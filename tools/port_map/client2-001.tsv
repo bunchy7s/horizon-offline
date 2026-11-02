@@ -40,27 +40,27 @@ FaceInfo.Extent.select	skip:data		corner selection; Horizon's unit-cube corner t
 FaceInfo.VertexInfo.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
 FirstPersonHandsAndItemsRenderer.calculateMapTilt	inline	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	tilt computed inline with the calculateMapTilt comment
 FirstPersonHandsAndItemsRenderer.renderPlayerHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	empty main hand's arm model with the player skin
-FirstPersonHandsAndItemsRenderer.renderMapHand	missing		player: holding a map in both hands, neither arm is drawn behind it (vanilla draws both arms)
+FirstPersonHandsAndItemsRenderer.renderMapHand	port	crates/horizon-client/src/first_person.rs::map_arm_poses (MapHold::TwoHanded)	both arms behind a two-handed map, at the jar's rotations and offsets
 FirstPersonHandsAndItemsRenderer.renderOneHandedMap	port	crates/horizon-client/src/first_person.rs::one_handed_map_pose	gap: player: the arm holding a map is not drawn; the map hand branch skips the arm
 FirstPersonHandsAndItemsRenderer.renderTwoHandedMap	port	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	gap: player: the arms that hold a two-handed map are not drawn
 FirstPersonHandsAndItemsRenderer.renderMap	port	crates/horizon-client/src/game/maps.rs::Game::held_map	map background with its 7-pixel border, then the map contents
 FirstPersonHandsAndItemsRenderer.applyEatTransform	port	crates/horizon-client/src/first_person.rs::item_pose	ItemPose::Eat: bob and jiggle while eating or drinking
-FirstPersonHandsAndItemsRenderer.applyBrushTransform	missing		player: a brush in use is held still; it does not sweep back and forth while brushing
+FirstPersonHandsAndItemsRenderer.applyBrushTransform	port	crates/horizon-client/src/first_person.rs::brush_transform	the brush sweep while brushing, term for term
 FirstPersonHandsAndItemsRenderer.applyItemArmAttackTransform	port	crates/horizon-client/src/first_person.rs::item_pose	attack swing rotation in the Swing pose
 FirstPersonHandsAndItemsRenderer.applyItemArmTransform	port	crates/horizon-client/src/first_person.rs::item_pose	base item-in-arm translation
 FirstPersonHandsAndItemsRenderer.submitHandsWithItems	port	crates/horizon-client/src/game.rs::Game::hand_geometry	sway, both hands, empty-hand arm and item pose
 FirstPersonHandsAndItemsRenderer.swingArm	port	crates/horizon-client/src/first_person.rs::item_pose	attack swing translation and arm rotation
 GameRenderer.<init>	port	crates/horizon-client-render/src/gfx.rs::Renderer::new	lightmap, hand target, debug crosshair and screen effects are built here
 GameRenderer.close	skip:other		GPU resource teardown; wgpu drops the renderer's objects
-GameRenderer.checkEntityPostEffect	missing		player: spectating a creeper, spider or enderman does not put their overlay shader on the screen
+GameRenderer.checkEntityPostEffect	port	crates/horizon-client/src/game/remote_camera.rs::entity_post_effect	spectating maps creeper to minecraft:creeper, spider and cave spider to minecraft:spider, enderman to minecraft:invert, and a first-person camera clears it
 GameRenderer.processBlurEffect	port	crates/horizon-client-render/src/menu_blur.rs::MenuBlur::apply	menu background blur pass
 GameRenderer.preloadUiShader	skip:other		GPU pipeline precompile at load; Horizon builds its pipelines in Renderer::new
 GameRenderer.update	port	crates/horizon-client-render/src/camera.rs::AvatarBob::update_bob	gap: minor: the requested post-effect list (from /postEffect) is not built
 GameRenderer.extract	skip:other		render-state copy for the vanilla render thread; Horizon renders from game state
 GameRenderer.preparePostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects (post_chain::PostEffects, built at gfx.rs:8424)	vanilla post chains are made on first use from the request the game builds
 GameRenderer.applyPostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects	the same chain runs after the world pass
-GameRenderer.tryTakeScreenshotIfNeeded	missing		player: a new singleplayer world gets no icon.png, so the world list shows no preview picture
-GameRenderer.takeAutoScreenshot	missing		player: no icon.png is written from the first rendered frame; the world list keeps a blank picture
+GameRenderer.tryTakeScreenshotIfNeeded	port	crates/horizon-client/src/game.rs::tick_world_icon (called at game.rs:17852)	a local world without an icon requests a 64x64 ScreenshotRequest for saves/<folder>/icon.png once the streamer, uploads and backlog are idle and more than 10 sections are drawn
+GameRenderer.takeAutoScreenshot	inline	crates/horizon-client/src/game.rs::tick_world_icon	the same retry, once a second until the file exists; the path comes from game/integrated.rs:485
 GameRenderer.integrate3DHudDepth	inline	crates/horizon-client-render/src/gfx.rs::post_effects	runs with a post chain applied, which is vanilla's consistentDepthRequired condition
 GameRenderer.extractWindow	skip:other		render-state copy of the window size; Horizon reads the window directly
 GameRenderer.extractOptions	skip:other		render-state copy of options; Horizon reads settings directly
@@ -100,7 +100,7 @@ LevelRenderer.invalidateCompiledGeometry	port	crates/horizon-client-render/src/g
 LevelRenderer.scheduleTranslucentSectionResort	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	resort scheduled when the camera point of view changes
 LevelRenderer.scheduleResort	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	per-section resort gated by point-of-view change and translucent geometry
 LevelRenderer.resetLevelRenderData	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	section data released when a level is left
-LevelRenderer.hasRenderedAllSections	missing		minor: only the world icon screenshot asks this, and that screenshot is missing
+LevelRenderer.hasRenderedAllSections	inline	crates/horizon-client/src/game.rs::tick_world_icon	renderer.drawn_sections > 10: the icon waits on the same count vanilla's hasRenderedAllSections asks for
 LevelRenderer.isSectionCompiledAndVisible	port	crates/horizon-client-render/src/gfx/resident.rs::Resident::contains	gap: minor: no section fade-in, so the 0.3 visibility threshold is not checked
 LevelRenderer.finalizeGizmoCollection	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	debug gizmos collected for the frame
 LevelTargetBundle.replace	skip:other		render-target bundle for post chains; Horizon has no frame graph

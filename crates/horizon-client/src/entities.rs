@@ -4,6 +4,7 @@
 //! piston that is carrying slime), water buoyancy, pickup delay, 6000-tick despawn,
 //! `HoneyBlock.entityInside` when falling against a honey block's side, and
 //! `BubbleColumnBlock.entityInside` (lift / drag, including the surface jump).
+use crate::entity_rules::EntityRules;
 use crate::{
     blocks::{BlockFacts, Fluid},
     collisions::SceneCollisions,
@@ -21,18 +22,44 @@ use horizon_world::{
 
 /// Gravity applied each tick when the item is not in a fluid (`ItemEntity.tick`).
 const ITEM_GRAVITY: f64 = 0.04;
-/// Non-living slime `bounceRestitution` (`1.0 * 0.8`) from
+/// Non-living slime `bounceRestitution` factor (`0.8f`) from
 /// `Entity.restituteMovementAfterCollisions`.
-const ITEM_SLIME_BOUNCE: f64 = 0.8;
+const ITEM_SLIME_BOUNCE: f32 = 0.8;
 
-/// After a vertical collision: slime bounces a dropped item by 0.8, matching
-/// non-living `Entity.restituteMovementAfterCollisions`. Anything else zeros Y.
-fn item_vertical_collision_velocity(wanted_y: f64, slime: bool) -> f64 {
-    if slime && wanted_y < 0.0 && -wanted_y > ITEM_GRAVITY {
-        -wanted_y * ITEM_SLIME_BOUNCE
-    } else {
-        0.0
+/// `Entity.restituteMovementAfterCollisions` for the vertical axis of a
+/// non-living entity: `current_y` is its velocity before the move, `moved_y`
+/// how far the move got. Landing on slime (`below`) bounces by the block's
+/// restitution `1.0f * 0.8f`, with the gravity and air drag the part of the tick
+/// after the hit would have added back; any other collision zeroes Y.
+pub fn vertical_collision_velocity(
+    current_y: f64,
+    moved_y: f64,
+    gravity: f64,
+    below: bool,
+    slime: bool,
+) -> f64 {
+    if !(below && slime && -current_y > gravity) {
+        return 0.0;
     }
+    let restitution = f64::from(1.0_f32 * ITEM_SLIME_BOUNCE);
+    let portion = moved_y / current_y;
+    let drag = 1.0 + portion * (f64::from(0.98_f32) - 1.0);
+    (portion * gravity - current_y) * drag * restitution
+}
+
+/// `Entity.move`: the position only changes when the collided step is longer
+/// than `sqrt(1e-7)` or nothing was cut off; a tiny step against a wall or floor
+/// is dropped (its collision effects still run).
+pub fn move_applies(wanted: Vec3, moved: Vec3) -> bool {
+    let moved_sq = moved.length_squared();
+    moved_sq > 1.0e-7 || wanted.length_squared() - moved_sq < 1.0e-7
+}
+
+/// `SlimeBlock.stepOn`: a slow walk or slide on slime drags the horizontal
+/// speed (`0.4 + |dy| * 0.2`); a fast vertical speed leaves it alone.
+pub fn slime_step_on_scale(velocity_y: f64) -> Option<f64> {
+    let abs_delta_y = velocity_y.abs();
+    (abs_delta_y < 0.1).then_some(0.4 + abs_delta_y * 0.2)
 }
 
 fn slime_support_name(block: &str, moving_moved: Option<&str>) -> bool {
@@ -91,6 +118,12 @@ pub struct ItemEntity {
     pub stuck: Vec3,
     /// `Entity.noGravity` (`NoGravity` in its save): `applyGravity` does nothing.
     pub no_gravity: bool,
+    /// `Entity.verticalCollision`: the last move was stopped vertically.
+    /// `ServerEntity.isFullPrecisionEncodingRequired` reads it for items, whose
+    /// resting position is exact while a 1/4096 delta is not.
+    pub vertical_collision: bool,
+    /// `Entity.horizontalCollision`: the last move was stopped on x or z.
+    pub horizontal_collision: bool,
 }
 /// Environment results needed by the entity owner, including lethal lava damage.
 #[derive(Debug)]
@@ -103,6 +136,26 @@ impl ItemEnvironmentTick {
         self.lava_hurt && (!self.alive || tick.is_multiple_of(10))
     }
 }
+impl crate::entity_rules::EntityRules for ItemEntity {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `ItemEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl crate::entity_rules::EntityRules for ExperienceOrb {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `ExperienceOrb.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.03
+    }
+}
+/// An armor stand keeps no `NoGravity` flag yet, so it takes the defaults.
+impl crate::entity_rules::EntityRules for ArmorStand {}
 impl ItemEntity {
     pub const WIDTH: f64 = 0.25;
     pub fn bounds(&self) -> Aabb {
@@ -231,9 +284,7 @@ impl ItemEntity {
                 self.velocity.z * 0.95,
             );
         } else {
-            if !self.no_gravity {
-                self.velocity.y -= 0.04;
-            }
+            self.velocity.y -= self.get_gravity();
         }
         let horizontal = self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z;
         // ItemEntity.tick: skip move 3 of 4 ticks while grounded with no
@@ -272,14 +323,23 @@ impl ItemEntity {
                 .resolve(self.bounds(), wanted, 0.0, self.on_ground)
                 .unwrap_or(Vec3::ZERO)
             };
-            self.position = Vec3::new(
-                self.position.x + moved.x,
-                self.position.y + moved.y,
-                self.position.z + moved.z,
-            );
+            if move_applies(wanted, moved) {
+                self.position = Vec3::new(
+                    self.position.x + moved.x,
+                    self.position.y + moved.y,
+                    self.position.z + moved.z,
+                );
+            }
             if !no_physics {
                 self.on_ground = wanted.y < 0.0 && moved.y != wanted.y;
             }
+            // Entity.move: what the move was stopped on. They outlive the
+            // tick, as vanilla's fields do, for the tracker that sends the
+            // position at the type's update interval.
+            self.vertical_collision = moved.y != wanted.y;
+            // `Mth.equal` on x and z (1e-5 as a float), exact on y.
+            let differs = |a: f64, b: f64| (b - a).abs() >= 9.999_999_747_378_752e-6;
+            self.horizontal_collision = differs(moved.x, wanted.x) || differs(moved.z, wanted.z);
             if moved.x != wanted.x {
                 self.velocity.x = 0.0;
             }
@@ -291,7 +351,13 @@ impl ItemEntity {
                 // (or a moving piston carrying one) bounces a dropped item;
                 // MovingPistonBlock itself has no bounceRestitution.
                 let slime = item_support_is_slime(world, facts, self.position);
-                self.velocity.y = item_vertical_collision_velocity(wanted.y, slime);
+                self.velocity.y = vertical_collision_velocity(
+                    wanted.y,
+                    moved.y,
+                    ITEM_GRAVITY,
+                    wanted.y < 0.0,
+                    slime,
+                );
             }
             // Entity.move -> applyEffectsFromBlocks: honey then bubble columns
             // (before air drag), matching ItemEntity.tick.
@@ -305,6 +371,11 @@ impl ItemEntity {
                 self.bounds(),
                 &mut self.velocity,
             );
+            // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn, with the
+            // vertical speed the bounce just left (before the air drag).
+            if !no_physics {
+                self.slime_step_on(world, facts);
+            }
             let mut friction = 0.98;
             if self.on_ground {
                 let below = world.block(
@@ -324,6 +395,9 @@ impl ItemEntity {
             }
         } else {
             // applyEffectsFromBlocksForLastMovements: still lift/drag while idle.
+            if !no_physics {
+                self.slime_step_on(world, facts);
+            }
             crate::motion::bubble_column_push(
                 world,
                 registry,
@@ -398,6 +472,26 @@ impl ItemEntity {
         }
         stuck
     }
+    /// `SlimeBlock.stepOn` for an item on the ground: slow vertical speed
+    /// drags the horizontal speed, on idle ticks too.
+    fn slime_step_on(&mut self, world: &World, facts: &BlockFacts) {
+        if !self.on_ground {
+            return;
+        }
+        let p = BlockPos::containing(self.position.add_vector(Vec3::new(
+            0.0,
+            -f64::from(0.2_f32),
+            0.0,
+        )));
+        if &*facts.get(world.block(p.x, p.y, p.z)).name != "minecraft:slime_block" {
+            return;
+        }
+        if let Some(scale) = slime_step_on_scale(self.velocity.y) {
+            self.velocity.x *= scale;
+            self.velocity.z *= scale;
+        }
+    }
+
     /// `PistonMovingBlockEntity.causeBounce` for a dropped item. Vanilla then
     /// runs `Entity.move(MoverType.PISTON)`, which leaves the ground on an
     /// upward push; without that, `ItemEntity.tick` skips movement 3 of 4 ticks
@@ -781,8 +875,8 @@ impl ExperienceOrb {
                 (self.velocity.y + 5.0e-4).min(0.06),
                 self.velocity.z * 0.99,
             );
-        } else if !colliding && !self.no_gravity {
-            self.velocity.y -= 0.03;
+        } else if !colliding {
+            self.velocity.y -= self.get_gravity();
         }
         if facts.get(block).fluid == Fluid::Lava {
             // ExperienceOrb.tick: lava throws the orb back out.
@@ -1182,6 +1276,8 @@ pub struct ArmorStand {
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
     pub enchantment_equipment: [Option<ItemStack>; 6],
+    /// `Entity.mainSupportingBlockPos` after the last move.
+    pub support: horizon_world::ground_support::GroundState,
 }
 impl ArmorStand {
     pub const SLOTS: [&'static str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
@@ -1256,6 +1352,22 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            support: Default::default(),
+        }
+    }
+    /// `Entity.getOnPos(0.2)` (`getOnPosLegacy`): the supporting block's
+    /// column 0.2 below the feet, the supporting block itself when `tall`
+    /// says it is a fence, wall or fence gate, else the cell 0.2 below.
+    pub fn on_pos_legacy(&self, tall: impl Fn(BlockPos) -> bool) -> BlockPos {
+        let y = (self.position.y - f64::from(0.2_f32)).floor() as i32;
+        match self.support.supporting_block {
+            Some(p) if tall(p) => p,
+            Some(p) => BlockPos::new(p.x, y, p.z),
+            None => BlockPos::new(
+                self.position.x.floor() as i32,
+                y,
+                self.position.z.floor() as i32,
+            ),
         }
     }
     /// `EquipmentSlot.getFilterFlag` of an `equipment` index (main hand, off
@@ -1394,6 +1506,24 @@ impl ArmorStand {
                 self.position.z + moved.z,
             );
             self.on_ground = wanted.y < 0.0 && moved.y > wanted.y;
+            // Entity.setOnGroundWithMovement: the block under the feet.
+            let context = horizon_world::collision_context::CollisionContext::for_entity(
+                horizon_world::collision_context::CollisionEntity {
+                    identity: horizon_world::entity_obstruction::EntityIdentity(u64::from(self.id)),
+                    y: self.position.y,
+                    descending: false,
+                    main_hand: Some(horizon_world::collision_context::CollisionItem::EMPTY),
+                },
+                false,
+            );
+            let position = self.position;
+            let _ =
+                self.support
+                    .check_support(self.on_ground, self.bounds(), Some(wanted), |area| {
+                        horizon_world::ground_support::find_supporting_block(
+                            scene, context, position, area, 1_000_000,
+                        )
+                    });
             if (wanted.x - moved.x).abs() >= f64::from(1.0e-5_f32) {
                 velocity.x = 0.0;
             }
@@ -1504,6 +1634,8 @@ mod fire_environment_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -1651,6 +1783,8 @@ mod merge_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -1990,6 +2124,8 @@ mod honey_slide_tests {
             previous: at,
             velocity: Vec3::new(vx, vy, vz),
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 10,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -2061,22 +2197,38 @@ mod slime_bounce_tests {
     use super::*;
 
     #[test]
-    fn landing_on_slime_bounces_a_dropped_item() {
-        assert_eq!(item_vertical_collision_velocity(-1.0, true), 0.8);
-        assert_eq!(item_vertical_collision_velocity(-0.5, true), 0.4);
+    fn landing_on_slime_bounces_a_dropped_item_like_vanilla() {
+        // Measured on a vanilla 26.3 server: an item falling at -0.6097 that
+        // is stopped 0.4865 down leaves with 0.4950 / 0.98 after the bounce.
+        let y = vertical_collision_velocity(-0.6097, -0.4865, ITEM_GRAVITY, true, true);
+        assert!((y - 0.4950 / 0.98).abs() < 1e-3, "{y}");
+        // A tiny landing: -0.0792 stopped after 0.06 gives 0.0862 (vanilla).
+        let y = vertical_collision_velocity(-0.0792, -0.06, ITEM_GRAVITY, true, true);
+        assert!((y - 0.0862).abs() < 1e-3, "{y}");
         assert_eq!(
-            item_vertical_collision_velocity(-0.04, true),
+            vertical_collision_velocity(-0.04, -0.01, ITEM_GRAVITY, true, true),
             0.0,
             "gravity alone is not a bounce"
         );
-        assert_eq!(item_vertical_collision_velocity(-0.041, true), 0.041 * 0.8);
     }
 
     #[test]
     fn landing_on_stone_or_hitting_a_ceiling_zeros_y() {
-        assert_eq!(item_vertical_collision_velocity(-1.0, false), 0.0);
-        assert_eq!(item_vertical_collision_velocity(1.0, true), 0.0);
-        assert_eq!(item_vertical_collision_velocity(0.96, true), 0.0);
+        assert_eq!(
+            vertical_collision_velocity(-1.0, -0.5, ITEM_GRAVITY, true, false),
+            0.0
+        );
+        assert_eq!(
+            vertical_collision_velocity(1.0, 0.5, ITEM_GRAVITY, false, true),
+            0.0
+        );
+    }
+
+    #[test]
+    fn slime_step_on_drags_slow_vertical_speed_only() {
+        let scale = slime_step_on_scale(0.0862).unwrap();
+        assert!((scale - 0.41724).abs() < 1e-5);
+        assert_eq!(slime_step_on_scale(0.1), None);
     }
 
     #[test]
@@ -2120,6 +2272,8 @@ mod slime_bounce_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 10,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -2147,9 +2301,8 @@ mod slime_bounce_tests {
     fn a_slime_landing_stays_upward_after_item_friction() {
         // ItemEntity then multiplies Y by 0.98 and applies -0.5 only if still
         // negative on the ground. A slime bounce must remain positive.
-        let bounced = item_vertical_collision_velocity(-1.0, true) * 0.98;
+        let bounced = vertical_collision_velocity(-1.0, -0.5, ITEM_GRAVITY, true, true) * 0.98;
         assert!(bounced > 0.0);
-        assert_eq!(bounced, 0.8 * 0.98);
     }
 
     #[test]

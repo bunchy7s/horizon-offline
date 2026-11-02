@@ -1030,16 +1030,20 @@ fn guests_see_each_other_and_the_world_entities() {
         head_yaw: 0.0,
         on_ground: true,
         velocity: [0.0; 3],
+        minecart_steps: None,
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,
+        vertical_collision: false,
+        horizontal_collision: false,
         needs_sync: false,
         leash: None,
         spectator: false,
         watching: false,
+        hidden: None,
     };
     let first = thread::spawn(move || {
         let mut bot = connect(port, "Alex", false)?;

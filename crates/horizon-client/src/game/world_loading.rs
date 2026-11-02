@@ -49,6 +49,7 @@ impl WorldRequest {
         settings: &Settings,
         upgrade: &horizon_world::datafix::progress::UpgradeProgress,
     ) -> Result<PreparedWorld> {
+        let _prepare_step = startup::step("world.prepare");
         // Before any chunk is read: a loaded container with a loot table is rolled as its chunk
         // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
         // opens. Every world opens here: in-frame, on the server thread, on a dedicated server.
@@ -176,8 +177,6 @@ impl WorldRequest {
                 o.flat_settings(),
                 o.single_biome(),
             )?;
-            // WorldCreationUiState.getGameRules, written with the level.
-            level.game_rules = o.rules.by_name();
             // The DataPackConfig the screen chose: the picked packs on,
             // everything else disabled — the feature packs left out, and the
             // world packs the Data Packs screen held back (`install` copies
@@ -206,16 +205,13 @@ impl WorldRequest {
             // picked feature packs over vanilla's (`FeatureFlags.REGISTRY`'s
             // codec writes the whole set, `minecraft:vanilla` included, and
             // omits the tag when it is the default).
-            let mut flags = vec!["minecraft:vanilla".to_owned()];
-            flags.extend(
-                packs
-                    .iter()
-                    .filter(|p| o.data_packs.contains(&p.id))
-                    .flat_map(|p| p.features()),
-            );
-            flags.sort();
-            flags.dedup();
-            level.enabled_features = flags;
+            level.enabled_features = o.enabled_features(&options.resources);
+            // CreateWorldScreen copies the edited rules with the final flags,
+            // even when the player never opened the rules screen.
+            level.game_rules = o
+                .rules
+                .copy_with_features(&level.enabled_features)
+                .by_name();
         }
         // Worlds made without the Create New World screen (--world, the
         // control socket) take its default: commands on for Creative only.
@@ -229,6 +225,7 @@ impl WorldRequest {
         let dim = Dim::from_id(&level.dimension);
         let shapes = level_shapes(&save_root, res.biomes());
         let shape = shapes.get(dim.id());
+        let streaming_step = startup::step("world.make_streaming");
         let (mut streaming, save, locator) = make_streaming(
             res,
             pack,
@@ -240,6 +237,7 @@ impl WorldRequest {
             level.seed,
             &level.enabled_features,
         )?;
+        drop(streaming_step);
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
         world.attachments = save.load_attachments();
@@ -746,7 +744,10 @@ pub(super) fn make_streaming(
             &settings,
             true,
         ) {
-            Ok(terrain) => Some(Arc::new(terrain)),
+            Ok(mut terrain) => {
+                terrain.add_mod_signs(res.facts());
+                Some(Arc::new(terrain))
+            }
             Err(e) => {
                 log::warn!("Horizon: the superflat structures are unavailable: {e}");
                 None
@@ -817,13 +818,15 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let inner = Arc::new(VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {
                     format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
                 }
-            })?);
+            })?;
+        inner.add_mod_signs(res.facts());
+        let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();
         }

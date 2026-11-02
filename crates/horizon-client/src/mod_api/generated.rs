@@ -759,8 +759,8 @@ pub trait Hooks: Send + Sync {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities and experience orbs; later
-    /// APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
+    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
     fn entity_leave_level(&self, host: &mut dyn Host, event: &mut EntityLeaveLevelEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -2013,10 +2013,9 @@ pub trait Hooks: Send + Sync {
     /// does not happen: no damage, no knockback, no sound, no block reaction, the
     /// arrow does not stick, a pearl does not teleport, a potion or a fireball
     /// does not burst. The projectile flies on and is not discarded, so a mod
-    /// that cancels also decides what becomes of it: it hits again the next tick
-    /// unless the mod moves, turns or removes it. An arrow stays where it would
-    /// have hit, and the other projectiles go on through the whole of their
-    /// motion. Covers what `tick_projectiles` flies: arrows, tridents, snowballs,
+    /// that cancels also decides what becomes of it. It continues through its
+    /// whole motion and may hit something on a later tick. Covers what
+    /// `tick_projectiles` flies: arrows, tridents, snowballs,
     /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
     /// shulker bullets, from players, mobs and dispensers. It does not fire for
     /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
@@ -2457,20 +2456,35 @@ pub trait Hooks: Send + Sync {
     }
     /// An anvil at `pos` took damage, changing its block from `from` to `to`.
     /// `to` is air when the anvil broke. Server-side.
-    /// @API:native_anvil_damaged@.
+    /// @API:anvil_damaged@.
     fn anvil_damaged(&self, host: &mut dyn Host, event: &mut AnvilDamagedEvent<'_>) {
         let _ = host;
         let _ = event;
     }
+    /// NeoForge's `ArrowLooseEvent`: the player releases a bow `stack` with
+    /// `has_ammo` and `charge` ticks held. Change `charge` or set `canceled`
+    /// to prevent the shot; negative charge also prevents it. Unlike
+    /// `native_living_entity_use_item_stop`, this does not skip the whole item
+    /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
+    /// with read-only force. Fires on the Game running the bow release, including
+    /// LAN guests; a remote client's own release path is not covered. Crossbows
+    /// and `ArrowNockEvent` are not covered. @API:arrow_loose@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A beacon at `pos` activated or deactivated after its beam was checked.
     /// `active` says whether it now has a complete pyramid. Server-side.
-    /// @API:native_beacon_state_change@.
+    /// @API:beacon_state_change@.
     fn beacon_state_change(&self, host: &mut dyn Host, event: &mut BeaconStateChangeEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// On an authoritative server, a bell at `pos` is about to ring. Set
-    /// `cancel` to stop the ring and its raider reveal. @API:native_bell_ring@.
+    /// `cancel` to stop the ring and its raider reveal. @API:bell_ring@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn bell_ring(&self, level: &dyn LevelHost, event: &mut BellRingEvent) -> Flow {
@@ -2479,7 +2493,7 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// A server guest's block-breaking animation changed to `progress` at
-    /// `pos` (0 through 9). @API:native_block_break_progress_update@.
+    /// `pos` (0 through 9). @API:block_break_progress_update@.
     fn block_break_progress_update(
         &self,
         host: &mut dyn Host,
@@ -2489,7 +2503,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// On an authoritative server, fire is about to burn the block at `pos`
-    /// away. Set `cancel` to keep that block. @API:native_block_burn@.
+    /// away. Set `cancel` to keep that block. @API:block_burn@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn block_burn(&self, level: &dyn LevelHost, event: &mut BlockBurnEvent) -> Flow {
@@ -2505,21 +2519,21 @@ pub trait Hooks: Send + Sync {
     /// A dispenser equipped `item` on the first eligible `target` in front
     /// of its block at `pos`. `target` is `player`, `mob` or `armor_stand`.
     /// The equip, item consumption, sound and game event have completed.
-    /// Server-side. @API:native_block_dispense_armor@.
+    /// Server-side. @API:block_dispense_armor@.
     fn block_dispense_armor(&self, host: &mut dyn Host, event: &mut BlockDispenseArmorEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A broken block is about to drop `experience` points at `pos`. The
     /// vanilla block drop rule has been checked; change the amount before its
-    /// orbs are awarded. Server-side. @API:native_block_exp@.
+    /// orbs are awarded. Server-side. @API:block_exp@.
     fn block_exp(&self, level: &dyn LevelHost, event: &mut BlockExpEvent<'_>) {
         let _ = level;
         let _ = event;
     }
     /// A block at `pos` is about to fade from `from` to `to` because of
     /// melting or coral death. Set `cancel` to keep it. Server-side.
-    /// @API:native_block_fade@.
+    /// @API:block_fade@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn block_fade(&self, level: &dyn LevelHost, event: &mut BlockFadeEvent) -> Flow {
@@ -2528,14 +2542,14 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// A dispenser at `pos` failed to dispense `item`. Server-side.
-    /// @API:native_block_failed_dispense@.
+    /// @API:block_failed_dispense@.
     fn block_failed_dispense(&self, host: &mut dyn Host, event: &mut BlockFailedDispenseEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// Precipitation is about to form or add to a block at `pos`. `from` and
     /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
-    /// @API:native_block_form@.
+    /// @API:block_form@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn block_form(&self, level: &dyn LevelHost, event: &mut BlockFormEvent) -> Flow {
@@ -2546,7 +2560,7 @@ pub trait Hooks: Send + Sync {
     /// On an authoritative server, fire is about to be placed at `pos` by
     /// flint and steel, a fire charge, lava, lightning or fire spread. Set
     /// `player` is the acting server player when there is one. Set `cancel` to
-    /// leave the position unchanged. @API:native_block_ignite@.
+    /// leave the position unchanged. @API:block_ignite@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn block_ignite(&self, level: &dyn LevelHost, event: &mut BlockIgniteEvent<'_>) -> Flow {
@@ -2556,7 +2570,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A guest's block inventory lock check at `pos`. `locked` is the
     /// vanilla result and may be changed. The guest's state is not swapped in.
-    /// @API:native_block_lock_check@.
+    /// @API:block_lock_check@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `locked`, and later mods are skipped.
     fn block_lock_check(&self, host: &mut dyn Host, event: &mut BlockLockCheckEvent<'_>) -> Flow {
@@ -2566,7 +2580,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
     /// Set `cancel` to suppress its response. Server-side.
-    /// @API:native_block_receive_game@.
+    /// @API:block_receive_game@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn block_receive_game(
@@ -2580,7 +2594,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A dispenser sheared `entity` of kind `kind` at the block in front of
     /// its own block at `pos`, after the shearing effects. Server-side.
-    /// @API:native_block_shear_entity@.
+    /// @API:block_shear_entity@.
     fn block_shear_entity(&self, host: &mut dyn Host, event: &mut BlockShearEntityEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -2602,7 +2616,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// A server broadcast line is about to be logged and sent. Change `line`
-    /// or set `cancel` to drop it. @API:native_broadcast_message@.
+    /// or set `cancel` to drop it. @API:broadcast_message@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn broadcast_message(&self, host: &dyn Host, event: &mut BroadcastMessageEvent<'_>) -> Flow {
@@ -2617,7 +2631,7 @@ pub trait Hooks: Send + Sync {
     }
     /// On an authoritative server, a cauldron at `pos` is about to change
     /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
-    /// to leave it unchanged. @API:native_cauldron_level_changed@.
+    /// to leave it unchanged. @API:cauldron_level_changed@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn cauldron_level_changed(
@@ -2626,6 +2640,27 @@ pub trait Hooks: Send + Sync {
         event: &mut CauldronLevelChangedEvent<'_>,
     ) -> Flow {
         let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player who ate chorus fruit (or another item with the
+    /// `teleport_randomly` consume effect) is about to try a random spot
+    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
+    /// after they stopped riding. `from` is their feet, `target` the spot
+    /// drawn; a mod may move it (its y kept inside the level's height, a
+    /// value that is not a number ignored), and the game still looks down
+    /// from it for ground it may land on. Canceling ends the effect: no teleport and no
+    /// more attempts. The player's state is swapped in
+    /// (`native_acting_player`). Foxes are not heard. @API:chorus_fruit_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn chorus_fruit_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ChorusFruitTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
         let _ = event;
         Flow::Continue
     }
@@ -2639,13 +2674,27 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// A player ignited a creeper with an item. @API:native_creeper_ignite@.
+    /// A player ignited a creeper with an item. @API:creeper_ignite@.
     fn creeper_ignite(&self, host: &mut dyn Host, event: &mut CreeperIgniteEvent<'_>) {
         let _ = host;
         let _ = event;
     }
-    /// Lightning charged a creeper. @API:native_creeper_power@.
+    /// Lightning charged a creeper. @API:creeper_power@.
     fn creeper_power(&self, host: &mut dyn Host, event: &mut CreeperPowerEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// NeoForge's `CriticalHitEvent`: a player's melee hit on a living
+    /// `target_kind` (`minecraft:zombie`, `minecraft:armor_stand`) that deals
+    /// damage, where `Player.attack` decides whether it is critical.
+    /// `vanilla_critical` is vanilla's answer; `critical` starts as it and may
+    /// be forced or denied (as in vanilla a critical hit prevents the sweep, so
+    /// a forced crit loses it; a denied crit loses the crit sound and
+    /// particles); `damage_multiplier` starts at 1.5 for vanilla's critical and
+    /// 1.0 otherwise, and scales the damage only while `critical` ends true. Not fired for a
+    /// target that is no living entity (a dragon part) or when the hit does
+    /// no damage. Fires on the Game that runs the attack. @API:critical_hit@.
+    fn critical_hit(&self, host: &mut dyn Host, event: &mut CriticalHitEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -2661,7 +2710,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
-    /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
+    /// Set `cancel` to leave the block unchanged. Server-side. @API:dragon_egg_form@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn dragon_egg_form(&self, level: &dyn LevelHost, event: &mut DragonEggFormEvent) -> Flow {
@@ -2669,48 +2718,70 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in. @API:native_enchant_item@.
+    /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in. @API:enchant_item@.
     fn enchant_item(&self, host: &mut dyn Host, event: &mut EnchantItemEvent<'_>) {
         let _ = host;
         let _ = event;
     }
+    /// A server player's ender pearl landed and is about to teleport them
+    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
+    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
+    /// entity id, `from` their feet now, `target` where the pearl started
+    /// its last tick and `damage` the fall damage they then take (5). A mod
+    /// may move `target` (a value that is not a number is ignored) or change
+    /// `damage` (0 or less: none). Canceling
+    /// keeps the player where they are: no endermite roll, no teleport, no
+    /// damage and no sound; the pearl is used up either way. The player's
+    /// state is swapped in (`native_acting_player`). The hit itself is
+    /// heard by `native_projectile_impact`. @API:ender_pearl_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn ender_pearl_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut EnderPearlTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Entities from `chunk` finished loading into the server world. `count`
-    /// is the number of saved entity records read. @API:native_entities_load@.
+    /// is the number of saved entity records read. @API:entities_load@.
     fn entities_load(&self, host: &mut dyn Host, event: &mut EntitiesLoadEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// Entities in `chunk` left the active server world and were queued for
-    /// saving. `count` is the number of entity records. @API:native_entities_unload@.
+    /// saving. `count` is the number of entity records. @API:entities_unload@.
     fn entities_unload(&self, host: &mut dyn Host, event: &mut EntitiesUnloadEvent<'_>) {
         let _ = host;
         let _ = event;
     }
-    /// A mob broke the door at `pos`. @API:native_entity_break_door@.
+    /// A mob broke the door at `pos`. @API:entity_break_door@.
     fn entity_break_door(&self, host: &mut dyn Host, event: &mut EntityBreakDoorEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// Two mobs completed a breeding action. `child` is absent when vanilla
-    /// lays an egg instead of creating a baby. @API:native_entity_breed@.
+    /// lays an egg instead of creating a baby. @API:entity_breed@.
     fn entity_breed(&self, host: &mut dyn Host, event: &mut EntityBreedEvent) {
         let _ = host;
         let _ = event;
     }
     /// A mob changed a block at `pos`, after the new state was applied.
-    /// @API:native_entity_change_block@.
+    /// @API:entity_change_block@.
     fn entity_change_block(&self, host: &mut dyn Host, event: &mut EntityChangeBlockEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A bee entered the hive at `pos` and was stored there.
-    /// @API:native_entity_enter_block@.
+    /// @API:entity_enter_block@.
     fn entity_enter_block(&self, host: &mut dyn Host, event: &mut EntityEnterBlockEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A mob entered love mode after player interaction. `player` is the
-    /// feeder when known. @API:native_entity_enter_love_mode@.
+    /// feeder when known. @API:entity_enter_love_mode@.
     fn entity_enter_love_mode(
         &self,
         host: &mut dyn Host,
@@ -2721,25 +2792,25 @@ pub trait Hooks: Send + Sync {
     }
     /// A server entity finished its portal wait and is beginning to leave
     /// `dimension` through `pos`. The destination follows the portal rules.
-    /// @API:native_entity_portal@.
+    /// @API:entity_portal@.
     fn entity_portal(&self, host: &mut dyn Host, event: &mut EntityPortalEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A guest player's synchronized pose changed from `from` to `to`.
-    /// @API:native_entity_pose_change@.
+    /// @API:entity_pose_change@.
     fn entity_pose_change(&self, host: &mut dyn Host, event: &mut EntityPoseChangeEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A player bow or crossbow launched an arrow with `force`, after the
-    /// projectile entered the level. @API:native_entity_shoot_bow@.
+    /// projectile entered the level. @API:entity_shoot_bow@.
     fn entity_shoot_bow(&self, host: &mut dyn Host, event: &mut EntityShootBowEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A mob became tamed after its owner and persistent state were set.
-    /// @API:native_entity_tame@.
+    /// @API:entity_tame@.
     fn entity_tame(&self, host: &mut dyn Host, event: &mut EntityTameEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -2748,25 +2819,25 @@ pub trait Hooks: Send + Sync {
     /// position changed. `entity` is its network id; `from` and `to` are
     /// coordinates in `dimension`. This hook reports command teleports that
     /// use Horizon's same-level target path; it does not change vanilla's
-    /// movement. @API:native_entity_teleport@.
+    /// movement. @API:entity_teleport@.
     fn entity_teleport(&self, host: &mut dyn Host, event: &mut EntityTeleportEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A guest's fall flying state changed on the server. The change has
-    /// already been applied. @API:native_entity_toggle_glide@.
+    /// already been applied. @API:entity_toggle_glide@.
     fn entity_toggle_glide(&self, host: &mut dyn Host, event: &mut EntityToggleGlideEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A mob conversion completed; both ids and entity types are reported.
-    /// @API:native_entity_transform@.
+    /// @API:entity_transform@.
     fn entity_transform(&self, host: &mut dyn Host, event: &mut EntityTransformEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// An experience bottle broke and its experience was awarded.
-    /// @API:native_exp_bottle@.
+    /// @API:exp_bottle@.
     fn exp_bottle(&self, host: &mut dyn Host, event: &mut ExpBottleEvent) {
         let _ = host;
         let _ = event;
@@ -2840,14 +2911,14 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
-    /// A firework rocket completed its explosion effects. @API:native_firework_explode@.
+    /// A firework rocket completed its explosion effects. @API:firework_explode@.
     fn firework_explode(&self, host: &mut dyn Host, event: &mut FireworkExplodeEvent) {
         let _ = host;
         let _ = event;
     }
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
-    /// level. Server-side. @API:native_fluid_level_change@.
+    /// level. Server-side. @API:fluid_level_change@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn fluid_level_change(
@@ -2879,7 +2950,7 @@ pub trait Hooks: Send + Sync {
     /// A server player took an output from a furnace at `pos`; `item` is the
     /// output item id and `count` is how many were taken. The player's state is
     /// not swapped in, so helpers that look them up through `self.lan` may find
-    /// nothing during guest packet handling. @API:native_furnace_extract@.
+    /// nothing during guest packet handling. @API:furnace_extract@.
     fn furnace_extract(&self, host: &mut dyn Host, event: &mut FurnaceExtractEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -2897,12 +2968,12 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// A generic world game event was fired at `pos`. @API:native_game_event@.
+    /// A generic world game event was fired at `pos`. @API:game_event@.
     fn game_event(&self, host: &mut dyn Host, event_: &mut GameEventEvent<'_>) {
         let _ = host;
         let _ = event_;
     }
-    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:native_hopper_pickup_item@.
+    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn hopper_pickup_item(
@@ -2930,7 +3001,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A server player is about to open an inventory supplied by a block at
     /// `pos`. Set `cancel` to leave the inventory closed. The player's state
-    /// is not swapped in. @API:native_inventory_block_start@.
+    /// is not swapped in. @API:inventory_block_start@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn inventory_block_start(
@@ -2975,13 +3046,13 @@ pub trait Hooks: Send + Sync {
         None
     }
     /// A dropped item entity was successfully added to the server level.
-    /// @API:native_item_spawn@.
+    /// @API:item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
-    /// Set `cancel` to keep it. Server-side. @API:native_leaves_decay@.
+    /// Set `cancel` to keep it. Server-side. @API:leaves_decay@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn leaves_decay(&self, level: &dyn LevelHost, event: &mut LeavesDecayEvent) -> Flow {
@@ -2991,7 +3062,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A server lightning bolt is about to be created. `cause` is `weather`,
     /// `trident` or `command`; `player` is the responsible player when known.
-    /// Set `cancel` to prevent the bolt and its effects. @API:native_lightning_strike@.
+    /// Set `cancel` to prevent the bolt and its effects. @API:lightning_strike@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn lightning_strike(&self, host: &mut dyn Host, event: &mut LightningStrikeEvent<'_>) -> Flow {
@@ -2999,9 +3070,39 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API @API:menu_quick_move@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn menu_quick_move(&self, host: &mut dyn Host, event: &mut MenuQuickMoveEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Farmland at `pos` is about to change moisture from `from` to `to`.
     /// Set `cancel` to keep its old moisture. Server-side.
-    /// @API:native_moisture_change@.
+    /// @API:moisture_change@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn moisture_change(&self, level: &dyn LevelHost, event: &mut MoistureChangeEvent) -> Flow {
@@ -3199,6 +3300,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// The item `item` of the server player `player` (`name`) broke in `slot`
+    /// (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body` or
+    /// `saddle`): `LivingEntity.onEquippedItemBroken`, Bukkit's
+    /// `PlayerItemBreakEvent`. Listen only; armour has a slot, not a hand.
+    /// The player's state is swapped in. Once for each break, on a server; a
+    /// creative player and the host of a LAN world are not heard.
+    /// @API:native_player_destroy_item@.
+    fn player_destroy_item(&self, host: &mut dyn Host, event: &mut PlayerDestroyItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
@@ -3222,7 +3334,7 @@ pub trait Hooks: Send + Sync {
     /// A server player put a plant into a flower pot, after the potted block
     /// state was stored and the item consumed. `plant` is the item id and
     /// `pos` the pot position. Helpers looking up the guest through `self.lan`
-    /// may find nothing during packet handling. Server-side. @API:player_flower_pot_manipulate@.
+    /// may find nothing during packet handling. Server-side. @API:native_player_flower_pot_manipulate@.
     fn player_flower_pot_manipulate(
         &self,
         host: &mut dyn Host,
@@ -3256,7 +3368,7 @@ pub trait Hooks: Send + Sync {
     /// A server player inserted a book into a lectern, after the block entity
     /// and inventory changed. `book` is the item id. Helpers looking up a
     /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. @API:player_insert_lectern_book@.
+    /// Server-side. @API:native_player_insert_lectern_book@.
     fn player_insert_lectern_book(
         &self,
         host: &mut dyn Host,
@@ -3269,7 +3381,7 @@ pub trait Hooks: Send + Sync {
     /// changed. `action` is `put`, `rotate`, `remove_item` or `break`; `item`
     /// is empty when no item remains, and `rotation` is the resulting step.
     /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. @API:player_item_frame_change@.
+    /// packet handling. Server-side. @API:native_player_item_frame_change@.
     fn player_item_frame_change(
         &self,
         host: &mut dyn Host,
@@ -3281,7 +3393,7 @@ pub trait Hooks: Send + Sync {
     /// Mending repaired a server player's item with experience from an orb.
     /// `repair` is durability restored and `experience` is the orb's value.
     /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. @API:player_item_mend@.
+    /// packet handling. Server-side. @API:native_player_item_mend@.
     fn player_item_mend(&self, host: &mut dyn Host, event: &mut PlayerItemMendEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -3289,7 +3401,7 @@ pub trait Hooks: Send + Sync {
     /// A server player changed the page of a lectern, after its page and
     /// redstone pulse changed. `page` is the zero-based new page. Helpers
     /// looking up a guest through `self.lan` may find nothing during packet
-    /// handling. Server-side. @API:player_lectern_page_change@.
+    /// handling. Server-side. @API:native_player_lectern_page_change@.
     fn player_lectern_page_change(
         &self,
         host: &mut dyn Host,
@@ -3351,7 +3463,7 @@ pub trait Hooks: Send + Sync {
     /// A server player took the book from a lectern, after the menu and block
     /// entity changed. `book` is the removed item id. Helpers looking up a
     /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. @API:player_take_lectern_book@.
+    /// Server-side. @API:native_player_take_lectern_book@.
     fn player_take_lectern_book(
         &self,
         host: &mut dyn Host,
@@ -3368,9 +3480,9 @@ pub trait Hooks: Send + Sync {
     /// teleport: when the new level is entered, before it has loaded around
     /// them), so it cannot stop it. The player's state is swapped in, so the
     /// helpers that read the acting player and `native_tell` work. Once for
-    /// each teleported player, on a server. Other teleports are not heard
-    /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
-    /// and respawns are not teleports here. @API:native_player_teleported@.
+    /// each teleported player, on a server. Ender pearls and chorus fruit
+    /// have their own hooks; a spectator's teleport menu is not heard yet;
+    /// portals and respawns are not teleports here. @API:native_player_teleported@.
     fn player_teleported(&self, host: &mut dyn Host, event: &mut PlayerTeleportedEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -3472,7 +3584,7 @@ pub trait Hooks: Send + Sync {
     }
     /// On an authoritative server, a note block at `pos` is about to sound.
     /// `player` is the acting server player when there is one. Set `cancel` to silence it.
-    /// @API:native_note_play@.
+    /// @API:note_play@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn note_play(&self, level: &dyn LevelHost, event: &mut NotePlayEvent<'_>) -> Flow {
@@ -3542,7 +3654,7 @@ pub trait Hooks: Send + Sync {
     /// A server player changed their client option for the dominant hand. `left` is true for
     /// left-handed. Their state is not swapped in, and helpers looking them up through `self.lan`
     /// may find nothing during guest packet handling. Server-side.
-    /// @API:native_player_change_main_hand@.
+    /// @API:player_change_main_hand@.
     fn player_change_main_hand(
         &self,
         host: &mut dyn Host,
@@ -3588,7 +3700,7 @@ pub trait Hooks: Send + Sync {
     /// after mending has taken its share. Change `amount` to change the points
     /// added. The player's state is not swapped in, so helpers that look them up
     /// through `self.lan` may find nothing while a guest packet is handled.
-    /// Server-side. @API:native_player_exp_change@.
+    /// Server-side. @API:player_exp_change@.
     fn player_exp_change(&self, host: &mut dyn Host, event: &mut PlayerExpChangeEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -3596,7 +3708,7 @@ pub trait Hooks: Send + Sync {
     /// A server player's XP orb pickup cooldown changed to `ticks`. It is
     /// reported after the value changes; the player's state may not be found
     /// through `self.lan` while a guest packet is handled. Server-side.
-    /// @API:native_player_exp_cooldown_change@.
+    /// @API:player_exp_cooldown_change@.
     fn player_exp_cooldown_change(
         &self,
         host: &mut dyn Host,
@@ -3609,7 +3721,7 @@ pub trait Hooks: Send + Sync {
     /// item id and `ticks` its duration. The player's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while a
     /// guest packet is handled. Set `cancel` to skip starting the cooldown.
-    /// Server-side. @API:native_player_item_cooldown@.
+    /// Server-side. @API:player_item_cooldown@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_item_cooldown(
@@ -3624,7 +3736,7 @@ pub trait Hooks: Send + Sync {
     /// A server player selected a new hotbar slot. The player's state is not
     /// swapped in, and helpers that look them up through `self.lan` may find
     /// nothing while a guest packet is being handled. Set `cancel` to keep
-    /// the old slot; the client is sent that slot again. @API:native_player_item_held@.
+    /// the old slot; the client is sent that slot again. @API:player_item_held@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_item_held(&self, host: &mut dyn Host, event: &mut PlayerItemHeldEvent<'_>) -> Flow {
@@ -3634,7 +3746,7 @@ pub trait Hooks: Send + Sync {
     }
     /// A server player changed their client language option to `locale`.
     /// The player's state may not be found through `self.lan` during a guest
-    /// packet. Server-side. @API:native_player_locale_change@.
+    /// packet. Server-side. @API:player_locale_change@.
     fn player_locale_change(&self, host: &mut dyn Host, event: &mut PlayerLocaleChangeEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -3678,7 +3790,7 @@ pub trait Hooks: Send + Sync {
     /// the hotbar. `pos` is zero for an entity; `entity_id` is zero for a
     /// block. The player's state is swapped in, though helpers that look them
     /// up through `self.lan` may find nothing while a guest packet is handled.
-    /// Set `cancel` to leave the inventory and client unchanged. @API:native_player_pick_item@.
+    /// Set `cancel` to leave the inventory and client unchanged. @API:player_pick_item@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_pick_item(&self, host: &mut dyn Host, event: &mut PlayerPickItemEvent<'_>) -> Flow {
@@ -3699,7 +3811,7 @@ pub trait Hooks: Send + Sync {
     /// The player's state is not swapped in, so helpers that look them up
     /// through `self.lan` may find nothing while a guest packet is handled.
     /// Set `cancel` to keep them in their current place. Server-side.
-    /// @API:native_player_portal@.
+    /// @API:player_portal@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_portal(&self, host: &mut dyn Host, event: &mut PlayerPortalEvent<'_>) -> Flow {
@@ -3710,7 +3822,7 @@ pub trait Hooks: Send + Sync {
     /// A server player's recipe book requested a known recipe be placed in
     /// their crafting grid. `recipe` is the recipe id; `all` is the shift
     /// click form. The player's state may not be available through `self.lan`
-    /// while a guest packet is handled. Server-side. @API:native_player_recipe_book_click@.
+    /// while a guest packet is handled. Server-side. @API:player_recipe_book_click@.
     fn player_recipe_book_click(
         &self,
         host: &mut dyn Host,
@@ -3722,7 +3834,7 @@ pub trait Hooks: Send + Sync {
     /// A recipe is about to be unlocked for a server player. Set `cancel` to
     /// keep it locked. The player's state is not swapped in, so helpers that
     /// look them up through `self.lan` may find nothing while a guest packet
-    /// is handled. Server-side. @API:native_player_recipe_discovered@.
+    /// is handled. Server-side. @API:player_recipe_discovered@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_recipe_discovered(
@@ -3770,7 +3882,7 @@ pub trait Hooks: Send + Sync {
     /// position. The player's state is not swapped in, so helpers that look
     /// them up through `self.lan` may find nothing while a guest packet is
     /// handled. Set `cancel` to keep the old point. Server-side.
-    /// @API:native_player_spawn_point_set@.
+    /// @API:player_spawn_point_set@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_spawn_point_set(
@@ -3819,7 +3931,7 @@ pub trait Hooks: Send + Sync {
     /// A server player is about to travel through an End gateway at `gateway`.
     /// Set `cancel` to leave them at the entrance; the gateway is not consumed
     /// and its cooldown does not start. Helpers may find no guest through
-    /// `self.lan` during its packet. Server-side. @API:native_player_teleport_end_gateway@.
+    /// `self.lan` during its packet. Server-side. @API:player_teleport_end_gateway@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn player_teleport_end_gateway(
@@ -3866,18 +3978,18 @@ pub trait Hooks: Send + Sync {
     /// A Nether portal was built for a dimension travel, or an End platform
     /// was made for an arrival. `pos` is the lower corner of the Nether
     /// portal rectangle or the End platform origin. The completed blocks are
-    /// already in the world. @API:native_portal_create@.
+    /// already in the world. @API:portal_create@.
     fn portal_create(&self, host: &mut dyn Host, event: &mut PortalCreateEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A thrown splash or lingering potion applied its hit effects.
-    /// @API:native_potion_splash@.
+    /// @API:potion_splash@.
     fn potion_splash(&self, host: &mut dyn Host, event: &mut PotionSplashEvent<'_>) {
         let _ = host;
         let _ = event;
     }
-    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. @API:native_prepare_anvil@.
+    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. @API:prepare_anvil@.
     ///
     /// Return `Some` to set `result`; the first mod returning `Some` wins.
     fn prepare_anvil(
@@ -3889,7 +4001,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
-    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_grindstone@.
+    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:prepare_grindstone@.
     ///
     /// Return `Some` to set `result`; the first mod returning `Some` wins.
     fn prepare_grindstone(
@@ -3901,7 +4013,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
-    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:native_prepare_item_craft@.
+    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:prepare_item_craft@.
     ///
     /// Return `Some` to set `result`; the first mod returning `Some` wins.
     fn prepare_item_craft(
@@ -3913,12 +4025,12 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
-    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:native_prepare_item_enchant@.
+    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:prepare_item_enchant@.
     fn prepare_item_enchant(&self, host: &mut dyn Host, event: &mut PrepareItemEnchantEvent<'_>) {
         let _ = host;
         let _ = event;
     }
-    /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_smithing@.
+    /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. @API:prepare_smithing@.
     ///
     /// Return `Some` to set `result`; the first mod returning `Some` wins.
     fn prepare_smithing(
@@ -3931,38 +4043,56 @@ pub trait Hooks: Send + Sync {
         None
     }
     /// A server projectile was added to the level. `player` is set only for
-    /// a player launch; other sources have an empty `name`. @API:native_projectile_launch@.
+    /// a player launch; other sources have an empty `name`. @API:projectile_launch@.
     fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
-    /// number and `raiders` counts the raiders, not the mobs they ride. @API:native_raid_spawn_wave@.
+    /// number and `raiders` counts the raiders, not the mobs they ride. @API:raid_spawn_wave@.
     fn raid_spawn_wave(&self, host: &mut dyn Host, event: &mut RaidSpawnWaveEvent) {
         let _ = host;
         let _ = event;
     }
     /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`). @API:native_raid_state_change@.
+    /// `stopped`). @API:raid_state_change@.
     fn raid_state_change(&self, host: &mut dyn Host, event: &mut RaidStateChangeEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// A sculk catalyst at `pos` has begun blooming after taking experience.
     /// The catalyst block state has changed. Server-side.
-    /// @API:native_sculk_bloom@.
+    /// @API:sculk_bloom@.
     fn sculk_bloom(&self, host: &mut dyn Host, event: &mut SculkBloomEvent<'_>) {
         let _ = host;
         let _ = event;
     }
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
+    /// API @API:sleep_finished_time@.
+    fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A sponge at `pos` absorbed water and became wet. Server-side.
-    /// @API:native_sponge_absorb@.
+    /// @API:sponge_absorb@.
     fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
         let _ = level;
         let _ = event;
     }
     /// A guest asked to complete `command`; `suggestions` may be added to or
-    /// filtered. `range` is the replaced byte range. @API:native_tab_complete@.
+    /// filtered. `range` is the replaced byte range. @API:tab_complete@.
     ///
     /// Every mod gets `event.suggestions` in order and may add, change or remove suggestions.
     fn tab_complete(&self, host: &mut dyn Host, event: &mut TabCompleteEvent<'_>) {
@@ -3970,14 +4100,14 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// A projectile hit the target block at `pos`, which now has `strength`
-    /// output power. Server-side. @API:native_target_hit@.
+    /// output power. Server-side. @API:target_hit@.
     fn target_hit(&self, host: &mut dyn Host, event: &mut TargetHitEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// The server changed its thunder state through `/weather`. Set `cancel`
     /// to keep the previous thunder state and timer. Server-side.
-    /// @API:native_thunder_change@.
+    /// @API:thunder_change@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn thunder_change(&self, host: &mut dyn Host, event: &mut ThunderChangeEvent<'_>) -> Flow {
@@ -3986,7 +4116,7 @@ pub trait Hooks: Send + Sync {
         Flow::Continue
     }
     /// The overworld clock is about to jump, from sleep or `/time`. Set
-    /// `cancel` to keep `from`. @API:native_time_skip@.
+    /// `cancel` to keep `from`. @API:time_skip@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn time_skip(&self, host: &mut dyn Host, event: &mut TimeSkipEvent<'_>) -> Flow {
@@ -3994,20 +4124,34 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
+    /// A server player selected trade `index` from `villager` in the trading menu. @API:trade_select@.
     fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
         let _ = host;
         let _ = event;
     }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    fn trade_with_villager(&self, host: &mut dyn Host, event: &mut TradeWithVillagerEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A vault at `pos` changed to `state`. Its block state is updated.
-    /// Server-side. @API:native_vault_change_state@.
+    /// Server-side. @API:vault_change_state@.
     fn vault_change_state(&self, host: &mut dyn Host, event: &mut VaultChangeStateEvent<'_>) {
         let _ = host;
         let _ = event;
     }
     /// The server changed its weather parameters. `raining` and `thundering`
     /// are the requested final states. Set `cancel` to keep the previous
-    /// weather parameters. Server-side. @API:native_weather_change@.
+    /// weather parameters. Server-side. @API:weather_change@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn weather_change(&self, host: &mut dyn Host, event: &mut WeatherChangeEvent<'_>) -> Flow {
@@ -4015,13 +4159,13 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
-    /// The dedicated server's whitelist changed to `enabled`. @API:native_whitelist_state_update@.
+    /// The dedicated server's whitelist changed to `enabled`. @API:whitelist_state_update@.
     fn whitelist_state_update(&self, host: &mut dyn Host, event: &mut WhitelistStateUpdateEvent) {
         let _ = host;
         let _ = event;
     }
     /// The server completed a world save cycle. `wait` says chunk writes were
-    /// flushed before returning. @API:native_world_saved@.
+    /// flushed before returning. @API:world_saved@.
     fn world_saved(&self, host: &mut dyn Host, event: &mut WorldSavedEvent) {
         let _ = host;
         let _ = event;
@@ -8379,6 +8523,37 @@ pub fn dispatch_anvil_damaged(
         mod_hook.anvil_damaged(host, &mut event);
     }
 }
+/// What [`Hooks::arrow_loose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArrowLooseEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub has_ammo: bool,
+    pub charge: i32,
+}
+pub fn dispatch_arrow_loose(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    has_ammo: bool,
+    charge: &mut i32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ArrowLooseEvent {
+        stack,
+        has_ammo,
+        charge: *charge,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.arrow_loose(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *charge = event.charge;
+}
 /// What [`Hooks::beacon_state_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct BeaconStateChangeEvent<'a> {
@@ -8882,6 +9057,42 @@ pub fn dispatch_cauldron_level_changed(
         }
     }
 }
+/// What [`Hooks::chorus_fruit_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ChorusFruitTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+}
+pub fn dispatch_chorus_fruit_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ChorusFruitTeleportEvent {
+        player,
+        name,
+        from,
+        target,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.chorus_fruit_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compost_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct CompostItemEvent<'a> {
@@ -8950,6 +9161,34 @@ pub fn dispatch_creeper_power(
     for mod_hook in mods {
         mod_hook.creeper_power(host, &mut event);
     }
+}
+/// What [`Hooks::critical_hit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CriticalHitEvent<'a> {
+    pub target_kind: &'a str,
+    pub vanilla_critical: bool,
+    pub critical: bool,
+    pub damage_multiplier: f32,
+}
+pub fn dispatch_critical_hit(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    target_kind: &str,
+    vanilla_critical: bool,
+    critical: &mut bool,
+    damage_multiplier: &mut f32,
+) {
+    let mut event = CriticalHitEvent {
+        target_kind,
+        vanilla_critical,
+        critical: *critical,
+        damage_multiplier: *damage_multiplier,
+    };
+    for mod_hook in mods {
+        mod_hook.critical_hit(host, &mut event);
+    }
+    *critical = event.critical;
+    *damage_multiplier = event.damage_multiplier;
 }
 /// What [`Hooks::difficulty_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -9020,6 +9259,49 @@ pub fn dispatch_enchant_item(
     for mod_hook in mods {
         mod_hook.enchant_item(host, &mut event);
     }
+}
+/// What [`Hooks::ender_pearl_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EnderPearlTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pearl: u32,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+    pub damage: f32,
+}
+pub fn dispatch_ender_pearl_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pearl: u32,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    damage: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = EnderPearlTeleportEvent {
+        player,
+        name,
+        pearl,
+        from,
+        target,
+        damage: *damage,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.ender_pearl_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *damage = event.damage;
 }
 /// What [`Hooks::entities_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -9892,6 +10174,42 @@ pub fn dispatch_lightning_strike(
         }
     }
 }
+/// What [`Hooks::menu_quick_move`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MenuQuickMoveEvent<'a> {
+    pub pos: [i32; 3],
+    pub entity: &'a mut ModBlockEntity,
+    pub container_slots: usize,
+    pub slot: usize,
+    pub stack: &'a mut ItemStack,
+}
+pub fn dispatch_menu_quick_move(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    container_slots: usize,
+    slot: usize,
+    stack: &mut ItemStack,
+    handled: &mut bool,
+) {
+    if *handled {
+        return;
+    }
+    let mut event = MenuQuickMoveEvent {
+        pos,
+        entity,
+        container_slots,
+        slot,
+        stack,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
+            *handled = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::moisture_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MoistureChangeEvent {
@@ -10211,6 +10529,32 @@ pub fn dispatch_player_commands_sent(
     };
     for mod_hook in mods {
         mod_hook.player_commands_sent(host, &mut event);
+    }
+}
+/// What [`Hooks::player_destroy_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerDestroyItemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+    pub slot: &'a str,
+}
+pub fn dispatch_player_destroy_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+    slot: &str,
+) {
+    let mut event = PlayerDestroyItemEvent {
+        player,
+        name,
+        item,
+        slot,
+    };
+    for mod_hook in mods {
+        mod_hook.player_destroy_item(host, &mut event);
     }
 }
 /// What [`Hooks::player_fish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11939,6 +12283,30 @@ pub fn dispatch_sculk_bloom(
         mod_hook.sculk_bloom(host, &mut event);
     }
 }
+/// What [`Hooks::sleep_finished_time`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SleepFinishedTimeEvent<'a> {
+    pub dimension: &'a str,
+    pub current: i64,
+    pub new_time: i64,
+}
+pub fn dispatch_sleep_finished_time(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    current: i64,
+    new_time: &mut i64,
+) {
+    let mut event = SleepFinishedTimeEvent {
+        dimension,
+        current,
+        new_time: *new_time,
+    };
+    for mod_hook in mods {
+        mod_hook.sleep_finished_time(host, &mut event);
+    }
+    *new_time = event.new_time;
+}
 /// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct SpongeAbsorbEvent {
@@ -12092,6 +12460,29 @@ pub fn dispatch_trade_select(
     };
     for mod_hook in mods {
         mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::trade_with_villager`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeWithVillagerEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a MerchantOffer,
+}
+pub fn dispatch_trade_with_villager(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    merchant: u32,
+    kind: &str,
+    offer: &MerchantOffer,
+) {
+    let mut event = TradeWithVillagerEvent {
+        merchant,
+        kind,
+        offer,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_with_villager(host, &mut event);
     }
 }
 /// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

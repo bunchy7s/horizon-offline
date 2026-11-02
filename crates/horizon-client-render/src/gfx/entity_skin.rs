@@ -51,6 +51,7 @@ pub struct SkinJob {
     pub overlay: u32,
     /// 1 when the overlay is the armour glint: the model UV rides in `glint_uv`.
     pub glint: u32,
+    /// Always 0: the shader reads the last as a zero it cannot fold away.
     pub spare: [u32; 3],
 }
 

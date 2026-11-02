@@ -2962,6 +2962,9 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
             exe_path().display()
         )
     })?;
+    // An installed launcher's Uninstall entry names the new version (installer.rs).
+    #[cfg(windows)]
+    crate::installer::after_update(launcher_version(&release.tag).unwrap_or(VERSION));
     let _ = fs::remove_dir_all(&work);
     progress(1.0);
     Ok(())

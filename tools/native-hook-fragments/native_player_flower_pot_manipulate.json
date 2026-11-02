@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "A server player put a plant in a flower pot (`native_player_flower_pot_manipulate`).",
-  "doc_summary": "A server player put a plant into a flower pot: `native_player_flower_pot_manipulate(player, name, pos, plant)` is heard after the potted state is stored and the item consumed. Bundles need \"hooks\": @API:player_flower_pot_manipulate@."
+  "doc_summary": "A server player put a plant into a flower pot: `native_player_flower_pot_manipulate(player, name, pos, plant)` is heard after the potted state is stored and the item consumed. Bundles need \"hooks\": @API:native_player_flower_pot_manipulate@."
 }

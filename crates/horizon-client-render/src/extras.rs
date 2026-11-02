@@ -135,6 +135,9 @@ pub struct Extras {
     pub splitscreen_three: u8,
     /// Splitscreen: each player's name in the corner of their view (`splitscreenNames`).
     pub splitscreen_names: bool,
+    /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
+    /// on by default as vanilla); off, the wheel only scrolls the list.
+    pub wheel_cycles_settings: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -177,6 +180,7 @@ impl Default for Extras {
             splitscreen_two: 0,
             splitscreen_three: 0,
             splitscreen_names: true,
+            wheel_cycles_settings: true,
         }
     }
 }
@@ -261,6 +265,7 @@ impl Extras {
                 "splitscreenTwo" => e.splitscreen_two = value.parse().unwrap_or(0).min(2),
                 "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
                 "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
+                "wheelCyclesSettings" => e.wheel_cycles_settings = flag(e.wheel_cycles_settings),
                 _ => {}
             }
         }
@@ -268,7 +273,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -312,6 +317,7 @@ impl Extras {
             self.splitscreen_two,
             self.splitscreen_three,
             bool_text(self.splitscreen_names),
+            bool_text(self.wheel_cycles_settings),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -456,6 +462,7 @@ pub enum Item {
     ReproKeys,
     /// On the Splitscreen settings page.
     Splitscreen,
+    WheelCyclesSettings,
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
@@ -480,6 +487,8 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Ok(AutoReconnect),
         Err("horizon.extras.header.sound"),
         Ok(UiSoundReserve),
+        Err("horizon.extras.header.menus"),
+        Ok(WheelCyclesSettings),
     ]
 }
 impl Item {
@@ -503,6 +512,7 @@ impl Item {
             Item::Splitscreen => "horizon.extras.splitscreen",
             Item::ChatAnimation => "horizon.extras.chat_animation",
             Item::ChatIndicator => "horizon.extras.chat_indicator",
+            Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -525,6 +535,7 @@ impl Item {
             Item::Splitscreen => "horizon.extras.splitscreen.tooltip",
             Item::ChatAnimation => "horizon.extras.chat_animation.tooltip",
             Item::ChatIndicator => "horizon.extras.chat_indicator.tooltip",
+            Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -556,6 +567,7 @@ impl Item {
             Item::ReproKeys => "Recording shortcuts",
             Item::DiscordPresence => "Discord Rich Presence",
             Item::Splitscreen => "Splitscreen",
+            Item::WheelCyclesSettings => "Scroll wheel changes settings",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -568,7 +580,7 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation => {
+            | ChatAnimation | WheelCyclesSettings => {
                 return None;
             }
         })
@@ -623,6 +635,9 @@ impl Item {
             Item::ReproKeys => {
                 "F3+R starts or stops a repro recording and F3+E writes its bundle. Off by default: a recording copies the world."
             }
+            Item::WheelCyclesSettings => {
+                "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -638,7 +653,8 @@ impl Item {
             | Item::AutoReconnect
             | Item::MouseTweaks
             | Item::Sort
-            | Item::Splitscreen => Some(Cost::None),
+            | Item::Splitscreen
+            | Item::WheelCyclesSettings => Some(Cost::None),
             _ => None,
         }
     }
@@ -661,6 +677,7 @@ impl Item {
             Item::ReproKeys => e.repro_keys,
             Item::DiscordPresence => e.discord_presence,
             Item::Splitscreen => e.splitscreen,
+            Item::WheelCyclesSettings => e.wheel_cycles_settings,
             _ => return None,
         })
     }
@@ -694,6 +711,7 @@ impl Item {
             Item::ReproKeys => e.repro_keys = !e.repro_keys,
             Item::DiscordPresence => e.discord_presence = !e.discord_presence,
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
+            Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
             Item::SortKey => {}
         }
     }
@@ -717,7 +735,7 @@ mod tests {
         assert!(!d.zoom && !d.fps && !d.keystrokes && !d.minimap && !d.auto_reconnect);
         assert!(!d.mouse_tweaks && !d.sort && !d.own_name_tag && !d.ui_sound_reserve);
         assert!(!d.hide_block_particles);
-        assert!(d.discord_presence);
+        assert!(d.discord_presence && d.wheel_cycles_settings);
         assert_eq!(Extras::parse(""), d);
         assert_eq!(Extras::parse(&d.serialize()), d);
         let mut e = d.clone();
@@ -758,6 +776,8 @@ mod tests {
         assert!(!e.splitscreen);
         Item::Splitscreen.cycle(&mut e, false);
         assert_eq!(Item::Splitscreen.switch(&e), Some(true));
+        Item::WheelCyclesSettings.cycle(&mut e, false);
+        assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(false));
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
 

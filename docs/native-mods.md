@@ -615,7 +615,7 @@ carry that. Bundles that use it need `"hooks": 52`.
 
 API 53 adds `native_entity_leave_level(dimension, entity, kind)`, an entity leaving a server level (NeoForge's
 `EntityLeaveLevelEvent`, vanilla's `onTrackingEnd`): removed for any reason or its chunk unloading, not the entities
-still loaded when the server stops. It only hears. It tells item entities and experience orbs so far; check `kind`.
+still loaded when the server stops. It only hears. It tells item entities, experience orbs and mobs (`kind` is the mob type) so far; check `kind`.
 Bundles that use it need `"hooks": 53`.
 
 API 54 adds fluid tanks on a mod block's block entity, and the fluid helpers that read and change them, in millibuckets (a
@@ -1049,6 +1049,20 @@ trusting native code is the player's decision, never an agent's.
    it is, and their clean-up never removes a native build. An instance built before this (the **Native mods**
    instance the default home's mods used to go to) keeps its worlds and its build.
 
+### Build log
+
+The full log of a build is `native/build.log`, beside the build's own folders under the launcher's data
+folder (`native_mods::log_path`). Each new attempt replaces it. Compiler output and the final result
+stay in the log, including failures before compilation or while selecting or exporting the built game.
+
+The launcher has a **Build log** action at the top right. It is there whenever a log exists, also right
+after the launcher starts, and it always opens the latest build's log: the next build replaces it. The
+panel shows a bounded preview of the end of the log and says when it truncated; **Copy log** copies the
+whole file, **Open full log** opens it outside the launcher, **Show in folder** reveals it, and
+**Refresh** reads it again (also after a build finishes). The panel is a snapshot read on open and
+refresh, not a live stream: a running build's later output appears only on the next refresh. Nothing is
+uploaded; the log stays on the player's computer.
+
 ## Rebuilds stay on the instance's Horizon
 
 A build starts from the version the instance plays (`native_mods::base_for`). When that is a native build, the
@@ -1410,8 +1424,21 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before and after and `dimension` the level they are in now. Heard after the move has reached the player's state and
   their client (into another level: when that level is entered, before it has loaded around them), so it cannot stop it
   (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `native_tell` and the acting-player helpers
-  work. Not heard yet: ender pearls, chorus fruit, a spectator's teleport menu; portals and respawns are not teleports
-  here.
+  work. Ender pearls and chorus fruit have their own hooks below; not heard yet: a spectator's teleport menu; portals
+  and respawns are not teleports here.
+- **`native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)`**: a server player's ender pearl
+  landed and is about to teleport them (NeoForge's `EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`).
+  `pearl` is the pearl's entity id, `from` their feet, `target` where the pearl started its last tick and `damage` the
+  fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
+  player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
+  pearls are not heard. Bundles need `"hooks": @API:ender_pearl_teleport@`.
+- **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
+  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
+  `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
+  `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
+  the border. Canceling ends the effect: no
+  teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
+  `"hooks": @API:chorus_fruit_teleport@`.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
   their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
   they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor
@@ -1487,6 +1514,13 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_item_frame_change(player, name, entity_id, action, item, rotation)`**: a server player changed a frame (`put`, `rotate`, `remove_item` or `break`), after its contents and comparator output changed. `item` is empty when none remains. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_item_mend(player, name, item, repair, experience)`**: an orb actually repaired `repair` durability on `item` for a server player, after the item changed. `experience` is the orb value. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_trade(player, name, entity_id)`**: a server player completed a villager or wandering trader trade, after the merchant applied it. `entity_id` is the merchant network id. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
+- **`native_trade_with_villager(merchant, kind, offer)`**: NeoForge's `TradeWithVillagerEvent`, heard once per trade a
+  server player makes with a villager or a wandering trader (a shift-click that trades several times is heard for each),
+  after the trade's statistic and `villager_trade` trigger. `merchant` is the trader's entity id, `kind` its type
+  (`minecraft:villager` or `minecraft:wandering_trader`), and `offer` the `MerchantOffer` as it was right after the
+  trade: its costs, `result`, `uses` (this trade counted), `max_uses` and `xp`. Listen only, heard once the whole click
+  is done (its payments taken; NeoForge fires during each take). The player's state is swapped in, so `native_acting_player` names
+  them. Unlike `native_player_trade`, which is heard once per click with no offer.
 - **`native_player_shield_disable(player, name, ticks)`**: a blocked melee hit disabled the server player’s shield for `ticks` ticks. It fires just before the cooldown is set; guest lookup helpers may not find the guest during packet handling.
 - **`native_player_loom_pattern_select(player, name, pattern)`**: a server player selected loom pattern button `pattern`, after the menu accepted it. Guest lookup helpers may not find the guest during packet handling.
 - **`native_player_name_entity(player, name, entity_id, entity_name)`**: a server player used a named name tag on a mob, after it became persistent and was named. Guest lookup helpers may not find the guest during packet handling.
@@ -1543,10 +1577,16 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
 - **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
   sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
-- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
-- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
-- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:spawn_change@`.
+- **`native_sleep_finished_time(dimension, current, new_time)`**: enough players slept through the night and the
+  `advance_time` rule is on (NeoForge's `SleepFinishedTimeEvent`). `new_time` comes in as the next morning's day time;
+  set another to wake everyone then. A time before `current` is refused and the morning stays; the check runs once after
+  every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
+  to the time chosen here and may still cancel it; the players wake either way. Bundles need
+  `"hooks": @API:sleep_finished_time@`.
+- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:native_world_border_bounds_changed@`.
+- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:native_world_border_center_changed@`.
+- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:native_world_game_rule_change@`.
+- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:native_spawn_change@`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": @API:portal_create@`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
 - **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
@@ -1998,6 +2038,29 @@ only for a server's players (single player's server thread, LAN guests, a dedica
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
 slot from filling that way, lower `max_stack`.
 
+### Shift-click in a mod container
+
+`native_menu_quick_move(pos, entity, container_slots, slot, stack, handled)` is a mod container's
+`AbstractContainerMenu.quickMoveStack`, the method a Java menu overrides to say where a shift-clicked stack goes. It is
+asked on the server before the game's own routing, for the mod block entity at `pos` whose menu a player shift-clicked
+with the left or right button, on a vanilla menu type (`minecraft:generic_9x1`...) or on the mod's own menu type. `slot`
+is the menu's index: below `container_slots` the block's own slot (`entity.items[slot]`), from there the player's
+inventory, its 27 main slots, then the hotbar. `stack` is a copy of what that slot holds. Take what you move out of
+`stack` (into `entity.items`, or into another block with `native_insert_item`) and set `handled`: the slot holds what
+is left of `stack` (whatever you wrote to that slot of `entity.items`), the game's routing is skipped, and the player's
+client gets the whole menu again. Unhandled, `entity.items` goes back to what it held and the game moves the stack as
+for any container; a later mod sees what an earlier one did to `stack`. If the mod removes its own block, the menu
+closes and the player's inventory is sent again. This is how a storage terminal
+whose items live in other blocks, or a screen that hides the container's slots, takes a shift-click from the
+inventory, and how a machine sends fuel to its fuel slot and ores to its input.
+
+Not asked for an empty slot, a slot the mod's screen hides, another click type, a spectator or a dead player, a menu
+no longer valid, or a shift-click during a drag (it only ends the drag, as in vanilla). It is asked once per click, where vanilla asks `quickMoveStack` again while the same item keeps moving: move
+all you want in one call. The clicking player's state is swapped in (`native_acting_player` names them), and `entity`
+is out of the world during the call, as in `native_menu_button`. Only a server's players (single player's server
+thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
+clicks already.
+
 ### Items' default components
 
 `crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
@@ -2061,7 +2124,7 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
-A bundle with an `[api]` package may declare its own HEAD injection in the trait:
+A bundle with an `[api]` package may declare its own injection in the trait:
 
 ```toml
 [[injection]]
@@ -2076,10 +2139,36 @@ The generated trait method is `inject_<mod_id>_<trait_method>` (hyphens in the m
 underscores). Its event, as a catalog hook's, is that name in CamelCase plus `Event`
 (`InjectExampleBeforeTickEvent`), with the bindings as fields under the same rules. Implement it on the object
 returned by that bundle's `hooks()`; it is called only for that bundle's object. Types must be
-public and available from both the target and `horizon_client::mod_api`. Only HEAD listen is
-supported, or HEAD with `cancellable = true` for a unit-returning target: that method returns
-`Flow`, and `Flow::Cancel` returns early from the target. Do not specify `helper` on these entries.
-Other injection kinds are rejected. Trait injections can target only functions in `horizon-client`;
+public and available from both the target and `horizon_client::mod_api`. The kinds are HEAD listen,
+or HEAD with `cancellable = true` for a unit-returning target (that method returns `Flow`, and
+`Flow::Cancel` returns early from the target), and RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE.
+For those three, the binding whose `value` is `$value` (its type is the returned, argument or
+expression type, as horizon-mixins requires) becomes a plain event field. The method changes it in
+place and returns nothing; the changed value is what the target returns, passes or uses. The selector,
+`require`, `ordinal` and `argument` are horizon-mixins' own fields. Before the mods are installed, the
+value passes through unchanged. A borrowed `$value` works only where Rust's elision ties the result to
+one input. `cancellable` is HEAD-only. Other kinds are rejected. Do not specify `helper` on these entries.
+
+```toml
+[[injection]]
+id = "points"
+target = "horizon_client::game::example"
+kind = "MODIFY_ARG"
+selector = "self.give_points"
+require = 1
+ordinal = 0
+argument = 0
+trait_method = "points"
+bindings = [{ name = "points", ty = "i32", value = "$value" }]
+```
+
+```rust
+fn inject_example_points(&self, event: &mut InjectExamplePointsEvent) {
+    event.points *= 2;
+}
+```
+
+Trait injections can target only functions in `horizon-client`;
 ordinary mixin helpers in other crates continue to work as before. The generated helper has the same priority and ordering as an
 ordinary helper of that mod: priority descending, mod id then injection id. It is not automatically
 ordered after other mixins. Catalog hooks retain the mixin-before-trait order below.
@@ -2121,7 +2210,8 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access and `native_set_block_property`. Whole-block writes wait for a
+`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
+`native_send_particles`. Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -2169,10 +2259,14 @@ injections go at the head of the body, before the dispatch, so they still run fi
 
 ### Server attachments
 
-A mod can declare an `AttachmentType<T>` once and call its `get`, `set` and `remove`
-methods with the hook's host and a `Holder`. `T` is `Clone + Send + Sync + 'static`;
-`get` returns a clone and inserts the default on first access. `set` runs the optional
-codec before changing the value, returning an `AttachmentError` if it cannot encode.
+A mod can declare an `AttachmentType<T>` once and call its `get`, `set`, `remove`,
+`has` and `get_existing` methods with the hook's host and a `Holder`. `T` is
+`Clone + Send + Sync + 'static`; `get` returns a clone and inserts the default on
+first access. `has` and `get_existing` read without inserting (NeoForge's `hasData`
+and `getExistingData`): `has` says whether a value is stored, saved or set, even
+before it decodes, and `get_existing` returns `None` instead of the default. Neither
+adds anything to the holder's saved data. `set` runs the optional codec before
+changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
 an error. A missing or non-server holder is an error, not a new phantom holder.
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
@@ -2193,6 +2287,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     copy_on_death: false,
 };
 // Inside a server hook with `host: &mut dyn Host`:
+if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
@@ -2215,13 +2310,14 @@ file, not `level.dat`.
 `copy_on_death` requires a codec. Player respawn copies opted-in entries via their
 encoded representation, including raw entries of an absent mod; other entries are
 removed. Living-entity conversion is not supported. This follows the default supplier,
-optional server-side persistence and player-respawn option of NeoForge 26.3's public
-`AttachmentType.Builder` contract, but not its holder-aware supplier, custom copy
-handler, conditional serialization or sync APIs.
+persistence and respawn option of NeoForge 26.3's public `AttachmentType.Builder`
+contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its
+holder-aware supplier, custom copy handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,

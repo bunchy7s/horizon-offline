@@ -7,7 +7,7 @@ Entity.equals	skip:java		entities are compared by id
 Entity.setRot	skip:other		plain setter; yaw and pitch are struct fields and the callers clamp pitch
 Entity.reapplyPosition	skip:other		bounding boxes are built from the position on demand (Mob::bounds_at), so there is no cached box to refresh
 Entity.commonTick	inline	crates/horizon-client/src/mobs/ai.rs::tick	previous position and rotations saved and age counted; invulnerable time counts down in base_tick; remote mobs do the same in tick_remote_entities
-Entity.computeSpeed	missing		minor: lastKnownSpeed is not tracked; only FollowPlayerRiddenEntityGoal reads it and Horizon has no such goal
+Entity.computeSpeed	missing		minor: Entity.lastKnownSpeed is not tracked and getKnownSpeed has no port; FollowPlayerRiddenEntityGoal exists (mobs/dolphin.rs) and reads the vehicle's velocity instead
 Entity.setSharedFlagOnFire	inline	crates/horizon-client/src/game/lan.rs::mob_meta	gap: minor: flag 0x01 is fire_ticks > 0, packed only when a mob goes to LAN guests; HasVisualFire is not read
 Entity.isSupportedBy	inline	crates/horizon-client/src/game/piston_push.rs::Game::push_body	supporting block equal to the piston's block decides whether the body rides it
 Entity.getBlockBounciness	port	crates/horizon-world/src/movement_restitution.rs::restitute_movement	mobs bind it too through crates/horizon-client/src/mobs/living.rs::MobRestitution::block_bounce_restitution, so a mob landing on a slime block or bed bounces
@@ -15,7 +15,7 @@ Entity.addMovementThisTick	port	crates/horizon-world/src/entity_move.rs::Movemen
 Entity.hasMovedHorizontallyRecently	port	crates/horizon-client/src/mobs/dolphin.rs::FollowPlayerRidden::rider	FollowPlayerRiddenEntityGoal follows a ridden boat or nautilus
 Entity.isStateClimbable	port	crates/horizon-world/src/movement_emission.rs::climbable	climbable tag or powder snow
 Entity.applyPistonMovementRestriction	port	crates/horizon-world/src/piston_movement.rs::PistonMovement::limit	the 0.51 per axis budget for each game tick
-Entity.getAvailableSpaceBelow	port	crates/horizon-world/src/world_movement.rs::entity_collisions	ticked in #3514; `Entity.getAvailableSpaceBelow` is cited at crates/horizon-world/src/world_movement.rs:12
+Entity.getAvailableSpaceBelow	inline	crates/horizon-world/src/world_movement.rs::in_range_of_ground	folded into in_range_of_ground: the colliders under the box down to one block are collected and the body needs less than a block of space (getAvailableSpaceBelow(1.0), cited at world_movement.rs:154); the distance itself is not returned
 Entity.collectAllColliders	inline	crates/horizon-world/src/world_movement.rs::resolve_world_movement	entity, border and block shapes are gathered inside resolve_world_movement; no standalone list exists, and the creative flight drop on a mode switch has no use of it
 Entity.collideWithShapes	port	crates/horizon-core/src/geometry/movement.rs::resolve_shape_movement	axis step order from the movement size
 Entity.debugBlockIntersection	skip:debug		debug subscription for the entity block intersection overlay
@@ -94,7 +94,7 @@ Entity.lerpPositionAndRotationStep	inline	crates/horizon-client/src/game/remote.
 Entity.applyImplicitComponents	port	crates/horizon-client/src/game/armor_stands.rs::Game::armor_stand_spawn	ticked in #3514; `Entity.applyImplicitComponents` is cited at crates/horizon-client/src/game/armor_stands.rs:390 (in a comment, so `where` names the enclosing fn)
 Entity.applyImplicitComponent	inline	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the stack's components (name, bucket data, variant, trim...) applied to the entity it spawns
 Entity.applyImplicitComponentIfPresent	inline	crates/horizon-client/src/entity_nbt.rs::apply_item_components	each component is applied only when the stack carries it
-EntityAttachments.scale	missing		minor: attachment points are not scaled with the mob, so riders on a resized or baby vehicle sit at the unscaled height
+EntityAttachments.scale	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	the vehicle attachment point is multiplied by the mob's minecraft:scale and the rider's own offset by its scale (vehicle_attachment); a baby hoglin and the avatars have their own points
 EntityAttachments.getNullable	inline	crates/horizon-client/src/game/names.rs::Game::name_tags	gap: minor: only the NAME_TAG default (0.5 above the height) is used, so a sniffer's tag (offset 2.05) sits 0.2 too high
 EntityAttachments.get	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	the point is always found: the species table or the top of the box
 EntityAttachments.getAverage	inline	crates/horizon-client/src/mobs/riders.rs::passenger_attachment	gap: minor: one point; a sheared harness or sulfur cube item spawns at the mob's centre or box top rather than at the average passenger point
@@ -118,7 +118,7 @@ EntityReference.store	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt
 EntityReference.readWithOldOwnerConversion	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: Owner is read as an int array UUID; an owner saved as a player name (worlds from before 1.7.6) is not converted
 EntityReference.equals	skip:java		UUIDs are compared directly
 world/entity/EntitySelector.withinDistance	port	crates/horizon-client/src/game/dragon.rs::Game::fight_has_players	the 192 block range around (0, 128, 0) for the dragon fight's valid players
-EntityType.appendCustomEntityStackConfig	missing		player: a spawn egg or entity item with an entity_data component spawns a plain entity (use_spawn_egg ignores the stack's data)
+EntityType.appendCustomEntityStackConfig	port	crates/horizon-client/src/game/creatures.rs::Game::apply_spawn_egg_entity_data	a spawn egg stack with a minecraft:entity_data component merges it over the spawned mob's own compound, from a spawn egg or a dispenser, with EntityType.updateCustomEntityTag's id and op guards
 EntityType.updateCustomEntityTag	port	crates/horizon-client/src/game/creatures.rs::Game::apply_spawn_egg_entity_data	the egg's minecraft:entity_data is merged over the mob's own compound and loaded back (TypedEntityData.loadInto), for a player's egg and a dispenser's
 EntityType.getDescription	inline	crates/horizon-client/src/game/commands.rs::Game::target_name	entity.<namespace>.<name> translated
 EntityType.toShortString	skip:debug		only a game test message uses it
@@ -133,7 +133,7 @@ EquipmentSlot.byName	skip:data		slot names are read as strings from data and NBT
 EquipmentSlotGroup.bySlot	inline	crates/horizon-client/src/game/lan_attributes.rs::slot_in_group	a slot is its own group, so the test is group == slot
 EquipmentTable.createForAllSlots	skip:data		drop chances come from the loot and entity data
 ExperienceOrb.<init>	port	crates/horizon-client/src/game.rs::Game::add_orb	random yaw and motion from the orb's own random; gap: minor: no rough direction offset and no unstuck when the orb spawns inside a block
-ExperienceOrb.unstuckIfPossible	missing		minor: an orb that spawns inside blocks (a kill in a 1x1 hole) is not nudged to the nearest free spot; Mob has free_position, orbs do not use it
+ExperienceOrb.unstuckIfPossible	port	crates/horizon-client/src/entities.rs::ExperienceOrb::unstuck	an orb spawned with its box inside blocks moves to the nearest free position (find_free_position over the border), run by the spawn path
 ExperienceOrb.awardWithDirection	port	crates/horizon-client/src/game.rs::Game::spawn_orbs	gap: minor: the rough direction is never given, so xp bottle orbs do not fly away from the surface they hit
 ExperienceOrb.setUnderwaterMovement	port	crates/horizon-client/src/entities.rs::ExperienceOrb::tick	gap: minor: tests the block at the orb's feet, not its eyes
 ExperienceOrb.hurtServer	port	crates/horizon-client/src/entities.rs::ExperienceOrb::hurt	ticked in #3514; `ExperienceOrb.hurtServer` is cited at crates/horizon-client/src/entities.rs:538

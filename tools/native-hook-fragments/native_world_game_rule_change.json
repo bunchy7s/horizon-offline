@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "A server game rule changes (`native_world_game_rule_change`).",
-  "doc_summary": "`native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need \"hooks\": @API:world_game_rule_change@."
+  "doc_summary": "`native_world_game_rule_change(player, name, rule, value)` is told after an operator changes a world game rule through the server's game rule screen, with its final value. Bundles need \"hooks\": @API:native_world_game_rule_change@."
 }

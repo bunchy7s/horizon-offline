@@ -1,14 +1,14 @@
 SelectItemModelProperty.Type.create	skip:java		codec builder
 SelectItemModelProperty.Type.validateCases	port	crates/horizon-assets/src/item_model.rs::ItemModelNode::decode	empty and duplicate case checks in the Select arm
 TrimMaterialProperty.get	port	crates/horizon-assets/src/item_model.rs::Resolve::select_value	trim material id from the minecraft:trim component
-OitPipelineSet.getPipeline	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitPipelineSet.Builder.composeModifiers	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitPipelineSet.Builder.build	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitRenderPassProvider.createRenderPass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitRenderPassProvider.createDepthBoundsPass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitRenderPassProvider.createTransmittancePass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-OitRenderPassProvider.createAccumulatePass	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
-PreparedRenderType.drawFromBufferOit	missing		minor: opt-in Improved Transparency (off by default), no OIT pipelines or passes in Horizon
+OitPipelineSet.getPipeline	port	crates/horizon-client-render/src/gfx/oit.rs::Oit::terrain	the terrain's pipeline for a stage; flat draws take Oit::flat and each feature kind its stage entry in oit_features::Features
+OitPipelineSet.Builder.composeModifiers	inline	crates/horizon-client-render/src/gfx/oit_features.rs::Features::new	a kind's modifier is a field of its Kind (cull face, depth bias) applied when its three stage pipelines are made, not a chain of consumers
+OitPipelineSet.Builder.build	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::new	the three stage pipelines for the terrain, the flat draws and the clouds, plus the cull and composite and the feature kinds
+OitRenderPassProvider.createRenderPass	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::run	one pass per stage, over the world's depth read only, with that stage's targets and bind group
+OitRenderPassProvider.createDepthBoundsPass	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::run	DepthBounds arm: the bounds target cleared to -MAX as the colour, the world depth read only
+OitRenderPassProvider.createTransmittancePass	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::run	Transmittance arm: the two coefficient targets cleared, the bounds texture bound as the sampler
+OitRenderPassProvider.createAccumulatePass	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::run	Accumulate arm: the accumulation target cleared to transparent, the world depth read only
+PreparedRenderType.drawFromBufferOit	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	the draw closure runs once per stage: flat draws take oit.flat, the rest oit.terrain
 PreparedRenderType.draw	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: the indexed draw runs in the gfx/ pass modules that draw_frame calls; RenderSetup scissor not seen
 RenderSetup.toString	skip:debug		
 RenderSetup.prepareTextures	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	overlay and lightmap samplers are bound per pass in gfx/
@@ -19,7 +19,7 @@ RenderType.calculateHasBlending	skip:other		blend flag from the pipeline colour 
 RenderType.prepare	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: texture and overlay/lightmap binding folded into the frame passes
 RenderType.writeDynamicTransforms	inline	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: no per-render-type layering offset found (only perspective layering scale)
 RenderTypes.createMovingBlockSetup	inline	crates/horizon-client/src/game/moving_pistons.rs::Game::moving_piston_geometry	block atlas and lightmap for moving blocks; gap: minor: crumbling and outline flags not checked here
-RenderTypes.breezeWind	inline	crates/horizon-client/src/mobs/render.rs::layers	gap: player: the breeze wind layer does not scroll; the UV offset is not applied (render.rs comment)
+RenderTypes.breezeWind	inline	crates/horizon-client/src/mobs/render.rs::layers	the breeze's wind layer scrolls by 0.02 of the texture a tick (scroll_offset, scroll_u)
 BannerSpecialRenderer.submit	port	crates/horizon-client/src/item_render/special.rs::submit	Banner arm: flag, base and up to 16 pattern layers
 BannerSpecialRenderer.Unbaked.bake	inline	crates/horizon-client/src/item_render/special.rs::load_parts	models are baked once from entity-models.json
 BellSpecialRenderer.submit	port	crates/horizon-client/src/item_render/special.rs::submit	Bell arm

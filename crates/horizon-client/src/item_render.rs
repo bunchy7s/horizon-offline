@@ -283,8 +283,34 @@ pub fn direction_vector(d: Direction) -> Vec3 {
 }
 /// `PoseStack.Pose.transformNormal`: the normal matrix, renormalized.
 pub fn transform_normal(m: Mat4, n: Vec3) -> Vec3 {
-    let normal = Mat3::from_mat4(m).inverse().transpose();
-    (normal * n).normalize_or_zero()
+    FaceNormals::new(m).transform(n)
+}
+/// [`transform_normal`] of one pose for many quads: its normal matrix inverted once, and
+/// the normal of each of the six facings worked out the first time a quad uses it.
+pub struct FaceNormals {
+    normal: Mat3,
+    faces: [Option<Vec3>; 6],
+}
+impl FaceNormals {
+    pub fn new(m: Mat4) -> Self {
+        Self {
+            normal: Mat3::from_mat4(m).inverse().transpose(),
+            faces: [None; 6],
+        }
+    }
+    fn transform(&self, n: Vec3) -> Vec3 {
+        (self.normal * n).normalize_or_zero()
+    }
+    /// The pose's normal of a face pointing `d`.
+    pub fn face(&mut self, d: Direction) -> Vec3 {
+        let i = d as usize;
+        if let Some(n) = self.faces[i] {
+            return n;
+        }
+        let n = self.transform(direction_vector(d));
+        self.faces[i] = Some(n);
+        n
+    }
 }
 /// An `ARGB` int as the `u32` colour of an [`ItemQuad`].
 pub fn argb(color: i32) -> u32 {
@@ -307,15 +333,25 @@ fn submit_quads(
         FoilType::Special => Foil::Special,
     };
     let _ = display;
-    // Quads of one layer mostly share a sprite: look its translucency up once.
+    let mut normals = FaceNormals::new(m);
+    // Quads of one layer mostly share a sprite: look its rect and its
+    // translucency up once.
     let mut last: Option<(&str, bool)> = None;
+    let mut last_rect: Option<(&str, Option<Rect>)> = None;
     for q in &baked.quads {
-        let Some(r) = sprites
-            .get(sprite_name(&q.material.sprite))
-            .or_else(|| sprites.get("misc/missingno"))
-            .or_else(|| sprites.get("horizon/missingno"))
-            .copied()
-        else {
+        let rect = match last_rect {
+            Some((sprite, rect)) if sprite == q.material.sprite => rect,
+            _ => {
+                let rect = sprites
+                    .get(sprite_name(&q.material.sprite))
+                    .or_else(|| sprites.get("misc/missingno"))
+                    .or_else(|| sprites.get("horizon/missingno"))
+                    .copied();
+                last_rect = Some((&q.material.sprite, rect));
+                rect
+            }
+        };
+        let Some(r) = rect else {
             continue;
         };
         // `getLayerColorSafe`: an untinted quad, or a tint index past the
@@ -354,7 +390,7 @@ fn submit_quads(
             pos,
             uv,
             foil_uv: q.uv,
-            normal: transform_normal(m, direction_vector(q.facing)),
+            normal: normals.face(q.facing),
             color: argb(color),
             foil,
             light_emission: q.light_emission,
@@ -433,11 +469,12 @@ impl FileSprites {
             cache.insert(sprite.to_owned(), translucent);
         }
         let alpha: Vec<u8> = argb.iter().map(|p| (p >> 24) as u8).collect();
-        let animation = fs::read_to_string(png.with_extension("png.mcmeta"))
-            .ok()
-            .and_then(|m| serde_json::from_str::<Value>(&m).ok())
-            .and_then(|m| m.get("animation").map(Value::to_string))
-            .and_then(|a| AnimationMetadata::from_json(&a).ok());
+        let animation =
+            horizon_core::prepared_files::read_to_string(&png.with_extension("png.mcmeta"))
+                .ok()
+                .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+                .and_then(|m| m.get("animation").map(Value::to_string))
+                .and_then(|a| AnimationMetadata::from_json(&a).ok());
         let (w, h) = match &animation {
             Some(a) => {
                 let [w, h] = a.frame_size(iw as i32, ih as i32);
@@ -506,40 +543,28 @@ pub struct ItemRenderer {
     pub cit: Option<cit::CitModels>,
 }
 
-/// Every `items/**/*.json` client item definition, by identifier.
+/// Every `items/**/*.json` client item definition, by identifier. Through
+/// `json_folder`: from the prepared data file when the root has one.
 fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
-    fn walk(dir: &Path, rel: &str, namespace: &str, out: &mut BTreeMap<String, ClientItem>) {
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-                continue;
-            };
-            let rel = if rel.is_empty() {
-                name
-            } else {
-                format!("{rel}/{name}")
-            };
-            if path.is_dir() {
-                walk(&path, &rel, namespace, out);
-            } else if let Some(id) = rel.strip_suffix(".json")
-                && let Some(item) = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|t| ClientItem::from_json(&t).ok())
-            {
-                out.insert(format!("{namespace}:{id}"), item);
-            }
-        }
-    }
     let mut out = BTreeMap::new();
     let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
         return out;
     };
     for ns in namespaces.flatten() {
+        let Ok(folder) = horizon_world::json_folder::read(&ns.path().join("items")) else {
+            continue;
+        };
         let namespace = ns.file_name().to_string_lossy().into_owned();
-        walk(&ns.path().join("items"), "", &namespace, &mut out);
+        for file in &folder.files {
+            if let Some(item) = file
+                .bytes()
+                .ok()
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .and_then(|t| ClientItem::from_json(t).ok())
+            {
+                out.insert(format!("{namespace}:{}", file.name), item);
+            }
+        }
     }
     out
 }
@@ -1138,5 +1163,42 @@ mod tests {
         assert_eq!(transform_normal(m, Vec3::X), Vec3::X);
         let r = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
         assert!((transform_normal(r, Vec3::Z) - Vec3::X).length() < 1e-6);
+    }
+
+    #[test]
+    fn face_normals_of_a_pose_are_its_inverse_transpose() {
+        // A dropped item's pose: spun, squashed and moved. Each face's normal is the
+        // inverse transpose of the pose's 3x3 applied to the face's axis, renormalized,
+        // here worked out in f64 from the cofactors.
+        let m = Mat4::from_translation(Vec3::new(3.0, -1.0, 7.5))
+            * Mat4::from_rotation_y(0.7)
+            * Mat4::from_rotation_x(-0.3)
+            * Mat4::from_scale(Vec3::new(0.5, 0.25, 2.0));
+        let c = m.to_cols_array();
+        let a = |row: usize, col: usize| f64::from(c[col * 4 + row]);
+        let cofactor = |row: usize, col: usize| {
+            let (r0, r1) = ((row + 1) % 3, (row + 2) % 3);
+            let (c0, c1) = ((col + 1) % 3, (col + 2) % 3);
+            a(r0, c0) * a(r1, c1) - a(r0, c1) * a(r1, c0)
+        };
+        let mut normals = FaceNormals::new(m);
+        // Twice each: a cached face gives what it gave the first time.
+        for d in Direction::ALL.into_iter().chain(Direction::ALL) {
+            let axis = direction_vector(d).to_array().map(f64::from);
+            // inverse^T = cofactors / det: the det's sign is the only part that survives
+            // renormalizing, and it is positive here.
+            let n: Vec<f64> = (0..3)
+                .map(|row| (0..3).map(|col| cofactor(row, col) * axis[col]).sum())
+                .collect();
+            let len = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let got = normals.face(d);
+            for (g, e) in got.to_array().into_iter().zip(&n) {
+                assert!(
+                    (f64::from(g) - e / len).abs() < 1e-6,
+                    "{d:?}: {got} vs {n:?}"
+                );
+            }
+            assert_eq!(got, transform_normal(m, direction_vector(d)), "{d:?}");
+        }
     }
 }

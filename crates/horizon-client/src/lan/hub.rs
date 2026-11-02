@@ -234,6 +234,10 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
+    /// only players of at least that permission level see them, in the
+    /// player list, the world and their joining and leaving.
+    pub hidden: crate::fast_hash::FxHashMap<u128, u8>,
     pub lan: Lan,
     pub config: HubConfig,
     pub encoder: ChunkEncoder,
@@ -576,6 +580,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             native_tracking: Vec::new(),
+            hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
         }
@@ -846,6 +851,72 @@ impl Hub {
         }
     }
 
+    /// Whether a player of `permission` sees the player `uuid`: not one a
+    /// native mod hid from players below a higher level.
+    pub fn sees(&self, permission: u8, uuid: u128) -> bool {
+        self.hidden
+            .get(&uuid)
+            .is_none_or(|&level| permission >= level)
+    }
+
+    /// The player lists after `hidden` or a permission changed: each placed
+    /// player loses the players hidden from it (ClientboundPlayerInfoRemove)
+    /// and gets back those it sees again (an ADD_PLAYER entry). A change
+    /// checks the client's entity pairs again, so the tracker follows too.
+    /// Nothing runs while nobody is hidden.
+    fn sync_hidden(&mut self) {
+        if self.hidden.is_empty() && self.guests.iter().all(|g| g.tab_hidden.is_empty()) {
+            return;
+        }
+        let candidates: Vec<usize> = (0..self.guests.len())
+            .filter(|&j| {
+                let u = self.guests[j].uuid;
+                self.guests[j].placed
+                    && (self.hidden.contains_key(&u)
+                        || self.guests.iter().any(|g| g.tab_hidden.contains(&u)))
+            })
+            .collect();
+        for i in 0..self.guests.len() {
+            if !self.guests[i].placed {
+                continue;
+            }
+            for &j in &candidates {
+                let (viewer, other) = (&self.guests[i], &self.guests[j]);
+                if i == j {
+                    continue;
+                }
+                let hide = !self.sees(viewer.permission, other.uuid);
+                if hide == viewer.tab_hidden.contains(&other.uuid) {
+                    continue;
+                }
+                let packet = if hide {
+                    C::PlayerInfoRemove(play::PlayerInfoRemove {
+                        uuids: vec![other.uuid],
+                    })
+                } else {
+                    C::PlayerInfoUpdate(play::PlayerInfoUpdate {
+                        actions: Self::INFO_ACTIONS,
+                        entries: vec![self.player_info(
+                            other.uuid,
+                            &other.name,
+                            other.game_mode,
+                            other.latency.load(Ordering::Relaxed),
+                        )],
+                    })
+                };
+                let uuid = other.uuid;
+                let viewer = &mut self.guests[i];
+                viewer.send(&packet);
+                if hide {
+                    viewer.tab_hidden.insert(uuid);
+                } else {
+                    viewer.tab_hidden.remove(&uuid);
+                }
+                viewer.moved = true;
+            }
+        }
+    }
+
     fn player_info(&self, uuid: u128, name: &str, mode: i32, latency: i32) -> play::PlayerInfo {
         let guest = self.guests.iter().find(|g| g.uuid == uuid);
         play::PlayerInfo {
@@ -985,17 +1056,21 @@ impl Hub {
         self.send_permission_level(i);
         self.send_initial_recipe_book(i);
         // PlayerList.placeNewPlayer broadcasts the join line before
-        // players.add: the others read it, the newcomer doesn't.
-        self.broadcast_except(
-            conn,
-            &C::SystemChat(play::SystemChat {
-                content: yellow_names(
-                    "multiplayer.player.joined",
-                    vec![display_name(self.guests[i].uuid, &name)],
-                ),
-                overlay: false,
-            }),
-        );
+        // players.add: the others read it, the newcomer doesn't (nor those
+        // a native mod hides it from).
+        let joined = C::SystemChat(play::SystemChat {
+            content: yellow_names(
+                "multiplayer.player.joined",
+                vec![display_name(self.guests[i].uuid, &name)],
+            ),
+            overlay: false,
+        })
+        .encode();
+        for g in self.guests.iter().filter(|g| g.placed && g.conn != conn) {
+            if self.sees(g.permission, uuid) {
+                g.sender.send(joined.clone());
+            }
+        }
         self.guests[i].placed = true;
         self.resend_teleport(i, None);
         let g = &self.guests[i];
@@ -1008,7 +1083,15 @@ impl Hub {
         if let Some(host) = ctx.host {
             entries.push(self.player_info(host.uuid, &host.name, host.game_mode, 0));
         }
+        // Players a native mod hid from the newcomer stay out of its list,
+        // and a hidden newcomer out of theirs.
+        let permission = self.guests[i].permission;
+        let mut hidden = Vec::new();
         for o in self.guests.iter().filter(|o| o.conn != conn && o.placed) {
+            if !self.sees(permission, o.uuid) {
+                hidden.push(o.uuid);
+                continue;
+            }
             entries.push(self.player_info(
                 o.uuid,
                 &o.name,
@@ -1016,15 +1099,24 @@ impl Hub {
                 o.latency.load(Ordering::Relaxed),
             ));
         }
+        self.guests[i].tab_hidden.extend(hidden);
         self.guests[i].send(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
             actions: Self::INFO_ACTIONS,
             entries,
         }));
-        let newcomer = play::PlayerInfoUpdate {
+        let newcomer = C::PlayerInfoUpdate(play::PlayerInfoUpdate {
             actions: Self::INFO_ACTIONS,
             entries: vec![self.player_info(uuid, &name, mode, 0)],
-        };
-        self.broadcast(&C::PlayerInfoUpdate(newcomer));
+        })
+        .encode();
+        let level = self.hidden.get(&uuid).copied();
+        for g in self.guests.iter_mut().filter(|g| g.placed) {
+            if level.is_some_and(|l| g.permission < l) {
+                g.tab_hidden.insert(uuid);
+            } else {
+                g.sender.send(newcomer.clone());
+            }
+        }
         self.send_level_info(i, ctx, true);
         // ServerLevel.addNewPlayer: the chunk tracking starts at the player.
         let g = &mut self.guests[i];
@@ -1251,11 +1343,12 @@ impl Hub {
         match &self.sync.commands {
             Some(tree) => {
                 let dedicated = self.config.dedicated && !self.config.integrated;
-                tree.packet_with(
+                tree.packet_with_features(
                     permission,
                     dedicated,
                     &self.sync.builtin,
                     &self.mod_commands.0,
+                    &self.sync.features,
                 )
             }
             None => play::Commands {
@@ -1600,6 +1693,7 @@ impl Hub {
             }
         }
         self.sync_containers(ctx.world);
+        self.sync_hidden();
         self.track_entities(ctx);
         for i in 0..self.guests.len() {
             if self.here(&self.guests[i]) {
@@ -1674,10 +1768,20 @@ impl Hub {
         self.broadcast(&C::RemoveEntities(play::RemoveEntities {
             ids: vec![g.entity_id],
         }));
-        self.system_message(yellow_names(
-            "multiplayer.player.left",
-            vec![display_name(g.uuid, &g.name)],
-        ));
+        let left = C::SystemChat(play::SystemChat {
+            content: yellow_names(
+                "multiplayer.player.left",
+                vec![display_name(g.uuid, &g.name)],
+            ),
+            overlay: false,
+        })
+        .encode();
+        for o in self.guests.iter_mut().filter(|o| o.placed) {
+            if o.tab_hidden.remove(&g.uuid) {
+                continue;
+            }
+            o.sender.send(left.clone());
+        }
         g
     }
 
@@ -2323,10 +2427,14 @@ impl Hub {
             equipment,
             attributes,
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
+            minecart_steps: None,
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         }
     }
 
@@ -2422,6 +2530,7 @@ impl Hub {
                 );
                 state.spectator = g.spectator();
                 state.watching = g.watching;
+                state.hidden = self.hidden.get(&g.uuid).copied();
                 stuck_meta(&mut state, g.stuck);
                 shoulder_meta(&mut state, g.shoulders);
                 state
@@ -2450,6 +2559,7 @@ impl Hub {
             .map(|(g, (out, gone))| Viewer {
                 entity_id: g.entity_id,
                 spectator: g.spectator(),
+                permission: g.permission,
                 moved: std::mem::take(&mut g.moved),
                 position: g.position,
                 view_distance: g.view_distance,

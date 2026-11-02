@@ -25,12 +25,17 @@ const MAX_SAVED: usize = 1024;
 /// How many resident chunks may wait for the worker's summary at once
 /// (`Lod::observing`).
 pub const OBSERVE_AHEAD: usize = 8;
+/// How long a tile whose sample waited for data (`Lod::finish_waited`) waits
+/// before it is sampled again without word of it.
+const WAIT_RETRY: std::time::Duration = std::time::Duration::from_secs(10);
 const SAMPLE_JOBS: usize = 4;
 /// Sample jobs queued per sampling thread once the near terrain is in.
 /// Results are taken and jobs started once a frame: with four in flight, a
 /// tile taking milliseconds left the threads idle for most of a slow frame
 /// (2-3 fps on a CPU renderer, with far terrain a few tiles a frame).
 const QUEUED_PER_SAMPLER: usize = 32;
+/// The last `refresh`es `Lod::refreshed_since` tells apart by area.
+const MAX_REFRESHED: usize = 64;
 /// Threads that sample far tiles beside the mesher. Sampling is the cold-load
 /// bottleneck (each task evaluates a shared density lattice for 256 columns),
 /// so medium machines use half their cores, not a quarter.
@@ -387,7 +392,7 @@ impl Column {
     }
 }
 /// A chunk's 256 columns (`Column::from_chunk`), on the far-terrain worker.
-fn summarize(chunk: &Chunk, kinds: &[u8]) -> Arc<[Column; 256]> {
+pub(crate) fn summarize(chunk: &Chunk, kinds: &[u8]) -> Arc<[Column; 256]> {
     let water = water_source(kinds);
     Arc::new(std::array::from_fn(|i| {
         Column::from_chunk(chunk, kinds, water, (i & 15) as i32, (i >> 4) as i32)
@@ -412,7 +417,7 @@ const AIR: u8 = 4;
 const WATERY: u8 = 8;
 /// What `Column::from_chunk` needs of each block state, read from the facts
 /// once: matching their names for every block made observing a chunk slow.
-fn state_kinds(facts: &BlockFacts) -> Vec<u8> {
+pub(crate) fn state_kinds(facts: &BlockFacts) -> Vec<u8> {
     (0..facts.states.len())
         .map(|i| {
             let state = BlockStateId(i as u32);
@@ -451,6 +456,67 @@ fn nearly_full(name: &str) -> bool {
             | "minecraft:honey_block"
     ) || name.ends_with("_stairs")
 }
+/// Clears the detail bits of a tile's cells whose chunk lies in `area`, but
+/// for the chunks `kept` (seen in the world): `request_detail` asks for them
+/// again.
+fn forget_detail(
+    key: TileKey,
+    area: [i32; 4],
+    mask: &mut [u64; 4],
+    kept: impl Fn((i32, i32)) -> bool,
+) {
+    let [ox, _, oz] = key.origin();
+    let stride = key.size() / 16;
+    for index in 0..256 {
+        let chunk = (
+            (ox + (index as i32 % 16) * stride).div_euclid(16),
+            (oz + (index as i32 / 16) * stride).div_euclid(16),
+        );
+        let fine = TileKey {
+            x: chunk.0,
+            z: chunk.1,
+            level: 0,
+        };
+        if fine.overlaps(area) && !kept(chunk) {
+            mask[index / 64] &= !(1 << (index % 64));
+        }
+    }
+}
+/// The tiles over `chunk` to sample again once their source keeps it
+/// (`Lod::resample_over`): those whose sample is still being taken, maybe
+/// from before, and those of cells wider than a chunk sampled empty there,
+/// which a chunk's own detail can't fill (`apply_detail`). The others hold
+/// it once `finish_detail` applies it.
+fn resampled_over(
+    ready: &FxHashMap<TileKey, Arc<Vec<Column>>>,
+    pending: &FxHashSet<TileKey>,
+    (cx, cz): (i32, i32),
+) -> Vec<TileKey> {
+    (1..=MAX_LEVEL)
+        .filter_map(|level| {
+            let size = 16 << level;
+            let key = TileKey {
+                x: (cx * 16).div_euclid(size),
+                z: (cz * 16).div_euclid(size),
+                level,
+            };
+            let resample = match ready.get(&key) {
+                None => pending.contains(&key),
+                Some(samples) => {
+                    let stride = size / CELLS as i32;
+                    let [ox, _, oz] = key.origin();
+                    let cell = (cz * 16 - oz) / stride * CELLS as i32 + (cx * 16 - ox) / stride;
+                    stride > 16
+                        && (pending.contains(&key)
+                            || samples
+                                .get(cell as usize)
+                                .is_some_and(|c| *c == Column::default()))
+                }
+            };
+            resample.then_some(key)
+        })
+        .collect()
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TileKey {
     pub x: i32,
@@ -483,6 +549,24 @@ impl TileKey {
         let [x, _, z] = self.origin();
         let gap = |c: i32, lo: i32| i64::from((lo - c).max(c - lo - self.size()).max(0));
         gap(camera[0], x).pow(2) + gap(camera[1], z).pow(2)
+    }
+    /// Whether the tile covers any of the blocks `[x0, z0, x1, z1)`.
+    fn overlaps(self, [x0, z0, x1, z1]: [i32; 4]) -> bool {
+        let [ox, _, oz] = self.origin();
+        let size = self.size();
+        ox < x1 && oz < z1 && ox + size > x0 && oz + size > z0
+    }
+    /// Whether new data for `area` drawn in cells `widths` wide changes the
+    /// tile's samples: its cells are that wide, and it covers `area` or the
+    /// blocks around it a cell's depth reads (`bluemap::SKIRT`: a block
+    /// around a chunk, the next cells' middles past one).
+    fn refreshed_by(self, area: [i32; 4], widths: (i32, i32)) -> bool {
+        let cell = self.size() / CELLS as i32;
+        (widths.0..=widths.1).contains(&cell) && self.overlaps(Self::around(area, cell))
+    }
+    fn around([x0, z0, x1, z1]: [i32; 4], cell: i32) -> [i32; 4] {
+        let m = if cell <= 16 { 1 } else { cell };
+        [x0 - m, z0 - m, x1 + m, z1 + m]
     }
     fn distance(self, camera: [i32; 2]) -> i32 {
         let [x, _, z] = self.origin();
@@ -676,11 +760,15 @@ impl Plan {
 /// horizon, then every other planned tile nearest first, each replacing its
 /// part of the backdrop: the horizon fills in early and sharpens from the
 /// player outward, whichever way they look.
+/// A tile `ready` and `stale` (`Lod::refresh`) is wanted again, its old
+/// samples drawn meanwhile: it needs no backdrop.
 fn wanted_tiles(
     plan: &Plan,
     ready: &FxHashMap<TileKey, impl Sized>,
+    stale: &FxHashSet<TileKey>,
     camera: [i32; 2],
 ) -> impl Iterator<Item = Wanted> {
+    let sampled = |key: &TileKey| ready.contains_key(key) && !stale.contains(key);
     let wanted = |class, key: TileKey| Wanted {
         class,
         distance: i64::from(key.distance(camera)),
@@ -692,10 +780,11 @@ fn wanted_tiles(
     let mut tiles: Vec<_> = plan
         .nodes
         .iter()
-        .filter(|key| !plan.split.contains(key) && !ready.contains_key(key))
+        .filter(|key| !plan.split.contains(key) && !sampled(key))
         .map(|&key| {
-            if let Some(coarse) = plan.backdrop(key)
-                && !ready.contains_key(&coarse)
+            if !ready.contains_key(&key)
+                && let Some(coarse) = plan.backdrop(key)
+                && !sampled(&coarse)
             {
                 backdrop.insert(coarse);
             }
@@ -817,16 +906,22 @@ enum Job {
     RequestDetail {
         chunks: Vec<(i32, i32)>,
         center: [i32; 2],
+        /// `Lod::refreshes` when asked: what was read before a later
+        /// `refresh` may be older than what it announced.
+        refreshes: u64,
     },
 }
 enum Done {
-    Detail((i32, i32), ReducedColumns),
+    /// A chunk's detail, and the `refreshes` of the request it answers.
+    Detail((i32, i32), ReducedColumns, u64),
     /// A visited chunk's summary (`Job::Observe`).
     Observed((i32, i32), ReducedColumns),
     DetailRequested,
     Sample {
         key: TileKey,
         samples: Vec<Column>,
+        /// Some of it is still on its way (`LodSampler::waited`).
+        waited: bool,
     },
     Mesh {
         key: TileKey,
@@ -922,6 +1017,10 @@ pub struct Lod {
     pending: FxHashSet<TileKey>,
     detail_masks: FxHashMap<TileKey, [u64; 4]>,
     detail_request_pending: bool,
+    /// `refresh`es so far (`Job::RequestDetail`), and the areas of the last
+    /// ones, each with its number.
+    refreshes: u64,
+    refreshed: VecDeque<(u64, [i32; 4])>,
     detail_request_at: std::time::Instant,
     /// Four threads or fewer: far work waits for the near terrain (`hold`).
     small: bool,
@@ -937,6 +1036,11 @@ pub struct Lod {
     ready: FxHashMap<TileKey, Arc<Vec<Column>>>,
     /// Fully covered subtrees, by tile.
     complete: FxHashMap<TileKey, bool>,
+    /// Sampled tiles whose source has more since (`refresh`): sampled again,
+    /// their old samples drawn meanwhile.
+    stale: FxHashSet<TileKey>,
+    /// Stale tiles `refresh`ed again while sampled: that sample may be older.
+    restale: FxHashSet<TileKey>,
     active: FxHashSet<TileKey>,
     /// Tiles needing a mesh, with the revision their job must carry.
     dirty: FxHashMap<TileKey, u64>,
@@ -988,6 +1092,9 @@ pub struct Lod {
     saved: Saved,
     reduced: Reduced,
     saved_order: VecDeque<(i32, i32)>,
+    /// `LodSource::keeps_observed`: tiles sampled without an observed chunk
+    /// are sampled again (`resample_over`).
+    keeps_observed: bool,
 }
 impl Lod {
     pub fn new(source: Arc<dyn LodSource>, context: Arc<WorkerContext>) -> Self {
@@ -1004,6 +1111,9 @@ impl Lod {
         context: Option<Arc<WorkerContext>>,
         workers: bool,
     ) -> Self {
+        let keeps_observed = source
+            .as_ref()
+            .is_some_and(|source| source.keeps_observed());
         let cores = thread::available_parallelism().map_or(1, |n| n.get());
         let shared = Arc::new(Shared {
             jobs: Mutex::new(VecDeque::new()),
@@ -1166,7 +1276,15 @@ impl Lod {
                                             if shared.stop.load(Ordering::Relaxed) {
                                                 return;
                                             }
-                                            if tx.send(Done::Sample { key, samples }).is_err() {
+                                            let waited = sample.waited();
+                                            if tx
+                                                .send(Done::Sample {
+                                                    key,
+                                                    samples,
+                                                    waited,
+                                                })
+                                                .is_err()
+                                            {
                                                 return;
                                             }
                                         }
@@ -1174,10 +1292,11 @@ impl Lod {
                                     .expect("far sampling worker"),
                             );
                         }
+                        let mut asked = 0;
                         'work: loop {
                             for (key, columns) in sampler.drain_details() {
                                 if tx
-                                    .send(Done::Detail(key, ReducedColumns::new(columns)))
+                                    .send(Done::Detail(key, ReducedColumns::new(columns), asked))
                                     .is_err()
                                 {
                                     break 'work;
@@ -1220,12 +1339,16 @@ impl Lod {
                                     else {
                                         continue;
                                     };
-                                    Done::Observed(
-                                        key,
-                                        ReducedColumns::new(summarize(&chunk, kinds)),
-                                    )
+                                    let columns = summarize(&chunk, kinds);
+                                    sampler.observed(key, &columns);
+                                    Done::Observed(key, ReducedColumns::new(columns))
                                 }
-                                Job::RequestDetail { chunks, center } => {
+                                Job::RequestDetail {
+                                    chunks,
+                                    center,
+                                    refreshes,
+                                } => {
+                                    asked = refreshes;
                                     sampler.request_detail(&chunks, center);
                                     Done::DetailRequested
                                 }
@@ -1236,7 +1359,12 @@ impl Lod {
                                     );
                                     let samples =
                                         sampler.grid(x, z, key.size() / CELLS as i32, CELLS);
-                                    Done::Sample { key, samples }
+                                    let waited = sampler.waited();
+                                    Done::Sample {
+                                        key,
+                                        samples,
+                                        waited,
+                                    }
                                 }
                             };
                             if tx.send(done).is_err() {
@@ -1269,6 +1397,8 @@ impl Lod {
             pending: FxHashSet::default(),
             detail_masks: FxHashMap::default(),
             detail_request_pending: false,
+            refreshes: 0,
+            refreshed: VecDeque::new(),
             detail_request_at: std::time::Instant::now(),
             small: cores <= 4,
             sample_jobs: sampling_threads(cores) * QUEUED_PER_SAMPLER,
@@ -1288,6 +1418,8 @@ impl Lod {
             meshed: FxHashSet::default(),
             unmeshed: FxHashSet::default(),
             removed_pending: FxHashSet::default(),
+            stale: FxHashSet::default(),
+            restale: FxHashSet::default(),
             removed: Vec::new(),
             covered: FxHashSet::default(),
             covered_bounds: None,
@@ -1302,6 +1434,7 @@ impl Lod {
             saved: FxHashMap::default(),
             reduced: FxHashMap::default(),
             saved_order: VecDeque::new(),
+            keeps_observed,
         }
     }
     /// The solid ground at block column (x, z): its top face's height and
@@ -1611,6 +1744,80 @@ impl Lod {
             }
         }
     }
+    /// The source has new data for the blocks `[x0, z0, x1, z1)` (a map tile
+    /// downloaded since), drawn in cells `widths` `(min, max)` blocks wide:
+    /// the tiles of those cells over them or beside (`refreshed_by`) are
+    /// sampled again, and their chunks' detail asked again, but for the
+    /// chunks seen in the world. A tile whose new samples are the old ones
+    /// isn't meshed again.
+    pub fn refresh(&mut self, area: [i32; 4], widths: (i32, i32)) {
+        self.refreshes += 1;
+        if self.refreshed.len() >= MAX_REFRESHED {
+            self.refreshed.pop_front();
+        }
+        // Detail is of cells up to a chunk wide, which read a block around:
+        // a chunk around is plenty.
+        let m = 16;
+        let [x0, z0, x1, z1] = area;
+        self.refreshed.push_back((
+            self.refreshes,
+            [
+                x0.saturating_sub(m),
+                z0.saturating_sub(m),
+                x1.saturating_add(m),
+                z1.saturating_add(m),
+            ],
+        ));
+        // Tiles waiting out a retry (`finish_waited`) are asked again now.
+        let retrying = self.retry.len();
+        self.retry.retain(|key, _| !key.refreshed_by(area, widths));
+        if self.retry.len() != retrying {
+            self.wanted_stale = true;
+        }
+        // A first sample in flight read the old data too.
+        let keys: Vec<_> = self
+            .ready
+            .keys()
+            .chain(self.pending.iter())
+            .copied()
+            .filter(|key| {
+                key.refreshed_by(area, widths)
+                    && !(key.level == 0 && self.covered.contains(&(key.x, key.z)))
+            })
+            .collect();
+        for key in keys {
+            self.mark_stale(key);
+            if let Some(mask) = self.detail_masks.get_mut(&key) {
+                let area = TileKey::around(area, key.size() / CELLS as i32);
+                forget_detail(key, area, mask, |chunk| self.saved.contains_key(&chunk));
+            }
+        }
+    }
+    /// Whether chunk `(cx, cz)` was under a `refresh` after request `asked`
+    /// (or one too old to tell).
+    fn refreshed_since(&self, (cx, cz): (i32, i32), asked: u64) -> bool {
+        if asked >= self.refreshes {
+            return false;
+        }
+        let oldest = self.refreshed.front().map_or(u64::MAX, |&(n, _)| n);
+        asked + 1 < oldest
+            || self.refreshed.iter().any(|&(n, [x0, z0, x1, z1])| {
+                n > asked
+                    && cx * 16 < x1
+                    && (cx + 1) * 16 > x0
+                    && cz * 16 < z1
+                    && (cz + 1) * 16 > z0
+            })
+    }
+    /// The tile's samples lack data its source has now: sampled again, the
+    /// old ones drawn meanwhile, and once more after a sample in flight.
+    fn mark_stale(&mut self, key: TileKey) {
+        self.stale.insert(key);
+        self.wanted_stale = true;
+        if self.pending.contains(&key) {
+            self.restale.insert(key);
+        }
+    }
     /// Capture actual block columns, including canopy gaps and material
     /// layers: the worker summarizes the chunk (`summarize`, a few
     /// milliseconds a chunk), then `finish_observed` keeps it.
@@ -1663,22 +1870,42 @@ impl Lod {
             self.saved_order.push_back(key);
         }
         self.saved.insert(key, columns.columns.clone());
+        if self.keeps_observed {
+            self.resample_over(key);
+        }
         self.finish_detail(key, columns);
     }
+    /// The source keeps the chunk now: the tiles over it whose samples lack
+    /// it are sampled again (`stale`), their old samples drawn meanwhile.
+    fn resample_over(&mut self, chunk: (i32, i32)) {
+        for key in resampled_over(&self.ready, &self.pending, chunk) {
+            self.mark_stale(key);
+        }
+    }
+    /// A chunk's own columns as its level-0 tile; the same columns again
+    /// (asked again after a `refresh`) mesh nothing.
     fn apply_fine(&mut self, (cx, cz): (i32, i32), columns: &[Column; 256]) {
         let fine = TileKey {
             x: cx,
             z: cz,
             level: 0,
         };
-        if self.plan.nodes.contains(&fine) || self.ready.contains_key(&fine) {
-            let existed = self
-                .ready
-                .insert(fine, Arc::new(columns.to_vec()))
-                .is_some();
-            self.detail_masks.insert(fine, [u64::MAX; 4]);
-            self.refresh_ready(fine, existed);
+        if !self.plan.nodes.contains(&fine) && !self.ready.contains_key(&fine) {
+            return;
         }
+        self.detail_masks.insert(fine, [u64::MAX; 4]);
+        if self
+            .ready
+            .get(&fine)
+            .is_some_and(|old| old[..] == columns[..])
+        {
+            return;
+        }
+        let existed = self
+            .ready
+            .insert(fine, Arc::new(columns.to_vec()))
+            .is_some();
+        self.refresh_ready(fine, existed);
     }
     fn apply_detail(&mut self, (cx, cz): (i32, i32), columns: &ReducedColumns) {
         self.apply_fine((cx, cz), &columns.columns);
@@ -1705,25 +1932,57 @@ impl Lod {
             if x0 == x1 || z0 == z1 {
                 continue;
             }
-            let samples = Arc::make_mut(samples);
             let mask = self.detail_masks.entry(key).or_default();
+            let mut changed = false;
             for z in z0..z1 {
                 for x in x0..x1 {
                     let index = (z * 16 + x) as usize;
-                    samples[index] = columns
-                        .get(
-                            (ox + x * stride).rem_euclid(16) as usize,
-                            (oz + z * stride).rem_euclid(16) as usize,
-                            stride as usize,
-                        )
-                        .clone();
+                    let column = columns.get(
+                        (ox + x * stride).rem_euclid(16) as usize,
+                        (oz + z * stride).rem_euclid(16) as usize,
+                        stride as usize,
+                    );
+                    // Copied (from a mesh job's snapshot) only to change it.
+                    if samples[index] != *column {
+                        Arc::make_mut(samples)[index] = column.clone();
+                        changed = true;
+                    }
                     mask[index / 64] |= 1 << (index % 64);
                 }
             }
-            modified.push(key);
+            if changed {
+                modified.push(key);
+            }
         }
         for key in modified {
             self.mark_data_changed(key);
+        }
+    }
+    /// A sample with a hole, its data still on its way and nothing coarser
+    /// to stand in: drawn, the hole stood where the coarser tile or the older
+    /// sample it replaces had terrain, until the data came (`refresh`) and
+    /// the tile was sampled again. So it is thrown away, and the tile sampled
+    /// again then (at once if it came while this one was taken), or after
+    /// `WAIT_RETRY`: a shorter wait let the retries of near tiles take every
+    /// slot while the rest waited. One whose waiting cells BlueMap's coarser
+    /// levels stood in for is drawn (`finish_any_sample`).
+    fn finish_waited(&mut self, key: TileKey) {
+        self.pending.remove(&key);
+        if self.restale.remove(&key) {
+            self.wanted_stale = true;
+        } else if self.plan.nodes.contains(&key) {
+            self.retry
+                .insert(key, std::time::Instant::now() + WAIT_RETRY);
+        }
+    }
+    /// A sample in: thrown away when a cell of it is a hole, its data on its
+    /// way (`finish_waited`); one whose waiting cells a coarser level stood
+    /// in for is drawn (`LodSampler::waited`).
+    fn finish_any_sample(&mut self, key: TileKey, samples: Vec<Column>, waited: bool) {
+        if waited {
+            self.finish_waited(key);
+        } else {
+            self.finish_sample(key, samples);
         }
     }
     fn finish_sample(&mut self, key: TileKey, samples: Vec<Column>) {
@@ -1734,6 +1993,7 @@ impl Lod {
                 self.retry.retain(|_, at| *at > now);
             }
             self.retry.insert(key, now + RETRY);
+            self.restale.remove(&key);
             return;
         }
         self.retry.remove(&key);
@@ -1745,6 +2005,15 @@ impl Lod {
                         samples[i] = old[i].clone();
                     }
                 }
+            }
+            // Refreshed again meanwhile: sampled once more after this.
+            if self.restale.remove(&key) {
+                self.wanted_stale = true;
+            } else {
+                self.stale.remove(&key);
+            }
+            if self.ready.get(&key).is_some_and(|old| **old == samples) {
+                return;
             }
             let existed = self.ready.insert(key, Arc::new(samples)).is_some();
             self.refresh_ready(key, existed);
@@ -1780,6 +2049,10 @@ impl Lod {
                 keep = keep.saturating_sub(1);
                 kept
             });
+            // Sampled again from the queue: they read what `refresh` announced.
+            for key in &dropped {
+                self.restale.remove(key);
+            }
             // Back in line where `wanted_tiles` put them: the near terrain can
             // start and stop loading every few frames, and rebuilding the whole
             // queue each time cost more than the samples it held back.
@@ -1885,6 +2158,7 @@ impl Lod {
                 .push_back(Job::RequestDetail {
                     chunks,
                     center: camera,
+                    refreshes: self.refreshes,
                 });
             self.shared.wake.notify_all();
         }
@@ -1917,6 +2191,10 @@ impl Lod {
         let mut meshes = Vec::new();
         crate::spans::time("lod_results", || self.receive(&mut meshes));
         crate::spans::time("lod_retiring", || self.prune_retiring());
+        // Uploaded over frames in this order (`Renderer::upload_lods`): a
+        // tile is meshed clipped around its finer ones, so they go first,
+        // and the nearest first, where far terrain meets the near chunks.
+        meshes.sort_by_key(|(key, _)| (key.level, key.distance(camera)));
         crate::spans::time("lod_covered", || self.cover(covered));
         if std::mem::take(&mut self.reselect) {
             self.rebuild_selection();
@@ -1945,6 +2223,8 @@ impl Lod {
         drop_queued_samples(&self.shared, &mut self.pending, |key| {
             self.plan.nodes.contains(key)
         });
+        self.stale.retain(|key| self.plan.nodes.contains(key));
+        self.restale.retain(|key| self.plan.nodes.contains(key));
         self.detail_masks
             .retain(|key, _| self.plan.nodes.contains(key));
         // Complete resident columns need no duplicate noise work.
@@ -2015,14 +2295,21 @@ impl Lod {
     fn receive(&mut self, meshes: &mut Vec<(TileKey, SectionMesh)>) {
         while let Ok(done) = self.results.try_recv() {
             match done {
-                Done::Detail(key, columns) => {
+                // Read before a `refresh` over it since: asked again (its
+                // bits stay clear), never kept over the newer data.
+                Done::Detail(key, _, asked) if self.refreshed_since(key, asked) => {}
+                Done::Detail(key, columns, _) => {
                     crate::spans::time("lod_detail", || self.finish_detail(key, columns))
                 }
                 Done::Observed(key, columns) => {
                     crate::spans::time("lod_detail", || self.finish_observed(key, columns))
                 }
                 Done::DetailRequested => self.detail_request_pending = false,
-                Done::Sample { key, samples } => self.finish_sample(key, samples),
+                Done::Sample {
+                    key,
+                    samples,
+                    waited,
+                } => self.finish_any_sample(key, samples, waited),
                 Done::Mesh {
                     key,
                     version,
@@ -2358,7 +2645,7 @@ impl Lod {
             };
             // Final tiles and the backdrop only (`wanted_tiles`).
             if self.pending.contains(&key)
-                || self.ready.contains_key(&key)
+                || self.sampled(key)
                 || (self.plan.split.contains(&key) && wanted.class != BACKDROP)
                 || !self.plan.nodes.contains(&key)
                 || self.retry.contains_key(&key)
@@ -2374,12 +2661,16 @@ impl Lod {
             self.shared.wake.notify_all();
         }
     }
+    /// Sampled, and not since `refresh`ed.
+    fn sampled(&self, key: TileKey) -> bool {
+        self.ready.contains_key(&key) && !self.stale.contains(&key)
+    }
     fn rebuild_wanted(&mut self, camera: [i32; 2]) {
         self.wanted.clear();
         // A failed tile waits out its retry delay (`retry`) before it is asked again.
         let retry = &self.retry;
         self.wanted.extend(
-            wanted_tiles(&self.plan, &self.ready, camera)
+            wanted_tiles(&self.plan, &self.ready, &self.stale, camera)
                 .filter(|w| {
                     !retry.contains_key(&TileKey {
                         x: w.x,
@@ -2990,6 +3281,94 @@ mod tests {
         assert_eq!(reduced.get(4, 8, 4).spans, [span(0, 4, 1)]);
         assert_eq!(reduced.get(0, 0, 16).spans, [span(0, 4, 1)]);
     }
+    /// Detail read before a refresh over its chunk is dropped (asked
+    /// again); elsewhere, or read after, it is kept.
+    #[test]
+    fn only_detail_a_later_refresh_covers_is_dropped() {
+        let mut lod = Lod::scheduler_for_test();
+        let asked = lod.refreshes;
+        lod.refresh([0, 0, 64, 64], (1, 16));
+        assert!(lod.refreshed_since((1, 1), asked));
+        assert!(lod.refreshed_since((4, 0), asked), "a chunk around");
+        assert!(!lod.refreshed_since((40, 40), asked), "elsewhere");
+        assert!(!lod.refreshed_since((1, 1), lod.refreshes), "read after");
+        for _ in 0..MAX_REFRESHED {
+            lod.refresh([10_000, 10_000, 10_064, 10_064], (1, 16));
+        }
+        assert!(lod.refreshed_since((40, 40), asked), "too old to tell");
+    }
+    #[test]
+    fn refreshed_areas_forget_detail_but_seen_chunks() {
+        let key = TileKey {
+            x: 1,
+            z: 0,
+            level: 1,
+        };
+        assert!(key.overlaps([40, 0, 50, 1]) && !key.overlaps([64, 0, 80, 32]));
+        // Only cells of the widths the new data is drawn in, a cell around.
+        assert!(key.refreshed_by([64, 0, 80, 32], (1, 16)));
+        assert!(!key.refreshed_by([65, 0, 80, 32], (1, 16)));
+        assert!(!key.refreshed_by([40, 0, 50, 1], (25, i32::MAX)));
+        let root = TileKey {
+            x: 0,
+            z: 0,
+            level: MAX_LEVEL,
+        };
+        assert!(!root.refreshed_by([40, 0, 72, 32], (1, 16)));
+        assert!(root.refreshed_by([0, 0, 800, 800], (25, i32::MAX)));
+        // Level 1: 2 × 2 cells a chunk, chunks 2..4 × 0..2.
+        let mut mask = [u64::MAX; 4];
+        forget_detail(key, [48, 0, 64, 16], &mut mask, |_| false);
+        let cleared: Vec<_> = (0..256)
+            .filter(|i| mask[i / 64] & (1 << (i % 64)) == 0)
+            .collect();
+        assert_eq!(cleared.len(), 64);
+        assert!(cleared.contains(&8) && cleared.contains(&(7 * 16 + 15)));
+        let mut mask = [u64::MAX; 4];
+        forget_detail(key, [0, 0, 1024, 1024], &mut mask, |chunk| chunk == (2, 1));
+        assert_eq!(mask.iter().map(|m| m.count_ones()).sum::<u32>(), 64);
+    }
+    #[test]
+    fn tiles_sampled_without_a_kept_chunk_are_sampled_again() {
+        let tile = |level: u8| {
+            let size = 16 << level;
+            TileKey {
+                x: (3 * 16i32).div_euclid(size),
+                z: (-5 * 16i32).div_euclid(size),
+                level,
+            }
+        };
+        let empty = || Arc::new(vec![Column::default(); CELLS * CELLS]);
+        let filled = || {
+            let column = Column {
+                surface: None,
+                spans: vec![Span {
+                    min: -64,
+                    max: 70,
+                    state: BlockStateId(1),
+                    biome: 0,
+                    light: 0,
+                }]
+                .into(),
+            };
+            Arc::new(vec![column; CELLS * CELLS])
+        };
+        let mut ready = FxHashMap::default();
+        let mut pending = FxHashSet::default();
+        // Cells of a chunk or less take its detail; wider ones sampled empty
+        // there are sampled again, and filled ones aren't.
+        ready.insert(tile(2), empty());
+        ready.insert(tile(5), empty());
+        ready.insert(tile(6), filled());
+        assert_eq!(resampled_over(&ready, &pending, (3, -5)), [tile(5)]);
+        // Samples in flight may predate it: those that detail can't patch.
+        pending.extend([tile(1), tile(2), tile(6), tile(7)]);
+        assert_eq!(
+            resampled_over(&ready, &pending, (3, -5)),
+            [tile(1), tile(5), tile(6), tile(7)]
+        );
+        assert!(resampled_over(&ready, &FxHashSet::default(), (40, 40)).is_empty());
+    }
     #[test]
     #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
     fn real_mesh_clips_near_chunks_and_preserves_water_and_edited_surfaces() -> crate::Result<()> {
@@ -3559,7 +3938,9 @@ mod tests {
             if let (Some(fine), Some(reached)) = (fine, reached) {
                 return ([fine, reached], leaves);
             }
-            let next = wanted_tiles(&plan, &ready, camera).min().unwrap();
+            let next = wanted_tiles(&plan, &ready, &FxHashSet::default(), camera)
+                .min()
+                .unwrap();
             let next = TileKey {
                 x: next.x,
                 z: next.z,
@@ -4195,5 +4576,462 @@ mod tests {
         lod.update(camera, 0, 32, Some(FxHashSet::default()));
         check(&lod);
         let _ = lod.removed();
+    }
+    /// The prepared resources' far-terrain worker context and block facts.
+    fn test_context() -> crate::Result<(Arc<WorkerContext>, BlockFacts)> {
+        use crate::{assets::Assets, biome::Biomes, light::LightTables, mesher::MeshTables};
+        let root = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES").expect("HORIZON_TEST_RESOURCES"),
+        );
+        let assets = Arc::new(Assets::load(&root)?);
+        let render = Arc::new(assets.reload(&root)?);
+        let facts = BlockFacts::load(&root, assets.registry)?;
+        let biomes = Arc::new(Biomes::load(&root)?);
+        let tables = Arc::new(MeshTables::new(
+            &assets,
+            &render,
+            &facts,
+            crate::models::load_visibility(&root, assets.registry)?,
+        )?);
+        let context = Arc::new(WorkerContext {
+            light: Arc::new(LightTables::load(&root, assets.registry, &facts)?),
+            tables,
+            assets,
+            render,
+            biomes,
+        });
+        Ok((context, facts))
+    }
+    /// A server's far terrain (`server_terrain`) in a scratch folder, and a
+    /// chunk of stone at y 70 to observe.
+    struct ServerLod {
+        lod: Lod,
+        facts: BlockFacts,
+        stone: BlockStateId,
+        dir: std::path::PathBuf,
+    }
+    impl ServerLod {
+        fn new(name: &str) -> crate::Result<Self> {
+            Self::with(name, |dir| {
+                crate::server_terrain::ServerTerrain::new(dir.into(), None)
+            })
+        }
+        fn with(
+            name: &str,
+            source: impl FnOnce(&std::path::Path) -> Arc<dyn LodSource>,
+        ) -> crate::Result<Self> {
+            let (context, facts) = test_context()?;
+            let stone = context
+                .assets
+                .registry
+                .default_state("minecraft:stone")
+                .unwrap();
+            let dir = std::env::temp_dir().join(format!("horizon-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            Ok(Self {
+                lod: Lod::new(source(&dir), context),
+                facts,
+                stone,
+                dir,
+            })
+        }
+        fn observe(&mut self, x: i32, z: i32) {
+            let mut chunk = Chunk::empty(x, z);
+            for i in 0..256 {
+                chunk.set(i % 16, 70, i / 16, self.stone.0);
+            }
+            self.lod.observe(Arc::new(chunk), &self.facts);
+        }
+        /// Updates until nothing is left to sample, summarize or mesh (`settle`:
+        /// for a while), or only a few times.
+        fn run(
+            &mut self,
+            camera: [f64; 3],
+            detail: i32,
+            distance: u32,
+            covered: &FxHashSet<(i32, i32)>,
+            settle: bool,
+        ) {
+            let lod = &mut self.lod;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            let mut covered = Some(covered.clone());
+            let mut quiet = 0;
+            while quiet < if settle { 50 } else { 3 } {
+                lod.update(camera, detail, distance, covered.take());
+                lod.removed();
+                // Every tile sampled, but those waiting for their data.
+                let unsampled = lod.plan.nodes.iter().any(|key| {
+                    !lod.plan.split.contains(key)
+                        && !lod.ready.contains_key(key)
+                        && !lod.retry.contains_key(key)
+                });
+                let idle = lod.pending.is_empty()
+                    && lod.outstanding_meshes == 0
+                    && lod.dirty.is_empty()
+                    && lod.observing() == 0
+                    && lod
+                        .shared
+                        .jobs
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .all(|job| matches!(job, Job::RequestDetail { .. }))
+                    && !unsampled;
+                quiet = if idle { quiet + 1 } else { 0 };
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "far terrain never settled: {} pending, {} meshing, {} observing, {} jobs, {} unsampled, {} waiting",
+                    lod.pending.len(),
+                    lod.outstanding_meshes,
+                    lod.observing(),
+                    lod.shared.jobs.lock().unwrap().len(),
+                    lod.plan
+                        .nodes
+                        .iter()
+                        .filter(|key| !lod.plan.split.contains(key)
+                            && !lod.ready.contains_key(key)
+                            && !lod.retry.contains_key(key))
+                        .count(),
+                    lod.retry.len(),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(2));
+            }
+        }
+        /// The chunks of `chunks` the active tiles don't draw as observed:
+        /// the visited column or the tile's sample there, at the chunk's middle.
+        fn missing(&self, chunks: impl Iterator<Item = (i32, i32)>) -> Vec<(i32, i32)> {
+            chunks
+                .filter(|&chunk| {
+                    self.drawn(chunk)
+                        .is_none_or(|c| c.spans.last().is_none_or(|s| s.max != 71))
+                })
+                .collect()
+        }
+        /// The column the active tiles draw at a chunk's middle.
+        fn drawn(&self, (cx, cz): (i32, i32)) -> Option<Column> {
+            let lod = &self.lod;
+            let snapshot = lod.snapshot();
+            let drawn = |x: i32, z: i32| {
+                let key = lod.active.iter().copied().find(|key| {
+                    let [ox, _, oz] = key.origin();
+                    (ox..ox + key.size()).contains(&x) && (oz..oz + key.size()).contains(&z)
+                })?;
+                let stride = key.size() / CELLS as i32;
+                let [ox, _, oz] = key.origin();
+                let (cx, cz) = ((x - ox) / stride, (z - oz) / stride);
+                let (wx, wz) = (ox + cx * stride, oz + cz * stride);
+                Some(match snapshot.visited_source(wx, wz, stride) {
+                    Some(source) => source.get().clone(),
+                    None => lod.ready[&key][(cz * CELLS as i32 + cx) as usize].clone(),
+                })
+            };
+            drawn(cx * 16 + 8, cz * 16 + 8)
+        }
+    }
+    impl Drop for ServerLod {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+    #[test]
+    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    fn chunks_a_server_dropped_stay_drawn_as_far_terrain() -> crate::Result<()> {
+        let mut far = ServerLod::new("lod-dropped")?;
+        // A server's view distance of 10 (it sends a ring more), drawn to a
+        // render distance of 32 (`streaming.radius`, the covered area).
+        let (view, detail, distance) = (10, 32, 64);
+        let mut resident = FxHashSet::default();
+        let mut dropped = FxHashSet::default();
+        // The player flies east past some 1800 chunks: more than `MAX_SAVED`.
+        let end = 60;
+        for step in 0..=end {
+            let center = (step, 0);
+            let now: FxHashSet<_> = (-view..=view)
+                .flat_map(|dz| (-view..=view).map(move |dx| (center.0 + dx, center.1 + dz)))
+                .collect();
+            for &(x, z) in now.difference(&resident) {
+                far.observe(x, z);
+            }
+            for &(x, z) in resident.difference(&now) {
+                // `forget_remote_chunk`: the last of it, for far terrain.
+                far.observe(x, z);
+                dropped.insert((x, z));
+            }
+            resident = now;
+            let covered = resident
+                .iter()
+                .copied()
+                .filter(|&(x, z)| crate::streaming::in_view_distance(center, detail, x, z))
+                .collect();
+            let camera = [f64::from(center.0 * 16 + 8), 100.0, 8.0];
+            far.run(camera, detail, distance, &covered, step == end);
+        }
+        // Those within the LOD distance of where the player is now.
+        let near = |&(x, z): &(i32, i32)| (x - end).pow(2) + z * z < (distance as i32 - 4).pow(2);
+        let missing = far.missing(dropped.iter().copied().filter(near));
+        assert!(
+            missing.is_empty(),
+            "{} dropped chunks aren't drawn, as {:?}",
+            missing.len(),
+            &missing[..missing.len().min(8)]
+        );
+        Ok(())
+    }
+    #[test]
+    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    fn far_cells_sampled_before_their_chunks_were_kept_fill_in() -> crate::Result<()> {
+        let mut far = ServerLod::new("lod-late")?;
+        // Seen from 5000 blocks: cells of 32 blocks and wider over them.
+        let camera = [-5000.0, 100.0, 8.0];
+        let (detail, distance) = (10, 512);
+        let none = FxHashSet::default();
+        // Every tile sampled while nothing is kept, then 32 × 32 chunks are.
+        far.run(camera, detail, distance, &none, true);
+        let chunks: Vec<_> = (0..32).flat_map(|z| (0..32).map(move |x| (x, z))).collect();
+        assert_eq!(far.missing(chunks.iter().copied()).len(), chunks.len());
+        for &(x, z) in &chunks {
+            far.observe(x, z);
+        }
+        far.run(camera, detail, distance, &none, true);
+        let missing = far.missing(chunks.iter().copied());
+        assert!(
+            missing.is_empty(),
+            "{} kept chunks aren't drawn",
+            missing.len()
+        );
+        Ok(())
+    }
+    /// A BlueMap whose coarse levels are in, its finest (cells up to a
+    /// chunk) still downloading until `arrived`.
+    struct Downloading {
+        stone: BlockStateId,
+        arrived: Arc<std::sync::atomic::AtomicBool>,
+    }
+    struct DownloadingSampler {
+        stone: BlockStateId,
+        arrived: Arc<std::sync::atomic::AtomicBool>,
+        details: Vec<crate::streaming::LodDetail>,
+    }
+    impl LodSource for Downloading {
+        fn sampler(self: Arc<Self>) -> Box<dyn crate::streaming::LodSampler> {
+            Box::new(DownloadingSampler {
+                stone: self.stone,
+                arrived: self.arrived.clone(),
+                details: Vec::new(),
+            })
+        }
+    }
+    impl crate::streaming::LodSampler for DownloadingSampler {
+        fn fork(&self) -> Option<Box<dyn crate::streaming::LodSampler>> {
+            Some(Box::new(Self {
+                stone: self.stone,
+                arrived: self.arrived.clone(),
+                details: Vec::new(),
+            }))
+        }
+        fn sample(&mut self, _x: i32, _z: i32) -> Option<Surface> {
+            None
+        }
+        /// The coarse levels' stone, the finest's next state, and the
+        /// coarse one's while the finest is on its way (`server_terrain`):
+        /// stood in for, so not `waited`.
+        fn reduced_column(&mut self, _x: i32, _z: i32, width: i32) -> Column {
+            let state = if width > 16 {
+                self.stone
+            } else if self.arrived.load(Ordering::Relaxed) {
+                BlockStateId(self.stone.0 + 1)
+            } else {
+                self.stone
+            };
+            Column {
+                surface: None,
+                spans: vec![Span {
+                    min: MIN_Y as i16,
+                    max: 71,
+                    state,
+                    biome: 0,
+                    light: 0xF0,
+                }]
+                .into(),
+            }
+        }
+        /// Chunks' detail once arrived, as `server_terrain`'s: asked again
+        /// while on its way.
+        fn request_detail(&mut self, chunks: &[(i32, i32)], _center: [i32; 2]) {
+            if self.arrived.load(Ordering::Relaxed) {
+                let columns = Arc::new(std::array::from_fn(|_| self.reduced_column(0, 0, 1)));
+                self.details
+                    .extend(chunks.iter().map(|&chunk| (chunk, columns.clone())));
+            }
+        }
+        fn drain_details(&mut self) -> Vec<crate::streaming::LodDetail> {
+            std::mem::take(&mut self.details)
+        }
+    }
+    #[test]
+    #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
+    fn coarser_stand_ins_keep_the_ring_past_the_near_chunks_drawn() -> crate::Result<()> {
+        let arrived = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut far = ServerLod::with("lod-waiting", |_| {
+            let stone = BlockStateId(1);
+            Arc::new(Downloading {
+                stone,
+                arrived: arrived.clone(),
+            })
+        })?;
+        let (camera, detail, distance) = ([8.0, 100.0, 8.0], 10, 64);
+        let none = FxHashSet::default();
+        // The ring past the near terrain, where nothing stood.
+        let ring: Vec<_> = (-24..=24)
+            .flat_map(|z| (-24..=24).map(move |x| (x, z)))
+            .filter(|&(x, z)| x * x + z * z > 11 * 11)
+            .collect();
+        far.run(camera, detail, distance, &none, true);
+        let missing = far.missing(ring.iter().copied());
+        assert!(
+            missing.is_empty(),
+            "{} of {} chunks past the near terrain show nothing while their tiles wait",
+            missing.len(),
+            ring.len()
+        );
+        // The map's tiles arrive (`BlueMap::take_changed`): the finest replace them.
+        arrived.store(true, Ordering::Relaxed);
+        far.lod.refresh([-1024, -1024, 1024, 1024], (1, 24));
+        far.run(camera, detail, distance, &none, true);
+        assert!(far.lod.retry.is_empty());
+        let fine = BlockStateId(2);
+        let coarse: Vec<_> = ring
+            .iter()
+            .copied()
+            .filter(|&chunk| {
+                far.drawn(chunk)
+                    .is_none_or(|c| c.spans.last().is_none_or(|s| s.state != fine))
+            })
+            .collect();
+        assert!(
+            coarse.is_empty(),
+            "{} chunks still drawn coarse",
+            coarse.len()
+        );
+        assert!(far.lod.active.iter().any(|key| key.level == 0));
+        Ok(())
+    }
+
+    /// The sample jobs `request_samples` queues now, taken off the queue.
+    fn queued(lod: &mut Lod) -> Vec<TileKey> {
+        lod.request_samples([0, 0]);
+        let mut jobs = lod.shared.jobs.lock().unwrap();
+        jobs.drain(..)
+            .filter_map(|job| match job {
+                Job::Sample(key) => Some(key),
+                _ => None,
+            })
+            .collect()
+    }
+    fn samples(top: i16) -> Vec<Column> {
+        let mut column = Column::default();
+        column.spans.push(Span {
+            min: -64,
+            max: top,
+            state: BlockStateId(1),
+            biome: 0,
+            light: 0,
+        });
+        vec![column; CELLS * CELLS]
+    }
+    const AREA: [i32; 4] = [0, 0, 128, 128];
+    const ALL: (i32, i32) = (1, i32::MAX);
+
+    /// A first sample that read a map tile still downloading is thrown
+    /// away; if the tile came while it was taken, it is sampled again at
+    /// once, else after `WAIT_RETRY` or when the tile comes.
+    #[test]
+    fn waited_samples_are_taken_again_when_their_data_comes() {
+        let mut lod = Lod::scheduler_for_test();
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 3,
+        };
+        lod.plan.nodes.insert(key);
+        assert_eq!(queued(&mut lod), [key]);
+        lod.finish_any_sample(key, vec![Column::default(); CELLS * CELLS], true);
+        assert!(lod.retry.contains_key(&key) && !lod.ready.contains_key(&key));
+        assert!(queued(&mut lod).is_empty(), "it waits for its data");
+        lod.refresh(AREA, ALL);
+        assert!(!lod.retry.contains_key(&key));
+        assert_eq!(queued(&mut lod), [key], "the data came");
+
+        // The data comes while it is being sampled.
+        lod.refresh(AREA, ALL);
+        lod.finish_any_sample(key, vec![Column::default(); CELLS * CELLS], true);
+        assert!(!lod.retry.contains_key(&key));
+        assert_eq!(queued(&mut lod), [key], "sampled again at once");
+        // Coarser levels stood in for what waited: drawn.
+        lod.finish_any_sample(key, samples(70), false);
+        assert!(lod.ready.contains_key(&key) && !lod.stale.contains(&key));
+        assert!(queued(&mut lod).is_empty());
+        // Refreshed, then sampled with a hole where a tile is still on its
+        // way: what is drawn stays, the hole isn't.
+        lod.refresh(AREA, ALL);
+        assert_eq!(queued(&mut lod), [key]);
+        let mut holed = samples(80);
+        holed[..CELLS].fill(Column::default());
+        lod.finish_any_sample(key, holed, true);
+        assert_eq!(lod.ready[&key][0], samples(70)[0]);
+        assert!(lod.retry.contains_key(&key));
+    }
+
+    /// A tile refreshed while its sample is in flight is sampled once more:
+    /// that sample read the old data. Samples equal to the drawn ones mesh
+    /// nothing.
+    #[test]
+    fn refreshed_tiles_are_sampled_again_and_only_meshed_when_changed() {
+        let mut lod = Lod::scheduler_for_test();
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 3,
+        };
+        lod.plan.nodes.insert(key);
+        lod.active.insert(key);
+        lod.ready.insert(key, Arc::new(samples(70)));
+        assert!(queued(&mut lod).is_empty());
+        lod.refresh(AREA, ALL);
+        assert_eq!(queued(&mut lod), [key]);
+        lod.refresh(AREA, ALL);
+        lod.finish_sample(key, samples(80));
+        assert!(lod.stale.contains(&key), "refreshed again meanwhile");
+        assert!(lod.dirty.contains_key(&key), "new samples are meshed");
+        assert_eq!(queued(&mut lod), [key]);
+        lod.dirty.clear();
+        lod.finish_sample(key, samples(80));
+        assert!(!lod.stale.contains(&key));
+        assert!(lod.dirty.is_empty(), "the same samples mesh nothing");
+        assert!(queued(&mut lod).is_empty());
+        // Data drawn in other cell widths leaves it alone.
+        lod.refresh(AREA, (17, 24));
+        assert!(queued(&mut lod).is_empty());
+    }
+
+    /// With a source that keeps what it observes (a server's chunks), a wide
+    /// tile sampled empty where a chunk is now kept is sampled again.
+    #[test]
+    fn kept_chunks_resample_the_wide_tiles_over_them() {
+        let mut lod = Lod::scheduler_for_test();
+        lod.keeps_observed = true;
+        let key = TileKey {
+            x: 0,
+            z: 0,
+            level: 5,
+        };
+        lod.plan.nodes.insert(key);
+        lod.ready
+            .insert(key, Arc::new(vec![Column::default(); CELLS * CELLS]));
+        let column = samples(70).swap_remove(0);
+        let columns: Arc<[Column; 256]> = Arc::new(std::array::from_fn(|_| column.clone()));
+        lod.finish_observed((1, 1), ReducedColumns::new(columns));
+        assert!(lod.stale.contains(&key));
+        assert_eq!(queued(&mut lod), [key]);
     }
 }
