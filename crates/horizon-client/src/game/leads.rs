@@ -136,16 +136,23 @@ impl Game<'_> {
     }
     fn drop_leash(&mut self, id: u32, drop: bool, sound: bool, used: bool) {
         let killer = self.lead_killers.remove(&id).map(|(killer, _)| killer);
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+        let Some((alive, at, kind)) = self.mobs.iter_mut().find(|m| m.id == id).and_then(|m| {
+            horizon_client::mobs::leash::remove(m)?;
+            Some((
+                m.alive(),
+                [m.position.x, m.position.y, m.position.z],
+                super::native_hooks::mob_kind(m),
+            ))
+        }) else {
             return;
         };
-        if horizon_client::mobs::leash::remove(m).is_none() {
-            return;
+        if used
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_unleash_entity(player, &name, id);
         }
         // Leashable.tickLeash gates a dying entity's lead drop on entity_drops.
-        let drop = drop && (m.alive() || self.ui.rules.bool("entity_drops"));
-        let at = [m.position.x, m.position.y, m.position.z];
-        let kind = super::native_hooks::mob_kind(m);
+        let drop = drop && (alive || self.ui.rules.bool("entity_drops"));
         if sound {
             self.lead_sound("break", at);
         }
@@ -400,6 +407,14 @@ impl Game<'_> {
             && boats_in_hand.is_empty()
         {
             return false;
+        }
+        // A knot is made when a lead is tied to a fence that has none.
+        if existing.is_empty()
+            && existing_boats.is_empty()
+            && (!in_hand.is_empty() || !boats_in_hand.is_empty())
+            && self.hanging_place_cancelled("minecraft:leash_knot", knot_pos)
+        {
+            return true;
         }
         let mut attached = self.tie_player_boats(center, Holder::Knot(knot_pos));
         for j in in_hand {

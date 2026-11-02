@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_unleash_entity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_unleash_entity",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player's action removed an entity's leash (`native_player_unleash_entity`).",
+  "doc_summary": "A server player's action removed an entity's leash: `native_player_unleash_entity(player, name, entity_id)` fires after the leash state is cleared. Bundles need \"hooks\": @API:player_unleash_entity@."
+}

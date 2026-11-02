@@ -73,6 +73,7 @@ pub mod render;
 pub mod riders;
 pub mod seen_grid;
 pub mod shulker;
+pub mod skin;
 pub mod sniffer;
 pub mod spawn_rules;
 pub mod spawn_selection;
@@ -1620,6 +1621,7 @@ pub enum MobEvent {
     /// `BreakDoorGoal.tick` at its end: the door is removed (`removeBlock`),
     /// then level events 1021 and 2001 with the state that is left there.
     BreakDoor {
+        mob: u32,
         pos: [i32; 3],
     },
     /// `Level.destroyBlockProgress` for a mob's crack on a block (`-1`
@@ -1722,6 +1724,7 @@ pub enum MobEvent {
     /// Replace a block by name (sheep turning grass to dirt), optionally with
     /// the destroy effect.
     SetBlockName {
+        mob: Option<u32>,
         pos: [i32; 3],
         name: &'static str,
         effect: bool,

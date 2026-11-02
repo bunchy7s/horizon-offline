@@ -46,6 +46,8 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,
+        vertical_collision: false,
+        horizontal_collision: false,
         needs_sync: false,
         leash: None,
         spectator: false,
@@ -622,6 +624,17 @@ impl Game<'_> {
                 // WitherSkull.DATA_DANGEROUS.
                 K::WitherSkull { dangerous: true } => {
                     e.meta.push((8, serializer::BOOLEAN, Value::Bool(true)));
+                }
+                // ThrowableItemProjectile.DATA_ITEM_STACK: the potion's
+                // `potion_contents`, whose effects the guest's splash and
+                // whose colour its drawing need. A plain splash potion is the
+                // client's default and is not sent.
+                K::Potion(stack) if stack.extra.is_some() || stack.count != 1 => {
+                    e.meta.push((
+                        8,
+                        serializer::ITEM_STACK,
+                        Value::Item(hub.stack(&Some((**stack).clone()))),
+                    ));
                 }
                 _ => {}
             }
