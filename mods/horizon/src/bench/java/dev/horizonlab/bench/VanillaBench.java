@@ -14,7 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 import net.fabricmc.api.ClientModInitializer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.ConnectScreen;
 import net.minecraft.client.gui.screens.TitleScreen;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.LevelSettings;
@@ -36,7 +39,8 @@ import net.minecraft.world.phys.Vec3;
  * "seconds", "timeout", "scenes": [{"name", "from": [x,y,z], "to": [x,y,z],
  * "pitch", "settle"?, "setup"?: [command...], "cleanup"?: [command...]}]}: a scene's own settle replaces
  * the script's, its setup commands (tools/stress_scenes.py) run once its chunks are loaded and its cleanup
- * commands after its flight. Output: horizon.bench.out.
+ * commands after its flight. "server" ("host:port") joins that server instead of creating a world (the
+ * player needs op there for /tp and /time). Output: horizon.bench.out.
  */
 public final class VanillaBench implements ClientModInitializer {
     private static VanillaBench bench;
@@ -116,6 +120,13 @@ public final class VanillaBench implements ClientModInitializer {
             case TITLE -> {
                 if (mc.gui.screen() instanceof TitleScreen && mc.gui.overlay() == null) {
                     event("title", renderer(mc));
+                    if (script.has("server")) {
+                        String address = script.get("server").getAsString();
+                        enter(Phase.WORLD, now);
+                        ConnectScreen.startConnecting(mc.gui.screen(), mc, ServerAddress.parseString(address),
+                            new ServerData("Bench", address, ServerData.Type.OTHER), false, null);
+                        return;
+                    }
                     LevelSettings settings = new LevelSettings(script.get("world").getAsString(), GameType.CREATIVE,
                         LevelSettings.DifficultySettings.DEFAULT, true, WorldDataConfiguration.DEFAULT);
                     WorldOptions options = new WorldOptions(script.get("seed").getAsLong(), true, false);

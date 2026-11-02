@@ -181,7 +181,7 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
                 assert!(scratch.own.is_none());
                 assert_eq!(scratch.padded.blocks.capacity(), 0);
                 assert_eq!(scratch.padded.light.capacity(), 0);
-                assert_eq!(scratch.visibility.capacity(), 0);
+                assert_eq!(scratch.opaque.capacity(), 0);
             }
             fresh.sort_solid();
             recycled.sort_solid();

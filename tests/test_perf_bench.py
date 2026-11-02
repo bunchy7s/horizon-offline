@@ -236,6 +236,10 @@ class PortabilityTests(unittest.TestCase):
         self.assertEqual(r["metrics"]["fps.village.avg_fps"]["mean"], 200.0)
         self.assertEqual(pb.report(args, 8, [dict(run, load_before=1.25)], {})["conditions"]["load_avg_1m"], 1.25)
         self.assertTrue(r["hardware"]["os"] and r["hardware"]["cpu_threads"])
+        self.assertNotIn("server", r["conditions"])
+        # A run on a dedicated server only compares with runs on the same kind of server.
+        on_server = argparse.Namespace(offscreen=False, settle=2.0, label="x", server="vanilla")
+        self.assertEqual(pb.report(on_server, 8, [run], {})["conditions"]["server"], "vanilla")
 
     def test_nvidia_memory_not_available(self):
         from unittest import mock

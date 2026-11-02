@@ -110,6 +110,7 @@ mod arena;
 pub mod compositor;
 mod cull;
 mod end_sky;
+pub mod entity_skin;
 mod flat;
 mod frame_gen;
 mod hdr;
@@ -627,6 +628,9 @@ pub struct Frame<'a> {
     pub glowing: &'a [Vertex],
     /// Runs of `entities` by entity, while a shader pack draws them (`pack_draw::EntitySpan`).
     pub entity_spans: &'a [pack_draw::EntitySpan],
+    /// Ordinary entity models posed on the GPU (`entity_skin`), drawn before `entities`'
+    /// ordinary ones; only when `Renderer::skins_entities` said so.
+    pub skin: Option<&'a entity_skin::SkinFrame>,
     pub weather: &'a [crate::weather::Vertex],
     pub weather_time: crate::weather::Time,
     /// Horizon Extras' dynamic lights, nearest first (`dynamic_light::select`); empty when off.
@@ -856,6 +860,8 @@ pub struct Renderer {
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
     entity_batch: EntityBatch,
+    /// Ordinary entity models posed on the GPU; `None` without compute shaders.
+    entity_skin: Option<entity_skin::EntitySkin>,
     group: wgpu::BindGroup,
     globals: wgpu::Buffer,
     /// The resource packs' LabPBR maps (normals, specular), for native shader packs.
@@ -3470,10 +3476,14 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let entity_capacity = 1 << 14;
+        let entity_skin = entity_skin::EntitySkin::new(
+            &device,
+            animate::SpriteAnimator::compute(&adapter, &device),
+        );
         let entity_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Entity vertices"),
             size: entity_capacity * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            usage: entity_skin::EntitySkin::usage(entity_skin.is_some()),
             mapped_at_creation: false,
         });
         let flat_wanted = flat::wanted(&adapter, &device);
@@ -3699,6 +3709,7 @@ impl Renderer {
             entity_buffer,
             entity_capacity,
             entity_batch: EntityBatch::default(),
+            entity_skin,
             group,
             globals,
             pbr_maps,
@@ -4868,6 +4879,23 @@ impl Renderer {
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
+    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`): not
+    /// while a shader pack or a native pack draws entities from their vertices, nor while
+    /// frame generation follows them.
+    /// The posed models' store size (`SkinFrame::base`), with entity skinning.
+    pub fn skinned_models(&self) -> Option<u32> {
+        self.entity_skin
+            .as_ref()
+            .map(entity_skin::EntitySkin::stored)
+    }
+
+    pub fn skins_entities(&self) -> bool {
+        self.entity_skin.is_some()
+            && !self.frame_gen.on
+            && self.pack_post.is_none()
+            && self.native.is_none()
+    }
+
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
@@ -6439,6 +6467,13 @@ impl Renderer {
             oit_on,
         );
         self.entity_batch.append_shadow_only(frame.shadow_only);
+        // The posed models' vertices come first: the ordinary entities' draw takes them in.
+        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
+            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
+            None => false,
+        });
+        let posed = skin.map_or(0, |s| s.vertices);
+        let entity_quads = entity_quads + posed / 4;
         let weather_quads = frame.weather.len() as u32 / 4;
         let world_quads = entity_quads
             + text_quads
@@ -6494,7 +6529,7 @@ impl Renderer {
             camera,
         );
         // Frame generation's made frame draws its own hand, halfway, after the others.
-        let made_hand_vertex = self.entity_batch.combined.len() as i32;
+        let made_hand_vertex = (posed as usize + self.entity_batch.combined.len()) as i32;
         if fg {
             self.frame_gen
                 .halfway_hand(frame.hand, hand_view, &mut self.entity_batch.combined);
@@ -6511,22 +6546,32 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        let entity_vertices = all_entities.len() as u64;
+        let entity_vertices = u64::from(posed) + all_entities.len() as u64;
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Entity vertices"),
                 size: self.entity_capacity * std::mem::size_of::<Vertex>() as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: entity_skin::EntitySkin::usage(self.entity_skin.is_some()),
                 mapped_at_creation: false,
             });
         }
-        if entity_vertices > 0 {
+        if !all_entities.is_empty() {
             self.uploads.buffer(
                 &mut encoder,
                 &self.entity_buffer,
-                0,
+                u64::from(posed) * std::mem::size_of::<Vertex>() as u64,
                 bytemuck::cast_slice(all_entities),
+            );
+        }
+        if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
+            skinner.dispatch(
+                &self.device,
+                &mut self.uploads,
+                &mut encoder,
+                skin,
+                &self.entity_buffer,
+                0,
             );
         }
         self.entity_outline.prepare(
