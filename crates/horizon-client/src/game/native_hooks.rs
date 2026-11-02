@@ -2919,6 +2919,21 @@ impl Game<'_> {
     ) {
         let _ = (player, name, amount);
     }
+    /// An item cooldown is about to start for a server player. `item` is the
+    /// item id and `ticks` its duration. The player's state is not swapped in,
+    /// so helpers that look them up through `self.lan` may find nothing while a
+    /// guest packet is handled. Set `cancel` to skip starting the cooldown.
+    /// Server-side. @API:native_player_item_cooldown@.
+    pub(super) fn native_player_item_cooldown(
+        &mut self,
+        player: u128,
+        name: &str,
+        item: &str,
+        ticks: i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, item, ticks, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
