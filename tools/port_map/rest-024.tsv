@@ -130,11 +130,11 @@ UpgradeProgress.incrementFinishedOperationsBy	skip:ui		progress counters for an 
 UpgradeProgress.reset	skip:ui		progress counters for an upgrade progress bar Horizon does not show
 UpgradeProgress.logProgress	skip:other		logs progress and sends JSON-RPC notifications; Horizon upgrades synchronously
 UpgradeProgress.FileFixStats.getProgress	skip:ui		progress fraction for the upgrade screen
-UpgradeStatusTranslator.translate	skip:ui		translatable status text for the upgrade screen
-UpgradeStatusTranslator.Messages.forStatus	skip:ui		translatable status text for the upgrade screen
+UpgradeStatusTranslator.translate	port	crates/horizon-world/src/datafix/world_upgrader.rs::status_key	failed, counting, no data fix type, then upgrading/finished by type; the key comes back as a string and the screen makes the Text
+UpgradeStatusTranslator.Messages.forStatus	inline	crates/horizon-world/src/datafix/world_upgrader.rs::status_key	the upgrading/finished pick is the last match arm there
 WorldUpgrader.getDataFixContextTag	port	crates/horizon-world/src/datafix/files.rs::generators	gap: minor: returns (dimension, generator type) pairs, not the context compound
 WorldUpgrader.verifyChunkPosAndEraseCache	port	crates/horizon-world/src/datafix/world_upgrader.rs::verify_chunk_pos_and_erase_cache	the chunk's position is checked and its Heightmaps, isLightOn, BlockLight and SkyLight are dropped, in the per-chunk upgrade step
-WorldUpgrader.verifyChunkPos	skip:other		only logs a warning for a chunk with a wrong stored position
+WorldUpgrader.verifyChunkPos	port	crates/horizon-world/src/datafix/world_upgrader.rs::verify_chunk_pos	warns when the stored xPos/zPos differ from the chunk's own position and reports no change
 WorldUpgrader.work	port	crates/horizon-world/src/datafix/files.rs::upgrade_world	gap: minor: no Optimize World pass and no progress; upgrade_world runs the file fixes then the data upgrade
 WorldUpgrader.upgradeLevels	inline	crates/horizon-world/src/datafix/files.rs::upgrade_world	per-dimension loop folded into upgrade_world
 LongJumpUtil.isClearTransition	port	crates/horizon-client/src/mobs/breeze.rs::clear_transition	boxed steps of nine tenths the smaller side from one point to the next must all be clear, for the breeze's long jump
