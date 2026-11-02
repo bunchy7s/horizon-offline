@@ -41,6 +41,8 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "gamerules" => game.gamerules(client, None),
+        "gamerules/update" => game.gamerules(client, Some(argument)),
         "serversettings/motd" => game.motd(client, None),
         "serversettings/motd/set" => game.motd(
             client,
@@ -366,6 +368,23 @@ impl Game<'_> {
         Ok(reply["value"].clone())
     }
 
+    /// `GameRulesService.get` and `update`: the game's rules as typed rules, or the one `update` set.
+    fn gamerules(&self, client: u32, update: Option<&Value>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "gamerules" });
+        if let Some(update) = update {
+            request["method"] = json!("gamerules/update");
+            request["value"] = update.clone();
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(invalid) = reply["invalid"].as_str() {
+            return Err(invalid_params(invalid));
+        }
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.isAutoSave`: read the game's live save flag.
     /// `MinecraftServerSettingsServiceImpl.setAutoSave`: update that flag and return its new value.
     fn autosave(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
@@ -683,6 +702,11 @@ pub fn list_notification(kind: &str, event: &Value) -> Option<(&'static str, Val
             "notification/bans/added",
             ban(("player", player()), &reason, source, expires),
         ),
+        // `MinecraftServer.onGameRuleChanged`: the rule as a typed rule (the event's own `type` is its kind).
+        "gamerule" => (
+            "notification/gamerules/updated",
+            json!({ "key": event["key"], "type": event["valueType"], "value": event["value"] }),
+        ),
         "bans_removed" => ("notification/bans/removed", player()),
         "ip_bans_added" => (
             "notification/ip_bans/added",
@@ -783,6 +807,17 @@ mod tests {
         assert_eq!(
             note("ip_bans_removed", json!({ "ip": "10.0.0.1" })),
             ("notification/ip_bans/removed", json!("10.0.0.1"))
+        );
+        // A game rule changed: the rule as a typed rule, whose `type` the event keeps as `valueType`.
+        assert_eq!(
+            note(
+                "gamerule",
+                json!({ "key": "minecraft:pvp", "valueType": "boolean", "value": false })
+            ),
+            (
+                "notification/gamerules/updated",
+                json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
+            )
         );
         assert!(list_notification("kick", &event(json!({}))).is_none());
     }

@@ -7,6 +7,7 @@ use super::{GAME_MODES, ServerState, auto_save, log, set_auto_save};
 use crate::game::Game;
 use horizon_client::{
     command::vanilla::DIFFICULTIES,
+    gamerules::{self, Value as GameRuleValue},
     server::{
         profiles,
         user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -29,6 +30,15 @@ struct Op {
     bypass: Option<bool>,
 }
 
+/// A `GameRuleUpdate` as `TYPED_CODEC` writes it: the rule's id, its type and its value.
+fn typed_rule(rule: &gamerules::Rule, value: GameRuleValue) -> Value {
+    let (kind, value) = match value {
+        GameRuleValue::Bool(b) => ("boolean", json!(b)),
+        GameRuleValue::Int(i) => ("integer", json!(i)),
+    };
+    json!({ "key": format!("minecraft:{}", rule.name), "type": kind, "value": value })
+}
+
 /// `NameAndId`'s record `toString`, as vanilla's log lines show it.
 fn shown(user: &NameAndId) -> String {
     format!(
@@ -49,6 +59,48 @@ impl Game<'_> {
         let entries = body["entries"].as_array().cloned().unwrap_or_default();
         let lists = state.lists.clone();
         match body["method"].as_str().unwrap_or_default() {
+            // `GameRulesService.get`: every rule the server has, with its type and current value.
+            "gamerules" => {
+                let rules = &self.ui.rules;
+                let all: Vec<Value> = rules
+                    .available_rules()
+                    .map(|r| typed_rule(r, rules.get(r.name).unwrap_or(r.default)))
+                    .collect();
+                return json!({ "value": all });
+            }
+            // `GameRulesService.update`: the rule is set only when its value changes, and logged.
+            "gamerules/update" => {
+                let update = &body["value"];
+                let Some(rule) = update["key"]
+                    .as_str()
+                    .and_then(gamerules::rule)
+                    .filter(|r| self.ui.rules.get(r.name).is_some())
+                else {
+                    return json!({ "invalid": format!("Unknown game rule: {}", update["key"]) });
+                };
+                let wanted = &update["value"];
+                let value = match (rule.default, wanted) {
+                    (GameRuleValue::Bool(_), Value::Bool(b)) => Some(GameRuleValue::Bool(*b)),
+                    (GameRuleValue::Int(_), n) => n
+                        .as_i64()
+                        .and_then(|n| i32::try_from(n).ok())
+                        .filter(|n| (rule.min..=rule.max).contains(n))
+                        .map(GameRuleValue::Int),
+                    _ => None,
+                };
+                let Some(value) = value else {
+                    return json!({ "invalid": format!("Invalid value {wanted} for game rule {}", rule.name) });
+                };
+                let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
+                if current != value {
+                    rpc(format!(
+                        "Game rule '{}' updated from '{current}' to '{value}'",
+                        rule.name
+                    ));
+                    self.set_game_rule(rule, value);
+                }
+                return json!({ "value": typed_rule(rule, value) });
+            }
             "serversettings/autosave" => {
                 return json!({ "value": auto_save(state) });
             }
@@ -490,4 +542,23 @@ fn management_ip_ban(entry: &Value, ip: String) -> IpBan {
         entry["expires"].as_i64(),
         reason,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_game_rule_is_written_as_vanillas_typed_codec_does() {
+        let pvp = gamerules::rule("pvp").unwrap();
+        assert_eq!(
+            typed_rule(pvp, GameRuleValue::Bool(false)),
+            json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
+        );
+        let tick = gamerules::rule("minecraft:random_tick_speed").unwrap();
+        assert_eq!(
+            typed_rule(tick, GameRuleValue::Int(3)),
+            json!({ "key": "minecraft:random_tick_speed", "type": "integer", "value": 3 })
+        );
+    }
 }

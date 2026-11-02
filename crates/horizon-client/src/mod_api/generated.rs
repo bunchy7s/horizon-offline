@@ -3173,6 +3173,19 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A player took an anvil's result at `pos` and the levels, inputs and anvil wear are done (`AnvilCraftEvent.Post`); a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not called when `native_anvil_craft_pre` cancelled. @API:native_anvil_craft_post@.
+    fn anvil_craft_post(&self, host: &mut dyn Host, event: &mut AnvilCraftPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player took an anvil's result at `pos` (`AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` holds the inputs and the result as they were before. Set `cancel` to refuse the take: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. @API:native_anvil_craft_pre@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn anvil_craft_pre(&self, host: &mut dyn Host, event: &mut AnvilCraftPreEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A player takes an item from an armor stand or puts one on it
     /// (`ArmorStand.interactAt`, after the stand's disabled-slot checks and
     /// `swapItem`'s take/put locks, before anything moves): `stand_id` is the
@@ -10713,6 +10726,65 @@ pub fn dispatch_moisture_change(
     };
     for mod_hook in mods {
         if matches!(mod_hook.moisture_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::anvil_craft_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct AnvilCraftPostEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub craft: &'a horizon_client::menu::AnvilCraft,
+}
+pub fn dispatch_anvil_craft_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    craft: &horizon_client::menu::AnvilCraft,
+) {
+    let mut event = AnvilCraftPostEvent {
+        player,
+        name,
+        pos,
+        craft,
+    };
+    for mod_hook in mods {
+        mod_hook.anvil_craft_post(host, &mut event);
+    }
+}
+/// What [`Hooks::anvil_craft_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct AnvilCraftPreEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub craft: &'a horizon_client::menu::AnvilCraft,
+}
+pub fn dispatch_anvil_craft_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    craft: &horizon_client::menu::AnvilCraft,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = AnvilCraftPreEvent {
+        player,
+        name,
+        pos,
+        craft,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.anvil_craft_pre(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
