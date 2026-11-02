@@ -197,8 +197,72 @@ struct ResourceIds {
     damage_types: Vec<String>,
     loot_tables: Vec<String>,
     templates: Vec<String>,
+    /// `entity-types.json`'s keys, sorted (empty when the file is missing).
+    entity_types: Vec<String>,
+    enchantments: Vec<String>,
+    structures: Vec<String>,
+    biomes: Vec<String>,
+    clocks: Vec<String>,
+    /// The overworld clock's timelines, their periods and time markers.
+    timelines: Vec<(String, Option<i64>)>,
+    markers: Vec<(String, TimeMarker)>,
 }
 static RESOURCE_IDS: Mutex<Vec<(PathBuf, Arc<ResourceIds>)>> = Mutex::new(Vec::new());
+
+/// The `minecraft:` ids of the `.json` files directly in `dir`, sorted.
+fn json_ids_in(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".json")
+                .map(|n| format!("minecraft:{n}"))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The overworld clock's timelines (with their periods) and their time
+/// markers, read from `data/minecraft/timeline`.
+fn overworld_timelines(root: &Path) -> (Vec<(String, Option<i64>)>, Vec<(String, TimeMarker)>) {
+    let dir = root.join("data/minecraft/timeline");
+    let (mut timelines, mut markers) = (Vec::new(), Vec::new());
+    for name in json_ids_in(&dir) {
+        let path = dir.join(format!("{}.json", name.trim_start_matches("minecraft:")));
+        let Ok(v) =
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap_or_default())
+        else {
+            continue;
+        };
+        if v["clock"].as_str() != Some("minecraft:overworld") {
+            continue;
+        }
+        let period = v["period_ticks"].as_i64();
+        timelines.push((name.clone(), period));
+        for (marker, def) in v["time_markers"].as_object().into_iter().flatten() {
+            let (ticks, show) = match def {
+                serde_json::Value::Number(n) => (n.as_i64().unwrap_or(0), false),
+                other => (
+                    other["ticks"].as_i64().unwrap_or(0),
+                    other["show_in_commands"].as_bool().unwrap_or(false),
+                ),
+            };
+            markers.push((
+                marker.clone(),
+                TimeMarker {
+                    ticks,
+                    period,
+                    show,
+                },
+            ));
+        }
+    }
+    (timelines, markers)
+}
 
 fn resource_ids(root: &Path) -> Arc<ResourceIds> {
     let mut cache = RESOURCE_IDS.lock().unwrap_or_else(|e| e.into_inner());
@@ -206,11 +270,32 @@ fn resource_ids(root: &Path) -> Arc<ResourceIds> {
         return ids.clone();
     }
     let data = root.join("data/minecraft");
+    let mut entity_types: Vec<String> = serde_json::from_slice::<serde_json::Value>(
+        &std::fs::read(root.join("entity-types.json")).unwrap_or_default(),
+    )
+    .ok()
+    .and_then(|v| {
+        v.as_object().map(|o| {
+            o.keys()
+                .map(|k| horizon_client::command::args::normalize(k))
+                .collect()
+        })
+    })
+    .unwrap_or_default();
+    entity_types.sort();
+    let (timelines, markers) = overworld_timelines(root);
     let ids = Arc::new(ResourceIds {
         recipes: ids_under(&data.join("recipe"), "json"),
         damage_types: ids_under(&data.join("damage_type"), "json"),
         loot_tables: ids_under(&data.join("loot_table"), "json"),
         templates: templates_under(&root.join("worldgen/structure")),
+        entity_types,
+        enchantments: json_ids_in(&data.join("enchantment")),
+        structures: json_ids_in(&data.join("worldgen/structure")),
+        biomes: json_ids_in(&data.join("worldgen/biome")),
+        clocks: json_ids_in(&data.join("world_clock")),
+        timelines,
+        markers,
     });
     cache.push((root.to_owned(), ids.clone()));
     ids
@@ -326,10 +411,11 @@ fn ids_in(root: &Path, extension: &str, namespace: &str) -> Vec<String> {
 }
 
 impl Game<'_> {
-    /// The caches `build_registries` reads (`resource_ids`, `block_properties`,
-    /// `command_export`), filled on a helper thread while the title screen is up: the
-    /// first world opened or server joined built them in its frame (20 ms of the Join
-    /// click on an M4 Pro). Whoever needs one before it is done waits for it, as before.
+    /// The caches `build_registries` and `join_server` read (`resource_ids`,
+    /// `block_properties`, `command_export`, `builtin_registries`), filled on a helper
+    /// thread while the title screen is up: the first world opened or server joined
+    /// built them in its frame (20 ms of the Join click on an M4 Pro). Whoever needs one
+    /// before it is done waits for it, as before.
     pub(super) fn preload_registries(&self) {
         if self.options.dedicated.is_some() {
             return;
@@ -340,6 +426,7 @@ impl Game<'_> {
             .name("Registries preload".into())
             .spawn(move || {
                 horizon_threads::behind_server();
+                super::remote::builtin_registries(&dirs[0]);
                 resource_ids(&dirs[0]);
                 block_properties(registry);
                 for dir in &dirs {
@@ -472,50 +559,23 @@ impl Game<'_> {
         summonable.sort();
         summonable.dedup();
         reg.summonable = summonable;
-        let root = self.options.resources.clone();
-        let mut types: Vec<String> = serde_json::from_slice::<serde_json::Value>(
-            &std::fs::read(root.join("entity-types.json")).unwrap_or_default(),
-        )
-        .ok()
-        .and_then(|v| {
-            v.as_object().map(|o| {
-                o.keys()
-                    .map(|k| horizon_client::command::args::normalize(k))
-                    .collect()
-            })
-        })
-        .unwrap_or_default();
+        let mut types = ids.entity_types.clone();
         if types.is_empty() {
             types = reg.summonable.clone();
             types.push("minecraft:player".into());
+            types.sort();
         }
-        types.sort();
         reg.entity_types = types;
-        let list = |dir: &str| -> Vec<String> {
-            let mut out: Vec<String> = std::fs::read_dir(root.join(dir))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter_map(|e| {
-                    e.file_name()
-                        .to_str()?
-                        .strip_suffix(".json")
-                        .map(|n| format!("minecraft:{n}"))
-                })
-                .collect();
-            out.sort();
-            out
-        };
         // The mob effect registry: every effect `/effect` and the
         // `mob_effect` resource arguments accept.
         reg.effects = horizon_client::brewing::all_effects()
             .map(|e| horizon_client::brewing::namespaced(e.id).to_owned())
             .collect();
         reg.effects.sort();
-        reg.enchantments = list("data/minecraft/enchantment");
-        reg.structures = list("data/minecraft/worldgen/structure");
-        reg.biomes = list("data/minecraft/worldgen/biome");
-        reg.clocks = list("data/minecraft/world_clock");
+        reg.enchantments = ids.enchantments.clone();
+        reg.structures = ids.structures.clone();
+        reg.biomes = ids.biomes.clone();
+        reg.clocks = ids.clocks.clone();
         reg.dimensions = vec![
             "minecraft:overworld".into(),
             "minecraft:the_nether".into(),
@@ -523,41 +583,8 @@ impl Game<'_> {
         ];
         reg.players = vec![PLAYER_NAME.into()];
         // Timelines of the overworld clock and their time markers.
-        self.ui.markers.clear();
-        self.ui.timelines.clear();
-        for name in list("data/minecraft/timeline") {
-            let path = root.join(format!(
-                "data/minecraft/timeline/{}.json",
-                name.trim_start_matches("minecraft:")
-            ));
-            let Ok(v) = serde_json::from_slice::<serde_json::Value>(
-                &std::fs::read(path).unwrap_or_default(),
-            ) else {
-                continue;
-            };
-            if v["clock"].as_str() != Some("minecraft:overworld") {
-                continue;
-            }
-            let period = v["period_ticks"].as_i64();
-            self.ui.timelines.insert(name.clone(), period);
-            for (marker, def) in v["time_markers"].as_object().into_iter().flatten() {
-                let (ticks, show) = match def {
-                    serde_json::Value::Number(n) => (n.as_i64().unwrap_or(0), false),
-                    other => (
-                        other["ticks"].as_i64().unwrap_or(0),
-                        other["show_in_commands"].as_bool().unwrap_or(false),
-                    ),
-                };
-                self.ui.markers.insert(
-                    marker.clone(),
-                    TimeMarker {
-                        ticks,
-                        period,
-                        show,
-                    },
-                );
-            }
-        }
+        self.ui.timelines = ids.timelines.iter().cloned().collect();
+        self.ui.markers = ids.markers.iter().cloned().collect();
         // Vanilla's built-in registries (mob effects, components, dialogs...).
         for dir in [&self.options.resources, &self.ui.vanilla_root] {
             if let Some(export) = command_export(dir, self.options.dedicated.is_none()) {
@@ -1577,6 +1604,43 @@ mod tests {
         assert!(first.loot_tables.is_empty());
         std::fs::write(recipe.join("c.json"), "{}").unwrap();
         assert!(Arc::ptr_eq(&first, &resource_ids(&root)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Only the overworld clock's timelines count; a marker is a bare tick
+    /// count (hidden from commands) or an object that may show itself.
+    #[test]
+    fn overworld_timelines_and_markers() {
+        let root = std::env::temp_dir().join(format!("horizon-timelines-{}", std::process::id()));
+        let dir = root.join("data/minecraft/timeline");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("day.json"),
+            r#"{"clock":"minecraft:overworld","period_ticks":24000,
+                "time_markers":{"minecraft:noon":6000,
+                "minecraft:night":{"ticks":13000,"show_in_commands":true}}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("other.json"),
+            r#"{"clock":"minecraft:the_end","time_markers":{"minecraft:x":1}}"#,
+        )
+        .unwrap();
+        std::fs::write(dir.join("broken.json"), "{").unwrap();
+        let (timelines, markers) = overworld_timelines(&root);
+        assert_eq!(timelines, [("minecraft:day".to_owned(), Some(24000))]);
+        let mut markers: Vec<_> = markers
+            .iter()
+            .map(|(name, m)| (name.as_str(), m.ticks, m.period, m.show))
+            .collect();
+        markers.sort();
+        assert_eq!(
+            markers,
+            [
+                ("minecraft:night", 13000, Some(24000), true),
+                ("minecraft:noon", 6000, Some(24000), false),
+            ]
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
