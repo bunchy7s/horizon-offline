@@ -112,7 +112,7 @@ Ocelot.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::ent
 Ocelot.reassessTrustingGoals	port	crates/horizon-client/src/mobs/tame.rs::register_cat	gap: player: the player-avoidance and tempt goals are always registered; trust is not modelled, so a trusting ocelot keeps them
 Ocelot.checkSpawnObstruction	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_obstruction	unobstructed, no liquid, at or above sea level on grass or leaves
 Ocelot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	baby chance 1.0 for a group
-Ocelot.getLeashOffset	missing		minor: the lead ties at full eye height instead of half of it (leash::leash_offset only special-cases llamas)
+Ocelot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	half of the eye height, the default width/2 forwards
 Ocelot.OcelotAvoidEntityGoal.canUse	port	crates/horizon-client/src/mobs/tame.rs::OcelotAvoid::can_use	gap: player: no isTrusting check (trust is not modelled), so a trusting ocelot still flees the player; 16 blocks, 0.8 and 1.33 match
 Ocelot.OcelotAvoidEntityGoal.canContinueToUse	port	crates/horizon-client/src/mobs/tame.rs::OcelotAvoid::can_continue	`!isTrusting() && super`, the same guard as its canUse
 Ocelot.OcelotTemptGoal.canScare	port	crates/horizon-client/src/mobs/tame.rs::OcelotTempt::scared_unless_trusting	the tempt goal's canScare with a trusting ocelot's scare turned off

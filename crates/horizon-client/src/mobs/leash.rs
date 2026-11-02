@@ -492,6 +492,23 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
             f64::from(0.55_f32 * m.eye_height() as f32),
             f64::from(m.width() * 0.4),
         ]
+    } else if let Some(factor) = match m.species() {
+        // Pig.getLeashOffset, Rabbit.getLeashOffset and
+        // Strider.getLeashOffset: 0.6 of the eye height; Parrot.getLeashOffset
+        // and Ocelot.getLeashOffset: half of it.
+        super::Species::Pig | super::Species::Rabbit | super::Species::Strider => Some(0.6_f32),
+        super::Species::Parrot | super::Species::Ocelot => Some(0.5_f32),
+        _ => None,
+    } {
+        [
+            0.0,
+            f64::from(factor * m.eye_height() as f32),
+            f64::from(m.width() * 0.4),
+        ]
+    } else if m.species() == super::Species::HappyGhast {
+        // HappyGhast.getLeashOffset: the origin, so the rope hangs at the
+        // ghast's feet rather than an eye height up.
+        [0.0, 0.0, 0.0]
     } else {
         [0.0, m.eye_height(), f64::from(m.width() * 0.4)]
     }
