@@ -1792,6 +1792,15 @@ impl BlockEntityRenderer {
                 portal_cube(base, &faces, END_GATEWAY_LAYER, out);
             }
             Kind::Conduit => {
+                // HDR output: the conduit shines, not its crumbling overlay.
+                let start = out.len();
+                let shine = |out: &mut Vec<Vertex>| {
+                    if !crumbling {
+                        for v in &mut out[start..] {
+                            v.layer |= u32::from(crate::mesher::BRIGHT) << 16;
+                        }
+                    }
+                };
                 let (ticks, active, hunting, raw_rotation) = (scene.anim)(pos).conduit;
                 // ConduitRenderer.extractRenderState.
                 let rotation = (raw_rotation + if active { scene.partial } else { 0.0 }) * -0.0375;
@@ -1809,6 +1818,7 @@ impl BlockEntityRenderer {
                         * Mat4::from_translation(Vec3::splat(0.5))
                         * Mat4::from_rotation_y(rotation.to_radians());
                     draw_part(model, "root", m, &none, paint, out);
+                    shine(out);
                     return;
                 }
                 let anim_time = ticks as f32 + scene.partial;
@@ -1867,6 +1877,7 @@ impl BlockEntityRenderer {
                         * Mat4::from_scale(Vec3::splat(1.333_333_4));
                     draw_part(model, "root", m, &none, paint, out);
                 }
+                shine(out);
             }
             Kind::EnchantingTable => {
                 let book = "entity/enchantment/enchanting_table_book";

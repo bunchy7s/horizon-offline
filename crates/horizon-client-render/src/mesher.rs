@@ -753,6 +753,10 @@ impl MeshTables {
             .copied()
             .unwrap_or(false)
     }
+    /// HDR output's tier of a state (`hdr_tier`), for what meshes it elsewhere (the LOD tiles).
+    pub fn hdr_tier(&self, state: BlockStateId) -> u8 {
+        self.info.get(state.0 as usize).map_or(0, |i| i.tier)
+    }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
         Some(MeshFacts {
