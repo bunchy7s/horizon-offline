@@ -71,19 +71,19 @@ DolphinJumpGoal.surfaceIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs:
 DolphinJumpGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_continue	
 DoorInteractGoal.start	inline	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::start	passed and the door direction only feed canContinueToUse, which both subclasses override, so they are not kept
 DoorInteractGoal.tick	inline	crates/horizon-client/src/mobs/doors.rs::BreakDoor::tick	the passed-the-door dot test is not kept: BreakDoor and RaiderOpenDoor both override can_continue
-FollowFlockLeaderGoal	port	crates/horizon-client/src/mobs/aquatic.rs::FollowFlockLeader	tick for tick with vanilla in mob_ai cod/salmon/tropical_fish_school; recruits in vanilla getEntitiesOfClass order (Mob.section)
-FollowMobGoal	port	crates/horizon-client/src/mobs/goals.rs::FollowMob	the mutual-look branch is left out: only parrots have the goal
-FollowPlayerRiddenEntityGoal	port	crates/horizon-client/src/mobs/dolphin.rs::FollowPlayerRidden	only the player the mob sees (the nearest) is considered; tick for tick with vanilla in mob_ai dolphin_boat_*
+FollowFlockLeaderGoal	home	crates/horizon-client/src/mobs/aquatic.rs	FollowFlockLeader in that file, tick for tick with vanilla in mob_ai cod/salmon/tropical_fish_school; recruits in vanilla getEntitiesOfClass order (Mob.section)
+FollowMobGoal	home	crates/horizon-client/src/mobs/goals.rs	FollowMob in that file; the mutual-look branch is left out: only parrots have the goal
+FollowPlayerRiddenEntityGoal	home	crates/horizon-client/src/mobs/dolphin.rs	FollowPlayerRidden in that file; only the player the mob sees (the nearest) is considered; tick for tick with vanilla in mob_ai dolphin_boat_*
 GoalSelector.removeAllGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::clear	gap: minor: clear() takes no predicate and does not stop running goals
 GoalSelector.removeGoal	missing		minor: no per-goal removal; callers (cat and ocelot trust, zombie break door, skeleton weapon swap, skeleton horse trap) fold the condition into can_use
 GoalSelector.goalContainsAnyFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	flags & disabled
 GoalSelector.goalCanBeReplacedForAllFlags	inline	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick	the replaceable check over the locked slots
 GoalSelector.tickRunningGoals	port	crates/horizon-client/src/mobs/goals.rs::GoalSelector::tick_running	
-GolemRandomStrollInVillageGoal	inline	crates/horizon-client/src/mobs/golem.rs::register_iron	a named Stroll with a gate and a position; tick for tick with vanilla in mob_ai iron_golem_village_*
+GolemRandomStrollInVillageGoal	home	crates/horizon-client/src/mobs/golem.rs	a Stroll with interval 240 and village_stroll_position that register_iron adds at 4; tick for tick with vanilla in mob_ai iron_golem_village_*
 MeleeAttackGoal.checkAndPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	reset cooldown, swing, do_hurt_target
 MeleeAttackGoal.canPerformAttack	inline	crates/horizon-client/src/mobs/goals.rs::MeleeAttack::tick	cooldown over, within melee range, line of sight
-MoveBackToVillageGoal	inline	crates/horizon-client/src/mobs/golem.rs::register_iron	a named Stroll with a gate and a position; tick for tick with vanilla in mob_ai iron_golem_village_*
-MoveThroughVillageGoal	inline	crates/horizon-client/src/mobs/undead.rs::MoveThroughVillage	zombies register it at priority 6 (the raider variant is raider.rs::MoveThroughVillage); no tick parity check yet
+MoveBackToVillageGoal	home	crates/horizon-client/src/mobs/golem.rs	the back Stroll register_iron adds at 2: interval 10, the outside_village gate and back_to_village_position; tick for tick with vanilla in mob_ai iron_golem_village_*
+MoveThroughVillageGoal	home	crates/horizon-client/src/mobs/undead.rs	MoveThroughVillage in that file: zombies add it at 6; the raider's nested Raider$RaiderMoveThroughVillageGoal is the separate MoveThroughVillage in raider.rs; no tick parity check yet
 MoveToBlockGoal.moveMobToBlock	inline	crates/horizon-client/src/mobs/goals.rs::MoveToBlock::start	nav_move_to the block centre one up
 MoveTowardsTargetGoal.start	inline	crates/horizon-client/src/mobs/golem.rs::MoveTowardsTarget::can_use	gap: minor: paths straight to the target entity in can_use, not to a random position towards it chosen in canUse
 OpenDoorGoal.canContinueToUse	port	crates/horizon-client/src/mobs/doors.rs::RaiderOpenDoor::can_continue	the raider goal does not close the door after, so it never continues
