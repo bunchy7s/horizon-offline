@@ -7,7 +7,7 @@ UnconfiguredPipelineHandler.Outbound.write	skip:other		Netty guard for packets s
 VarInt.getByteSize	port	crates/horizon-protocol/src/buf.rs::varint_size	
 VarLong.getByteSize	skip:java		byte-size helper with no caller here; Horizon writes varlongs and measures the buffer
 Varint21FrameDecoder.copyVarint	inline	crates/horizon-protocol/src/frame.rs::split	the 3-byte length read and the 'length wider than 21 bits' error
-Varint21FrameDecoder.decode	port	crates/horizon-protocol/src/frame.rs::split	gap: minor: a zero frame length is not rejected (vanilla throws 'Frame length cannot be zero')
+Varint21FrameDecoder.decode	port	crates/horizon-protocol/src/frame.rs::split	the length prefix is read by frame::header, which refuses a zero frame as corrupted, and split cuts the frame at it
 ChatType.bind	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::handle_chat	the bound takes the chat type and the sender's display name
 ChatTypeDecoration.incomingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
 ChatTypeDecoration.outgoingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
@@ -23,7 +23,7 @@ Component.contains	skip:other		no caller in the 26.3 sources; the only match is 
 Component.translatableEscape	port	crates/horizon-client-core/src/text.rs::Text::tr	non-text arguments become literal strings
 Component.translatableWithFallback	inline	crates/horizon-client-core/src/component.rs::to_text_with	the fallback key is read from the JSON and used when the key is missing
 Component.score	skip:java		builder of a score component; Horizon reads score components from JSON in resolve_score_component
-Component.object	missing		minor: an object component (sprite or player head) draws nothing and its fallback text is not shown
+Component.object	inline	crates/horizon-client-core/src/component.rs::to_text_with	the object branch keeps the object's JSON on the span's style, and inline_object turns it into the fallback text
 Component.translationArg	skip:java		Date-to-text helper; Horizon has no Date argument type
 ComponentSerialization.createFromList	port	crates/horizon-client-core/src/component.rs::to_text_with	a list: the first element, then the rest as siblings in its style
 ComponentSerialization.createLegacyComponentMatcher	skip:java		codec dispatch builder; to_text_with reads both forms directly
@@ -44,7 +44,7 @@ FilterMask.equals	skip:java		value equality
 FilterMask.hashCode	skip:java		hashing
 FormattedText.of	skip:java		adapter from a String to FormattedText
 FormattedText.getString	port	crates/horizon-client-core/src/text.rs::Text::plain	
-HoverEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: show_entity is accepted by vanilla and dropped here
+HoverEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	show_text, show_item and show_entity are kept; a show_entity hover draws its tooltip in chat with advanced item tooltips on
 HoverEvent.EntityTooltipInfo.getTooltipLines	port	crates/horizon-client/src/game/chat.rs::Game::entity_tooltip_lines	the name when the event has one, then the entity type and the uuid, for a show_entity hover
 HoverEvent.EntityTooltipInfo.equals	skip:java		value equality
 HoverEvent.EntityTooltipInfo.hashCode	skip:java		hashing
@@ -89,7 +89,7 @@ SignedMessageValidator.KeyBased.validate	port	crates/horizon-protocol/src/secure
 SignedMessageValidator.KeyBased.updateAndValidate	port	crates/horizon-protocol/src/secure_chat.rs::MessageValidator::update_and_validate	a failed message breaks the chain: nothing more is accepted
 Style.create	skip:java		builder from optionals; Style is a plain struct
 Style.checkEmptyAfterChange	skip:java		canonical empty style instance
-Style.withShadowColor	missing		minor: Style has no shadow colour, so a component's shadow_color is dropped
+Style.withShadowColor	port	crates/horizon-client-core/src/component.rs::shadow_color	the style's shadow colour is kept on Style (text.rs:92) as packed ARGB, read from a packed int or a normalized RGBA array and written back out
 Style.withBold	port	crates/horizon-client-core/src/text.rs::Text::bold	gap: minor: sets true only; a null or false setter is not kept
 Style.withItalic	port	crates/horizon-client-core/src/text.rs::Text::italic	gap: minor: sets true only; a null or false setter is not kept
 Style.withUnderlined	port	crates/horizon-client-core/src/text.rs::Text::underlined	gap: minor: sets true only; a null or false setter is not kept
@@ -115,8 +115,8 @@ TextColor.parseColor	port	crates/horizon-client-core/src/component.rs::object_st
 KeybindContents.getNestedComponent	port	crates/horizon-client-core/src/key_display.rs::display_name	the key's display text
 KeybindContents.visit	port	crates/horizon-client-core/src/key_display.rs::display_name	visits the nested key text
 KeybindContents.equals	skip:java		value equality
-ObjectContents.resolve	missing		minor: object components (sprite or player head) are not resolved; the fallback text is not shown
-ObjectContents.visit	missing		minor: object components draw nothing
+ObjectContents.resolve	inline	crates/horizon-client-core/src/component.rs::inline_object	the object's own fallback text: '[sprite]' for a sprite and '[name head]' for a player head, replaced by the drawn sprite
+ObjectContents.visit	port	crates/horizon-client-render/src/hud.rs::draw_inline_object	the sprite or player head is drawn at the text's U+FFFC placeholder span, with the hat toggle and the span's tint
 PlainTextContents.LiteralContents.visit	skip:java		leaf of the visit walk; Text holds the literal in its spans
 ScoreContents.findTargetName	inline	crates/horizon-client/src/game/commands/text_commands.rs::Game::resolve_score_component	a selector matching one entity is that entity, none is the name, more than one is an error
 ScoreContents.getScore	port	crates/horizon-client/src/game/commands/text_commands.rs::Game::resolve_score_component	the objective's value in the holder's format; empty when there is none
@@ -135,9 +135,9 @@ TranslatableContents.hashCode	skip:java		hashing
 TranslatableContents.toString	skip:debug		debug text
 BlockDataSource.getData	inline	crates/horizon-client/src/game/commands/text_commands.rs::Game::resolve_nbt_component	the block branch: the block's data for an nbt component
 EntityDataSource.getData	inline	crates/horizon-client/src/game/commands/text_commands.rs::Game::resolve_nbt_component	the entity branch: the entity's data for an nbt component
-AtlasSprite.toShortName	missing		minor: sprite object components are not drawn, so their short names are not shown
-AtlasSprite.defaultFallback	missing		minor: the '[sprite]' fallback text of a sprite object is not produced
-PlayerSprite.defaultFallback	missing		minor: the '[name head]' fallback text of a player head is not produced
+AtlasSprite.toShortName	inline	crates/horizon-client-core/src/component.rs::inline_object	a minecraft id drops its namespace, any other id keeps it
+AtlasSprite.defaultFallback	inline	crates/horizon-client-core/src/component.rs::inline_object	'[sprite]', or '[sprite@atlas]' when the atlas is not minecraft:blocks
+PlayerSprite.defaultFallback	inline	crates/horizon-client-core/src/component.rs::inline_object	'[name head]', or '[unknown player head]' for a profile with no name
 NumberFormatTypes.bootstrap	skip:data		registry bootstrap of number format types
 ByteBufCodecs.compoundTagCodec	port	crates/horizon-protocol/src/buf.rs::Nbt::read	gap: minor: any NBT tag is accepted where a compound is required
 ByteBufCodecs.fromCodec	skip:java		generic codec adapter

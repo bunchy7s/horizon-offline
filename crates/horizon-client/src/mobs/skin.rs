@@ -22,6 +22,8 @@ struct Stored {
     /// The model's bounds in its parts' own space, per part: min and max of
     /// its own vertices (none: no polygons).
     bounds: Vec<Option<([f32; 3], [f32; 3])>>,
+    /// The model's render type culls back faces (the bat).
+    cull: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -42,6 +44,10 @@ pub struct SkinModels {
     /// Item models, the same way (`item_render::ItemRenderState::submit_skinned`).
     items: FxHashMap<usize, (Arc<BakedItemModel>, Option<StoredItem>)>,
     vertices: u32,
+    /// Whether the eyes render type's layers (spiders', endermen's...) are posed
+    /// here too, as [`SkinJob::FLAT`] draws (`gfx::Renderer::skins_eyes`); set
+    /// each frame.
+    pub eyes: bool,
 }
 
 /// A stored item model: its quads' vertices in order, by runs of quads that
@@ -241,7 +247,13 @@ fn flatten(model: &Part, first: u32, out: &mut Vec<SkinVertex>) -> Option<Stored
         first,
         parts,
         bounds,
+        cull: has_cull(model),
     })
+}
+
+/// Whether the model's polygons cull back faces (all or none, set per model).
+fn has_cull(part: &Part) -> bool {
+    part.polygons.iter().any(|p| p.cull_back) || part.children.iter().any(has_cull)
 }
 
 /// 0..2 for +x, +y, +z, 3..5 for -x, -y, -z; `None` for any other normal.
@@ -414,8 +426,9 @@ impl Walk<'_> {
                 light: paint.light,
                 overlay: paint.overlay,
                 glint: u32::from(paint.overlay == super::render::ARMOR_GLINT),
-                item: 0,
-                spare: [0; 2],
+                mode: SkinJob::MODEL,
+                cull: u32::from(self.stored.cull),
+                spare: 0,
             });
         }
         *self.vertices += stored.count;
@@ -431,7 +444,9 @@ mod tests {
     /// Every vanilla mob, at a few ages and turns: the GPU path's vertices
     /// (its jobs expanded as `entity_skin.wgsl` does) are the CPU path's, to
     /// the bit and in the same order, for each mob it takes; the mobs it
-    /// leaves to the CPU draw exactly as before. Needs the prepared resources.
+    /// leaves to the CPU draw exactly as before. Twice: with the eyes render
+    /// type's layers left to the CPU (improved transparency on), then posed
+    /// too (`SkinModels::eyes`). Needs the prepared resources.
     #[test]
     fn posed_on_the_gpu_every_mob_draws_what_the_cpu_draws() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -472,65 +487,142 @@ mod tests {
         let (mut posed, mut kept) = (0, 0);
         let mut ids: Vec<_> = types.types.keys().cloned().collect();
         ids.sort();
-        for (n, id) in ids.iter().enumerate() {
-            let kind = Arc::new(types.types[id].clone());
-            for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
-                let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
-                let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
-                m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
-                m.age = age;
-                m.limb_speed = 0.6;
-                m.limb_position = age as f32 * 0.37;
-                let mut cpu = Vec::new();
-                render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
-                models.begin(&mut frame, store.len() as u32);
-                let mut gpu = Vec::new();
-                let mut skin = Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
-                render::render_skinned(&m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin);
-                let bounds = skin.bounds;
-                if frame.reset {
-                    store.clear();
-                }
-                assert_eq!(store.len() as u32, frame.base);
-                store.extend_from_slice(&frame.new_model);
-                frame.handed();
-                if frame.jobs.is_empty() {
-                    kept += 1;
-                    assert_eq!(
-                        bytemuck::cast_slice::<_, u8>(&gpu),
-                        bytemuck::cast_slice::<_, u8>(&cpu),
-                        "{id} age {age}: the CPU path changed"
+        // The mobs posed at least once, without and with the eyes layers.
+        let mut taken = [std::collections::BTreeSet::new(), Default::default()];
+        for eyes in [false, true] {
+            for (n, id) in ids.iter().enumerate() {
+                let kind = Arc::new(types.types[id].clone());
+                for (age, yaw) in [(0u32, 0.0f32), (37, 123.0), (412, -71.5)] {
+                    let at = horizon_core::geometry::Vec3::new(1.5 + n as f64 % 5.0, 64.0, 3.25);
+                    let mut m = Mob::new(n as u32 + 1, kind.clone(), at, yaw);
+                    m.previous = horizon_core::geometry::Vec3::new(at.x - 0.1, at.y, at.z + 0.05);
+                    m.age = age;
+                    m.limb_speed = 0.6;
+                    m.limb_position = age as f32 * 0.37;
+                    let mut cpu = Vec::new();
+                    render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
+                    models.begin(&mut frame, store.len() as u32);
+                    models.eyes = eyes;
+                    let mut gpu = Vec::new();
+                    let mut skin = Skin {
+                        models: &mut models,
+                        frame: &mut frame,
+                        bounds: None,
+                    };
+                    render::render_skinned(
+                        &m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin,
                     );
-                    continue;
-                }
-                posed += 1;
-                assert!(gpu.is_empty(), "{id}: a posed mob left vertices on the CPU");
-                let expanded = expand(&store, &frame);
-                assert_eq!(expanded.len(), cpu.len(), "{id} age {age}: vertex count");
-                for (i, (a, b)) in expanded.iter().zip(&cpu).enumerate() {
-                    assert_eq!(
-                        bytemuck::bytes_of(a),
-                        bytemuck::bytes_of(b),
-                        "{id} age {age} vertex {i}: {a:?} != {b:?}"
-                    );
-                }
-                // The culling bounds hold every vertex.
-                let (lo, hi) = bounds.expect("a posed mob has bounds");
-                for v in &cpu {
-                    let p = glam::Vec3::from_array(v.pos);
-                    assert!(
-                        p.cmpge(lo - 1e-4).all() && p.cmple(hi + 1e-4).all(),
-                        "{id}: {p} outside {lo}..{hi}"
-                    );
+                    let bounds = skin.bounds;
+                    if frame.reset {
+                        store.clear();
+                    }
+                    assert_eq!(store.len() as u32, frame.base);
+                    store.extend_from_slice(&frame.new_model);
+                    frame.handed();
+                    if frame.jobs.is_empty() {
+                        kept += 1;
+                        assert_eq!(
+                            bytemuck::cast_slice::<_, u8>(&gpu),
+                            bytemuck::cast_slice::<_, u8>(&cpu),
+                            "{id} age {age}: the CPU path changed"
+                        );
+                        continue;
+                    }
+                    posed += 1;
+                    taken[usize::from(eyes)].insert(id.as_str());
+                    assert!(gpu.is_empty(), "{id}: a posed mob left vertices on the CPU");
+                    let expanded = expand(&store, &frame);
+                    assert_eq!(expanded.len(), cpu.len(), "{id} age {age}: vertex count");
+                    for (i, (a, b)) in expanded.iter().zip(&cpu).enumerate() {
+                        assert_eq!(
+                            bytemuck::bytes_of(a),
+                            bytemuck::bytes_of(b),
+                            "{id} age {age} vertex {i}: {a:?} != {b:?}"
+                        );
+                    }
+                    // The culling bounds hold every vertex.
+                    let (lo, hi) = bounds.expect("a posed mob has bounds");
+                    for v in &cpu {
+                        let p = glam::Vec3::from_array(v.pos);
+                        assert!(
+                            p.cmpge(lo - 1e-4).all() && p.cmple(hi + 1e-4).all(),
+                            "{id}: {p} outside {lo}..{hi}"
+                        );
+                    }
                 }
             }
         }
         eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
-        assert!(posed > 3 * 40, "only {posed} draws took the GPU path");
+        assert!(posed > 2 * 3 * 40, "only {posed} draws took the GPU path");
+        let added: Vec<_> = taken[1].difference(&taken[0]).copied().collect();
+        eprintln!("posed only with the eyes layers: {added:?}");
+        for id in [
+            "minecraft:spider",
+            "minecraft:cave_spider",
+            "minecraft:enderman",
+            "minecraft:phantom",
+            "minecraft:copper_golem",
+        ] {
+            assert!(added.contains(&id), "{id} not posed with its eyes");
+        }
+        assert!(taken[0].is_subset(&taken[1]));
+    }
+
+    /// `BatModel` draws with `entityCutoutCull`: its zero-depth ears, wings and
+    /// feet put two quads in one place, and only culling tells them apart. The
+    /// bat's vertices ask for the shaded cull encoding, other mobs keep -127,
+    /// on both paths (the whole-mob test above holds them bit-equal).
+    #[test]
+    fn only_the_bat_asks_for_culled_back_faces() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let types = MobTypes::load(&root).unwrap();
+        for (id, w) in [
+            ("minecraft:bat", crate::mesher::SHADED_CULL_W),
+            ("minecraft:cow", -127),
+            ("minecraft:cat", -127),
+        ] {
+            let mut part = vec![&*types.types[id].model];
+            let mut seen = 0;
+            while let Some(p) = part.pop() {
+                for poly in &p.polygons {
+                    let n = poly.vertex_normal(ModelNormals::new(glam::Mat4::IDENTITY));
+                    assert_eq!(n[3], w, "{id}");
+                    seen += 1;
+                }
+                part.extend(&p.children);
+            }
+            assert!(seen > 0, "{id} has polygons");
+        }
+        // The GPU path flags the job, the CPU path the polygons.
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        for (id, cull) in [("minecraft:bat", 1), ("minecraft:cow", 0)] {
+            models.begin(&mut frame, 0);
+            let mut skin = Skin {
+                models: &mut models,
+                frame: &mut frame,
+                bounds: None,
+            };
+            assert!(skin.draw(
+                &types.types[id].model,
+                glam::Mat4::IDENTITY,
+                &Poses::default(),
+                Paint {
+                    uv: [0.0, 0.0, 1.0, 1.0],
+                    scroll: 0.0,
+                    color: u32::MAX,
+                    light: 0,
+                    overlay: 0
+                },
+            ));
+            assert!(frame.jobs.iter().all(|j| j.cull == cull), "{id}");
+            frame.clear_draws();
+        }
     }
 
     /// The armor stand's models (`ArmorStandRenderer`: the stand, the small

@@ -4,7 +4,8 @@
 //!   name isn't stored again with every session. `extra` holds the later hardware fields
 //!   (cores, clocks, GPU maker and kind, VRAM, drive, screen, power, form) as JSON.
 //! - `perf`: one row per play session, in columns. A frame or tick summary is an 80-byte blob
-//!   ([`pack`]), not JSON.
+//!   ([`pack`]), not JSON; `slow_frames` (the frames of 250 ms or more by the step they spent
+//!   their time in) is JSON, empty for most sessions.
 //! - `reports`: crash and bug reports and benchmark uploads, their `data` zstd-compressed.
 //! - `perf_daily`: the anonymous totals per day, version, OS, GPU vendor and render distance
 //!   that `/v1/aggregate` reads. Rebuilt from `perf` when a day changes (new sessions, a
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS perf (
     render_distance INTEGER NOT NULL, simulation_distance INTEGER NOT NULL, max_fps INTEGER NOT NULL,
     vsync INTEGER NOT NULL, fullscreen INTEGER NOT NULL, graphics TEXT NOT NULL,
     seconds INTEGER NOT NULL, frames BLOB NOT NULL, ticks BLOB,
-    peak_ram_mb INTEGER NOT NULL, to_title_ms INTEGER, to_world_ms INTEGER
+    peak_ram_mb INTEGER NOT NULL, to_title_ms INTEGER, to_world_ms INTEGER, slow_frames TEXT
 );
 CREATE INDEX IF NOT EXISTS perf_install ON perf (install);
 CREATE INDEX IF NOT EXISTS perf_day ON perf (day);
@@ -160,13 +161,16 @@ impl Store {
                     tx.execute(
                         "INSERT INTO perf (install, day, version, system, render_distance, simulation_distance,
                          max_fps, vsync, fullscreen, graphics, seconds, frames, ticks, peak_ram_mb,
-                         to_title_ms, to_world_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                         to_title_ms, to_world_ms, slow_frames) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                         params![
                             install, day, item.version, system,
                             p.settings.render_distance, p.settings.simulation_distance, p.settings.max_fps,
                             p.settings.vsync, p.settings.fullscreen, p.settings.graphics,
                             p.seconds, pack(&p.frames), p.ticks.as_ref().map(pack), p.peak_ram_mb,
                             p.to_title_ms, p.to_world_ms,
+                            (!p.slow_frames.is_empty())
+                                .then(|| serde_json::to_string(&p.slow_frames).ok())
+                                .flatten(),
                         ],
                     )?;
                 }
@@ -366,12 +370,65 @@ impl Store {
             .collect::<Result<_, _>>()?
         };
         let breakdowns = self.breakdowns(from, to)?;
+        let slow_frames = self.slow_frames(from, to, k)?;
         Ok(serde_json::json!({
             "from_day": from, "to_day": to, "min_install_days": k,
             "bucket_edges_ms": BUCKET_EDGES_MS.map(|e| (f64::from(e) * 10.0).round() / 10.0),
             "totals": { "sessions": sessions, "hours": (hours * 10.0).round() / 10.0 },
             "groups": out, "crashes_by_version": crashes, "breakdowns": breakdowns,
+            "slow_frames": slow_frames,
         }))
+    }
+
+    /// What froze in `from..=to`: per release and step (`span`, `""` when no step was timed),
+    /// the frames of 250 ms or more spent mostly in it, the sessions and installs that had one,
+    /// and the longest frame and step. Only steps seen by at least `k` installs. From the raw
+    /// rows, so only within the retention period.
+    fn slow_frames(&self, from: u32, to: u32, k: u64) -> rusqlite::Result<serde_json::Value> {
+        #[derive(Default)]
+        struct Step {
+            frames: u64,
+            sessions: u64,
+            installs: HashSet<Vec<u8>>,
+            frame_max_ms: f32,
+            span_max_ms: f32,
+        }
+        let mut steps: HashMap<(String, String), Step> = HashMap::new();
+        let mut q = self.db.prepare(
+            "SELECT install, version, slow_frames FROM perf
+             WHERE day BETWEEN ?1 AND ?2 AND slow_frames IS NOT NULL",
+        )?;
+        let mut rows = q.query([from, to])?;
+        while let Some(r) = rows.next()? {
+            let install: Vec<u8> = r.get(0)?;
+            let version: String = r.get(1)?;
+            let list: Vec<horizon_telemetry::payload::SlowFrames> =
+                serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default();
+            for entry in list {
+                let step = steps.entry((version.clone(), entry.span)).or_default();
+                step.frames += u64::from(entry.frames);
+                step.sessions += 1;
+                step.installs.insert(install.clone());
+                step.frame_max_ms = step.frame_max_ms.max(entry.frame_max_ms);
+                step.span_max_ms = step.span_max_ms.max(entry.span_max_ms);
+            }
+        }
+        let mut out: Vec<((String, String), Step)> = steps
+            .into_iter()
+            .filter(|(_, s)| s.installs.len() as u64 >= k)
+            .collect();
+        out.sort_by(|a, b| b.1.frames.cmp(&a.1.frames).then(a.0.cmp(&b.0)));
+        let round = |ms: f32| (f64::from(ms) * 10.0).round() / 10.0;
+        Ok(out
+            .into_iter()
+            .map(|((version, span), s)| {
+                serde_json::json!({
+                    "version": version, "span": span, "frames": s.frames, "sessions": s.sessions,
+                    "installs": s.installs.len(), "frame_max_ms": round(s.frame_max_ms),
+                    "span_max_ms": round(s.span_max_ms),
+                })
+            })
+            .collect())
     }
 
     /// Play sessions in `from..=to` per hardware class (`classes`): for each RAM, VRAM, drive,
@@ -516,12 +573,17 @@ impl Extra {
     }
 }
 
-/// Databases from before `systems.extra`: the table rebuilt with it (ids kept), once.
+/// Databases from before a column: `perf.slow_frames` added, and `systems` rebuilt with
+/// `extra` (ids kept), once each.
 fn migrate(db: &mut Connection) -> rusqlite::Result<()> {
-    let has_extra = db
-        .prepare("SELECT 1 FROM pragma_table_info('systems') WHERE name = 'extra'")?
-        .exists([])?;
-    if has_extra {
+    let has = |db: &Connection, table: &str, column: &str| {
+        db.prepare("SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2")?
+            .exists([table, column])
+    };
+    if !has(db, "perf", "slow_frames")? {
+        db.execute_batch("ALTER TABLE perf ADD COLUMN slow_frames TEXT")?;
+    }
+    if has(db, "systems", "extra")? {
         return Ok(());
     }
     let tx = db.transaction()?;
@@ -581,6 +643,42 @@ pub fn inflate(body: &[u8]) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A database from before `perf.slow_frames` gains the column and keeps its sessions.
+    #[test]
+    fn perf_from_before_slow_frames_gains_the_column() {
+        let path = std::env::temp_dir().join(format!(
+            "horizon-telemetry-slow-{}.sqlite",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(
+                "CREATE TABLE perf (
+                    install BLOB NOT NULL, day INTEGER NOT NULL, version TEXT NOT NULL, system INTEGER NOT NULL,
+                    render_distance INTEGER NOT NULL, simulation_distance INTEGER NOT NULL, max_fps INTEGER NOT NULL,
+                    vsync INTEGER NOT NULL, fullscreen INTEGER NOT NULL, graphics TEXT NOT NULL,
+                    seconds INTEGER NOT NULL, frames BLOB NOT NULL, ticks BLOB,
+                    peak_ram_mb INTEGER NOT NULL, to_title_ms INTEGER, to_world_ms INTEGER
+                );
+                INSERT INTO perf VALUES (x'00', 1, 'v1', 1, 12, 12, 0, 0, 0, 'fancy', 60, x'00', NULL, 1, NULL, NULL);",
+            )
+            .unwrap();
+        }
+        let path_str = path.to_str().unwrap();
+        let store = Store::open(path_str).unwrap();
+        let old: Option<String> = store
+            .db
+            .query_row("SELECT slow_frames FROM perf", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(old, None, "the old session is kept, with none");
+        drop(store);
+        Store::open(path_str).unwrap(); // a second open adds nothing
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{path_str}{suffix}"));
+        }
+    }
 
     /// A database from before `systems.extra` opens, keeps its machines' ids and takes new ones.
     #[test]

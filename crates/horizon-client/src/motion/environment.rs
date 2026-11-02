@@ -1,6 +1,6 @@
 //! Player liquid travel and environmental damage over the shared fluid state.
 use super::*;
-use crate::breathing::{Breath, apply, breathe};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::random::RandomSource;
 use horizon_world::{
     fluid::FluidKind,
@@ -98,14 +98,21 @@ impl MotionWorld<'_, '_, '_> {
         } else {
             breathe(self.player.entity_id as u32, "minecraft:player", vanilla)
         };
-        let (air, drowned) = apply(self.player.air, 300, breath);
-        self.player.air = air;
-        if drowned {
+        // LivingDrownEvent, likewise.
+        if let Some(drowning) = drown(
+            self.player.entity_id as u32,
+            "minecraft:player",
+            &mut self.player.air,
+            breath,
+            !self.player.client_side,
+        ) {
             self.player.events.push(MotionEvent::Drown);
-            self.player.events.push(MotionEvent::Health(
-                crate::health::HealthEvent::DrownDamage(2.0),
-            ));
-            self.environment_hurt("minecraft:drown", 2.0)?;
+            if let Some(damage) = drowning.damage {
+                self.player.events.push(MotionEvent::Health(
+                    crate::health::HealthEvent::DrownDamage(damage),
+                ));
+                self.environment_hurt("minecraft:drown", damage)?;
+            }
         }
         if self.player.is_in_lava() {
             self.player.ignite_for_ticks(300)?;

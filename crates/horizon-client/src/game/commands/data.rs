@@ -173,7 +173,8 @@ impl Game<'_> {
                 let raw = self.persist.raw.get(&id);
                 entity_nbt::arrow_to_nbt(p, random_uuid(), owner, in_block, raw)
                     .or_else(|| entity_nbt::fireball_to_nbt(p, random_uuid(), owner, raw))
-                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))?
+                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))
+                    .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, random_uuid(), owner, raw))?
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
@@ -222,6 +223,11 @@ impl Game<'_> {
                 let uuid = self.uuid_for(id);
                 let r = self.rockets.iter().find(|r| r.id == id)?;
                 r.to_nbt(uuid, player_uuid, self.persist.raw.get(&id))
+            }
+            Target::Trident(id) => {
+                let uuid = self.uuid_for(id);
+                let t = self.tridents.iter().find(|t| t.id == id)?;
+                t.to_nbt(uuid, self.persist.raw.get(&id))
             }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
@@ -855,6 +861,8 @@ impl Game<'_> {
             Some(Target::Falling(id))
         } else if self.rockets.iter().any(|r| r.id == id) {
             Some(Target::Rocket(id))
+        } else if self.tridents.iter().any(|t| t.id == id) {
+            Some(Target::Trident(id))
         } else if self.ominous_spawners.iter().any(|s| s.id == id) {
             Some(Target::Spawner(id))
         } else {
@@ -879,7 +887,9 @@ impl Game<'_> {
         let target = self.spawn_entity_from_nbt(tag);
         self.native_mobs_joined(from, false);
         // A mod kept the entity out: tryAddFreshEntityWithPassengers is false.
-        if target.is_none() && self.persist.joins_canceled != canceled {
+        if self.persist.joins_canceled != canceled
+            && target.is_none_or(|t| self.target_position(t).is_none())
+        {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)

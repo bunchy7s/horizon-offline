@@ -381,6 +381,18 @@ fn templates_under(root: &Path) -> Vec<String> {
 
 /// The `namespace:` ids of the `extension` files under `root`, sorted.
 fn ids_in(root: &Path, extension: &str, namespace: &str) -> Vec<String> {
+    let suffix = format!(".{extension}");
+    // A prepared root's folder: from its data file, without listing the disk.
+    if let Some(files) = horizon_core::prepared_files::files_under(root) {
+        let mut out: Vec<String> = files
+            .iter()
+            .filter_map(|file| file.strip_suffix(&suffix))
+            .filter(|path| !path.is_empty() && !path.ends_with('/'))
+            .map(|path| format!("{namespace}:{path}"))
+            .collect();
+        out.sort();
+        return out;
+    }
     let mut out = Vec::new();
     let mut stack = vec![root.to_owned()];
     while let Some(dir) = stack.pop() {

@@ -873,7 +873,7 @@ impl Game<'_> {
         let Some(book) = &l.book else { return false };
         let pages = view_pages(book.data());
         let page = (l.page.max(0) as usize).min(pages.len().saturating_sub(1));
-        self.stats.custom("interact_with_lectern", 1);
+        self.award_custom_stat("interact_with_lectern", 1);
         self.open_book(BookScreen::View {
             pages,
             page,

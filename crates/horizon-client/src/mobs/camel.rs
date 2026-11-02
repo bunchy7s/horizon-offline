@@ -433,6 +433,7 @@ pub fn dash(m: &mut Mob, amount: f32, events: &mut Vec<MobEvent>) -> bool {
     m.velocity.y += 1.4285 * a * 0.42;
     m.extra.anim_ticks = DASH_COOLDOWN;
     m.extra.flag2 = true;
+    crate::motion::native_living_jump(m.id, &m.kind.id);
     sound(m, voice(m, 3), events);
     true
 }

@@ -1,6 +1,6 @@
 OptionInstance.SliderableEnum.toSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::kind	slider position of the graphics preset (index / 3)
-OptionInstance.SliderableEnum.next	inline	crates/horizon-client-render/src/options_ui.rs	Opt::Preset is a 0..3 slider (unit/step at options_ui.rs:335, 417, 844), so stepping happens through the slider rather than a cycle arm
-OptionInstance.SliderableEnum.previous	inline	crates/horizon-client-render/src/options_ui.rs	same slider
+OptionInstance.SliderableEnum.next	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	Opt::Preset is a 0..3 slider (unit/step at options_ui.rs:335, 417, 844), so stepping happens through the slider rather than a cycle arm
+OptionInstance.SliderableEnum.previous	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	same slider
 OptionInstance.SliderableEnum.fromSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: rounds v*3 where vanilla floors v*4
 OptionInstance.SliderableEnum.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	named spec accepts the four preset indexes
 OptionInstance.SliderableOrCyclableValueSet.createButton	port	crates/horizon-client-render/src/options_ui.rs::option_widget	cycle or slider button by option kind
@@ -8,14 +8,14 @@ OptionInstance.SliderableValueSet.createButton	port	crates/horizon-client-render
 OptionInstance.UnitDouble.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	unit range 0..1
 OptionInstance.UnitDouble.codec	port	crates/horizon-client-render/src/options_file.rs::codec_double	
 Options.updateResourcePacks	port	crates/horizon-client/src/game/options.rs::Game::handle_option_events	gap: minor: saves and reloads on every packs event; vanilla only when the list changed
-Options.maxAnisotropyValue	port	crates/horizon-client/src/game/options.rs + horizon-client-render::gfx::set_texture_filtering	the options.txt maxAnisotropyBit (and textureFiltering) reach the sampler
+Options.maxAnisotropyValue	port	crates/horizon-client-render/src/gfx.rs::sampler_anisotropy	the options.txt maxAnisotropyBit (and textureFiltering) reach the sampler
 Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no now-playing toast when master or music changes
 Options.setGraphicsPresetToCustom	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
 Options.processOptions	inline	crates/horizon-client-render/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
 Options.dataFix	port	crates/horizon-client-render/src/options_fixes.rs::update	
-Options.getFullscreenVideoModeString	inline	crates/horizon-client-render/src/options_file.rs	options.txt keeps fullscreen_resolution as the monitor index the option was picked from instead of a 'WxH@Hz' string; the window is restored from that index
+Options.getFullscreenVideoModeString	inline	crates/horizon-client-input/src/window.rs::VideoMode::write	options.txt keeps fullscreenResolution as `VideoMode::write`'s mode JSON, not as a separate 'WxH@Hz' string; `Settings.video_mode_index` reads it back to place the Video screen's mode slider
 Options.buildPlayerInformation	port	crates/horizon-client/src/net.rs::run	gap: player: only view distance and chat visibility are sent; language, skin parts, main hand, particles and text filtering stay at defaults
-Options.setModelPart	port	crates/horizon-client-render/src/options_file.rs::MODEL_PARTS + options_ui model part keys	the seven modelPart_* options are read back and sent as the PlayerModelPart set
+Options.setModelPart	port	crates/horizon-client-render/src/options_file.rs::OptionsFile::model_customisation	the seven modelPart_* options are read back and sent as the PlayerModelPart set
 Options.loadSelectedResourcePacks	port	crates/horizon-client-render/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
 Options.readListOfStrings	port	crates/horizon-client-render/src/options_file.rs::read_list	
 Options.dumpOptionsForReport	skip:debug		options dump for the debug report
@@ -87,29 +87,29 @@ ClientMannequin.tick	missing		minor: unsure: the mannequin avatar state (walk bo
 AbstractSelectionList.getRowLeft	port	crates/horizon-client-render/src/pack_screen.rs::List::row_left	
 CycleButton.setValue	skip:ui		widgets read the settings each frame; no separate value setter
 CreateFlatWorldScreen.DetailsList.LayerEntry.getNarration	skip:ui		screen-reader text
-InputQuirks.isQuitShortcutDown	port	crates/horizon-client/src/game.rs	the close path reads settings.quit_shortcuts and input::is_quit_shortcut_down, so with the option off the shortcut no longer closes the window
+InputQuirks.isQuitShortcutDown	port	crates/horizon-client-input/src/input.rs::is_quit_shortcut_down	the close path reads settings.quit_shortcuts and input::is_quit_shortcut_down, so with the option off the shortcut no longer closes the window
 InputWithModifiers.isSelection	inline	crates/horizon-client/src/game/key_focus.rs::nav_of	Enter, Space and keypad Enter all map to Nav::Select, which presses the focused widget
 InputWithModifiers.isConfirmation	inline	crates/horizon-client-render/src/chat.rs::ChatScreen::key	Enter and keypad Enter only, as the text-field screens do (chat, sign, command block, books); no shared predicate
 InputWithModifiers.isCopy	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isPaste	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isCut	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
-PreeditEvent.fromSdlTextEditing	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the composition text to the focused field
-PreeditEvent.toFormattedText	inline	crates/horizon-client/src/game.rs::ime_preedit	the composing text is drawn as the field's preedit, not as formatted chat
+PreeditEvent.fromSdlTextEditing	port	crates/horizon-client-render/src/preedit.rs::PreeditEvent::from_sdl_text_editing	WindowEvent::Ime(Preedit) feeds the composition text to the focused field
+PreeditEvent.toFormattedText	inline	crates/horizon-client-render/src/preedit.rs::PreeditEvent::to_formatted_text	the composing text is drawn as the field's preedit, not as formatted chat
 GameConfig.FolderData.getExternalAssetSource	skip:data		Horizon reads assets from the prepared resources folder
 net/minecraft/client/main/Main#getQuickPlayVariant	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: only the quick play flags of the launch parser; realms branch not checked
-net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::read	
-net/minecraft/client/main/Main#hasValidUuid	missing		minor: unsure: no --uuid argument found in the client
-net/minecraft/client/main/Main#isUuidValid	missing		minor: unsure: see hasValidUuid
+net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::parse	the argument loop itself (Options::read is the wrapper that feeds it std::env::args)
+net/minecraft/client/main/Main#hasValidUuid	skip:other		the --uuid argument is what reaches it, and Horizon's client parses none (game.rs::Options::parse takes its own flags)
+net/minecraft/client/main/Main#isUuidValid	skip:other		the check behind hasValidUuid, which no --uuid argument reaches
 AbstractClientPlayer.getPlayerInfo	inline	crates/horizon-client/src/game/remote.rs::Game::remote_pushes	the entity id -> uuid -> tab entry lookups stand in for the PlayerInfo; the name, team and game mode are read from that entry
 AbstractClientPlayer.getSkin	port	crates/horizon-client/src/game/remote.rs::Game::update_remote_skins	the downloaded skin and slim flag, else DefaultPlayerSkin by uuid, as PlayerInfo.getSkin
 AbstractClientPlayer.getParrotVariantOnShoulder	port	crates/horizon-client/src/mobs/render.rs::shoulder_parrot	the shoulder slot's stored variant picks the parrot texture and model in the layer
 ClientInput.makeJump	inline	crates/horizon-client/src/motion.rs::MotionWorld::controlled_simulation_tick	gap: minor: carries the auto-jump flag; no separate jump input
 FirstPersonHandsAndItems.extractRenderState	inline	crates/horizon-client/src/game/hand.rs::Game::visible_hand_items	gap: minor: bob, swing and map state are read elsewhere; no render-state struct
-FirstPersonHandsAndItems.shouldInstantlyReplaceVisibleItem	missing		minor: unsure: no instant swap rule found in first_person.rs; HandHeights::tick takes a changed flag
+FirstPersonHandsAndItems.shouldInstantlyReplaceVisibleItem	port	crates/horizon-client/src/game/hand.rs::shows_held_stack	the same stack object, or an equal one, which plays no swap animation; the slot a replaced hand changed is the exception
 FirstPersonHandsAndItems.extractMapRenderState	inline	crates/horizon-client/src/game/maps.rs::Game::held_map	the MAP_ID component picks the map data drawn in the hand, its decorations included, and decides the checkerboard background
 FirstPersonHandsAndItems.isChargedCrossbow	inline	crates/horizon-client/src/first_person.rs::hands_to_render	
-ItemActivation.tick	missing		player: the totem-of-undying item pop is never drawn; game/totem.rs draws particles and sound only
-ItemActivation.activate	missing		player: same as tick
+ItemActivation.tick	port	crates/horizon-client/src/item_activation.rs::ItemActivation::tick	the count down to 0, where the item goes; game.rs::tick_item_activation runs it
+ItemActivation.activate	port	crates/horizon-client/src/item_activation.rs::ItemActivation::activate	a copy of the stack, the 40 ticks and two offsets in [-1, 1); game/totem.rs sets it from findTotem
 KeyboardInput.calculateImpulse	inline	crates/horizon-client-input/src/input.rs::keyboard_direction	
 LocalPlayer.<init>	inline	crates/horizon-client/src/ambience.rs::Ambience::new	gap: minor: the three ambient handlers are the Ambience loops; no connection set-up
 LocalPlayer.sendChanges	port	crates/horizon-client/src/game/remote.rs::Game::remote_send_state	
@@ -117,7 +117,7 @@ LocalPlayer.getCurrentMood	inline	crates/horizon-client/src/ambience.rs::Ambienc
 LocalPlayer.sendIsSprintingIfNeeded	inline	crates/horizon-client/src/game/remote.rs::Game::remote_send_state	sprint start and stop commands
 LocalPlayer.closeContainer	port	crates/horizon-client/src/game/remote.rs::Game::remote_close_container	
 LocalPlayer.isSuppressingSlidingDownLadder	port	crates/horizon-client/src/motion.rs::MotionWorld::suppressing_ladder_slide	gap: minor: sneak only; vanilla also requires not flying
-LocalPlayer.canSpawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: flying check is the caller's
+LocalPlayer.canSpawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: the test there is Entity.canSpawnSprintParticle's (sprinting, not spectator, not crouching, alive, out of water and lava) without the !abilities.flying LocalPlayer adds
 LocalPlayer.sendRidingJump	port	crates/horizon-client/src/game/remote_vehicles.rs::riding_jump	START_RIDING_JUMP carrying the jump scale
 LocalPlayer.removeRecipeHighlight	port	crates/horizon-client/src/recipe_book.rs::Settings::remove_highlight	gap: minor: the seen-recipe packet is not sent, so the server keeps the highlight
 LocalPlayer.moveTowardsClosestSpace	port	crates/horizon-client/src/game.rs::Game::closest_space_nudge	the four body corners, 0.1 towards the nearest free side on its axis, a later corner overwriting an earlier one
@@ -135,7 +135,7 @@ LocalPlayer.resetPos	inline	crates/horizon-client/src/game/screens.rs::Game::res
 LocalPlayer.shouldStopRunSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::should_stop	gap: player: minor_horizontal_collision is always false, so wall slides stop the sprint
 LocalPlayer.shouldStopSwimSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::should_stop	
 LocalPlayer.tickDeath	missing		minor: unsure: the dead local player is not removed after 20 ticks; the death screen flow covers it
-LocalPlayer.rideTick	port	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the keys are latched into the boat's input and the seat follows its turn
+LocalPlayer.rideTick	port	crates/horizon-client/src/game/remote_vehicles.rs::Game::remote_ride	the keys are latched into the boat's input and the seat follows its turn
 LocalPlayer.isHorizontalCollisionMinor	port	crates/horizon-client/src/motion.rs::EntityMoveWorld::minor_horizontal_collision	the sprint keeps when a move hits a wall at under 8 degrees
 LocalPlayer.isMoving	inline	crates/horizon-client/src/auto_jump.rs::can_auto_jump	
 LocalPlayer.isSprintingPossible	port	crates/horizon-client/src/sprint.rs::Conditions::possible	

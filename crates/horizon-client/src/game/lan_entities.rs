@@ -596,6 +596,12 @@ impl Game<'_> {
                 Some(g) => g.entity_id,
                 None => owner(p.owner),
             };
+            // Entity.DATA_SHARED_FLAGS_ID's FLAG_ONFIRE: Entity.baseTick's
+            // `setSharedFlagOnFire(remainingFireTicks > 0)`, which a client's
+            // isOnFire reads to draw the flames (a Flame bow's arrow).
+            if p.arrow.as_ref().is_some_and(|a| a.on_fire()) {
+                e.meta.push((0, serializer::BYTE, Value::Byte(1)));
+            }
             match &p.kind {
                 K::Arrow { critical, .. } => {
                     let a = p.arrow.as_deref();
@@ -633,7 +639,7 @@ impl Game<'_> {
                 // `potion_contents`, whose effects the guest's splash and
                 // whose colour its drawing need. A plain splash potion is the
                 // client's default and is not sent.
-                K::Potion(stack) if stack.extra.is_some() || stack.count != 1 => {
+                K::Potion(stack, _) if stack.extra.is_some() || stack.count != 1 => {
                     e.meta.push((
                         8,
                         serializer::ITEM_STACK,

@@ -274,8 +274,13 @@ impl Game<'_> {
         }
         best
     }
-    /// `Painting.hurtServer` -> kill and `dropItem`.
-    pub(super) fn break_painting(&mut self, index: usize, by_player: bool) {
+    /// `Painting.hurtServer` -> kill and `dropItem`. False when a mod kept it
+    /// (`native_hanging_break`): it stays at `index`.
+    pub(super) fn break_painting(&mut self, index: usize, by_player: bool) -> bool {
+        let pos = self.paintings[index].pos;
+        if self.hanging_break_cancelled("minecraft:painting", pos, by_player) {
+            return false;
+        }
         let p = self.paintings.remove(index);
         let (lo, hi) = p.bounds();
         let at = [
@@ -285,12 +290,12 @@ impl Game<'_> {
         ];
         self.world.modified.insert((p.pos[0] >> 4, p.pos[2] >> 4));
         if !self.ui.rules.bool("entity_drops") {
-            return;
+            return true;
         }
         self.audio
             .play("minecraft:entity.painting.break", Some(at), 1.0, 1.0);
         if by_player && self.creative {
-            return;
+            return true;
         }
         // HangingEntity.spawnAtLocation: 0.15 out from the wall.
         let s = p.step().map(f64::from);
@@ -306,6 +311,7 @@ impl Game<'_> {
             [0.0; 3],
             10,
         );
+        true
     }
     /// BlockAttachedEntity.tick: check survival every 100 ticks.
     pub(super) fn tick_paintings(&mut self) {
@@ -323,8 +329,7 @@ impl Game<'_> {
             if self.paintings[i].check_interval >= 100 {
                 self.paintings[i].check_interval = 0;
                 let p = self.paintings[i].clone();
-                if !self.painting_survives(&p) {
-                    self.break_painting(i, false);
+                if !self.painting_survives(&p) && self.break_painting(i, false) {
                     continue;
                 }
             }

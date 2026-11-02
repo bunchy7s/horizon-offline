@@ -16,7 +16,10 @@ ServerScoreboard.stopTrackingObjective	inline	crates/horizon-client/src/lan/scor
 ServerScoreboard.getObjectiveDisplaySlotCount	inline	crates/horizon-client/src/lan/scoreboard.rs::View::of	tracked set = objectives in any display slot
 ServerScoreboard.updatePlayerWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	team change remakes the player's waypoint connections, found by the per-tick diff
 ServerScoreboard.updateTeamWaypoints	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	every player on a changed team, via the per-tick diff
+ServerScoreboard.load	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::unpack	the saved data's Objectives, Scores, DisplaySlots and Teams read back
+ServerScoreboard.store	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	ScoreboardSaveData.Packed's fields, those equal to their codec default left out
 ServerTickRateManager.updateJoiningPlayer	port	crates/horizon-client/src/lan/hub.rs::Hub::send_level_info	sends ticking state and step to the joining guest
+ServerTickRateManager.updateStepTicks	inline	crates/horizon-client/src/lan/hub.rs::Hub::sync_ticking	a step's revision change broadcasts TickingStep, and the same fn sends the ticking state when the rate or the freeze changed
 SuppressedExceptionCollector.addEntry	skip:server		feeds the system report's suppressed-exception section; no player-facing behaviour
 SuppressedExceptionCollector.dump	skip:server		system report section only
 WorldLoader.PackConfig.createResourceManager	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	discovers packs and rebuilds the data store; no resource manager object
@@ -121,7 +124,7 @@ DebugConfigCommand.showDialog	skip:debug		/debugconfig, a developer tool
 DebugMobSpawningCommand.register	skip:debug		/debugmobspawning, a developer tool
 DebugPathCommand.register	skip:debug		/debugpath, a developer tool
 DebugPathCommand.fillBlocks	skip:debug		/debugpath, a developer tool
-DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: unsure: calls set_default_game_mode (lan.rs), which also sets the host's creative flag; vanilla only changes the default for new players
+DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: the defaultgamemode arm goes through set_default_game_mode (lan.rs:1645), which sets the world's default and, when the world forces a mode, puts the guests in it (as vanilla's setMode does), but also flips the host's own creative flag (level.creative = mode == 1)
 DialogCommand.showDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: open_dialog only sets the host's dialog state; other targets are counted but never sent the dialog
 DialogCommand.clearDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: close_dialog only closes the host's dialog; guests get no clear packet
 DifficultyCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	difficulty syntax (vanilla.rs line 284)
@@ -134,7 +137,7 @@ EnchantCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	e
 net/minecraft/server/commands/ExecuteCommand#wrapStores	port	crates/horizon-command/src/tree_execute.rs::store	execute store syntax
 net/minecraft/server/commands/ExecuteCommand#storeValue	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	score and bossbar store targets
 net/minecraft/server/commands/ExecuteCommand#storeData	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	data target store with int, float, short, long, double tags
-net/minecraft/server/commands/ExecuteCommand#isChunkLoaded	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_matches	gap: unsure: tests the streaming lit set; vanilla needs ENTITY_TICKING status and loaded entities
+net/minecraft/server/commands/ExecuteCommand#isChunkLoaded	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_matches	gap: the loaded arm tests a chunk present with light (streaming.is_lit) and has no entity check, where vanilla wants the chunk at ENTITY_TICKING and level.areEntitiesLoaded
 net/minecraft/server/commands/ExecuteCommand#countItems	port	crates/horizon-client/src/game/commands/items.rs::Game::condition_items	item count predicate
 net/minecraft/server/commands/ExecuteCommand#checkScore	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_score	score comparison, both score holders
 net/minecraft/server/commands/ExecuteCommand#checkStopwatch	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_stopwatch	stopwatch range check

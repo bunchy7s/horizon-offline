@@ -56,7 +56,7 @@ impl Game<'_> {
             return Ok(());
         };
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
-        self.stats.add("used", "minecraft:bucket", 1);
+        self.award_stat("used", "minecraft:bucket", 1);
         if let Some(eye) = self
             .player
             .as_ref()

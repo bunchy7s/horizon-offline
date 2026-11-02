@@ -32,6 +32,10 @@ SETTINGS = [
     "time set 6000",
 ]
 MOBS = ["husk", "creeper", "cow", "pig", "sheep", "chicken", "villager", "spider"]
+HOLDERS = ["husk", "wither_skeleton", "vindicator", "piglin"]
+# Mobs with an eyes render type layer that do not burn at noon.
+EYED = ["spider", "cave_spider", "enderman"]
+HELD = ["iron_sword", "stone_axe", "torch", "apple", "bow", "carrot", "diamond_pickaxe", "stone"]
 ITEMS = ["stone", "oak_log", "diamond", "apple", "iron_sword", "bread", "redstone", "torch"]
 FRAMED = ["diamond_sword", "compass", "clock", "stone", "oak_planks", "apple", "shield", "golden_apple"]
 CONTAINERS = ["chest", "trapped_chest", "ender_chest", "white_shulker_box"]
@@ -69,6 +73,50 @@ def mobs(ox, oz):
                 x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
                 out.append(f"summon {kind} {num(x)} {num(y)} {num(z)} "
                            "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b}")
+                i += 1
+    return out
+
+
+def glowing(ox, oz):
+    """1000 glowing mobs (the outline post effect): the mobs scene's kinds and grid."""
+    out, i = [], 0
+    for layer in range(5):
+        for row in range(10):
+            for col in range(20):
+                kind = MOBS[i % len(MOBS)]
+                x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
+                out.append(f"summon {kind} {num(x)} {num(y)} {num(z)} "
+                           "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b,Glowing:1b}")
+                i += 1
+    return out
+
+
+def eyes(ox, oz):
+    """1000 mobs with glowing eyes (spiders, cave spiders, endermen): the mobs scene's grid."""
+    out, i = [], 0
+    for layer in range(5):
+        for row in range(10):
+            for col in range(20):
+                kind = EYED[i % len(EYED)]
+                x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
+                out.append(f"summon {kind} {num(x)} {num(y)} {num(z)} "
+                           "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b}")
+                i += 1
+    return out
+
+
+def held(ox, oz):
+    """1000 mobs holding an item in each hand: the mobs scene's grid, of kinds that neither burn nor convert."""
+    out, i = [], 0
+    for layer in range(5):
+        for row in range(10):
+            for col in range(20):
+                kind = HOLDERS[i % len(HOLDERS)]
+                main, off = HELD[i % len(HELD)], HELD[(i + 3) % len(HELD)]
+                x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
+                out.append(f"summon {kind} {num(x)} {num(y)} {num(z)} "
+                           "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b,IsImmuneToZombification:1b,"
+                           f'equipment:{{mainhand:{{id:"minecraft:{main}"}},offhand:{{id:"minecraft:{off}"}}}}}}')
                 i += 1
     return out
 
@@ -171,6 +219,9 @@ STRESS = [
     ("stress_signs", signs),
     ("stress_banners", banners),
     ("stress_particles", particles),
+    ("stress_held", held),
+    ("stress_eyes", eyes),
+    ("stress_glowing", glowing),
 ]
 NAMES = [name for name, _ in STRESS]
 

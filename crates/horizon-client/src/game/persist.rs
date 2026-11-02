@@ -43,6 +43,12 @@ pub struct EntityMemory {
     /// Entities a native mod kept out of the level (`native_entity_join_level`),
     /// counted so `/summon` can fail as vanilla's refused add does.
     pub(super) joins_canceled: u32,
+    /// The highest entity id `native_entity_join_level` has been told of.
+    pub(super) joined_mark: u32,
+    /// The entities mods were told of and that have not left since: id (in
+    /// increasing order), type, and whether the last leave sweep saw it.
+    /// Only filled while a mod is loaded.
+    pub(super) live: Vec<(u32, String, bool)>,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -342,6 +348,8 @@ impl Game<'_> {
                 let from_disk = !take_fresh(&mut tag);
                 // An End gateway's traveller never left the level: nothing joins.
                 let moved = take_moved(&mut tag);
+                // Whatever was added since the last tick joins before this one.
+                self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
@@ -351,6 +359,10 @@ impl Game<'_> {
                     kind.as_str(),
                     "minecraft:experience_orb"
                         | "minecraft:arrow"
+                        | "minecraft:spectral_arrow"
+                        | "minecraft:llama_spit"
+                        | "minecraft:shulker_bullet"
+                        | "minecraft:experience_bottle"
                         | "minecraft:fireball"
                         | "minecraft:small_fireball"
                         | "minecraft:wind_charge"
@@ -358,6 +370,8 @@ impl Game<'_> {
                         | "minecraft:snowball"
                         | "minecraft:egg"
                         | "minecraft:ender_pearl"
+                        | "minecraft:splash_potion"
+                        | "minecraft:lingering_potion"
                         | "minecraft:falling_block"
                         | "minecraft:firework_rocket"
                         | "minecraft:trident"
@@ -377,40 +391,22 @@ impl Game<'_> {
                         if let Some(e) =
                             entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob)
                         {
-                            let (id, p) = (e.id, e.position);
                             self.remember(e.id, uuid, tag);
                             self.dropped.push(e);
-                            if !moved
-                                && !self.native_entity_joins(
-                                    id,
-                                    "minecraft:item",
-                                    [p.x, p.y, p.z],
-                                    from_disk,
-                                )
-                            {
-                                self.dropped.pop();
-                                self.forget_entity(id);
-                            }
                         }
                     }
                     "minecraft:experience_orb" => {
                         for mut orb in entity_nbt::orbs_from_nbt(&tag) {
                             self.next_entity += 1;
                             orb.id = self.next_entity;
-                            let (id, p) = (orb.id, orb.position);
+                            let id = orb.id;
                             // An orb that came through a portal keeps its cooldown.
                             self.restore_portal_cooldown(id, &tag);
                             self.orbs.push(orb);
                             self.remember_tags(id, &tag);
-                            let kind = "minecraft:experience_orb";
-                            if !moved
-                                && !self.native_entity_joins(id, kind, [p.x, p.y, p.z], from_disk)
-                            {
-                                self.orbs.pop();
-                            }
                         }
                     }
-                    "minecraft:arrow" => {
+                    "minecraft:arrow" | "minecraft:spectral_arrow" => {
                         if let Some((mut p, in_block)) = entity_nbt::arrow_from_nbt(
                             &tag,
                             player_uuid,
@@ -436,6 +432,17 @@ impl Game<'_> {
                         if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
                             self.claim_owner(&mut p);
                             // A projectile that came through a portal keeps its cooldown.
+                            self.next_entity += 1;
+                            p.id = self.next_entity;
+                            self.restore_portal_cooldown(p.id, &tag);
+                            self.add_projectile(p);
+                            self.remember_last_projectile_tags(&tag);
+                        }
+                    }
+                    "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid)
+                        {
+                            self.claim_owner(&mut p);
                             self.next_entity += 1;
                             p.id = self.next_entity;
                             self.restore_portal_cooldown(p.id, &tag);
@@ -497,8 +504,9 @@ impl Game<'_> {
                             let mut t = super::trident::ThrownTrident::from_nbt(n);
                             t.id = self.take_entity_id();
                             // One that came through a portal keeps its cooldown.
-                            self.restore_portal_cooldown(t.id, &tag);
+                            let id = t.id;
                             self.tridents.push(t);
+                            self.remember(id, uuid, tag);
                         }
                     }
                     "minecraft:firework_rocket" => {
@@ -668,6 +676,13 @@ impl Game<'_> {
                         self.load_other(tag, &kind);
                     }
                     _ => self.persist.unknown.entry(key).or_default().push(tag),
+                }
+                // PersistentEntitySectionManager.addEntity: every kind that
+                // just joined tells the mods; a moved one does not join.
+                if moved {
+                    self.native_joins_skip();
+                } else {
+                    self.native_joins_flush(from_disk, 0);
                 }
             }
             self.native_entities_load(self.dim.id(), [key.0, key.1], count);
@@ -1331,7 +1346,6 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
-            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1339,7 +1353,6 @@ impl Game<'_> {
                 }
                 keep
             });
-            let (items_before, orbs_before) = (self.dropped_ids(), self.orb_ids());
             self.dropped.retain(|e| {
                 let keep = !gone(e.position);
                 if !keep {
@@ -1349,9 +1362,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
-            self.native_mobs_left_since(&mobs_before);
-            self.native_items_left_since(&items_before);
-            self.native_orbs_left_since(&orbs_before);
+            self.native_leaves_flush();
             // the ones saved with the chunk go with it (a trident too, unsaved).
             self.creatures.projectiles.retain(|p| {
                 let leaves = entity_nbt::saved_with_chunk(p) || p.arrow.is_some();
@@ -1517,7 +1528,8 @@ impl Game<'_> {
             .map(|s| self.state_to_nbt(s));
         let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))?;
+            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
+            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
         Some((
             chunk_of(p.position),
             with_raw(tag, self.persist.raw.get(&p.id)),
@@ -1570,10 +1582,11 @@ impl Game<'_> {
         i: usize,
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
-        let t = &self.tridents[i];
-        keys.contains(&chunk_of(t.position)).then(|| {
-            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:trident", t.position);
-            (chunk_of(t.position), t.to_nbt(uuid, raw.as_ref()))
+        let (id, at) = (self.tridents[i].id, self.tridents[i].position);
+        keys.contains(&chunk_of(at)).then(|| {
+            let uuid = self.uuid_for(id);
+            let tag = self.tridents[i].to_nbt(uuid, self.persist.raw.get(&id));
+            (chunk_of(at), tag)
         })
     }
     pub(super) fn save_tnt(
@@ -1775,6 +1788,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
+            sync: false,
         };
         let root_id = [1, 2, 3, 4];
         let child_id = [5, 6, 7, 8];

@@ -80,6 +80,25 @@ fn translucent_layer(m: &Mob, layer: &Layer) -> bool {
         || layer.texture.starts_with("entity/horse/horse_markings")
 }
 
+/// Whether a layer is the eyes render type's (`RenderTypes.eyes`: full bright, no
+/// normal, at `EYES_TIER`) on a mob whose other draws are plain: spiders',
+/// endermen's, phantoms', the creaking's and the copper golem's. The GPU path
+/// poses them as [`super::skin::Skin`] `FLAT` draws when improved transparency
+/// is off ([`super::skin::SkinModels::eyes`]).
+fn eyes_layer(m: &Mob, layer: &Layer) -> bool {
+    layer.full_bright
+        && layer.scroll == 0.0
+        && matches!(
+            m.species(),
+            Species::Spider
+                | Species::CaveSpider
+                | Species::Enderman
+                | Species::Phantom
+                | Species::Creaking
+                | Species::CopperGolem
+        )
+}
+
 /// One draw of a model with a texture.
 pub struct Layer {
     pub model: String,
@@ -1901,8 +1920,8 @@ fn render_visible(
                 && energy_swirl(m, s.age).is_none()
                 && skin.supports(&model)
                 && all_layers.iter().all(|layer| {
-                    !layer.full_bright
-                        && !translucent_layer(m, layer)
+                    (skin.models.eyes && eyes_layer(m, layer)
+                        || !layer.full_bright && !translucent_layer(m, layer))
                         && cem.layer(&layer.model).is_none()
                         && m.kind
                             .layer(&layer.model)
@@ -2021,6 +2040,7 @@ fn render_visible(
             None => overlay,
         };
         let start = out.len();
+        let first_job = skin.as_deref().map(|skin| skin.frame.jobs.len());
         put(
             &mut skin,
             &part,
@@ -2049,6 +2069,22 @@ fn render_visible(
         }
         if translucent_layer(m, layer) {
             mark_oit(&mut out[start..]);
+        }
+        // The same marks on what the GPU path posed of the layer (only eyes
+        // layers get there among the marked ones): the tags in the overlay word,
+        // no normal.
+        if let (Some(skin), Some(first)) = (skin.as_deref_mut(), first_job) {
+            let tagged = translucent_layer(m, layer);
+            let eyes = layer.full_bright && m.species() != Species::Warden;
+            for job in &mut skin.frame.jobs[first..] {
+                if tagged {
+                    job.overlay |= crate::gfx::OIT_ENTITY;
+                }
+                if eyes {
+                    job.overlay |= u32::from(EYES_TIER) << 16;
+                    job.mode = crate::gfx::entity_skin::SkinJob::FLAT;
+                }
+            }
         }
         // The eyes render type's glowing eyes also shine in HDR output, at
         // `EYES_TIER` in the overlay's high bits (entity.wgsl fs_hdr_mark).
@@ -2602,6 +2638,7 @@ mod tests {
             .map(|_| super::super::Polygon {
                 normal: [0.0; 3],
                 vertices: [corner(min), corner(max), corner(min), corner(max)],
+                cull_back: false,
             })
             .collect()
     }
@@ -3380,6 +3417,7 @@ mod emissive_tests {
             pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             polygons: vec![Polygon {
                 normal: [0.0, 0.0, -1.0],
+                cull_back: false,
                 vertices: [
                     [0.0, 0.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0, 0.0],
@@ -3670,6 +3708,7 @@ mod random_texture_tests {
             pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
             polygons: vec![Polygon {
                 normal: [0.0, 0.0, -1.0],
+                cull_back: false,
                 vertices: [
                     [0.0, 0.0, 0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0, 1.0, 0.0],

@@ -1,5 +1,5 @@
 DedicatedServer.readCodeOfConducts	port	crates/horizon-client/src/lan/code_of_conduct.rs::read	with enable-code-of-conduct the folder's files are read at startup (game/dedicated.rs::run_dedicated_inner) and handed to a joining player, whose client shows the prompt (game/code_of_conduct.rs)
-DedicatedServer.setEnforceWhitelist	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setEnforceWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::set_enforce_whitelist	management stores enforce-whitelist and kicks unlisted players when enforcement is enabled
 DedicatedServer.setUsingWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	console whitelist on|off; store_property writes white-list back
 DedicatedServer.saveAllChunks	port	crates/horizon-client/src/game.rs::Game::save_game	gap: minor: no save notifications to the JSON-RPC management API
 DedicatedServer.sendLowDiskSpaceWarning	port	crates/horizon-client/src/lan/hub.rs::Hub::send_low_disk_space_warning	chunk_io reports the low disk space and the operators are told (game/dedicated.rs); a client shows the toast (game/remote.rs)
@@ -10,12 +10,12 @@ DedicatedServer.setSimulationDistance	skip:server		JSON-RPC management API only;
 DedicatedServer.fillServerSystemReport	skip:debug		adds rows to the system report of a server crash report; Horizon writes no server crash report
 DedicatedServer.dumpServerProperties	skip:debug		writes server.properties.txt into the debug report only
 DedicatedServer.onServerExit	inline	crates/horizon-client/src/game/dedicated.rs::Game::stop_dedicated	gap: minor: closes no query, GUI or JSON-RPC (RCON is the supervisor's, which outlives the game); the LAN pinger and listener are closed by lan_close
-DedicatedServer.setMaxPlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setMaxPlayers	port	crates/horizon-client/src/game/dedicated.rs::Game::set_max_players	live login limit and server.properties max-players via the management protocol
 DedicatedServer.setSpawnProtectionRadius	skip:server		JSON-RPC management API only; spawn-protection is read at start and used by Game::under_spawn_protection
 DedicatedServer.setRepliesToStatus	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setHidesOnlinePlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setOperatorUserPermissions	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
-DedicatedServer.setPlayerIdleTimeout	missing		minor: no /setidletimeout command in Horizon's command tree; player-idle-timeout is read once at start
+DedicatedServer.setPlayerIdleTimeout	missing		no /setidletimeout in Horizon's command tree (command_order.rs lists the name, the dispatcher has no arm); player-idle-timeout is read once at start and the kick it drives is game/dedicated.rs's idle sweep
 DedicatedServer.setStatusHeartbeatInterval	skip:server		JSON-RPC management API only (status heartbeat)
 DedicatedServer.setMotd	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.enforceSecureProfile	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: services.canValidateProfileKeys() is not part of the check
@@ -25,6 +25,10 @@ DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC manageme
 DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
 DedicatedServer.setForceGameMode	port	crates/horizon-client/src/game/dedicated/management.rs::Game::management	stores force-gamemode, updates the host and applies the default mode to online players
 MinecraftServerSettingsServiceImpl.setForceGameMode	port	crates/horizon-server/src/management_methods.rs::Game::force_game_mode	forwards the live setting to the game and persists it in server.toml
+MinecraftServerSettingsServiceImpl.setUsingWhitelist	port	crates/horizon-server/src/management_methods.rs::Game::allowlist_setting	forwards the live setting to the game and persists server.whitelist in server.toml
+MinecraftServerSettingsServiceImpl.setEnforceWhitelist	port	crates/horizon-server/src/management_methods.rs::Game::allowlist_setting	forwards the live setting to the game and persists server.enforce_whitelist in server.toml
+MinecraftServerSettingsServiceImpl.setMaxPlayers	port	crates/horizon-server/src/management_methods.rs::Game::max_players	forwards the live limit to the game and persists server.max_players
+MinecraftServerSettingsServiceImpl.setAutoSave	port	crates/horizon-server/src/management_methods.rs::Game::autosave	forwards the live save flag to the game; unlike a server property, it resets when the server restarts
 DedicatedServer.setGameMode	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	the /defaultgamemode command; gap: minor: the value is not written back to server.properties
 DedicatedServer.setAcceptsTransfers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setPauseWhenEmptySeconds	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
@@ -33,9 +37,9 @@ DedicatedServer.parseBugReportLink	port	crates/horizon-client/src/game/server_li
 DedicatedServerProperties.getDatapackConfig	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	splits initial-enabled-packs and initial-disabled-packs
 DedicatedServerProperties.deserializePermission	port	crates/horizon-server-files/src/properties.rs::Reader::permission	gap: minor: numbers clamp to 0 to 4; PermissionLevel.byId is not compared
 DedicatedServerProperties.WorldDimensionData.create	port	crates/horizon-client/src/game/dedicated.rs::Game::write_world_gen	gap: minor: only the preset pick by level-type is mapped; the flat-settings replacement is not compared
-ServerWatchdog.run	missing		minor: max-tick-time is read (properties.rs) but no watchdog runs; a stuck tick is never reported or stopped
-ServerWatchdog.createWatchdogCrashReport	missing		minor: builds the thread-dump crash report for the watchdog only; Horizon has no watchdog
-ServerWatchdog.exit	missing		minor: halts the process 10 s after a stuck tick (watchdog only)
+ServerWatchdog.run	port	crates/horizon-client/src/game/dedicated.rs::Watchdog::run	the thread DedicatedServer starts from max-tick-time; a tick max-tick-time past its due time logs, writes the report and exits
+ServerWatchdog.createWatchdogCrashReport	port	crates/horizon-client-render/src/crash.rs::report_watchdog	the report of a hung tick, written by that thread; gap: minor: no thread dump, since the stuck thread's stack is not available to Rust
+ServerWatchdog.exit	inline	crates/horizon-client/src/game/dedicated.rs::Watchdog::run	the process exits with 1 straight after the report; gap: minor: vanilla sleeps 10 s and dumps the stuck thread first
 Settings.dispatchNumberOrString	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	the difficulty parse in ServerProperties::new does this job inline
 Settings.getLegacy	port	crates/horizon-server-files/src/properties.rs::Reader::legacy	returns the raw value and removes the key; the caller parses it
 Settings.get	port	crates/horizon-server-files/src/properties.rs::Reader::get	reads with a default and writes the value back to the properties map
@@ -86,7 +90,7 @@ ServerCommandSuggestionsProvider.limitSuggestionCount	missing		minor: vanilla ke
 ServerCommandSuggestionsProvider.trySchedule	inline	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no hop to the server thread; the request is handled on its packet
 ServerCommandSuggestionsProvider.request	port	crates/horizon-client/src/game/lan_actions.rs::Game::guest_suggestions	gap: minor: no coalescing of rapid requests; vanilla keeps only the newest text
 ServerCommonPacketListenerImpl.onDisconnect	inline	crates/horizon-client/src/game/integrated.rs::Integrated::halt	gap: minor: unsure: whether a dropped local connection halts the server is not checked
-ServerCommonPacketListenerImpl.onPacketError	missing		unsure: vanilla records the exception for the crash report (reportPacketHandlingException); Horizon keeps no record of a failing packet
+ServerCommonPacketListenerImpl.onPacketError	missing		vanilla records the exception for the crash report (reportPacketHandlingException); nothing in the tree keeps one — a failing packet is not named anywhere, and every other ServerWatchdog gap here is now closed
 ServerCommonPacketListenerImpl.handleKeepAlive	inline	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: read_loop stores the id and write_loop sets the latency; a wrong id is not an instant disconnect
 ServerCommonPacketListenerImpl.handleCustomClickAction	skip:debug		vanilla only logs at debug (the NeoForge hook is mod API); Horizon drops the packet
 ServerCommonPacketListenerImpl.keepConnectionAlive	port	crates/horizon-client/src/lan/conn.rs::write_loop	gap: minor: times out after 30 s without an answer; vanilla after 15 s
@@ -103,6 +107,6 @@ ServerConnectionListener.stop	port	crates/horizon-client/src/lan/mod.rs::Lan::st
 ServerConnectionListener.stopTcpServerListener	port	crates/horizon-client/src/lan/mod.rs::Lan::stop_listening	closes the network listener; connections already in, the local one included, stay
 ServerConnectionListener.tick	inline	crates/horizon-client/src/lan/mod.rs::Lan::poll	gap: minor: reports Left events; no Internal server error disconnect when a packet fails
 ServerConnectionListener.addPendingConnections	skip:java		queue of accepted sockets; Horizon starts one thread per connection
-ServerConnectionListener.getSessionId	missing		minor: vanilla sends one random session id per server run in login finished; Horizon sends the player's uuid
+ServerConnectionListener.getSessionId	missing		vanilla sends one random session id per server run in login finished; lan/conn.rs sends the player's own uuid as `session`
 ServerConnectionListener.LatencySimulator.delayDownstream	skip:debug		dev latency simulator behind SharedConstants.DEBUG_FAKE_LATENCY_MS
 ServerConnectionListener.LatencySimulator.onTimeout	skip:debug		dev latency simulator behind SharedConstants.DEBUG_FAKE_LATENCY_MS

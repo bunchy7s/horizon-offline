@@ -272,7 +272,7 @@ impl Game<'_> {
             }
             self.post_block_game_event("minecraft:fluid_pickup", pos, self.sculk_actor(), None);
         }
-        self.stats.add("used", &held.item, 1);
+        self.award_stat("used", &held.item, 1);
         let smokey = beehive::smokey(&self.mob_world_base(&[]), pos);
         let key = (pos[0], pos[1], pos[2]);
         if !smokey
