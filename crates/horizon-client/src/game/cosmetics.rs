@@ -45,7 +45,9 @@ impl Cosmetics {
             .unwrap_or_else(|_| horizon_cosmetics::API.to_owned());
         let agent = format!("Horizon/{}", env!("CARGO_PKG_VERSION"));
         // Beside the downloaded skins (`assets/skins` in the game folder).
-        let cache = std::env::current_dir().unwrap_or_default().join("assets/cosmetics");
+        let cache = std::env::current_dir()
+            .unwrap_or_default()
+            .join("assets/cosmetics");
         let http = horizon_cosmetics::Http::new(&api, &agent);
         (horizon_cosmetics::Cosmetics::new(http, Some(cache)), false)
     }
@@ -209,7 +211,10 @@ impl Game<'_> {
                 }
             };
             // The texture fills the top-left of its 64×64 slot.
-            let (w, h) = (item.texture.width as f32 / 64.0, item.texture.height as f32 / 64.0);
+            let (w, h) = (
+                item.texture.width as f32 / 64.0,
+                item.texture.height as f32 / 64.0,
+            );
             let uv = [
                 rect.u0,
                 rect.v0,
