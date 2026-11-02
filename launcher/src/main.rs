@@ -15,8 +15,11 @@ mod cull;
 mod datapacks_page;
 mod dev_options;
 mod export_page;
+mod frame;
 mod game_tools;
 mod github_mods_page;
+mod glass;
+mod glass_ui;
 mod home;
 mod home_tabs;
 mod import_page;
@@ -236,6 +239,10 @@ struct Launcher {
     language_menu: bool,
     /// The top bar's quick switch of who plays (`switch_page.rs`).
     account_menu: bool,
+    /// The glass sidebar's ⋮ menu (`frame.rs`).
+    row_menu: frame::RowMenu,
+    /// The glass look's colours for the player's accent (`horizon_theme::glass`).
+    look: horizon_theme::glass::Glass,
     /// Where the mouse went down to close a menu by pressing outside it, so that the
     /// same press, ending on the menu's own button, doesn't open it again.
     menu_closed_at: Option<Point<Pixels>>,
@@ -503,6 +510,8 @@ impl Launcher {
             hue_dragging: false,
             language_menu: false,
             account_menu: false,
+            row_menu: Default::default(),
+            look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
             background_error: None,
@@ -4718,6 +4727,7 @@ impl Render for Launcher {
         }
         // Dark: the new design's scene; Light keeps the dawn sky until the design has a light
         // look.
+        glass::begin_build(window);
         let sky = if t.dark {
             self.scene.clone().into_any_element()
         } else {
@@ -4733,8 +4743,20 @@ impl Render for Launcher {
             }
             sky.into_any_element()
         };
-        let topbar = self.topbar(cx);
-        let sidebar = self.sidebar(window, cx);
+        // Dark: the glass frame over the scene; Light keeps the night one over the dawn.
+        let (topbar, sidebar) = if t.dark {
+            (
+                self.glass_topbar(cx),
+                self.glass_sidebar(window, cx).into_any_element(),
+            )
+        } else {
+            (self.topbar(cx), self.sidebar(window, cx).into_any_element())
+        };
+        let row_menu = if t.dark {
+            self.row_menu(window, cx)
+        } else {
+            None
+        };
         let mut root = div()
             .id("root")
             .track_focus(&self.root_focus)
@@ -4818,6 +4840,7 @@ impl Render for Launcher {
                             ),
                     ),
             );
+        root = root.children(row_menu);
         if self.page == Page::Servers {
             if let Some(dialog) = self.create_dialog(cx) {
                 root = root.child(dialog);

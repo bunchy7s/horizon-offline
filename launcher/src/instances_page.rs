@@ -280,6 +280,20 @@ impl Launcher {
         self.servers.text(Field::InstanceVersion).set(String::new());
     }
 
+    /// Opens the dialog for a copy of the selected instance, named after it.
+    pub(super) fn start_copy(&mut self) {
+        let Some(name) = self.selected_instance().map(|i| i.name.clone()) else {
+            return;
+        };
+        self.open_instance_dialog(None);
+        self.servers
+            .text(Field::InstanceName)
+            .set(format!("{name} copy"));
+        if let Some(d) = &mut self.instances.dialog {
+            d.copy = true;
+        }
+    }
+
     /// Escape closes the dialog. Whether it did.
     pub(super) fn instance_escape(&mut self) -> bool {
         if self.instances.dialog.as_ref().is_some_and(|d| !d.busy) {
@@ -676,11 +690,7 @@ impl Launcher {
     pub(super) fn instance_row(&mut self, n: usize, cx: &mut Context<Self>) -> Option<Div> {
         let t = self.theme;
         let instance = self.selected_instance()?.clone();
-        let (home, edit, name) = (
-            instance.home.clone(),
-            instance.clone(),
-            instance.name.clone(),
-        );
+        let (home, edit) = (instance.home.clone(), instance.clone());
         // Under the name, wrapping: six actions don't fit beside it at the window's narrowest.
         let actions = div()
             .flex()
@@ -699,13 +709,7 @@ impl Launcher {
             .child(
                 button("instance-copy", "Copy…", Kind::Ghost, &t).on_click(cx.listener(
                     move |this, _: &ClickEvent, _, cx| {
-                        this.open_instance_dialog(None);
-                        this.servers
-                            .text(Field::InstanceName)
-                            .set(format!("{name} copy"));
-                        if let Some(d) = &mut this.instances.dialog {
-                            d.copy = true;
-                        }
+                        this.start_copy();
                         cx.notify();
                     },
                 )),
@@ -845,7 +849,7 @@ impl Launcher {
         )
     }
 
-    fn delete_instance(&mut self, id: &str) {
+    pub(super) fn delete_instance(&mut self, id: &str) {
         if self.client.is_some() || self.starting_client.is_some() {
             return;
         }
@@ -882,7 +886,7 @@ pub(super) fn played_line(instance: &Instance) -> String {
 }
 
 /// A Java instance's line in the sidebar: "Java 1.21.4", and its loader ("· Fabric 0.16.9").
-fn java_line(j: &instances::JavaGame) -> String {
+pub(super) fn java_line(j: &instances::JavaGame) -> String {
     match &j.loader {
         Some(l) => format!("Java {} · {} {}", j.minecraft, l.kind.name(), l.version),
         None => format!("Java {}", j.minecraft),
