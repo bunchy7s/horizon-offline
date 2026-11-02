@@ -19,6 +19,8 @@ Checks:
              the menu with an available pointer.
 - titles: a chest named with styles (`CustomName`, as a plugin's menu is): its screen's title keeps
           the colours and bold (it used to be flattened to plain grey).
+- dialog_text: custom click events inherited by message text and inline sprites send their id and
+               optional payload, with the dialog's none/close/wait_for_response screen behaviour.
 
 The game runs with fresh HORIZON_HOME, launcher and XDG folders and without audio. Screenshots and both
 logs go to --out.
@@ -276,7 +278,61 @@ def check_titles(server, game, out):
     return {'title': title}
 
 
-CHECKS = {'dialog': check_dialog, 'titles': check_titles, 'book_menu': check_book_menu}
+def check_dialog_text(server, game, out):
+    """Custom component clicks (including an inherited inline sprite) reach the real server."""
+    results = {}
+    for after in ('none', 'close', 'wait_for_response'):
+        event = {'action': 'custom', 'id': f'horizon:text_{after}'}
+        if after != 'none':
+            event['payload'] = {'shop': 'potions', 'amount': 3}
+        dialog = {
+            'type': 'minecraft:multi_action', 'title': 'Text actions', 'pause': False,
+            'after_action': after,
+            'body': {'type': 'minecraft:plain_message', 'width': 325, 'contents': {
+                'text': '', 'click_event': event, 'extra': [
+                    {'object': 'atlas', 'atlas': 'minecraft:items', 'sprite': 'minecraft:item/potion'},
+                    ' Shop',
+                ],
+            }},
+            'actions': [{'label': 'Unused'}],
+        }
+        server.console(f'dialog show {PLAYER} {snbt(dialog)}')
+        game.raw('wait-for', 'screen', 'dialog', '--timeout', 30)
+        # Read the rendered layout without depending on simulation ticks: dialogs are UI.
+        width = game.raw('ui')['gui_size'][0]
+        # The single message starts at y=63 with four pixels of padding. Blank space
+        # within its 325-wide widget must not execute the component's click event.
+        game.raw('click-at', width / 2 + 100, 70)
+        time.sleep(0.25)
+        assert not any(f'Received custom click action {event["id"]} ' in line for line in server.lines)
+        # The icon and the letters inherit the same event. Exercise both paths.
+        game.raw('click-at', width / 2 - 15 if after == 'none' else width / 2 + 3, 70)
+        server.wait_for(rf'Received custom click action {event["id"]} with payload', timeout=10)
+        line = next(line for line in server.lines if f'Received custom click action {event["id"]} ' in line)
+        if 'payload' in event:
+            assert 'shop:"potions"' in line and 'amount:3' in line, line
+        else:
+            assert 'with payload null' in line, line
+        state = game('state')
+        if after == 'none':
+            assert state['dialog']['open'], state['dialog']
+            server.console(f'dialog clear {PLAYER}')
+        elif after == 'wait_for_response':
+            assert state['dialog']['screen'] == 'waiting_for_response', state['dialog']
+            game.shot(out, 'text-waiting')
+            time.sleep(5.5)
+            game.raw('key', 'esc', 'tap')
+        game.raw('wait-for', 'screen', 'playing', '--timeout', 10)
+        results[after] = line
+    return results
+
+
+CHECKS = {
+    'dialog': check_dialog,
+    'dialog_text': check_dialog_text,
+    'titles': check_titles,
+    'book_menu': check_book_menu,
+}
 
 
 def run(bins, out, checks):

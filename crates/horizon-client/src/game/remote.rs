@@ -450,6 +450,11 @@ pub(super) struct Remote {
     /// The item the player's use began with (`LivingEntity.useItem`).
     pub(super) use_item: Option<Arc<str>>,
     pub(super) dimension: DimensionType,
+    /// The level's key (`minecraft:overworld`): where its far terrain is kept.
+    pub(super) level: String,
+    /// The level's hashed seed (login, respawn): the folder of its kept chunks
+    /// (`server_terrain::level_dir`).
+    pub(super) hashed_seed: i64,
     /// What chunk packets decode with (the dimension's height and sky, the
     /// biome registry); replaced whenever one of them changes.
     pub(super) chunk_format: Arc<ChunkFormat>,
@@ -960,6 +965,8 @@ impl Game<'_> {
             camera: None,
             use_item: None,
             dimension: DimensionType::vanilla("minecraft:overworld"),
+            level: "minecraft:overworld".into(),
+            hashed_seed: 0,
             chunk_format: Arc::new(ChunkFormat::new(
                 &DimensionType::vanilla("minecraft:overworld"),
                 Vec::new(),
@@ -1712,7 +1719,17 @@ impl Game<'_> {
             .backlog_since
             .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
         let mut chunks = Duration::ZERO;
+        // A run of ForgetLevelChunk (thousands when the server's view moves far: a
+        // teleport at 32 chunks) is forgotten at once, before whatever follows it.
+        let mut forgotten = horizon_client::fast_hash::FxHashSet::default();
         while let Some(item) = events.pop_front() {
+            if let Received::Event(Event::Packet(packet)) = &item
+                && let C::ForgetLevelChunk(p) = &**packet
+            {
+                forgotten.insert((p.pos[0], p.pos[1]));
+                continue;
+            }
+            self.forget_remote_columns(&mut forgotten);
             let chunk = matches!(item, Received::Chunk(_));
             if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
                 events.push_front(item);
@@ -1902,6 +1919,9 @@ impl Game<'_> {
                 break;
             }
         }
+        if self.remote.is_some() {
+            self.forget_remote_columns(&mut forgotten);
+        }
         if let Some(r) = self.remote.as_mut() {
             r.backlog_since = if events.is_empty() {
                 None
@@ -2019,6 +2039,8 @@ impl Game<'_> {
                 .in_column(shape.column()),
         );
         r.dimension = dimension;
+        r.level = spawn.dimension.clone();
+        r.hashed_seed = spawn.seed;
         r.game_mode = spawn.game_type;
         r.flat = spawn.flat;
         r.loaded_sent = false;
@@ -2126,30 +2148,52 @@ impl Game<'_> {
             (x - r.chunk_center.0).abs() <= range && (z - r.chunk_center.1).abs() <= range
         })
     }
+    /// A column the client no longer holds; far terrain keeps it as it was
+    /// last (`server_terrain`).
+    fn forget_remote_chunk(
+        &mut self,
+        x: i32,
+        z: i32,
+    ) -> Option<std::sync::Arc<horizon_client::chunk::Chunk>> {
+        let chunk = self.streaming.forget(&mut self.world, x, z)?;
+        if let Some(lod) = &mut self.lod {
+            lod.observe(chunk.clone(), self.res.facts());
+        }
+        Some(chunk)
+    }
     /// The columns a moved or resized storage no longer holds.
     fn drop_remote_chunks_out_of_range(&mut self) {
-        let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
+        let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
             .world
             .chunks
             .keys()
             .copied()
             .filter(|&(x, z)| !self.remote_chunk_in_range(x, z))
             .collect();
+        self.forget_remote_columns(&mut gone);
+    }
+    /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
+    /// of their own when there are many), their sections in the renderer and their block
+    /// entities, each store once for all of them.
+    fn forget_remote_columns(
+        &mut self,
+        gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    ) {
         if gone.is_empty() {
             return;
         }
         let mut freed = Vec::with_capacity(gone.len());
-        for &(x, z) in &gone {
-            freed.extend(self.streaming.forget(&mut self.world, x, z));
+        for &(x, z) in gone.iter() {
+            freed.extend(self.forget_remote_chunk(x, z));
         }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_columns(gone.iter().copied());
         }
         horizon_client::chunk::free_columns(freed, gone.len());
-        // One pass for all of them.
         self.world
             .block_entities
             .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+        gone.clear();
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
     /// packet's type, loads the tag (`loadWithComponents`); an empty tag
@@ -3023,15 +3067,9 @@ impl Game<'_> {
             C::LevelChunkWithLight(p) => self.remote_chunk(&p, None),
             C::LightUpdate(p) => self.remote_light_update(&p),
             C::ChunksBiomes(p) => self.remote_chunks_biomes(&p),
+            // `poll_remote` forgets a run of them at once.
             C::ForgetLevelChunk(p) => {
-                let [x, z] = p.pos;
-                self.streaming.forget(&mut self.world, x, z);
-                self.world
-                    .block_entities
-                    .retain(|k, _| (k.0 >> 4, k.2 >> 4) != (x, z));
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.remove_columns([(x, z)]);
-                }
+                self.forget_remote_columns(&mut [(p.pos[0], p.pos[1])].into_iter().collect());
             }
             C::ChunkBatchFinished(_) => {
                 // ChunkBatchSizeCalculator's ceiling; meshing runs on workers.
@@ -5215,6 +5253,8 @@ impl Game<'_> {
             previous: at,
             velocity,
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset,
@@ -10004,6 +10044,11 @@ impl Remote {
                 (fallback, true)
             }
         }
+    }
+    /// How far the server sends chunks: its view distance and the ring
+    /// around (`ChunkTrackingView`), at least two.
+    pub(super) fn sent_radius(&self) -> i32 {
+        self.view_distance.max(2) + 1
     }
     /// A player entity's profile name: the one it was created with, else its
     /// player-list entry's (an entity the list named after it spawned).

@@ -419,4 +419,99 @@ mod tests {
         eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
         assert!(posed > 3 * 40, "only {posed} draws took the GPU path");
     }
+
+    /// The armor stand's models (`ArmorStandRenderer`: the stand, the small
+    /// one, their armour layers) posed like a stand: turned arms and head, a
+    /// hidden part (scale 0, as a stand without arms or base plate), the
+    /// armour glint on one layer. The GPU path draws what the CPU path draws,
+    /// to the bit. Needs the prepared resources.
+    #[test]
+    fn armor_stand_models_pose_on_the_gpu_as_on_the_cpu() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let document = crate::mobs::EntityModelDocument::load(&root).unwrap();
+        let base = glam::Mat4::from_translation(glam::Vec3::new(2.5, -1.0, 6.25))
+            * glam::Mat4::from_rotation_y(2.1)
+            * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
+            * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
+        let (mut models, mut frame) = (SkinModels::default(), SkinFrame::default());
+        let mut store = Vec::new();
+        let mut drawn = 0;
+        for model in ["armor_stand", "armor_stand_small"] {
+            for slot in ["main", "helmet", "chestplate", "leggings", "boots"] {
+                let key = format!("minecraft:{model}#{slot}");
+                let part = Arc::new(document.model(&key).unwrap_or_else(|| panic!("no {key}")));
+                let mut poses = Poses::new(&part);
+                for (name, turn) in [("head", [0.3, -0.7, 0.1]), ("left_arm", [-1.2, 0.4, 0.25])] {
+                    if poses.has(name) {
+                        poses.get(name)[3..6].copy_from_slice(&turn);
+                    }
+                }
+                for hidden in ["base_plate", "right_arm"] {
+                    if poses.has(hidden) {
+                        poses.get(hidden)[6..9].copy_from_slice(&[0.0; 3]);
+                    }
+                }
+                let overlay = if slot == "chestplate" {
+                    render::ARMOR_GLINT
+                } else {
+                    0
+                };
+                let uv = [0.125, 0.25, 0.1875, 0.28125];
+                let mut cpu = Vec::new();
+                render::draw(
+                    &part,
+                    base,
+                    &poses,
+                    uv,
+                    0xff80_c0ff,
+                    0x70a0,
+                    overlay,
+                    &mut cpu,
+                );
+                models.begin(&mut frame, store.len() as u32);
+                let mut gpu = Vec::new();
+                let mut skin = Skin {
+                    models: &mut models,
+                    frame: &mut frame,
+                    bounds: None,
+                };
+                let paint = (uv, 0.0, 0xff80_c0ff, 0x70a0, overlay);
+                render::put(
+                    &mut Some(&mut skin),
+                    &part,
+                    base,
+                    &poses,
+                    paint.0,
+                    paint.1,
+                    paint.2,
+                    paint.3,
+                    paint.4,
+                    &mut gpu,
+                );
+                if frame.reset {
+                    store.clear();
+                }
+                store.extend_from_slice(&frame.new_model);
+                frame.handed();
+                assert!(gpu.is_empty(), "{key} stayed on the CPU");
+                let expanded = expand(&store, &frame);
+                assert_eq!(expanded.len(), cpu.len(), "{key}: vertex count");
+                assert!(!cpu.is_empty(), "{key} drew nothing");
+                for (i, (a, b)) in expanded.iter().zip(&cpu).enumerate() {
+                    assert_eq!(
+                        bytemuck::bytes_of(a),
+                        bytemuck::bytes_of(b),
+                        "{key} vertex {i}: {a:?} != {b:?}"
+                    );
+                }
+                drawn += 1;
+            }
+        }
+        assert_eq!(drawn, 10);
+    }
 }

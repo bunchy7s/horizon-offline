@@ -351,21 +351,51 @@ fn matches(p: &index::Project, text: &str) -> bool {
         .all(|word| hay.contains(&word.to_lowercase()))
 }
 
+/// The sorts the registry can honor: it has downloads and each version's publish day, but no
+/// follows and no relevance score (its search is a word match).
+pub const SORTS: [super::details::Sort; 3] = [
+    super::details::Sort::Downloads,
+    super::details::Sort::Newest,
+    super::details::Sort::Updated,
+];
+
 /// The projects of the query's kind whose words match, for this game unless `everything`: the
-/// most downloaded first.
+/// most downloaded first, or the newest (first published) or most recently updated (latest
+/// version) when the query asks, ties by downloads.
 fn search(index: &Index, query: &Query) -> Vec<Project> {
-    let mut found: Vec<Project> = index
+    use super::details::Sort;
+    let mut found: Vec<&index::Project> = index
         .projects
         .iter()
         .filter(|p| kind_of(&p.kind) == Some(query.kind) && matches(p, &query.text))
         .filter(|p| query.everything || p.versions.iter().any(|v| v.game == GAME))
         // A WebAssembly mod stays in the index for the modpacks that need it, not in the browser.
         .filter(|p| !p.versions.iter().filter(|v| v.game == GAME).all(needs_port))
-        .filter_map(project_of)
         .collect();
-    found.sort_by_key(|p| std::cmp::Reverse(p.downloads));
+    let day = |p: &index::Project, newest: bool| {
+        let days = p.versions.iter().map(|v| v.published.as_str());
+        if newest { days.min() } else { days.max() }
+            .unwrap_or("")
+            .to_string()
+    };
+    match query.filters.sort {
+        Some(Sort::Newest) => found.sort_by_cached_key(|p| {
+            (
+                std::cmp::Reverse(day(p, true)),
+                std::cmp::Reverse(p.downloads),
+            )
+        }),
+        Some(Sort::Updated) => found.sort_by_cached_key(|p| {
+            (
+                std::cmp::Reverse(day(p, false)),
+                std::cmp::Reverse(p.downloads),
+            )
+        }),
+        _ => found.sort_by_key(|p| std::cmp::Reverse(p.downloads)),
+    }
     found
         .into_iter()
+        .filter_map(project_of)
         .skip(query.offset)
         .take(query.limit)
         .collect()

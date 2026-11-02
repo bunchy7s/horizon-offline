@@ -101,9 +101,14 @@ fn java_float(v: f64) -> String {
         format!("{v}")
     }
 }
+/// String.format(Locale.ROOT, "%.<decimals>f"): Java rounds the shortest
+/// decimal text half-up, which `{:.N}` (exact value, half-even) does not.
+pub(super) fn percent_f(v: f64, decimals: usize) -> String {
+    horizon_client::java_text::format_fixed(v, decimals)
+}
 /// String.format(Locale.ROOT, "%f").
 fn format_double(v: f64) -> String {
-    format!("{v:.6}")
+    percent_f(v, 6)
 }
 /// `EntitySelectorParser.createRotationPredicate`: the wrapped angle lies in
 /// the wrapped range, which runs through 180 when its minimum is above its
@@ -845,41 +850,18 @@ impl Game<'_> {
             })
             .collect()
     }
-    /// The entities of the level in place a selector can find.
+    /// The entities of the level in place a selector can find: one walk over
+    /// the entity lists (a kind added there joins `@e` once it names its
+    /// `Target`), then the kinds that are not on the walk. An
+    /// unsorted selector lists them in that order.
     fn level_candidates(&self) -> Vec<Target> {
-        use horizon_client::projectiles::ProjectileKind as K;
+        use super::entity::{Entity as _, entity_lists_of, for_each_entity};
         let mut candidates = Vec::new();
-        candidates.extend(
-            self.mobs
-                .iter()
-                .filter(|m| m.death_time == 0)
-                .map(|m| Target::Mob(m.id)),
-        );
-        candidates.extend(self.dropped.iter().map(|i| Target::Item(i.id)));
-        candidates.extend(self.orbs.iter().map(|o| Target::Orb(o.id)));
-        candidates.extend(
-            self.creatures
-                .projectiles
-                .iter()
-                // The kinds /data can write (entity_nbt).
-                .filter(|p| {
-                    p.is_arrow()
-                        || horizon_client::entity_nbt::saved_with_chunk(p)
-                        || matches!(
-                            p.kind,
-                            K::LargeFireball { .. }
-                                | K::SmallFireball
-                                | K::WindCharge
-                                | K::BreezeWindCharge
-                        )
-                })
-                .map(|p| Target::Projectile(p.id)),
-        );
-        candidates.extend(self.armor_stands.iter().map(|a| Target::Stand(a.id)));
+        for_each_entity!(entity_lists_of!(self), entity => {
+            candidates.extend(entity.selector_target());
+        });
         candidates.extend(self.item_frames.iter().map(|f| Target::Frame(f.id)));
         candidates.extend(self.paintings.iter().map(|p| Target::Painting(p.id)));
-        candidates.extend(self.boats.iter().map(|b| Target::Boat(b.id)));
-        candidates.extend(self.carts.iter().map(|c| Target::Cart(c.id)));
         candidates.extend(self.others.iter().map(|o| Target::Other(o.id)));
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
@@ -887,9 +869,6 @@ impl Game<'_> {
         if let Some(d) = &self.dragon {
             candidates.push(Target::Dragon(d.id));
         }
-        candidates.extend(self.tnts.iter().map(|t| Target::Tnt(t.id)));
-        candidates.extend(self.falling.iter().map(|f| Target::Falling(f.id)));
-        candidates.extend(self.rockets.iter().map(|r| Target::Rocket(r.id)));
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
         candidates
     }
@@ -1831,12 +1810,7 @@ impl Game<'_> {
             } else {
                 pos[1]
             };
-            let (dx, dy, dz) = (f[0] - pos[0], f[1] - eye, f[2] - pos[2]);
-            let horizontal = (dx * dx + dz * dz).sqrt();
-            Some([
-                ((dz.atan2(dx).to_degrees()) - 90.0) as f32,
-                (-(dy.atan2(horizontal).to_degrees())) as f32,
-            ])
+            Some(world_cmds::look_at([pos[0], eye, pos[2]], f))
         };
         // A server's player in another level than the source's (`execute
         // in`, the console's Overworld) moves there (ServerPlayer.teleport
@@ -3909,5 +3883,23 @@ mod look_at_tests {
         assert_eq!(non_player_entity_id(Target::Player), None);
         assert_eq!(non_player_entity_id(Target::Guest(3)), None);
         assert_eq!(non_player_entity_id(Target::Mob(u32::MAX - 4096)), None);
+    }
+}
+
+#[cfg(test)]
+mod percent_f_tests {
+    use super::percent_f;
+
+    #[test]
+    fn rounds_the_shortest_decimal_half_up_like_java() {
+        // WorldBorderCommand: "%.1f" distance, "%.2f" buffer, "%.0f" size.
+        assert_eq!(percent_f(10.35, 1), "10.4");
+        assert_eq!(percent_f(5.125, 2), "5.13");
+        assert_eq!(percent_f(10.5, 0), "11");
+        assert_eq!(percent_f(2.5, 0), "3");
+        // TeleportCommand.formatDouble: "%f".
+        assert_eq!(percent_f(0.1234565, 6), "0.123457");
+        assert_eq!(percent_f(-1.005, 2), "-1.01");
+        assert_eq!(percent_f(3.0, 2), "3.00");
     }
 }

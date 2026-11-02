@@ -1302,12 +1302,14 @@ impl Game<'_> {
             .get("minecraft:worldgen/biome")
             .map(|v| v.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_default();
-        let mut encoder = ChunkEncoder::new(
-            self.res
-                .facts()
-                .states
-                .iter()
-                .map(|s| (s.name.clone(), s.fluid_level > 0 || s.waterlogged)),
+        let mut encoder = ChunkEncoder::with_signs(
+            self.res.facts().states.iter().map(|s| {
+                (
+                    s.name.clone(),
+                    s.fluid_level > 0 || s.waterlogged,
+                    s.sign_form(),
+                )
+            }),
             &sync.builtin,
             &biome_names,
             &registry,
@@ -1819,8 +1821,13 @@ impl Game<'_> {
             e.position = [d.position.x, d.position.y, d.position.z];
             e.on_ground = d.on_ground;
             e.velocity = [d.velocity.x, d.velocity.y, d.velocity.z];
-            e.precise = d.needs_sync;
+            // `ServerEntity.getRequiresPrecisePosition` is false for an item:
+            // `needs_sync` asks for its data again, not for an exact position.
+            // The collision case is `full_precision_required` in the tracker.
+            e.precise = false;
             e.needs_sync = d.needs_sync;
+            e.vertical_collision = d.vertical_collision;
+            e.horizontal_collision = d.horizontal_collision;
             // Entity.DATA_SHARED_FLAGS_ID: glowing 0x40 (the Glowing tag).
             if self.entity_glowing(d.id) {
                 e.meta.push((0, serializer::BYTE, Value::Byte(0x40)));

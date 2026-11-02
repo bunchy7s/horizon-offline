@@ -3588,3 +3588,189 @@ fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
     // A remainder that is the mod's own block item is kept too (`jar`).
     assert_eq!(left, ["jar", "good", "vanilla"]);
 }
+
+/// A sign's four forms come from its template, whatever the blocks are named,
+/// its wood from its declaration, and its item places the wall form it names
+/// and is that form's item too. A `road_sign` of stone is no sign.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
+    use horizon_world::level::{Behaviours, ItemKind};
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-signs-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("signs"),
+        &[
+            ("horizon-mod.toml", &manifest("signs", "")),
+            (
+                "data/signs/horizon/block/notice.json",
+                r#"{"template": "minecraft:oak_sign", "wood_type": "signs:elm", "wall_block": "signs:board"}"#,
+            ),
+            (
+                "data/signs/horizon/block/board.json",
+                r#"{"template": "minecraft:oak_wall_sign", "wood_type": "signs:elm", "item": false}"#,
+            ),
+            (
+                "data/signs/horizon/block/lantern.json",
+                r#"{"template": "minecraft:spruce_hanging_sign", "wall_block": "signs:bracket"}"#,
+            ),
+            (
+                "data/signs/horizon/block/bracket.json",
+                r#"{"template": "minecraft:spruce_wall_hanging_sign", "wood_type": "cherry", "item": false}"#,
+            ),
+            (
+                "data/signs/horizon/block/road_sign.json",
+                r#"{"template": "minecraft:stone"}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, std::slice::from_ref(&m), &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let behaviours = Behaviours::load(registry, &root).unwrap();
+    let block = |name: &str| facts.get(registry.default_state(name).unwrap());
+    let form = |hanging, wall| Some(crate::blocks::SignForm { hanging, wall });
+    assert_eq!(block("signs:notice").sign_form(), form(false, false));
+    assert_eq!(block("signs:board").sign_form(), form(false, true));
+    assert_eq!(block("signs:lantern").sign_form(), form(true, false));
+    assert_eq!(block("signs:bracket").sign_form(), form(true, true));
+    assert_eq!(block("signs:road_sign").sign_form(), None);
+    assert_eq!(
+        block("minecraft:oak_wall_sign").sign_form(),
+        form(false, true)
+    );
+    // The declared wood, or the template's.
+    assert_eq!(facts.wood_type("signs:notice"), Some("signs:elm"));
+    assert_eq!(facts.wood_type("signs:bracket"), Some("cherry"));
+    assert_eq!(facts.wood_type("signs:lantern"), Some("spruce"));
+    assert_eq!(
+        facts.wood_type("minecraft:dark_oak_wall_sign"),
+        Some("dark_oak")
+    );
+    assert_eq!(facts.wood_type("signs:road_sign"), None);
+    // Each item places its sign and the wall form it names, which it is the item of.
+    let id = |name: &str| behaviours.table.block_by_name(name);
+    let notice = behaviours.item_binding("signs:notice").unwrap();
+    assert_eq!(notice.kind, ItemKind::StandingAndWall);
+    assert_eq!(
+        (Some(notice.block), notice.wall_block),
+        (id("signs:notice"), id("signs:board"))
+    );
+    let lantern = behaviours.item_binding("signs:lantern").unwrap();
+    assert_eq!(lantern.kind, ItemKind::HangingSign);
+    assert_eq!(
+        (Some(lantern.block), lantern.wall_block),
+        (id("signs:lantern"), id("signs:bracket"))
+    );
+    assert_eq!(&*block("signs:board").item, "signs:notice");
+    assert_eq!(&*block("signs:bracket").item, "signs:lantern");
+    let mut renderer =
+        crate::block_entity_render::BlockEntityRenderer::load(&root, registry).unwrap();
+    renderer.add_mod_signs(&facts, registry);
+    for name in [
+        "signs:notice",
+        "signs:board",
+        "signs:lantern",
+        "signs:bracket",
+    ] {
+        assert!(
+            renderer.renders(registry.default_state(name).unwrap().0),
+            "{name}"
+        );
+    }
+    assert!(!renderer.renders(registry.default_state("signs:road_sign").unwrap().0));
+    // Vanilla's pair stays as it was.
+    let oak = behaviours.item_binding("minecraft:oak_sign").unwrap();
+    assert_eq!(oak.wall_block, id("minecraft:oak_wall_sign"));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// `WorldGenRegion.setBlock`: a feature that places a mod's sign leaves it its
+/// block entity, which goes by the template's class and not the block's name.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_feature_gives_a_mods_sign_its_block_entity() {
+    use crate::containers::BlockEntity;
+    use crate::streaming::{ChunkGenerator, Proto};
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-mod-sign-feature-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("post"),
+        &[
+            ("horizon-mod.toml", &manifest("post", "")),
+            (
+                "data/post/horizon/block/notice.json",
+                r#"{"template": "minecraft:oak_sign"}"#,
+            ),
+            (
+                "data/post/worldgen/configured_feature/notice.json",
+                r#"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
+                    "targets": [{"target": {"predicate_type": "minecraft:tag_match",
+                        "tag": "minecraft:stone_ore_replaceables"},
+                        "state": "post:notice"}]}"#,
+            ),
+            (
+                "data/post/worldgen/placed_feature/notice.json",
+                r#"{"feature": "post:notice", "placement": [
+                    {"type": "minecraft:count", "count": 40}, {"type": "minecraft:in_square"},
+                    {"type": "minecraft:height_range", "height": {"type": "minecraft:uniform",
+                        "min_inclusive": {"absolute": -32}, "max_inclusive": {"absolute": 48}}},
+                    {"type": "minecraft:biome"}]}"#,
+            ),
+            (
+                "data/post/neoforge/biome_modifier/add_notice.json",
+                r##"{"type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
+                    "features": "post:notice", "step": "underground_ores"}"##,
+            ),
+        ],
+    );
+    let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let notice = registry.default_state("post:notice").unwrap().0;
+    let generate = |signs: bool| -> (usize, usize) {
+        let mut terrain =
+            crate::vanillagen::VanillaTerrain::new(&root.join("worldgen"), registry, &biomes, 1234)
+                .unwrap();
+        if signs {
+            terrain.add_mod_signs(&facts);
+        }
+        let mut worker = terrain.worker();
+        let mut region: [Proto; 9] =
+            std::array::from_fn(|i| terrain.proto(&mut worker, i as i32 % 3 - 1, i as i32 / 3 - 1));
+        terrain.decorate(&mut worker, &mut region);
+        let [_, _, _, _, center, ..] = region;
+        let chunk = terrain.finish(center);
+        let mut placed = 0;
+        for y in chunk.min_y()..chunk.max_y() {
+            for z in 0..16 {
+                for x in 0..16 {
+                    placed += usize::from(chunk.get(x, y, z) == notice);
+                }
+            }
+        }
+        let entities = chunk
+            .block_entities
+            .iter()
+            .filter(|(_, e)| matches!(e, BlockEntity::Sign(s) if !s.hanging))
+            .count();
+        (placed, entities)
+    };
+    let (placed, entities) = generate(false);
+    assert!(placed > 0, "the feature places the sign");
+    assert_eq!(entities, 0, "by its name alone it has none");
+    assert_eq!(generate(true), (placed, placed));
+    let _ = fs::remove_dir_all(&scratch);
+}

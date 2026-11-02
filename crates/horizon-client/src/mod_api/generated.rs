@@ -759,8 +759,8 @@ pub trait Hooks: Send + Sync {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities and experience orbs; later
-    /// APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
+    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
     fn entity_leave_level(&self, host: &mut dyn Host, event: &mut EntityLeaveLevelEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -2013,10 +2013,9 @@ pub trait Hooks: Send + Sync {
     /// does not happen: no damage, no knockback, no sound, no block reaction, the
     /// arrow does not stick, a pearl does not teleport, a potion or a fireball
     /// does not burst. The projectile flies on and is not discarded, so a mod
-    /// that cancels also decides what becomes of it: it hits again the next tick
-    /// unless the mod moves, turns or removes it. An arrow stays where it would
-    /// have hit, and the other projectiles go on through the whole of their
-    /// motion. Covers what `tick_projectiles` flies: arrows, tridents, snowballs,
+    /// that cancels also decides what becomes of it. It continues through its
+    /// whole motion and may hit something on a later tick. Covers what
+    /// `tick_projectiles` flies: arrows, tridents, snowballs,
     /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
     /// shulker bullets, from players, mobs and dispensers. It does not fire for
     /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
@@ -2629,6 +2628,27 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A server player who ate chorus fruit (or another item with the
+    /// `teleport_randomly` consume effect) is about to try a random spot
+    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
+    /// after they stopped riding. `from` is their feet, `target` the spot
+    /// drawn; a mod may move it (its y kept inside the level's height, a
+    /// value that is not a number ignored), and the game still looks down
+    /// from it for ground it may land on. Canceling ends the effect: no teleport and no
+    /// more attempts. The player's state is swapped in
+    /// (`native_acting_player`). Foxes are not heard. @API:chorus_fruit_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn chorus_fruit_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ChorusFruitTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A compostable item was added to the composter at `pos`. @API:compost_item@.
     fn compost_item(&self, host: &dyn Host, event: &mut CompostItemEvent<'_>) {
         let _ = host;
@@ -2673,6 +2693,28 @@ pub trait Hooks: Send + Sync {
     fn enchant_item(&self, host: &mut dyn Host, event: &mut EnchantItemEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// A server player's ender pearl landed and is about to teleport them
+    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
+    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
+    /// entity id, `from` their feet now, `target` where the pearl started
+    /// its last tick and `damage` the fall damage they then take (5). A mod
+    /// may move `target` (a value that is not a number is ignored) or change
+    /// `damage` (0 or less: none). Canceling
+    /// keeps the player where they are: no endermite roll, no teleport, no
+    /// damage and no sound; the pearl is used up either way. The player's
+    /// state is swapped in (`native_acting_player`). The hit itself is
+    /// heard by `native_projectile_impact`. @API:ender_pearl_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn ender_pearl_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut EnderPearlTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Entities from `chunk` finished loading into the server world. `count`
     /// is the number of saved entity records read. @API:native_entities_load@.
@@ -2995,6 +3037,36 @@ pub trait Hooks: Send + Sync {
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn lightning_strike(&self, host: &mut dyn Host, event: &mut LightningStrikeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API @API:menu_quick_move@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn menu_quick_move(&self, host: &mut dyn Host, event: &mut MenuQuickMoveEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -3368,9 +3440,9 @@ pub trait Hooks: Send + Sync {
     /// teleport: when the new level is entered, before it has loaded around
     /// them), so it cannot stop it. The player's state is swapped in, so the
     /// helpers that read the acting player and `native_tell` work. Once for
-    /// each teleported player, on a server. Other teleports are not heard
-    /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
-    /// and respawns are not teleports here. @API:native_player_teleported@.
+    /// each teleported player, on a server. Ender pearls and chorus fruit
+    /// have their own hooks; a spectator's teleport menu is not heard yet;
+    /// portals and respawns are not teleports here. @API:native_player_teleported@.
     fn player_teleported(&self, host: &mut dyn Host, event: &mut PlayerTeleportedEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -3955,6 +4027,24 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
+    /// API @API:sleep_finished_time@.
+    fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     /// @API:native_sponge_absorb@.
     fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
@@ -3996,6 +4086,20 @@ pub trait Hooks: Send + Sync {
     }
     /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
     fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    fn trade_with_villager(&self, host: &mut dyn Host, event: &mut TradeWithVillagerEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -8882,6 +8986,42 @@ pub fn dispatch_cauldron_level_changed(
         }
     }
 }
+/// What [`Hooks::chorus_fruit_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ChorusFruitTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+}
+pub fn dispatch_chorus_fruit_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ChorusFruitTeleportEvent {
+        player,
+        name,
+        from,
+        target,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.chorus_fruit_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compost_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct CompostItemEvent<'a> {
@@ -9020,6 +9160,49 @@ pub fn dispatch_enchant_item(
     for mod_hook in mods {
         mod_hook.enchant_item(host, &mut event);
     }
+}
+/// What [`Hooks::ender_pearl_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EnderPearlTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pearl: u32,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+    pub damage: f32,
+}
+pub fn dispatch_ender_pearl_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pearl: u32,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    damage: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = EnderPearlTeleportEvent {
+        player,
+        name,
+        pearl,
+        from,
+        target,
+        damage: *damage,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.ender_pearl_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *damage = event.damage;
 }
 /// What [`Hooks::entities_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -9888,6 +10071,42 @@ pub fn dispatch_lightning_strike(
     for mod_hook in mods {
         if matches!(mod_hook.lightning_strike(host, &mut event), Flow::Cancel) {
             *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::menu_quick_move`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MenuQuickMoveEvent<'a> {
+    pub pos: [i32; 3],
+    pub entity: &'a mut ModBlockEntity,
+    pub container_slots: usize,
+    pub slot: usize,
+    pub stack: &'a mut ItemStack,
+}
+pub fn dispatch_menu_quick_move(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    container_slots: usize,
+    slot: usize,
+    stack: &mut ItemStack,
+    handled: &mut bool,
+) {
+    if *handled {
+        return;
+    }
+    let mut event = MenuQuickMoveEvent {
+        pos,
+        entity,
+        container_slots,
+        slot,
+        stack,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
+            *handled = true;
             break;
         }
     }
@@ -11939,6 +12158,30 @@ pub fn dispatch_sculk_bloom(
         mod_hook.sculk_bloom(host, &mut event);
     }
 }
+/// What [`Hooks::sleep_finished_time`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SleepFinishedTimeEvent<'a> {
+    pub dimension: &'a str,
+    pub current: i64,
+    pub new_time: i64,
+}
+pub fn dispatch_sleep_finished_time(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    current: i64,
+    new_time: &mut i64,
+) {
+    let mut event = SleepFinishedTimeEvent {
+        dimension,
+        current,
+        new_time: *new_time,
+    };
+    for mod_hook in mods {
+        mod_hook.sleep_finished_time(host, &mut event);
+    }
+    *new_time = event.new_time;
+}
 /// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct SpongeAbsorbEvent {
@@ -12092,6 +12335,29 @@ pub fn dispatch_trade_select(
     };
     for mod_hook in mods {
         mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::trade_with_villager`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeWithVillagerEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a MerchantOffer,
+}
+pub fn dispatch_trade_with_villager(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    merchant: u32,
+    kind: &str,
+    offer: &MerchantOffer,
+) {
+    let mut event = TradeWithVillagerEvent {
+        merchant,
+        kind,
+        offer,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_with_villager(host, &mut event);
     }
 }
 /// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
