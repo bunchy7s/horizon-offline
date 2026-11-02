@@ -7,6 +7,7 @@
 //! `Game` end. The walk allocates nothing and dispatch is static: hot paths pay
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
+use super::commands::Target;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
@@ -23,6 +24,9 @@ pub(super) trait Entity {
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
+    /// What a selector finds this entity as (`@e`), or `None` for one it cannot
+    /// name yet. Required, so a new kind states which.
+    fn selector_target(&self) -> Option<Target>;
 
     fn on_ground(&self) -> bool {
         false
@@ -222,6 +226,9 @@ pub(super) use with_entity_mut;
 
 impl Entity for Mob {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        (self.death_time == 0).then_some(Target::Mob(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
     }
@@ -251,6 +258,9 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Item(self.id))
+    }
     fn bounds(&self) -> Aabb {
         ItemEntity::bounds(self)
     }
@@ -271,6 +281,9 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Orb(self.id))
+    }
     fn bounds(&self) -> Aabb {
         ExperienceOrb::bounds(self)
     }
@@ -291,6 +304,9 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Boat(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Boat::bounds(self)
     }
@@ -301,6 +317,9 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Cart(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Minecart::bounds(self)
     }
@@ -315,6 +334,9 @@ impl Entity for Minecart {
 
 impl Entity for ArmorStand {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Stand(self.id))
+    }
     fn bounds(&self) -> Aabb {
         ArmorStand::bounds(self)
     }
@@ -340,6 +362,9 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Tnt(self.id))
+    }
     fn bounds(&self) -> Aabb {
         PrimedTnt::bounds(self)
     }
@@ -356,6 +381,9 @@ impl Entity for PrimedTnt {
 
 impl Entity for FallingBlock {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Falling(self.id))
+    }
     fn bounds(&self) -> Aabb {
         horizon_client::falling_block::bounds(self.position)
     }
@@ -363,6 +391,17 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        use horizon_client::projectiles::ProjectileKind as K;
+        // The kinds /data can write (entity_nbt).
+        let selectable = self.is_arrow()
+            || horizon_client::entity_nbt::saved_with_chunk(self)
+            || matches!(
+                self.kind,
+                K::LargeFireball { .. } | K::SmallFireball | K::WindCharge | K::BreezeWindCharge
+            );
+        selectable.then_some(Target::Projectile(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Projectile::bounds(self)
     }
@@ -378,6 +417,9 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Rocket(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Rocket::bounds(self)
     }
@@ -389,6 +431,10 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        // No `Target` variant for it yet: `@e` does not find tridents.
+        None
+    }
     fn bounds(&self) -> Aabb {
         let p = self.position;
         Aabb::new(
