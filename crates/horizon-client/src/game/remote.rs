@@ -6374,7 +6374,12 @@ impl Game<'_> {
                         illager::cast_particles(m, &mut mob_fx);
                     }
                     S::Evoker => illager::cast_particles(m, &mut mob_fx),
-                    S::Wither => wither::client_smoke(m, &mut mob_fx),
+                    S::Wither => {
+                        wither::client_smoke(m, &mut mob_fx);
+                        // `getInvulnerableTicks() > 0`: the charge's cloud,
+                        // after the heads' smoke as in `aiStep`.
+                        wither::charging_particles(m, &mut mob_fx);
+                    }
                     _ => {}
                 }
             }

@@ -243,7 +243,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// charging (`getInvulnerableTicks() > 0`): three a tick in the
 /// (0.7, 0.7, 0.9) colour, a gaussian away from the body on x and z and up to
 /// `3.3 * getScale()` above its feet on y, all from the wither's own random.
-pub(crate) fn charging_particles(m: &mut Mob, events: &mut Vec<MobEvent>) {
+pub fn charging_particles(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if m.extra.counter <= 0 {
         return;
     }
