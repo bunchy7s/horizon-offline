@@ -76,6 +76,11 @@ pub(super) trait Entity {
     fn ignores_explosion(&self, _blast: &Blast) -> bool {
         false
     }
+    /// Whether a burst of wind moves it: what `Entity.push` moves, unless the
+    /// kind says otherwise.
+    fn pushed_by_wind(&self) -> bool {
+        self.pushed_by_explosion()
+    }
     /// Whether `Entity.push` moves it. An arrow in the ground, a wind charge and
     /// an armour stand (`explosion_breaks_decorations` takes those) stay put.
     fn pushed_by_explosion(&self) -> bool {
@@ -194,7 +199,22 @@ macro_rules! define_entity_handles {
             $($kind(usize),)*
         }
 
+        /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
+        /// world stays readable while the entities change.
+        pub(super) struct TakenEntities {
+            $(pub(super) $field: Vec<$ty>,)*
+        }
+
         impl Game<'_> {
+            /// Moves every list out; give it back with `restore_entities`.
+            pub(super) fn take_entities(&mut self) -> TakenEntities {
+                TakenEntities {
+                    $($field: std::mem::take(&mut self$(.$list)+),)*
+                }
+            }
+            pub(super) fn restore_entities(&mut self, taken: TakenEntities) {
+                $(self$(.$list)+ = taken.$field;)*
+            }
             /// Every entity's handle: lengths read now, nothing allocated, and
             /// no borrow of `Game` held, so the caller can change it mid-walk.
             pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
@@ -275,6 +295,22 @@ macro_rules! for_each_entity {
     };
 }
 pub(super) use for_each_entity;
+
+macro_rules! walk_lists_mut {
+    (($lists:expr, $entity:ident, $body:block)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for $entity in $lists.$field.iter_mut() $body)*
+    };
+}
+pub(crate) use walk_lists_mut;
+
+/// [`for_each_entity`] over [`TakenEntities`], with the entity mutable.
+macro_rules! for_each_entity_mut {
+    ($lists:expr, $entity:ident => $body:block) => {
+        $crate::game::entity::entity_lists!(walk_lists_mut, $lists, $entity, $body)
+    };
+}
+pub(super) use for_each_entity_mut;
 
 /// [`with_entity`], with the entity mutable.
 macro_rules! with_entity_mut {
@@ -450,8 +486,47 @@ impl Entity for Minecart {
     }
 }
 
+/// Width and height `EntityType.ARMOR_STAND` gives a stand.
+fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
+    if stand.marker {
+        (0.0, 0.0)
+    } else if stand.small {
+        (0.25, f64::from(0.9875f32))
+    } else {
+        (0.5, f64::from(1.975f32))
+    }
+}
+
 impl Entity for ArmorStand {
     stored_motion!();
+    /// `ArmorStand.ignoreExplosion`: a visible stand feels only a burst that
+    /// affects block-like entities (`items_ignore` is that flag, negated).
+    fn ignores_explosion(&self, blast: &Blast) -> bool {
+        self.invisible || blast.items_ignore
+    }
+    /// `EntityType.ARMOR_STAND`'s size, halved when small; a marker has none.
+    fn explosion_box(&self) -> Aabb {
+        let (w, h) = armor_stand_size(self);
+        let half = w / 2.0;
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - half, p.y, p.z - half),
+            Vec3::new(p.x + half, p.y + h, p.z + half),
+        )
+    }
+    fn explosion_eye_height(&self) -> f64 {
+        if self.marker {
+            0.0
+        } else if self.small {
+            f64::from(0.9875f32)
+        } else {
+            f64::from(1.7775f32)
+        }
+    }
+    /// A burst of wind pushes a stand that a blast only breaks.
+    fn pushed_by_wind(&self) -> bool {
+        true
+    }
     fn bounds(&self) -> Aabb {
         ArmorStand::bounds(self)
     }
