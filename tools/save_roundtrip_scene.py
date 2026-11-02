@@ -137,3 +137,19 @@ ENTITIES = [
     ('minecart', 'Passengers:[{id:"minecraft:cow",UUID:[I;28673,0,0,4],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]'),
     ('horse', 'Tame:1b,Passengers:[{id:"minecraft:skeleton",UUID:[I;28673,0,0,5],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b,Passengers:[{id:"minecraft:bat",UUID:[I;28673,0,0,6],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]}]'),
 ]
+
+# Leads. A leashed mob saves `leash` as [I;x,y,z] (a fence knot at that block) or
+# {UUID:[I;..]} (a holder entity); vanilla restores the holder on the first tick after
+# loading and drops the lead if the holder is not found, so the knot and the holder
+# are summoned first, with fixed UUIDs, and within a few blocks of what they hold.
+# SETBLOCKS run before the entities.
+SETBLOCKS = ['setblock 40 -60 40 minecraft:oak_fence']
+_NOAI = 'NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b'
+_first = len(ENTITIES)
+ENTITIES += [
+    ('leash_knot', 'block_pos:[I;40,-60,40],Pos:[40.5d,-59.5d,40.5d]'),
+    ('cow', 'Pos:[42.5d,-60.0d,40.5d],leash:[I;40,-60,40]'),
+    ('pig', 'Pos:[44.5d,-60.0d,44.5d]'),
+    ('oak_boat', f'Pos:[44.5d,-60.0d,42.5d],leash:{{UUID:[I;28672,0,0,{_first + 2}]}}'),
+]
+LEADS = 2  # the leashed mobs above that vanilla must still have leashed when it saves

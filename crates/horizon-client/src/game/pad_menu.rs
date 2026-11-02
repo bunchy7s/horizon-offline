@@ -112,6 +112,17 @@ pub(super) struct MenuCursor {
     key_restart: Option<u64>,
 }
 
+impl MenuCursor {
+    /// `Screen.clearFocus`: nothing is focused any more, and no click focus
+    /// is kept for the next Tab (`ComponentPath.applyFocus(false)`).
+    fn clear_focus(&mut self) {
+        self.focus = None;
+        self.origin = None;
+        self.slider_edit = false;
+        self.pending = None;
+    }
+}
+
 impl Game<'_> {
     /// A menu, a screen, the title, a sign or a book is open: the pad drives
     /// it instead of the player.
@@ -1041,6 +1052,15 @@ impl Game<'_> {
                     || self.ui.options.selected_pad_action.is_some()))
     }
 
+    /// `Screen.clearFocus`, which `Gui.setScreen` runs on the screen it takes
+    /// down: the keyboard's focus belongs to that screen. A key bound to the
+    /// container's own close key can move the focus and close the screen in
+    /// one press (Tab bound to the inventory), and vanilla clears the focus
+    /// before the next frame, so nothing stays highlighted.
+    pub(super) fn pad_clear_focus(&mut self) {
+        self.pad.menu.clear_focus();
+    }
+
     /// A key pressed in a menu, before the screen takes it
     /// (`Screen.keyPressed`): Tab, Shift+Tab and the arrows move the focus,
     /// Enter, Space and keypad Enter press the focused widget; the focused
@@ -1541,6 +1561,23 @@ mod tests {
         assert!(!osk_auto_opens(false, true, true, 5, true));
         assert!(!osk_auto_opens(true, false, true, 5, true));
         assert!(!osk_auto_opens(false, false, true, 5, false));
+    }
+
+    #[test]
+    fn clear_focus_leaves_nothing_focused() {
+        let mut menu = MenuCursor {
+            focus: Some(Target {
+                rect: [229.0, 98.0, 20.0, 18.0],
+                kind: Kind::Button,
+            }),
+            origin: Some([229.0, 98.0, 20.0, 18.0]),
+            slider_edit: true,
+            ..MenuCursor::default()
+        };
+        menu.clear_focus();
+        assert!(menu.focus.is_none());
+        assert!(menu.origin.is_none());
+        assert!(!menu.slider_edit);
     }
 
     #[test]

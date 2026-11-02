@@ -9,15 +9,15 @@ use std::path::{Path, PathBuf};
 pub(super) struct Worlds {
     /// The game folder the list is of, and the list as last read: kept on screen while it is
     /// read again, so the page doesn't jump.
-    home: Option<PathBuf>,
-    list: Vec<World>,
+    pub(super) home: Option<PathBuf>,
+    pub(super) list: Vec<World>,
     fresh: bool,
     reading: bool,
     /// The world being backed up, copied or deleted now.
-    busy: Option<String>,
+    pub(super) busy: Option<String>,
     confirm_delete: Option<String>,
     /// What the last action did (a backup's zip), or why it failed.
-    done: Option<Result<(String, Option<PathBuf>), String>>,
+    pub(super) done: Option<Result<(String, Option<PathBuf>), String>>,
 }
 
 impl Worlds {
@@ -39,7 +39,7 @@ pub(super) fn ago(when: std::time::SystemTime) -> String {
     }
 }
 
-enum Action {
+pub(super) enum Action {
     Backup,
     Copy,
     Delete,
@@ -48,7 +48,7 @@ enum Action {
 impl Launcher {
     /// Reads the worlds of `home` in the background when the list is missing or of another
     /// instance.
-    fn load_worlds(&mut self, home: PathBuf, cx: &mut Context<Self>) {
+    pub(super) fn load_worlds(&mut self, home: PathBuf, cx: &mut Context<Self>) {
         if self.worlds.home.as_ref() != Some(&home) {
             self.worlds = Worlds {
                 home: Some(home.clone()),
@@ -78,7 +78,7 @@ impl Launcher {
         .detach();
     }
 
-    fn world_action(&mut self, action: Action, world: World, cx: &mut Context<Self>) {
+    pub(super) fn world_action(&mut self, action: Action, world: World, cx: &mut Context<Self>) {
         let Some(home) = self.worlds.home.clone() else {
             return;
         };
