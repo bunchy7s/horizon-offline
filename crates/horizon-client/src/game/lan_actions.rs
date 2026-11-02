@@ -1047,6 +1047,8 @@ impl Game<'_> {
         if let Some(mob) = guest_mount {
             self.lan_open_mount(host, conn, mob);
         }
+        // The turn's teleports are in the hub now: the mods hear them.
+        self.flush_teleport_notes(host);
     }
 
     /// `ServerLevel.broadcastDamageEvent` for a guest that took an unblocked hit.
