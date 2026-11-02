@@ -320,7 +320,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health && heal > 0.0 {
-            m.health = (m.health + heal).min(m.attrs.max_health);
+            m.heal(heal);
             used = true;
         }
         if m.is_baby() && age_up > 0 && !m.extra.age_locked {

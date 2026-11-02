@@ -251,7 +251,7 @@ impl Game<'_> {
             self.handle_mob_events(events)?;
             return Ok(true);
         }
-        self.stats.custom("talked_to_villager", 1);
+        self.award_custom_stat("talked_to_villager", 1);
         self.ensure_offers(index);
         let m = &self.mobs[index];
         let trade = m.extra.trade.as_deref().cloned().unwrap_or_default();
@@ -470,7 +470,7 @@ impl Game<'_> {
     /// for a server's player (when the trader is still in the level).
     pub(super) fn merchant_traded(&mut self, mob: Option<u32>, offers: &[MerchantOffer]) {
         for offer in offers {
-            self.stats.custom("traded_with_villager", 1);
+            self.award_custom_stat("traded_with_villager", 1);
             let merchant = mob.and_then(|id| self.mobs.iter().find(|m| m.id == id));
             let kind = merchant.map(super::native_hooks::mob_kind);
             let villager = merchant.map(|m| self.mob_entity(m));

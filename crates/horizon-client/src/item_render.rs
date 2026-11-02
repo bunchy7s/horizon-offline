@@ -264,6 +264,96 @@ impl ItemRenderState {
             }
         }
     }
+    /// [`Self::submit`] into a [`WorldSink`] of `light`, `lights` and `tier`,
+    /// posed on the GPU (`gfx::entity_skin`): the same vertices in the same
+    /// order. False, with nothing drawn, when a layer cannot take that path: a
+    /// special model, a glint, or a quad that glows or is translucent (another
+    /// material).
+    pub fn submit_skinned(
+        &self,
+        renderer: &ItemRenderer,
+        sprites: &HashMap<String, Rect>,
+        pose: Mat4,
+        (light, lights, tier): (u32, Option<(Vec3, Vec3)>, u8),
+        skin: &mut crate::mobs::skin::Skin,
+    ) -> bool {
+        use crate::gfx::entity_skin::{SkinJob, SkinPart};
+        // The axes' order in a stored vertex (`SkinVertex::axis`).
+        const AXES: [Direction; 6] = [
+            Direction::East,
+            Direction::Up,
+            Direction::South,
+            Direction::West,
+            Direction::Down,
+            Direction::North,
+        ];
+        for layer in &self.layers {
+            let LayerGeometry::Quads(baked) = &layer.geometry else {
+                return false;
+            };
+            if layer.foil != FoilType::None {
+                return false;
+            }
+            let Some(stored) = skin.models.item(baked, skin.frame) else {
+                return false;
+            };
+            let translucent = |run: &crate::mobs::skin::ItemRun| {
+                let sprite = &baked.quads[run.quad].material.sprite;
+                renderer.sprites.translucent(sprite_name(sprite))
+            };
+            if stored.runs.iter().any(translucent) {
+                return false;
+            }
+        }
+        for layer in &self.layers {
+            let LayerGeometry::Quads(baked) = &layer.geometry else {
+                continue;
+            };
+            let m = pose * layer.matrix;
+            let mut normals = FaceNormals::new(m);
+            let Some(stored) = skin.models.item(baked, skin.frame) else {
+                continue;
+            };
+            for run in &stored.runs {
+                // `submit_quads`' sprite and tint, once for the run's quads.
+                let q = &baked.quads[run.quad];
+                let Some(r) = sprites
+                    .get(sprite_name(&q.material.sprite))
+                    .or_else(|| sprites.get("misc/missingno"))
+                    .or_else(|| sprites.get("horizon/missingno"))
+                else {
+                    continue;
+                };
+                let color = if run.tint_index >= 0 {
+                    layer
+                        .tints
+                        .get(run.tint_index as usize)
+                        .copied()
+                        .unwrap_or(-1)
+                } else {
+                    -1
+                };
+                let colors = AXES.map(|d| shaded(argb(color), normals.face(d), lights));
+                let frame = &mut *skin.frame;
+                frame.jobs.push(SkinJob {
+                    first: run.first,
+                    count: run.count,
+                    part: frame.parts.len() as u32,
+                    dst: frame.vertices,
+                    rect: [r.u0, r.v0, r.u1, r.v1],
+                    light,
+                    overlay: u32::from(tier) << 16,
+                    mode: SkinJob::ITEM,
+                    ..Default::default()
+                });
+                frame.parts.push(SkinPart::item(m, colors));
+                frame.vertices += run.count;
+            }
+            let bounds = stored.bounds;
+            skin.grow_bounds(m, bounds);
+        }
+        true
+    }
 }
 
 /// The atlas name of a sprite identifier (`minecraft:item/apple` -> `item/apple`).
@@ -913,12 +1003,17 @@ pub struct WorldSink<'a> {
     /// HDR output's tier (`ItemRenderState::hdr_tier`): rides in the layer's high bits.
     pub tier: u8,
 }
+/// The vertex colour [`WorldSink`] gives a quad of `color` (ARGB) facing `normal`:
+/// shaded by `lights` (`None`: unshaded), as ABGR bytes.
+fn shaded(color: u32, normal: Vec3, lights: Option<(Vec3, Vec3)>) -> u32 {
+    let brightness = lights.map_or(1.0, |l| diffuse(normal, l));
+    let [a, r, g, b] = color.to_be_bytes();
+    let c = |v: u8| (f32::from(v) * brightness) as u32;
+    u32::from(a) << 24 | c(b) << 16 | c(g) << 8 | c(r)
+}
 impl ItemSink for WorldSink<'_> {
     fn quad(&mut self, q: ItemQuad) {
-        let brightness = self.lights.map_or(1.0, |l| diffuse(q.normal, l));
-        let [a, r, g, b] = q.color.to_be_bytes();
-        let c = |v: u8| (f32::from(v) * brightness) as u32;
-        let color = u32::from(a) << 24 | c(b) << 16 | c(g) << 8 | c(r);
+        let color = shaded(q.color, q.normal, self.lights);
         // `LightCoordsUtil.lightCoordsWithEmission`: block light at least the emission.
         let emission = u32::from(q.light_emission) * 16;
         let light = if (self.light >> 8 & 0xFF) < emission {
@@ -1163,6 +1258,150 @@ mod tests {
         assert_eq!(transform_normal(m, Vec3::X), Vec3::X);
         let r = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
         assert!((transform_normal(r, Vec3::Z) - Vec3::X).length() < 1e-6);
+    }
+
+    /// Every vanilla item on the ground, held in either hand, framed and worn on the
+    /// head, turned, shaded and unshaded: the GPU path's vertices (its jobs expanded as
+    /// `entity_skin.wgsl` does) are the CPU path's, to the bit and in the same order, for
+    /// each state it takes. Needs the prepared resources.
+    #[test]
+    fn items_posed_on_the_gpu_draw_what_the_cpu_draws() {
+        use crate::gfx::entity_skin::{SkinFrame, expand};
+        use crate::mobs::skin::{Skin, SkinModels};
+        use horizon_assets::item_model::{NoEnv, StackView};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let r = ItemRenderer::load(&root).unwrap();
+        let resolve = |id: &str| {
+            let view = StackView::new(id, 1);
+            r.resolve(&view, DisplayContext::Ground, None, None, 7, &NoEnv)
+        };
+        // Each display context's transforms (`ItemTransform`s) pose the same quads.
+        let contexts = [
+            DisplayContext::Ground,
+            DisplayContext::ThirdPersonRightHand,
+            DisplayContext::ThirdPersonLeftHand,
+            DisplayContext::Fixed,
+            DisplayContext::Head,
+        ];
+        let states: Vec<_> = r
+            .models
+            .definitions
+            .keys()
+            .flat_map(|id| {
+                contexts.map(|context| {
+                    let view = StackView::new(id, 1);
+                    (id, r.resolve(&view, context, None, None, 7, &NoEnv))
+                })
+            })
+            .collect();
+        // Each sprite its own rect, so a run drawn with another's shows.
+        let mut sprites: HashMap<String, Rect> = HashMap::new();
+        for (_, state) in &states {
+            for layer in &state.layers {
+                if let LayerGeometry::Quads(baked) = &layer.geometry {
+                    for q in &baked.quads {
+                        let n = sprites.len() as f32;
+                        sprites
+                            .entry(sprite_name(&q.material.sprite).to_owned())
+                            .or_insert(Rect {
+                                u0: n / 4096.0,
+                                v0: 0.5 - n / 8192.0,
+                                u1: n / 4096.0 + 0.003,
+                                v1: 0.5 - n / 8192.0 + 0.007,
+                                w: 16,
+                                h: 16,
+                            });
+                    }
+                }
+            }
+        }
+        let pose = Mat4::from_translation(Vec3::new(-2.3, 0.7, 5.1))
+            * Mat4::from_rotation_y(2.1)
+            * Mat4::from_scale(Vec3::splat(0.5));
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        let (mut taken, mut left) = (0, 0);
+        for lights in [
+            Some(crate::block_entity_render::diffuse_lights(false)),
+            None,
+        ] {
+            for (id, state) in &states {
+                let mut cpu = Vec::new();
+                let mut sink = WorldSink {
+                    out: &mut cpu,
+                    light: 0x50_a0,
+                    lights,
+                    glint: None,
+                    tier: 1,
+                };
+                state.submit(&r, &sprites, &NoHost, pose, &mut sink);
+                frame.clear_draws();
+                let mut skin = Skin {
+                    models: &mut models,
+                    frame: &mut frame,
+                    bounds: None,
+                };
+                if !state.submit_skinned(&r, &sprites, pose, (0x50_a0, lights, 1), &mut skin) {
+                    assert!(frame.jobs.is_empty(), "{id}: left to the CPU after drawing");
+                    left += 1;
+                    continue;
+                }
+                taken += 1;
+                let bounds = skin.bounds;
+                let gpu = expand(&frame.new_model, &frame);
+                assert_eq!(gpu.len(), cpu.len(), "{id}");
+                for (i, (g, c)) in gpu.iter().zip(&cpu).enumerate() {
+                    assert_eq!(
+                        bytemuck::bytes_of(g),
+                        bytemuck::bytes_of(c),
+                        "{id} vertex {i}: {g:?} != {c:?}"
+                    );
+                }
+                if let (Some((lo, hi)), false) = (bounds, cpu.is_empty()) {
+                    for v in &cpu {
+                        let p = Vec3::from_array(v.pos);
+                        assert!(
+                            p.cmpge(lo - 1e-4).all() && p.cmple(hi + 1e-4).all(),
+                            "{id}: {p} outside"
+                        );
+                    }
+                }
+            }
+        }
+        // The 8 kinds of the `stress_items` scene all take it, and resolved again (as
+        // every frame does) they draw the models already stored.
+        let stored = frame.new_model.len();
+        for id in [
+            "stone",
+            "oak_log",
+            "diamond",
+            "apple",
+            "iron_sword",
+            "bread",
+            "redstone",
+            "torch",
+        ] {
+            frame.clear_draws();
+            let mut skin = Skin {
+                models: &mut models,
+                frame: &mut frame,
+                bounds: None,
+            };
+            let state = resolve(&format!("minecraft:{id}"));
+            assert!(
+                state.submit_skinned(&r, &sprites, pose, (0, None, 0), &mut skin),
+                "{id}"
+            );
+        }
+        assert_eq!(frame.new_model.len(), stored, "models stored again");
+        eprintln!("{taken} item states on the GPU path, {left} on the CPU");
+        assert!(taken > left, "{taken} taken, {left} left");
     }
 
     #[test]

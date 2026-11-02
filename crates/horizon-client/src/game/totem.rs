@@ -59,7 +59,7 @@ impl Game<'_> {
                 *cell = None;
             }
         }
-        self.stats.add("used", TOTEM, 1);
+        self.award_stat("used", TOTEM, 1);
         self.trigger_item(
             "minecraft:used_totem",
             &horizon_client::items::ItemStack::new(TOTEM, 1),

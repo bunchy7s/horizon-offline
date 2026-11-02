@@ -16,9 +16,129 @@ use serde_json::{Value, json};
 use std::{
     net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs},
     path::Path,
-    sync::Arc,
-    time::Duration,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
 };
+
+/// The connections that have upgraded, and the queue that carries notifications to them, which
+/// `JsonRpcNotificationService.broadcastNotification` does to every `Connection` of the `ManagementServer`.
+/// A queue and a thread, so that a caller (the game's output pump, the supervisor) never waits on a slow client.
+#[derive(Default)]
+pub struct Clients {
+    sockets: Mutex<Vec<(u32, Arc<Socket>)>>,
+    outbox: Mutex<Option<mpsc::Sender<String>>>,
+    /// `server/stopping` went out for this run of the game: a stop comes from the supervisor and from the
+    /// game's own `stop`, and one run says it once.
+    stopping_told: AtomicBool,
+    /// When `server/activity` last went out.
+    activity_told: Mutex<Option<Instant>>,
+}
+
+/// `MinecraftServer.SERVER_ACTIVITY_MONITOR_SECONDS_BETWEEN_NOTIFICATIONS`.
+const ACTIVITY_EVERY: Duration = Duration::from_secs(30);
+
+/// A connection in `Clients` for as long as this lives.
+struct Registered<'a>(&'a Shared, u32);
+
+impl Drop for Registered<'_> {
+    fn drop(&mut self) {
+        let id = self.1;
+        self.0
+            .management
+            .sockets
+            .lock()
+            .unwrap()
+            .retain(|(client, _)| *client != id);
+    }
+}
+
+/// A notification to every connected client: `short` is the method without `minecraft:` and `params` its one
+/// parameter, as `JsonRPCUtils.createRequest` writes a request without an `id`.
+pub fn notify(shared: &Shared, short: &str, params: Option<Value>) {
+    let mut message = json!({ "jsonrpc": "2.0", "method": format!("minecraft:{short}") });
+    if let Some(params) = params {
+        message["params"] = json!([params]);
+    }
+    if let Some(outbox) = shared.management.outbox.lock().unwrap().as_ref() {
+        let _ = outbox.send(message.to_string());
+    }
+}
+
+/// `NotificationService.serverStarted`, after the game's `Done`: a new run of the game.
+pub fn started(shared: &Shared) {
+    shared
+        .management
+        .stopping_told
+        .store(false, Ordering::SeqCst);
+    notify(shared, "notification/server/started", None);
+}
+
+/// The notification a typed event of the game is, if vanilla sends one for it: a player who joined or left
+/// (`playerJoined`, `playerLeft`, with the player as a `PlayerDto`), a world save that began or ended
+/// (`serverSaveStarted`, `serverSaveCompleted`), and a change of the operators, the allowlist, the bans or the
+/// IP bans.
+pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
+    let player = || Some(json!({ "id": event["uuid"], "name": event["name"] }));
+    let (method, params) = match kind {
+        "join" => ("notification/players/joined", player()),
+        "leave" => ("notification/players/left", player()),
+        "saving" => ("notification/server/saving", None),
+        "saved" => ("notification/server/saved", None),
+        // `ServerActivityMonitor.reportLoginActivity`: a login attempt, told at most once in thirty seconds.
+        "login_activity" => {
+            if activity_due(shared, Instant::now()) {
+                notify(shared, "notification/server/activity", None);
+            }
+            return;
+        }
+        // A change of a list, whoever made it: the console, a command in the game, the protocol's own methods.
+        _ => match crate::management_methods::list_notification(kind, event) {
+            Some((method, params)) => (method, Some(params)),
+            None => return,
+        },
+    };
+    notify(shared, method, params);
+}
+
+/// `ServerActivityMonitor.processWithRateLimit`: an activity is told when thirty seconds have gone by since the
+/// last one told, and is lost otherwise (the monitor clears its flag whatever it did).
+fn activity_due(shared: &Shared, now: Instant) -> bool {
+    let mut told = shared.management.activity_told.lock().unwrap();
+    let due = told.is_none_or(|last| now.saturating_duration_since(last) >= ACTIVITY_EVERY);
+    if due {
+        *told = Some(now);
+    }
+    due
+}
+
+/// `ManagementServer.scheduleHeartbeat`: `NotificationService.statusHeartbeat` every `seconds` (the first
+/// after as many), with the server's status as `server/status` answers it, up or not. Nothing is computed
+/// while no client is connected.
+fn heartbeat(shared: Arc<Shared>, seconds: u64) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("management-heartbeat".into())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_secs(seconds));
+                if !shared.management.sockets.lock().unwrap().is_empty() {
+                    let status = crate::management_methods::status(&shared);
+                    notify(&shared, "notification/server/status", Some(status));
+                }
+            }
+        })
+        .map(drop)
+}
+
+/// `NotificationService.serverShuttingDown`, which `DedicatedServer.stopServer` sends first of all.
+pub fn stopping(shared: &Shared) {
+    if !shared.management.stopping_told.swap(true, Ordering::SeqCst) {
+        notify(shared, "notification/server/stopping", None);
+    }
+}
 
 /// The management server's settings, read from server.properties as vanilla's `JsonRpc.create` reads them.
 struct Settings {
@@ -28,6 +148,8 @@ struct Settings {
     allowed_origins: Vec<String>,
     /// TLS, unless `management-server-tls-enabled=false`.
     tls: Option<management_tls::Tls>,
+    /// `status-heartbeat-interval`: seconds between the status notifications, none when 0.
+    heartbeat: u64,
 }
 
 /// `SecurityConfig.isValid`: 40 letters and digits.
@@ -48,6 +170,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
     if !p.management_server_enabled {
         return Ok(None);
     }
+    let heartbeat = p.status_heartbeat_interval.max(0) as u64;
     let mut secret = p.management_server_secret;
     if generated {
         secret = generate_secret_key(&mut SystemEntropy::default());
@@ -105,6 +228,7 @@ fn settings(dir: &Path) -> Result<Option<Settings>, String> {
             .map(str::to_owned)
             .collect(),
         tls,
+        heartbeat,
     }))
 }
 
@@ -150,6 +274,29 @@ fn serve(
     settings: Arc<Settings>,
     listener: TcpListener,
 ) -> std::io::Result<()> {
+    let (outbox, queue) = mpsc::channel::<String>();
+    *shared.management.outbox.lock().unwrap() = Some(outbox);
+    if settings.heartbeat > 0 {
+        heartbeat(shared.clone(), settings.heartbeat)?;
+    }
+    let carrier = shared.clone();
+    std::thread::Builder::new()
+        .name("management-notify".into())
+        .spawn(move || {
+            for text in queue {
+                let sockets: Vec<_> = carrier
+                    .management
+                    .sockets
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(_, socket)| socket.clone())
+                    .collect();
+                for socket in sockets {
+                    let _ = socket.send_text(&text);
+                }
+            }
+        })?;
     std::thread::Builder::new()
         .name("management".into())
         .spawn(move || {
@@ -191,7 +338,15 @@ fn connection(shared: &Arc<Shared>, settings: &Settings, stream: &TcpStream) {
         return;
     };
     // `Connection`'s `ClientInfo`: the connections are numbered from 1, as the log lines show them.
-    let client = CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let client = CONNECTIONS.fetch_add(1, Ordering::Relaxed) + 1;
+    let socket = Arc::new(socket);
+    shared
+        .management
+        .sockets
+        .lock()
+        .unwrap()
+        .push((client, socket.clone()));
+    let _registered = Registered(shared, client);
     while let Ok(Some(text)) = socket.read_text() {
         match receive(shared, client, &text) {
             Some(Ok(reply)) => {
@@ -449,6 +604,7 @@ mod tests {
             secret: SECRET.into(),
             allowed_origins: vec!["http://localhost:3000".into()],
             tls: None,
+            heartbeat: 0,
         }
     }
 
@@ -645,10 +801,252 @@ mod tests {
     }
 
     fn listen(settings: Settings) -> SocketAddr {
+        listen_on(shared(), settings)
+    }
+
+    fn listen_on(shared: Arc<Shared>, settings: Settings) -> SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
-        serve(shared(), Arc::new(settings), listener).unwrap();
+        serve(shared, Arc::new(settings), listener).unwrap();
         address
+    }
+
+    /// The upgrade over a plain socket, without the `rpc.discover` that follows it in `discover`.
+    fn upgrade(address: SocketAddr) -> TcpStream {
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        write!(
+            stream,
+            "GET / HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\
+             Authorization: Bearer {SECRET}\r\n\r\n"
+        )
+        .unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut b = [0u8];
+            stream.read_exact(&mut b).unwrap();
+            head.push(b[0]);
+        }
+        assert!(head.starts_with(b"HTTP/1.1 101 "));
+        stream
+    }
+
+    /// The text of the next frame the server sends (unmasked, shorter than 65536 bytes).
+    fn next_text(stream: &mut TcpStream) -> String {
+        let mut head = [0u8; 2];
+        stream.read_exact(&mut head).unwrap();
+        assert_eq!(head[0], 0x81);
+        let length = match head[1] {
+            126 => {
+                let mut b = [0u8; 2];
+                stream.read_exact(&mut b).unwrap();
+                usize::from(u16::from_be_bytes(b))
+            }
+            n => usize::from(n),
+        };
+        let mut payload = vec![0u8; length];
+        stream.read_exact(&mut payload).unwrap();
+        String::from_utf8(payload).unwrap()
+    }
+
+    /// Waits until `count` connections are in the registry, which the upgrade's reply doesn't guarantee yet.
+    fn registered(shared: &Shared, count: usize) {
+        for _ in 0..500 {
+            if shared.management.sockets.lock().unwrap().len() == count {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("{count} connections never registered");
+    }
+
+    #[test]
+    fn notifications_go_to_every_client_as_vanilla_writes_them() {
+        let shared = shared();
+        let address = listen_on(shared.clone(), settings());
+        let mut first = upgrade(address);
+        let mut second = upgrade(address);
+        registered(&shared, 2);
+        started(&shared);
+        let expected = r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/started"}"#;
+        assert_eq!(next_text(&mut first), expected);
+        assert_eq!(next_text(&mut second), expected);
+        // One stop is told once per run of the game, whoever asks for it first; the next run says it again.
+        stopping(&shared);
+        stopping(&shared);
+        started(&shared);
+        stopping(&shared);
+        let stopping_frame =
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/stopping"}"#;
+        for client in [&mut first, &mut second] {
+            assert_eq!(next_text(client), stopping_frame);
+            assert_eq!(next_text(client), expected);
+            assert_eq!(next_text(client), stopping_frame);
+        }
+        // A parameter goes in an array of one, and a client that left is dropped from the registry.
+        drop(second);
+        notify(
+            &shared,
+            "notification/players/left",
+            Some(json!({ "name": "A" })),
+        );
+        assert_eq!(
+            next_text(&mut first),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/players/left","params":[{"name":"A"}]}"#
+        );
+        for _ in 0..500 {
+            if shared.management.sockets.lock().unwrap().len() == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(shared.management.sockets.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_games_events_become_the_notifications_vanilla_sends() {
+        let shared = shared();
+        let address = listen_on(shared.clone(), settings());
+        let mut client = upgrade(address);
+        registered(&shared, 1);
+        let id = "0123abcd-0000-4000-8000-00000000000a";
+        let joined = json!({ "type": "join", "name": "Kim0", "uuid": id });
+        game_event(&shared, "join", &joined);
+        game_event(
+            &shared,
+            "chat",
+            &json!({ "name": "Kim0", "uuid": id, "message": "hi" }),
+        );
+        game_event(&shared, "saving", &json!({ "type": "saving" }));
+        game_event(&shared, "saved", &json!({ "type": "saved" }));
+        game_event(&shared, "leave", &json!({ "name": "Kim0", "uuid": id }));
+        // The chat is not a notification; the rest come in order, the player as a `PlayerDto`.
+        let player = format!(r#"[{{"id":"{id}","name":"Kim0"}}]"#);
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/players/joined","params":{player}}}"#
+            )
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/saving"}"#
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/saved"}"#
+        );
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/players/left","params":{player}}}"#
+            )
+        );
+        // A change of a list reaches the client with its one parameter (the player, for an allowlist).
+        game_event(
+            &shared,
+            "allowlist_removed",
+            &json!({ "name": "Kim0", "uuid": id }),
+        );
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/allowlist/removed","params":{player}}}"#
+            )
+        );
+    }
+
+    #[test]
+    fn an_activity_is_told_once_in_thirty_seconds_and_otherwise_lost() {
+        let shared = shared();
+        let start = Instant::now();
+        assert!(activity_due(&shared, start));
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        // The one lost at 29 s is not told later: the next login after thirty seconds is.
+        assert!(!activity_due(&shared, start + Duration::from_secs(29)));
+        assert!(activity_due(&shared, start + Duration::from_secs(30)));
+        assert!(!activity_due(&shared, start + Duration::from_secs(59)));
+        assert!(activity_due(&shared, start + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_login_is_an_activity_notification_and_the_heartbeat_carries_the_status() {
+        let shared = shared();
+        let address = listen_on(
+            shared.clone(),
+            Settings {
+                heartbeat: 1,
+                ..settings()
+            },
+        );
+        let mut client = upgrade(address);
+        registered(&shared, 1);
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        game_event(
+            &shared,
+            "login_activity",
+            &json!({ "type": "login_activity" }),
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/activity"}"#
+        );
+        // The second login came inside the thirty seconds, so the next frame is the heartbeat, a second
+        // after the start: the status of a game that isn't up.
+        let beat: Value = serde_json::from_str(&next_text(&mut client)).unwrap();
+        assert_eq!(beat["method"], "minecraft:notification/server/status");
+        assert_eq!(beat["params"][0]["started"], false);
+        assert!(beat["params"][0]["version"]["name"].is_string());
+    }
+
+    #[test]
+    fn every_notification_sent_is_one_discover_lists() {
+        let listed = schema::discover();
+        let names: Vec<&str> = listed["methods"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["name"].as_str().unwrap())
+            .collect();
+        for sent in [
+            "notification/server/started",
+            "notification/server/stopping",
+            "notification/server/saving",
+            "notification/server/saved",
+            "notification/players/joined",
+            "notification/players/left",
+            "notification/operators/added",
+            "notification/operators/removed",
+            "notification/allowlist/added",
+            "notification/allowlist/removed",
+            "notification/bans/added",
+            "notification/bans/removed",
+            "notification/ip_bans/added",
+            "notification/ip_bans/removed",
+            "notification/gamerules/updated",
+            "notification/server/activity",
+            "notification/server/status",
+        ] {
+            assert!(
+                names.contains(&format!("minecraft:{sent}").as_str()),
+                "{sent}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_a_management_server_a_notification_goes_nowhere() {
+        let shared = shared();
+        started(&shared);
+        stopping(&shared);
+        assert!(shared.management.outbox.lock().unwrap().is_none());
     }
 
     #[test]

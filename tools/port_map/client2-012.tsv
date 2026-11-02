@@ -5,11 +5,11 @@ ContainerEventHandler.mouseScrolled	port	crates/horizon-client-render/src/pack_s
 ContainerEventHandler.keyPressed	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
 ContainerEventHandler.keyReleased	skip:other		no widget in the pack screen acts on key release
 ContainerEventHandler.charTyped	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
-ContainerEventHandler.preeditUpdated	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the focused field's composition text
+ContainerEventHandler.preeditUpdated	port	crates/horizon-client/src/game/ime.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the focused field's composition text
 ContainerEventHandler.getBorderForArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::edge	the screen border an arrow key is measured against
 ContainerEventHandler.getCurrentFocusPath	inline	crates/horizon-client/src/game/key_focus.rs::drawn_targets	the drawn targets of the open screen are the focus path, resolved per screen
-ContainerEventHandler.nextFocusPath	port	crates/horizon-client/src/game/key_focus.rs::nav_of + act	a nav key moves focus to the next drawn target, with the screen context deciding what passes on
-ContainerEventHandler.handleTabNavigation	port	crates/horizon-client/src/game/key_focus.rs::tab_order + tab_step	Tab and Shift+Tab step through the focusable targets in drawing order
+ContainerEventHandler.nextFocusPath	port	crates/horizon-client/src/game/key_focus.rs::act	a nav key moves focus to the next drawn target, with the screen context deciding what passes on
+ContainerEventHandler.handleTabNavigation	port	crates/horizon-client/src/game/key_focus.rs::tab_step	Tab and Shift+Tab step through the focusable targets in drawing order
 ContainerEventHandler.handleArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::act	the four directions pick the nearest target that way
 ContainerEventHandler.nextFocusPathVaguelyInDirection	inline	crates/horizon-client/src/game/key_focus.rs::act	the same directional search, without vanilla's vague fallback
 SpectatorGui.extractPage	port	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	the nine-slot page with its frame and selection
@@ -28,15 +28,15 @@ TabNavigationBar.arrangeElements	skip:ui		layout of the tab row
 TabNavigationBar.isMouseOver	port	crates/horizon-client/src/title/create_world.rs::tab_at	pointer over a tab
 TabNavigationBar.setFocused	missing		minor: the tab row cannot take keyboard focus
 TabNavigationBar.nextFocusPath	missing		minor: the Tab key never reaches the tab row
-TabNavigationBar.narrationPriority	skip:other		screen-reader narration; Horizon has no narrator
-TabNavigationBar.updateWidgetNarration	skip:other		screen-reader narration; Horizon has no narrator
-TabNavigationBar.narrateListElementPosition	skip:other		screen-reader narration; Horizon has no narrator
+TabNavigationBar.narrationPriority	inline	crates/horizon-client/src/screen_narrator.rs::Ctx::priority	the tab row is a tabs list recorded by create_world.rs::Title::draw_create; a hovered tab is Hovered, an unfocused, unhovered one None, and the row takes no keyboard focus so Focused is never reached
+TabNavigationBar.updateWidgetNarration	port	crates/horizon-client/src/screen_narrator.rs::narrate	the tabs list's narration: gui.narrate.tab of the tab under the mouse else the open one, plus narration.tab_navigation.usage while the row has focus
+TabNavigationBar.narrateListElementPosition	inline	crates/horizon-client/src/screen_narrator.rs::narrate	narrator.position.tab with the tab's index and the tab count, in the same branch
 TabNavigationBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	tab row drawn in draw_create
-TabNavigationBar.selectTab	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: only clicks pick a tab; no select by index (Ctrl+number, init)
-TabNavigationBar.setTabActiveState	missing		minor: tabs cannot be disabled; vanilla StatsScreen.java:91-93 disables two tabs, Horizon's stats tabs stay clickable
+TabNavigationBar.selectTab	port	crates/horizon-client/src/title.rs::Title::select_create_tab	the tab set by index, the focus cleared, from a click on the row and from Ctrl+number
+TabNavigationBar.setTabActiveState	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stats_tab_active	the Items and Mobs tabs are active only while their list has rows: an inactive tab does not click (stats_screen.rs:582) and its label draws inactive (stats_screen.rs:317-337)
 TabNavigationBar.setTabTooltip	missing		minor: the tab row has no per-tab tooltip
-TabNavigationBar.keyPressed	missing		minor: Ctrl+1 to 9 and Ctrl+Tab do not switch create-world tabs
-TabNavigationBar.getNextTabIndex	missing		minor: index math for Ctrl+number and Ctrl+Tab, which Horizon lacks
+TabNavigationBar.keyPressed	port	crates/horizon-client/src/title.rs::Title::tab_bar_key	Ctrl+1 to Ctrl+0 and Ctrl+Tab (back with Shift) switch the Create World tabs, a digit past the last clamping to it; the rules and experiments screens keep the keys first
+TabNavigationBar.getNextTabIndex	port	crates/horizon-client/src/title/create_world.rs::next_tab_index	the tab Ctrl plus a digit asks for, Ctrl+1 the first and Ctrl+0 the tenth, or one step for Tab, wrapping; the caller clamps to the tabs there are
 TabNavigationBar.currentTabIndex	skip:other		accessor; Horizon keeps the open tab in options.tab
 TabNavigationBar.currentTabButton	skip:other		accessor; Horizon draws the tabs from options.tab
 TabNavigationBar.Builder.addTab	skip:java		builder
@@ -44,13 +44,13 @@ TabNavigationBar.Builder.build	skip:java		builder
 AdvancementToast.update	port	crates/horizon-client/src/game/advancements.rs::Toast::wants_show	5 s visible, scaled by the notification time option
 AdvancementToast.isChallengeAdvancement	inline	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	challenge check for the sound when a toast enters a slot
 AdvancementToast.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	gap: player: a long title is one line; vanilla wraps it and fades the frame label into it over 1.5 s
-FriendToast.update	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.extractRenderState	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.add	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestSent	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestReceived	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendRequestAccepted	skip:service		friend toasts: social, Horizon has no friends system
-FriendToast.showFriendAdded	skip:service		friend toasts: social, Horizon has no friends system
+FriendToast.update	skip:service		friend toasts belong to the friend-request service; Horizon's friends are an invite code for the open world (horizon-friends), with no requests and no toasts
+FriendToast.extractRenderState	skip:service		no friend toast is drawn: Horizon's friends are an invite code for the open world (horizon-friends)
+FriendToast.add	skip:service		nothing adds a friend toast: no request service, no toast queue entry
+FriendToast.showFriendRequestSent	skip:service		no request is sent: the friends screen copies an invite code instead, so no toast
+FriendToast.showFriendRequestReceived	skip:service		no request arrives: a friend joins the open world with the invite code
+FriendToast.showFriendRequestAccepted	skip:service		no request is accepted: the invite code is the whole invitation
+FriendToast.showFriendAdded	skip:service		no friend list is added to: horizon-friends shares one world by code
 NowPlayingToast.extractToast	port	crates/horizon-client/src/toasts.rs::draw_now_playing	the background, the music notes and the song's name on the top row
 NowPlayingToast.tickMusicNotes	port	crates/horizon-client/src/toasts.rs::MusicNotes::tick	the notes change colour every 25 ms while a song plays
 NowPlayingToast.showToast	port	crates/horizon-client/src/toasts.rs::NowPlayingToast::show	slide in and count down over 5000 ms times the notification time
@@ -61,7 +61,7 @@ SystemToast.height	missing		minor: no multi-line height; a system toast always t
 SystemToast.extractRenderState	port	crates/horizon-client/src/toasts.rs::SystemToast::draw	gap: minor: one line per title and message, no wrapping
 SystemToast.extractTextLines	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	text lines drawn in draw
 SystemToast.recalculateWidth	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	width from the widest line, at least 160, plus 30
-SystemToast.onFileDropFailure	missing		minor: Horizon takes no dropped files, so this toast never shows
+SystemToast.onFileDropFailure	missing		gap: minor: a dropped file that is not a data pack is only logged (title.rs::Title::drop_file); no failure toast
 SystemToast.onChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::load_failure_toast	the chunk.toast.loadFailure toast with its check-log line
 SystemToast.onChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs::save_failure_toast	the chunk.toast.saveFailure toast with its check-log line
 ToastManager.findFreeSlotsIndex	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	gap: minor: one 32 px slot per toast; no search for consecutive slots
@@ -72,8 +72,8 @@ ToastManager.setMusicToastDisplayState	port	crates/horizon-client/src/game/music
 ToastManager.ToastInstance.resetToast	port	crates/horizon-client/src/toasts.rs::SystemToast::reset	gap: minor: text and display timer restart; the slide-in does not
 ToastManager.ToastInstance.calculateVisiblePortion	port	crates/horizon-client/src/toasts.rs::Slide::update	600 ms, squared ease in and out
 ToastManager.ToastInstance.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	slide x and slot y; system toasts slide in SystemToast::draw
-TutorialToast.update	missing		player: new worlds show no movement or look tutorial toasts (vanilla tutorialStep defaults to movement)
-TutorialToast.extractRenderState	missing		player: same gap; the tutorial toast is never drawn
+TutorialToast.update	inline	crates/horizon-client/src/game/tutorial.rs::Game::draw_tutorial_toasts	per frame: a toast whose hint is no longer wanted hides (slide out) and goes, the shown one takes the hint's progress, and the progress bar smooths toward it by the shown portion
+TutorialToast.extractRenderState	port	crates/horizon-client/src/game/tutorial.rs::Game::draw_tutorial_toasts	tutorial/toast/tutorial nine slice 160 wide, the hint icon at (6, 6), the title lines in purple and the description in black from x + 30, and the 154 px progress bar at the bottom in green or red
 AtlasGlyphProvider.Instance.renderSprite	missing		minor: sprite-font glyphs (atlas sprite objects in text) are not parsed
 CodepointMap.get	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet
 CodepointMap.put	skip:java		codepoint lookup table; Horizon uses HashMap and BTreeSet

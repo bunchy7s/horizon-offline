@@ -241,7 +241,7 @@ mod tests {
         // A shulker bullet takes a blow, with no pick radius round its box.
         let bullet = Projectile::new(
             ProjectileKind::ShulkerBullet {
-                target: Who::Player,
+                target: Some(Who::Player),
                 dir: None,
                 steps: 0,
                 delta: [0.0; 3],

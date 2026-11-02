@@ -691,7 +691,7 @@ impl Game<'_> {
             self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
             self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
             self.stuck_in_body_geometry(m, self.own_entity_id(), camera, alpha as f32, packed, out);
-            self.held_item_geometry(m, camera, alpha, packed, true, out);
+            self.held_item_geometry(m, camera, alpha, packed, true, None, out);
             // CustomHeadLayer: a pumpkin, skull or other head item.
             self.head_item_geometry(m, camera, alpha, packed, true, out);
             // `native_mob_layer`: a native mod's layer, over the vanilla ones.
@@ -795,9 +795,14 @@ impl Game<'_> {
             240 | 240 << 8,
             &mut verts,
         );
+        // `WingsLayer` draws through `RenderTypes.armorCutoutNoCull`: the
+        // wings' faces show from both sides (the elytra texture is empty on
+        // the face that looks at the body).
+        let wings_start = verts.len();
         self.player_elytra_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
+        let wings = wings_start..verts.len();
         self.shoulder_parrots_geometry(&m, camera, 1.0, 240 | 240 << 8, &mut verts);
-        self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
+        self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, None, &mut verts);
         self.head_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
         let height = if m.extra.crouching { 1.5 } else { 1.8 };
         // PictureInPictureRenderer: the box centre, (size, size, -size);
@@ -812,7 +817,7 @@ impl Game<'_> {
             .as_ref()
             .filter(|p| p.fire_ticks > 0 && !p.spectator)
             .map(|p| (p.dimensions.width, p.dimensions.height));
-        let quads = player_preview_quads(verts, gui, fire, &atlas.sprites);
+        let quads = player_preview_quads_no_cull(verts, gui, fire, &atlas.sprites, wings);
         let start = batch.vertices.len();
         for (_, p, uv, color) in quads {
             batch.quad_3d(p, uv, color);
@@ -1176,10 +1181,23 @@ fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
 }
 
 pub(super) fn player_preview_quads(
+    verts: Vec<horizon_client::mesher::Vertex>,
+    gui: glam::Mat4,
+    fire: Option<(f32, f32)>,
+    sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
+) -> Vec<(f32, [[f32; 3]; 4], [[f32; 2]; 4], u32)> {
+    player_preview_quads_no_cull(verts, gui, fire, sprites, 0..0)
+}
+
+/// `player_preview_quads` where the faces of the vertices in `no_cull` are
+/// kept when they look away (a `NoCull` render type); their light still comes
+/// from the face's own outward normal, as the vertex normal gives it.
+pub(super) fn player_preview_quads_no_cull(
     mut verts: Vec<horizon_client::mesher::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
+    no_cull: std::ops::Range<usize>,
 ) -> Vec<(f32, [[f32; 3]; 4], [[f32; 2]; 4], u32)> {
     let flame_start = verts.len();
     if let Some((width, height)) = fire {
@@ -1200,7 +1218,8 @@ pub(super) fn player_preview_quads(
             std::array::from_fn(|i| gui.transform_point3(glam::Vec3::from_array(q[i].pos)));
         let n = (p[1] - p[0]).cross(p[2] - p[0]);
         // The winding gives inward normals: faces with n.z >= 0 point away.
-        if n.z >= 0.0 {
+        let back = n.z >= 0.0;
+        if back && !no_cull.contains(&(index * 4)) {
             continue;
         }
         let n = n.normalize_or_zero();
@@ -1213,12 +1232,13 @@ pub(super) fn player_preview_quads(
         let ch = |s: u32| ((((c >> s) & 255) as f32 * shade) as u32) << s;
         let color = (c & 0xFF00_0000) | ch(0) | ch(8) | ch(16);
         let depth = p.iter().map(|v| v.z).sum::<f32>() / 4.0;
-        quads.push((
-            depth,
-            p.map(|v| v.to_array()),
-            std::array::from_fn(|i| q[i].uv),
-            color,
-        ));
+        let (mut pos, mut uv) = (p.map(|v| v.to_array()), std::array::from_fn(|i| q[i].uv));
+        if back {
+            // Seen from behind: the same quad in the opposite winding.
+            pos.reverse();
+            uv.reverse();
+        }
+        quads.push((depth, pos, uv, color));
     }
     // Keep far-to-near order for translucent faces; opaque overlap uses depth.
     quads.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1392,6 +1412,37 @@ mod preview_tests {
         assert!(shield[0].depth < arm[0].depth);
         assert!(shield[2].depth > arm[2].depth);
         assert_eq!(batch.runs(), vec![(0..12, Blend::Depth([1, 0, 1, 1]))]);
+    }
+
+    #[test]
+    fn no_cull_faces_stay_in_the_preview_when_they_look_away() {
+        use horizon_client::mesher::Vertex;
+        // The wings' `armorCutoutNoCull`: a face turned from the viewer is
+        // dropped by the preview's culling unless its vertices are no-cull.
+        let face = |z: f32| {
+            [[-1.0, -1.0], [-1.0, 1.0], [1.0, 1.0], [1.0, -1.0]].map(|[x, y]| Vertex {
+                pos: [x, y, z],
+                uv: [x, y],
+                layer: 0,
+                color: u32::MAX,
+                light: 0,
+                normal: [0; 4],
+                glint_uv: [0.0, 0.0],
+            })
+        };
+        // Wound one way a face looks at the viewer, the other way it looks away.
+        let mut away = face(0.0);
+        away.reverse();
+        let verts: Vec<_> = face(0.0).into_iter().chain(away).collect();
+        let sprites = Default::default();
+        let gui = glam::Mat4::IDENTITY;
+        let culled = player_preview_quads(verts.clone(), gui, None, &sprites);
+        assert_eq!(culled.len(), 1);
+        let kept = player_preview_quads_no_cull(verts.clone(), gui, None, &sprites, 4..8);
+        assert_eq!(kept.len(), 2);
+        // The first face is outside the range and still culled when it looks away.
+        let first_away = player_preview_quads_no_cull(verts, gui, None, &sprites, 0..0);
+        assert_eq!(first_away.len(), 1);
     }
 
     #[test]

@@ -54,6 +54,9 @@ impl DirtySections {
 pub struct World {
     /// Server-owned mod data attached to this dimension.
     pub attachments: horizon_world::attachments::Attachments,
+    /// The holders lent to mods since the last flush, whose synced changes
+    /// `flush_attachment_sync` sends.
+    pub attachment_syncs: FxHashSet<horizon_world::attachments::Holder>,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -203,6 +206,7 @@ impl World {
             loaded_chunks: Vec::new(),
             modified: FxHashSet::default(),
             attachments: Default::default(),
+            attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
             chest_openers: FxHashMap::default(),
             block_names: FxHashMap::default(),

@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use horizon_telemetry::batch::{self, Batch};
-use horizon_telemetry::payload::{Crash, Payload, Perf, Settings, Source, System, Timings};
+use horizon_telemetry::payload::{
+    Crash, Payload, Perf, Settings, SlowFrames, Source, System, Timings,
+};
 use horizon_telemetry::{Item, outbox};
 use horizon_telemetry_server::store::{self, Store};
 use horizon_telemetry_server::{App, Config, router};
@@ -194,6 +196,55 @@ async fn totals_break_down_by_hardware_class() {
     for raw in ["16376", "570.86", "Fedora", "hdd", &install(0)] {
         assert!(!text.contains(raw), "{raw} in {text}");
     }
+}
+
+/// What froze: slow frames by release and step, summed over sessions; a step shows only once
+/// enough installs had it, and never with an install or a machine.
+#[tokio::test]
+async fn slow_frames_show_what_froze_with_enough_installs() {
+    let s = server(Config {
+        min_install_days: 2,
+        ..generous()
+    });
+    let slow = |span: &str, frames, frame_max_ms, span_max_ms| {
+        let mut item = perf("NVIDIA GeForce RTX 4070", 12);
+        if let Payload::Perf(p) = &mut item.payload {
+            p.slow_frames = vec![SlowFrames {
+                span: span.into(),
+                frames,
+                frame_max_ms,
+                span_max_ms,
+            }];
+        }
+        item
+    };
+    for (n, frame_max_ms) in [(0, 900.0), (1, 400.0)] {
+        let item = slow("renderer/r_uploads", 3, frame_max_ms, 300.0);
+        assert_eq!(
+            s.post(&install(n), vec![item]).await,
+            StatusCode::NO_CONTENT
+        );
+    }
+    let lone = slow("tick/tick_mobs", 1, 260.0, 200.0);
+    assert_eq!(
+        s.post(&install(2), vec![lone]).await,
+        StatusCode::NO_CONTENT
+    );
+    let quiet = perf("NVIDIA GeForce RTX 4070", 12);
+    assert_eq!(
+        s.post(&install(3), vec![quiet]).await,
+        StatusCode::NO_CONTENT
+    );
+    let totals = s.aggregate().await;
+    assert_eq!(
+        totals["slow_frames"],
+        serde_json::json!([{
+            "version": "v2026.10.15", "span": "renderer/r_uploads", "frames": 6, "sessions": 2,
+            "installs": 2, "frame_max_ms": 900.0, "span_max_ms": 300.0,
+        }]),
+        "one install is too few for tick_mobs: {totals}"
+    );
+    assert!(!totals.to_string().contains(&install(0)));
 }
 
 #[tokio::test]

@@ -12,7 +12,7 @@ use crate::{
     world::World,
 };
 use horizon_core::{
-    geometry::{Aabb, Direction, Vec3, VoxelShape},
+    geometry::{Aabb, Direction, Vec3, VoxelShape, border::BorderGeometry},
     position::BlockPos,
 };
 use horizon_world::{
@@ -104,7 +104,7 @@ pub struct ItemEntity {
     pub previous: Vec3,
     pub velocity: Vec3,
     pub on_ground: bool,
-    pub age: u32,
+    pub age: i32,
     pub pickup_delay: u32,
     pub bob_offset: f32,
     /// `Entity.tickCount`: ticks since the item entered the level, which
@@ -261,6 +261,7 @@ impl ItemEntity {
         no_physics: bool,
         fluids: &crate::motion::FluidResources,
         entity_boxes: &[Aabb],
+        border: Option<&BorderGeometry>,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
@@ -291,8 +292,11 @@ impl ItemEntity {
         // horizontal speed. The idle branch still runs bubble-column push
         // (`applyEffectsFromBlocksForLastMovements`), so lift builds up and
         // the item moves on the next wake-up (#4558).
-        if !self.on_ground || horizontal > 1.0e-5 || (self.age + self.id).is_multiple_of(4) {
-            let mut scene = SceneCollisions {
+        if !self.on_ground
+            || horizontal > 1.0e-5
+            || self.ticks.wrapping_add(self.id).is_multiple_of(4)
+        {
+            let scene = SceneCollisions {
                 world,
                 binding: collision,
                 subject: None,
@@ -308,17 +312,14 @@ impl ItemEntity {
             // Entity.move with noPhysics: straight through, the ground as it was.
             let moved = if no_physics {
                 wanted
-            } else if entity_boxes.is_empty() {
-                scene
-                    .resolve(self.bounds(), wanted, 0.0, self.on_ground)
-                    .unwrap_or(Vec3::ZERO)
             } else {
                 // `Entity.collide`: the entities that `canBeCollidedWith` the item stop it
-                // too (a boat, a minecart, a shulker, a happy ghast held still).
+                // too (a boat, a minecart, a shulker, a happy ghast held still), and
+                // so does the world border (`Entity.collectColliders`).
                 crate::collisions::EntityCollisions {
                     blocks: scene,
                     entities: entity_boxes,
-                    border: None,
+                    border: border.map(|b| (b, [self.position.x, self.position.z])),
                 }
                 .resolve(self.bounds(), wanted, 0.0, self.on_ground)
                 .unwrap_or(Vec3::ZERO)
@@ -441,7 +442,9 @@ impl ItemEntity {
         if self.velocity.subtract(old_velocity).length_squared() > 0.01 {
             self.needs_sync = true;
         }
-        self.age += 1;
+        if self.age != i16::MIN as i32 {
+            self.age += 1;
+        }
         // ItemEntity.tick refreshes immersion after moving.
         self.update_fluids(world, fluids);
         self.age < 6000 && self.position.y > -128.0
@@ -548,8 +551,11 @@ impl ItemEntity {
     }
     /// `ItemEntity.isMergable` at `age`: a stack below its size whose pickup
     /// delay isn't infinite, before its lifetime ends.
-    fn mergeable(&self, age: u32, max_stack: u32) -> bool {
-        self.pickup_delay != u32::MAX && age < 6000 && self.stack.count < max_stack
+    fn mergeable(&self, age: i32, max_stack: u32) -> bool {
+        self.pickup_delay != u32::MAX
+            && age != i16::MIN as i32
+            && age < 6000
+            && self.stack.count < max_stack
     }
 }
 /// The boxes that stop a dropped item (boats, minecarts, shulkers, a held-still happy ghast),
@@ -685,7 +691,7 @@ pub fn merge_with_neighbours(
     max_stack: &dyn Fn(&ItemStack) -> u32,
 ) {
     let age = |items: &[ItemEntity], j: usize| {
-        if j == i {
+        if j == i && items[j].age != i16::MIN as i32 {
             items[j].age - 1
         } else {
             items[j].age
@@ -729,7 +735,7 @@ pub fn merge_with_neighbours(
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
         // This item's age goes up once its tick ends.
-        to_item.age = to_age.min(from_age) + u32::from(to == i);
+        to_item.age = to_age.min(from_age) + i32::from(to == i);
         if items[from].stack.count == 0 {
             removed[from] = true;
             cells.remove(from, items[from].position);
@@ -852,6 +858,7 @@ impl ExperienceOrb {
         player: Option<[f64; 3]>,
         server: bool,
         next_float: &mut dyn FnMut() -> f32,
+        border: Option<&BorderGeometry>,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
@@ -916,8 +923,10 @@ impl ExperienceOrb {
         // `double fallSpeed = getDeltaMovement().y`, taken after the stuck
         // push and before the move.
         let wanted = self.velocity;
+        // Entity.collide: the world border's walls stop the orb too.
+        let border = border.map(|b| (b, [self.position.x, self.position.z]));
         let moved = scene
-            .resolve(bounds, wanted, 0.0, self.on_ground)
+            .resolve_in_border(bounds, wanted, 0.0, self.on_ground, border)
             .unwrap_or(Vec3::ZERO);
         self.position = Vec3::new(
             self.position.x + moved.x,
@@ -1254,6 +1263,10 @@ pub struct ArmorStand {
     pub no_base_plate: bool,
     pub invisible: bool,
     pub marker: bool,
+    /// `Entity.isNoGravity` (`NoGravity` in the save). `ArmorStand.hasPhysics`
+    /// is false with it, as with `Marker`: `travel` does nothing, so the stand
+    /// never moves, and the blocks it stands in do not touch it.
+    pub no_gravity: bool,
     /// `CustomName`: the text of a hologram.
     pub custom_name: Option<crate::text::Text>,
     /// `CustomNameVisible`.
@@ -1343,6 +1356,7 @@ impl ArmorStand {
             no_base_plate: false,
             invisible: false,
             marker: false,
+            no_gravity: false,
             custom_name: None,
             name_visible: false,
             last_hit: i64::MIN / 2,
@@ -1428,7 +1442,9 @@ impl ArmorStand {
             self.fire_ticks = self.fire_ticks.max(300);
         }
         let fire = crate::motion::environment::fire_contact(world, registry, self.bounds()) > 0.0;
-        if fire && !self.invisible && !self.marker {
+        // The fire block reaches a stand through `applyEffectsFromBlocks`,
+        // which a NoGravity stand does not feel (measured beside the server).
+        if fire && !self.invisible && !self.marker && !self.no_gravity {
             if self.fire_ticks > 0 {
                 self.health -= 0.15;
             } else {
@@ -1467,6 +1483,7 @@ impl ArmorStand {
         facts: &BlockFacts,
         in_water: bool,
         push: &mut dyn FnMut(Aabb, &mut Vec3),
+        border: Option<&BorderGeometry>,
     ) {
         self.previous = self.position;
         if self.marker {
@@ -1485,6 +1502,10 @@ impl ArmorStand {
             if v.z.abs() < 0.003 { 0.0 } else { v.z },
         );
         self.velocity = wanted;
+        // ArmorStand.travel: no physics with NoGravity, the velocity stays.
+        if self.no_gravity {
+            return;
+        }
         // `travelInFluid` reads `isFalling` before the move and any push;
         // `travelInAir` reads ground friction before the move.
         let falling = wanted.y <= 0.0;
@@ -1499,7 +1520,20 @@ impl ArmorStand {
             1.0
         };
         let mut velocity = wanted;
-        if let Ok(moved) = scene.resolve(self.bounds(), wanted, 0.0, self.on_ground) {
+        // Entity.collide: the world border's walls stop the stand too.
+        let moved = SceneCollisions {
+            world: scene.world,
+            binding: scene.binding,
+            subject: scene.subject,
+        }
+        .resolve_in_border(
+            self.bounds(),
+            wanted,
+            0.0,
+            self.on_ground,
+            border.map(|b| (b, [self.position.x, self.position.z])),
+        );
+        if let Ok(moved) = moved {
             self.position = Vec3::new(
                 self.position.x + moved.x,
                 self.position.y + moved.y,
@@ -1764,7 +1798,7 @@ mod armor_stand_render_tests {
 mod merge_tests {
     use super::*;
 
-    fn item(id: &str, count: u32, x: f64, age: u32) -> ItemEntity {
+    fn item(id: &str, count: u32, x: f64, age: i32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
             no_gravity: false,
@@ -1788,7 +1822,7 @@ mod merge_tests {
             age,
             pickup_delay: 0,
             bob_offset: 0.0,
-            ticks: age,
+            ticks: age.max(0) as u32,
             needs_sync: false,
             stuck: Vec3::ZERO,
         }
@@ -1944,6 +1978,73 @@ mod merge_tests {
 }
 
 #[cfg(test)]
+mod world_border_tests {
+    use super::*;
+
+    /// `Entity.collectColliders` (#7080): the world border's wall stops an
+    /// item and an experience orb as it stops the player. A border of size
+    /// 10 around (20, 20) has its east wall at x = 25; each body starts at
+    /// x = 24 on the flat ground of the test scene, moving 1.5 east.
+    #[test]
+    fn the_world_border_stops_items_and_experience_orbs() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let border = BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984).unwrap();
+        for bordered in [false, true] {
+            let border = bordered.then_some(&border);
+            let mut item = super::honey_slide_tests::falling_item(24.0, 4.0, 20.5, 1.5, 0.0, 0.0);
+            item.tick(
+                &world,
+                assets.registry,
+                &facts,
+                &collision,
+                false,
+                &fluids,
+                &[],
+                border,
+            );
+            let mut orb = ExperienceOrb {
+                no_gravity: false,
+                id: 2,
+                position: Vec3::new(24.0, 4.0, 20.5),
+                previous: Vec3::new(24.0, 4.0, 20.5),
+                velocity: Vec3::new(1.5, 0.0, 0.0),
+                value: 1,
+                age: 0,
+                on_ground: true,
+                count: 1,
+                ticks: 0,
+                health: 5,
+            };
+            orb.tick(&world, &facts, &collision, None, true, &mut || 0.0, border);
+            for (what, east) in [
+                ("item", item.bounds().max_position().x),
+                ("orb", orb.bounds().max_position().x),
+            ] {
+                if bordered {
+                    assert!(
+                        (east - 25.0).abs() < 1.0e-7,
+                        "the {what} stops on the wall at x = 25, got {east}"
+                    );
+                } else {
+                    assert!(east > 25.0, "no border: the {what} goes on, got {east}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod honey_slide_tests {
     use super::*;
 
@@ -1973,7 +2074,8 @@ mod honey_slide_tests {
         let mut item = falling_item(at.x, at.y, at.z, 0.0, 0.0, 0.0);
         item.on_ground = true;
         item.age = 0;
-        item.id = 1;
+        item.ticks = 0;
+        item.id = 0;
         let mut ys = Vec::new();
         for _ in 0..8 {
             item.tick(
@@ -1984,6 +2086,7 @@ mod honey_slide_tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
             ys.push(item.velocity.y);
         }
@@ -2048,6 +2151,7 @@ mod honey_slide_tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
         }
         assert!(
@@ -2344,6 +2448,7 @@ mod slime_bounce_tests {
             false,
             &fluids,
             &[],
+            None,
         );
         assert_eq!(falling.position.y, 4.0);
         assert!(falling.velocity.y > 0.0);
@@ -2362,6 +2467,7 @@ mod slime_bounce_tests {
             false,
             &fluids,
             &[],
+            None,
         );
         assert!(!falling.needs_sync);
     }
@@ -2454,6 +2560,7 @@ mod entity_collision_tests {
                     false,
                     &fluids,
                     boxes,
+                    None,
                 );
             }
             item.position.y
@@ -2502,6 +2609,7 @@ mod entity_collision_tests {
                     false,
                     &fluids,
                     &[],
+                    None,
                 );
             }
             item.position.x
@@ -2605,7 +2713,53 @@ mod armor_stand_motion_tests {
             binding: collision,
             subject: None,
         };
-        stand.tick(&mut scene, facts, false, &mut |_, _| {});
+        stand.tick(&mut scene, facts, false, &mut |_, _| {}, None);
+    }
+
+    /// `Entity.collectColliders` (#7080): the world border's wall stops an
+    /// armor stand as it stops the player. A border of size 10 around
+    /// (20, 20) has its east wall at x = 25; the stand starts at x = 24 on the
+    /// test scene's flat ground, moving 1.5 east.
+    #[test]
+    fn the_world_border_stops_an_armor_stand() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let border = BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984).unwrap();
+        for bordered in [false, true] {
+            let mut stand = ArmorStand::new(1, Vec3::new(24.0, 4.0, 20.5), 0.0);
+            stand.on_ground = true;
+            stand.velocity = Vec3::new(1.5, 0.0, 0.0);
+            let mut scene = SceneCollisions {
+                world: &world,
+                binding: &collision,
+                subject: None,
+            };
+            stand.tick(
+                &mut scene,
+                &facts,
+                false,
+                &mut |_, _| {},
+                bordered.then_some(&border),
+            );
+            let east = stand.bounds().max_position().x;
+            if bordered {
+                assert!(
+                    (east - 25.0).abs() < 1.0e-7,
+                    "stops on the wall, got {east}"
+                );
+            } else {
+                assert!(east > 25.0, "no border: goes on, got {east}");
+            }
+        }
     }
 
     #[test]
@@ -2642,6 +2796,36 @@ mod armor_stand_motion_tests {
             mid < start.y && mid > stand.position.y,
             "alpha 0.5 must sit between previous and current"
         );
+    }
+
+    #[test]
+    fn a_no_gravity_stand_stays_put() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let start = Vec3::new(20.5, 20.0, 20.5);
+        let mut stand = ArmorStand::new(1, start, 0.0);
+        stand.on_ground = false;
+        stand.no_gravity = true;
+        // ArmorStand.travel does nothing without physics: measured on the real
+        // server, Pos and Motion stay exactly as summoned for every tick.
+        for _ in 0..5 {
+            tick_stand(&mut stand, &world, &facts, &collision);
+            assert_eq!(stand.position, start);
+            assert_eq!(stand.velocity, Vec3::ZERO);
+        }
+        stand.no_gravity = false;
+        tick_stand(&mut stand, &world, &facts, &collision);
+        tick_stand(&mut stand, &world, &facts, &collision);
+        assert!(stand.position.y < start.y, "gravity again once cleared");
     }
 
     #[test]

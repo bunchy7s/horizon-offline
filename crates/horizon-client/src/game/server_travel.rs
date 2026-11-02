@@ -252,6 +252,12 @@ impl Game<'_> {
                     play.respawn_requested = false;
                     play.won_game = false;
                 }
+                // PlayerList.respawn(keepAllPlayerData = true), CHANGED_DIMENSION:
+                // PlayerEvent.Clone with `wasDeath` false.
+                if let Some(g) = host.hub.guest(conn) {
+                    let (uuid, name) = (g.uuid, g.name.clone());
+                    self.native_player_clone(uuid, &name, false);
+                }
                 self.start_server_trip(host, conn, Dim::Overworld, None);
                 self.portals.player.cooldown = 10;
             }

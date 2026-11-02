@@ -215,8 +215,8 @@ comes out of the headless-engine work.
 **Docker** (`packaging/server/Dockerfile`, built the same way as the relay's image): a multi-stage build that
 ends on `debian:bookworm-slim` as user `horizon`, with the server build as `horizon-engine`, so the image needs
 no ALSA or udev. It uses volume `/data` for the server folder, takes the owner's prepared game files as a read-only
-mount on `/opt/horizon/.local/horizon-client/26.3`, exposes port `25565/tcp`, and keeps the control API (and
-later the panel) on 127.0.0.1 inside the container: `docker exec <name> horizon-server status|cmd|backup`.
+mount on `/opt/horizon/.local/horizon-client/26.3`, exposes port `25565/tcp`, and keeps the control API and
+the panel on 127.0.0.1 inside the container: `docker exec <name> horizon-server status|cmd|backup`.
 On the first start, `HORIZON_EULA=true` and `HORIZON_WORLD`, `HORIZON_SEED`, `HORIZON_PORT`,
 `HORIZON_WHITELIST`, `HORIZON_PLAYERS` and `HORIZON_OP` answer `init`'s questions; without the EULA answer
 the container exits and says why. `docker stop` sends SIGTERM, which saves and stops cleanly (give it
@@ -293,10 +293,10 @@ keep = 12                    # automatic backups kept (backups made by hand are 
 keep = 1                     # other releases kept by updates, besides the one in use and the one rollback goes to
 ```
 
-This is the file `init` writes today (PR 4 adds `[panel] bind = "127.0.0.1:8130"` and `allow_public =
-false`, section 6). The defaults are vanilla 26.3's (a test checks each one). Unknown keys are errors, as are
-a typed key set again under `[properties]` and values vanilla would refuse. Planned: `backups.before_update`
-(section 7).
+This is the file `init` writes today, and it also writes `[panel]` (`bind = "127.0.0.1:8130"` and
+`allow_public = false`, section 6), `[api]` and `[discord]`. The defaults are vanilla 26.3's (a test checks
+each one). Unknown keys are errors, as are a typed key set again under `[properties]` and values vanilla would
+refuse. There is no `backups.before_update` setting: an update always backs up the world first (section 7).
 
 - **Import.** `horizon-server init` in a folder with a `server.properties`, or `horizon-server import
   server.properties`, reads it with vanilla's own parser (`ServerProperties`). Keys with typed fields go into
@@ -394,8 +394,8 @@ runtime or new dependency. Server-sent events can replace the polling later if a
 
 - **Backups.** The supervisor runs `save-off`, then `save-all flush`, then zips the world plus the vanilla
   files and `server.toml` into `backups/<UTC time>-<name>.zip`, then runs `save-on`. Players stay online. Zip
-  works for everyone, Windows included. It runs on the `every` schedule and on demand (later also before an
-  update). It keeps the last `keep` automatic backups and never deletes one made by hand. A backup is written
+  works for everyone, Windows included. It runs on the `every` schedule, on demand and before an
+  update. It keeps the last `keep` automatic backups and never deletes one made by hand. A backup is written
   to a temporary name and renamed when complete, so a crash never leaves a half-written backup that looks
   finished. A stopped server is backed up straight from its files.
 - **Restore.** `restore NAME` takes a file name, a unique prefix, or the name given to `backup` (the newest
@@ -506,7 +506,28 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     `server/{status,save,stop,system_message}`, and the four lists (`allowlist/*`, `bans/*`, `ip_bans/*`,
     `operators/*`), whose changes the game applies itself (its control endpoint's `management` request, in
     `game/dedicated/management.rs`), so the source, expiry, log lines and kicks are vanilla's;
-  - planned: `serversettings/*` and `gamerules`, the notifications and heartbeat (from the event stream).
+  - notifications: the supervisor pushes them to every connected client as vanilla's `JsonRpcNotificationService`
+    does (a JSON-RPC request without an `id`, its one parameter in an array), through a queue and a thread so a slow
+    client never holds the game's output. Built: `server/started` (the game's `Done`) and `server/stopping`
+    (when the supervisor or the game's own `stop` begins the shutdown, once per run), `server/saving` and
+    `server/saved` (around every world save of the running game: `save-all`, the autosave, the pause when
+    empty; a save the game makes while it stops is after the last one the supervisor hears of), and
+    `players/joined` and `players/left` (from the game's typed events, within a quarter of a second), and
+    `operators/*`, `allowlist/*`, `bans/*` and `ip_bans/*` `added`/`removed`: each of the game's lists tells a
+    watcher what `add`, `remove` and `clear` do, as vanilla's `StoredUserList` tells its `NotificationService`,
+    so a change by the console, a command in the game or the protocol itself is told alike (`clear` once per
+    entry); the event stream carries them as `operators_added`, `bans_removed`... too;
+  - game rules: `gamerules` lists every rule the game has as a typed rule (`{key, type, value}`), `gamerules/update`
+    sets one (checked against its type and bounds with vanilla's error texts, and set, logged and told on every
+    update, as vanilla's does) and `notification/gamerules/updated` follows every change, by that method or by
+    `/gamerule` (`Game::set_game_rule`); the parity script compares both servers on all of it;
+  - `server/activity`: a login attempt (the game records `login_activity` in its login gate, as
+    `ServerActivityMonitor.reportLoginActivity` is called when a login starts), told at most once in thirty
+    seconds and lost otherwise, as the monitor clears its flag whatever it did; and `server/status`, the
+    heartbeat: every `status-heartbeat-interval` seconds (none at 0, the first after as many) the status
+    `server/status` answers, up or not, to whoever is connected;
+  - planned: the rest of `serversettings/*` and the world-upgrade notifications (after `WorldUpgrader`'s server
+    side).
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
 
@@ -570,7 +591,8 @@ reproducible by anyone, and show the same gameplay on both sides.
 - **Equal-work run (2026-10-17,** `benchmarks/server-equal-work-2026-10-17/`, on the ThinkPad with the bots
   on the Mac mini). Horizon now checks moves and paces chunks as vanilla does (#586), the bots wait for the
   chunk they stand in, an `--explore-speed` pass keeps both servers at the same rate, and vanilla runs with
-  `gamerule locator_bar false` (Horizon has no locator bar yet). Results:
+  `gamerule locator_bar false` (Horizon had no locator bar when this ran; since #692, merged the same day,
+  it sends one to vanilla clients). Results:
   - Memory: Horizon's RSS is 1.9 to 2.6 times smaller in every run (vanilla's heap is fixed at 4 GB).
   - Walking near spawn: Horizon's tick is shorter with 1 and 10 bots (5.5 against 18.3 ms, 11.5 against
     16.8), and longer with 25 and 50 (20.7 against 16.0, 31.4 against 20.5). Both keep 20 TPS up to 50.

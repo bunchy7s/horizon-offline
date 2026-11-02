@@ -1982,6 +1982,36 @@ fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
     );
 }
 
+/// `MovingPistonBlock.destroy`: a moving piston that goes away takes the
+/// extended piston base behind it with it; an unextended base stays.
+#[test]
+fn breaking_a_moving_piston_removes_its_extended_base() {
+    let mut w = world!();
+    let moving = w.id("moving_piston", &[("facing", "east"), ("type", "normal")]);
+    let extended = w.id("piston", &[("facing", "east"), ("extended", "true")]);
+    let retracted = w.id("piston", &[("facing", "east"), ("extended", "false")]);
+    let air = w.id("air", &[]);
+    // The head at (1, 1, 0) faces east, so its base is at (0, 1, 0).
+    w.put(BlockPos::new(0, 1, 0), extended);
+    w.put(BlockPos::new(1, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(1, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(0, 1, 0)),
+        air,
+        "the extended base goes with the moving piston"
+    );
+    w.put(BlockPos::new(5, 1, 0), retracted);
+    w.put(BlockPos::new(6, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(6, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(5, 1, 0)),
+        retracted,
+        "an unextended base is left alone"
+    );
+}
+
 #[test]
 fn dripstone_fills_cauldrons() {
     let mut w = world!();

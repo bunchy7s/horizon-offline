@@ -85,7 +85,7 @@ IGNORED = {
     r'^chunk\.block_entities\..*\.(ticks_since_song_started|Age|BrewTime|warning_level|ticks_in_hive|last_vibration_frequency|listener\..*|RecipesUsed\..*|'
     r'server_data\.state_updating_resumes_at)$':
         'block entity timers advance',
-    r'^entity\.(Age|Motion\[\]|Rotation\[\]|Pos\[\]|OnGround|HurtTime|Health|TimeInOverworld|fall_distance|'
+    r'^entity\.(Passengers\[\]\.)*(Age|Motion\[\]|Rotation\[\]|Pos\[\]|OnGround|HurtTime|Health|TimeInOverworld|fall_distance|'
     r'wasOnGround|Fire|Air|DeathTime|Fuse|life|inGround|ticks_in_ground|Time)$': 'entity simulation advances',
     r'^level\.dat\.Data\.(Time|LastPlayed)$': 'clock and wall time of the save',
     r'^level\.dat\.Data\.(ServerBrands.*|singleplayer_uuid)$': 'a client world names its brand and its player',

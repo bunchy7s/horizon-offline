@@ -16,12 +16,16 @@ sent the same things over TLS, and every answer is compared exactly:
   vanilla's data generator), `server/status`, the four lists, `players`, kicking nobody, `server/save` and
   `server/system_message` with no one online, the four lists changed (`add`, `remove`, `set`,
   `clear`; with no profile service, players named resolve to offline players on both), the live server
-  message, difficulty, default game mode and forced game mode read and changed (including saved properties), and
+  message, difficulty, default and forced game mode read and changed (including saved properties), autosave
+  read and changed (including its reset after restart), allowlist use and enforcement read and changed
+  (including saved properties and restart), max players read and changed (including saved
+  properties and restart), and
   `server/stop`;
 - the TLS version each server agrees on.
 
-A parse error's `data` is Gson's message in vanilla and serde's in Horizon: left out. The notifications vanilla
-sends meanwhile (`server/started`, `server/saving`...) are set aside: Horizon doesn't send them yet.
+A parse error's `data` is Gson's message in vanilla and serde's in Horizon: left out. The notifications the
+servers send meanwhile (`server/stopping`...) are set aside, and their names are kept in each side's report
+(`notifications`); Horizon sends `server/started` and `server/stopping` so far, not yet the rest.
 """
 import base64
 import json
@@ -147,7 +151,61 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":61,"method":"minecraft:serversettings/force_game_mode"}',
     '{"jsonrpc":"2.0","id":62,"method":"minecraft:serversettings/force_game_mode/set","params":["yes"]}',
     '{"jsonrpc":"2.0","id":63,"method":"minecraft:serversettings/force_game_mode"}',
+    '{"jsonrpc":"2.0","id":65,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":66,"method":"minecraft:serversettings/autosave/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":67,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":68,"method":"minecraft:serversettings/autosave/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":69,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":70,"method":"minecraft:serversettings/autosave/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":71,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":72,"method":"minecraft:serversettings/autosave/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":73,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":75,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":76,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":77,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":78,"method":"minecraft:serversettings/use_allowlist/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":79,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":80,"method":"minecraft:serversettings/use_allowlist/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":81,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":82,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":83,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":84,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":85,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":86,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":87,"method":"minecraft:serversettings/enforce_allowlist/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":88,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":89,"method":"minecraft:serversettings/enforce_allowlist/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":90,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":91,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":92,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":100,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":101,"method":"minecraft:serversettings/max_players/set","params":[10]}',
+    '{"jsonrpc":"2.0","id":102,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":103,"method":"minecraft:serversettings/max_players/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":104,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":105,"method":"minecraft:serversettings/max_players/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":106,"method":"minecraft:serversettings/max_players"}',
+    '{"jsonrpc":"2.0","id":107,"method":"minecraft:serversettings/max_players/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":108,"method":"minecraft:serversettings/max_players"}',
+    # The game rules: the list, a rule set (and set again to the same value), an integer rule, and what doesn't fit.
+    '{"jsonrpc":"2.0","id":200,"method":"minecraft:gamerules"}',
+    '{"jsonrpc":"2.0","id":201,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":false}]}',
+    '{"jsonrpc":"2.0","id":202,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":false}]}',
+    '{"jsonrpc":"2.0","id":203,"method":"minecraft:gamerules/update",'
+    '"params":[{"key":"minecraft:random_tick_speed","value":5}]}',
+    '{"jsonrpc":"2.0","id":204,"method":"minecraft:gamerules/update",'
+    '"params":[{"key":"minecraft:random_tick_speed","value":-1}]}',
+    '{"jsonrpc":"2.0","id":205,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:pvp","value":"yes"}]}',
+    '{"jsonrpc":"2.0","id":206,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:nope","value":true}]}',
+    '{"jsonrpc":"2.0","id":207,"method":"minecraft:gamerules/update","params":[{"value":true}]}',
+    '{"jsonrpc":"2.0","id":208,"method":"minecraft:gamerules"}',
 ]
+# The notifications Horizon sends so far, which both servers must send for the same messages the same number of
+# times (the others, `server/saving`... depend on timing, or aren't sent yet).
+COMPARED_NOTIFICATIONS = {
+    f'minecraft:notification/{name}' for name in (
+        'gamerules/updated', 'operators/added', 'operators/removed', 'allowlist/added', 'allowlist/removed',
+        'bans/added', 'bans/removed', 'ip_bans/added', 'ip_bans/removed')}
 
 
 def management_properties(port, keystore):
@@ -282,6 +340,10 @@ def normal(text):
     value = json.loads(text)
     if isinstance(value, dict) and value.get('error', {}).get('code') == -32700:
         value['error'].pop('data', None)
+    # The game rules come in the order of a map keyed by identity in vanilla (it changes from run to run).
+    result = value.get('result') if isinstance(value, dict) else None
+    if isinstance(result, list) and result and all(isinstance(r, dict) and 'key' in r for r in result):
+        value['result'] = sorted(result, key=lambda rule: rule['key'])
     return value
 
 
@@ -372,11 +434,26 @@ def main():
                 sides[side]['saved_force_game_mode'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('force-gamemode=')), None)
+                sides[side]['saved_use_allowlist'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('white-list=')), None)
+                sides[side]['saved_enforce_allowlist'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('enforce-whitelist=')), None)
+                sides[side]['saved_max_players'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('max-players=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
                     sides[side]['saved_config_game_mode'] = 'game_mode = "spectator"' in world
                     sides[side]['saved_config_force_game_mode'] = 'force-gamemode = true' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_use_allowlist'] = 'whitelist = true' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_enforce_allowlist'] = 'enforce_whitelist = true' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_max_players'] = 'max_players = 30' in (
                         folder / 'server.toml').read_text()
             finally:
                 server.stop()
@@ -391,6 +468,30 @@ def main():
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_force_game_mode'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":74,"method":"minecraft:serversettings/autosave"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_autosave'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":93,"method":"minecraft:serversettings/use_allowlist"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_use_allowlist'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":94,"method":"minecraft:serversettings/enforce_allowlist"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_enforce_allowlist'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":109,"method":"minecraft:serversettings/max_players"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_max_players'] = reply
                 finally:
                     ws.sock.close()
             finally:
@@ -403,6 +504,10 @@ def main():
         for message, v, h in zip(MESSAGES, vanilla['answers'], horizon['answers']):
             if v != h:
                 failures.append(f'{message}\n  vanilla {json.dumps(v)[:400]}\n  Horizon {json.dumps(h)[:400]}')
+        told = {side: sorted(n for n in sides[side]['notifications'] if n in COMPARED_NOTIFICATIONS)
+                for side in ('vanilla', 'horizon')}
+        if told['vanilla'] != told['horizon']:
+            failures.append(f"notifications: vanilla {told['vanilla']}\n  Horizon {told['horizon']}")
         if vanilla['saved_difficulty'] != horizon['saved_difficulty'] or vanilla['saved_difficulty'] != 'peaceful':
             failures.append(f"saved difficulty: vanilla {vanilla['saved_difficulty']!r}, Horizon {horizon['saved_difficulty']!r}")
         if not horizon['saved_config_difficulty']:
@@ -415,9 +520,33 @@ def main():
             failures.append(f"saved forced game mode: vanilla {vanilla['saved_force_game_mode']!r}, Horizon {horizon['saved_force_game_mode']!r}")
         if not horizon['saved_config_force_game_mode']:
             failures.append('Horizon did not save forced game mode in server.toml')
+        if vanilla['saved_use_allowlist'] != horizon['saved_use_allowlist'] or vanilla['saved_use_allowlist'] != 'true':
+            failures.append(f"saved allowlist use: vanilla {vanilla['saved_use_allowlist']!r}, Horizon {horizon['saved_use_allowlist']!r}")
+        if vanilla['saved_enforce_allowlist'] != horizon['saved_enforce_allowlist'] or vanilla['saved_enforce_allowlist'] != 'true':
+            failures.append(f"saved allowlist enforcement: vanilla {vanilla['saved_enforce_allowlist']!r}, Horizon {horizon['saved_enforce_allowlist']!r}")
+        if not horizon['saved_config_use_allowlist']:
+            failures.append('Horizon did not save allowlist use in server.toml')
+        if not horizon['saved_config_enforce_allowlist']:
+            failures.append('Horizon did not save allowlist enforcement in server.toml')
         if vanilla['restarted_force_game_mode'] != horizon['restarted_force_game_mode'] or \
                 vanilla['restarted_force_game_mode'] != {'jsonrpc': '2.0', 'id': 64, 'result': True}:
             failures.append(f"restarted forced game mode: vanilla {vanilla['restarted_force_game_mode']!r}, Horizon {horizon['restarted_force_game_mode']!r}")
+        if vanilla['restarted_autosave'] != horizon['restarted_autosave'] or \
+                vanilla['restarted_autosave'] != {'jsonrpc': '2.0', 'id': 74, 'result': True}:
+            failures.append(f"restarted autosave: vanilla {vanilla['restarted_autosave']!r}, Horizon {horizon['restarted_autosave']!r}")
+        if vanilla['restarted_use_allowlist'] != horizon['restarted_use_allowlist'] or \
+                vanilla['restarted_use_allowlist'] != {'jsonrpc': '2.0', 'id': 93, 'result': True}:
+            failures.append(f"restarted allowlist use: vanilla {vanilla['restarted_use_allowlist']!r}, Horizon {horizon['restarted_use_allowlist']!r}")
+        if vanilla['restarted_enforce_allowlist'] != horizon['restarted_enforce_allowlist'] or \
+                vanilla['restarted_enforce_allowlist'] != {'jsonrpc': '2.0', 'id': 94, 'result': True}:
+            failures.append(f"restarted allowlist enforcement: vanilla {vanilla['restarted_enforce_allowlist']!r}, Horizon {horizon['restarted_enforce_allowlist']!r}")
+        if vanilla['saved_max_players'] != horizon['saved_max_players'] or vanilla['saved_max_players'] != '30':
+            failures.append(f"saved max players: vanilla {vanilla['saved_max_players']!r}, Horizon {horizon['saved_max_players']!r}")
+        if not horizon['saved_config_max_players']:
+            failures.append('Horizon did not save max players in server.toml')
+        if vanilla['restarted_max_players'] != horizon['restarted_max_players'] or \
+                vanilla['restarted_max_players'] != {'jsonrpc': '2.0', 'id': 109, 'result': 30}:
+            failures.append(f"restarted max players: vanilla {vanilla['restarted_max_players']!r}, Horizon {horizon['restarted_max_players']!r}")
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
         if failures:
             sys.exit(f'{NAME}: {len(failures)} differences (logs in {build}):\n' + '\n'.join(failures))

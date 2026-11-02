@@ -128,7 +128,7 @@ impl Launcher {
         // The question and Settings say what the "I'm playing" ping holds, beside the switches.
         if !self.settings.ping_notice_seen {
             self.settings.ping_notice_seen = true;
-            self.settings.save();
+            self.save_settings();
         }
         self.collection.view = None;
     }
