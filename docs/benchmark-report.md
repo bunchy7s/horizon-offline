@@ -88,6 +88,10 @@ confidence interval of the mean, Student's t, null when `n` is 1). The unit is t
 | `tick.mspt`, `tick.tps` | integrated server tick time and rate (planned) |
 | `memory.rss_peak_mb`, `memory.rss_steady_mb` | resident memory: peak over the run, median while flying |
 | `memory.gpu_mb`, `memory.<phase>.gpu_mb` | video memory the game allocated (or NVIDIA attributes to it), where readable |
+| `memory.<phase>.rss_mb` | resident memory, median over that phase's flight (perf_bench) |
+| `cpu.<phase>.p50_ms` | median CPU time of a frame (the frame minus its waits for the GPU, the display and the limiter; Horizon only) |
+| `tick.<phase>.client_ms` | mean time of one client tick during the phase (vanilla: `Minecraft.tick`; Horizon: the frames' tick phase over the ticks run) |
+| `gpu_pass.<phase>.<pass>_ms` | GPU time of one of the game's render passes (`world`, `world_after_culling`, `occlusion_test`, `hud`...), the median of the last 15 timed frames in the 2 s before the flight, at its start; the flight itself is not timed per pass. Not on Metal, where passes overlap |
 | `power.package_w`, `power.battery_drain_pct` | power draw, battery used per hour (laptops; planned) |
 | `thermal.cpu_c`, `thermal.throttled_pct` | temperature, share of the run spent throttled (planned) |
 | `launcher.start_ms` | launcher process start to its first frame (a session) |

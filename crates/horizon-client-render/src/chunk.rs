@@ -564,14 +564,20 @@ impl Chunk {
     }
     #[inline]
     pub fn light(&self, x: i32, y: i32, z: i32) -> u8 {
-        let s = (y - self.min_y) >> 4;
-        if s < 0 {
-            return 0;
+        match self.section_at(y) {
+            Ok(section) => section.light(index(x, y, z)),
+            Err(light) => light,
         }
-        if s >= self.sections.len() as i32 {
-            return 0xF0;
+    }
+    /// The section holding block height `y`, or the light of the air outside the
+    /// column's sections there: none below them, full sky above.
+    #[inline]
+    pub fn section_at(&self, y: i32) -> Result<&Section, u8> {
+        match self.section_index(y) {
+            Some(s) => Ok(&self.sections[s]),
+            None if y < self.min_y => Err(0),
+            None => Err(0xF0),
         }
-        self.sections[s as usize].light(index(x, y, z))
     }
     /// Heap bytes held by the sections (benchmark accounting).
     pub fn heap_bytes(&self) -> usize {

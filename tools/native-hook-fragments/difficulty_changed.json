@@ -4,7 +4,10 @@
       "name": "difficulty_changed",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_difficulty_changed",
       "neoforge": "DifficultyChangeEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "the server's difficulty changing (`native_difficulty_changed`).",

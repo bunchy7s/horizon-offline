@@ -203,7 +203,8 @@ fn bucket(quad: &[TerrainVertex; 4]) -> usize {
 
 /// Reorders `solid`'s quads by bucket, opaque ones first in each. Solid
 /// cutout quads are also ordered front to back within each axis-facing
-/// bucket; stable sorting preserves the mesher's order for coplanar overlays.
+/// bucket; quads that tie keep the mesher's order (the quad's index ends its
+/// sort key), so coplanar overlays still draw over their base.
 pub fn sort(solid: &mut Vec<TerrainVertex>) -> Sides {
     sort_parts(solid, GROUPED.load(Ordering::Relaxed))
 }
@@ -213,9 +214,9 @@ fn sort_parts(solid: &mut Vec<TerrainVertex>, grouped: bool) -> Sides {
     SORT_SCRATCH.with_borrow_mut(|scratch| sort_with(solid, grouped, scratch))
 }
 
-/// `sort`'s buffers, kept by each meshing thread: a section's quads went
-/// through fresh vectors, and the sorted copy replaced the mesh's own
-/// (recycled) buffer.
+/// `sort`'s buffers, kept by each meshing thread so sorting a mesh allocates
+/// nothing: each quad's part, its sort key, and the sorted quads, which are
+/// copied back into the mesh's own (recycled) buffer.
 #[derive(Default)]
 struct SortScratch {
     slots: Vec<u8>,
