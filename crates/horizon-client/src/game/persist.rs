@@ -45,6 +45,10 @@ pub struct EntityMemory {
     pub(super) joins_canceled: u32,
     /// The highest entity id `native_entity_join_level` has been told of.
     pub(super) joined_mark: u32,
+    /// The entities mods were told of and that have not left since: id (in
+    /// increasing order), type, and whether the last leave sweep saw it.
+    /// Only filled while a mod is loaded.
+    pub(super) live: Vec<(u32, String, bool)>,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -355,6 +359,10 @@ impl Game<'_> {
                     kind.as_str(),
                     "minecraft:experience_orb"
                         | "minecraft:arrow"
+                        | "minecraft:spectral_arrow"
+                        | "minecraft:llama_spit"
+                        | "minecraft:shulker_bullet"
+                        | "minecraft:experience_bottle"
                         | "minecraft:fireball"
                         | "minecraft:small_fireball"
                         | "minecraft:wind_charge"
@@ -398,7 +406,7 @@ impl Game<'_> {
                             self.remember_tags(id, &tag);
                         }
                     }
-                    "minecraft:arrow" => {
+                    "minecraft:arrow" | "minecraft:spectral_arrow" => {
                         if let Some((mut p, in_block)) = entity_nbt::arrow_from_nbt(
                             &tag,
                             player_uuid,
@@ -424,6 +432,17 @@ impl Game<'_> {
                         if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
                             self.claim_owner(&mut p);
                             // A projectile that came through a portal keeps its cooldown.
+                            self.next_entity += 1;
+                            p.id = self.next_entity;
+                            self.restore_portal_cooldown(p.id, &tag);
+                            self.add_projectile(p);
+                            self.remember_last_projectile_tags(&tag);
+                        }
+                    }
+                    "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid)
+                        {
+                            self.claim_owner(&mut p);
                             self.next_entity += 1;
                             p.id = self.next_entity;
                             self.restore_portal_cooldown(p.id, &tag);
@@ -1326,7 +1345,6 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
-            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1334,7 +1352,6 @@ impl Game<'_> {
                 }
                 keep
             });
-            let (items_before, orbs_before) = (self.dropped_ids(), self.orb_ids());
             self.dropped.retain(|e| {
                 let keep = !gone(e.position);
                 if !keep {
@@ -1344,9 +1361,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
-            self.native_mobs_left_since(&mobs_before);
-            self.native_items_left_since(&items_before);
-            self.native_orbs_left_since(&orbs_before);
+            self.native_leaves_flush();
             // the ones saved with the chunk go with it (a trident too, unsaved).
             self.creatures.projectiles.retain(|p| {
                 let leaves = entity_nbt::saved_with_chunk(p) || p.arrow.is_some();
@@ -1512,7 +1527,8 @@ impl Game<'_> {
             .map(|s| self.state_to_nbt(s));
         let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))?;
+            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
+            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
         Some((
             chunk_of(p.position),
             with_raw(tag, self.persist.raw.get(&p.id)),
