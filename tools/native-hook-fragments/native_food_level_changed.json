@@ -4,7 +4,11 @@
       "name": "food_level_changed",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_food_level_changed",
       "neoforge": "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a player's food level changing, changeable and cancellable (`native_food_level_changed`).",

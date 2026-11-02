@@ -3781,7 +3781,7 @@ impl Game<'_> {
         to: &mut i32,
         cancel: &mut bool,
     ) {
-        let _ = (player, name, from, to, cancel);
+        mod_api::dispatch_food_level_changed(self, mod_api::mods(), player, name, from, to, cancel);
     }
     /// Whether a mod hears `native_experience_orb_pickup`: set `listened`
     /// (a HEAD injection), or the server skips swapping the player in for it,
