@@ -746,7 +746,10 @@ pub(super) fn make_streaming(
             &settings,
             true,
         ) {
-            Ok(terrain) => Some(Arc::new(terrain)),
+            Ok(mut terrain) => {
+                terrain.add_mod_signs(res.facts());
+                Some(Arc::new(terrain))
+            }
             Err(e) => {
                 log::warn!("Horizon: the superflat structures are unavailable: {e}");
                 None
@@ -817,13 +820,15 @@ pub(super) fn make_streaming(
         let preset = horizon_client::save::WorldGen::preset(world_root);
         let overrides =
             world_worldgen_overrides(world_root, &options.resources, &biomes, enabled_features);
-        let inner = Arc::new(VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
+        let mut inner = VanillaTerrain::for_world_with(&options.resources.join("worldgen"), &overrides, pack.assets.registry, &biomes, seed, preset, dim.id(), structures).map_err(|e| {
                 if overrides.is_empty() {
                     format!("{e}\nPrepare the worldgen bundle with the launcher, or: horizon-prepare --prepare")
                 } else {
                     format!("{e}\nThe world's data packs change its world generation: one of them may not be made for this version")
                 }
-            })?);
+            })?;
+        inner.add_mod_signs(res.facts());
+        let inner = Arc::new(inner);
         if dim == Dim::Overworld && structures {
             inner.search_rings_behind();
         }
