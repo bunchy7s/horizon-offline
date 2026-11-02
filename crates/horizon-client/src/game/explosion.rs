@@ -148,8 +148,12 @@ fn blast_direction(center: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
     }
 }
 
-/// An entity in the blast's reach: how far (as a share of the blast's
-/// diameter), how much of it the rays see, and the knockback.
+struct ExplosionHookContext<'a> {
+    center: [f64; 3],
+    blocks: &'a [[i32; 3]],
+}
+
+/// An entity in the blast's reach: distance, exposure, and knockback.
 struct Hit {
     dist: f64,
     exposure: f32,
@@ -389,16 +393,16 @@ impl Game<'_> {
     ///
     /// `cause` is the blast's source as predicates see it, read before the
     /// guests' turns swap their own combat state in.
-    pub(super) fn explosion_hurt_player(
+    fn explosion_hurt_player(
         &mut self,
-        center: [f64; 3],
+        context: &ExplosionHookContext<'_>,
         radius: f32,
         damage_type: &str,
         exploding: Option<u32>,
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
-        blocks: &[[i32; 3]],
     ) -> Option<[f64; 3]> {
+        let ExplosionHookContext { center, blocks } = *context;
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
         // piece, so two Blast Protection IV pieces cancel it).
@@ -451,10 +455,6 @@ impl Game<'_> {
         let flying = self.player.as_ref().is_some_and(|p| p.flying);
         let mut outcome = horizon_client::health::BlockOutcome::default();
         let mut pushed = None;
-        let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
-        if !spectator && !(creative && flying) {
-            self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
-        }
         // The death message names the blast's causing entity. It goes to this
         // player's tracker, the host's or a guest's.
         if let Some((id, name)) = attacker.filter(|_| !creative && !spectator && hurtable) {
@@ -486,7 +486,11 @@ impl Game<'_> {
                         .indicate_damage(center[0] - feet[0], center[2] - feet[2], p.yaw);
                 }
             }
-            if !spectator && !(creative && flying) {
+        }
+        if !spectator && !(creative && flying) {
+            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+            self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
+            if let Some(p) = self.player.as_mut() {
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
@@ -573,14 +577,14 @@ impl Game<'_> {
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
         let blast_source = self.combat.explosion_cause.clone();
+        let context = ExplosionHookContext { center, blocks };
         let own = self.explosion_hurt_player(
-            center,
+            &context,
             radius,
             damage_type,
             exploding,
             attacker.as_ref(),
             blast_source.as_ref(),
-            blocks,
         );
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(mut host) = self.lan.take() {
@@ -594,13 +598,12 @@ impl Game<'_> {
             for conn in guests {
                 let push = self.as_guest(&mut host, conn, |g| {
                     g.explosion_hurt_player(
-                        center,
+                        &context,
                         radius,
                         damage_type,
                         exploding,
                         attacker.as_ref(),
                         blast_source.as_ref(),
-                        blocks,
                     )
                 });
                 if let Some(Some(push)) = push {
@@ -649,6 +652,12 @@ impl Game<'_> {
             }) = hit
             {
                 let amount = damage(dist, exposure);
+                let entity = with_entity!(self, handle, e => e.id());
+                let mut velocity = [push.x, push.y, push.z];
+                self.native_explosion_knockback(
+                    self.dim.id(), center, blocks, Some(entity), &mut velocity,
+                );
+                let push = Vec3::new(velocity[0], velocity[1], velocity[2]);
                 match handle {
                     EntityHandle::Mob(i) => {
                         let hurtable = teams_allow(self, self.mob_team(self.mobs[i].id));

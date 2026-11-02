@@ -5294,7 +5294,7 @@ impl Game<'_> {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
     /// Server explosion knockback for `entity` (None for the acting player).
-    /// Replace the velocity added to its existing velocity. API @API:explosion_knockback@.
+    /// Replace the velocity added to its existing velocity. API @API:native_explosion_knockback@.
     pub(super) fn native_explosion_knockback(
         &mut self,
         dimension: &str,

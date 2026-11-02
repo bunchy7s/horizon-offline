@@ -226,8 +226,9 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
-        blocklike: bool,
+        blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
+        let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
         let diameter = f64::from(radius * 2.0);
         let distance = |p: [f64; 3]| {
             ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2))
@@ -249,7 +250,7 @@ impl Game<'_> {
         // The player, then every other player in the level (LAN guests),
         // each swapped in as the player. In a guest's turn (a mace's wind
         // burst) the player is that guest.
-        let own = self.wind_push_player(center, radius, multiplier, breeze, wind_charge);
+        let own = self.wind_push_player(center, radius, multiplier, breeze, wind_charge, blocks);
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(mut host) = self.lan.take() {
             let guests: Vec<u32> = host
@@ -261,7 +262,7 @@ impl Game<'_> {
                 .collect();
             for conn in guests {
                 let push = self.as_guest(&mut host, conn, |g| {
-                    g.wind_push_player(center, radius, multiplier, breeze, wind_charge)
+                    g.wind_push_player(center, radius, multiplier, breeze, wind_charge, blocks)
                 });
                 if let Some(Some(push)) = push {
                     pushed.push((conn, push));
@@ -295,7 +296,9 @@ impl Game<'_> {
             let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
             let power = (1.0 - dist) * f64::from(exposure) * multiplier;
             let dir = direction([feet[0], feet[1] + entity.explosion_eye_height(), feet[2]]);
-            entity.push_from_explosion(Vec3::new(dir[0] * power, dir[1] * power, dir[2] * power));
+            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+            self.native_explosion_knockback(self.dim.id(), center, blocks, Some(entity.id()), &mut push);
+            entity.push_from_explosion(Vec3::new(push[0], push[1], push[2]));
         });
         self.restore_entities(entities);
         pushed
@@ -310,6 +313,7 @@ impl Game<'_> {
         multiplier: f32,
         breeze: bool,
         wind_charge: bool,
+        blocks: &[[i32; 3]],
     ) -> Option<[f64; 3]> {
         if self.spectator() {
             return None;
@@ -344,11 +348,12 @@ impl Game<'_> {
         );
         let power = (1.0 - dist) * f64::from(exposure) * f64::from(multiplier) * (1.0 - resistance);
         let l = (eye[0] * eye[0] + eye[1] * eye[1] + eye[2] * eye[2]).sqrt();
-        let push = if l < 1.0e-5 {
+        let mut push = if l < 1.0e-5 {
             [0.0; 3]
         } else {
             eye.map(|d| d / l * power)
         };
+        self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
         let p = self.player.as_mut()?;
         p.velocity = Vec3::new(
             p.velocity.x + push[0],
@@ -402,10 +407,8 @@ impl Game<'_> {
         let ctx = horizon_client::sculk::Context::default();
         self.post_game_event("minecraft:explode", center, ctx);
         let mut targets = self.wind_positions(center, radius);
-        // ServerExplosion.shouldAffectBlocklikeEntities
-        let blocklike = !breeze && !wind_charge && self.ui.rules.bool("mob_griefing");
         let pushed =
-            self.wind_knockback(center, radius, multiplier, breeze, wind_charge, blocklike);
+            self.wind_knockback(center, radius, multiplier, breeze, wind_charge, &targets);
         let block_count = targets.len();
         // Explosion.canTriggerBlocks: a breeze's charge needs mob griefing.
         if !breeze || self.ui.rules.bool("mob_griefing") {
