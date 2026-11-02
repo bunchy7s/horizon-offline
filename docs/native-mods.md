@@ -2210,7 +2210,8 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access and `native_set_block_property`. Whole-block writes wait for a
+`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
+`native_send_particles`. Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -2287,7 +2288,8 @@ handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,
