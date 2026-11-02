@@ -9,6 +9,7 @@
 //! A server keeps one level per dimension. Entity portal processes and
 //! cooldowns follow their level; shared `Arrival`s hold each traveller's
 //! saved compound until its destination chunks are loaded.
+use super::entity::{Entity as _, entity_lists_of, for_each_entity};
 use super::{Dim, Game, Screen};
 use horizon_client::Result;
 use horizon_client::fast_hash::FxHashMap;
@@ -110,7 +111,7 @@ fn rotate_y(v: Vec3, degrees: f32) -> Vec3 {
 }
 /// Whether a projectile is an arrow, which goes through a portal like the
 /// other entities.
-fn is_arrow(p: &horizon_client::projectiles::Projectile) -> bool {
+pub(super) fn is_arrow(p: &horizon_client::projectiles::Projectile) -> bool {
     matches!(
         p.kind,
         horizon_client::projectiles::ProjectileKind::Arrow { .. }
@@ -119,7 +120,7 @@ fn is_arrow(p: &horizon_client::projectiles::Projectile) -> bool {
 /// The projectiles besides arrows that a portal sends on: the thrown items
 /// and fireballs a chunk saves. A pearl has its own rules (it keeps its owner's
 /// dimension) and a wind charge is not saved, so both stay.
-fn is_portal_projectile(p: &horizon_client::projectiles::Projectile) -> bool {
+pub(super) fn is_portal_projectile(p: &horizon_client::projectiles::Projectile) -> bool {
     use horizon_client::projectiles::ProjectileKind;
     !is_arrow(p)
         && !matches!(
@@ -131,7 +132,7 @@ fn is_portal_projectile(p: &horizon_client::projectiles::Projectile) -> bool {
         && horizon_client::entity_nbt::saved_with_chunk(p)
 }
 /// Width and height of a projectile that goes through a portal.
-fn projectile_box(p: &horizon_client::projectiles::Projectile) -> (f32, f32) {
+pub(super) fn projectile_box(p: &horizon_client::projectiles::Projectile) -> (f32, f32) {
     if is_arrow(p) {
         (
             horizon_client::arrows::WIDTH,
@@ -685,73 +686,24 @@ impl Game<'_> {
         }
         self.load_portal_arrivals();
         let mut leaving: Vec<(u32, BlockPos)> = Vec::new();
-        self.portals.before.clear();
-        for e in &self.dropped {
-            self.portals.before.insert(e.id, e.position);
-        }
-        for m in &self.mobs {
-            self.portals.before.insert(m.id, m.position);
-        }
-        for b in &self.boats {
-            self.portals.before.insert(b.id, b.position);
-        }
-        for c in &self.carts {
-            self.portals.before.insert(c.id, c.position);
-        }
-        for t in &self.tnts {
-            self.portals.before.insert(t.id, t.position);
-        }
-        for o in &self.orbs {
-            self.portals.before.insert(o.id, o.position);
-        }
-        // Only an entity in a portal, or cooling down from one, has a state
-        // here: whether the others could use a portal is not worth asking
-        // for each of them on every tick.
+        // Positions before the entities move, and (only for an entity in a
+        // portal, or cooling down from one, which has a state here) whether it
+        // can use one: asking every entity on every tick is not worth it.
+        let mut before = std::mem::take(&mut self.portals.before);
+        before.clear();
         let mut ids: Vec<(u32, bool)> = Vec::new();
-        if !self.portals.entities.is_empty() {
-            let tracked = &self.portals.entities;
-            for e in &self.dropped {
-                if tracked.contains_key(&e.id) {
-                    ids.push((e.id, true));
+        let tracked = &self.portals.entities;
+        for_each_entity!(entity_lists_of!(self), entity => {
+            if entity.portal_size().is_some() {
+                if entity.portal_from().is_none() {
+                    before.insert(entity.id(), entity.position());
+                }
+                if tracked.contains_key(&entity.id()) {
+                    ids.push((entity.id(), entity.can_use_portal(self)));
                 }
             }
-            for m in &self.mobs {
-                if tracked.contains_key(&m.id) {
-                    ids.push((m.id, self.mob_can_use_portal(m)));
-                }
-            }
-            for t in &self.tnts {
-                if tracked.contains_key(&t.id) {
-                    ids.push((t.id, self.tnt_can_use_portal(t.id)));
-                }
-            }
-            let vehicles = self.boats.iter().map(|b| b.id);
-            for id in vehicles.chain(self.carts.iter().map(|c| c.id)) {
-                if tracked.contains_key(&id) {
-                    ids.push((id, self.vehicle_can_use_portal(id)));
-                }
-            }
-            for p in &self.creatures.projectiles {
-                if tracked.contains_key(&p.id) && (is_arrow(p) || is_portal_projectile(p)) {
-                    ids.push((p.id, true));
-                }
-            }
-            for o in &self.orbs {
-                if tracked.contains_key(&o.id) {
-                    ids.push((o.id, true));
-                }
-            }
-            for t in &self.tridents {
-                if tracked.contains_key(&t.id) {
-                    ids.push((t.id, true));
-                }
-            }
-            for r in &self.rockets {
-                if tracked.contains_key(&r.id) && r.attached_to.is_none() && !r.attached {
-                    ids.push((r.id, true));
-                }
-            }
-        }
+        });
+        self.portals.before = before;
         let present: std::collections::HashSet<u32> = ids.iter().map(|(id, _)| *id).collect();
         self.portals.entities.retain(|id, _| present.contains(id));
         for (id, allowed) in ids {
@@ -825,11 +777,11 @@ impl Game<'_> {
     /// `canUsePortal(false)` of a boat or minecart: empty, or ridden by
     /// server players only, whom it carries along.
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
-    fn tnt_can_use_portal(&self, id: u32) -> bool {
+    pub(super) fn tnt_can_use_portal(&self, id: u32) -> bool {
         // Id 0: not tracked yet (the in-frame path), nothing to key its portal state by.
         id != 0 && !self.mobs.iter().any(|m| m.extra.mount == Some(id))
     }
-    fn vehicle_can_use_portal(&self, id: u32) -> bool {
+    pub(super) fn vehicle_can_use_portal(&self, id: u32) -> bool {
         if !self.vehicle_occupied(id) {
             return true;
         }
@@ -883,85 +835,40 @@ impl Game<'_> {
         if self.remote.is_some() {
             return;
         }
-        let mut inside: Vec<(u32, BlockPos)> = Vec::new();
-        let items: Vec<(u32, Vec3, f32, f32)> = self
-            .dropped
-            .iter()
-            .map(|e| (e.id, e.position, 0.25, 0.25))
-            .chain(self.orbs.iter().map(|o| (o.id, o.position, 0.5, 0.5)))
-            .collect();
-        // PrimedTnt is 0.98 across; one that carries a mob stays (the rider would be left behind).
-        let tnts: Vec<(u32, Vec3, f32, f32)> = self
-            .tnts
-            .iter()
-            .filter(|t| self.tnt_can_use_portal(t.id))
-            .map(|t| (t.id, t.position, 0.98, 0.98))
-            .collect();
-        let mobs: Vec<(u32, Vec3, f32, f32)> = self
-            .mobs
-            .iter()
-            .filter(|m| self.mob_can_use_portal(m))
-            .map(|m| (m.id, m.position, m.width(), m.height()))
-            .collect();
-        let vehicles: Vec<(u32, Vec3, f32, f32)> = self
-            .boats
-            .iter()
-            .map(|b| (b.id, b.position, super::boats::WIDTH, super::boats::HEIGHT))
-            .chain(self.carts.iter().map(|c| {
-                (
-                    c.id,
-                    c.position,
-                    super::minecarts::WIDTH,
-                    super::minecarts::HEIGHT,
-                )
-            }))
-            .filter(|(id, ..)| self.vehicle_can_use_portal(*id))
-            .map(|(id, at, w, h)| (id, at, w as f32, h as f32))
-            .collect();
-        let mut portal_sections = std::mem::take(&mut self.portals.sections);
-        for (id, to, width, height) in items.into_iter().chain(tnts).chain(mobs).chain(vehicles) {
-            let from = self.portals.before.get(&id).copied().unwrap_or(to);
-            if let Some(pos) = self.swept_portal(from, to, width, height, &mut portal_sections) {
-                inside.push((id, pos));
-            }
-        }
-        // The arrow's `previous` is where it stood at the start of its tick,
-        // which is also where an arrow shot this tick began. A stuck arrow
-        // that did not move this tick enters no block.
-        for p in self.creatures.projectiles.iter().filter(|p| {
-            (is_arrow(p) && (!p.stuck || p.previous != p.position)) || is_portal_projectile(p)
-        }) {
-            let (width, height) = projectile_box(p);
-            if let Some(pos) =
-                self.swept_portal(p.previous, p.position, width, height, &mut portal_sections)
-            {
-                inside.push((p.id, pos));
-            }
-        }
-        // A trident (0.5 across) or rocket (0.25) in flight, or one that moved
-        // this tick; a rocket that carries its owner stays.
-        let mut flyers: Vec<(u32, Vec3, Vec3, f32)> = Vec::new();
+        // A trident or rocket in flight gets its id here, before the walk.
         for t in self
             .tridents
             .iter_mut()
             .filter(|t| !t.in_ground || t.previous != t.position)
         {
-            let id = super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
-            flyers.push((id, t.previous, t.position, 0.5));
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
         }
         for r in self
             .rockets
             .iter_mut()
             .filter(|r| r.attached_to.is_none() && !r.attached)
         {
-            let id = super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
-            flyers.push((id, r.previous, r.position, 0.25));
+            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
         }
-        for (id, from, to, size) in flyers {
-            if let Some(pos) = self.swept_portal(from, to, size, size, &mut portal_sections) {
+        let mut inside: Vec<(u32, BlockPos)> = Vec::new();
+        let mut portal_sections = std::mem::take(&mut self.portals.sections);
+        // The first portal block each entity's box swept through since the
+        // start of its tick (a stuck arrow that did not move enters none).
+        for_each_entity!(entity_lists_of!(self), entity => {
+            let Some((width, height)) = entity.portal_size() else {
+                continue;
+            };
+            if !entity.portal_sweeps() || !entity.can_use_portal(self) {
+                continue;
+            }
+            let (id, to) = (entity.id(), entity.position());
+            let from = entity
+                .portal_from()
+                .unwrap_or_else(|| self.portals.before.get(&id).copied().unwrap_or(to));
+            if let Some(pos) = self.swept_portal(from, to, width, height, &mut portal_sections) {
                 inside.push((id, pos));
             }
-        }
+        });
         self.portals.sections = portal_sections;
         for (id, pos) in inside {
             self.portals
