@@ -310,3 +310,48 @@ fn dependent_global_initializers_store_in_file_order() {
     stores(&module, entry, &entry.body, &mut names);
     assert_eq!(names, ["first", "second", "third"]);
 }
+
+#[test]
+fn array_length_uses_declaration_scope() {
+    for denominator in ["2.0", "0.0"] {
+        let module = assert_terrain_translates(&format!(
+            "#version 330\nconst int count = 2;\nconst float audit[count] = float[count](-1.0 / {denominator}, 0.25);\n\
+             int query_length() {{ int count = 3; int hz_array_length_audit = 4; int hz_array_length_audit_ = 5; const int n = audit.length(); return n; }}\n\
+             void main() {{ gl_FragData[0] = vec4(float(query_length()), audit[1], 0.0, 1.0); }}\n",
+        ));
+        let (_, function) = module
+            .functions
+            .iter()
+            .find(|(_, function)| function.name.as_deref() == Some("query_length"))
+            .unwrap();
+        let (local, declaration) = function
+            .local_variables
+            .iter()
+            .find(|(_, local)| local.name.as_deref() == Some("n"))
+            .unwrap();
+        let mut value = declaration.init.or_else(|| function.body.iter().find_map(|statement| match statement {
+            naga::Statement::Store { pointer, value }
+                if matches!(function.expressions[*pointer], naga::Expression::LocalVariable(handle) if handle == local) => Some(*value),
+            _ => None,
+        })).unwrap();
+        let mut expressions = &function.expressions;
+        loop {
+            match expressions[value] {
+                naga::Expression::As { expr, .. } => value = expr,
+                naga::Expression::Constant(constant) => {
+                    value = module.constants[constant].init;
+                    expressions = &module.global_expressions;
+                }
+                _ => break,
+            }
+        }
+        assert!(
+            matches!(
+                expressions[value],
+                naga::Expression::Literal(naga::Literal::I32(2))
+            ),
+            "array length must stay constant 2 with denominator {denominator}: {:?}",
+            expressions[value],
+        );
+    }
+}

@@ -75,7 +75,7 @@ pub(super) struct Stage<'p> {
     pub(super) replaced: HashMap<usize, String>,
     /// Globals whose initializer runs in our `main` (`g = hz_init_g();`), in order.
     pub(super) inits: Vec<String>,
-    /// Their array size expressions and declarator ends: `.length()` stays type-only.
+    /// Their captured array size constants and declarator ends: `.length()` stays type-only.
     pub(super) runtime_array_lengths: HashMap<String, (String, usize)>,
     pub(super) errors: Vec<Error>,
 }
@@ -786,10 +786,24 @@ impl<'p> Stage<'p> {
             match assign {
                 Some(a) if runtime[n] => {
                     let dimensions = if array.is_empty() { &ty } else { &array };
-                    if let Some(length) = outer_array_length(dimensions) {
+                    let capture = if let Some(length) = outer_array_length(dimensions) {
+                        // Bind the size in declaration scope: a use site's local `count` must
+                        // not change the length of a global declared with `[count]`.
+                        let mut bound = format!("hz_array_length_{name}");
+                        while self.tokens.contains(&bound.as_str())
+                            || self
+                                .runtime_array_lengths
+                                .values()
+                                .any(|(n, _)| n == &bound)
+                        {
+                            bound.push('_');
+                        }
                         self.runtime_array_lengths
-                            .insert(name.clone(), (length.to_owned(), end_token));
-                    }
+                            .insert(name.clone(), (bound.clone(), end_token));
+                        format!(" const int {bound} = int({length});")
+                    } else {
+                        String::new()
+                    };
                     // Scalars, vectors and matrices convert; arrays and structs must match.
                     let scalar = array.is_empty()
                         && !ty.contains('[')
@@ -808,7 +822,7 @@ impl<'p> Stage<'p> {
                     );
                     replaced.push((
                         words[a],
-                        format!("; {return_ty} hz_init_{name}() {{ return {open}"),
+                        format!(";{capture} {return_ty} hz_init_{name}() {{ return {open}"),
                     ));
                     replaced.push((end_token, format!("{close}; }}{next}")));
                     names.push(name);
