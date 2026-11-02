@@ -19,7 +19,7 @@ pub fn pose_matrix(p: Pose) -> glam::Mat4 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{Bone, Error, Item, MAX_VERTICES, Motion, Slot};
     use glam::{Mat4, Vec3};

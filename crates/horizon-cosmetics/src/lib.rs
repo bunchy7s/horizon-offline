@@ -7,9 +7,11 @@
 //! player model it rides on and a few simple looping animations. This crate
 //! reads and checks items and poses them; the game draws them.
 
+mod fetch;
 mod item;
 mod pose;
 
+pub use fetch::{BATCH, Clock, Cosmetics, Frame, Http, Transport, Worn};
 pub use item::{
     Animation, Axis, Bone, Error, FORMAT, Face, Item, MAX_PARTS, MAX_REACH, MAX_TEXTURE,
     MAX_VERTICES, Motion, Part, Slot, Texture,
