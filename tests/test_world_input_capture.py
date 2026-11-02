@@ -1,8 +1,9 @@
 """Exercise the client's capture methods without opening or focusing an OS window.
 
-The fixture substitutes only winit and mouse state. Method bodies come from the
-client, so the assertions observe grab attempts, visibility and stored capture
-state. Native Windows delivery remains a manual check. Vanilla 26.3 reference:
+Capture fixtures substitute winit; the raw-motion fixture uses the real mouse
+accumulator and rotation math. Method bodies come from the client, so assertions
+observe capture and camera outcomes. Native OS routing is checked separately by
+`tools/splitscreen_e2e.py --only native_pointer` on macOS. Vanilla 26.3 reference:
 LevelLoadingScreen.tick/onClose, Gui.setScreen, MouseHandler.grabMouse/releaseMouse.
 """
 from pathlib import Path
@@ -106,7 +107,7 @@ struct Options { offscreen: bool }
 struct ServerPacks { prompt: Option<()> }
 struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
-    keyboard_mouse: bool, view_at: [u32; 2],
+    keyboard_mouse: bool, split_window: bool, view_at: [u32; 2],
     captured: bool, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
@@ -115,7 +116,7 @@ struct Game {
 impl Default for Game {
     fn default() -> Self {
         Self { focused: true, agent_pointer: false, window: Some(Window::default()),
-            keyboard_mouse: true, view_at: [0, 0],
+            keyboard_mouse: true, split_window: false, view_at: [0, 0],
             mouse: Mouse::default(), captured: false, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
             renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default(),
@@ -260,6 +261,22 @@ fn main() {
         assert_eq!(game.window.as_ref().unwrap().at.get(), (1700.0, 700.0));
         assert_eq!(game.cursor, (250.0, 150.0));
     }
+    // A composited view still has a visible native window. Its owner must grab,
+    // hide and release the real pointer even though its renderer is offscreen.
+    {
+        let mut game = Game::default();
+        game.options.offscreen = true;
+        game.split_window = true;
+        game.window.as_ref().unwrap().visible.set(true);
+        game.capture(true);
+        assert!(game.captured);
+        let window = game.window.as_ref().unwrap();
+        assert_eq!(window.grabs.get(), 1, "split owner must grab the native pointer");
+        assert!(!window.visible.get());
+        game.capture(false);
+        assert!(!game.captured);
+        assert!(game.window.as_ref().unwrap().visible.get());
+    }
     // `--offscreen` shows no window: the grab is the game's own, and the system
     // pointer is never grabbed, warped or hidden.
     {
@@ -328,6 +345,93 @@ fn main() {
                            check=True, capture_output=True, text=True, timeout=60)
             subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
 
+
+    @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
+    def test_native_split_mouse_turns_only_its_owner(self):
+        source = (ROOT / "crates/horizon-client/src/game.rs").read_text(encoding="utf-8")
+        fixture = r'''
+use std::time::Instant;
+#[path = "MOUSE_PATH"] mod mouse;
+use mouse::{MouseLook, LookOptions, Rotation};
+struct ActiveEventLoop;
+struct DeviceId;
+enum DeviceEvent { MouseMotion { delta: (f64, f64) }, Other }
+#[derive(PartialEq)] enum Screen { Playing, Paused }
+struct Options { offscreen: bool }
+struct Game {
+    pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool, split_window: bool,
+    options: Options, screen: Screen, mouse: MouseLook, last_input: Instant,
+}
+impl Game {
+METHOD
+}
+fn main() {
+    // (offscreen renderer, compositor, keyboard/mouse owner, active, gameplay, saving).
+    for (offscreen, split, owner, active, playing, saving, turns) in [
+        (false, false, true, true, true, false, true),
+        (true, true, true, true, true, false, true),
+        (true, true, false, true, true, false, false),
+        (true, false, true, true, true, false, false),
+        (true, true, true, false, true, false, false),
+        (true, true, true, true, false, false, false),
+        (true, true, true, true, true, true, false),
+    ] {
+        let mut game = Game {
+            pending_save: saving.then_some(()), captured: true, focused: active,
+            keyboard_mouse: owner, split_window: split, options: Options { offscreen },
+            screen: if playing { Screen::Playing } else { Screen::Paused },
+            mouse: MouseLook::default(), last_input: Instant::now(),
+        };
+        game.device_event(&ActiveEventLoop, DeviceId, DeviceEvent::MouseMotion { delta: (0.0, 0.0) });
+        game.device_event(&ActiveEventLoop, DeviceId, DeviceEvent::MouseMotion { delta: (20.0, -10.0) });
+        let look = LookOptions { sensitivity: 0.5, smooth_camera: false, scoping: false, invert_x: false, invert_y: false };
+        let (x, y) = game.mouse.handle_accumulated_movement(1.0, true, true, look).unwrap();
+        let mut rotation = Rotation { x_rot: 0.0, y_rot: 0.0, x_rot_o: 0.0, y_rot_o: 0.0 };
+        rotation.turn(x, y);
+        let want = if turns { (3.0, -1.5) } else { (0.0, 0.0) };
+        assert!((rotation.y_rot - want.0).abs() < 0.00001 && (rotation.x_rot - want.1).abs() < 0.00001,
+            "rotation=({}, {}), offscreen={offscreen}, split={split}, owner={owner}, active={active}, playing={playing}, saving={saving}", rotation.y_rot, rotation.x_rot);
+    }
+}
+'''
+        fixture = fixture.replace("MOUSE_PATH", (ROOT / "crates/horizon-client-input/src/mouse.rs").as_posix())
+        fixture = fixture.replace("METHOD", method(source, "device_event"))
+        self.run_fixture(fixture, "native-mouse")
+
+    @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
+    def test_split_layout_keeps_capture_in_the_same_window(self):
+        source = (ROOT / "crates/horizon-client/src/game/split/windows.rs").read_text(encoding="utf-8")
+        body = function(source.replace("pub(super) fn", "pub fn"), "into_window").replace("Game<'_>", "Game")
+        fixture = r'''
+use std::sync::Arc;
+struct Window(usize);
+impl Window { fn id(&self) -> usize { self.0 } }
+struct Game { captured: bool, window: Option<Arc<Window>> }
+impl Game { fn capture(&mut self, captured: bool) { self.captured = captured; } }
+FUNCTION
+fn main() {
+    let first = Arc::new(Window(1));
+    let mut game = Game { captured: true, window: Some(first.clone()) };
+    into_window(&mut game, first.clone());
+    assert!(game.captured, "a player joining or a layout resize must not release P1's existing native window");
+    into_window(&mut game, Arc::new(Window(2)));
+    assert!(!game.captured, "moving to a different native window releases the previous grab");
+    assert_eq!(game.window.as_ref().unwrap().id(), 2);
+}
+'''.replace("FUNCTION", body)
+        self.run_fixture(fixture, "split-window")
+
+    def run_fixture(self, fixture, name):
+        with tempfile.TemporaryDirectory(prefix="horizon-input-") as folder:
+            folder = Path(folder)
+            rust = folder / f"{name}.rs"
+            binary = folder / (name + (".exe" if os.name == "nt" else ""))
+            rust.write_text(fixture, encoding="utf-8")
+            built = subprocess.run(["rustc", "--edition=2024", str(rust), "-o", str(binary)],
+                                   capture_output=True, text=True, timeout=60)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            ran = subprocess.run([str(binary)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
 
 if __name__ == "__main__":
     unittest.main()

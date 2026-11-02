@@ -500,7 +500,7 @@ impl Game<'_> {
         json!({
             "dialog": self.dialog_status(),
             "screen": self.screen_label(),
-            "menu": (self.title.is_some() || self.split_profiles_open()).then(|| self.title_value()),
+            "menu": (self.title.is_some() || self.split_profiles_open() || self.split_setup_open()).then(|| self.title_value()),
             "world": (self.title.is_none()).then(|| match &self.integrated {
                 Some(server) => server.world_name.clone(),
                 None => self.level.name.clone(),
@@ -535,10 +535,17 @@ impl Game<'_> {
         self.screen == Screen::Options
             && self.ui.options.page() == horizon_client::options_ui::Page::SplitProfiles
     }
+    fn split_setup_open(&self) -> bool {
+        self.screen == Screen::Options
+            && self.ui.options.page() == horizon_client::options_ui::Page::SplitSetup
+    }
     fn title_value(&self) -> Value {
         use horizon_client::title::Mode;
         if self.split_profiles_open() {
             return self.ui.options.split_profiles.state();
+        }
+        if self.split_setup_open() {
+            return json!({ "mode": "splitscreen-setup", "status": self.ui.options.split_setup.status() });
         }
         let Some(title) = &self.title else {
             return Value::Null;
@@ -742,7 +749,7 @@ impl Game<'_> {
             v["chat_input"] = json!(chat.input.value);
             v["chat_suggestions"] = json!(chat.suggestions_visible());
         }
-        if self.title.is_some() || self.split_profiles_open() {
+        if self.title.is_some() || self.split_profiles_open() || self.split_setup_open() {
             v["menu"] = self.title_value();
         }
         if self.screen == Screen::Inventory && self.title.is_none() {
