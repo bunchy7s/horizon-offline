@@ -79,10 +79,12 @@ class StampTests(unittest.TestCase):
         path = self.fragment("helper")
         fragment = json.loads(path.read_text())
         fragment["hooks"] = []
+        fragment["helpers"] = [{"name": "helper", "target": "target::helper"}]
         path.write_text(json.dumps(fragment))
         self.assertFalse(stamp.stamp(False))
         self.assertIn("NATIVE_HOOKS_API: u32 = 8;", (self.root / stamp.SOURCE).read_text())
         self.assertEqual(json.loads((self.root / stamp.CATALOG).read_text())["hooks"], [])
+        self.assertEqual(json.loads((self.root / stamp.CATALOG).read_text())["helpers"], fragment["helpers"])
 
     def test_catalog_facts_travel_with_the_hook(self):
         self.git("add", ".")
