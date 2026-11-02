@@ -176,6 +176,14 @@ and the container screen tests are unchanged).
 - `chatIndicator` off removes the coloured bar at the left of a line. It hides
   the bar only, never the message.
 
+### Scroll wheel changes settings (`wheelCyclesSettings`, default on)
+- On, the wheel works as in vanilla: over a button in the settings it changes the button's value
+  (`CycleButton.mouseScrolled`), and a button focused with the keyboard or a pad steps on the
+  wheel wherever the cursor is.
+- Off, the wheel only scrolls the list under the cursor, on every settings page, Video's included
+  (`OptionsUi::wheel`, `GraphicsUi::wheel`). Scrolling through a long page then can't change an
+  option that passes under the cursor (#5455). Client-only.
+
 ### Splitscreen (`splitscreen`, default off)
 
 **Options → Horizon Settings... → Splitscreen...** turns local joining on or off at once.
@@ -201,8 +209,16 @@ While a window has two or three players, a square at the bottom picks how they s
 by side); Apply saves it (`splitscreenTwo`, `splitscreenThree`). **Names** (top left,
 `splitscreenNames`, on by default) keeps each player's name in the corner of their view; off,
 it shows only for a moment when something changes. **Identify** makes every view say which
-window it is in. Controller pick-up in Setup and joining P1 on an external server follow
-separately.
+window it is in.
+
+With a controller, A on a player's tile picks it up: left and right (or LB and RB) cycle where
+it goes, the map showing it there, A drops it, B puts it back. **Give Up Pad** (top, while P1
+has a controller in a world) frees P1's controller and offers it to join, for a friend to
+press A; if nobody joins, the offer runs out, or it's declined, it drives P1 again. A player
+whose controller disconnected shows "(no controller)" on its tile. Other players' pause menus
+say **Leave** for disconnecting. `HORIZON_SPLIT_STATS=1` logs every 5 s where a frame's time
+goes (each player's turn and render, the presents, the GPU wait) and each player's frame rate.
+Joining P1 on an external server follows separately.
 
 ## Shared rules
 

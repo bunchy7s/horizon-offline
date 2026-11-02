@@ -147,7 +147,7 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 |---|---|
 | Game loop, tick, frame | `game.rs`: `fn run`, `impl ApplicationHandler for Game` (`window_event`, `about_to_wait`), `fn tick`, `fn tick_world`, `fn render`; L: `clock.rs`, `spans.rs`; `horizon-client-input/src/window.rs` |
 | Rendering | L: `gfx.rs` (`Renderer::new`, `Renderer::render`), `gfx/` (cull, occlusion, translucency, upload, timing, lod, weather, stars, end_sky), `*.wgsl`, `particles.rs`, `block_entity_render.rs`, `item_render.rs`, `fog.rs`, `clouds.rs`, `camera.rs`, `first_person.rs`; G: `render_tick.rs`, `item_draw.rs` |
-| Chunks, streaming, light | L: `streaming.rs` (worker pool: generate, light, mesh), `world.rs`, `chunk.rs`, `chunk_map.rs`, `light.rs`, `mesher.rs` + `mesher/`, `vanillagen.rs` (binds horizon-world's generator), `lod.rs` + `lod/`, `ticket_levels.rs`; G: `world_loading.rs`, `postprocess.rs`; game.rs `fn update_world` |
+| Chunks, streaming, light | L: `streaming.rs` (worker pool: generate, light, mesh), `world.rs`, `chunk.rs`, `chunk_map.rs`, `light.rs`, `mesher.rs` + `mesher/`, `vanillagen.rs` (binds horizon-world's generator), `lod.rs` + `lod/`, `server_terrain.rs` (a server's kept chunks), `bluemap.rs` + `bluemap_detect.rs` (far terrain from its web map), `ticket_levels.rs`; G: `world_loading.rs`, `postprocess.rs`; game.rs `fn update_world` |
 | World generation | `crates/horizon-world/src/worldgen/` (`generator*.rs`, `feature_graph.rs`, `structure/`, `carver/`) |
 | Block behaviour | `crates/horizon-world/src/level/` (`mod.rs`, `tick.rs`, `hooks.rs`, `redstone.rs`, `place.rs`, `interact.rs`); game.rs `fn tick_blocks`, `fn process_level_events` |
 | Mobs | L: `mobs.rs` (types), `mobs/` (`ai.rs`, `goals.rs`, `brain.rs`, `*_brain.rs`, `nav.rs`, `path.rs`, `species.rs`, `spawning.rs`, `render.rs`, `anim.rs`); G: `creatures.rs` (ticking, spawning, mob events), one file per mob family (`dragon.rs`, `wither.rs`, `villagers.rs`, `piglins.rs`, `golems.rs`...), `natural_spawning.rs` |
@@ -178,28 +178,24 @@ state stays separate from the library tests. This compiles gameplay twice for ex
 - Fields that say which mode runs: `remote` (this window is a client of a server: multiplayer, LAN guest, or
   single player on its server thread), `lan` (`LanHost`: this world is open to the network), `integrated`
   (the window's own server thread), `serving` (this `Game` *is* that server thread), `options.dedicated`.
-  `fn tick` returns `tick_remote()` when `remote` is set; nothing else of the local simulation runs.
-- A server's players run through the same gameplay code as the local player: `as_guest` swaps the guest's
+  `fn tick` returns `tick_remote()` when `remote` is set; a server ticks its levels (`fn tick_world`).
+- A server's players run through the shared gameplay code: `as_guest` swaps the guest's
   state (position, inventory, mode, mining, item use) into `Game` for one call (`game/lan_actions.rs`), and
   `levels.rs` swaps whole dimensions in the same way. Changes reach clients through the block log, level
   events and the entity tracker (`lan/tracking.rs`, `game/lan_entities.rs`).
 - Shared read-only data: `Resources` (`res`: blocks, items, recipes, mob types, biomes) and `PackResources`
   (`pack`), both in game.rs.
 
-## The two single-player paths
+## Single player runs on a server thread
 
-1. **Server thread (default since #1514):** `game/integrated.rs` runs a second `Game` (`serving`) on a
-   "Server thread" with one level per dimension; the window joins it as a client through memory (`remote`),
-   exactly as a LAN guest or a dedicated server's player does. This is what players run. Open
-   `[server-thread]` issues list the gaps left.
-2. **In-frame (`--in-frame`, `--no-server-thread` or `HORIZON_SERVER_THREAD=0`): DEPRECATED, never use it, it
-   will be removed soon.** The window's `Game` ticks the world itself, one level that follows the player
-   (`fn enter_dimension`). Compatibility does not matter: don't add features or fixes for it, don't write new
-   tests against it, and move code off it when you touch it. The deterministic rule fixtures still run on it
-   until they are ported.
+`game/integrated.rs` runs a second `Game` (`serving`) on a "Server thread" with one level per dimension;
+the window joins it as a client through memory (`remote`), exactly as a LAN guest or a dedicated server's
+player does (#1514). A window's `Game` never ticks a world itself: the old in-frame path is gone
+(`--in-frame` and `--no-server-thread` only print a notice; `HORIZON_SERVER_THREAD` is ignored).
+Open `[server-thread]` issues list the gaps left.
 
-LAN guests and dedicated servers always use the server code, so a fix there serves both. Test the server
-thread when you touch player-facing gameplay:
+Single player, LAN guests and dedicated servers all run the server code, so a fix there serves all three.
+Test the server thread when you touch player-facing gameplay:
 
 ```sh
 cargo run --profile fast -p horizon-client -- --resources .local/horizon-client/26.3 --world T               # server thread

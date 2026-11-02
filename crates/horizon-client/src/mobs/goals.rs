@@ -689,6 +689,11 @@ impl Mob {
     /// `IronGolem.canAttack`'s refusal of creepers. The callers check that
     /// the target is alive and can be seen as an enemy.
     pub fn spares_target(&self, w: &MobWorld, who: Who) -> bool {
+        // Dolphin.canAttack: a baby dolphin attacks nobody, so whatever hurt it
+        // is never taken as its target.
+        if self.species() == Species::Dolphin && self.is_baby() {
+            return true;
+        }
         match who {
             Who::Player => self.spares_players(w),
             Who::Mob(id) => {

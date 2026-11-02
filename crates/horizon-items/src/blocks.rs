@@ -105,9 +105,36 @@ pub fn cube_edges() -> Vec<[f64; 6]> {
     }
     edges
 }
+/// Which of the four `SignBlock` subclasses a block is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SignForm {
+    /// `CeilingHangingSignBlock` or `WallHangingSignBlock`.
+    pub hanging: bool,
+    /// `WallSignBlock` or `WallHangingSignBlock`.
+    pub wall: bool,
+}
+impl SignForm {
+    /// The block entity type its `newBlockEntity` makes.
+    pub fn block_entity_type(self) -> &'static str {
+        if self.hanging {
+            "minecraft:hanging_sign"
+        } else {
+            "minecraft:sign"
+        }
+    }
+}
 impl StateFacts {
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.iter().any(|c| &**c == name)
+    }
+    /// A `SignBlock`'s form, by class: a mod's sign has its template's,
+    /// whatever its name.
+    pub fn sign_form(&self) -> Option<SignForm> {
+        self.has_class("SignBlock").then(|| SignForm {
+            hanging: self.has_class("CeilingHangingSignBlock")
+                || self.has_class("WallHangingSignBlock"),
+            wall: self.has_class("WallSignBlock") || self.has_class("WallHangingSignBlock"),
+        })
     }
 }
 /// Compact, owned behaviour inputs retained until the normal behaviour startup stage.
@@ -222,6 +249,8 @@ impl GameplayStateSource for GameplayProjection {
 pub struct BlockFacts {
     pub states: Vec<StateFacts>,
     pub air: BlockStateId,
+    /// Each sign block's `SignBlock.getWoodType` name.
+    pub woods: HashMap<Arc<str>, Arc<str>>,
 }
 impl BlockFacts {
     pub fn load(root: &Path, registry: &BlockRegistry) -> Result<Self> {
@@ -340,6 +369,22 @@ impl BlockFacts {
                             .clone()
                     });
                 Some((b["name"].as_str()?, chain.collect()))
+            })
+            .collect();
+        let woods = behaviours["blocks"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|b| {
+                b["class"]
+                    .as_array()
+                    .is_some_and(|chain| chain.iter().any(|c| c == "SignBlock"))
+            })
+            .filter_map(|b| {
+                Some((
+                    Arc::from(b["name"].as_str()?),
+                    Arc::from(b["fields"]["type"]["name"].as_str()?),
+                ))
             })
             .collect();
         let mut names: HashMap<String, Arc<str>> = HashMap::new();
@@ -462,12 +507,17 @@ impl BlockFacts {
                 air: registry
                     .default_state("minecraft:air")
                     .ok_or("missing air")?,
+                woods,
             },
             extra,
         ))
     }
     pub fn get(&self, id: BlockStateId) -> &StateFacts {
         &self.states[id.0 as usize]
+    }
+    /// `SignBlock.getWoodType`'s name for a sign block.
+    pub fn wood_type(&self, block: &str) -> Option<&str> {
+        self.woods.get(block).map(|wood| &**wood)
     }
     pub fn is_air(&self, id: BlockStateId) -> bool {
         matches!(

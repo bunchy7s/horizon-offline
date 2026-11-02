@@ -317,6 +317,34 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_built_data"
     },
     {
+      "name": "on",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_on"
+    },
+    {
+      "name": "mod_key",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_key"
+    },
+    {
+      "name": "setting",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_setting"
+    },
+    {
+      "name": "set_setting",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_setting"
+    },
+    {
+      "name": "set_block_property",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property"
+    },
+    {
+      "name": "set_block_property_with",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block_property_with"
+    },
+    {
+      "name": "config_dir",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_config_dir"
+    },
+    {
       "name": "panel_items",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_panel_items"
     },
@@ -1730,7 +1758,7 @@
     {
       "name": "menu_slot_rules",
       "version": 1,
-      "target": "horizon_client::menu::native_menu_slot_rules",
+      "target": "horizon_client_lib::menu::native_menu_slot_rules",
       "side": "server",
       "cancellable": false,
       "mod_api": {
@@ -1965,7 +1993,7 @@
     {
       "name": "living_breathe",
       "version": 1,
-      "target": "horizon_client::breathing::native_living_breathe",
+      "target": "horizon_client_lib::breathing::native_living_breathe",
       "neoforge": "LivingBreatheEvent",
       "side": "server",
       "cancellable": false,

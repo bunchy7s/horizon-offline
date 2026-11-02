@@ -46,7 +46,8 @@ def cases():
         out.append(case)
 
     for block in ['chest', 'trapped_chest', 'copper_chest', 'exposed_copper_chest', 'weathered_copper_chest',
-                  'oxidized_copper_chest', 'waxed_copper_chest', 'waxed_oxidized_copper_chest']:
+                  'oxidized_copper_chest', 'waxed_copper_chest', 'waxed_exposed_copper_chest',
+                  'waxed_weathered_copper_chest', 'waxed_oxidized_copper_chest']:
         for facing in HORIZONTAL:
             for kind in ['single', 'left', 'right']:
                 add(f'minecraft:{block}[facing={facing},type={kind}]', open=rng.choice([0.0, 0.25, 0.7, 1.0]))
@@ -117,7 +118,8 @@ def cases():
     for f in HORIZONTAL:
         add(f'minecraft:lectern[facing={f},has_book=true]')
         add(f'minecraft:lectern[facing={f},has_book=false]')
-    for prefix in ['', 'exposed_', 'weathered_', 'oxidized_', 'waxed_']:
+    for prefix in ['', 'exposed_', 'weathered_', 'oxidized_', 'waxed_', 'waxed_exposed_',
+                   'waxed_weathered_', 'waxed_oxidized_']:
         for pose in ['standing', 'running', 'sitting', 'star']:
             add(f'minecraft:{prefix}copper_golem_statue[facing={rng.choice(HORIZONTAL)},copper_golem_pose={pose}]')
     for _ in range(8):

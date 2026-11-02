@@ -173,6 +173,8 @@ pub trait LodSampler: Send {
     fn drain_details(&mut self) -> Vec<LodDetail> {
         Vec::new()
     }
+    /// A loaded chunk's summary, made on the far-terrain worker.
+    fn observed(&mut self, _key: (i32, i32), _columns: &Arc<[crate::lod::Column; 256]>) {}
     /// Reduced far detail (`graphics::FarDetail::Reduced`): `grid` may then
     /// approximate wide cells.
     fn set_approximate(&mut self, _approximate: bool) {}
@@ -182,6 +184,13 @@ pub trait LodSampler: Send {
     }
     fn reduced_column(&mut self, x: i32, z: i32, _width: i32) -> crate::lod::Column {
         self.column(x, z)
+    }
+    /// Whether a column since the last call was left empty because its data
+    /// is still on its way (a BlueMap tile downloading, nothing coarser to
+    /// stand in): that sample isn't drawn, what it would replace is
+    /// (`Lod::finish_any_sample`), and it is taken again later.
+    fn waited(&mut self) -> bool {
+        false
     }
     /// `side` x `side` columns from (`x`, `z`), `stride` blocks apart; none
     /// when sampling failed and should be tried again later.
@@ -201,6 +210,11 @@ pub trait LodSampler: Send {
 }
 pub trait LodSource: Send + Sync {
     fn sampler(self: Arc<Self>) -> Box<dyn LodSampler>;
+    /// Whether its samplers' `observed` chunks become its own (a server's
+    /// kept terrain): tiles sampled without one are sampled again.
+    fn keeps_observed(&self) -> bool {
+        false
+    }
 }
 struct GeneratorSampler<G: ChunkGenerator> {
     generator: Arc<G>,
@@ -234,6 +248,7 @@ impl<G: ChunkGenerator> Saves for G {
 struct MeshSettings {
     nether: bool,
     shader_pack_lighting: bool,
+    separate_ao: bool,
     zoom: BiomeZoom,
     blend_radius: i32,
     smooth_lighting: bool,
@@ -424,8 +439,8 @@ pub struct Streaming {
     decoration_order: DecorationOrder,
     order_area: Option<((i32, i32), i32)>,
     /// What the queued jobs' priorities were computed from (`requeue`): the
-    /// centre, the loading screen, the band, and the extra areas.
-    queue_basis: (((i32, i32), bool, Option<Band>), Vec<((i32, i32), i32)>),
+    /// centre, the band, and the extra areas.
+    queue_basis: (((i32, i32), Option<Band>), Vec<((i32, i32), i32)>),
     finishing: FxHashSet<(i32, i32)>,
     decorates: bool,
     /// `ChunkGenerator::decorates_beside_final`.
@@ -457,14 +472,15 @@ pub struct Streaming {
     pub forced: HashSet<(i32, i32)>,
     /// No work is scheduled while paused (title screen).
     pub paused: bool,
-    /// The level loading screen is up: work goes ring by ring (`Ranges::rings`).
-    pub loading: bool,
     /// Dimension flags: sky light, Nether face shading.
     pub sky_light: bool,
     pub nether_shading: bool,
     /// A shader pack lights the faces: sections mesh without face shading
     /// (`Mesher::shader_pack_lighting`).
     pub shader_pack_lighting: bool,
+    /// OptiFine/Iris separate ambient occlusion: vertex RGB has pure tint and alpha holds AO factor
+    /// (`Mesher::separate_ao`).
+    pub separate_ao: bool,
     /// `BiomeManager`'s zoom seed (the hashed world seed) and `biomeBlendRadius`.
     pub biome_zoom: BiomeZoom,
     pub biome_blend: i32,
@@ -526,9 +542,9 @@ struct GenerationScan {
     plan: Vec<(i64, i32, i32)>,
     /// Entries before it are no longer missing.
     next: usize,
-    /// What `plan` was made for: the ranges, the loading screen and
-    /// decoration; the chunk map's revision is `chunk_revision`.
-    plan_basis: Option<(bool, bool)>,
+    /// What `plan` was made for: the ranges and decoration; the chunk
+    /// map's revision is `chunk_revision`.
+    plan_basis: Option<bool>,
 }
 impl GenerationScan {
     fn same_ranges(&self, ranges: &Ranges<'_>) -> bool {
@@ -552,9 +568,7 @@ impl GenerationScan {
     /// Whether `plan` still holds every candidate: same ranges, and no
     /// column left the chunk map since it was made.
     fn plan_holds(&mut self, input: &GenerationInputs<'_>) -> bool {
-        if self.plan_basis != Some((input.loading, input.decorates))
-            || !self.same_ranges(&input.ranges)
-        {
+        if self.plan_basis != Some(input.decorates) || !self.same_ranges(&input.ranges) {
             return false;
         }
         let revision = input.world.chunks.membership_revision();
@@ -588,7 +602,6 @@ struct GenerationInputs<'a> {
     finishing: &'a FxHashSet<(i32, i32)>,
     decorates: bool,
     remote: bool,
-    loading: bool,
 }
 impl GenerationScan {
     /// None means the scan was skipped; Some preserves the original candidate
@@ -663,7 +676,7 @@ impl GenerationScan {
                     {
                         continue;
                     }
-                    wanted.push((input.ranges.priority(x, z, input.loading), x, z));
+                    wanted.push((input.ranges.priority(x, z), x, z));
                 }
             }
             // Forced chunks and their generation neighbourhood: the ring that
@@ -685,7 +698,7 @@ impl GenerationScan {
                         {
                             continue;
                         }
-                        wanted.push((input.ranges.priority(x, z, input.loading), x, z));
+                        wanted.push((input.ranges.priority(x, z), x, z));
                     }
                 }
             }
@@ -705,7 +718,7 @@ impl GenerationScan {
                 // A bounded batch may leave candidates behind: the next calls
                 // take them from the plan as capacity opens.
                 self.exhausted = false;
-                self.plan_basis = Some((input.loading, input.decorates));
+                self.plan_basis = Some(input.decorates);
             }
             wanted.sort_unstable();
             wanted.dedup();
@@ -878,6 +891,7 @@ impl<G: ChunkGenerator> Jobs<G> {
                 let mut mesher = Mesher {
                     nether_shading: settings.nether,
                     shader_pack_lighting: settings.shader_pack_lighting,
+                    separate_ao: settings.separate_ao,
                     zoom: settings.zoom,
                     blend_radius: settings.blend_radius,
                     smooth_lighting: settings.smooth_lighting,
@@ -975,10 +989,10 @@ impl Streaming {
             radius: 8,
             forced: HashSet::new(),
             paused: false,
-            loading: false,
             sky_light: true,
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             biome_zoom: BiomeZoom::new(0),
             biome_blend: 2,
             smooth_lighting: true,
@@ -1151,7 +1165,7 @@ impl Streaming {
     /// render distance 32 nothing was decorated until every proto chunk had
     /// been generated.
     fn requeue(&mut self) {
-        let basis = (self.center, self.loading, self.band);
+        let basis = (self.center, self.band);
         if self.queue_basis.0 == basis && self.queue_basis.1 == self.extra {
             return;
         }
@@ -1289,7 +1303,7 @@ impl Streaming {
     }
     /// The order jobs around the player run in, lowest first.
     fn distance(&self, x: i32, z: i32) -> i64 {
-        self.ranges().priority(x, z, self.loading)
+        self.ranges().priority(x, z)
     }
     /// The 3x3 a light job reads: the finished columns, and for a neighbour
     /// that will not finish (past the area), its decorated proto chunk, as
@@ -1920,6 +1934,7 @@ impl Streaming {
                         MeshSettings {
                             nether: self.nether_shading,
                             shader_pack_lighting: self.shader_pack_lighting,
+                            separate_ao: self.separate_ao,
                             zoom: self.biome_zoom,
                             blend_radius: self.biome_blend,
                             smooth_lighting: self.smooth_lighting,
@@ -1949,7 +1964,6 @@ impl Streaming {
             finishing: &self.finishing,
             decorates: self.decorates,
             remote: self.remote,
-            loading: self.loading,
         };
         if let Some(wanted) = self.generation_scan.candidates(input, workers * 3) {
             for (_, x, z) in wanted {
@@ -2436,32 +2450,13 @@ impl ExtraCover {
     }
 }
 impl Ranges<'_> {
-    /// `distance`, or `rings` while the level loading screen is up.
-    fn priority(&self, x: i32, z: i32, loading: bool) -> i64 {
-        let own = if loading {
-            self.rings(x, z)
-        } else {
-            self.distance(x, z)
-        };
+    /// `distance`, or the band's nearer priority close to it.
+    fn priority(&self, x: i32, z: i32) -> i64 {
+        let own = self.distance(x, z);
         match self.band {
             Some(band) if band.within(x, z, 4) => own.min(band.priority(x, z)),
             _ => own,
         }
-    }
-    /// Ring by ring: the Chebyshev distance to the nearest centre first, then
-    /// the squared distance. Vanilla's chunk tasks run by ticket level, which
-    /// spreads one level per ring of chunks (`ChunkTaskPriorityQueue`), so
-    /// `LevelLoadingScreen`'s chunk map fills squares around the spawn.
-    fn rings(&self, x: i32, z: i32) -> i64 {
-        let d = |c: (i32, i32)| {
-            let (dx, dz) = (i64::from(x - c.0), i64::from(z - c.1));
-            let ring = dx.abs().max(dz.abs());
-            (ring * ring) << 20 | (dx * dx + dz * dz)
-        };
-        self.extra
-            .iter()
-            .map(|(c, _)| d(*c))
-            .fold(d(self.center), i64::min)
     }
     fn distance(&self, x: i32, z: i32) -> i64 {
         let d = |c: (i32, i32)| {
@@ -2846,7 +2841,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_jobs_follow_the_centre_and_the_loading_screen() {
+    fn queued_jobs_follow_the_centre() {
         let forced = HashSet::new();
         let ranges = |center| Ranges {
             center,
@@ -2863,13 +2858,13 @@ mod tests {
             order,
             job: Job::Generate(x, z),
         };
-        let loading = ranges((0, 0));
+        // Both queued around an earlier centre, where the farther job came first.
+        let earlier = ranges((40, 0));
+        let current = ranges((0, 0));
         let queued = || {
             BinaryHeap::from(vec![
-                // Queued while the loading screen was up: ring order.
-                generate(3, 1, loading.priority(3, 1, true) * 4, 1),
-                // Queued after it closed: plain distances, far below any ring past the first.
-                generate(20, 0, loading.priority(20, 0, false) * 4, 2),
+                generate(3, 1, earlier.priority(3, 1) * 4, 1),
+                generate(20, 0, earlier.priority(20, 0) * 4, 2),
                 Queued {
                     priority: i64::MIN,
                     at: None,
@@ -2890,12 +2885,12 @@ mod tests {
             "the stale order"
         );
         let mut queue = queued();
-        rank_again(&mut queue, |x, z| loading.priority(x, z, false));
+        rank_again(&mut queue, |x, z| current.priority(x, z));
         assert_eq!(pops(queue), [None, Some((3, 1)), Some((20, 0))]);
         // The player moved: the job near the new centre goes first.
         let mut queue = BinaryHeap::from(vec![generate(3, 1, 0, 1), generate(20, 0, 1, 2)]);
         let moved = ranges((19, 0));
-        rank_again(&mut queue, |x, z| moved.priority(x, z, false));
+        rank_again(&mut queue, |x, z| moved.priority(x, z));
         assert_eq!(queue.pop().and_then(|q| q.at), Some((20, 0)));
     }
 
@@ -3079,7 +3074,6 @@ mod tests {
                 finishing: &self.finishing,
                 decorates: self.decorates,
                 remote: self.remote,
-                loading: false,
             }
         }
         fn fill(&mut self) {
@@ -3499,33 +3493,6 @@ mod tests {
     /// from the save) and is not unloaded right after: either way it would be
     /// asked for and loaded again on the next frame, forever (8 such columns
     /// after a teleport at render distance 16 held 8 of the in-flight slots).
-    /// #770: while the loading screen is up, chunks go ring by ring (a
-    /// square front, as vanilla's ticket levels), nearest first in a ring.
-    #[test]
-    fn loading_goes_ring_by_ring() {
-        let forced = HashSet::new();
-        let r = Ranges {
-            center: (2, -1),
-            radius: 12,
-            extra: &[],
-            forced: &forced,
-            cover: None,
-            band: None,
-        };
-        let at = |dx: i32, dz: i32| (2 + dx, -1 + dz);
-        let key = |(x, z): (i32, i32), loading| r.priority(x, z, loading);
-        // The corner of ring 3 comes before the edge of ring 4 only while loading.
-        assert!(key(at(3, 3), true) < key(at(0, 4), true));
-        assert!(key(at(3, 3), false) > key(at(0, 4), false));
-        // Inside a ring, nearest first; rings never interleave.
-        assert!(key(at(0, 3), true) < key(at(2, -3), true));
-        assert!(key(at(-3, -3), true) < key(at(4, 0), true));
-        for dx in -20..=20 {
-            for dz in -20..=20 {
-                assert_eq!(key(at(dx, dz), false), r.distance(2 + dx, -1 + dz));
-            }
-        }
-    }
     #[test]
     fn requested_columns_stay_loaded() {
         let forced = HashSet::new();

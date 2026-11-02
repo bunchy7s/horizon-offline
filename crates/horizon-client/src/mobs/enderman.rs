@@ -84,6 +84,19 @@ pub fn teleport_to(
     if m.extra.passenger {
         return false;
     }
+    // LivingEntity.randomTeleport: WorldBorder.clampVec3ToBound keeps the
+    // target inside the border (Mth.clamp, 1.0E-5F inside the far edges).
+    let (x, z) = match w.border {
+        Some(border) => {
+            let [min_x, min_z, max_x, max_z] = border.bounds(0.0);
+            let clamp = |v: f64, low: f64, high: f64| if v < low { low } else { v.min(high) };
+            (
+                clamp(x, min_x, max_x - f64::from(1.0e-5_f32)),
+                clamp(z, min_z, max_z - f64::from(1.0e-5_f32)),
+            )
+        }
+        None => (x, z),
+    };
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     if !w.world.loaded(bx, bz) {
         return false;
@@ -580,6 +593,53 @@ mod tests {
                 assert!(events.is_empty(), "{tries}");
                 assert_eq!(seated.random.next_int(), expected.next_int(), "{tries}");
             }
+        });
+    }
+
+    /// LivingEntity.randomTeleport clamps the target into the world border
+    /// (`WorldBorder.clampVec3ToBound`), so an enderman never lands outside
+    /// it (#7080). A border of size 10 around the origin ends at x = 5.
+    #[test]
+    fn an_enderman_teleports_inside_the_world_border() {
+        let build = |world: &mut crate::world::World, registry: &BlockRegistry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for cx in -2..2 {
+                for cz in -2..2 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -32..32 {
+                for z in -32..32 {
+                    world.set(x, -1, z, stone).unwrap();
+                }
+            }
+        };
+        let border =
+            horizon_core::geometry::border::BorderGeometry::new([0.0, 0.0], 10.0, 29_999_984)
+                .unwrap();
+        crate::mobs::world::with_built_test_world(&[], build, |w, _| {
+            let mut free = enderman();
+            assert!(teleport_to(&mut free, w, 20.5, 0.0, 0.5, &mut Vec::new()));
+            assert_eq!(free.position, Vec3::new(20.5, 0.0, 0.5), "no border");
+
+            let w = MobWorld {
+                border: Some(&border),
+                ..w.clone()
+            };
+            let mut bounded = enderman();
+            assert!(teleport_to(
+                &mut bounded,
+                &w,
+                20.5,
+                0.0,
+                -20.5,
+                &mut Vec::new()
+            ));
+            // Mth.clamp to [min, max - 1.0E-5F] on x and z.
+            let edge = 5.0 - f64::from(1.0e-5_f32);
+            assert_eq!(bounded.position, Vec3::new(edge, 0.0, -5.0));
         });
     }
 

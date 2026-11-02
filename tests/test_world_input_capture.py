@@ -368,11 +368,17 @@ struct DeviceId;
 enum DeviceEvent { MouseMotion { delta: (f64, f64) }, Other }
 #[derive(PartialEq)] enum Screen { Playing, Paused }
 struct Options { offscreen: bool }
+mod input_trace {
+    pub enum InputOrigin { User }
+    pub enum TraceKind { Motion { x: f64, y: f64 } }
+}
 struct Game {
     pending_save: Option<()>, captured: bool, focused: bool, keyboard_mouse: bool, split_window: bool,
     options: Options, screen: Screen, mouse: MouseLook, last_input: Instant,
 }
 impl Game {
+    // The input trace records the motion; it does not change the turn.
+    fn note_input(&mut self, _: input_trace::InputOrigin, _: input_trace::TraceKind) {}
 METHOD
 }
 fn main() {

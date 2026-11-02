@@ -245,6 +245,8 @@ mod tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset: 0.0,
@@ -260,7 +262,8 @@ mod tests {
             &collision,
             false,
             &fluids,
-            &[]
+            &[],
+            None
         ));
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
@@ -273,7 +276,8 @@ mod tests {
             &collision,
             false,
             &fluids,
-            &[]
+            &[],
+            None
         ));
         // First push is damped by buoyancy before motion, second follows drag.
         assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
@@ -287,6 +291,7 @@ mod tests {
                 false,
                 &fluids,
                 &[],
+                None,
             );
         }
         assert!(carried.position.x > at.x + 0.5);

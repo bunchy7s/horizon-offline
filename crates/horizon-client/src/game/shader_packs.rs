@@ -140,6 +140,8 @@ pub(super) struct PackIds {
     vignette: bool,
     /// `oldLighting`: `true` keeps the game's face shading in the block colours.
     old_lighting: bool,
+    /// `separateAo`: `true` passes AO factor in vertex alpha and keeps pure tint in RGB.
+    pub(super) separate_ao: bool,
 }
 
 impl Game<'_> {
@@ -156,6 +158,11 @@ impl Game<'_> {
         let pack_lighting = self.pack_ids.as_ref().is_some_and(|ids| !ids.old_lighting);
         if self.streaming.shader_pack_lighting != pack_lighting {
             self.streaming.shader_pack_lighting = pack_lighting;
+            self.all_sections_changed();
+        }
+        let separate_ao = self.pack_ids.as_ref().is_some_and(|ids| ids.separate_ao);
+        if self.streaming.separate_ao != separate_ao {
+            self.streaming.separate_ao = separate_ao;
             self.all_sections_changed();
         }
         let picked = picked_pack(&self.settings).to_owned();
@@ -209,9 +216,22 @@ impl Game<'_> {
                                 note.message
                             );
                         }
+                        let separate_ao = properties
+                            .get("separateAo")
+                            .is_some_and(|v| v.trim() == "true");
+                        renderer.set_separate_ao(separate_ao);
                         let folder = dimension_folder(&pack, dimension);
                         let inputs = renderer.pack_inputs();
                         let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
+                        // Textures that name one of the game's: from the resource packs over
+                        // the game's own resources.
+                        let resources = self.options.resources.clone();
+                        let read = |namespace: &str, path: &str| {
+                            std::fs::read(resources.join("assets").join(namespace).join(path)).ok()
+                        };
+                        for note in horizon_shaders::resolve_resources(&mut post.textures, &read) {
+                            log::warn!("shader pack {name}: {note}");
+                        }
                         let biomes = world_biomes!(self);
                         let names: Vec<&str> =
                             biomes.list.iter().map(|b| b.name.as_str()).collect();
@@ -246,6 +266,7 @@ impl Game<'_> {
                             old_lighting: properties
                                 .get("oldLighting")
                                 .is_some_and(|v| v.trim() == "true"),
+                            separate_ao,
                             entities: entities.plain(),
                             missing_entity: if text.is_some() { 65535 } else { 0 },
                             missing_block: if ids.is_empty() { 0 } else { 65535 },

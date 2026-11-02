@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "attachment reads that never insert the default (`AttachmentType::has`, `AttachmentType::get_existing`).",
+  "doc_summary": "attachment reads that never insert the default: `AttachmentType::has` says whether a holder carries a value, saved or set,\neven before it decodes (NeoForge's `hasData`), and `AttachmentType::get_existing` returns `None` instead of the default\n(NeoForge's `getExistingData`). Neither adds anything to the holder's saved data. Bundles that use them need `\"hooks\": @API:attachment_existing@`.",
+  "comments": [
+    "crates/horizon-world/src/attachments.rs"
+  ]
+}

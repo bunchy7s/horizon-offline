@@ -328,6 +328,33 @@ impl Host for super::Game<'_> {
     fn built_data(&self, mod_id: &str) -> Option<PathBuf> {
         self.native_built_data(mod_id)
     }
+    fn on(&self, mod_id: &str) -> bool {
+        self.native_on(mod_id)
+    }
+    fn mod_key(&self, mod_id: &str, name: &str, default: &str) -> String {
+        self.native_mod_key(mod_id, name, default)
+    }
+    fn setting(&self, mod_id: &str, key: &str) -> Option<String> {
+        self.native_setting(mod_id, key)
+    }
+    fn set_setting(&self, mod_id: &str, key: &str, value: &str) {
+        self.native_set_setting(mod_id, key, value)
+    }
+    fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str) -> bool {
+        self.native_set_block_property(pos, key, value)
+    }
+    fn set_block_property_with(
+        &mut self,
+        pos: [i32; 3],
+        key: &str,
+        value: &str,
+        flags: i32,
+    ) -> bool {
+        self.native_set_block_property_with(pos, key, value, flags)
+    }
+    fn config_dir(&self) -> Result<PathBuf, String> {
+        Self::native_config_dir()
+    }
     fn panel_items(&mut self, mod_id: &str, items: Vec<NativeStack>) {
         self.native_panel_items(mod_id, items)
     }
@@ -449,5 +476,11 @@ impl Host for super::Game<'_> {
         max: u32,
     ) -> u32 {
         self.native_move_items(dimension, from, from_face, to, to_face, item, max)
+    }
+    fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
+        self.native_hide_player(uuid, level)
+    }
+    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
+        self.native_item_stack(batch, stack, at, size)
     }
 }

@@ -101,7 +101,11 @@ import net.minecraft.world.phys.Vec3;
  * also records what the server changes about it: its game mode, teleports,
  * motion, inventory slots, effects and death) and {@code end}, which writes each
  * player's lines to OUT. {@code boats on|off} records boat paddle metadata;
- * {@code paddle NAME LEFT RIGHT} sends the two boolean paddle states.
+ * {@code hooks on|off} records the entity a fishing bobber hooks, by type;
+ * {@code paddle NAME LEFT RIGHT} sends the two boolean paddle states;
+ * {@code events on|off} records each level event: its id, block and data;
+ * {@code spawns on|off} records each entity other than a player added to the
+ * level, by type and position.
  */
 public final class LocatorBarClient {
     private static volatile boolean tickSteps;
@@ -109,7 +113,10 @@ public final class LocatorBarClient {
     private static volatile boolean players;
     private static volatile boolean chat;
     private static volatile boolean boats;
+    private static volatile boolean hooks;
     private static volatile boolean state;
+    private static volatile boolean events;
+    private static volatile boolean spawns;
     private static final Map<UUID, String> NAMES = new LinkedHashMap<>();
 
     public static void main(String[] args) throws Exception {
@@ -167,12 +174,15 @@ public final class LocatorBarClient {
                     case "players" -> LocatorBarClient.players = w[1].equals("on");
                     case "chat" -> chat = w[1].equals("on");
                     case "boats" -> boats = w[1].equals("on");
+                    case "hooks" -> hooks = w[1].equals("on");
                     case "paddle" -> {
                         String[] sides = w[2].split(" ");
                         players.get(w[1]).send(new net.minecraft.network.protocol.game.ServerboundPaddleBoatPacket(
                             Boolean.parseBoolean(sides[0]), Boolean.parseBoolean(sides[1])));
                     }
                     case "state" -> state = w[1].equals("on");
+                    case "events" -> events = w[1].equals("on");
+                    case "spawns" -> spawns = w[1].equals("on");
                     case "end" -> {
                         try (PrintWriter out = new PrintWriter(Files.newBufferedWriter(output, StandardCharsets.UTF_8))) {
                             for (Player p : players.values()) {
@@ -240,6 +250,7 @@ public final class LocatorBarClient {
         private int vehicle = -1;
         /** The other players this one was sent, by entity id. */
         private final java.util.Set<Integer> boatIds = new java.util.HashSet<>();
+        private final Map<Integer, String> entityTypes = new java.util.HashMap<>();
         private final Map<Integer, String> seen = new java.util.HashMap<>();
         private final Object replyLock = new Object();
         private int replies;
@@ -456,6 +467,18 @@ public final class LocatorBarClient {
                         && e.getPos().equals(new net.minecraft.core.BlockPos(0, 80, 0)))
                         record("piston-event " + e.getB0() + " " + e.getB1());
                     if (state) recordState(p);
+                    if (hooks && p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a) {
+                        entityTypes.put(a.getId(), net.minecraft.world.entity.EntityType.getKey(a.getType()).toString());
+                    }
+                    // FishingHook.DATA_HOOKED_ENTITY (id 8) holds the hooked entity's id + 1, or 0.
+                    if (hooks && p instanceof net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket data
+                        && "minecraft:fishing_bobber".equals(entityTypes.get(data.id()))) {
+                        for (var value : data.packedItems()) {
+                            if (value.id() == 8 && value.value() instanceof Integer hooked) {
+                                record("hooked " + (hooked > 0 ? entityTypes.get(hooked - 1) : "none"));
+                            }
+                        }
+                    }
                     if (boats && p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a
                         && isBoat(a.getType())) {
                         boatIds.add(a.getId());
@@ -467,6 +490,11 @@ public final class LocatorBarClient {
                                 record("paddle " + value.id() + " " + value.value());
                             }
                         }
+                    }
+                    if (spawns && p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a
+                        && a.getType() != net.minecraft.world.entity.EntityTypes.PLAYER) {
+                        record(String.format(java.util.Locale.ROOT, "spawn %s %.4f %.4f %.4f",
+                            net.minecraft.world.entity.EntityType.getKey(a.getType()), a.getX(), a.getY(), a.getZ()));
                     }
                     if (p instanceof net.minecraft.network.protocol.game.ClientboundAddEntityPacket a
                         && a.getType() == net.minecraft.world.entity.EntityTypes.PLAYER) {
@@ -507,6 +535,12 @@ public final class LocatorBarClient {
                         if (state) {
                             Vec3 v = m.movement();
                             record(String.format(java.util.Locale.ROOT, "motion %.4f %.4f %.4f", v.x, v.y, v.z));
+                        }
+                    } else if (p instanceof net.minecraft.network.protocol.game.ClientboundLevelEventPacket e) {
+                        if (events) {
+                            net.minecraft.core.BlockPos at = e.getPos();
+                            record("event " + e.getType() + " " + at.getX() + " " + at.getY() + " " + at.getZ()
+                                + " " + e.getData());
                         }
                     } else if (p instanceof ClientboundKeepAlivePacket k) {
                         send(new ServerboundKeepAlivePacket(k.getId()));
