@@ -9214,20 +9214,30 @@ impl Renderer {
                 .contains(wgpu::TextureUsages::COPY_SRC)
         {
             let device = &self.device;
-            self.post_effects
-                .get_or_insert_with(|| crate::post_chain::PostEffects::new(device))
-                .apply(
-                    &self.device,
-                    &self.queue,
-                    encoder,
-                    target_texture,
-                    view_target,
-                    [self.config.width, self.config.height],
-                    // The scaled world pass drew its own depth buffer.
-                    overlay.world_depth.then_some(&self.depth),
-                    &frame.post_effects,
-                    timing.as_mut(),
-                );
+            let post = self
+                .post_effects
+                .get_or_insert_with(|| crate::post_chain::PostEffects::new(device));
+            // The chains a spectated mob applies compile in the background from the
+            // first frame in a world, not in the frame that first needs one.
+            post.preload(
+                &self.device,
+                &self.queue,
+                frame.post_effects.root,
+                &crate::post_chain::SPECTATOR_CHAINS,
+                target_texture.format(),
+            );
+            post.apply(
+                &self.device,
+                &self.queue,
+                encoder,
+                target_texture,
+                view_target,
+                [self.config.width, self.config.height],
+                // The scaled world pass drew its own depth buffer.
+                overlay.world_depth.then_some(&self.depth),
+                &frame.post_effects,
+                timing.as_mut(),
+            );
         }
         if !frame.screen.is_empty() {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
