@@ -848,6 +848,8 @@ impl Game<'_> {
         let mut probe = Boat::new(b.id, b.wood.clone(), b.position, b.yaw);
         let status = self.boat_status(&mut probe);
         self.boats[i].status = status;
+        // `oldStatus = status` runs on every boat, so the next tick has one.
+        self.boats[i].status_known = true;
         self.boats[i].tick_submersion();
     }
     /// `BubbleColumnBlock.entityInside`: the bubble columns boat `i` touches
