@@ -1738,9 +1738,9 @@ mod tests {
         m
     }
     /// `Wolf.die`: the wet flag, the shake counter and both shake animations
-    /// are cleared before the rest of the death, so a wolf killed mid-shake
-    /// does not shake on the ground. `LivingEntity.die`'s loot runs from
-    /// `drops::die`, which is where the wolf's own reset is asked first.
+    /// are cleared before any loot is rolled. The death runs
+    /// `drops::death_state` first, so the reset has to be asked there, not
+    /// only exist.
     #[test]
     fn a_wolf_that_dies_mid_shake_is_dry_and_still() {
         let mut m = wolf();
@@ -1750,7 +1750,7 @@ mod tests {
         entity_event(&mut m, 8);
         m.anim.v[SHAKE] = 0.9;
         m.anim.vo[SHAKE] = 0.85;
-        die(&mut m);
+        crate::mobs::drops::death_state(&mut m);
         assert!(!m.extra.flag2, "a dead wolf is not wet");
         assert_eq!(m.extra.counter2, 0, "a dead wolf is not shaking");
         assert_eq!(m.anim.v[SHAKE], 0.0, "shakeAnim");
