@@ -11920,7 +11920,7 @@ pub struct TabCompleteEvent<'a> {
     pub name: &'a str,
     pub command: &'a str,
     pub range: [usize; 2],
-    pub suggestions: &'a mut Vec<horizon_command::Suggestion>,
+    pub suggestions: &'a mut Vec<Suggestion>,
 }
 pub fn dispatch_tab_complete(
     host: &mut dyn Host,
@@ -11929,7 +11929,7 @@ pub fn dispatch_tab_complete(
     name: &str,
     command: &str,
     range: [usize; 2],
-    suggestions: &mut Vec<horizon_command::Suggestion>,
+    suggestions: &mut Vec<Suggestion>,
 ) {
     let mut event = TabCompleteEvent {
         player,

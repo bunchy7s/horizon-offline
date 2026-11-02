@@ -462,7 +462,7 @@ use horizon_client::mod_api::{
     self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     ServerTickPhase, WorldPhase,
 };
-use horizon_client::mod_api::{AttachmentResult, Attachments, Holder};
+use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
     NativeBlockRim, NativeColoredLight, NativeLootDrops, NativeMinimap, NativeMod,
     NativePanelEvent, NativeScreen, NativeScreenView, NativeStack, NativeZoom,
@@ -4493,7 +4493,7 @@ impl Game<'_> {
         name: &str,
         command: &str,
         range: [usize; 2],
-        suggestions: &mut Vec<horizon_command::Suggestion>,
+        suggestions: &mut Vec<Suggestion>,
     ) {
         mod_api::dispatch_tab_complete(
             self,
