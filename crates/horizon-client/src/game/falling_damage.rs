@@ -1,6 +1,6 @@
 //! Landing impacts for falling blocks, before their placement/drop decision.
 use super::{FallingBlock, Game, Landing};
-use horizon_client::{falling_block, items::ItemStack};
+use horizon_client::falling_block;
 use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
 use horizon_world::level::LevelEvent;
 
@@ -81,21 +81,18 @@ impl Game<'_> {
     pub(super) fn finish_falling_block(&mut self, block: FallingBlock, pos: [i32; 3]) {
         let name = self.res.facts().get(block.state).name.clone();
         let anvil = name.ends_with("anvil");
+        // Fallable.onBrokenAfterFall: the anvil's, the pointed dripstone's and
+        // the sulfur spike's level event.
         let sound_event = match &*name {
             "minecraft:pointed_dripstone" => Some(1045),
             "minecraft:sulfur_spike" => Some(1052),
+            _ if anvil => Some(1029),
             _ => None,
         };
         if block.damage.cancel_drop {
             if let Some(id) = sound_event {
                 self.level_events.push(LevelEvent::LevelEvent {
                     id,
-                    pos: BlockPos::new(pos[0], pos[1], pos[2]),
-                    data: 0,
-                });
-            } else if anvil {
-                self.level_events.push(LevelEvent::LevelEvent {
-                    id: 1029,
                     pos: BlockPos::new(pos[0], pos[1], pos[2]),
                     data: 0,
                 });
@@ -157,18 +154,9 @@ impl Game<'_> {
                     data: 0,
                 });
             }
-            let item = self.res.facts().get(block.state).item.clone();
-            if &*item != "minecraft:air" {
-                self.pop_resource(
-                    pos,
-                    ItemStack {
-                        item,
-                        count: 1,
-                        damage: 0,
-                        extra: None,
-                    },
-                );
-            }
+            // FallingBlockEntity.tick: spawnAtLocation, from where the entity
+            // came to rest (on top of a turtle egg, not inside its cell).
+            self.drop_falling_block(block.state, block.position);
         }
     }
     fn falling_hurt_player(&mut self, position: Vec3, amount: f32, kind: &str) {

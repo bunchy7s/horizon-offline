@@ -492,3 +492,101 @@ mod generated;
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A double with the three `Host` methods the probe calls.
+    struct Reader {
+        block: &'static str,
+        lines: Vec<Text>,
+    }
+
+    impl Host for Reader {
+        fn block(&self, _pos: [i32; 3]) -> String {
+            self.block.to_string()
+        }
+        fn acting_player(&self) -> Option<NativeServerPlayer> {
+            Some(NativeServerPlayer {
+                uuid: 7,
+                name: "Probe".to_string(),
+                permission: 0,
+                dimension: "minecraft:overworld".to_string(),
+                position: [0.0; 3],
+                game_mode: 0,
+                health: 20.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            })
+        }
+        fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
+            self.lines.push(line);
+            true
+        }
+    }
+
+    /// Claims a use on stone, after telling the player what the block is.
+    struct Probe;
+
+    impl Hooks for Probe {
+        fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            let block = host.block(event.pos);
+            let player = host.acting_player().expect("a player acts");
+            host.action_bar(player.uuid, Text::literal(block.clone()));
+            if block == "minecraft:stone" {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    /// Asks the host to tell a player without anyone having implemented it.
+    struct Chatty;
+
+    impl Hooks for Chatty {
+        fn use_item_on(&self, host: &mut dyn Host, _event: &mut UseItemOnEvent<'_>) -> Flow {
+            host.tell(7, Text::literal("hello"));
+            Flow::Continue
+        }
+    }
+
+    fn stick() -> ItemStack {
+        ItemStack {
+            item: Arc::from("minecraft:stick"),
+            count: 1,
+            damage: 0,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn a_test_host_implements_only_what_its_hook_calls() {
+        let mods = [Box::new(Probe) as Box<dyn Hooks>];
+        let stack = stick();
+        for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
+            let mut host = Reader {
+                block,
+                lines: Vec::new(),
+            };
+            let mut claimed = false;
+            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            assert_eq!(claimed, expected, "{block}");
+            let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
+            assert_eq!(told, [block], "{block}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Host::tell")]
+    fn an_unexpected_host_call_names_the_method() {
+        let mods = [Box::new(Chatty) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut claimed = false;
+        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+    }
+}

@@ -251,7 +251,7 @@ impl Game<'_> {
             self.handle_mob_events(events)?;
             return Ok(true);
         }
-        self.stats.custom("talked_to_villager", 1);
+        self.award_custom_stat("talked_to_villager", 1);
         self.ensure_offers(index);
         let m = &self.mobs[index];
         let trade = m.extra.trade.as_deref().cloned().unwrap_or_default();
@@ -470,7 +470,7 @@ impl Game<'_> {
     /// for a server's player (when the trader is still in the level).
     pub(super) fn merchant_traded(&mut self, mob: Option<u32>, offers: &[MerchantOffer]) {
         for offer in offers {
-            self.stats.custom("traded_with_villager", 1);
+            self.award_custom_stat("traded_with_villager", 1);
             let merchant = mob.and_then(|id| self.mobs.iter().find(|m| m.id == id));
             let kind = merchant.map(super::native_hooks::mob_kind);
             let villager = merchant.map(|m| self.mob_entity(m));
@@ -482,55 +482,6 @@ impl Game<'_> {
                 self.native_trade_with_villager(id, &kind, offer);
             }
         }
-    }
-    /// `Villager.customServerAiStep`: the TRADE reputation event of the last
-    /// trade, a tick later; the prices follow the new reputation.
-    pub(super) fn merchant_tick(&mut self) {
-        // `AbstractVillager.stillValid`: the trade screen closes once the trader
-        // is gone or dead, or the player is more than 4 blocks past their reach.
-        if self.remote.is_none()
-            && self.screen == super::Screen::Inventory
-            && let Some(id) = self
-                .station
-                .as_ref()
-                .and_then(|s| s.merchant.as_ref())
-                .and_then(|m| m.mob)
-            && let Some(eye) = self.eye_position()
-        {
-            let valid = self.mobs.iter().find(|m| m.id == id).is_some_and(|m| {
-                let (lo, hi) = (m.bounds().min_position(), m.bounds().max_position());
-                let d = [
-                    eye[0] - eye[0].clamp(lo.x, hi.x),
-                    eye[1] - eye[1].clamp(lo.y, hi.y),
-                    eye[2] - eye[2].clamp(lo.z, hi.z),
-                ];
-                let range = self.entity_reach + 4.0;
-                m.alive() && d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < range * range
-            });
-            if !valid {
-                self.close_container();
-                self.screen = super::Screen::Playing;
-                self.capture(true);
-                return;
-            }
-        }
-        let Some(m) = self.station.as_mut().and_then(|s| s.merchant.as_mut()) else {
-            return;
-        };
-        if !m.session.villager || !m.session.last_traded {
-            return;
-        }
-        m.session.last_traded = false;
-        let Some(id) = m.mob else { return };
-        self.villager_traded(id);
-        let reputation = self.villager_reputation(id);
-        self.menu_session(|menu, env, _| {
-            let s = menu.merchant.as_mut()?;
-            s.reputation = reputation;
-            s.update_special_prices();
-            menu.merchant_update(env);
-            Some(true)
-        });
     }
     /// `MerchantMenu.tryMoveItems` for the selected offer (the select trade packet).
     fn try_move_items(&mut self, index: usize) {

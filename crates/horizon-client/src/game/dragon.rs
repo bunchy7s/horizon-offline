@@ -866,15 +866,15 @@ impl Game<'_> {
         (-2..=1).all(|cz| (-2..=1).all(|cx| self.streaming.is_lit(cx, cz)))
     }
     /// A player's entity id: the acting player's body has it, another
-    /// player's comes from the LAN host (0 when it is out on a guest's turn,
-    /// and for an in-frame host with none).
+    /// player's comes from the hub (0 when it is out on a guest's turn, and
+    /// for no player).
     fn fight_entity(&self, who: FightWho) -> i32 {
         if who == self.acting_player() {
             return self.player.as_ref().map_or(0, |p| p.entity_id);
         }
         let host = self.lan.as_ref();
         match who {
-            FightWho::Host => host.map_or(0, |h| h.host_entity),
+            FightWho::Host => 0,
             FightWho::Guest(conn) => host
                 .and_then(|h| h.hub.guest(conn))
                 .map_or(0, |g| g.entity_id),
@@ -950,9 +950,6 @@ impl Game<'_> {
     /// `EnderDragonFight.tick` and the fight's entities, while the End is
     /// ticked (in place for its player, or on a server with players in it).
     pub(super) fn tick_fight(&mut self) {
-        if self.travelling.is_some() {
-            return;
-        }
         // A dragon outside the End (`/summon`) has no fight: `ServerLevel.getDragonFight` is
         // null there, but `EnderDragon.aiStep` still flies it.
         if self.dim != Dim::End {
@@ -1319,8 +1316,8 @@ impl Game<'_> {
         view: &horizon_client::advancements::EntityView,
         blow: Option<(DamageKind, bool)>,
     ) {
-        self.stats.add("killed", "minecraft:ender_dragon", 1);
-        self.stats.custom("mob_kills", 1);
+        self.award_stat("killed", "minecraft:ender_dragon", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(id));
         // KilledTrigger: the damage source `die` was given.
         let blow = blow.map(|(kind, by_player)| {

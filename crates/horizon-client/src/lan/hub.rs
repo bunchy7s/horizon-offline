@@ -67,43 +67,12 @@ pub struct HubConfig {
     pub allow_flight: bool,
     pub seed: i64,
     pub max_players: usize,
-    /// A dedicated server: operators from `ops`, the dedicated-only commands.
-    pub dedicated: bool,
-    /// An integrated server (`dedicated` too, since it has no host player):
-    /// the owner's level from `ops`, the others' from Allow Commands and
-    /// the guests' command access, and the integrated-only commands.
+    /// An integrated server: the owner's level from `ops`, the others' from Allow Commands
+    /// and the guests' command access, and the integrated-only commands. Otherwise a
+    /// dedicated server: operators from `ops`, the dedicated-only commands.
     pub integrated: bool,
     /// The shapes of the world's levels (their dimension types).
     pub levels: crate::chunk::LevelShapes,
-}
-
-/// The host player as the other players see them.
-#[derive(Clone, Debug)]
-pub struct HostState {
-    pub uuid: u128,
-    pub name: String,
-    pub entity_id: i32,
-    pub position: [f64; 3],
-    pub yaw: f32,
-    pub pitch: f32,
-    pub head_yaw: f32,
-    pub on_ground: bool,
-    pub game_mode: i32,
-    pub sneaking: bool,
-    pub sprinting: bool,
-    pub equipment: [Option<ItemStack>; 6],
-    pub health: f32,
-    /// The host player's client-syncable attribute instances.
-    pub attributes: Vec<play::AttributeSnapshot>,
-    /// `LivingEntity.DATA_LIVING_ENTITY_FLAGS` (the item in use).
-    pub living_flags: i8,
-    /// `LivingEntity.DATA_ARROW_COUNT_ID` and `DATA_STINGER_COUNT_ID`.
-    pub stuck: (i32, i32),
-    /// `Player.DATA_SHOULDER_PARROT_LEFT` and `_RIGHT`: the parrots' variants.
-    pub shoulders: [Option<i32>; 2],
-    /// The bed the host sleeps in (`LivingEntity.SLEEPING_POS`).
-    pub bed: Option<[i32; 3]>,
-    pub body: BodyFlags,
 }
 
 /// What the other players see of a player's body besides sneaking and
@@ -131,8 +100,6 @@ pub struct BodyFlags {
 /// Everything the hub needs from the game for one tick.
 pub struct TickCtx<'a> {
     pub world: &'a mut World,
-    /// The player playing on the host (none on a dedicated server).
-    pub host: Option<&'a HostState>,
     pub entities: &'a [EntityState],
     pub next_entity: &'a mut u32,
     /// Where new players appear.
@@ -208,6 +175,13 @@ pub enum HostEvent {
     },
 }
 
+/// The criteria `CriteriaTriggers.TICK` granted one player.
+pub struct TickGrants {
+    pub player: u128,
+    pub name: String,
+    pub grants: Vec<super::advancements::CriterionGrant>,
+}
+
 /// What one player started and stopped tracking, in order, for the game to
 /// tell the mods.
 pub struct TrackingBatch {
@@ -234,6 +208,9 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
+    /// tell the mods.
+    pub native_advancement_grants: Vec<TickGrants>,
     /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
     /// only players of at least that permission level see them, in the
     /// player list, the world and their joining and leaving.
@@ -580,6 +557,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             native_tracking: Vec::new(),
+            native_advancement_grants: Vec::new(),
             hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -769,15 +747,12 @@ impl Hub {
     /// ListPlayersCommand's reply: the players in join order (the host of a
     /// LAN world first), as display names or names with ids, joined by
     /// gray commas (ComponentUtils.formatList).
-    pub fn list_reply(&self, host: Option<(u128, &str)>, uuids: bool) -> Tag {
-        let players: Vec<(u128, &str)> = host
-            .into_iter()
-            .chain(
-                self.guests
-                    .iter()
-                    .filter(|g| g.placed)
-                    .map(|g| (g.uuid, g.name.as_str())),
-            )
+    pub fn list_reply(&self, uuids: bool) -> Tag {
+        let players: Vec<(u128, &str)> = self
+            .guests
+            .iter()
+            .filter(|g| g.placed)
+            .map(|g| (g.uuid, g.name.as_str()))
             .collect();
         let format = |(uuid, name): (u128, &str)| {
             if uuids {
@@ -996,12 +971,8 @@ impl Hub {
             // IntegratedServer.getProfilePermissions / getCustomPermissionLevel.
             let guests = if self.config.guest_commands { 2 } else { 0 };
             self.ops.get(&uuid).copied().unwrap_or(guests)
-        } else if self.config.dedicated {
-            self.ops.get(&uuid).copied().unwrap_or(0)
-        } else if self.config.guest_commands {
-            2
         } else {
-            0
+            self.ops.get(&uuid).copied().unwrap_or(0)
         }
     }
 
@@ -1080,9 +1051,6 @@ impl Hub {
         }));
         // The player list: everyone already here, then the newcomer to all.
         let mut entries = Vec::new();
-        if let Some(host) = ctx.host {
-            entries.push(self.player_info(host.uuid, &host.name, host.game_mode, 0));
-        }
         // Players a native mod hid from the newcomer stay out of its list,
         // and a hidden newcomer out of theirs.
         let permission = self.guests[i].permission;
@@ -1342,7 +1310,7 @@ impl Hub {
     fn commands_packet(&self, permission: u8) -> play::Commands {
         match &self.sync.commands {
             Some(tree) => {
-                let dedicated = self.config.dedicated && !self.config.integrated;
+                let dedicated = !self.config.integrated;
                 tree.packet_with_features(
                     permission,
                     dedicated,
@@ -2462,36 +2430,9 @@ impl Hub {
         out
     }
 
-    /// All entities as one client sees them: the world's, the host, the other guests.
+    /// All entities as one client sees them: the world's and the other players.
     fn track_entities(&mut self, ctx: &mut TickCtx) {
-        let mut all: Vec<EntityState> =
-            Vec::with_capacity(ctx.entities.len() + self.guests.len() + 1);
-        if let Some(h) = ctx.host {
-            let equipment = {
-                let e = &h.equipment;
-                self.equipment_of(&e[0], &e[1], [&e[5], &e[4], &e[3], &e[2]])
-            };
-            let mut state = self.player_state(
-                h.entity_id,
-                h.uuid,
-                h.position,
-                (h.yaw, h.pitch, h.head_yaw),
-                h.on_ground,
-                (h.sneaking, h.sprinting, h.bed.is_some()),
-                h.body,
-                h.living_flags,
-                h.bed,
-                0x7F,
-                h.health,
-                equipment,
-                h.attributes.clone(),
-                &[],
-            );
-            state.spectator = h.game_mode == 3;
-            stuck_meta(&mut state, h.stuck);
-            shoulder_meta(&mut state, h.shoulders);
-            all.push(state);
-        }
+        let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
         let placed: Vec<usize> = (0..self.guests.len())
             .filter(|&i| self.here(&self.guests[i]))
             .collect();
@@ -2680,6 +2621,11 @@ impl Hub {
                     g.send(&raw(ids::RECIPE_BOOK_ADD, add));
                 }
                 g.send(&raw(ids::UPDATE_ADVANCEMENTS, first.update_advancements));
+                self.native_advancement_grants.push(TickGrants {
+                    player: g.uuid,
+                    name: g.name.clone(),
+                    grants: first.granted,
+                });
                 g.advancements_visible = sync.advancements.visibility(&g.advancements);
                 g.advancements_changed.clear();
             } else {
@@ -2814,6 +2760,7 @@ impl Hub {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
         for g in &mut self.guests {
+            let mut granted = Vec::new();
             // PlayerAdvancements.reload: isFirstPacket again, the progress
             // read against the new tree; a player whose advancements were
             // never loaded does that on their first tick.
@@ -2822,12 +2769,20 @@ impl Hub {
             }
             g.advancements_visible.clear();
             g.advancements_changed.clear();
-            if let Some(add) =
-                sync.advancements
-                    .reload(&sync, now, &mut g.advancements, &mut g.recipe_book)
-            {
+            if let Some(add) = sync.advancements.reload(
+                &sync,
+                now,
+                &mut g.advancements,
+                &mut g.recipe_book,
+                &mut granted,
+            ) {
                 g.send(&raw(ids::RECIPE_BOOK_ADD, add));
             }
+            self.native_advancement_grants.push(TickGrants {
+                player: g.uuid,
+                name: g.name.clone(),
+                grants: granted,
+            });
         }
         // broadcastAll(ClientboundUpdateTagsPacket).
         self.broadcast(&C::UpdateTags(sync.tags.clone()));
@@ -3627,18 +3582,6 @@ impl Hub {
             motion.flying_speed = speed;
         }
         g.send(&g.abilities());
-    }
-
-    /// The host's game mode changed (PlayerInfo UPDATE_GAME_MODE for everyone).
-    pub fn set_host_game_mode(&self, uuid: u128, mode: i32) {
-        self.broadcast(&C::PlayerInfoUpdate(play::PlayerInfoUpdate {
-            actions: 4,
-            entries: vec![play::PlayerInfo {
-                uuid,
-                game_mode: Some(mode),
-                ..Default::default()
-            }],
-        }));
     }
 
     pub fn disconnect_all(&mut self) {

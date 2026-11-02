@@ -31,16 +31,12 @@ impl PaintingVariants {
     pub fn load(root: &std::path::Path) -> Self {
         let data = root.join("data/minecraft");
         let mut all = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(data.join("painting_variant")) {
-            for e in entries.flatten() {
-                let path = e.path();
-                let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                let Ok(bytes) = std::fs::read(&path) else {
-                    continue;
-                };
-                let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        if let Ok(folder) = horizon_world::json_folder::read(&data.join("painting_variant")) {
+            for file in &folder.files {
+                let name = file.name.as_str();
+                let Ok(v) =
+                    serde_json::from_slice::<serde_json::Value>(file.bytes().unwrap_or_default())
+                else {
                     continue;
                 };
                 all.push(Variant {
@@ -57,14 +53,15 @@ impl PaintingVariants {
                 });
             }
         }
-        let placeable = std::fs::read(data.join("tags/painting_variant/placeable.json"))
-            .ok()
-            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-            .and_then(|v| v["values"].as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|v| v.as_str().map(Arc::from))
-            .collect();
+        let placeable =
+            horizon_core::prepared_files::read(&data.join("tags/painting_variant/placeable.json"))
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|v| v["values"].as_array().cloned())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|v| v.as_str().map(Arc::from))
+                .collect();
         Self { all, placeable }
     }
     pub fn get(&self, id: &str) -> Option<&Variant> {
@@ -277,8 +274,13 @@ impl Game<'_> {
         }
         best
     }
-    /// `Painting.hurtServer` -> kill and `dropItem`.
-    pub(super) fn break_painting(&mut self, index: usize, by_player: bool) {
+    /// `Painting.hurtServer` -> kill and `dropItem`. False when a mod kept it
+    /// (`native_hanging_break`): it stays at `index`.
+    pub(super) fn break_painting(&mut self, index: usize, by_player: bool) -> bool {
+        let pos = self.paintings[index].pos;
+        if self.hanging_break_cancelled("minecraft:painting", pos, by_player) {
+            return false;
+        }
         let p = self.paintings.remove(index);
         let (lo, hi) = p.bounds();
         let at = [
@@ -288,12 +290,12 @@ impl Game<'_> {
         ];
         self.world.modified.insert((p.pos[0] >> 4, p.pos[2] >> 4));
         if !self.ui.rules.bool("entity_drops") {
-            return;
+            return true;
         }
         self.audio
             .play("minecraft:entity.painting.break", Some(at), 1.0, 1.0);
         if by_player && self.creative {
-            return;
+            return true;
         }
         // HangingEntity.spawnAtLocation: 0.15 out from the wall.
         let s = p.step().map(f64::from);
@@ -309,6 +311,7 @@ impl Game<'_> {
             [0.0; 3],
             10,
         );
+        true
     }
     /// BlockAttachedEntity.tick: check survival every 100 ticks.
     pub(super) fn tick_paintings(&mut self) {
@@ -326,8 +329,7 @@ impl Game<'_> {
             if self.paintings[i].check_interval >= 100 {
                 self.paintings[i].check_interval = 0;
                 let p = self.paintings[i].clone();
-                if !self.painting_survives(&p) {
-                    self.break_painting(i, false);
+                if !self.painting_survives(&p) && self.break_painting(i, false) {
                     continue;
                 }
             }

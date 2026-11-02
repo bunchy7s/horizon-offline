@@ -167,7 +167,7 @@ impl Game<'_> {
         };
         if taken > 0 {
             // awardStat(ITEM_USED), then stackToInsert.consume(count, player).
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             for _ in 0..taken {
                 self.consume_held();
             }
