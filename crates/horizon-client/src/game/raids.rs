@@ -1333,7 +1333,6 @@ impl Game<'_> {
                         &mut canceled,
                     );
                     if canceled {
-                        self.raiding.siege.tonight = false;
                         return false;
                     }
                     self.raiding.siege.spot = spot;
