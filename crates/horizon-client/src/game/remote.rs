@@ -4401,9 +4401,18 @@ impl Game<'_> {
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
             C::PlaceGhostRecipe(p) => self.remote_ghost_recipe(p),
             C::MerchantOffers(p) => self.remote_merchant_offers(p),
-            C::ContainerClose(_) if self.remote_lectern_closed() => {}
             C::ContainerClose(_) => {
-                if self.screen == Screen::Inventory {
+                // `LocalPlayer.clientSideCloseContainer` sets the screen to
+                // null, including dialogs and WaitingForResponseScreen. This
+                // differs from clearDialog, which restores the parent screen.
+                let dialog = self.dialog_open();
+                if dialog {
+                    self.close_dialogs();
+                    self.ui.chat_screen = None;
+                    self.book = None;
+                    self.sign_edit = None;
+                }
+                if !self.remote_lectern_closed() && (self.screen == Screen::Inventory || dialog) {
                     self.remote_close_local();
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -7144,7 +7153,7 @@ impl Game<'_> {
         }
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
-        let entity = self.entity_targeted();
+        let entity = self.remote_use_targets_entity();
         horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
     }
 
@@ -8182,7 +8191,7 @@ impl Game<'_> {
             }
             return;
         }
-        let off_target = if self.entity_targeted() {
+        let off_target = if self.remote_use_targets_entity() {
             self.remote_use_entity(Hand::Off)
         } else {
             self.remote_use_block(Hand::Off)

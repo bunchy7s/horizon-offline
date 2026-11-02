@@ -8,7 +8,32 @@ pub mod heap_census;
 pub mod jobs;
 pub mod memory_limit;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicBool, Ordering},
+};
+
+/// The worker threads the machine offers this process: `available_parallelism`'s
+/// answer (its share of the cores — CPU affinity, a container's quota), resolved
+/// once, since it doesn't change under a run and asking again on a later path
+/// can only disagree with the pools already started. `HORIZON_WORKER_THREADS`
+/// sets it instead, to cap every pool on a machine whose OS reports more cores
+/// than a run should take; a value that isn't a positive number is ignored.
+/// Each pool keeps its own share of the count (the streaming pool all but one,
+/// far decoration a third of it).
+pub fn worker_count() -> usize {
+    static COUNT: OnceLock<usize> = OnceLock::new();
+    *COUNT.get_or_init(|| {
+        parse_worker_count(std::env::var("HORIZON_WORKER_THREADS").ok())
+            .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get()))
+    })
+}
+
+/// `Some(n)` when `value` names a positive count (`" 4 "` counts; `"0"`,
+/// `"lots"`, a missing variable don't).
+fn parse_worker_count(value: Option<String>) -> Option<usize> {
+    value?.trim().parse().ok().filter(|&n| n > 0)
+}
 
 /// Ask the OS to run the calling thread ahead of the process's other
 /// threads, as vanilla's `MinecraftServer.spin` does for its server thread
@@ -403,6 +428,32 @@ pub fn keep_stdio_from_children() {
 
 #[cfg(test)]
 mod tests {
+    /// Without `HORIZON_WORKER_THREADS`, the count is the machine's.
+    #[test]
+    fn worker_count_defaults_to_the_machine() {
+        if std::env::var_os("HORIZON_WORKER_THREADS").is_some() {
+            return;
+        }
+        let machine = std::thread::available_parallelism().map_or(1, |n| n.get());
+        assert_eq!(super::worker_count(), machine);
+    }
+
+    /// Only a positive number overrides the machine's count.
+    #[test]
+    fn worker_count_override_parses() {
+        for (value, parsed) in [
+            (None, None),
+            (Some("4"), Some(4)),
+            (Some(" 4 "), Some(4)),
+            (Some("0"), None),
+            (Some("-2"), None),
+            (Some("lots"), None),
+            (Some(""), None),
+        ] {
+            assert_eq!(super::parse_worker_count(value.map(String::from)), parsed);
+        }
+    }
+
     /// After it, this process's standard output is no longer handed to the processes it starts.
     #[cfg(windows)]
     #[test]

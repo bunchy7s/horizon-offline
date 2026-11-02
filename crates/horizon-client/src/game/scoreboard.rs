@@ -182,6 +182,7 @@ impl Game<'_> {
             | Target::Tnt(id)
             | Target::Falling(id)
             | Target::Rocket(id)
+            | Target::Trident(id)
             | Target::Other(id)
             | Target::Cloud(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
@@ -227,6 +228,7 @@ impl Game<'_> {
             | Target::Crystal(id)
             | Target::Dragon(id)
             | Target::Rocket(id)
+            | Target::Trident(id)
             | Target::Other(id)
             | Target::Cloud(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
