@@ -3316,6 +3316,7 @@ impl Game<'_> {
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         })
     }
 }
