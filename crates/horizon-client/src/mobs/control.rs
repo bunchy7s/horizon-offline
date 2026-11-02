@@ -478,6 +478,7 @@ fn rotate_toward_max(from: f32, to: f32, max: f32) -> f32 {
 #[cfg(test)]
 mod goat_head_tests {
     use super::*;
+    use glam::Vec3;
     use std::sync::Arc;
 
     fn mob(species: Species) -> Mob {
