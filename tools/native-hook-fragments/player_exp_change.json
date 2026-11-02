@@ -5,7 +5,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_change",
       "side": "server",
       "cancellable": false,
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)"
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player's orb-pickup experience points before they are added (`native_player_exp_change`).",

@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pick_item",
       "neoforge": "none (NeoForge has no such event; Paper's PlayerPickItemEvent)",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "A server player's middle-click pick, cancellable (`native_player_pick_item`).",

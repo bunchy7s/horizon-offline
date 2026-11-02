@@ -5,7 +5,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bed_leave",
       "side": "server",
       "neoforge": "PlayerWakeUpEvent",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A player left a bed, after their sleeping state changed (`native_player_bed_leave`).",

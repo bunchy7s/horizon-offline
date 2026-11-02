@@ -4,7 +4,10 @@
       "name": "spawn_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_spawn_change",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "The world spawn point changes (`native_spawn_change`).",

@@ -4,7 +4,10 @@
       "name": "prepare_item_enchant",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_enchant",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "Enchanting offers calculated (`native_prepare_item_enchant`).",

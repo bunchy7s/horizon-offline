@@ -4,7 +4,10 @@
       "name": "player_take_lectern_book",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_take_lectern_book",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player took a book from a lectern (`native_player_take_lectern_book`).",

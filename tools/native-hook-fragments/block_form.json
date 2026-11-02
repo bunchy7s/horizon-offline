@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_form",
       "side": "server",
       "cancellable": true,
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "Precipitation forms ice or snow (`native_block_form`).",

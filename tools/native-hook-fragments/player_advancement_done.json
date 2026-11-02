@@ -5,7 +5,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
       "side": "server",
       "neoforge": "AdvancementEvent.AdvancementEarnEvent",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A player completed an advancement (`native_player_advancement_done`).",

@@ -4,7 +4,10 @@
       "name": "player_toggle_entity_age_lock",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_toggle_entity_age_lock",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player toggled an entity's age lock (`native_player_toggle_entity_age_lock`).",

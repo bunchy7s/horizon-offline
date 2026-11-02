@@ -4,7 +4,10 @@
       "name": "player_change_main_hand",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_main_hand",
       "neoforge": "none (NeoForge has no such event)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player's client option for their dominant hand changed (`native_player_change_main_hand`).",

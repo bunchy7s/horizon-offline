@@ -4,7 +4,10 @@
       "name": "player_change_beacon_effect",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_beacon_effect",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player changed a beacon's selected effects (`native_player_change_beacon_effect`).",

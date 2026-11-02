@@ -4,7 +4,10 @@
       "name": "game_event",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_game_event",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A vanilla world game event fired (`native_game_event`).",

@@ -4,7 +4,11 @@
       "name": "block_lock_check",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_lock_check",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "locked"
+      }
     }
   ],
   "rust_summary": "A guest checks a block container lock (`native_block_lock_check`).",

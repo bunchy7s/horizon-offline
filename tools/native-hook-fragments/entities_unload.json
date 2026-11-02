@@ -4,7 +4,10 @@
       "name": "entities_unload",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entities_unload",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "Entities left the active world as a chunk unloaded (`native_entities_unload`).",

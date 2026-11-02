@@ -4,7 +4,10 @@
       "name": "player_bucket_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bucket_entity",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player caught a mob in a bucket (`native_player_bucket_entity`).",

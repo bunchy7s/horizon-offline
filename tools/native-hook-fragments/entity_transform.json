@@ -4,7 +4,10 @@
       "name": "entity_transform",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A mob conversion completed (`native_entity_transform`).",

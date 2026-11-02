@@ -4,7 +4,10 @@
       "name": "player_shield_disable",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_shield_disable",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A player's shield was disabled by a blocked hit (`native_player_shield_disable`).",

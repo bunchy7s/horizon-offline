@@ -4,7 +4,10 @@
       "name": "player_recipe_book_click",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_book_click",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "Server player requests recipe book auto-fill (`native_player_recipe_book_click`).",

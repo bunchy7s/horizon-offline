@@ -4,7 +4,11 @@
       "name": "tab_complete",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_tab_complete",
       "neoforge": "none (NeoForge has no generic tab completion event)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "suggestions"
+      }
     }
   ],
   "rust_summary": "A guest asked the server to complete a command (`native_tab_complete`).",

@@ -1303,7 +1303,7 @@ impl Game<'_> {
         // The mods may stop the menu; the click is spent.
         if !self.guest_may_open(host, conn, menu, Some([pos.0, pos.1, pos.2])) {
             return true;
-    }
+        }
         let mut cancel = false;
         self.native_inventory_block_start(uuid, &name, [pos.0, pos.1, pos.2], &mut cancel);
         if cancel {

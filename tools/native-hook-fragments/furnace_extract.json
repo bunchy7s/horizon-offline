@@ -4,7 +4,10 @@
       "name": "furnace_extract",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_extract",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A player takes a furnace output (`native_furnace_extract`).",

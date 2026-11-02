@@ -4,7 +4,10 @@
       "name": "block_cook",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_cook",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A block finishes cooking an item (`native_block_cook`).",

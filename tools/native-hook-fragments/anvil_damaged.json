@@ -4,7 +4,10 @@
       "name": "anvil_damaged",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_damaged",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "An anvil takes damage (`native_anvil_damaged`).",

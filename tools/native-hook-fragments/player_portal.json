@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_portal",
       "neoforge": "EntityTravelToDimensionEvent",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "A server player about to travel through a portal, cancellable (`native_player_portal`).",

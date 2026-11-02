@@ -4,7 +4,10 @@
       "name": "player_map_filled",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_map_filled",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player filled an empty map (`native_player_map_filled`).",

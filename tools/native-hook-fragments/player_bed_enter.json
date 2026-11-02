@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bed_enter",
       "side": "server",
       "neoforge": "none (NeoForge has no such event; Bukkit's PlayerBedEnterEvent)",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "A player about to enter a bed, cancellable (`native_player_bed_enter`).",

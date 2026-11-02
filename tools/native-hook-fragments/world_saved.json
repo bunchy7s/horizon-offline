@@ -4,7 +4,10 @@
       "name": "world_saved",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_world_saved",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A world save cycle completed (`native_world_saved`).",

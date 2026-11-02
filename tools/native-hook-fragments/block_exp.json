@@ -4,7 +4,10 @@
       "name": "block_exp",
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_exp",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A block is about to drop experience (`native_block_exp`).",

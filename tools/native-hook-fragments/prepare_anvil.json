@@ -4,7 +4,11 @@
       "name": "prepare_anvil",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_anvil",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
     }
   ],
   "rust_summary": "Anvil result prepared (`native_prepare_anvil`).",

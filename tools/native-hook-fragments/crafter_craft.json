@@ -4,7 +4,10 @@
       "name": "crafter_craft",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_crafter_craft",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A crafter completes a recipe (`native_crafter_craft`).",

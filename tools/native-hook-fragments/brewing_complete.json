@@ -4,7 +4,10 @@
       "name": "brewing_complete",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_complete",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "Brewing stand finished brewing (`native_brewing_complete`).",

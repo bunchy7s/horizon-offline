@@ -4,7 +4,10 @@
       "name": "whitelist_state_update",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_whitelist_state_update",
       "neoforge": "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "The dedicated server whitelist was enabled or disabled (`native_whitelist_state_update`).",

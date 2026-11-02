@@ -4,7 +4,10 @@
       "name": "player_riptide",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_riptide",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRiptideEvent)"
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRiptideEvent)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A player launches with a riptide trident (`native_player_riptide`).",

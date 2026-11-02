@@ -4,7 +4,10 @@
       "name": "entity_teleport",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_teleport",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server entity completed a same-level teleport command (`native_entity_teleport`).",

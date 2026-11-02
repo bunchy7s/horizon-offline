@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_leaves_decay",
       "side": "server",
       "cancellable": true,
-      "neoforge": "none (NeoForge has no such event)"
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "A leaf block decaying (`native_leaves_decay`).",
