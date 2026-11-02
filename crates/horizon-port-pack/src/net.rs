@@ -189,7 +189,15 @@ fn local(host: &str) -> bool {
         || host.ends_with(".localhost")
         || host == "::1"
         || host == "0.0.0.0"
-        || host.starts_with("127.")
+        || is_loopback_v4(&host)
+}
+
+/// A dotted IPv4 address in `127.0.0.0/8`; a DNS name that merely starts with `127.` is not one.
+fn is_loopback_v4(host: &str) -> bool {
+    host.starts_with("127.")
+        && host
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether `host` is in `NO_PROXY`: `*`, `host`, `.domain`, `*.domain` and `host:port` entries.
@@ -323,7 +331,13 @@ mod tests {
         ] {
             assert!(local(host), "{host}");
         }
-        for host in ["playhorizon.dev", "api.minecraftservices.com", "10.0.0.1"] {
+        for host in [
+            "playhorizon.dev",
+            "api.minecraftservices.com",
+            "10.0.0.1",
+            "127.example.com",
+            "127.0.0.1.example.com",
+        ] {
             assert!(!local(host), "{host}");
         }
     }
