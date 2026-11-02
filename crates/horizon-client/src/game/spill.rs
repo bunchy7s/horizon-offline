@@ -433,9 +433,12 @@ impl GameLevel<'_> {
         // BlockBehaviour.spawnAfterBreak with no tool: ores, sculk and spawners
         // award experience at the block's centre.
         let name = self.facts.get(state).name.clone();
-        if let Some(xp) = removal::break_experience(&mut self.world.random, &name)
+        if let Some(mut xp) = removal::break_experience(&mut self.world.random, &name)
             && self.rules.block_drops
         {
+            if self.native_authoritative {
+                self.native_block_exp(self.dimension, pos, &name, &mut xp);
+            }
             let centre = [
                 f64::from(pos.x) + 0.5,
                 f64::from(pos.y) + 0.5,

@@ -1199,11 +1199,12 @@ pub trait Hooks: Send + Sync {
     /// with those of `horizon-client/src/game/native_hooks.rs`): `components` holds
     /// `item`'s default components in `items.json`'s form (`"minecraft:max_stack_size": 16`,
     /// `"minecraft:food": {"nutrition": 4, "saturation": 2.4}`); insert or replace one to
-    /// set it, remove it to take it away (a stack size outside 1 to 99 is brought back
-    /// into it). Asked for every item each time the game reads
-    /// the defaults, from any thread, several times as resources load and again when a
-    /// world's data packs load: answer the same each time. Client and server each ask
-    /// their own mods, as NeoForge does, so both sides need the mod.
+    /// set it, remove it to take it away (a stack size outside 1 to `i32::MAX` is
+    /// brought back into it, and one that is not a number leaves the data pack's
+    /// own). Asked for every item each time the game reads the defaults, from any
+    /// thread, several times as resources load and again when a world's data packs
+    /// load: answer the same each time. Client and server each ask their own mods,
+    /// as NeoForge does, so both sides need the mod.
     /// 79.
     ///
     /// Every mod gets `event.components` in order and may add, change or remove components.
@@ -1262,6 +1263,2768 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// The camera shake native mods ask for in this frame, `partial` ticks
+    /// past the last tick (0 to 1): add your pitch, yaw and roll in degrees
+    /// and your offset in blocks, along the camera's right, up and back, to
+    /// `shake`, so several mods' shakes add up. Read while playing only;
+    /// Horizon scales the sum by Distortion Effects and bounds it
+    /// (`native_shake_matrix`). API 82.
+    fn camera_shake(&self, host: &dyn Host, event: &mut CameraShakeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The values native mods hand their shader packs in this frame,
+    /// `partial` ticks past the last tick (0 to 1): a pack's WGSL reads
+    /// them as `frame.mods` (eight `vec4<f32>`). Write the slots your own
+    /// pack reads; a mod that bundles its pack as `native-<mod id>` is the
+    /// one that pack is for. Asked once a frame while a pack is on; a value
+    /// that isn't finite reads as 0 (`native_shader_params_now`). API
+    /// 84.
+    fn shader_params(&self, host: &dyn Host, event: &mut ShaderParamsEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before an eligible targeted block's selection outline is built.
+    /// Cancel skips only the default block highlight, after normal HUD and game-mode gates.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn block_highlight(&self, host: &dyn Host, event: &mut BlockHighlightEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
+    /// Equip progress is the inverse arm height, including the item's swap animation scale.
+    /// Cancel skips that hand's default geometry, including its map and arm geometry.
+    /// It only hides: the hook has no way to draw a replacement.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn render_hand(&self, host: &dyn Host, event: &mut RenderHandEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Render-thread notification after a resource-pack reload has applied successfully.
+    /// Atlas, models, renderer and client caches already refer to the new resources.
+    /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
+    fn client_resources_reloaded(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ClientResourcesReloadedEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Append an item's custom decorations after its default bar, cooldown and count.
+    /// Coordinates are the icon's top-left in GUI units, as the batch takes them;
+    /// no item translation is active.
+    /// Runs wherever the shared item-decoration path is used (hotbar, menus, tooltips,
+    /// and the other screens that draw item icons: advancements, beacon, stats, trading).
+    fn item_decorations(&self, host: &dyn Host, event: &mut ItemDecorationsEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.getUseDuration` of `stack`, in ticks: `duration` arrives with
+    /// vanilla's (a consumable's time, 72000 for a shield, a spear, a bow,
+    /// 0 for an item with no use over time). A mod's own item (outside
+    /// `minecraft:`) with no `consumable`, `blocks_attacks` or kinetic
+    /// weapon that answers above 0 is used over time on a right click, as an
+    /// `Item.use` that calls `startUsingItem`, until it is let go or the time
+    /// runs out (`native_living_entity_use_item_finish`). A consumable's time
+    /// changes too, potions and the other vanilla items keep their own.
+    /// Asked when a use starts, each tick a mod's item is in use, and each
+    /// frame the hand draws one in use, on both sides. It has no user, as
+    /// it is asked so often: answer from the stack alone. API 90.
+    fn use_duration(&self, host: &dyn Host, event: &mut UseDurationEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Item.getUseAnimation` of `stack` in use, for the first person hand:
+    /// `animation` arrives with its consumable's (`eat`, `drink`), else
+    /// `None`. `Eat` and `Drink` bring the food to the mouth, `Bow` draws,
+    /// `Trident` raises, `Brush` sweeps; the rest hold the item still.
+    /// Asked each frame the hand draws an item in use, for an item with no
+    /// pose of its own (bows, crossbows, tridents, brushes and spears keep
+    /// theirs). Client-side. API 90.
+    fn use_animation(&self, host: &dyn Host, event: &mut UseAnimationEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `Player.canEat` for the food `stack`, from `Consumable.canConsume`
+    /// when eating starts: `can_eat` arrives with vanilla's (creative,
+    /// `can_always_eat`, or hungry). Clear it to refuse the food, set it to
+    /// let a full player eat. Both sides (the client starts eating as the
+    /// server does), so answer from the stack and the player alone. API 90.
+    fn can_eat(&self, host: &dyn Host, event: &mut CanEatEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// NeoForge's `LivingEntityUseItemEvent.Start`: `entity` starts using
+    /// `stack` in `hand` (`LivingEntity.startUsingItem`), for `duration`
+    /// ticks (`native_use_duration`'s answer). `entity` is a mob's
+    /// `Entity.getId`, None for a player (`native_acting_player` says who);
+    /// only players fire it so far. Change `duration` (consumables, potions,
+    /// spyglasses and mods' items count to it; below 0 refuses the use, and
+    /// 0 runs it out on its first tick, as `native_living_entity_use_item_tick`
+    /// running it out, unless the item's own is 0 already), or set
+    /// `canceled` and the use doesn't start. Both sides, as
+    /// vanilla's: wherever the world runs (the server, single player
+    /// in-frame, a LAN host) for every player of the world, and on a
+    /// server's client for the uses it predicts. Answer the same on both,
+    /// and change the world only where this `Game` runs the world, not on a
+    /// server's client: no helper tells the two apart yet (`native_window`
+    /// is also true in-frame and on an in-frame LAN host). API 90.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_entity_use_item_start(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEntityUseItemStartEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// NeoForge's `LivingEntityUseItemEvent.Finish`: `entity`'s use of
+    /// `stack` in `hand` ran its time (`LivingEntity.completeUsingItem`),
+    /// `duration` the ticks left, always 0. `entity` is as in
+    /// `native_living_entity_use_item_start`. `result` arrives with what
+    /// `finishUsingItem` left in the hand (the bowl of a stew, none for the
+    /// last apple; a mod's own item is kept) and may be replaced. Fired for
+    /// consumables, potions, spyglasses and mods' items. Server-side, for every player
+    /// of the world (the helpers read the acting one). API 90.
+    fn living_entity_use_item_finish(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEntityUseItemFinishEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The wheel turned over the open screen (`ScreenEvent.MouseScrolled.Pre`,
+    /// vanilla's `Screen.mouseScrolled`): `screen` is the screen it is,
+    /// `screen.mouse` where the pointer is (so there is no position of its
+    /// own), `scroll` the wheel's movement in x and y as the game's own scroll
+    /// handler scales it (a line times the wheel sensitivity: with Discrete
+    /// Scrolling on, a notch is ±1, its sign only; a touchpad's pixels are
+    /// divided by 30), and
+    /// `modifiers` GLFW's bits (shift 1, control 2, alt 4, super 8). Set
+    /// `canceled` and nothing the screen would scroll moves: not the bundle
+    /// under the pointer, nor a list, slider, scrollbar or map. Nothing else
+    /// reads the wheel while a screen of the game's is open, so no hotbar slot
+    /// changes either.
+    /// It fires before the screen scrolls anything, for the window's wheel
+    /// (horizon-ctl's `scroll-at` sends it through the window too), and
+    /// only while a screen of the game's is open (Options and the pack list
+    /// opened from the title screen count, with no player and no `menu`). It
+    /// does not fire on the title screen itself, the connect and loading
+    /// screens, nor for a server dialog, the server pack, link and
+    /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
+    /// nor while a world loads or saves: the scroll there stays the game's
+    /// own. A wheel a gamepad or the keyboard's focus sends is not the mouse
+    /// and fires nothing.
+    /// API 93.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn screen_mouse_scrolled_pre(
+        &self,
+        host: &dyn Host,
+        event: &mut ScreenMouseScrolledPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A command a player typed (NeoForge's `CommandEvent`, before
+    /// `Commands.performCommand` runs it), without its slash: any command,
+    /// vanilla's and the mods' own, also one the player may not run. Set
+    /// `canceled` to stop it: nothing runs and nothing is answered but the
+    /// lines pushed to `replies`, which go to the player as system chat.
+    /// No player's state is swapped in and the server's player list is busy
+    /// with this one, so `native_tell` and the other helpers that take a UUID
+    /// reach nobody here: answer through `replies`. Once for each command a
+    /// player sends, on a server, and for each line of a quiet command batch
+    /// (`horizon:quiet_commands`, whose replies are dropped). A command the
+    /// server refuses before reading it (unsigned chat arguments, the chat
+    /// rate limit) never reaches it. 95.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn player_command(&self, host: &mut dyn Host, event: &mut PlayerCommandEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A command a mod registered, typed on the dedicated server's console
+    /// or sent through `horizon-server console`
+    /// (`DedicatedServer.handleConsoleInputs`), without its slash: set `ran`
+    /// when it is yours. There is no player: the source is the console, at
+    /// permission level 4, so `native_acting_player` is None and the
+    /// player-only helpers give nothing; `native_feedback` answers on the
+    /// console. A name no mod registered goes to vanilla's dispatcher as
+    /// before. 99.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `ran`, and later mods are skipped.
+    fn perform_console_command(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PerformConsoleCommandEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A key went down over the open screen (`ScreenEvent.KeyPressed.Pre`,
+    /// vanilla's `Screen.keyPressed`): `screen` is the screen it is, `key`
+    /// vanilla's name for the key (`key.keyboard.e`, the name `native_key`
+    /// hands over) — a key with no name fires nothing — `repeat` whether it is
+    /// the keyboard's auto-repeat of a held press (Horizon's extra; NeoForge
+    /// folds repeats into the event), and `modifiers` GLFW's bits (shift 1,
+    /// control 2, alt 4, super 8). Set `canceled` and the press goes no
+    /// further: no focus move, no Escape-close, no inventory or hotbar key, no
+    /// typing by the key itself, no `native_key`.
+    /// It fires for the window's presses and their repeats, and for the
+    /// control socket's `key` (a release fires nothing), after the window's
+    /// own shortcuts have run — the fullscreen and screenshot keys, the debug
+    /// keys and the narrator — and only while a screen of the game's is open
+    /// (Options and the pack list opened from the title screen count, with no
+    /// player and no `menu`). It does not fire on the title screen itself, the
+    /// connect and loading screens, nor for a server dialog, the server pack,
+    /// link and code-of-conduct prompts, a book or a sign editor drawn over
+    /// gameplay, nor while a world loads or saves: the key there stays the
+    /// game's own. A cancelled press's release still runs, so a `native_key`
+    /// listener sees that release without its press, and its characters are
+    /// GLFW's separate char callback and still come; see
+    /// `native_screen_char_typed_pre`.
+    /// API 104.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn screen_key_pressed_pre(
+        &self,
+        host: &dyn Host,
+        event: &mut ScreenKeyPressedPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A character was typed at the open screen
+    /// (`ScreenEvent.CharacterTyped.Pre`, vanilla's `Screen.charTyped`):
+    /// `screen` is the screen it is, `c` the character, and `modifiers` GLFW's
+    /// bits (shift 1, control 2, alt 4, super 8). Set `canceled` and that one
+    /// character never reaches a text box.
+    /// It fires once per printable character of a key press's text and once
+    /// per character of the input method's committed text, never for a control
+    /// character (Enter, Backspace, Tab, Delete, Escape, a Control letter):
+    /// those are keys, and the game reads them as keys, not as text. A key's
+    /// characters fire after the key has acted, as GLFW's char callback comes
+    /// after its key callback (`KeyboardHandler.charTyped`): `screen` is the
+    /// screen open then, so a key that closes the screen (the inventory key)
+    /// leaves none to hear its character, where vanilla's closed screen hears
+    /// nothing, and one that moves the focus types into the box it moved to.
+    /// They fire even when `native_screen_key_pressed_pre` cancelled the press
+    /// that carried the text, as NeoForge delivers `CharacterTyped.Pre` for a
+    /// cancelled `KeyPressed.Pre`: the characters left reach the text box
+    /// without the key's own effects. Cancelling one character drops only that
+    /// one. The control socket's `type` fires it too, but not for its `\b`
+    /// backspace. Same screens as the key press, and it fires with no text box
+    /// focused (there is nothing to take the character then).
+    /// API 104.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn screen_char_typed_pre(
+        &self,
+        host: &dyn Host,
+        event: &mut ScreenCharTypedPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The server is assembling its data tables from the world's data packs
+    /// (`ReloadableServerResources`): a world is opening, or `/reload` was
+    /// run, and the recipes, tags, loot and advancements are built after
+    /// this. Push `(path, bytes)` pack files and they join this load. `path`
+    /// is the overlay's key, `<kind>/<namespace>:<path>` without `.json`, over
+    /// the kinds the tables read: `recipe/mymod:thing`,
+    /// `tags/mymod:block/thing`, `loot_table/…`, `advancement/…`,
+    /// `trade_set/…`, `villager_trade/…`, `dialog/…`. A file that isn't JSON
+    /// is skipped with a warning. Asked once per load on both paths, so this
+    /// is where a mod recomputes them.
+    /// Contributed files sit below the world's own data packs: a pack's file
+    /// for the same path still overrides a mod's. Server-side (the single
+    /// player's integrated server included). API 106.
+    ///
+    /// Every mod gets `event.files` in order and may add, change or remove files.
+    fn data_pack_files(&self, host: &dyn Host, event: &mut DataPackFilesEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Change the colours of `biome` (`minecraft:plains`) on this client: the
+    /// grass, foliage (leaves, vines), dry foliage (leaf litter) and water
+    /// tints, 0xRRGGBB, as its biome file and the colormaps set them. Asked
+    /// for every biome when a mod calls `native_refresh_biome_colors`, which
+    /// rebuilds the terrain with them; a season mod answers from its season
+    /// and calls that when the season turns. The dark forest's modifier
+    /// still applies to the grass set here; the swamp's noise colours
+    /// replace it. API 107.
+    fn biome_colors(&self, host: &dyn Host, event: &mut BiomeColorsEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server's data tables are built (NeoForge's `TagsUpdatedEvent`
+    /// with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of
+    /// the world's data packs, and the files mods added through
+    /// `native_data_pack_files`, are what the helpers read from now on.
+    /// `reload` is false on a world's first open, before its chunks and
+    /// players are loaded, and true after `/reload` rebuilt them, once the
+    /// players were sent the new data. The place to
+    /// drop caches derived from the data and to rebind what depends on it.
+    /// Server-side (the single player's integrated server included); a client
+    /// connected to a server never fires it. API 108.
+    fn server_data_loaded(&self, host: &mut dyn Host, event: &mut ServerDataLoadedEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// World field of view, after normal calculation and zoom and before projection/Nausea.
+    /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
+    /// Only finite values in 1..=179 degrees replace the computed FOV.
+    fn compute_fov(&self, host: &dyn Host, event: &mut ComputeFovEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Draw the mob `mob` (its id, kind, custom name and the frame's body
+    /// and head turns and walk cycle, `LivingEntityRenderState`) on this
+    /// client with a model of your own, once a frame while it is in view
+    /// (vanilla's `EntityRenderer.submit`), and set `drawn` to leave out its
+    /// vanilla model, armour and held items (NeoForge's `RenderLivingEvent.Pre`,
+    /// cancelled). Add geometry with `native_draw_cube`, `native_draw_quad`,
+    /// `native_draw_block` and `native_draw_item` under `draw`'s pose stack,
+    /// which starts at the mob's feet turned with its body: +z is the way it
+    /// faces, +x its left, +y up, in blocks. `draw` also has the partial tick,
+    /// the game time and the mob's light. Its name tag, shadow, flames and
+    /// glowing outline draw as for any mob. Asked for every mob in view but
+    /// players; a mob your server half spawned (`native_spawn_mob`) is told
+    /// apart by its id, sent with mod messages, or by its custom name.
+    /// A mob is drawn afresh each frame: `draw.keep()` does nothing here.
+    /// API 110.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `drawn`, and later mods are skipped.
+    fn mob_submit(&self, host: &dyn Host, event: &mut MobSubmitEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Final scaled third-person camera distance, before visual-shape collision clipping.
+    /// `entity` includes its living scale/distance and optional mount scale/distance.
+    /// Only finite requests in 0..=1024 blocks replace the vanilla distance.
+    fn camera_distance(&self, host: &dyn Host, event: &mut CameraDistanceEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Computed world fog RGB, after ordinary effects and before upload. Title panoramas skip it.
+    /// Only finite RGB components in 0..=1 are accepted; alpha and distances stay unchanged.
+    fn compute_fog_color(&self, host: &dyn Host, event: &mut ComputeFogColorEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Raw mouse button input on any screen, before dispatch; cancel skips dispatch and Post.
+    /// Button/modifiers use the same GLFW encoding as screen hooks. Synthetic clicks skip it.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn mouse_button_pre(&self, host: &mut dyn Host, event: &mut MouseButtonPreEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An accepted raw button event finished dispatch, including a screen handler's early return.
+    fn mouse_button_post(&self, host: &mut dyn Host, event: &mut MouseButtonPostEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `player` (`name`) respawned (NeoForge's `PlayerRespawnEvent`): at the
+    /// end of `PlayerList.respawn`, once they are placed and their health,
+    /// food and experience reset, with their state swapped in. Once for each
+    /// death that ends in a respawn, on a server; not for the End-exit one.
+    /// 115.
+    fn player_respawned(&self, host: &mut dyn Host, event: &mut PlayerRespawnedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Final world fog, after the computed color hook, ordinary calculations and Horizon's fog
+    /// option, before upload. Title panoramas skip it. Invalid color or distance values retain the
+    /// original whole fog.
+    fn render_fog(&self, host: &dyn Host, event: &mut RenderFogEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before an open screen handles a named key's release (same screen gate as key presses).
+    /// Cancel bypasses screen handling; physical keys and mapped keyboard hold/toggle state release.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn screen_key_released_pre(
+        &self,
+        host: &dyn Host,
+        event: &mut ScreenKeyReleasedPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Choose this client's music, once a client tick: `music` and `volume`
+    /// hold what vanilla chose (`Minecraft.getSituationalMusic` and
+    /// `getMusicVolume`: the biome's track, the creative or underwater one, a
+    /// boss's, the menu's; None for silence). Set `music` to a track of your
+    /// own, a sound event of your content mod's `sounds.json` such as
+    /// `Music::new("mymod:music.spring", 1200, 6000, false)` (the delays in
+    /// ticks between songs, and whether it cuts off a different song playing),
+    /// None to keep vanilla's quiet, or change `volume` (0 to 1) to fade it. API
+    /// 119.
+    fn music(&self, host: &dyn Host, event: &mut MusicEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The tracks to play over (or instead of) the music on this client,
+    /// asked once a client tick: push a `MusicLayer` (a sound event, looped,
+    /// and its volume, 0 to 1) for each. A layer eases to a new volume over up
+    /// to two seconds, and one left out fades out and stops; layers that
+    /// first appear in the same tick start together, so list every stem of a
+    /// piece from the start, the silent ones at volume 0, and raise them (a
+    /// fuller arrangement as a village grows). Their sound events should be
+    /// `stream: true` in `sounds.json`. API 119.
+    ///
+    /// Every mod gets `event.layers` in order and may add, change or remove layers.
+    fn music_layers(&self, host: &dyn Host, event: &mut MusicLayersEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server is about to send its data to the players (NeoForge's
+    /// `OnDatapackSyncEvent`, its `sendRecipes`): push the recipe types
+    /// (`minecraft:smelting`, `mymod:crusher`) whose recipes your client half
+    /// needs. Horizon sends their final recipes — the world's data packs
+    /// merged, load conditions held — to every Horizon client when it joins
+    /// and again after each `/reload`; a vanilla client is sent nothing new.
+    /// Asked once per load, when the server's data tables are built, and the
+    /// same types go to every player: unlike NeoForge, which asks again for
+    /// each joining player, it can't differ between players. Push nothing and
+    /// nothing is sent; push nothing after a load that pushed some and the
+    /// clients go back to their own recipes. Server-side (the single
+    /// player's integrated server included). API 120.
+    ///
+    /// Every mod gets `event.recipe_types` in order and may add, change or remove recipe_types.
+    fn datapack_sync(&self, host: &mut dyn Host, event: &mut DatapackSyncEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server's recipes of `recipe_types` arrived (NeoForge's
+    /// `RecipesReceivedEvent`): from now on the recipe helpers
+    /// (`native_recipes`, `native_recipes_of_type`) give the server's recipes
+    /// of those types in place of the window's own, so rebuild what you made
+    /// of them. It comes after a join, once the window has its player, and
+    /// after every `/reload`, on a server whose mods asked for them
+    /// (`native_datapack_sync`), single player included; with no types when
+    /// the server stopped sending them and the window is back on its own
+    /// recipes. A recipe the
+    /// window's own recipe book doesn't know has `book_id` -1. Client-side.
+    /// API 120.
+    fn recipes_received(&self, host: &mut dyn Host, event: &mut RecipesReceivedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A real window key event after handling, including repeats and consumed shortcuts.
+    /// Receives the original physical/logical key, text, location, state and repeat flag.
+    /// Modifier bits use the screen hooks' GLFW encoding. Not cancellable.
+    fn input_key(&self, host: &mut dyn Host, event_: &mut InputKeyEvent<'_>) {
+        let _ = host;
+        let _ = event_;
+    }
+    /// Gameplay scrolling after whole steps accumulate, before hotbar/spectator handling.
+    /// `scroll` is scaled x/y, `accumulated` whole x/y steps, `buttons` left/middle/right,
+    /// and `cursor` the GUI position. Cancel skips gameplay scrolling; synthetic input skips it.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn mouse_scrolling(&self, host: &mut dyn Host, event: &mut MouseScrollingEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Before a real held-button movement reaches screen drag handlers.
+    /// `screen.mouse` is the current GUI position; `delta` is its GUI-space movement.
+    /// Cancel keeps the new cursor position but skips all screen drag handlers.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn screen_mouse_dragged_pre(
+        &self,
+        host: &dyn Host,
+        event: &mut ScreenMouseDraggedPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The number of players with the mod container at `pos` of `dimension`
+    /// open went from `previous` to `viewers` (vanilla's
+    /// `ContainerOpenersCounter`, as a barrel keeps it): 0 to more than 0 is
+    /// `onOpen`, back to 0 is `onClose`, any change `openerCountChanged`, so a
+    /// block can show itself open while `viewers` is not 0. Counted every
+    /// tick from the players' open menus, so a player who leaves without
+    /// closing (a lost connection, death, another dimension, out of reach, the
+    /// block gone) is heard too (`recheckOpeners`). Once for each change, with
+    /// no player's state swapped in. Server-side.
+    /// 124.
+    fn mod_container_viewers(&self, host: &mut dyn Host, event: &mut ModContainerViewersEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
+    /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
+    /// on the raw strength, before the entity's knockback resistance takes its share and its motion
+    /// changes
+    /// (docs/native-mods.md, API 125). Vanilla's direction points at the
+    /// source of a hit (the attacker's side), and the entity is pushed the other way. Change
+    /// `strength`, `x` or `z`, or set `canceled`, and the push follows them: canceled, the
+    /// entity's motion is left alone. A `strength` of 0 or less after the hook is no push, and a
+    /// direction too short to tell draws a random one after it, as in vanilla. A value a mod
+    /// leaves that is not a finite number is put back as it was. `damage_type`
+    /// (`minecraft:player_attack`), `causing` (`DamageSource.getEntity`) and `direct`
+    /// (`getDirectEntity`) are the push's `DamageSource`, named as `native_living_incoming_damage`
+    /// names a hit's, with the same entity ids left at 0. It fires for the players and mobs the
+    /// game knocks back: a hit's own push, a sprinting or Knockback hit, a sweep, a spear, a
+    /// shield's push on its holder and a goat's ram. It does not fire for a sulfur cube with a
+    /// block that a hit with a causing entity knocks back (`SulfurCube.knockback` does not call
+    /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
+    /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
+    /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
+    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
+    /// on the thread that ticks the world (the server thread; the window's in-frame): state
+    /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
+    /// of the hit. API 125.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_knockback(&self, event: &mut LivingKnockbackEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// Whether the experience orb `into` takes the orb `from` in (vanilla's
+    /// `ExperienceOrb.canMerge`): the same value, and ids a multiple of 40 apart. Asked
+    /// for each pair whose boxes meet, when an orb spawns (`tryMergeToExisting`: `from` is
+    /// 0, the new orb isn't an entity yet, and only `from_value` is known) and every 20
+    /// ticks as an orb scans for neighbours (`scanForMerges`). `can_merge` holds vanilla's
+    /// answer; change it either way. A merged orb counts as `count` orbs of `into`'s
+    /// value, so forcing orbs of different values together drops points unless the mod
+    /// raises `into`'s value with `native_set_experience_orb` in `native_experience_orb_merge`.
+    /// Server-side. API 128.
+    fn experience_orb_can_merge(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ExperienceOrbCanMergeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The experience orb `into` is about to take `from` in, after
+    /// `native_experience_orb_can_merge` said yes (`from` is 0 and `from_value` the
+    /// points of a new orb that is spawning). Set `canceled` to stop it: both orbs stay, and
+    /// a spawning orb tries the next orb in reach, then spawns on its own. Server-side.
+    /// API 128.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn experience_orb_merge(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ExperienceOrbMergeEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Hook point for native mods (docs/native-mods.md, listed in `native-hooks.json`
+    /// with the game's): container slot `slot` of the content mod menu type `menu`
+    /// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
+    /// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
+    /// `may_place` and `max_stack` hold the type's own answer (false on one of its
+    /// `results`, true elsewhere, and 99): change them for your own menu types.
+    /// `max_stack` is kept to 1 to 99,
+    /// and the item's own stack size still caps it. Asked on the server, for each
+    /// click, drag and shift-click that puts an item in a slot, several times for
+    /// one shift-click: answer from `stack` alone, and fast. API
+    /// 130.
+    fn menu_slot_rules(&self, event: &mut MenuSlotRulesEvent<'_>) {
+        let _ = event;
+    }
+    /// NeoForge's `LivingEntityUseItemEvent.Tick`: each tick `entity` uses
+    /// `stack` in `hand`, where `LivingEntity.updatingUsingItem` starts,
+    /// `duration` the ticks left. `entity` is as in
+    /// `native_living_entity_use_item_start`. Change `duration` to move the
+    /// end (consumables, potions, spyglasses and mods' items count to it,
+    /// and so do a client's eating crumbs and first person pose, as the
+    /// started duration of `native_living_entity_use_item_start` does). A
+    /// cancel sets it to -1. Once a mod set it, the use goes on
+    /// only while it is above 0: at 0 or less, by a cancel or set, the
+    /// item's tick is skipped and the server finishes the use
+    /// (`completeUsingItem`: `finishUsingItem`, the food eaten,
+    /// `native_living_entity_use_item_finish`), while an item used on
+    /// release (a crossbow) stays frozen until let go. NeoForge's javadoc
+    /// says a cancel stops the use, but its code finishes it; this follows
+    /// the code. On a server's client a run-out use stays in use, frozen,
+    /// so letting go still tells the server. Both sides, as vanilla's
+    /// `updatingUsingItem`: answer the same on both, and change the world
+    /// only where this `Game` runs the world, not on a server's client (no
+    /// helper tells the two apart yet; `native_window` is also true
+    /// in-frame and on an in-frame LAN host). Runs every tick of every use:
+    /// check the item first. API 131.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_entity_use_item_tick(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEntityUseItemTickEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// `Item.onUseTick` of `stack`, used by `entity` with `remaining` ticks
+    /// left, always above 0: what a mod's own item does each tick it is used
+    /// (cook, charge, drain). It comes where `ItemStack.onUseTick` calls the
+    /// item, once `native_living_entity_use_item_tick` let the use go on:
+    /// after a consumable's crumbs, for consumables, shields and mods' items
+    /// (vanilla's other items do their own, and a kinetic weapon has none on
+    /// the server). Both sides, as `native_living_entity_use_item_tick`:
+    /// change the world only where this `Game` runs the world, not on a
+    /// server's client. Runs every tick of every use: check the item first.
+    /// API 131.
+    fn on_use_tick(&self, host: &mut dyn Host, event: &mut OnUseTickEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// NeoForge's `LivingEntityUseItemEvent.Stop`: `entity` lets go of
+    /// `stack` in `hand` before its use ran its time
+    /// (`LivingEntity.releaseUsingItem`: the use button let go, a screen
+    /// opened), `duration` the ticks left. Set `canceled` to skip the item's
+    /// release (a bow doesn't shoot, a spyglass makes no sound,
+    /// `native_release_using` isn't called); the use stops anyway. Not when
+    /// the hand changed item, which stops the use without a release. Both
+    /// sides, as `native_living_entity_use_item_tick`. API 131.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_entity_use_item_stop(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEntityUseItemStopEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
+    /// ticks of its `native_use_duration` left, so it was held for
+    /// `duration - time_left` (a bow-like item shoots by that charge). Set
+    /// `used` as vanilla's return, and the stack's use cooldown starts
+    /// (`ItemStack.releaseUsing`). After the vanilla item's own release, once
+    /// `native_living_entity_use_item_stop` let it through. Both sides, as
+    /// vanilla's: change the world only where this `Game` runs the world,
+    /// not on a server's client. API 131.
+    fn release_using(&self, host: &mut dyn Host, event: &mut ReleaseUsingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A loot function of a mod's own kind: the entry named a `type` in a
+    /// namespace outside `minecraft:`, and the roll kept it for this call.
+    /// The kind, the JSON, the context and the stack to change are here.
+    /// API 133.
+    ///
+    /// Every mod gets `event.stack` in order and may add, change or remove stack.
+    fn loot_function(&self, event: &mut LootFunctionEvent<'_>) {
+        let _ = event;
+    }
+    /// A loot condition of a mod's own kind: the entry named a `type` in a
+    /// namespace outside `minecraft:`. The kind, the JSON, the context and
+    /// whether it holds are here (`holds` starts `false`; a mod that claims
+    /// the kind sets it). API 133.
+    ///
+    /// Every mod gets `event.holds` in order and may add, change or remove holds.
+    fn loot_condition(&self, event: &mut LootConditionEvent<'_>) {
+        let _ = event;
+    }
+    /// `dimension`'s level opened on the server (NeoForge's `LevelEvent.Load`,
+    /// posted in `MinecraftServer.createLevels`): before any of its chunks
+    /// (`native_chunk_load`), so a mod sets up what it keeps for the level
+    /// here. The level the world opens in comes before `WorldOpenReady`; the
+    /// others open when someone first goes there (a player, a portal, an
+    /// `execute in` command), with the level in place. Once for each open:
+    /// `native_level_unload` follows. Server-side. API 134.
+    fn level_load(&self, host: &mut dyn Host, event: &mut LevelLoadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `dimension`'s level closed (NeoForge's `LevelEvent.Unload`, posted after
+    /// `level.close()` in `MinecraftServer.stopServer`), after its last save:
+    /// drop what the mod kept for it. A level other than the Overworld closes
+    /// once nobody has been in it for 300 ticks, after its chunks' unloads;
+    /// every level still open closes when the server stops, before
+    /// `WorldCloseFinal`, and when its open or its loop fails, before
+    /// `WorldOpenFailed` or `WorldCloseFailed`. Once for each
+    /// `native_level_load`. Don't read its blocks. Server-side. API
+    /// 134.
+    fn level_unload(&self, host: &mut dyn Host, event: &mut LevelUnloadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The client made a new level for `dimension` (NeoForge's
+    /// `LevelEvent.Load` from the `ClientLevel` constructor): on joining a
+    /// server, single player's own included, and on changing dimension.
+    /// Its chunks come after. When the dimension changes, the old level's
+    /// `native_client_level_unload` follows this, as `Minecraft.setLevel`
+    /// tells it after the new level is made. Client-side, on the window; the
+    /// server's levels have `native_level_load`. API 135.
+    fn client_level_load(&self, host: &mut dyn Host, event: &mut ClientLevelLoadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The client dropped its level for `dimension` (`LevelEvent.Unload`
+    /// from `Minecraft.setLevel` and `disconnect`): replaced by another
+    /// dimension's, or on leaving the server. Once for each
+    /// `native_client_level_load`. Not told when the game itself quits.
+    /// Client-side. API 135.
+    fn client_level_unload(&self, host: &mut dyn Host, event: &mut ClientLevelUnloadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
+    /// set `hears`. Asked once a server tick before the projectiles fly; only
+    /// then does the tick keep the copy of each flying projectile that a
+    /// canceled impact flies on from, so a game without such a mod pays
+    /// nothing. Server-side. API 136.
+    ///
+    /// Every mod gets `event.hears` in order and may add, change or remove hears.
+    fn hears_projectile_impacts(&self, host: &dyn Host, event: &mut HearsProjectileImpactsEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A projectile hit something (NeoForge's `ProjectileImpactEvent`, posted
+    /// where vanilla's projectile has found what it meets, before the hit
+    /// acts): `projectile` (its entity id) of type `kind` (`minecraft:arrow`),
+    /// shot by `owner` (a mob's or a player's entity id, 0 for none) in the level
+    /// `dimension`. It hit the entity `entity` of type `entity_kind` (a player is
+    /// `minecraft:player`; a dragon's part is `minecraft:ender_dragon`), or, with
+    /// `entity` None, the block at `block` on its `face` (the face's normal,
+    /// `[0, 1, 0]` for the top), at the point `at`. Set `canceled` and the impact
+    /// does not happen: no damage, no knockback, no sound, no block reaction, the
+    /// arrow does not stick, a pearl does not teleport, a potion or a fireball
+    /// does not burst. The projectile flies on and is not discarded, so a mod
+    /// that cancels also decides what becomes of it: it hits again the next tick
+    /// unless the mod moves, turns or removes it. An arrow stays where it would
+    /// have hit, and the other projectiles go on through the whole of their
+    /// motion. Covers what `tick_projectiles` flies: arrows, tridents, snowballs,
+    /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
+    /// shulker bullets, from players, mobs and dispensers. It does not fire for
+    /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
+    /// fishing bobbers. A dragon part or End crystal is told by the id of the
+    /// dragon or crystal. Heard only when a mod also sets
+    /// `native_hears_projectile_impacts`. Server-side. API 136.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn projectile_impact(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ProjectileImpactEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An entity mounts or dismounts a vehicle (NeoForge's `EntityMountEvent`, posted from
+    /// `Entity.startRiding` and `removeVehicle`): `entity` of type `kind` (`minecraft:player`,
+    /// `minecraft:zombie`) in the server level `dimension`, getting on (`mounting`) or off the
+    /// `vehicle` of type `vehicle_kind` (`minecraft:oak_boat`, `minecraft:minecart`,
+    /// `minecraft:horse`, `minecraft:cushion`). Set `canceled` and it does not: a player stays
+    /// where they were, a mob does not board, a `/ride` fails, and a rider whose dismount is
+    /// canceled keeps riding. Told for a player boarding a boat, minecart, cushion or a mount (pig,
+    /// strider, horse and its kin, llama, nautilus, happy ghast) and getting off one by their
+    /// own input, `/ride`, a stab, a buck, a teleport or spectator mode; and for the mobs
+    /// Horizon seats on a vehicle (jockeys, raiders on a ravager, `/ride`) and lets off one
+    /// (`/ride`, a stab). It is not told for a rider whose vehicle was removed from the
+    /// level (a boat or minecart destroyed, a broken cushion), nor for riders loaded with a
+    /// save. The acting player is the one whose action runs, a guest on a server. Server-side.
+    /// API 137.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn entity_mount(&self, host: &mut dyn Host, event: &mut EntityMountEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An interaction key acts on what the crosshair points at
+    /// (`InputEvent.InteractionKeyMappingTriggered`), while playing: `button` 0 is
+    /// the attack key (`key_mapping` `key.attack`), 1 the use key (`key.use`, once
+    /// for each hand it tries, the main hand first), 2 pick block (`key.pickItem`,
+    /// only with something aimed at). The attack fires when an attack is allowed
+    /// and again each tick a held attack key keeps digging a block. Set `canceled`
+    /// to skip the action: a cancelled use also skips the other hand. A cancelled
+    /// attack or use still swings `hand` unless the mod clears `swing_hand` (it
+    /// starts true). A server's player and a single player's window only; a mod
+    /// that claims an item's use (`mod_use_start`) sees the event first. API
+    /// 138.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn interaction_key(&self, host: &mut dyn Host, event: &mut InteractionKeyEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Before one of vanilla's HUD layers is drawn (`RenderGuiLayerEvent.Pre`):
+    /// draw here to put something below the layer, or set `canceled` to hide
+    /// it. `layer` is the layer's id, in the order Horizon draws them:
+    /// `minecraft:crosshair`, `hotbar`, `effects`, `boss_overlay`,
+    /// `vehicle_health` (only riding a mount), `contextual_info_bar` (the
+    /// mount's jump bar, the locator bar or the experience bar, with the level
+    /// number), `player_health` (the health, armor, food and air rows, drawn in
+    /// one pass), `selected_item_name`, `sleep_overlay`, `overlay_message`
+    /// (the action bar), `title`, `scoreboard_sidebar`, `subtitle_overlay`,
+    /// `chat` and `tab_list`. A layer F1 hides fires nothing, and the chat
+    /// screen draws the focused chat itself, so `chat` is only the unfocused
+    /// lines. The camera overlays and the debug screen are not layers here:
+    /// they are not drawn in this pass. Draw with `native_fill`, `native_text`
+    /// and the sprite helpers; `batch.width` and `batch.height` are the GUI
+    /// size. Together with `native_gui_layer_post` this is NeoForge's
+    /// `RegisterGuiLayersEvent`: a mod keeps its own list of what it draws
+    /// above or below which layer. API 139.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn gui_layer_pre(&self, host: &mut dyn Host, event: &mut GuiLayerPreEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// After one of vanilla's HUD layers (or after the layer a mod hid), with
+    /// the ids of `native_gui_layer_pre`: draw here to put something above
+    /// the layer (`RenderGuiLayerEvent.Post`). API 139.
+    fn gui_layer_post(&self, host: &mut dyn Host, event: &mut GuiLayerPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Icons a mod puts on map `map` each time it is drawn: held, in an
+    /// item frame or on the cartography table's screen (a map's pixels are
+    /// its own; nothing is saved in the map). Push `NativeMapDecoration`s
+    /// (an atlas sprite, a position in half map pixels, a rotation, and
+    /// whether it shows in a frame and on the screen like vanilla's markers
+    /// do); they are drawn after the vanilla ones with the same pose, and a
+    /// sprite the atlas lacks is left out. `map.center`, `map.scale` and
+    /// `map.dimension` say which blocks the map shows, and
+    /// `NativeMapDecoration::x` has the formula. Vanilla's decorations are
+    /// not passed in. Asked every frame a map is drawn, so keep it cheap.
+    /// The client half of `MapDecorationType` and `addDecoration`: a type
+    /// registered on the server and saved in the map's data is not here.
+    /// API 140.
+    ///
+    /// Every mod gets `event.decorations` in order and may add, change or remove decorations.
+    fn map_decorations(&self, host: &dyn Host, event: &mut MapDecorationsEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A client started tracking an entity (NeoForge's
+    /// `PlayerEvent.StartTracking`, posted at the end of
+    /// `ServerEntity.addPairing`): `player` (`name`) is now sent `entity`
+    /// (its ID, `uuid` its UUID, `kind` its type, `minecraft:zombie`) and its
+    /// changes. It comes into range, its client's chunks reach it, or it is
+    /// put in the level; another player is an entity too, and a player never
+    /// tracks their own. A mod sends the player what they need to show it
+    /// (`native_net_send_to_player`). The entity is as it was last tick: it
+    /// may be gone by now. Heard after the tick's players and entities have
+    /// moved, in order, with no player's state swapped in. Server-side.
+    /// API 141.
+    fn player_start_tracking(&self, host: &mut dyn Host, event: &mut PlayerStartTrackingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A client stopped tracking an entity (NeoForge's
+    /// `PlayerEvent.StopTracking`, posted at the end of
+    /// `ServerEntity.removePairing`): it went out of range, left the level or
+    /// died, or `player` (`name`) left, changed level or respawned, which
+    /// stops everything they tracked. `entity`, `uuid` and `kind` are as
+    /// `native_player_start_tracking` told. Once for each start, a leaving
+    /// player's after `native_player_logged_out`. The entity is not
+    /// necessarily still there, and a player who left is gone: no player's
+    /// state is swapped in. Server-side. API 141.
+    fn player_stop_tracking(&self, host: &mut dyn Host, event: &mut PlayerStopTrackingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Block `block`'s block entity has an energy buffer
+    /// (`Capabilities.Energy.BLOCK`): set `energy` when the block is yours,
+    /// as `SimpleEnergyHandler` is built: its capacity, the most one insert
+    /// and one extract moves, and the faces a fill may come through and a
+    /// drain may leave by. Asked once for each mod block when the ticking
+    /// table is built; a capacity under 1 leaves the buffer out, and the
+    /// limits are clamped to 0..=capacity. The amount is kept in the entity's
+    /// saved compound, as the int `energy`, and the energy helpers below read
+    /// and write it. API 142.
+    ///
+    /// Return `Some` to set `energy`; the first mod returning `Some` wins.
+    fn block_entity_energy(
+        &self,
+        host: &dyn Host,
+        event: &mut BlockEntityEnergyEvent<'_>,
+    ) -> Option<ModEnergyBuffer> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// The server is assembling its data tables, as for
+    /// `native_data_pack_files` (a world's first open and every `/reload`):
+    /// push the data map types your mod registers (NeoForge's
+    /// `RegisterDataMapTypesEvent`). A type is an `id` (`mod_id:name`, not in
+    /// `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block`
+    /// so far. Its values come from the world's data packs'
+    /// `data/<mod_id>/data_maps/<registry path>/<name>.json`, and from files
+    /// you push through `native_data_pack_files` under the key
+    /// `data_maps/<mod_id>:<registry path>/<name>`: `replace`, `values`
+    /// (entry ids and `#tags` to JSON values) and `remove`, a newer value
+    /// overriding an older. Read them with `native_data_map` and
+    /// `native_data_map_entries`, in `native_data_maps.rs`. Server-side, not
+    /// synced to clients. API 143.
+    ///
+    /// Every mod gets `event.types` in order and may add, change or remove types.
+    fn data_map_types(&self, host: &dyn Host, event: &mut DataMapTypesEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// An entity's breathing this tick (`LivingBreatheEvent`, posted from
+    /// `LivingEntity.baseTick` every tick for a living entity with the generic
+    /// air logic): `entity` is its ID and `kind` its type (`minecraft:player`,
+    /// `minecraft:zombie`). `can_breathe`, `consume` and `refill` come in as
+    /// Horizon does it today (a mod-free game changes nothing); set them to
+    /// change this tick. With `can_breathe` the air rises by `refill`, up to its
+    /// maximum (300); without, it falls by `consume`, and at -20 it is set to 0
+    /// and the entity takes 2 drowning damage. Negative amounts count as 0.
+    /// Asked on servers for players and for mobs, except those with a
+    /// `WaterAnimal`'s or an axolotl's own air logic. API 144.
+    fn living_breathe(&self, event: &mut LivingBreatheEvent<'_>) {
+        let _ = event;
+    }
+    /// Blocks this mod adds, declared in code rather than one file each
+    /// (NeoForge's `DeferredRegister.Blocks` drained by `RegisterEvent`):
+    /// push a `horizon_mods::content::Block` per block, the same declaration
+    /// a content mod's `data/<id>/horizon/block/<path>.json` holds (a
+    /// vanilla `template`, `properties`, `state_properties`, `shapes`...),
+    /// with its id in your mod's namespace. `item: true` gives it a block
+    /// item, as a file does unless told not to (`..Default::default()`
+    /// leaves it false). They join the content mods' blocks: the one whose
+    /// id is that namespace when it is on (your models, textures, loot and
+    /// recipes are its files), else one of their own, with the template's
+    /// look. Ids, saves and the check that a joining client has the same
+    /// blocks are the files' (docs/mods.md). Asked once at start, on every
+    /// side, before any resource loads: push the same ones every time, from
+    /// nothing but your code. Declarations that don't pass the files' checks
+    /// are logged and that namespace's are left out. API
+    /// 145.
+    ///
+    /// Every mod gets `event.blocks` in order and may add, change or remove blocks.
+    fn blocks(&self, event: &mut BlocksEvent<'_>) {
+        let _ = event;
+    }
+    /// Items this mod adds, declared in code (NeoForge's
+    /// `DeferredRegister.Items`), as `native_blocks` declares blocks: a
+    /// `horizon_mods::content::Item` per item, a content mod's
+    /// `data/<id>/horizon/item/<path>.json` (a vanilla `template`,
+    /// `max_stack_size`, `rarity`, `components`, `crafting_remainder`). A
+    /// block's item comes with its block (`item: true`), not from here.
+    /// Asked once at start, on every side. API 145.
+    ///
+    /// Every mod gets `event.items` in order and may add, change or remove items.
+    fn items(&self, event: &mut ItemsEvent<'_>) {
+        let _ = event;
+    }
+    /// An entity of type `kind` (`minecraft:zombie`, `minecraft:item`) with ID `entity` is
+    /// about to tick in the server level `dimension` (NeoForge's `EntityTickEvent.Pre`, posted
+    /// around `Entity.commonTick` and `tick` in `ServerLevel.tickNonPassenger`). Set `canceled`
+    /// and it does not tick this tick: a mob has no AI, physics or effects, an item no movement,
+    /// ageing or merging, a minecart or boat no motion, and `native_entity_tick_post` is not told.
+    /// Horizon ticks a family of entities together, so mobs and items hear every Pre before the
+    /// first of them ticks; minecarts and boats hear theirs one by one. Told for the mobs, item
+    /// entities, minecarts and boats that tick: those in an entity-ticking chunk, not a player's
+    /// boat or cart (it ticks with the player). Later APIs add other kinds, so check `kind`. It
+    /// runs for every ticking entity each tick, so keep it cheap. Server-side. API
+    /// 146.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn entity_tick_pre(&self, host: &mut dyn Host, event: &mut EntityTickPreEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The entity `entity` of type `kind` ticked in the server level `dimension` (NeoForge's
+    /// `EntityTickEvent.Post`): for each entity `native_entity_tick_pre` let through, after it
+    /// ticked, also one that died or was removed in its tick. Mobs and items hear their Posts
+    /// once the whole family has ticked; minecarts and boats right after their own tick. Server-side.
+    /// API 146.
+    fn entity_tick_post(&self, host: &mut dyn Host, event: &mut EntityTickPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Whether a mod listens to `native_entity_tick_pre` and `native_entity_tick_post`: a mod
+    /// that hooks them hooks this one too and sets `listened` (HEAD, `*listened = true`).
+    /// Without it the game tells no entity's tick, and keeps no list of them. Asked once for
+    /// each family (mobs, items, minecarts, boats) each tick. Server-side. API 146.
+    ///
+    /// Every mod gets `event.listened` in order and may add, change or remove listened.
+    fn entity_tick_listened(&self, host: &mut dyn Host, event: &mut EntityTickListenedEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Item `item` (`mod_id:name`) is a fluid container
+    /// (`Capabilities.FluidHandler.ITEM`): set `capacity`, in millibuckets,
+    /// when the item is yours (clamped to 1..=1 000 000; vanilla's buckets
+    /// are built in and cannot be changed). Asked at each call of the item
+    /// fluid helpers (`native_item_fluid`, `native_item_fluid_fill`,
+    /// `native_item_fluid_drain`, in `native_item_fluids.rs`). What the
+    /// container holds is kept in the stack's `minecraft:custom_data`, under
+    /// `horizon_fluid`. API 147.
+    ///
+    /// Return `Some` to set `capacity`; the first mod returning `Some` wins.
+    fn item_fluid_tank(&self, host: &dyn Host, event: &mut ItemFluidTankEvent<'_>) -> Option<i32> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// A mob's or an armor stand's equipment slot took a different stack
+    /// (NeoForge's `LivingEquipmentChangeEvent`, posted in
+    /// `LivingEntity.collectEquipmentChanges`): `entity` is its ID and `kind`
+    /// its type (`minecraft:zombie`), `slot` the `EquipmentSlot` (`mainhand`,
+    /// `offhand`, `feet`, `legs`, `chest`, `head`, `body`, `saddle`), `from`
+    /// what the slot held when this was last heard (none for empty) and `to`
+    /// what it holds now. Once for each slot that changed, in that order,
+    /// after the mobs' tick, so a mob that joins the level wearing something
+    /// counts from empty on its first tick. It only hears: change the mob with
+    /// its own helpers. Players are heard by `native_on_equip`. Server-side.
+    /// API 148.
+    fn living_equipment_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEquipmentChangeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Whether a mod listens to the mobs' `native_living_equipment_change`: a
+    /// mod that hooks it hooks this one too and sets `listened` (HEAD,
+    /// `*listened = true`). Without it the game does not read every mob's
+    /// equipment each tick, and mobs are not told (armor stands still are). A
+    /// mob that ticks once it is set counts from empty. Asked once a tick, after
+    /// the mobs' tick. Server-side. API 148.
+    ///
+    /// Every mod gets `event.listened` in order and may add, change or remove listened.
+    fn living_equipment_listened(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingEquipmentListenedEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Draw the player `player` (`who`: its profile name, and whether it is
+    /// this window's own player) with a model of your own, once a frame while
+    /// it is in view (`RenderPlayerEvent.Pre`), and set `drawn` to leave out its
+    /// vanilla model, armour, held items, cape and the other layers. This
+    /// window's player is drawn only in third person (and F5 front view); an
+    /// invisible player is not asked. `draw` is the frame of `native_mob_submit`:
+    /// at the player's feet, turned with the body. The name tag, shadow,
+    /// flames and glowing outline draw as before. API 149.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `drawn`, and later mods are skipped.
+    fn player_submit(&self, host: &dyn Host, event: &mut PlayerSubmitEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A layer on every mob and player in view, once a frame after its
+    /// vanilla model and layers (`EntityRenderersEvent.AddLayers`, with
+    /// `RenderLivingEvent.Post` and `RenderPlayerEvent.Post`): add geometry
+    /// in the entity's frame, which starts at its feet turned with the body
+    /// (`mob.head_yaw`, `mob.pitch` and the walk cycle place a part, the eyes
+    /// being at the entity type's eye height). `who` is set for a player.
+    /// Not asked for what a mod drew itself (`native_mob_submit`,
+    /// `native_player_submit`) nor for a mob that isn't drawn at all.
+    /// API 149.
+    fn mob_layer(&self, host: &dyn Host, event: &mut MobLayerEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Whether a mod listens to `native_player_submit` or `native_mob_layer`: a
+    /// mod that hooks either hooks this one too and sets `listened` (HEAD,
+    /// `*listened = true`). Without it the game poses no player or mob for
+    /// them, each frame. Client-side. API 149.
+    ///
+    /// Every mod gets `event.listened` in order and may add, change or remove listened.
+    fn player_render_listened(&self, host: &dyn Host, event: &mut PlayerRenderListenedEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player finished editing a sign: `ServerGamePacketListenerImpl.updateSignText`
+    /// has taken their update packet and every check has passed (they were
+    /// editing that sign, within reach, the sign is not waxed, the chat filter
+    /// let the text through), right before the lines go on the sign. `pos` in
+    /// `dimension`, the `front` or back side, and the four `lines` as written,
+    /// plain text with the formatting codes still in (vanilla strips them
+    /// afterwards). Rewrite `lines` (made four lines again) and that is what
+    /// the sign gets, without a second look from the chat filter, or set
+    /// `cancel` and the sign keeps its old text. With the player's state
+    /// swapped in, so `native_tell` and the helpers that act on the player
+    /// reach them. Once for each update a player sends on a server. Not told:
+    /// the host's own editing of a sign on a LAN or single-player world
+    /// (the editor writes into their world directly), and the sign changes
+    /// that are no edit of the text (dyeing, glow ink, waxing, `/data`,
+    /// `/setblock`, mods' `native_with_mod_block_entity`).
+    /// 150.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn sign_changed(&self, host: &mut dyn Host, event: &mut SignChangedEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Models no blockstate names that this client bakes beside the block
+    /// models (NeoForge's `ModelEvent.RegisterStandalone`): push their ids
+    /// (`mymod:block/shaft_half`, the model at
+    /// `assets/mymod/models/block/shaft_half.json`). Parts a block entity or
+    /// a mob draws, with `native_draw_model`, so that no block is registered
+    /// only to bake its model. Asked once at start, before the resources
+    /// load; every resource load, a pack reload included, bakes them again
+    /// from that pack's files. A model that doesn't read is logged and left
+    /// out; an id without a namespace is dropped. Every side asks it, but
+    /// only a window bakes models. API 151.
+    ///
+    /// Every mod gets `event.models` in order and may add, change or remove models.
+    fn standalone_models(&self, event: &mut StandaloneModelsEvent<'_>) {
+        let _ = event;
+    }
+    /// `player` (`name`) opened a menu (NeoForge's `PlayerContainerEvent.Open`,
+    /// posted when `ServerPlayer.openMenu` sets the new `containerMenu`): any
+    /// menu, vanilla or a mod's. `menu` is the menu type's name
+    /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:merchant`,
+    /// `minecraft:crafting`, `minecraft:lectern`, a mod's own), `pos` the
+    /// block it is of in `dimension` (none for a trade, a vehicle's, a mod's
+    /// native menu or a mount's inventory, which has no menu type in vanilla
+    /// and is told as `horizon:mount_inventory`). The player's own inventory
+    /// is not one. Heard once a tick, so a menu opened and closed again
+    /// inside one tick is not; one that replaces another comes after that
+    /// one's close. The player's state is swapped in. `native_player_container_close`
+    /// follows. Server-side. API 152.
+    fn player_container_open(&self, host: &mut dyn Host, event: &mut PlayerContainerOpenEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `player` (`name`) closed the menu `native_player_container_open` told
+    /// of (NeoForge's `PlayerContainerEvent.Close`, posted in
+    /// `ServerPlayer.doCloseContainer` after the menu's `removed`): they
+    /// closed it, walked out of reach, died, changed level, or another menu
+    /// opened. A player who leaves closes it before `native_player_logged_out`
+    /// (vanilla posts nothing for a disconnect; Horizon does, so each open has
+    /// its close). Once for each open; not told when the server stops. The
+    /// menu's items are where it left them: the block's, and the cursor stack
+    /// back in the inventory. State swapped in, when the player has a body.
+    /// Server-side. API 152.
+    fn player_container_close(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerContainerCloseEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player's client started (`flying`) or stopped flying (vanilla's
+    /// `handlePlayerAbilities`, which honours it only for a player who may
+    /// fly: creative or spectator), heard once for each change, on a server,
+    /// with the player's state swapped in, so `native_tell` and the other
+    /// helpers reach them. The player is already flying or not as asked, as
+    /// vanilla leaves them; set `cancel` to refuse it: they keep the state
+    /// they had and the server sends their abilities back, as vanilla does
+    /// for what it refuses, so the client lands or flies again. Only what a
+    /// client asks for is heard: not the flight a game-mode change starts or
+    /// ends (`/gamemode`), and not a LAN host's own player.
+    /// 153.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_toggle_flight(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerToggleFlightEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An anvil at `pos` took damage, changing its block from `from` to `to`.
+    /// `to` is air when the anvil broke. Server-side.
+    /// @API:native_anvil_damaged@.
+    fn anvil_damaged(&self, host: &mut dyn Host, event: &mut AnvilDamagedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A beacon at `pos` activated or deactivated after its beam was checked.
+    /// `active` says whether it now has a complete pyramid. Server-side.
+    /// @API:native_beacon_state_change@.
+    fn beacon_state_change(&self, host: &mut dyn Host, event: &mut BeaconStateChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// On an authoritative server, a bell at `pos` is about to ring. Set
+    /// `cancel` to stop the ring and its raider reveal. @API:native_bell_ring@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn bell_ring(&self, level: &dyn LevelHost, event: &mut BellRingEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server guest's block-breaking animation changed to `progress` at
+    /// `pos` (0 through 9). @API:native_block_break_progress_update@.
+    fn block_break_progress_update(
+        &self,
+        host: &mut dyn Host,
+        event: &mut BlockBreakProgressUpdateEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// On an authoritative server, fire is about to burn the block at `pos`
+    /// away. Set `cancel` to keep that block. @API:native_block_burn@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_burn(&self, level: &dyn LevelHost, event: &mut BlockBurnEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A block finished cooking `item` into `result` at `pos`. @API:block_cook@.
+    fn block_cook(&self, host: &dyn Host, event: &mut BlockCookEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A dispenser equipped `item` on the first eligible `target` in front
+    /// of its block at `pos`. `target` is `player`, `mob` or `armor_stand`.
+    /// The equip, item consumption, sound and game event have completed.
+    /// Server-side. @API:native_block_dispense_armor@.
+    fn block_dispense_armor(&self, host: &mut dyn Host, event: &mut BlockDispenseArmorEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A broken block is about to drop `experience` points at `pos`. The
+    /// vanilla block drop rule has been checked; change the amount before its
+    /// orbs are awarded. Server-side. @API:native_block_exp@.
+    fn block_exp(&self, level: &dyn LevelHost, event: &mut BlockExpEvent<'_>) {
+        let _ = level;
+        let _ = event;
+    }
+    /// A block at `pos` is about to fade from `from` to `to` because of
+    /// melting or coral death. Set `cancel` to keep it. Server-side.
+    /// @API:native_block_fade@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_fade(&self, level: &dyn LevelHost, event: &mut BlockFadeEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A dispenser at `pos` failed to dispense `item`. Server-side.
+    /// @API:native_block_failed_dispense@.
+    fn block_failed_dispense(&self, host: &mut dyn Host, event: &mut BlockFailedDispenseEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Precipitation is about to form or add to a block at `pos`. `from` and
+    /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
+    /// @API:native_block_form@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_form(&self, level: &dyn LevelHost, event: &mut BlockFormEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// On an authoritative server, fire is about to be placed at `pos` by
+    /// flint and steel, a fire charge, lava, lightning or fire spread. Set
+    /// `player` is the acting server player when there is one. Set `cancel` to
+    /// leave the position unchanged. @API:native_block_ignite@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_ignite(&self, level: &dyn LevelHost, event: &mut BlockIgniteEvent<'_>) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A guest's block inventory lock check at `pos`. `locked` is the
+    /// vanilla result and may be changed. The guest's state is not swapped in.
+    /// @API:native_block_lock_check@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `locked`, and later mods are skipped.
+    fn block_lock_check(&self, host: &mut dyn Host, event: &mut BlockLockCheckEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
+    /// Set `cancel` to suppress its response. Server-side.
+    /// @API:native_block_receive_game@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn block_receive_game(
+        &self,
+        host: &mut dyn Host,
+        event_: &mut BlockReceiveGameEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event_;
+        Flow::Continue
+    }
+    /// A dispenser sheared `entity` of kind `kind` at the block in front of
+    /// its own block at `pos`, after the shearing effects. Server-side.
+    /// @API:native_block_shear_entity@.
+    fn block_shear_entity(&self, host: &mut dyn Host, event: &mut BlockShearEntityEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A brewing stand finished brewing at `pos`, after its bottle contents
+    /// were changed. Server-side. @API:brewing_complete@.
+    fn brewing_complete(&self, host: &dyn Host, event: &mut BrewingCompleteEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A brewing stand at `pos` consumed `fuel` and gained brewing fuel. Server-side. @API:brewing_fuel@.
+    fn brewing_fuel(&self, host: &dyn Host, event: &mut BrewingFuelEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A brewing stand at `pos` began brewing `ingredient`, after fuel and the timer were set. Server-side. @API:brewing_start@.
+    fn brewing_start(&self, host: &dyn Host, event: &mut BrewingStartEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server broadcast line is about to be logged and sent. Change `line`
+    /// or set `cancel` to drop it. @API:native_broadcast_message@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn broadcast_message(&self, host: &dyn Host, event: &mut BroadcastMessageEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An item was placed on a campfire at `pos` and began cooking. @API:campfire_start@.
+    fn campfire_start(&self, host: &dyn Host, event: &mut CampfireStartEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// On an authoritative server, a cauldron at `pos` is about to change
+    /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
+    /// to leave it unchanged. @API:native_cauldron_level_changed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn cauldron_level_changed(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut CauldronLevelChangedEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A compostable item was added to the composter at `pos`. @API:compost_item@.
+    fn compost_item(&self, host: &dyn Host, event: &mut CompostItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A crafter at `pos` completed recipe `recipe`. @API:crafter_craft@.
+    fn crafter_craft(&self, host: &dyn Host, event: &mut CrafterCraftEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player ignited a creeper with an item. @API:native_creeper_ignite@.
+    fn creeper_ignite(&self, host: &mut dyn Host, event: &mut CreeperIgniteEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Lightning charged a creeper. @API:native_creeper_power@.
+    fn creeper_power(&self, host: &mut dyn Host, event: &mut CreeperPowerEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server's difficulty changed, from `from` to `to` (`peaceful`,
+    /// `easy`, `normal`, `hard`; NeoForge's `DifficultyChangeEvent`). It is
+    /// vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a
+    /// dedicated server's management and a test environment's difficulty all
+    /// go through, and it is told only when the difficulty is another one. It
+    /// only hears: the change has already happened. Server-side. API
+    /// @API:difficulty_changed@.
+    fn difficulty_changed(&self, host: &mut dyn Host, event: &mut DifficultyChangedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
+    /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn dragon_egg_form(&self, level: &dyn LevelHost, event: &mut DragonEggFormEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in. @API:native_enchant_item@.
+    fn enchant_item(&self, host: &mut dyn Host, event: &mut EnchantItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Entities from `chunk` finished loading into the server world. `count`
+    /// is the number of saved entity records read. @API:native_entities_load@.
+    fn entities_load(&self, host: &mut dyn Host, event: &mut EntitiesLoadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Entities in `chunk` left the active server world and were queued for
+    /// saving. `count` is the number of entity records. @API:native_entities_unload@.
+    fn entities_unload(&self, host: &mut dyn Host, event: &mut EntitiesUnloadEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob broke the door at `pos`. @API:native_entity_break_door@.
+    fn entity_break_door(&self, host: &mut dyn Host, event: &mut EntityBreakDoorEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Two mobs completed a breeding action. `child` is absent when vanilla
+    /// lays an egg instead of creating a baby. @API:native_entity_breed@.
+    fn entity_breed(&self, host: &mut dyn Host, event: &mut EntityBreedEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob changed a block at `pos`, after the new state was applied.
+    /// @API:native_entity_change_block@.
+    fn entity_change_block(&self, host: &mut dyn Host, event: &mut EntityChangeBlockEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A bee entered the hive at `pos` and was stored there.
+    /// @API:native_entity_enter_block@.
+    fn entity_enter_block(&self, host: &mut dyn Host, event: &mut EntityEnterBlockEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob entered love mode after player interaction. `player` is the
+    /// feeder when known. @API:native_entity_enter_love_mode@.
+    fn entity_enter_love_mode(
+        &self,
+        host: &mut dyn Host,
+        event: &mut EntityEnterLoveModeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server entity finished its portal wait and is beginning to leave
+    /// `dimension` through `pos`. The destination follows the portal rules.
+    /// @API:native_entity_portal@.
+    fn entity_portal(&self, host: &mut dyn Host, event: &mut EntityPortalEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest player's synchronized pose changed from `from` to `to`.
+    /// @API:native_entity_pose_change@.
+    fn entity_pose_change(&self, host: &mut dyn Host, event: &mut EntityPoseChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player bow or crossbow launched an arrow with `force`, after the
+    /// projectile entered the level. @API:native_entity_shoot_bow@.
+    fn entity_shoot_bow(&self, host: &mut dyn Host, event: &mut EntityShootBowEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob became tamed after its owner and persistent state were set.
+    /// @API:native_entity_tame@.
+    fn entity_tame(&self, host: &mut dyn Host, event: &mut EntityTameEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server entity was moved by a same-level teleport command, after its
+    /// position changed. `entity` is its network id; `from` and `to` are
+    /// coordinates in `dimension`. This hook reports command teleports that
+    /// use Horizon's same-level target path; it does not change vanilla's
+    /// movement. @API:native_entity_teleport@.
+    fn entity_teleport(&self, host: &mut dyn Host, event: &mut EntityTeleportEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest's fall flying state changed on the server. The change has
+    /// already been applied. @API:native_entity_toggle_glide@.
+    fn entity_toggle_glide(&self, host: &mut dyn Host, event: &mut EntityToggleGlideEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob conversion completed; both ids and entity types are reported.
+    /// @API:native_entity_transform@.
+    fn entity_transform(&self, host: &mut dyn Host, event: &mut EntityTransformEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// An experience bottle broke and its experience was awarded.
+    /// @API:native_exp_bottle@.
+    fn exp_bottle(&self, host: &mut dyn Host, event: &mut ExpBottleEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Whether a mod hears `native_experience_orb_pickup`: set `listened`
+    /// (a HEAD injection), or the server skips swapping the player in for it,
+    /// and with this empty the pickup costs nothing more without mods.
+    /// Server-side. @API:experience_orb_pickup@.
+    ///
+    /// Every mod gets `event.listened` in order and may add, change or remove listened.
+    fn experience_orb_pickup_listened(
+        &self,
+        host: &dyn Host,
+        event: &mut ExperienceOrbPickupListenedEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before `player` picks up orb `orb` in `dimension`. Mutations to `value`
+    /// and `count` take effect only when not canceled; value is clamped to
+    /// 1..=i32::MAX and count to at least one.
+    /// Canceling leaves the orb and pickup delay unchanged. Server-side.
+    /// @API:experience_orb_pickup@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn experience_orb_pickup(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ExperienceOrbPickupEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The selected damaged Mending `stack` and the proposed durability repair
+    /// for `experience` points. The amount is clamped to the stack's current damage. Zero leaves the
+    /// experience unspent when it overrides a positive proposal. If the selected
+    /// stack changes, the repair is skipped.
+    /// Server-side, including `native_give_experience`.
+    /// @API:experience_orb_pickup@.
+    fn mending_repair(&self, host: &mut dyn Host, event: &mut MendingRepairEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// On an authoritative server, how fire treats the block `state`
+    /// (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`): put
+    /// `(ignite, burn)` in `odds` for your own blocks, and vanilla's table
+    /// isn't read. Ignite odds above zero let fire stand beside the block and
+    /// spread into the air around it (planks 5, wool 30, leaves 30); burn odds
+    /// are how fast fire destroys it (planks 20, wool 60, leaves 60). `(0, 0)`
+    /// never burns; keep both within vanilla's 0 to 100. A waterlogged state
+    /// never burns and isn't asked. Answer only for your own blocks and leave
+    /// `odds` empty otherwise; the level is read-only. Asked hundreds of times
+    /// per fire tick: keep it short. API @API:fire_odds@.
+    ///
+    /// Return `Some` to set `odds`; the first mod returning `Some` wins.
+    fn fire_odds(&self, level: &dyn LevelHost, event: &mut FireOddsEvent) -> Option<(i32, i32)> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// On an authoritative server, `CampfireBlock.isSmokeSource` for the
+    /// block `state` under a campfire, as the campfire is placed or the block
+    /// under it changes: `Some(true)` for your own blocks makes the campfire a
+    /// signal fire whose smoke rises higher, as over a hay bale. The level is
+    /// read-only. API @API:fire_odds@.
+    ///
+    /// Return `Some` to set `smoke`; the first mod returning `Some` wins.
+    fn smoke_source(&self, level: &dyn LevelHost, event: &mut SmokeSourceEvent) -> Option<bool> {
+        let _ = level;
+        let _ = event;
+        None
+    }
+    /// A firework rocket completed its explosion effects. @API:native_firework_explode@.
+    fn firework_explode(&self, host: &mut dyn Host, event: &mut FireworkExplodeEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
+    /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
+    /// level. Server-side. @API:native_fluid_level_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn fluid_level_change(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut FluidLevelChangeEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The frame rate this window is about to be held to: Max Framerate after the
+    /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
+    /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
+    /// is open. A mod may lower `limit`, as Dynamic FPS does for a window in the background:
+    /// Horizon keeps the lower of its own limit and the mod's, and ignores values below 1.
+    /// API @API:framerate_limit@.
+    fn framerate_limit(&self, host: &dyn Host, event: &mut FramerateLimitEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A furnace at `pos` consumed fuel and began or resumed burning it.
+    /// `fuel` is the item consumed from its fuel slot. Server-side.
+    /// @API:furnace_burn@.
+    fn furnace_burn(&self, host: &dyn Host, event: &mut FurnaceBurnEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player took an output from a furnace at `pos`; `item` is the
+    /// output item id and `count` is how many were taken. The player's state is
+    /// not swapped in, so helpers that look them up through `self.lan` may find
+    /// nothing during guest packet handling. @API:native_furnace_extract@.
+    fn furnace_extract(&self, host: &mut dyn Host, event: &mut FurnaceExtractEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A furnace finished smelting `item` into `result` at `pos`. Server-side.
+    /// @API:furnace_smelt@.
+    fn furnace_smelt(&self, host: &dyn Host, event: &mut FurnaceSmeltEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A furnace at `pos` began cooking `item` (its cooking timer advanced
+    /// from zero). Server-side.
+    /// @API:furnace_start_smelt@.
+    fn furnace_start_smelt(&self, host: &dyn Host, event: &mut FurnaceStartSmeltEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A generic world game event was fired at `pos`. @API:native_game_event@.
+    fn game_event(&self, host: &mut dyn Host, event_: &mut GameEventEvent<'_>) {
+        let _ = host;
+        let _ = event_;
+    }
+    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:native_hopper_pickup_item@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn hopper_pickup_item(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut HopperPickupItemEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A recipe ingredient of a mod's own kind: the entry named a type in a
+    /// namespace outside `minecraft:`, and the loader kept it for this call.
+    /// The kind and the JSON the file wrote are here; fill `items` with the
+    /// item ids the ingredient matches (item ids only: components are not
+    /// checked here; a match-time hook follows separately). Duplicates are
+    /// removed keeping first-seen order. The hook may be called more than
+    /// once per recipe; the answer must be the same. An unclaimed kind
+    /// leaves the list empty and the recipe fails, as an unknown kind does.
+    /// API @API:ingredient@.
+    ///
+    /// Every mod gets `event.items` in order and may add, change or remove items.
+    fn ingredient(&self, event: &mut IngredientEvent<'_>) {
+        let _ = event;
+    }
+    /// A server player is about to open an inventory supplied by a block at
+    /// `pos`. Set `cancel` to leave the inventory closed. The player's state
+    /// is not swapped in. @API:native_inventory_block_start@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn inventory_block_start(
+        &self,
+        host: &mut dyn Host,
+        event: &mut InventoryBlockStartEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
+    /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
+    /// the recipe the grid matched (`minecraft:oak_planks`) and `stack` the
+    /// result it took, with its components. It only hears: the take has
+    /// already happened. It fires for the crafting grid of an inventory or a
+    /// crafting table, on the integrated server and a dedicated server, guests
+    /// included, and not for a stonecutter's, a smithing table's or a
+    /// furnace's result. Server-side. API @API:item_crafted@.
+    fn item_crafted(&self, host: &mut dyn Host, event: &mut ItemCraftedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
+    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
+    /// its capacity and the most one insert and one extract move. A capacity
+    /// under 1 leaves the buffer out, and the limits are clamped to
+    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
+    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
+    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
+    /// is kept in the stack's `minecraft:custom_data`, as the int
+    /// `horizon_energy`. API @API:item_energy_buffer@.
+    ///
+    /// Return `Some` to set `buffer`; the first mod returning `Some` wins.
+    fn item_energy_buffer(
+        &self,
+        host: &dyn Host,
+        event: &mut ItemEnergyBufferEvent<'_>,
+    ) -> Option<ItemEnergyBuffer> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// A dropped item entity was successfully added to the server level.
+    /// @API:native_item_spawn@.
+    fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
+    /// Set `cancel` to keep it. Server-side. @API:native_leaves_decay@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn leaves_decay(&self, level: &dyn LevelHost, event: &mut LeavesDecayEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server lightning bolt is about to be created. `cause` is `weather`,
+    /// `trident` or `command`; `player` is the responsible player when known.
+    /// Set `cancel` to prevent the bolt and its effects. @API:native_lightning_strike@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn lightning_strike(&self, host: &mut dyn Host, event: &mut LightningStrikeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// Farmland at `pos` is about to change moisture from `from` to `to`.
+    /// Set `cancel` to keep its old moisture. Server-side.
+    /// @API:native_moisture_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn moisture_change(&self, level: &dyn LevelHost, event: &mut MoistureChangeEvent) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player takes an item from an armor stand or puts one on it
+    /// (`ArmorStand.interactAt`, after the stand's disabled-slot checks and
+    /// `swapItem`'s take/put locks, before anything moves): `stand_id` is the
+    /// stand's `Entity.getId` and `slot` the one the click reached
+    /// (`mainhand`, `offhand`, `feet`, `legs`, `chest` or `head`). Set
+    /// `cancel` and nothing changes: neither the stand nor the player's hand,
+    /// and the click is spent. The player's state is swapped in for the call;
+    /// `player` is the UUID the helpers take. Not told of a click that changes
+    /// nothing (an empty hand on an empty slot). Not covered, other ways a
+    /// stand's equipment moves: breaking or blasting the stand (its items
+    /// drop), a dispenser putting armour on one, a mod's own changes.
+    /// Server-side, for every player of the world.
+    /// @API:native_armor_stand_manipulate@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn armor_stand_manipulate(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ArmorStandManipulateEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
+    /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
+    /// empties `minecraft:water`): where `BucketItem.use` has found the block
+    /// the fluid goes into and the player may build there, right before it is
+    /// placed. Set `cancel` and nothing is poured and the bucket stays full.
+    /// The player's state is swapped in, so `native_tell` answers them. Only
+    /// for guests of a server. `native_fill_bucket` hears this click too (and
+    /// the filling one) without the player and the fluid. Not heard: a
+    /// dispenser, a cauldron, and a fluid a block places itself.
+    /// @API:native_bucket_empty@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn bucket_empty(&self, host: &mut dyn Host, event: &mut BucketEmptyEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player opens one of the game's own menus (`ServerPlayer.openMenu`; the
+    /// job of NeoForge's `PlayerContainerEvent.Open`, which comes after the
+    /// menu is open and cannot stop it): `kind` is the menu type
+    /// (`minecraft:generic_9x3`, `minecraft:furnace`, `minecraft:crafting`,
+    /// `minecraft:merchant`, `minecraft:anvil`, `minecraft:lectern`...; a
+    /// horse's inventory is `minecraft:horse_inventory`) and `pos` the block
+    /// it belongs to, none for a villager, a mount or a vehicle's chest.
+    /// Heard after the checks that refuse the menu (a locked container, a
+    /// spectator) and before the menu that was open closes. Set `cancel` and
+    /// nothing opens: the open menu stays as it was and the click is spent.
+    /// The player's state is swapped in for the call, as for
+    /// `native_perform_command`, so `native_acting_player`, `native_tell` and
+    /// the item helpers reach them. Not heard: a menu a mod opens
+    /// (`native_open_menu`), the inventory screen, and the editors (sign,
+    /// book, command block). Server-side, for every player of the world.
+    /// @API:native_container_opened@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn container_opened(&self, host: &mut dyn Host, event: &mut ContainerOpenedEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A creative-mode player sets a slot of their inventory from the
+    /// creative screen (`ServerGamePacketListenerImpl.handleSetCreativeModeSlot`):
+    /// `slot` is the inventory menu's slot (5 to 8 armour, 9 to 35 the
+    /// inventory, 36 to 44 the hotbar, 45 the off hand; below 0 is a stack
+    /// thrown out of the screen, which is dropped) and `item` (`minecraft:air`
+    /// for an emptied slot) and `count` what is put there. Heard once the
+    /// packet passed vanilla's checks (a creative player, a real slot, a valid
+    /// stack) and before the slot changes or the stack drops. Set `cancel`
+    /// and the packet is ignored. The player's state is swapped in for the
+    /// call, as for `native_perform_command`, so `native_acting_player`,
+    /// `native_tell` and the item helpers reach them. Not heard: stacks a
+    /// creative player gets other ways (middle-click pick block, `/give`).
+    /// Server-side, for every player of the world.
+    /// @API:native_creative_slot@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn creative_slot(&self, host: &mut dyn Host, event: &mut CreativeSlotEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The food level of the server player `player` (`name`) is about to change
+    /// from `from` to `to` (Bukkit's `FoodLevelChangeEvent`):
+    /// eating, hunger and saturation effects, the exhaustion that costs a
+    /// point, starving. Change `to` (kept between 0 and 20; saturation never
+    /// exceeds it) or set `cancel` to leave the level at `from`, saturation
+    /// included. Heard once for the change a player's turn made as a whole, so
+    /// two changes in one tick arrive as one. Not heard: the full food bar a
+    /// respawn gives, the food a player joins with and the host of a LAN
+    /// world. The player's state is swapped in, so `native_acting_player`,
+    /// `native_tell` and the item helpers reach them. On a server.
+    /// @API:native_food_level_changed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn food_level_changed(
+        &self,
+        host: &mut dyn Host,
+        event: &mut FoodLevelChangedEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player places a hanging entity: an item frame
+    /// (`minecraft:item_frame`, `minecraft:glow_item_frame`), a painting
+    /// (`minecraft:painting`) or a leash knot (`minecraft:leash_knot`, when a
+    /// lead is tied to a fence that has none yet), `kind` its entity type and
+    /// `pos` the block it takes (the fence's for a knot). Where
+    /// `HangingEntityItem.useOn` and `LeadItem.useOn` create it, once it is
+    /// known to fit and before anything is placed or used up. Set `cancel`
+    /// and nothing is placed: the item stays in the player's hand. The
+    /// player's state is swapped in, so `native_tell` answers them. Only for
+    /// guests of a server; `/summon`, a dispenser and the game's own player
+    /// are not heard, nor is a lead tied to a mob or a boat.
+    /// @API:native_hanging_place@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn hanging_place(&self, host: &mut dyn Host, event: &mut HangingPlaceEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The item `item` of a server player is about to lose `amount` points of
+    /// durability (`ItemStack.hurtAndBreak`; Bukkit's `PlayerItemDamageEvent`):
+    /// the tool that mines or hits, the armour that takes a hit, a shield, a
+    /// rod, an elytra. `amount` is what is left after Unbreaking; change it
+    /// (0 or less leaves the item whole) or set `cancel` for no wear at all. It
+    /// is not heard for a creative player's tools (they take no wear) nor when
+    /// Unbreaking already saved the item, nor for the wear of a mob's armour or
+    /// of a tool a dispenser uses, nor the host of a LAN world. The player's
+    /// state is swapped in, so `native_acting_player`, `native_tell` and the
+    /// item helpers reach them. Once for each wear, on a server.
+    /// @API:native_item_damaged@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn item_damaged(&self, host: &mut dyn Host, event: &mut ItemDamagedEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// `player` (`name`) changed dimension (NeoForge's
+    /// `PlayerChangedDimensionEvent`): `from` and `to` are dimension ids
+    /// (`minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`).
+    /// Heard once per move, when it has ended: the portal's exit is found
+    /// and the player stands there (after the destination has loaded), a
+    /// command's teleport has landed, or a respawn in another level than the
+    /// death's is placed for good (a bed or anchor, or the world spawn's
+    /// free column, after the fallback when a respawn block was gone). The
+    /// level of `to` is the one in place, and the player's state is swapped
+    /// in, as for `native_perform_command`: `native_acting_player`,
+    /// `native_tell`, the item helpers and the rest reach them. Heard for:
+    /// Nether and End portals (also riding a vehicle, and leaving the End as
+    /// its winner), `/execute in ... run tp` and any other command that
+    /// teleports a player into another level, and the death respawn. Not
+    /// heard: a move within a level (`/tp`, an End gateway), a player who
+    /// leaves before the move ends, a move that ends where it started (a
+    /// respawn in the dimension of the death), and anything outside a
+    /// dedicated server. @API:native_player_changed_dimension@.
+    fn player_changed_dimension(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerChangedDimensionEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The command tree a server sends a player (NeoForge's and Paper's
+    /// "commands sent to a player" stage): when they join and when their
+    /// level changes (`/op`, `/deop`, the LAN settings). `names` are the
+    /// root commands their client would get, vanilla's they may use and the
+    /// mods'; take a name out and that client gets the tree without it
+    /// (and without what it leads to), so it neither completes nor
+    /// highlights it. This hides the command from the client only: the
+    /// server still runs a typed one, `native_player_command` stops it.
+    /// For a player who is already on, their state is swapped in and the
+    /// helpers (`native_tell`...) work; for one who is joining it is not, and
+    /// their client has no world to tell yet. The tree the hub sends again by
+    /// itself (after a respawn or a change of level) keeps the last answer
+    /// and does not ask again; the integrated server's owner is not asked
+    /// when the world's cheats are switched. @API:native_player_commands_sent@.
+    ///
+    /// Every mod gets `event.names` in order and may add, change or remove names.
+    fn player_commands_sent(&self, host: &mut dyn Host, event: &mut PlayerCommandsSentEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's fishing rod, with `state`: 0 the cast
+    /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
+    /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
+    /// catch, 3 the reel-in with nothing on the line, 4 the reel-in of a
+    /// bobber hooked to an entity or item (like Bukkit's `PlayerFishEvent`;
+    /// NeoForge's `ItemFishedEvent` is later, in `FishingHook.retrieve`). Set `cancel` on the cast and nothing
+    /// is thrown; on a bite the fish gets away and the wait starts over; on
+    /// a reel-in (2 to 4) nothing happens, the bobber stays out and the rod
+    /// takes no wear. The bobber ending by itself (too far, the rod put
+    /// away, the owner dying), nor the host of a LAN world's rod. The
+    /// player's state is swapped in, so `native_acting_player`, `native_tell`
+    /// and the item helpers reach them. Once for each cast, bite and reel-in,
+    /// on a server. @API:native_player_fish@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_fish(&self, host: &mut dyn Host, event: &mut PlayerFishEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player put a plant into a flower pot, after the potted block
+    /// state was stored and the item consumed. `plant` is the item id and
+    /// `pos` the pot position. Helpers looking up the guest through `self.lan`
+    /// may find nothing during packet handling. Server-side. @API:player_flower_pot_manipulate@.
+    fn player_flower_pot_manipulate(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerFlowerPotManipulateEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's game mode is about to change (NeoForge's
+    /// `PlayerChangeGameModeEvent`): from `from` to `to` (0 survival, 1
+    /// creative, 2 adventure, 3 spectator, as `NativeServerPlayer`'s
+    /// `game_mode`), `player` being the UUID and `name` the name. Heard for
+    /// the `/gamemode` command, the F3+F4 switcher's packet and a hardcore
+    /// world's respawn into spectator, once for each change to a different
+    /// mode; not for the world's default mode a player joins with. Set
+    /// `cancel` and the player keeps their mode (nothing is sent, the
+    /// command counts it as no change). For a change the game makes inside
+    /// a player's turn their state is swapped in; for the hardcore respawn
+    /// it is not. @API:native_player_game_mode_changed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_game_mode_changed(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerGameModeChangedEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player inserted a book into a lectern, after the block entity
+    /// and inventory changed. `book` is the item id. Helpers looking up a
+    /// guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_insert_lectern_book@.
+    fn player_insert_lectern_book(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerInsertLecternBookEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player changed an item frame after its contents or rotation
+    /// changed. `action` is `put`, `rotate`, `remove_item` or `break`; `item`
+    /// is empty when no item remains, and `rotation` is the resulting step.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// packet handling. Server-side. @API:player_item_frame_change@.
+    fn player_item_frame_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerItemFrameChangeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Mending repaired a server player's item with experience from an orb.
+    /// `repair` is durability restored and `experience` is the orb's value.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// packet handling. Server-side. @API:player_item_mend@.
+    fn player_item_mend(&self, host: &mut dyn Host, event: &mut PlayerItemMendEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player changed the page of a lectern, after its page and
+    /// redstone pulse changed. `page` is the zero-based new page. Helpers
+    /// looking up a guest through `self.lan` may find nothing during packet
+    /// handling. Server-side. @API:player_lectern_page_change@.
+    fn player_lectern_page_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerLecternPageChangeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player whose login the server has accepted (NeoForge's
+    /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
+    /// server-full checks have passed and the player holds a place, but their
+    /// saved state is not loaded and they are not placed in a level yet. Set
+    /// `cancel` to refuse them: they are disconnected with `reason` (a plain
+    /// "Disconnected" if it is left unset) and nothing else of the join (the
+    /// join message, `native_player_logged_in`) happens. Once for each player
+    /// who joins, on a server. The player is not placed yet and their client
+    /// has no world to show a message in, so no player's state is swapped in
+    /// and `native_tell` reaches nobody: the refusal `reason` is the answer.
+    /// The checks that need no mod (name, whitelist, bans, a full server,
+    /// the proxy's forwarding) refuse earlier, on the connection, and this
+    /// hook does not hear those players. @API:native_player_login@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_login(&self, host: &mut dyn Host, event: &mut PlayerLoginEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player's sprint started or stopped: their client sent
+    /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
+    /// forward, or letting go) and the server's player is now `sprinting`
+    /// (vanilla's `setSprinting` in `handlePlayerCommand`). Heard only when it
+    /// changes. It cannot be stopped, and it hears what the client asks, not
+    /// what the server does: a sprint that ends by itself (a hit's knockback,
+    /// hunger, a wall) is not reported. The player's state is swapped in, so
+    /// the helpers and `native_tell` work. Once for each change, on a server.
+    /// @API:native_player_sprint@.
+    fn player_sprint(&self, host: &mut dyn Host, event: &mut PlayerSprintEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// `player` (`name`) pressed the swap-hands key: heard before the main and
+    /// off hand items swap (the `SWAP_ITEM_WITH_OFFHAND` player action that
+    /// `ServerGamePacketListenerImpl.handlePlayerAction` answers; Bukkit's
+    /// `PlayerSwapHandItemsEvent`), not for a spectator. Set `cancel` to keep
+    /// the items where they are: the player's client, which swapped them at
+    /// once, gets its slots back. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each press, on a server. Not heard: the same swap made in an
+    /// open inventory (hovering a slot and pressing the key, a menu click) and
+    /// the host of a LAN world. @API:native_player_swap_hands@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_swap_hands(&self, host: &mut dyn Host, event: &mut PlayerSwapHandsEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player took the book from a lectern, after the menu and block
+    /// entity changed. `book` is the removed item id. Helpers looking up a
+    /// guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_take_lectern_book@.
+    fn player_take_lectern_book(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerTakeLecternBookEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player a command teleported (NeoForge's
+    /// `EntityTeleportEvent`, for a player): `/tp` and `/teleport`, inside
+    /// their level or into another one. `from` and `to` are their feet before
+    /// and after, `dimension` the level they are in now. Heard after the move
+    /// has reached the player's state and their client (an inter-level
+    /// teleport: when the new level is entered, before it has loaded around
+    /// them), so it cannot stop it. The player's state is swapped in, so the
+    /// helpers that read the acting player and `native_tell` work. Once for
+    /// each teleported player, on a server. Other teleports are not heard
+    /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
+    /// and respawns are not teleports here. @API:native_player_teleported@.
+    fn player_teleported(&self, host: &mut dyn Host, event: &mut PlayerTeleportedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A totem of undying saved the server player `player` (`name`): their
+    /// hurt would have killed them and the totem held in either hand fired
+    /// (`LivingEntity.checkTotemDeathProtection`; Bukkit's
+    /// `EntityResurrectEvent`), heard just before it is used up and its
+    /// effects apply. Listen only: whether the totem saves is decided inside
+    /// the health state machine, before a mod is asked, so a mod cannot veto
+    /// it from here. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each totem, on a server; the host of a LAN world's totem is
+    /// not heard. @API:native_player_totem@.
+    fn player_totem(&self, host: &mut dyn Host, event: &mut PlayerTotemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's client answered a resource pack in play (vanilla's
+    /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
+    /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
+    /// downloaded, 5 invalid URL, 6 failed reload, 7 discarded. Heard when the
+    /// packet arrives, after the server has handled it; it cannot be stopped.
+    /// The player's state is swapped in, so the helpers and `native_tell`
+    /// work. The pack a dedicated server offers in the configuration
+    /// (`resource-pack` in `server.properties`) is answered before the
+    /// player has joined, and those answers are not heard. Once for each
+    /// answer, on a server. @API:native_resource_pack_status@.
+    fn resource_pack_status(&self, host: &mut dyn Host, event: &mut ResourcePackStatusEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The world's spawn point changed to `pos` and `angle`. @API:native_spawn_change@.
+    fn spawn_change(&self, host: &mut dyn Host, event: &mut SpawnChangeEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// TNT at `pos` is about to be lit (primed): a flint and steel or a fire
+    /// charge on it, fire burning it, a redstone signal, an arrow, or a
+    /// dispenser's flint and steel or TNT item. `player` is the server player
+    /// whose click lit it, with their state swapped in (so `native_tell`
+    /// answers them), None when no player is behind it (fire, redstone, an
+    /// arrow, a dispenser). Set `cancel` and it is not primed: a TNT block
+    /// stays where it is (one that fire or a signal had already taken out is
+    /// put back, without a block update), a dispenser's TNT item stays in it.
+    /// Not asked: TNT set off by a blast (`native_explosion_detonate` spares
+    /// blocks), a TNT minecart and a sulfur cube. Server-side and in single
+    /// player. @API:native_tnt_primed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn tnt_primed(&self, host: &mut dyn Host, event: &mut TntPrimedEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
+    /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
+    /// after the tick moved it. Once a tick for each vehicle that carries a
+    /// server player, whose state is then swapped in (as for
+    /// `native_perform_command`: `native_acting_player`, `native_tell` and
+    /// the item helpers reach them; `player` is their UUID), and for one a
+    /// server player rode and left, until it has stood still for ten
+    /// seconds (`player` is none, nobody is swapped in). It only hears.
+    /// Cheap when nothing moves: one position compare a tick for each watched
+    /// vehicle. Not heard: a vehicle moved before anyone rode it, a mount
+    /// (horse, pig...) or a vehicle carrying only a mob. Server-side, in the
+    /// level the vehicle is in. @API:native_vehicle_moved@.
+    fn vehicle_moved(&self, host: &mut dyn Host, event: &mut VehicleMovedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server world's border bounds changed, either immediately or when
+    /// its timed size change was requested. @API:native_world_border_bounds_changed@.
+    fn world_border_bounds_changed(
+        &self,
+        host: &mut dyn Host,
+        event: &mut WorldBorderBoundsChangedEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server world's border center changed. @API:native_world_border_center_changed@.
+    fn world_border_center_changed(
+        &self,
+        host: &mut dyn Host,
+        event: &mut WorldBorderCenterChangedEvent,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server game rule changed to its final `value`. @API:native_world_game_rule_change@.
+    fn world_game_rule_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut WorldGameRuleChangeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// On an authoritative server, a note block at `pos` is about to sound.
+    /// `player` is the acting server player when there is one. Set `cancel` to silence it.
+    /// @API:native_note_play@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn note_play(&self, level: &dyn LevelHost, event: &mut NotePlayEvent<'_>) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player completed an advancement, after progress was recorded.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// its packet. @API:player_advancement_done@.
+    fn player_advancement_done(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAdvancementDoneEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player reset their attack strength by swinging (`handlePunch`).
+    /// The swing and reset have already happened. The player's state is not
+    /// swapped in, and helpers looking them up through `self.lan` may find
+    /// nothing during a guest packet. Server-side. @API:player_attack_cooldown_reset@.
+    fn player_attack_cooldown_reset(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAttackCooldownResetEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player is about to enter a bed after the sleep checks pass.
+    /// Set `cancel` to keep them out. The player's state is swapped in, but
+    /// helpers that look them up through `self.lan` may find nothing during a
+    /// guest packet. @API:player_bed_enter@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_bed_enter(&self, host: &mut dyn Host, event: &mut PlayerBedEnterEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// while a guest packet is handled. @API:player_bed_leave@.
+    fn player_bed_leave(&self, host: &mut dyn Host, event: &mut PlayerBedLeaveEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player caught a mob in a bucket, after it was removed and the
+    /// filled bucket was given. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_bucket_entity@.
+    fn player_bucket_entity(&self, host: &mut dyn Host, event: &mut PlayerBucketEntityEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player changed a beacon's selected effects, after they were
+    /// stored. Empty effect ids mean no effect. Helpers looking up the guest
+    /// through `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_change_beacon_effect@.
+    fn player_change_beacon_effect(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerChangeBeaconEffectEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player changed their client option for the dominant hand. `left` is true for
+    /// left-handed. Their state is not swapped in, and helpers looking them up through `self.lan`
+    /// may find nothing during guest packet handling. Server-side.
+    /// @API:native_player_change_main_hand@.
+    fn player_change_main_hand(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerChangeMainHandEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player has slept for 100 ticks in a bed and now counts as
+    /// deeply asleep for the night-skip check. Helpers looking the guest up
+    /// through `self.lan` may find nothing during its tick. @API:player_deep_sleep@.
+    fn player_deep_sleep(&self, host: &mut dyn Host, event: &mut PlayerDeepSleepEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's book edit or signing packet is about to be applied.
+    /// `pages` is its page count; `signing` means the packet has a title. Set
+    /// `cancel` to drop the edit. Helpers looking up the guest through
+    /// `self.lan` may find nothing during the packet. @API:player_edit_book@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_edit_book(&self, host: &mut dyn Host, event: &mut PlayerEditBookEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player threw an egg, after its projectile was launched and
+    /// the use was applied. Helpers looking up the guest through `self.lan`
+    /// may find nothing during its packet. Server-side. @API:player_egg_throw@.
+    fn player_egg_throw(&self, host: &mut dyn Host, event: &mut PlayerEggThrowEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player used a firework rocket to boost while gliding, after
+    /// the rocket was launched and consumed. Helpers looking up the guest
+    /// through `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_elytra_boost@.
+    fn player_elytra_boost(&self, host: &mut dyn Host, event: &mut PlayerElytraBoostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's experience points are about to increase from an orb pickup,
+    /// after mending has taken its share. Change `amount` to change the points
+    /// added. The player's state is not swapped in, so helpers that look them up
+    /// through `self.lan` may find nothing while a guest packet is handled.
+    /// Server-side. @API:native_player_exp_change@.
+    fn player_exp_change(&self, host: &mut dyn Host, event: &mut PlayerExpChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's XP orb pickup cooldown changed to `ticks`. It is
+    /// reported after the value changes; the player's state may not be found
+    /// through `self.lan` while a guest packet is handled. Server-side.
+    /// @API:native_player_exp_cooldown_change@.
+    fn player_exp_cooldown_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerExpCooldownChangeEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// An item cooldown is about to start for a server player. `item` is the
+    /// item id and `ticks` its duration. The player's state is not swapped in,
+    /// so helpers that look them up through `self.lan` may find nothing while a
+    /// guest packet is handled. Set `cancel` to skip starting the cooldown.
+    /// Server-side. @API:native_player_item_cooldown@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_item_cooldown(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerItemCooldownEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player selected a new hotbar slot. The player's state is not
+    /// swapped in, and helpers that look them up through `self.lan` may find
+    /// nothing while a guest packet is being handled. Set `cancel` to keep
+    /// the old slot; the client is sent that slot again. @API:native_player_item_held@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_item_held(&self, host: &mut dyn Host, event: &mut PlayerItemHeldEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player changed their client language option to `locale`.
+    /// The player's state may not be found through `self.lan` during a guest
+    /// packet. Server-side. @API:native_player_locale_change@.
+    fn player_locale_change(&self, host: &mut dyn Host, event: &mut PlayerLocaleChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player selected a loom pattern, after the loom menu accepted
+    /// the button. `pattern` is the zero-based button index. Helpers looking
+    /// up the guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_loom_pattern_select@.
+    fn player_loom_pattern_select(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerLoomPatternSelectEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player filled an empty map, after the filled map and its saved
+    /// data were created. Guest lookup helpers may find nothing during packet
+    /// handling. Server-side. @API:player_map_filled@.
+    fn player_map_filled(&self, host: &mut dyn Host, event: &mut PlayerMapFilledEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player named a mob with a name tag, after its name and
+    /// persistence changed and the tag was consumed. Helpers looking up the
+    /// guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_name_entity@.
+    fn player_name_entity(&self, host: &mut dyn Host, event: &mut PlayerNameEntityEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player opened a sign for editing, after the editor state was
+    /// made. `front` selects the front or back side. Guest lookup helpers may
+    /// find nothing during packet handling. Server-side.
+    /// @API:player_open_sign@.
+    fn player_open_sign(&self, host: &mut dyn Host, event: &mut PlayerOpenSignEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player picked an item from a block or entity, before it enters
+    /// the hotbar. `pos` is zero for an entity; `entity_id` is zero for a
+    /// block. The player's state is swapped in, though helpers that look them
+    /// up through `self.lan` may find nothing while a guest packet is handled.
+    /// Set `cancel` to leave the inventory and client unchanged. @API:native_player_pick_item@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_pick_item(&self, host: &mut dyn Host, event: &mut PlayerPickItemEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player picked up an arrow after it was removed and its pickup
+    /// was applied. `item` is the arrow's pickup item id. Guest lookup helpers
+    /// may find nothing during packet handling. Server-side.
+    /// @API:player_pickup_arrow@.
+    fn player_pickup_arrow(&self, host: &mut dyn Host, event: &mut PlayerPickupArrowEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player is about to travel through a Nether portal, End portal
+    /// or End gateway. `cause` is `nether_portal`, `end_portal` or `end_gateway`.
+    /// The player's state is not swapped in, so helpers that look them up
+    /// through `self.lan` may find nothing while a guest packet is handled.
+    /// Set `cancel` to keep them in their current place. Server-side.
+    /// @API:native_player_portal@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_portal(&self, host: &mut dyn Host, event: &mut PlayerPortalEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player's recipe book requested a known recipe be placed in
+    /// their crafting grid. `recipe` is the recipe id; `all` is the shift
+    /// click form. The player's state may not be available through `self.lan`
+    /// while a guest packet is handled. Server-side. @API:native_player_recipe_book_click@.
+    fn player_recipe_book_click(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerRecipeBookClickEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A recipe is about to be unlocked for a server player. Set `cancel` to
+    /// keep it locked. The player's state is not swapped in, so helpers that
+    /// look them up through `self.lan` may find nothing while a guest packet
+    /// is handled. Server-side. @API:native_player_recipe_discovered@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_recipe_discovered(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerRecipeDiscoveredEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player launched with a riptide trident, after the velocity,
+    /// spin attack and grounded lift have been applied. The player's state is
+    /// swapped in; during a guest packet, helpers that look them up through
+    /// `self.lan` may find nothing. No reply is needed. @API:player_riptide@.
+    fn player_riptide(&self, host: &mut dyn Host, event: &mut PlayerRiptideEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A player shearing a mob is about to do so. Set `cancel` to leave the
+    /// mob and shears unchanged. The guest's state is swapped in, though
+    /// helpers looking them up through `self.lan` may find nothing during a
+    /// guest packet. @API:player_shear_entity@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_shear_entity(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerShearEntityEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player's shield was disabled by a blocked melee hit. The
+    /// shield cooldown is set immediately after this call. Helpers looking up
+    /// the guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_shield_disable@.
+    fn player_shield_disable(&self, host: &mut dyn Host, event: &mut PlayerShieldDisableEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's respawn point is about to change. `cause` is `bed`,
+    /// `respawn_anchor`, `command` or `death_reset`; `pos` is its block
+    /// position. The player's state is not swapped in, so helpers that look
+    /// them up through `self.lan` may find nothing while a guest packet is
+    /// handled. Set `cancel` to keep the old point. Server-side.
+    /// @API:native_player_spawn_point_set@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_spawn_point_set(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerSpawnPointSetEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player selected a stonecutter recipe, after the menu accepted
+    /// its button. `recipe` is the zero-based button index. Guest lookup
+    /// helpers may find nothing during packet handling. Server-side.
+    /// @API:player_stonecutter_recipe_select@.
+    fn player_stonecutter_recipe_select(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerStonecutterRecipeSelectEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player stopped spectating `entity_id`, after their camera
+    /// returned to the player. Guest lookup helpers may find nothing.
+    /// @API:player_stop_spectating_entity@.
+    fn player_stop_spectating_entity(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerStopSpectatingEntityEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player swapped their main and off hands, after both inventory
+    /// slots changed. Guest lookup helpers may find nothing during packet
+    /// handling. Server-side. @API:player_swap_with_equipment_slot@.
+    fn player_swap_with_equipment_slot(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerSwapWithEquipmentSlotEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player is about to travel through an End gateway at `gateway`.
+    /// Set `cancel` to leave them at the entrance; the gateway is not consumed
+    /// and its cooldown does not start. Helpers may find no guest through
+    /// `self.lan` during its packet. Server-side. @API:native_player_teleport_end_gateway@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_teleport_end_gateway(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerTeleportEndGatewayEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player toggled an ageable mob's age lock with a golden
+    /// dandelion, after the lock and item use changed. @API:player_toggle_entity_age_lock@.
+    fn player_toggle_entity_age_lock(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerToggleEntityAgeLockEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player completed a villager or wandering trader trade.
+    /// `entity_id` is the merchant network id. Helpers looking up the guest
+    /// through `self.lan` may find nothing during packet handling. Server-side.
+    /// @API:player_trade@.
+    fn player_trade(&self, host: &mut dyn Host, event: &mut PlayerTradeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player removed an entity's leash, after it was cleared.
+    /// Guest lookup helpers may find nothing during packet handling.
+    /// @API:player_unleash_entity@.
+    fn player_unleash_entity(&self, host: &mut dyn Host, event: &mut PlayerUnleashEntityEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server applied `velocity` to a player, when syncing changed motion to
+    /// that player's client. Guest lookup helpers may find nothing.
+    /// @API:player_velocity@.
+    fn player_velocity(&self, host: &mut dyn Host, event: &mut PlayerVelocityEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A Nether portal was built for a dimension travel, or an End platform
+    /// was made for an arrival. `pos` is the lower corner of the Nether
+    /// portal rectangle or the End platform origin. The completed blocks are
+    /// already in the world. @API:native_portal_create@.
+    fn portal_create(&self, host: &mut dyn Host, event: &mut PortalCreateEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A thrown splash or lingering potion applied its hit effects.
+    /// @API:native_potion_splash@.
+    fn potion_splash(&self, host: &mut dyn Host, event: &mut PotionSplashEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. @API:native_prepare_anvil@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn prepare_anvil(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PrepareAnvilEvent<'_>,
+    ) -> Option<ItemStack> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_grindstone@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn prepare_grindstone(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PrepareGrindstoneEvent<'_>,
+    ) -> Option<ItemStack> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:native_prepare_item_craft@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn prepare_item_craft(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PrepareItemCraftEvent<'_>,
+    ) -> Option<ItemStack> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:native_prepare_item_enchant@.
+    fn prepare_item_enchant(&self, host: &mut dyn Host, event: &mut PrepareItemEnchantEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_smithing@.
+    ///
+    /// Return `Some` to set `result`; the first mod returning `Some` wins.
+    fn prepare_smithing(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PrepareSmithingEvent<'_>,
+    ) -> Option<ItemStack> {
+        let _ = host;
+        let _ = event;
+        None
+    }
+    /// A server projectile was added to the level. `player` is set only for
+    /// a player launch; other sources have an empty `name`. @API:native_projectile_launch@.
+    fn projectile_launch(&self, host: &mut dyn Host, event: &mut ProjectileLaunchEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
+    /// number and `raiders` counts the raiders, not the mobs they ride. @API:native_raid_spawn_wave@.
+    fn raid_spawn_wave(&self, host: &mut dyn Host, event: &mut RaidSpawnWaveEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
+    /// `stopped`). @API:native_raid_state_change@.
+    fn raid_state_change(&self, host: &mut dyn Host, event: &mut RaidStateChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A sculk catalyst at `pos` has begun blooming after taking experience.
+    /// The catalyst block state has changed. Server-side.
+    /// @API:native_sculk_bloom@.
+    fn sculk_bloom(&self, host: &mut dyn Host, event: &mut SculkBloomEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A sponge at `pos` absorbed water and became wet. Server-side.
+    /// @API:native_sponge_absorb@.
+    fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
+        let _ = level;
+        let _ = event;
+    }
+    /// A guest asked to complete `command`; `suggestions` may be added to or
+    /// filtered. `range` is the replaced byte range. @API:native_tab_complete@.
+    ///
+    /// Every mod gets `event.suggestions` in order and may add, change or remove suggestions.
+    fn tab_complete(&self, host: &mut dyn Host, event: &mut TabCompleteEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A projectile hit the target block at `pos`, which now has `strength`
+    /// output power. Server-side. @API:native_target_hit@.
+    fn target_hit(&self, host: &mut dyn Host, event: &mut TargetHitEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server changed its thunder state through `/weather`. Set `cancel`
+    /// to keep the previous thunder state and timer. Server-side.
+    /// @API:native_thunder_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn thunder_change(&self, host: &mut dyn Host, event: &mut ThunderChangeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The overworld clock is about to jump, from sleep or `/time`. Set
+    /// `cancel` to keep `from`. @API:native_time_skip@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn time_skip(&self, host: &mut dyn Host, event: &mut TimeSkipEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
+    fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A vault at `pos` changed to `state`. Its block state is updated.
+    /// Server-side. @API:native_vault_change_state@.
+    fn vault_change_state(&self, host: &mut dyn Host, event: &mut VaultChangeStateEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server changed its weather parameters. `raining` and `thundering`
+    /// are the requested final states. Set `cancel` to keep the previous
+    /// weather parameters. Server-side. @API:native_weather_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn weather_change(&self, host: &mut dyn Host, event: &mut WeatherChangeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// The dedicated server's whitelist changed to `enabled`. @API:native_whitelist_state_update@.
+    fn whitelist_state_update(&self, host: &mut dyn Host, event: &mut WhitelistStateUpdateEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// The server completed a world save cycle. `wait` says chunk writes were
+    /// flushed before returning. @API:native_world_saved@.
+    fn world_saved(&self, host: &mut dyn Host, event: &mut WorldSavedEvent) {
+        let _ = host;
+        let _ = event;
     }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -3668,5 +6431,5745 @@ pub fn dispatch_screen_mouse_button_released_pre(
             *canceled = true;
             break;
         }
+    }
+}
+/// What [`Hooks::camera_shake`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CameraShakeEvent<'a> {
+    pub partial: f32,
+    pub shake: &'a mut NativeShake,
+}
+pub fn dispatch_camera_shake(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    shake: &mut NativeShake,
+) {
+    let mut event = CameraShakeEvent { partial, shake };
+    for mod_hook in mods {
+        mod_hook.camera_shake(host, &mut event);
+    }
+}
+/// What [`Hooks::shader_params`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ShaderParamsEvent<'a> {
+    pub partial: f32,
+    pub params: &'a mut [[f32; 4]; 8],
+}
+pub fn dispatch_shader_params(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    params: &mut [[f32; 4]; 8],
+) {
+    let mut event = ShaderParamsEvent { partial, params };
+    for mod_hook in mods {
+        mod_hook.shader_params(host, &mut event);
+    }
+}
+/// What [`Hooks::block_highlight`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockHighlightEvent {
+    pub pos: [i32; 3],
+    pub state: BlockStateId,
+    pub partial: f32,
+}
+pub fn dispatch_block_highlight(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    state: BlockStateId,
+    partial: f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = BlockHighlightEvent {
+        pos,
+        state,
+        partial,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_highlight(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::render_hand`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderHandEvent<'a> {
+    pub hand: horizon_client::first_person::Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub swing: f32,
+    pub equip: f32,
+}
+pub fn dispatch_render_hand(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hand: horizon_client::first_person::Hand,
+    stack: Option<&ItemStack>,
+    partial: f32,
+    swing: f32,
+    equip: f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = RenderHandEvent {
+        hand,
+        stack,
+        partial,
+        swing,
+        equip,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.render_hand(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::client_resources_reloaded`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientResourcesReloadedEvent {}
+pub fn dispatch_client_resources_reloaded(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = ClientResourcesReloadedEvent {};
+    for mod_hook in mods {
+        mod_hook.client_resources_reloaded(host, &mut event);
+    }
+}
+/// What [`Hooks::item_decorations`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemDecorationsEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub x: f32,
+    pub y: f32,
+    pub batch: &'a mut HudBatch,
+}
+pub fn dispatch_item_decorations(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    x: f32,
+    y: f32,
+    batch: &mut HudBatch,
+) {
+    let mut event = ItemDecorationsEvent { stack, x, y, batch };
+    for mod_hook in mods {
+        mod_hook.item_decorations(host, &mut event);
+    }
+}
+/// What [`Hooks::use_duration`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct UseDurationEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub duration: i32,
+}
+pub fn dispatch_use_duration(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    duration: &mut i32,
+) {
+    let mut event = UseDurationEvent {
+        stack,
+        duration: *duration,
+    };
+    for mod_hook in mods {
+        mod_hook.use_duration(host, &mut event);
+    }
+    *duration = event.duration;
+}
+/// What [`Hooks::use_animation`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct UseAnimationEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub animation: &'a mut UseAnimation,
+}
+pub fn dispatch_use_animation(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    animation: &mut UseAnimation,
+) {
+    let mut event = UseAnimationEvent { stack, animation };
+    for mod_hook in mods {
+        mod_hook.use_animation(host, &mut event);
+    }
+}
+/// What [`Hooks::can_eat`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanEatEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub can_eat: bool,
+}
+pub fn dispatch_can_eat(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    can_eat: &mut bool,
+) {
+    let mut event = CanEatEvent {
+        stack,
+        can_eat: *can_eat,
+    };
+    for mod_hook in mods {
+        mod_hook.can_eat(host, &mut event);
+    }
+    *can_eat = event.can_eat;
+}
+/// What [`Hooks::living_entity_use_item_start`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEntityUseItemStartEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub hand: Hand,
+    pub duration: i32,
+}
+pub fn dispatch_living_entity_use_item_start(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    hand: Hand,
+    duration: &mut i32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingEntityUseItemStartEvent {
+        stack,
+        entity,
+        hand,
+        duration: *duration,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.living_entity_use_item_start(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *duration = event.duration;
+}
+/// What [`Hooks::living_entity_use_item_finish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEntityUseItemFinishEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub hand: Hand,
+    pub duration: i32,
+    pub result: &'a mut Option<ItemStack>,
+}
+pub fn dispatch_living_entity_use_item_finish(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    hand: Hand,
+    duration: i32,
+    result: &mut Option<ItemStack>,
+) {
+    let mut event = LivingEntityUseItemFinishEvent {
+        stack,
+        entity,
+        hand,
+        duration,
+        result,
+    };
+    for mod_hook in mods {
+        mod_hook.living_entity_use_item_finish(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_mouse_scrolled_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenMouseScrolledPreEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+    pub scroll: [f64; 2],
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_mouse_scrolled_pre(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+    scroll: [f64; 2],
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ScreenMouseScrolledPreEvent {
+        screen,
+        scroll,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.screen_mouse_scrolled_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_command`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCommandEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub command: &'a str,
+    pub replies: &'a mut Vec<Text>,
+}
+pub fn dispatch_player_command(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    command: &str,
+    replies: &mut Vec<Text>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PlayerCommandEvent {
+        player,
+        name,
+        command,
+        replies,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_command(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::perform_console_command`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PerformConsoleCommandEvent<'a> {
+    pub command: &'a str,
+}
+pub fn dispatch_perform_console_command(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    command: &str,
+    ran: &mut bool,
+) {
+    if *ran {
+        return;
+    }
+    let mut event = PerformConsoleCommandEvent { command };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.perform_console_command(host, &mut event),
+            Flow::Cancel
+        ) {
+            *ran = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::screen_key_pressed_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenKeyPressedPreEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+    pub key: &'a str,
+    pub repeat: bool,
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_key_pressed_pre(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+    key: &str,
+    repeat: bool,
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ScreenKeyPressedPreEvent {
+        screen,
+        key,
+        repeat,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.screen_key_pressed_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::screen_char_typed_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenCharTypedPreEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+    pub c: char,
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_char_typed_pre(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+    c: char,
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ScreenCharTypedPreEvent {
+        screen,
+        c,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.screen_char_typed_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::data_pack_files`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct DataPackFilesEvent<'a> {
+    pub files: &'a mut Vec<(String, Vec<u8>)>,
+}
+pub fn dispatch_data_pack_files(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    files: &mut Vec<(String, Vec<u8>)>,
+) {
+    let mut event = DataPackFilesEvent { files };
+    for mod_hook in mods {
+        mod_hook.data_pack_files(host, &mut event);
+    }
+}
+/// What [`Hooks::biome_colors`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BiomeColorsEvent<'a> {
+    pub biome: &'a str,
+    pub colors: &'a mut BiomeColors,
+}
+pub fn dispatch_biome_colors(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    biome: &str,
+    colors: &mut BiomeColors,
+) {
+    let mut event = BiomeColorsEvent { biome, colors };
+    for mod_hook in mods {
+        mod_hook.biome_colors(host, &mut event);
+    }
+}
+/// What [`Hooks::server_data_loaded`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ServerDataLoadedEvent {
+    pub reload: bool,
+}
+pub fn dispatch_server_data_loaded(host: &mut dyn Host, mods: &[Box<dyn Hooks>], reload: bool) {
+    let mut event = ServerDataLoadedEvent { reload };
+    for mod_hook in mods {
+        mod_hook.server_data_loaded(host, &mut event);
+    }
+}
+/// What [`Hooks::compute_fov`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ComputeFovEvent {
+    pub partial: f32,
+    pub camera: [f64; 3],
+    pub degrees: f32,
+}
+pub fn dispatch_compute_fov(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    camera: [f64; 3],
+    degrees: &mut f32,
+) {
+    let mut event = ComputeFovEvent {
+        partial,
+        camera,
+        degrees: *degrees,
+    };
+    for mod_hook in mods {
+        mod_hook.compute_fov(host, &mut event);
+    }
+    *degrees = event.degrees;
+}
+/// What [`Hooks::mob_submit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MobSubmitEvent<'a> {
+    pub mob: &'a NativeMobRender<'a>,
+    pub draw: &'a mut BlockEntityDraw,
+}
+pub fn dispatch_mob_submit(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    mob: &NativeMobRender<'_>,
+    draw: &mut BlockEntityDraw,
+    drawn: &mut bool,
+) {
+    if *drawn {
+        return;
+    }
+    let mut event = MobSubmitEvent { mob, draw };
+    for mod_hook in mods {
+        if matches!(mod_hook.mob_submit(host, &mut event), Flow::Cancel) {
+            *drawn = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::camera_distance`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CameraDistanceEvent<'a> {
+    pub partial: f32,
+    pub mirrored: bool,
+    pub entity: &'a horizon_client::camera::CameraEntity,
+    pub distance: f32,
+}
+pub fn dispatch_camera_distance(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    mirrored: bool,
+    entity: &horizon_client::camera::CameraEntity,
+    distance: &mut f32,
+) {
+    let mut event = CameraDistanceEvent {
+        partial,
+        mirrored,
+        entity,
+        distance: *distance,
+    };
+    for mod_hook in mods {
+        mod_hook.camera_distance(host, &mut event);
+    }
+    *distance = event.distance;
+}
+/// What [`Hooks::compute_fog_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ComputeFogColorEvent<'a> {
+    pub partial: f32,
+    pub camera: [f64; 3],
+    pub fog_type: horizon_client::fog::FogType,
+    pub rgb: &'a mut [f32; 3],
+}
+pub fn dispatch_compute_fog_color(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    camera: [f64; 3],
+    fog_type: horizon_client::fog::FogType,
+    rgb: &mut [f32; 3],
+) {
+    let mut event = ComputeFogColorEvent {
+        partial,
+        camera,
+        fog_type,
+        rgb,
+    };
+    for mod_hook in mods {
+        mod_hook.compute_fog_color(host, &mut event);
+    }
+}
+/// What [`Hooks::mouse_button_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MouseButtonPreEvent {
+    pub button: i32,
+    pub pressed: bool,
+    pub modifiers: u32,
+}
+pub fn dispatch_mouse_button_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    button: i32,
+    pressed: bool,
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = MouseButtonPreEvent {
+        button,
+        pressed,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.mouse_button_pre(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::mouse_button_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MouseButtonPostEvent {
+    pub button: i32,
+    pub pressed: bool,
+    pub modifiers: u32,
+}
+pub fn dispatch_mouse_button_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    button: i32,
+    pressed: bool,
+    modifiers: u32,
+) {
+    let mut event = MouseButtonPostEvent {
+        button,
+        pressed,
+        modifiers,
+    };
+    for mod_hook in mods {
+        mod_hook.mouse_button_post(host, &mut event);
+    }
+}
+/// What [`Hooks::player_respawned`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRespawnedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_respawned(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerRespawnedEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_respawned(host, &mut event);
+    }
+}
+/// What [`Hooks::render_fog`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderFogEvent<'a> {
+    pub partial: f32,
+    pub camera: [f64; 3],
+    pub fog_type: horizon_client::fog::FogType,
+    pub fog: &'a mut horizon_client::fog::FogData,
+}
+pub fn dispatch_render_fog(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    partial: f32,
+    camera: [f64; 3],
+    fog_type: horizon_client::fog::FogType,
+    fog: &mut horizon_client::fog::FogData,
+) {
+    let mut event = RenderFogEvent {
+        partial,
+        camera,
+        fog_type,
+        fog,
+    };
+    for mod_hook in mods {
+        mod_hook.render_fog(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_key_released_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenKeyReleasedPreEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+    pub key: &'a str,
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_key_released_pre(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+    key: &str,
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ScreenKeyReleasedPreEvent {
+        screen,
+        key,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.screen_key_released_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::music`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MusicEvent<'a> {
+    pub music: &'a mut Option<Music>,
+    pub volume: f32,
+}
+pub fn dispatch_music(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    music: &mut Option<Music>,
+    volume: &mut f32,
+) {
+    let mut event = MusicEvent {
+        music,
+        volume: *volume,
+    };
+    for mod_hook in mods {
+        mod_hook.music(host, &mut event);
+    }
+    *volume = event.volume;
+}
+/// What [`Hooks::music_layers`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MusicLayersEvent<'a> {
+    pub layers: &'a mut Vec<MusicLayer>,
+}
+pub fn dispatch_music_layers(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    layers: &mut Vec<MusicLayer>,
+) {
+    let mut event = MusicLayersEvent { layers };
+    for mod_hook in mods {
+        mod_hook.music_layers(host, &mut event);
+    }
+}
+/// What [`Hooks::datapack_sync`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct DatapackSyncEvent<'a> {
+    pub recipe_types: &'a mut Vec<String>,
+}
+pub fn dispatch_datapack_sync(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    recipe_types: &mut Vec<String>,
+) {
+    let mut event = DatapackSyncEvent { recipe_types };
+    for mod_hook in mods {
+        mod_hook.datapack_sync(host, &mut event);
+    }
+}
+/// What [`Hooks::recipes_received`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RecipesReceivedEvent<'a> {
+    pub recipe_types: &'a [String],
+}
+pub fn dispatch_recipes_received(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    recipe_types: &[String],
+) {
+    let mut event = RecipesReceivedEvent { recipe_types };
+    for mod_hook in mods {
+        mod_hook.recipes_received(host, &mut event);
+    }
+}
+/// What [`Hooks::input_key`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct InputKeyEvent<'a> {
+    pub event: &'a winit::event::KeyEvent,
+    pub modifiers: u32,
+}
+pub fn dispatch_input_key(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    event: &winit::event::KeyEvent,
+    modifiers: u32,
+) {
+    let mut event_ = InputKeyEvent { event, modifiers };
+    for mod_hook in mods {
+        mod_hook.input_key(host, &mut event_);
+    }
+}
+/// What [`Hooks::mouse_scrolling`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MouseScrollingEvent {
+    pub scroll: [f64; 2],
+    pub accumulated: [i32; 2],
+    pub buttons: [bool; 3],
+    pub cursor: [f32; 2],
+    pub modifiers: u32,
+}
+pub fn dispatch_mouse_scrolling(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    scroll: [f64; 2],
+    accumulated: [i32; 2],
+    buttons: [bool; 3],
+    cursor: [f32; 2],
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = MouseScrollingEvent {
+        scroll,
+        accumulated,
+        buttons,
+        cursor,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.mouse_scrolling(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::screen_mouse_dragged_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenMouseDraggedPreEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+    pub button: i32,
+    pub delta: [f32; 2],
+    pub modifiers: u32,
+}
+pub fn dispatch_screen_mouse_dragged_pre(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+    button: i32,
+    delta: [f32; 2],
+    modifiers: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ScreenMouseDraggedPreEvent {
+        screen,
+        button,
+        delta,
+        modifiers,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.screen_mouse_dragged_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::mod_container_viewers`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ModContainerViewersEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub viewers: u32,
+    pub previous: u32,
+}
+pub fn dispatch_mod_container_viewers(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    viewers: u32,
+    previous: u32,
+) {
+    let mut event = ModContainerViewersEvent {
+        dimension,
+        pos,
+        viewers,
+        previous,
+    };
+    for mod_hook in mods {
+        mod_hook.mod_container_viewers(host, &mut event);
+    }
+}
+/// What [`Hooks::living_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingKnockbackEvent<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub direct: i32,
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+pub fn dispatch_living_knockback(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    damage_type: &str,
+    causing: i32,
+    direct: i32,
+    strength: &mut f64,
+    x: &mut f64,
+    z: &mut f64,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingKnockbackEvent {
+        entity,
+        kind,
+        damage_type,
+        causing,
+        direct,
+        strength: *strength,
+        x: *x,
+        z: *z,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_knockback(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *strength = event.strength;
+    *x = event.x;
+    *z = event.z;
+}
+/// What [`Hooks::experience_orb_can_merge`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExperienceOrbCanMergeEvent<'a> {
+    pub dimension: &'a str,
+    pub into: u32,
+    pub from: u32,
+    pub into_value: u32,
+    pub from_value: u32,
+    pub can_merge: bool,
+}
+pub fn dispatch_experience_orb_can_merge(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    into: u32,
+    from: u32,
+    into_value: u32,
+    from_value: u32,
+    can_merge: &mut bool,
+) {
+    let mut event = ExperienceOrbCanMergeEvent {
+        dimension,
+        into,
+        from,
+        into_value,
+        from_value,
+        can_merge: *can_merge,
+    };
+    for mod_hook in mods {
+        mod_hook.experience_orb_can_merge(host, &mut event);
+    }
+    *can_merge = event.can_merge;
+}
+/// What [`Hooks::experience_orb_merge`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExperienceOrbMergeEvent<'a> {
+    pub dimension: &'a str,
+    pub into: u32,
+    pub from: u32,
+    pub from_value: u32,
+}
+pub fn dispatch_experience_orb_merge(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    into: u32,
+    from: u32,
+    from_value: u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ExperienceOrbMergeEvent {
+        dimension,
+        into,
+        from,
+        from_value,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.experience_orb_merge(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::menu_slot_rules`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MenuSlotRulesEvent<'a> {
+    pub menu: &'a str,
+    pub slot: usize,
+    pub stack: &'a ItemStack,
+    pub may_place: bool,
+    pub max_stack: u32,
+}
+pub fn dispatch_menu_slot_rules(
+    mods: &[Box<dyn Hooks>],
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    may_place: &mut bool,
+    max_stack: &mut u32,
+) {
+    let mut event = MenuSlotRulesEvent {
+        menu,
+        slot,
+        stack,
+        may_place: *may_place,
+        max_stack: *max_stack,
+    };
+    for mod_hook in mods {
+        mod_hook.menu_slot_rules(&mut event);
+    }
+    *may_place = event.may_place;
+    *max_stack = event.max_stack;
+}
+/// What [`Hooks::living_entity_use_item_tick`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEntityUseItemTickEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub hand: Hand,
+    pub duration: i32,
+}
+pub fn dispatch_living_entity_use_item_tick(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    hand: Hand,
+    duration: &mut i32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingEntityUseItemTickEvent {
+        stack,
+        entity,
+        hand,
+        duration: *duration,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.living_entity_use_item_tick(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *duration = event.duration;
+}
+/// What [`Hooks::on_use_tick`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct OnUseTickEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub remaining: i32,
+}
+pub fn dispatch_on_use_tick(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    remaining: i32,
+) {
+    let mut event = OnUseTickEvent {
+        stack,
+        entity,
+        remaining,
+    };
+    for mod_hook in mods {
+        mod_hook.on_use_tick(host, &mut event);
+    }
+}
+/// What [`Hooks::living_entity_use_item_stop`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEntityUseItemStopEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub hand: Hand,
+    pub duration: i32,
+}
+pub fn dispatch_living_entity_use_item_stop(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    hand: Hand,
+    duration: i32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingEntityUseItemStopEvent {
+        stack,
+        entity,
+        hand,
+        duration,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.living_entity_use_item_stop(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::release_using`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ReleaseUsingEvent<'a> {
+    pub stack: &'a ItemStack,
+    pub entity: Option<i32>,
+    pub time_left: i32,
+    pub used: bool,
+}
+pub fn dispatch_release_using(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: &ItemStack,
+    entity: Option<i32>,
+    time_left: i32,
+    used: &mut bool,
+) {
+    let mut event = ReleaseUsingEvent {
+        stack,
+        entity,
+        time_left,
+        used: *used,
+    };
+    for mod_hook in mods {
+        mod_hook.release_using(host, &mut event);
+    }
+    *used = event.used;
+}
+/// What [`Hooks::loot_function`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LootFunctionEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a Value,
+    pub ctx: &'a NativeLootContext<'a>,
+    pub stack: &'a mut LootStack,
+}
+pub fn dispatch_loot_function(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &Value,
+    ctx: &NativeLootContext<'_>,
+    stack: &mut LootStack,
+) {
+    let mut event = LootFunctionEvent {
+        kind,
+        data,
+        ctx,
+        stack,
+    };
+    for mod_hook in mods {
+        mod_hook.loot_function(&mut event);
+    }
+}
+/// What [`Hooks::loot_condition`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LootConditionEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a Value,
+    pub ctx: &'a NativeLootContext<'a>,
+    pub holds: bool,
+}
+pub fn dispatch_loot_condition(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &Value,
+    ctx: &NativeLootContext<'_>,
+    holds: &mut bool,
+) {
+    let mut event = LootConditionEvent {
+        kind,
+        data,
+        ctx,
+        holds: *holds,
+    };
+    for mod_hook in mods {
+        mod_hook.loot_condition(&mut event);
+    }
+    *holds = event.holds;
+}
+/// What [`Hooks::level_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LevelLoadEvent<'a> {
+    pub dimension: &'a str,
+}
+pub fn dispatch_level_load(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
+    let mut event = LevelLoadEvent { dimension };
+    for mod_hook in mods {
+        mod_hook.level_load(host, &mut event);
+    }
+}
+/// What [`Hooks::level_unload`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LevelUnloadEvent<'a> {
+    pub dimension: &'a str,
+}
+pub fn dispatch_level_unload(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
+    let mut event = LevelUnloadEvent { dimension };
+    for mod_hook in mods {
+        mod_hook.level_unload(host, &mut event);
+    }
+}
+/// What [`Hooks::client_level_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientLevelLoadEvent<'a> {
+    pub dimension: &'a str,
+}
+pub fn dispatch_client_level_load(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
+    let mut event = ClientLevelLoadEvent { dimension };
+    for mod_hook in mods {
+        mod_hook.client_level_load(host, &mut event);
+    }
+}
+/// What [`Hooks::client_level_unload`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ClientLevelUnloadEvent<'a> {
+    pub dimension: &'a str,
+}
+pub fn dispatch_client_level_unload(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
+    let mut event = ClientLevelUnloadEvent { dimension };
+    for mod_hook in mods {
+        mod_hook.client_level_unload(host, &mut event);
+    }
+}
+/// What [`Hooks::hears_projectile_impacts`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HearsProjectileImpactsEvent {
+    pub hears: bool,
+}
+pub fn dispatch_hears_projectile_impacts(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hears: &mut bool,
+) {
+    let mut event = HearsProjectileImpactsEvent { hears: *hears };
+    for mod_hook in mods {
+        mod_hook.hears_projectile_impacts(host, &mut event);
+    }
+    *hears = event.hears;
+}
+/// What [`Hooks::projectile_impact`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ProjectileImpactEvent<'a> {
+    pub dimension: &'a str,
+    pub projectile: u32,
+    pub kind: &'a str,
+    pub owner: u32,
+    pub entity: Option<u32>,
+    pub entity_kind: &'a str,
+    pub block: [i32; 3],
+    pub face: [i32; 3],
+    pub at: [f64; 3],
+}
+pub fn dispatch_projectile_impact(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    projectile: u32,
+    kind: &str,
+    owner: u32,
+    entity: Option<u32>,
+    entity_kind: &str,
+    block: [i32; 3],
+    face: [i32; 3],
+    at: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ProjectileImpactEvent {
+        dimension,
+        projectile,
+        kind,
+        owner,
+        entity,
+        entity_kind,
+        block,
+        face,
+        at,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.projectile_impact(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::entity_mount`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityMountEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+    pub vehicle: u32,
+    pub vehicle_kind: &'a str,
+    pub mounting: bool,
+}
+pub fn dispatch_entity_mount(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    entity: u32,
+    kind: &str,
+    vehicle: u32,
+    vehicle_kind: &str,
+    mounting: bool,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = EntityMountEvent {
+        dimension,
+        entity,
+        kind,
+        vehicle,
+        vehicle_kind,
+        mounting,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.entity_mount(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::interaction_key`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct InteractionKeyEvent<'a> {
+    pub button: i32,
+    pub key_mapping: &'a str,
+    pub hand: horizon_client::first_person::Hand,
+    pub swing_hand: bool,
+}
+pub fn dispatch_interaction_key(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    button: i32,
+    key_mapping: &str,
+    hand: horizon_client::first_person::Hand,
+    swing_hand: &mut bool,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = InteractionKeyEvent {
+        button,
+        key_mapping,
+        hand,
+        swing_hand: *swing_hand,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.interaction_key(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *swing_hand = event.swing_hand;
+}
+/// What [`Hooks::gui_layer_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct GuiLayerPreEvent<'a> {
+    pub layer: &'a str,
+    pub batch: &'a mut HudBatch,
+}
+pub fn dispatch_gui_layer_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    layer: &str,
+    batch: &mut HudBatch,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = GuiLayerPreEvent { layer, batch };
+    for mod_hook in mods {
+        if matches!(mod_hook.gui_layer_pre(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::gui_layer_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct GuiLayerPostEvent<'a> {
+    pub layer: &'a str,
+    pub batch: &'a mut HudBatch,
+}
+pub fn dispatch_gui_layer_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    layer: &str,
+    batch: &mut HudBatch,
+) {
+    let mut event = GuiLayerPostEvent { layer, batch };
+    for mod_hook in mods {
+        mod_hook.gui_layer_post(host, &mut event);
+    }
+}
+/// What [`Hooks::map_decorations`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MapDecorationsEvent<'a> {
+    pub map: &'a NativeMapInfo<'a>,
+    pub decorations: &'a mut Vec<NativeMapDecoration>,
+}
+pub fn dispatch_map_decorations(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    map: &NativeMapInfo<'_>,
+    decorations: &mut Vec<NativeMapDecoration>,
+) {
+    let mut event = MapDecorationsEvent { map, decorations };
+    for mod_hook in mods {
+        mod_hook.map_decorations(host, &mut event);
+    }
+}
+/// What [`Hooks::player_start_tracking`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStartTrackingEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity: u32,
+    pub uuid: u128,
+    pub kind: &'a str,
+}
+pub fn dispatch_player_start_tracking(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity: u32,
+    uuid: u128,
+    kind: &str,
+) {
+    let mut event = PlayerStartTrackingEvent {
+        player,
+        name,
+        entity,
+        uuid,
+        kind,
+    };
+    for mod_hook in mods {
+        mod_hook.player_start_tracking(host, &mut event);
+    }
+}
+/// What [`Hooks::player_stop_tracking`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStopTrackingEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity: u32,
+    pub uuid: u128,
+    pub kind: &'a str,
+}
+pub fn dispatch_player_stop_tracking(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity: u32,
+    uuid: u128,
+    kind: &str,
+) {
+    let mut event = PlayerStopTrackingEvent {
+        player,
+        name,
+        entity,
+        uuid,
+        kind,
+    };
+    for mod_hook in mods {
+        mod_hook.player_stop_tracking(host, &mut event);
+    }
+}
+/// What [`Hooks::block_entity_energy`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockEntityEnergyEvent<'a> {
+    pub block: &'a str,
+}
+pub fn dispatch_block_entity_energy(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    block: &str,
+    energy: &mut Option<ModEnergyBuffer>,
+) {
+    if energy.is_some() {
+        return;
+    }
+    let mut event = BlockEntityEnergyEvent { block };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.block_entity_energy(host, &mut event) {
+            *energy = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::data_map_types`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct DataMapTypesEvent<'a> {
+    pub types: &'a mut Vec<NativeDataMapType>,
+}
+pub fn dispatch_data_map_types(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    types: &mut Vec<NativeDataMapType>,
+) {
+    let mut event = DataMapTypesEvent { types };
+    for mod_hook in mods {
+        mod_hook.data_map_types(host, &mut event);
+    }
+}
+/// What [`Hooks::living_breathe`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingBreatheEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub can_breathe: bool,
+    pub consume: i32,
+    pub refill: i32,
+}
+pub fn dispatch_living_breathe(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    can_breathe: &mut bool,
+    consume: &mut i32,
+    refill: &mut i32,
+) {
+    let mut event = LivingBreatheEvent {
+        entity,
+        kind,
+        can_breathe: *can_breathe,
+        consume: *consume,
+        refill: *refill,
+    };
+    for mod_hook in mods {
+        mod_hook.living_breathe(&mut event);
+    }
+    *can_breathe = event.can_breathe;
+    *consume = event.consume;
+    *refill = event.refill;
+}
+/// What [`Hooks::blocks`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlocksEvent<'a> {
+    pub blocks: &'a mut Vec<horizon_mods::content::Block>,
+}
+pub fn dispatch_blocks(mods: &[Box<dyn Hooks>], blocks: &mut Vec<horizon_mods::content::Block>) {
+    let mut event = BlocksEvent { blocks };
+    for mod_hook in mods {
+        mod_hook.blocks(&mut event);
+    }
+}
+/// What [`Hooks::items`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemsEvent<'a> {
+    pub items: &'a mut Vec<horizon_mods::content::Item>,
+}
+pub fn dispatch_items(mods: &[Box<dyn Hooks>], items: &mut Vec<horizon_mods::content::Item>) {
+    let mut event = ItemsEvent { items };
+    for mod_hook in mods {
+        mod_hook.items(&mut event);
+    }
+}
+/// What [`Hooks::entity_tick_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTickPreEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_entity_tick_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    entity: u32,
+    kind: &str,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = EntityTickPreEvent {
+        dimension,
+        entity,
+        kind,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.entity_tick_pre(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::entity_tick_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTickPostEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_entity_tick_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    entity: u32,
+    kind: &str,
+) {
+    let mut event = EntityTickPostEvent {
+        dimension,
+        entity,
+        kind,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_tick_post(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_tick_listened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTickListenedEvent {
+    pub listened: bool,
+}
+pub fn dispatch_entity_tick_listened(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    listened: &mut bool,
+) {
+    let mut event = EntityTickListenedEvent {
+        listened: *listened,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_tick_listened(host, &mut event);
+    }
+    *listened = event.listened;
+}
+/// What [`Hooks::item_fluid_tank`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemFluidTankEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_fluid_tank(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    capacity: &mut Option<i32>,
+) {
+    if capacity.is_some() {
+        return;
+    }
+    let mut event = ItemFluidTankEvent { item };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.item_fluid_tank(host, &mut event) {
+            *capacity = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::living_equipment_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEquipmentChangeEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub slot: &'a str,
+    pub from: Option<&'a ItemStack>,
+    pub to: Option<&'a ItemStack>,
+}
+pub fn dispatch_living_equipment_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    slot: &str,
+    from: Option<&ItemStack>,
+    to: Option<&ItemStack>,
+) {
+    let mut event = LivingEquipmentChangeEvent {
+        entity,
+        kind,
+        slot,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.living_equipment_change(host, &mut event);
+    }
+}
+/// What [`Hooks::living_equipment_listened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingEquipmentListenedEvent {
+    pub listened: bool,
+}
+pub fn dispatch_living_equipment_listened(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    listened: &mut bool,
+) {
+    let mut event = LivingEquipmentListenedEvent {
+        listened: *listened,
+    };
+    for mod_hook in mods {
+        mod_hook.living_equipment_listened(host, &mut event);
+    }
+    *listened = event.listened;
+}
+/// What [`Hooks::player_submit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSubmitEvent<'a> {
+    pub player: &'a NativeMobRender<'a>,
+    pub who: &'a NativePlayerRender<'a>,
+    pub draw: &'a mut BlockEntityDraw,
+}
+pub fn dispatch_player_submit(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: &NativeMobRender<'_>,
+    who: &NativePlayerRender<'_>,
+    draw: &mut BlockEntityDraw,
+    drawn: &mut bool,
+) {
+    if *drawn {
+        return;
+    }
+    let mut event = PlayerSubmitEvent { player, who, draw };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_submit(host, &mut event), Flow::Cancel) {
+            *drawn = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::mob_layer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MobLayerEvent<'a> {
+    pub mob: &'a NativeMobRender<'a>,
+    pub who: Option<&'a NativePlayerRender<'a>>,
+    pub draw: &'a mut BlockEntityDraw,
+}
+pub fn dispatch_mob_layer(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    mob: &NativeMobRender<'_>,
+    who: Option<&NativePlayerRender<'_>>,
+    draw: &mut BlockEntityDraw,
+) {
+    let mut event = MobLayerEvent { mob, who, draw };
+    for mod_hook in mods {
+        mod_hook.mob_layer(host, &mut event);
+    }
+}
+/// What [`Hooks::player_render_listened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRenderListenedEvent {
+    pub listened: bool,
+}
+pub fn dispatch_player_render_listened(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    listened: &mut bool,
+) {
+    let mut event = PlayerRenderListenedEvent {
+        listened: *listened,
+    };
+    for mod_hook in mods {
+        mod_hook.player_render_listened(host, &mut event);
+    }
+    *listened = event.listened;
+}
+/// What [`Hooks::sign_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SignChangedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub front: bool,
+    pub lines: &'a mut Vec<String>,
+}
+pub fn dispatch_sign_changed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    dimension: &str,
+    pos: [i32; 3],
+    front: bool,
+    lines: &mut Vec<String>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = SignChangedEvent {
+        player,
+        name,
+        dimension,
+        pos,
+        front,
+        lines,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.sign_changed(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::standalone_models`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct StandaloneModelsEvent<'a> {
+    pub models: &'a mut Vec<String>,
+}
+pub fn dispatch_standalone_models(mods: &[Box<dyn Hooks>], models: &mut Vec<String>) {
+    let mut event = StandaloneModelsEvent { models };
+    for mod_hook in mods {
+        mod_hook.standalone_models(&mut event);
+    }
+}
+/// What [`Hooks::player_container_open`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerContainerOpenEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a str,
+    pub menu: &'a str,
+    pub pos: Option<[i32; 3]>,
+}
+pub fn dispatch_player_container_open(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    dimension: &str,
+    menu: &str,
+    pos: Option<[i32; 3]>,
+) {
+    let mut event = PlayerContainerOpenEvent {
+        player,
+        name,
+        dimension,
+        menu,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.player_container_open(host, &mut event);
+    }
+}
+/// What [`Hooks::player_container_close`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerContainerCloseEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a str,
+    pub menu: &'a str,
+    pub pos: Option<[i32; 3]>,
+}
+pub fn dispatch_player_container_close(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    dimension: &str,
+    menu: &str,
+    pos: Option<[i32; 3]>,
+) {
+    let mut event = PlayerContainerCloseEvent {
+        player,
+        name,
+        dimension,
+        menu,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.player_container_close(host, &mut event);
+    }
+}
+/// What [`Hooks::player_toggle_flight`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerToggleFlightEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub flying: bool,
+}
+pub fn dispatch_player_toggle_flight(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    flying: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerToggleFlightEvent {
+        player,
+        name,
+        flying,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_toggle_flight(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::anvil_damaged`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct AnvilDamagedEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_anvil_damaged(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    from: &str,
+    to: &str,
+) {
+    let mut event = AnvilDamagedEvent {
+        dimension,
+        pos,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.anvil_damaged(host, &mut event);
+    }
+}
+/// What [`Hooks::beacon_state_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BeaconStateChangeEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub active: bool,
+}
+pub fn dispatch_beacon_state_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    active: bool,
+) {
+    let mut event = BeaconStateChangeEvent {
+        dimension,
+        pos,
+        active,
+    };
+    for mod_hook in mods {
+        mod_hook.beacon_state_change(host, &mut event);
+    }
+}
+/// What [`Hooks::bell_ring`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BellRingEvent {
+    pub dimension: LevelDimension,
+    pub player: Option<u128>,
+    pub pos: BlockPos,
+}
+pub fn dispatch_bell_ring(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    player: Option<u128>,
+    pos: BlockPos,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BellRingEvent {
+        dimension,
+        player,
+        pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.bell_ring(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_break_progress_update`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockBreakProgressUpdateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub progress: i32,
+}
+pub fn dispatch_block_break_progress_update(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    progress: i32,
+) {
+    let mut event = BlockBreakProgressUpdateEvent {
+        player,
+        name,
+        pos,
+        progress,
+    };
+    for mod_hook in mods {
+        mod_hook.block_break_progress_update(host, &mut event);
+    }
+}
+/// What [`Hooks::block_burn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockBurnEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+}
+pub fn dispatch_block_burn(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockBurnEvent { dimension, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_burn(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_cook`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockCookEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+    pub result: &'a str,
+}
+pub fn dispatch_block_cook(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    item: &str,
+    result: &str,
+) {
+    let mut event = BlockCookEvent { pos, item, result };
+    for mod_hook in mods {
+        mod_hook.block_cook(host, &mut event);
+    }
+}
+/// What [`Hooks::block_dispense_armor`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockDispenseArmorEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub item: &'a str,
+    pub target: &'a str,
+}
+pub fn dispatch_block_dispense_armor(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    item: &str,
+    target: &str,
+) {
+    let mut event = BlockDispenseArmorEvent {
+        dimension,
+        pos,
+        item,
+        target,
+    };
+    for mod_hook in mods {
+        mod_hook.block_dispense_armor(host, &mut event);
+    }
+}
+/// What [`Hooks::block_exp`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockExpEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub block: &'a str,
+    pub experience: u32,
+}
+pub fn dispatch_block_exp(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    block: &str,
+    experience: &mut u32,
+) {
+    let mut event = BlockExpEvent {
+        dimension,
+        pos,
+        block,
+        experience: *experience,
+    };
+    for mod_hook in mods {
+        mod_hook.block_exp(level, &mut event);
+    }
+    *experience = event.experience;
+}
+/// What [`Hooks::block_fade`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockFadeEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub from: BlockStateId,
+    pub to: BlockStateId,
+}
+pub fn dispatch_block_fade(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    from: BlockStateId,
+    to: BlockStateId,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockFadeEvent {
+        dimension,
+        pos,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_fade(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_failed_dispense`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockFailedDispenseEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_block_failed_dispense(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    item: &str,
+) {
+    let mut event = BlockFailedDispenseEvent {
+        dimension,
+        pos,
+        item,
+    };
+    for mod_hook in mods {
+        mod_hook.block_failed_dispense(host, &mut event);
+    }
+}
+/// What [`Hooks::block_form`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockFormEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub from: BlockStateId,
+    pub to: BlockStateId,
+}
+pub fn dispatch_block_form(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    from: BlockStateId,
+    to: BlockStateId,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockFormEvent {
+        dimension,
+        pos,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_form(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_ignite`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockIgniteEvent<'a> {
+    pub dimension: LevelDimension,
+    pub player: Option<u128>,
+    pub pos: BlockPos,
+    pub cause: &'a str,
+}
+pub fn dispatch_block_ignite(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    player: Option<u128>,
+    pos: BlockPos,
+    cause: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BlockIgniteEvent {
+        dimension,
+        player,
+        pos,
+        cause,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_ignite(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_lock_check`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockLockCheckEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_block_lock_check(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    locked: &mut bool,
+) {
+    if *locked {
+        return;
+    }
+    let mut event = BlockLockCheckEvent { player, name, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_lock_check(host, &mut event), Flow::Cancel) {
+            *locked = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_receive_game`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockReceiveGameEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub block: &'a str,
+    pub event: &'a str,
+}
+pub fn dispatch_block_receive_game(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    block: &str,
+    event: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event_ = BlockReceiveGameEvent {
+        dimension,
+        pos,
+        block,
+        event,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.block_receive_game(host, &mut event_), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::block_shear_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockShearEntityEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_block_shear_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    entity: u32,
+    kind: &str,
+) {
+    let mut event = BlockShearEntityEvent {
+        dimension,
+        pos,
+        entity,
+        kind,
+    };
+    for mod_hook in mods {
+        mod_hook.block_shear_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::brewing_complete`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BrewingCompleteEvent {
+    pub pos: [i32; 3],
+}
+pub fn dispatch_brewing_complete(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3]) {
+    let mut event = BrewingCompleteEvent { pos };
+    for mod_hook in mods {
+        mod_hook.brewing_complete(host, &mut event);
+    }
+}
+/// What [`Hooks::brewing_fuel`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BrewingFuelEvent<'a> {
+    pub pos: [i32; 3],
+    pub fuel: &'a str,
+}
+pub fn dispatch_brewing_fuel(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], fuel: &str) {
+    let mut event = BrewingFuelEvent { pos, fuel };
+    for mod_hook in mods {
+        mod_hook.brewing_fuel(host, &mut event);
+    }
+}
+/// What [`Hooks::brewing_start`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BrewingStartEvent<'a> {
+    pub pos: [i32; 3],
+    pub ingredient: &'a str,
+}
+pub fn dispatch_brewing_start(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    ingredient: &str,
+) {
+    let mut event = BrewingStartEvent { pos, ingredient };
+    for mod_hook in mods {
+        mod_hook.brewing_start(host, &mut event);
+    }
+}
+/// What [`Hooks::broadcast_message`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BroadcastMessageEvent<'a> {
+    pub line: &'a mut Text,
+}
+pub fn dispatch_broadcast_message(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    line: &mut Text,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BroadcastMessageEvent { line };
+    for mod_hook in mods {
+        if matches!(mod_hook.broadcast_message(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::campfire_start`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CampfireStartEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_campfire_start(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    item: &str,
+) {
+    let mut event = CampfireStartEvent { pos, item };
+    for mod_hook in mods {
+        mod_hook.campfire_start(host, &mut event);
+    }
+}
+/// What [`Hooks::cauldron_level_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CauldronLevelChangedEvent<'a> {
+    pub dimension: LevelDimension,
+    pub player: Option<u128>,
+    pub pos: BlockPos,
+    pub from_level: i32,
+    pub to_level: i32,
+    pub reason: &'a str,
+}
+pub fn dispatch_cauldron_level_changed(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    player: Option<u128>,
+    pos: BlockPos,
+    from_level: i32,
+    to_level: i32,
+    reason: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CauldronLevelChangedEvent {
+        dimension,
+        player,
+        pos,
+        from_level,
+        to_level,
+        reason,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.cauldron_level_changed(level, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::compost_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CompostItemEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_compost_item(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], item: &str) {
+    let mut event = CompostItemEvent { pos, item };
+    for mod_hook in mods {
+        mod_hook.compost_item(host, &mut event);
+    }
+}
+/// What [`Hooks::crafter_craft`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CrafterCraftEvent<'a> {
+    pub pos: [i32; 3],
+    pub recipe: &'a str,
+}
+pub fn dispatch_crafter_craft(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    recipe: &str,
+) {
+    let mut event = CrafterCraftEvent { pos, recipe };
+    for mod_hook in mods {
+        mod_hook.crafter_craft(host, &mut event);
+    }
+}
+/// What [`Hooks::creeper_ignite`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreeperIgniteEvent<'a> {
+    pub entity: u32,
+    pub player: u128,
+    pub item: &'a str,
+}
+pub fn dispatch_creeper_ignite(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    player: u128,
+    item: &str,
+) {
+    let mut event = CreeperIgniteEvent {
+        entity,
+        player,
+        item,
+    };
+    for mod_hook in mods {
+        mod_hook.creeper_ignite(host, &mut event);
+    }
+}
+/// What [`Hooks::creeper_power`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreeperPowerEvent {
+    pub entity: u32,
+    pub lightning: [f64; 3],
+}
+pub fn dispatch_creeper_power(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    lightning: [f64; 3],
+) {
+    let mut event = CreeperPowerEvent { entity, lightning };
+    for mod_hook in mods {
+        mod_hook.creeper_power(host, &mut event);
+    }
+}
+/// What [`Hooks::difficulty_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct DifficultyChangedEvent<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_difficulty_changed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    from: &str,
+    to: &str,
+) {
+    let mut event = DifficultyChangedEvent { from, to };
+    for mod_hook in mods {
+        mod_hook.difficulty_changed(host, &mut event);
+    }
+}
+/// What [`Hooks::dragon_egg_form`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct DragonEggFormEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+}
+pub fn dispatch_dragon_egg_form(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = DragonEggFormEvent { dimension, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.dragon_egg_form(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::enchant_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EnchantItemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub item: &'a ItemStack,
+    pub levels: i32,
+}
+pub fn dispatch_enchant_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    item: &ItemStack,
+    levels: i32,
+) {
+    let mut event = EnchantItemEvent {
+        player,
+        name,
+        pos,
+        item,
+        levels,
+    };
+    for mod_hook in mods {
+        mod_hook.enchant_item(host, &mut event);
+    }
+}
+/// What [`Hooks::entities_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntitiesLoadEvent<'a> {
+    pub dimension: &'a str,
+    pub chunk: [i32; 2],
+    pub count: usize,
+}
+pub fn dispatch_entities_load(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    chunk: [i32; 2],
+    count: usize,
+) {
+    let mut event = EntitiesLoadEvent {
+        dimension,
+        chunk,
+        count,
+    };
+    for mod_hook in mods {
+        mod_hook.entities_load(host, &mut event);
+    }
+}
+/// What [`Hooks::entities_unload`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntitiesUnloadEvent<'a> {
+    pub dimension: &'a str,
+    pub chunk: [i32; 2],
+    pub count: usize,
+}
+pub fn dispatch_entities_unload(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    chunk: [i32; 2],
+    count: usize,
+) {
+    let mut event = EntitiesUnloadEvent {
+        dimension,
+        chunk,
+        count,
+    };
+    for mod_hook in mods {
+        mod_hook.entities_unload(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_break_door`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityBreakDoorEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_entity_break_door(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    pos: [i32; 3],
+) {
+    let mut event = EntityBreakDoorEvent { entity, kind, pos };
+    for mod_hook in mods {
+        mod_hook.entity_break_door(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_breed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityBreedEvent {
+    pub parent: u32,
+    pub partner: u32,
+    pub child: Option<u32>,
+}
+pub fn dispatch_entity_breed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    parent: u32,
+    partner: u32,
+    child: Option<u32>,
+) {
+    let mut event = EntityBreedEvent {
+        parent,
+        partner,
+        child,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_breed(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_change_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityChangeBlockEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_entity_change_block(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    pos: [i32; 3],
+    from: &str,
+    to: &str,
+) {
+    let mut event = EntityChangeBlockEvent {
+        entity,
+        kind,
+        pos,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_change_block(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_enter_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityEnterBlockEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+    pub block: &'a str,
+}
+pub fn dispatch_entity_enter_block(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    pos: [i32; 3],
+    block: &str,
+) {
+    let mut event = EntityEnterBlockEvent {
+        entity,
+        kind,
+        pos,
+        block,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_enter_block(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_enter_love_mode`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityEnterLoveModeEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub player: Option<u128>,
+}
+pub fn dispatch_entity_enter_love_mode(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    player: Option<u128>,
+) {
+    let mut event = EntityEnterLoveModeEvent {
+        entity,
+        kind,
+        player,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_enter_love_mode(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_portal`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityPortalEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_entity_portal(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    entity: u32,
+    pos: [i32; 3],
+) {
+    let mut event = EntityPortalEvent {
+        dimension,
+        entity,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_portal(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_pose_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityPoseChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_entity_pose_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: &str,
+    to: &str,
+) {
+    let mut event = EntityPoseChangeEvent {
+        player,
+        name,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_pose_change(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_shoot_bow`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityShootBowEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub projectile: u32,
+    pub force: f32,
+}
+pub fn dispatch_entity_shoot_bow(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    projectile: u32,
+    force: f32,
+) {
+    let mut event = EntityShootBowEvent {
+        player,
+        name,
+        projectile,
+        force,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_shoot_bow(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_tame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTameEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub owner: Option<u128>,
+}
+pub fn dispatch_entity_tame(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    owner: Option<u128>,
+) {
+    let mut event = EntityTameEvent {
+        entity,
+        kind,
+        owner,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_tame(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTeleportEvent<'a> {
+    pub dimension: &'a str,
+    pub entity: u32,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+}
+pub fn dispatch_entity_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    entity: u32,
+    from: [f64; 3],
+    to: [f64; 3],
+) {
+    let mut event = EntityTeleportEvent {
+        dimension,
+        entity,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_teleport(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_toggle_glide`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityToggleGlideEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub gliding: bool,
+}
+pub fn dispatch_entity_toggle_glide(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    gliding: bool,
+) {
+    let mut event = EntityToggleGlideEvent {
+        player,
+        name,
+        gliding,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_toggle_glide(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_transform`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityTransformEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub transformed: u32,
+    pub transformed_kind: &'a str,
+}
+pub fn dispatch_entity_transform(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    transformed: u32,
+    transformed_kind: &str,
+) {
+    let mut event = EntityTransformEvent {
+        entity,
+        kind,
+        transformed,
+        transformed_kind,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_transform(host, &mut event);
+    }
+}
+/// What [`Hooks::exp_bottle`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExpBottleEvent {
+    pub pos: [f64; 3],
+    pub experience: u32,
+}
+pub fn dispatch_exp_bottle(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [f64; 3],
+    experience: u32,
+) {
+    let mut event = ExpBottleEvent { pos, experience };
+    for mod_hook in mods {
+        mod_hook.exp_bottle(host, &mut event);
+    }
+}
+/// What [`Hooks::experience_orb_pickup_listened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExperienceOrbPickupListenedEvent {
+    pub listened: bool,
+}
+pub fn dispatch_experience_orb_pickup_listened(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    listened: &mut bool,
+) {
+    let mut event = ExperienceOrbPickupListenedEvent {
+        listened: *listened,
+    };
+    for mod_hook in mods {
+        mod_hook.experience_orb_pickup_listened(host, &mut event);
+    }
+    *listened = event.listened;
+}
+/// What [`Hooks::experience_orb_pickup`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExperienceOrbPickupEvent<'a> {
+    pub player: u128,
+    pub dimension: &'a str,
+    pub orb: u32,
+    pub value: u32,
+    pub count: u32,
+}
+pub fn dispatch_experience_orb_pickup(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    dimension: &str,
+    orb: u32,
+    value: &mut u32,
+    count: &mut u32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = ExperienceOrbPickupEvent {
+        player,
+        dimension,
+        orb,
+        value: *value,
+        count: *count,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.experience_orb_pickup(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *value = event.value;
+    *count = event.count;
+}
+/// What [`Hooks::mending_repair`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MendingRepairEvent<'a> {
+    pub player: u128,
+    pub stack: &'a ItemStack,
+    pub experience: u32,
+    pub repair: u32,
+}
+pub fn dispatch_mending_repair(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    stack: &ItemStack,
+    experience: u32,
+    repair: &mut u32,
+) {
+    let mut event = MendingRepairEvent {
+        player,
+        stack,
+        experience,
+        repair: *repair,
+    };
+    for mod_hook in mods {
+        mod_hook.mending_repair(host, &mut event);
+    }
+    *repair = event.repair;
+}
+/// What [`Hooks::fire_odds`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FireOddsEvent {
+    pub dimension: LevelDimension,
+    pub state: BlockStateId,
+}
+pub fn dispatch_fire_odds(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    state: BlockStateId,
+    odds: &mut Option<(i32, i32)>,
+) {
+    if odds.is_some() {
+        return;
+    }
+    let mut event = FireOddsEvent { dimension, state };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.fire_odds(level, &mut event) {
+            *odds = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::smoke_source`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SmokeSourceEvent {
+    pub dimension: LevelDimension,
+    pub state: BlockStateId,
+}
+pub fn dispatch_smoke_source(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    state: BlockStateId,
+    smoke: &mut Option<bool>,
+) {
+    if smoke.is_some() {
+        return;
+    }
+    let mut event = SmokeSourceEvent { dimension, state };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.smoke_source(level, &mut event) {
+            *smoke = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::firework_explode`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FireworkExplodeEvent {
+    pub entity: u32,
+    pub pos: [f64; 3],
+    pub bursts: usize,
+}
+pub fn dispatch_firework_explode(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    pos: [f64; 3],
+    bursts: usize,
+) {
+    let mut event = FireworkExplodeEvent {
+        entity,
+        pos,
+        bursts,
+    };
+    for mod_hook in mods {
+        mod_hook.firework_explode(host, &mut event);
+    }
+}
+/// What [`Hooks::fluid_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FluidLevelChangeEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub fluid: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_fluid_level_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    fluid: &str,
+    from: i32,
+    to: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = FluidLevelChangeEvent {
+        dimension,
+        pos,
+        fluid,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.fluid_level_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::framerate_limit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FramerateLimitEvent {
+    pub focused: bool,
+    pub minimized: bool,
+    pub in_world: bool,
+    pub limit: i32,
+}
+pub fn dispatch_framerate_limit(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    focused: bool,
+    minimized: bool,
+    in_world: bool,
+    limit: &mut i32,
+) {
+    let mut event = FramerateLimitEvent {
+        focused,
+        minimized,
+        in_world,
+        limit: *limit,
+    };
+    for mod_hook in mods {
+        mod_hook.framerate_limit(host, &mut event);
+    }
+    *limit = event.limit;
+}
+/// What [`Hooks::furnace_burn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FurnaceBurnEvent<'a> {
+    pub pos: [i32; 3],
+    pub fuel: &'a str,
+}
+pub fn dispatch_furnace_burn(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], fuel: &str) {
+    let mut event = FurnaceBurnEvent { pos, fuel };
+    for mod_hook in mods {
+        mod_hook.furnace_burn(host, &mut event);
+    }
+}
+/// What [`Hooks::furnace_extract`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FurnaceExtractEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub item: &'a str,
+    pub count: u32,
+}
+pub fn dispatch_furnace_extract(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    item: &str,
+    count: u32,
+) {
+    let mut event = FurnaceExtractEvent {
+        player,
+        name,
+        pos,
+        item,
+        count,
+    };
+    for mod_hook in mods {
+        mod_hook.furnace_extract(host, &mut event);
+    }
+}
+/// What [`Hooks::furnace_smelt`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FurnaceSmeltEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+    pub result: &'a str,
+}
+pub fn dispatch_furnace_smelt(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    item: &str,
+    result: &str,
+) {
+    let mut event = FurnaceSmeltEvent { pos, item, result };
+    for mod_hook in mods {
+        mod_hook.furnace_smelt(host, &mut event);
+    }
+}
+/// What [`Hooks::furnace_start_smelt`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FurnaceStartSmeltEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_furnace_start_smelt(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    item: &str,
+) {
+    let mut event = FurnaceStartSmeltEvent { pos, item };
+    for mod_hook in mods {
+        mod_hook.furnace_start_smelt(host, &mut event);
+    }
+}
+/// What [`Hooks::game_event`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct GameEventEvent<'a> {
+    pub event: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_game_event(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    event: &str,
+    pos: [f64; 3],
+) {
+    let mut event_ = GameEventEvent { event, pos };
+    for mod_hook in mods {
+        mod_hook.game_event(host, &mut event_);
+    }
+}
+/// What [`Hooks::hopper_pickup_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HopperPickupItemEvent<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub item: &'a str,
+    pub count: u32,
+}
+pub fn dispatch_hopper_pickup_item(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    item: &str,
+    count: u32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = HopperPickupItemEvent {
+        dimension,
+        pos,
+        item,
+        count,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.hopper_pickup_item(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::ingredient`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct IngredientEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a serde_json::Map<String, Value>,
+    pub items: &'a mut Vec<String>,
+}
+pub fn dispatch_ingredient(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    items: &mut Vec<String>,
+) {
+    let mut event = IngredientEvent { kind, data, items };
+    for mod_hook in mods {
+        mod_hook.ingredient(&mut event);
+    }
+}
+/// What [`Hooks::inventory_block_start`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct InventoryBlockStartEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_inventory_block_start(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = InventoryBlockStartEvent { player, name, pos };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.inventory_block_start(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_crafted`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemCraftedEvent<'a> {
+    pub player: u128,
+    pub recipe: &'a str,
+    pub stack: &'a ItemStack,
+}
+pub fn dispatch_item_crafted(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    recipe: &str,
+    stack: &ItemStack,
+) {
+    let mut event = ItemCraftedEvent {
+        player,
+        recipe,
+        stack,
+    };
+    for mod_hook in mods {
+        mod_hook.item_crafted(host, &mut event);
+    }
+}
+/// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemEnergyBufferEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_energy_buffer(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    buffer: &mut Option<ItemEnergyBuffer>,
+) {
+    if buffer.is_some() {
+        return;
+    }
+    let mut event = ItemEnergyBufferEvent { item };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.item_energy_buffer(host, &mut event) {
+            *buffer = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemSpawnEvent<'a> {
+    pub entity: u32,
+    pub item: &'a str,
+    pub count: i32,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_item_spawn(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    item: &str,
+    count: i32,
+    pos: [f64; 3],
+) {
+    let mut event = ItemSpawnEvent {
+        entity,
+        item,
+        count,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.item_spawn(host, &mut event);
+    }
+}
+/// What [`Hooks::leaves_decay`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LeavesDecayEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+}
+pub fn dispatch_leaves_decay(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LeavesDecayEvent { dimension, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.leaves_decay(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::lightning_strike`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LightningStrikeEvent<'a> {
+    pub player: Option<u128>,
+    pub pos: [i32; 3],
+    pub cause: &'a str,
+}
+pub fn dispatch_lightning_strike(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    pos: [i32; 3],
+    cause: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LightningStrikeEvent { player, pos, cause };
+    for mod_hook in mods {
+        if matches!(mod_hook.lightning_strike(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::moisture_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MoistureChangeEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_moisture_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+    from: i32,
+    to: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = MoistureChangeEvent {
+        dimension,
+        pos,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.moisture_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::armor_stand_manipulate`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArmorStandManipulateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub stand_id: i32,
+    pub slot: &'a str,
+}
+pub fn dispatch_armor_stand_manipulate(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    stand_id: i32,
+    slot: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ArmorStandManipulateEvent {
+        player,
+        name,
+        stand_id,
+        slot,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.armor_stand_manipulate(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::bucket_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BucketEmptyEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub fluid: &'a str,
+}
+pub fn dispatch_bucket_empty(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    fluid: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BucketEmptyEvent {
+        player,
+        name,
+        pos,
+        fluid,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.bucket_empty(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::container_opened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ContainerOpenedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: Option<[i32; 3]>,
+}
+pub fn dispatch_container_opened(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    kind: &str,
+    pos: Option<[i32; 3]>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ContainerOpenedEvent {
+        player,
+        name,
+        kind,
+        pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.container_opened(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::creative_slot`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CreativeSlotEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub slot: i32,
+    pub item: &'a str,
+    pub count: i32,
+}
+pub fn dispatch_creative_slot(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    slot: i32,
+    item: &str,
+    count: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = CreativeSlotEvent {
+        player,
+        name,
+        slot,
+        item,
+        count,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.creative_slot(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::food_level_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FoodLevelChangedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_food_level_changed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: i32,
+    to: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = FoodLevelChangedEvent {
+        player,
+        name,
+        from,
+        to: *to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.food_level_changed(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *to = event.to;
+}
+/// What [`Hooks::hanging_place`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HangingPlaceEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_hanging_place(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    kind: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = HangingPlaceEvent {
+        player,
+        name,
+        kind,
+        pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.hanging_place(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::item_damaged`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemDamagedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+    pub amount: i32,
+}
+pub fn dispatch_item_damaged(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ItemDamagedEvent {
+        player,
+        name,
+        item,
+        amount: *amount,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.item_damaged(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::player_changed_dimension`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerChangedDimensionEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: &'a str,
+    pub to: &'a str,
+}
+pub fn dispatch_player_changed_dimension(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: &str,
+    to: &str,
+) {
+    let mut event = PlayerChangedDimensionEvent {
+        player,
+        name,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.player_changed_dimension(host, &mut event);
+    }
+}
+/// What [`Hooks::player_commands_sent`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerCommandsSentEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub names: &'a mut Vec<String>,
+}
+pub fn dispatch_player_commands_sent(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    names: &mut Vec<String>,
+) {
+    let mut event = PlayerCommandsSentEvent {
+        player,
+        name,
+        names,
+    };
+    for mod_hook in mods {
+        mod_hook.player_commands_sent(host, &mut event);
+    }
+}
+/// What [`Hooks::player_fish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerFishEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub state: i32,
+}
+pub fn dispatch_player_fish(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    state: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerFishEvent {
+        player,
+        name,
+        state,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_fish(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_flower_pot_manipulate`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerFlowerPotManipulateEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub plant: &'a str,
+}
+pub fn dispatch_player_flower_pot_manipulate(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    plant: &str,
+) {
+    let mut event = PlayerFlowerPotManipulateEvent {
+        player,
+        name,
+        pos,
+        plant,
+    };
+    for mod_hook in mods {
+        mod_hook.player_flower_pot_manipulate(host, &mut event);
+    }
+}
+/// What [`Hooks::player_game_mode_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerGameModeChangedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_player_game_mode_changed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: i32,
+    to: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerGameModeChangedEvent {
+        player,
+        name,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_game_mode_changed(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_insert_lectern_book`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerInsertLecternBookEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub book: &'a str,
+}
+pub fn dispatch_player_insert_lectern_book(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    book: &str,
+) {
+    let mut event = PlayerInsertLecternBookEvent {
+        player,
+        name,
+        pos,
+        book,
+    };
+    for mod_hook in mods {
+        mod_hook.player_insert_lectern_book(host, &mut event);
+    }
+}
+/// What [`Hooks::player_item_frame_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerItemFrameChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+    pub action: &'a str,
+    pub item: &'a str,
+    pub rotation: u8,
+}
+pub fn dispatch_player_item_frame_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+    action: &str,
+    item: &str,
+    rotation: u8,
+) {
+    let mut event = PlayerItemFrameChangeEvent {
+        player,
+        name,
+        entity_id,
+        action,
+        item,
+        rotation,
+    };
+    for mod_hook in mods {
+        mod_hook.player_item_frame_change(host, &mut event);
+    }
+}
+/// What [`Hooks::player_item_mend`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerItemMendEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+    pub repair: u32,
+    pub experience: u32,
+}
+pub fn dispatch_player_item_mend(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+    repair: u32,
+    experience: u32,
+) {
+    let mut event = PlayerItemMendEvent {
+        player,
+        name,
+        item,
+        repair,
+        experience,
+    };
+    for mod_hook in mods {
+        mod_hook.player_item_mend(host, &mut event);
+    }
+}
+/// What [`Hooks::player_lectern_page_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLecternPageChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub page: i32,
+}
+pub fn dispatch_player_lectern_page_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    page: i32,
+) {
+    let mut event = PlayerLecternPageChangeEvent {
+        player,
+        name,
+        pos,
+        page,
+    };
+    for mod_hook in mods {
+        mod_hook.player_lectern_page_change(host, &mut event);
+    }
+}
+/// What [`Hooks::player_login`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoginEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub reason: &'a mut Option<Text>,
+}
+pub fn dispatch_player_login(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    reason: &mut Option<Text>,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerLoginEvent {
+        player,
+        name,
+        reason,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_login(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_sprint`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSprintEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub sprinting: bool,
+}
+pub fn dispatch_player_sprint(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    sprinting: bool,
+) {
+    let mut event = PlayerSprintEvent {
+        player,
+        name,
+        sprinting,
+    };
+    for mod_hook in mods {
+        mod_hook.player_sprint(host, &mut event);
+    }
+}
+/// What [`Hooks::player_swap_hands`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSwapHandsEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_swap_hands(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerSwapHandsEvent { player, name };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_swap_hands(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_take_lectern_book`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTakeLecternBookEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub book: &'a str,
+}
+pub fn dispatch_player_take_lectern_book(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    book: &str,
+) {
+    let mut event = PlayerTakeLecternBookEvent {
+        player,
+        name,
+        pos,
+        book,
+    };
+    for mod_hook in mods {
+        mod_hook.player_take_lectern_book(host, &mut event);
+    }
+}
+/// What [`Hooks::player_teleported`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTeleportedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+    pub dimension: &'a str,
+}
+pub fn dispatch_player_teleported(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: [f64; 3],
+    to: [f64; 3],
+    dimension: &str,
+) {
+    let mut event = PlayerTeleportedEvent {
+        player,
+        name,
+        from,
+        to,
+        dimension,
+    };
+    for mod_hook in mods {
+        mod_hook.player_teleported(host, &mut event);
+    }
+}
+/// What [`Hooks::player_totem`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTotemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_totem(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerTotemEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_totem(host, &mut event);
+    }
+}
+/// What [`Hooks::resource_pack_status`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ResourcePackStatusEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub status: i32,
+}
+pub fn dispatch_resource_pack_status(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    status: i32,
+) {
+    let mut event = ResourcePackStatusEvent {
+        player,
+        name,
+        status,
+    };
+    for mod_hook in mods {
+        mod_hook.resource_pack_status(host, &mut event);
+    }
+}
+/// What [`Hooks::spawn_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SpawnChangeEvent {
+    pub pos: [i32; 3],
+    pub angle: [f32; 2],
+}
+pub fn dispatch_spawn_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    angle: [f32; 2],
+) {
+    let mut event = SpawnChangeEvent { pos, angle };
+    for mod_hook in mods {
+        mod_hook.spawn_change(host, &mut event);
+    }
+}
+/// What [`Hooks::tnt_primed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TntPrimedEvent {
+    pub player: Option<u128>,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_tnt_primed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = TntPrimedEvent { player, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.tnt_primed(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::vehicle_moved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleMovedEvent<'a> {
+    pub player: Option<u128>,
+    pub kind: &'a str,
+    pub from: [f64; 3],
+    pub to: [f64; 3],
+}
+pub fn dispatch_vehicle_moved(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    kind: &str,
+    from: [f64; 3],
+    to: [f64; 3],
+) {
+    let mut event = VehicleMovedEvent {
+        player,
+        kind,
+        from,
+        to,
+    };
+    for mod_hook in mods {
+        mod_hook.vehicle_moved(host, &mut event);
+    }
+}
+/// What [`Hooks::world_border_bounds_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldBorderBoundsChangedEvent {}
+pub fn dispatch_world_border_bounds_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = WorldBorderBoundsChangedEvent {};
+    for mod_hook in mods {
+        mod_hook.world_border_bounds_changed(host, &mut event);
+    }
+}
+/// What [`Hooks::world_border_center_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldBorderCenterChangedEvent {}
+pub fn dispatch_world_border_center_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = WorldBorderCenterChangedEvent {};
+    for mod_hook in mods {
+        mod_hook.world_border_center_changed(host, &mut event);
+    }
+}
+/// What [`Hooks::world_game_rule_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldGameRuleChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub rule: &'a str,
+    pub value: &'a str,
+}
+pub fn dispatch_world_game_rule_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    rule: &str,
+    value: &str,
+) {
+    let mut event = WorldGameRuleChangeEvent {
+        player,
+        name,
+        rule,
+        value,
+    };
+    for mod_hook in mods {
+        mod_hook.world_game_rule_change(host, &mut event);
+    }
+}
+/// What [`Hooks::note_play`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct NotePlayEvent<'a> {
+    pub dimension: LevelDimension,
+    pub player: Option<u128>,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    pub note: i32,
+}
+pub fn dispatch_note_play(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    player: Option<u128>,
+    pos: BlockPos,
+    instrument: &str,
+    note: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = NotePlayEvent {
+        dimension,
+        player,
+        pos,
+        instrument,
+        note,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.note_play(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_advancement_done`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAdvancementDoneEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub advancement: &'a str,
+}
+pub fn dispatch_player_advancement_done(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    advancement: &str,
+) {
+    let mut event = PlayerAdvancementDoneEvent {
+        player,
+        name,
+        advancement,
+    };
+    for mod_hook in mods {
+        mod_hook.player_advancement_done(host, &mut event);
+    }
+}
+/// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAttackCooldownResetEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_attack_cooldown_reset(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerAttackCooldownResetEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_attack_cooldown_reset(host, &mut event);
+    }
+}
+/// What [`Hooks::player_bed_enter`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBedEnterEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_player_bed_enter(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerBedEnterEvent { player, name, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_bed_enter(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_bed_leave`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBedLeaveEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_player_bed_leave(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+) {
+    let mut event = PlayerBedLeaveEvent { player, name, pos };
+    for mod_hook in mods {
+        mod_hook.player_bed_leave(host, &mut event);
+    }
+}
+/// What [`Hooks::player_bucket_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBucketEntityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: i32,
+    pub entity: &'a str,
+}
+pub fn dispatch_player_bucket_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: i32,
+    entity: &str,
+) {
+    let mut event = PlayerBucketEntityEvent {
+        player,
+        name,
+        entity_id,
+        entity,
+    };
+    for mod_hook in mods {
+        mod_hook.player_bucket_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_change_beacon_effect`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerChangeBeaconEffectEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub primary: &'a str,
+    pub secondary: &'a str,
+}
+pub fn dispatch_player_change_beacon_effect(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    primary: &str,
+    secondary: &str,
+) {
+    let mut event = PlayerChangeBeaconEffectEvent {
+        player,
+        name,
+        pos,
+        primary,
+        secondary,
+    };
+    for mod_hook in mods {
+        mod_hook.player_change_beacon_effect(host, &mut event);
+    }
+}
+/// What [`Hooks::player_change_main_hand`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerChangeMainHandEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub left: bool,
+}
+pub fn dispatch_player_change_main_hand(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    left: bool,
+) {
+    let mut event = PlayerChangeMainHandEvent { player, name, left };
+    for mod_hook in mods {
+        mod_hook.player_change_main_hand(host, &mut event);
+    }
+}
+/// What [`Hooks::player_deep_sleep`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerDeepSleepEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_deep_sleep(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerDeepSleepEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_deep_sleep(host, &mut event);
+    }
+}
+/// What [`Hooks::player_edit_book`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerEditBookEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pages: i32,
+    pub signing: bool,
+}
+pub fn dispatch_player_edit_book(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pages: i32,
+    signing: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerEditBookEvent {
+        player,
+        name,
+        pages,
+        signing,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_edit_book(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_egg_throw`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerEggThrowEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_egg_throw(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerEggThrowEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_egg_throw(host, &mut event);
+    }
+}
+/// What [`Hooks::player_elytra_boost`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerElytraBoostEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_elytra_boost(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerElytraBoostEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_elytra_boost(host, &mut event);
+    }
+}
+/// What [`Hooks::player_exp_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerExpChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub amount: i32,
+}
+pub fn dispatch_player_exp_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    amount: &mut i32,
+) {
+    let mut event = PlayerExpChangeEvent {
+        player,
+        name,
+        amount: *amount,
+    };
+    for mod_hook in mods {
+        mod_hook.player_exp_change(host, &mut event);
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::player_exp_cooldown_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerExpCooldownChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub ticks: u32,
+}
+pub fn dispatch_player_exp_cooldown_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    ticks: u32,
+) {
+    let mut event = PlayerExpCooldownChangeEvent {
+        player,
+        name,
+        ticks,
+    };
+    for mod_hook in mods {
+        mod_hook.player_exp_cooldown_change(host, &mut event);
+    }
+}
+/// What [`Hooks::player_item_cooldown`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerItemCooldownEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+    pub ticks: i32,
+}
+pub fn dispatch_player_item_cooldown(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+    ticks: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerItemCooldownEvent {
+        player,
+        name,
+        item,
+        ticks,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_item_cooldown(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_item_held`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerItemHeldEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from_slot: i32,
+    pub to_slot: i32,
+}
+pub fn dispatch_player_item_held(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from_slot: i32,
+    to_slot: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerItemHeldEvent {
+        player,
+        name,
+        from_slot,
+        to_slot,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_item_held(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_locale_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLocaleChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub locale: &'a str,
+}
+pub fn dispatch_player_locale_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    locale: &str,
+) {
+    let mut event = PlayerLocaleChangeEvent {
+        player,
+        name,
+        locale,
+    };
+    for mod_hook in mods {
+        mod_hook.player_locale_change(host, &mut event);
+    }
+}
+/// What [`Hooks::player_loom_pattern_select`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLoomPatternSelectEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pattern: i32,
+}
+pub fn dispatch_player_loom_pattern_select(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pattern: i32,
+) {
+    let mut event = PlayerLoomPatternSelectEvent {
+        player,
+        name,
+        pattern,
+    };
+    for mod_hook in mods {
+        mod_hook.player_loom_pattern_select(host, &mut event);
+    }
+}
+/// What [`Hooks::player_map_filled`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerMapFilledEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub map_id: i32,
+}
+pub fn dispatch_player_map_filled(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    map_id: i32,
+) {
+    let mut event = PlayerMapFilledEvent {
+        player,
+        name,
+        map_id,
+    };
+    for mod_hook in mods {
+        mod_hook.player_map_filled(host, &mut event);
+    }
+}
+/// What [`Hooks::player_name_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerNameEntityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+    pub entity_name: &'a str,
+}
+pub fn dispatch_player_name_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+    entity_name: &str,
+) {
+    let mut event = PlayerNameEntityEvent {
+        player,
+        name,
+        entity_id,
+        entity_name,
+    };
+    for mod_hook in mods {
+        mod_hook.player_name_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_open_sign`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerOpenSignEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub front: bool,
+}
+pub fn dispatch_player_open_sign(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    front: bool,
+) {
+    let mut event = PlayerOpenSignEvent {
+        player,
+        name,
+        pos,
+        front,
+    };
+    for mod_hook in mods {
+        mod_hook.player_open_sign(host, &mut event);
+    }
+}
+/// What [`Hooks::player_pick_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerPickItemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from_entity: bool,
+    pub pos: [i32; 3],
+    pub entity_id: i32,
+}
+pub fn dispatch_player_pick_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from_entity: bool,
+    pos: [i32; 3],
+    entity_id: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerPickItemEvent {
+        player,
+        name,
+        from_entity,
+        pos,
+        entity_id,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_pick_item(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_pickup_arrow`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerPickupArrowEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+    pub item: &'a str,
+}
+pub fn dispatch_player_pickup_arrow(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+    item: &str,
+) {
+    let mut event = PlayerPickupArrowEvent {
+        player,
+        name,
+        entity_id,
+        item,
+    };
+    for mod_hook in mods {
+        mod_hook.player_pickup_arrow(host, &mut event);
+    }
+}
+/// What [`Hooks::player_portal`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerPortalEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from_dimension: &'a str,
+    pub to_dimension: &'a str,
+    pub cause: &'a str,
+}
+pub fn dispatch_player_portal(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from_dimension: &str,
+    to_dimension: &str,
+    cause: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerPortalEvent {
+        player,
+        name,
+        from_dimension,
+        to_dimension,
+        cause,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_portal(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_recipe_book_click`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRecipeBookClickEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub recipe: &'a str,
+    pub all: bool,
+}
+pub fn dispatch_player_recipe_book_click(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    recipe: &str,
+    all: bool,
+) {
+    let mut event = PlayerRecipeBookClickEvent {
+        player,
+        name,
+        recipe,
+        all,
+    };
+    for mod_hook in mods {
+        mod_hook.player_recipe_book_click(host, &mut event);
+    }
+}
+/// What [`Hooks::player_recipe_discovered`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRecipeDiscoveredEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub recipe: &'a str,
+}
+pub fn dispatch_player_recipe_discovered(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    recipe: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerRecipeDiscoveredEvent {
+        player,
+        name,
+        recipe,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_recipe_discovered(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_riptide`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRiptideEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_riptide(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerRiptideEvent { player, name };
+    for mod_hook in mods {
+        mod_hook.player_riptide(host, &mut event);
+    }
+}
+/// What [`Hooks::player_shear_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerShearEntityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: i32,
+    pub off_hand: bool,
+}
+pub fn dispatch_player_shear_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: i32,
+    off_hand: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerShearEntityEvent {
+        player,
+        name,
+        entity_id,
+        off_hand,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.player_shear_entity(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_shield_disable`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerShieldDisableEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub ticks: u32,
+}
+pub fn dispatch_player_shield_disable(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    ticks: u32,
+) {
+    let mut event = PlayerShieldDisableEvent {
+        player,
+        name,
+        ticks,
+    };
+    for mod_hook in mods {
+        mod_hook.player_shield_disable(host, &mut event);
+    }
+}
+/// What [`Hooks::player_spawn_point_set`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSpawnPointSetEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub cause: &'a str,
+}
+pub fn dispatch_player_spawn_point_set(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    dimension: &str,
+    pos: [i32; 3],
+    cause: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerSpawnPointSetEvent {
+        player,
+        name,
+        dimension,
+        pos,
+        cause,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_spawn_point_set(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_stonecutter_recipe_select`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStonecutterRecipeSelectEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub recipe: i32,
+}
+pub fn dispatch_player_stonecutter_recipe_select(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    recipe: i32,
+) {
+    let mut event = PlayerStonecutterRecipeSelectEvent {
+        player,
+        name,
+        recipe,
+    };
+    for mod_hook in mods {
+        mod_hook.player_stonecutter_recipe_select(host, &mut event);
+    }
+}
+/// What [`Hooks::player_stop_spectating_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStopSpectatingEntityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: i32,
+}
+pub fn dispatch_player_stop_spectating_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: i32,
+) {
+    let mut event = PlayerStopSpectatingEntityEvent {
+        player,
+        name,
+        entity_id,
+    };
+    for mod_hook in mods {
+        mod_hook.player_stop_spectating_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_swap_with_equipment_slot`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerSwapWithEquipmentSlotEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub slot: &'a str,
+}
+pub fn dispatch_player_swap_with_equipment_slot(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    slot: &str,
+) {
+    let mut event = PlayerSwapWithEquipmentSlotEvent { player, name, slot };
+    for mod_hook in mods {
+        mod_hook.player_swap_with_equipment_slot(host, &mut event);
+    }
+}
+/// What [`Hooks::player_teleport_end_gateway`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTeleportEndGatewayEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub gateway: [i32; 3],
+}
+pub fn dispatch_player_teleport_end_gateway(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    gateway: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerTeleportEndGatewayEvent {
+        player,
+        name,
+        gateway,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.player_teleport_end_gateway(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::player_toggle_entity_age_lock`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerToggleEntityAgeLockEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+    pub locked: bool,
+}
+pub fn dispatch_player_toggle_entity_age_lock(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+    locked: bool,
+) {
+    let mut event = PlayerToggleEntityAgeLockEvent {
+        player,
+        name,
+        entity_id,
+        locked,
+    };
+    for mod_hook in mods {
+        mod_hook.player_toggle_entity_age_lock(host, &mut event);
+    }
+}
+/// What [`Hooks::player_trade`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerTradeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+}
+pub fn dispatch_player_trade(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+) {
+    let mut event = PlayerTradeEvent {
+        player,
+        name,
+        entity_id,
+    };
+    for mod_hook in mods {
+        mod_hook.player_trade(host, &mut event);
+    }
+}
+/// What [`Hooks::player_unleash_entity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerUnleashEntityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub entity_id: u32,
+}
+pub fn dispatch_player_unleash_entity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    entity_id: u32,
+) {
+    let mut event = PlayerUnleashEntityEvent {
+        player,
+        name,
+        entity_id,
+    };
+    for mod_hook in mods {
+        mod_hook.player_unleash_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_velocity`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerVelocityEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub velocity: [f64; 3],
+}
+pub fn dispatch_player_velocity(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    velocity: [f64; 3],
+) {
+    let mut event = PlayerVelocityEvent {
+        player,
+        name,
+        velocity,
+    };
+    for mod_hook in mods {
+        mod_hook.player_velocity(host, &mut event);
+    }
+}
+/// What [`Hooks::portal_create`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PortalCreateEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_portal_create(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+) {
+    let mut event = PortalCreateEvent { dimension, pos };
+    for mod_hook in mods {
+        mod_hook.portal_create(host, &mut event);
+    }
+}
+/// What [`Hooks::potion_splash`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotionSplashEvent<'a> {
+    pub item: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_potion_splash(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    pos: [f64; 3],
+) {
+    let mut event = PotionSplashEvent { item, pos };
+    for mod_hook in mods {
+        mod_hook.potion_splash(host, &mut event);
+    }
+}
+/// What [`Hooks::prepare_anvil`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareAnvilEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub cost: i32,
+}
+pub fn dispatch_prepare_anvil(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    cost: &mut i32,
+    result: &mut Option<ItemStack>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PrepareAnvilEvent {
+        player,
+        name,
+        pos,
+        cost: *cost,
+    };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.prepare_anvil(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
+    }
+    *cost = event.cost;
+}
+/// What [`Hooks::prepare_grindstone`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareGrindstoneEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_prepare_grindstone(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    result: &mut Option<ItemStack>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PrepareGrindstoneEvent { player, name, pos };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.prepare_grindstone(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::prepare_item_craft`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareItemCraftEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: Option<[i32; 3]>,
+}
+pub fn dispatch_prepare_item_craft(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: Option<[i32; 3]>,
+    result: &mut Option<ItemStack>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PrepareItemCraftEvent { player, name, pos };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.prepare_item_craft(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::prepare_item_enchant`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareItemEnchantEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub costs: &'a mut [i32; 3],
+}
+pub fn dispatch_prepare_item_enchant(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    costs: &mut [i32; 3],
+) {
+    let mut event = PrepareItemEnchantEvent {
+        player,
+        name,
+        pos,
+        costs,
+    };
+    for mod_hook in mods {
+        mod_hook.prepare_item_enchant(host, &mut event);
+    }
+}
+/// What [`Hooks::prepare_smithing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareSmithingEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_prepare_smithing(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    result: &mut Option<ItemStack>,
+) {
+    if result.is_some() {
+        return;
+    }
+    let mut event = PrepareSmithingEvent { player, name, pos };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.prepare_smithing(host, &mut event) {
+            *result = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::projectile_launch`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ProjectileLaunchEvent<'a> {
+    pub player: Option<u128>,
+    pub name: &'a str,
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_projectile_launch(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    name: &str,
+    entity: u32,
+    kind: &str,
+) {
+    let mut event = ProjectileLaunchEvent {
+        player,
+        name,
+        entity,
+        kind,
+    };
+    for mod_hook in mods {
+        mod_hook.projectile_launch(host, &mut event);
+    }
+}
+/// What [`Hooks::raid_spawn_wave`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RaidSpawnWaveEvent {
+    pub raid: i32,
+    pub pos: [i32; 3],
+    pub wave: i32,
+    pub raiders: usize,
+}
+pub fn dispatch_raid_spawn_wave(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    raid: i32,
+    pos: [i32; 3],
+    wave: i32,
+    raiders: usize,
+) {
+    let mut event = RaidSpawnWaveEvent {
+        raid,
+        pos,
+        wave,
+        raiders,
+    };
+    for mod_hook in mods {
+        mod_hook.raid_spawn_wave(host, &mut event);
+    }
+}
+/// What [`Hooks::raid_state_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RaidStateChangeEvent<'a> {
+    pub raid: i32,
+    pub pos: [i32; 3],
+    pub state: &'a str,
+}
+pub fn dispatch_raid_state_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    raid: i32,
+    pos: [i32; 3],
+    state: &str,
+) {
+    let mut event = RaidStateChangeEvent { raid, pos, state };
+    for mod_hook in mods {
+        mod_hook.raid_state_change(host, &mut event);
+    }
+}
+/// What [`Hooks::sculk_bloom`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SculkBloomEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_sculk_bloom(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+) {
+    let mut event = SculkBloomEvent { dimension, pos };
+    for mod_hook in mods {
+        mod_hook.sculk_bloom(host, &mut event);
+    }
+}
+/// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SpongeAbsorbEvent {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+}
+pub fn dispatch_sponge_absorb(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    dimension: LevelDimension,
+    pos: BlockPos,
+) {
+    let mut event = SpongeAbsorbEvent { dimension, pos };
+    for mod_hook in mods {
+        mod_hook.sponge_absorb(level, &mut event);
+    }
+}
+/// What [`Hooks::tab_complete`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TabCompleteEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub command: &'a str,
+    pub range: [usize; 2],
+    pub suggestions: &'a mut Vec<Suggestion>,
+}
+pub fn dispatch_tab_complete(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    command: &str,
+    range: [usize; 2],
+    suggestions: &mut Vec<Suggestion>,
+) {
+    let mut event = TabCompleteEvent {
+        player,
+        name,
+        command,
+        range,
+        suggestions,
+    };
+    for mod_hook in mods {
+        mod_hook.tab_complete(host, &mut event);
+    }
+}
+/// What [`Hooks::target_hit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TargetHitEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub strength: i32,
+}
+pub fn dispatch_target_hit(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    strength: i32,
+) {
+    let mut event = TargetHitEvent {
+        dimension,
+        pos,
+        strength,
+    };
+    for mod_hook in mods {
+        mod_hook.target_hit(host, &mut event);
+    }
+}
+/// What [`Hooks::thunder_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ThunderChangeEvent<'a> {
+    pub dimension: &'a str,
+    pub thundering: bool,
+}
+pub fn dispatch_thunder_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    thundering: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ThunderChangeEvent {
+        dimension,
+        thundering,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.thunder_change(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::time_skip`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TimeSkipEvent<'a> {
+    pub dimension: &'a str,
+    pub from: i64,
+    pub to: i64,
+    pub cause: &'a str,
+}
+pub fn dispatch_time_skip(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    from: i64,
+    to: i64,
+    cause: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = TimeSkipEvent {
+        dimension,
+        from,
+        to,
+        cause,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.time_skip(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::trade_select`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeSelectEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub villager: Option<u32>,
+    pub index: usize,
+}
+pub fn dispatch_trade_select(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    villager: Option<u32>,
+    index: usize,
+) {
+    let mut event = TradeSelectEvent {
+        player,
+        name,
+        villager,
+        index,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VaultChangeStateEvent<'a> {
+    pub dimension: &'a str,
+    pub pos: [i32; 3],
+    pub state: &'a str,
+}
+pub fn dispatch_vault_change_state(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    pos: [i32; 3],
+    state: &str,
+) {
+    let mut event = VaultChangeStateEvent {
+        dimension,
+        pos,
+        state,
+    };
+    for mod_hook in mods {
+        mod_hook.vault_change_state(host, &mut event);
+    }
+}
+/// What [`Hooks::weather_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WeatherChangeEvent<'a> {
+    pub dimension: &'a str,
+    pub raining: bool,
+    pub thundering: bool,
+}
+pub fn dispatch_weather_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    raining: bool,
+    thundering: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = WeatherChangeEvent {
+        dimension,
+        raining,
+        thundering,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.weather_change(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::whitelist_state_update`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WhitelistStateUpdateEvent {
+    pub enabled: bool,
+}
+pub fn dispatch_whitelist_state_update(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    enabled: bool,
+) {
+    let mut event = WhitelistStateUpdateEvent { enabled };
+    for mod_hook in mods {
+        mod_hook.whitelist_state_update(host, &mut event);
+    }
+}
+/// What [`Hooks::world_saved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldSavedEvent {
+    pub wait: bool,
+}
+pub fn dispatch_world_saved(host: &mut dyn Host, mods: &[Box<dyn Hooks>], wait: bool) {
+    let mut event = WorldSavedEvent { wait };
+    for mod_hook in mods {
+        mod_hook.world_saved(host, &mut event);
     }
 }

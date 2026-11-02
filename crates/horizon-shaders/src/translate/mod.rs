@@ -1025,21 +1025,25 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
     };
     // naga's frontend refuses a few things GL takes: a scalar's swizzle (`f.x`, GLSL 4.20), a
     // matrix column's component written to (`m[1].y =`) and `min`/`max`/`clamp` of a `uint` and
-    // integer literals. Each refusal is rewritten where naga points, and the source parsed again.
+    // integer literals, and a function prototype declared again. Each refusal is rewritten where
+    // naga points, and the source parsed again.
     let mut text = std::borrow::Cow::Borrowed(text);
     let mut tries = 0;
-    let module = loop {
+    let mut module = loop {
         tries += 1;
         match Frontend::default().parse(&Options::from(stage.kind), &text) {
             Ok(m) => break m,
-            Err(e) => match (e.errors.iter())
-                .find_map(|e| scalar_swizzle(&text, e).or_else(|| unsigned_literals(&text, e)))
-            {
+            Err(e) => match e.errors.iter().find_map(|e| {
+                scalar_swizzle(&text, e)
+                    .or_else(|| unsigned_literals(&text, e))
+                    .or_else(|| repeated_prototype(&text, e))
+            }) {
                 Some(fixed) if tries < 256 => text = fixed.into(),
                 _ => return parse(&text),
             },
         }
     };
+    end_returns_give_zero(&mut module);
     Validator::new(ValidationFlags::all(), Capabilities::all())
         .subgroup_operations(naga::valid::SubgroupOperationSet::all())
         .subgroup_stages(naga::valid::ShaderStages::all())
@@ -1057,6 +1061,42 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             vec![at(&text, span, message)]
         })?;
     Ok(module)
+}
+
+/// GLSL lets a function that returns a value reach its end without a `return`: what it returns
+/// then is undefined (GLSL 4.60, 6.1). naga's frontend ends every body that can reach its end
+/// with a `return` of no value, which its validator refuses in such a function; those returns
+/// give the result type's zero instead.
+fn end_returns_give_zero(module: &mut naga::Module) {
+    fn fill(block: &mut naga::Block, zero: &mut dyn FnMut() -> naga::Handle<naga::Expression>) {
+        // The ends naga's frontend gives a `return` to (`naga::proc::ensure_block_returns`).
+        match block.last_mut() {
+            Some(naga::Statement::Block(b)) => fill(b, zero),
+            Some(naga::Statement::If { accept, reject, .. }) => {
+                fill(accept, zero);
+                fill(reject, zero);
+            }
+            Some(naga::Statement::Switch { cases, .. }) => {
+                for case in cases.iter_mut().filter(|c| !c.fall_through) {
+                    fill(&mut case.body, zero);
+                }
+            }
+            Some(naga::Statement::Return { value }) if value.is_none() => *value = Some(zero()),
+            _ => {}
+        }
+    }
+    for (_, f) in module.functions.iter_mut() {
+        let Some(ty) = f.result.as_ref().map(|r| r.ty) else {
+            continue;
+        };
+        let (body, expressions) = (&mut f.body, &mut f.expressions);
+        let mut made = None;
+        fill(body, &mut || {
+            *made.get_or_insert_with(|| {
+                expressions.append(naga::Expression::ZeroValue(ty), naga::Span::default())
+            })
+        });
+    }
 }
 
 /// `text` without the scalar swizzle naga's frontend refused (`e`, GLSL 4.20's `f.x`, `f.xx`): one
@@ -1129,6 +1169,33 @@ fn unsigned_literals(text: &str, e: &naga::front::glsl::Error) -> Option<String>
         i += 1;
     }
     changed.then(|| format!("{}{out}{}", &text[..r.start], &text[r.end..]))
+}
+
+/// `text` without the function prototype naga's frontend refused as declared before (`e`): GLSL
+/// lets a function be declared again (packs include the same helper's prototype from two
+/// files). The prototype and its `;` turn to spaces, keeping lines where they are; one with
+/// qualifiers before its type (naga's span starts at the type) is left alone.
+fn repeated_prototype(text: &str, e: &naga::front::glsl::Error) -> Option<String> {
+    if e.kind.to_string() != "Prototype already defined" {
+        return None;
+    }
+    let r = e.meta.to_range()?;
+    let end = r.end + text.get(r.end..)?.find(';')? + 1;
+    if !text.get(r.end..end - 1)?.trim().is_empty() {
+        return None;
+    }
+    let before = text.get(..r.start)?.trim_end();
+    let line = &before[before.rfind('\n').map_or(0, |n| n + 1)..];
+    let boundary =
+        before.is_empty() || before.ends_with([';', '}']) || line.trim_start().starts_with('#');
+    if !boundary {
+        return None;
+    }
+    let blank: String = text[r.start..end]
+        .chars()
+        .map(|c| if c == '\n' { '\n' } else { ' ' })
+        .collect();
+    Some(format!("{}{blank}{}", &text[..r.start], &text[end..]))
 }
 
 /// Where the operand that ends right before byte `end` begins: a name, a call or an index (with
@@ -1774,6 +1841,20 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// A non-void function whose only `return` has unreachable code after it and no trailing
+    /// return at the end of the block (which naga would otherwise end with `return;` without a value).
+    #[test]
+    fn early_return_without_trailing_return_translates() {
+        let fsh = "#version 120\n\
+                   vec3 exposure(vec3 color) {\n    return color * 3.5;\n    int x = 1;\n}\n\
+                   void main() { gl_FragColor = vec4(exposure(vec3(1.0)), 1.0); }\n";
+        program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     /// GLSL's `dot` and `normalize` take a `float` too (genType); naga's take vectors only. A
     /// pack's own `dot` is kept.
     #[test]
@@ -1823,6 +1904,104 @@ mod tests {
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// A function that returns a value may reach its end without a `return` (GLSL 4.60, 6.1:
+    /// the value is undefined): after a loop (Lux's `MaxIdx`), an `if` without `else`, a
+    /// `switch` without `default`; it returns zero there. A function ending in its own
+    /// `return` keeps it.
+    #[test]
+    fn functions_reaching_their_end_return_zero() {
+        let fsh = "#version 330\nuniform int k;\nout vec4 c;\n\
+                   struct S { float a; ivec2 b; };\n\
+                   float after_loop(float x) {\n    for (int i = 0; i < 4; i++) {\n        \
+                   if (x > float(i)) return float(i);\n    }\n}\n\
+                   vec3 after_if(float x) { if (x > 0.5) return vec3(x); }\n\
+                   int after_switch() { switch (k) { case 0: return 1; case 1: return 2; } }\n\
+                   S after_struct(float x) { if (x > 0.5) { return S(x, ivec2(k)); } }\n\
+                   float own(float x) { return x * 2.0; }\n\
+                   void main() {\n    float x = float(k) * 0.25;\n    \
+                   c = vec4(after_loop(x) + after_if(x).x, float(after_switch()), \
+                   after_struct(x).a, own(x));\n}\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let zero_returns = |name: &str| {
+            let (_, f) = (p.fragment.functions.iter())
+                .find(|(_, f)| f.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} missing"));
+            fn count(f: &naga::Function, b: &naga::Block) -> usize {
+                b.iter()
+                    .map(|s| match s {
+                        naga::Statement::Return { value: Some(v) } => matches!(
+                            f.expressions[*v],
+                            naga::Expression::ZeroValue(t) if Some(t) == f.result.as_ref().map(|r| r.ty)
+                        )
+                        .into(),
+                        naga::Statement::Block(b) => count(f, b),
+                        naga::Statement::If { accept, reject, .. } => {
+                            count(f, accept) + count(f, reject)
+                        }
+                        naga::Statement::Switch { cases, .. } => {
+                            cases.iter().map(|c| count(f, &c.body)).sum()
+                        }
+                        naga::Statement::Loop { body, continuing, .. } => {
+                            count(f, body) + count(f, continuing)
+                        }
+                        _ => 0,
+                    })
+                    .sum()
+            }
+            count(f, &f.body)
+        };
+        for name in ["after_loop", "after_if", "after_switch", "after_struct"] {
+            assert!(zero_returns(name) > 0, "{name}: its end returns no zero");
+        }
+        assert_eq!(zero_returns("own"), 0, "own: its own return was replaced");
+    }
+
+    /// A function may be declared again (GLSL 4.60, 6.1), before or after its definition: Bloop
+    /// includes the same helper's prototype from two files.
+    #[test]
+    fn functions_declared_again_translate() {
+        let fsh = "#version 330\nuniform float k;\nout vec4 c;\n\
+                   float f(float x);\nfloat f(float x);\nvec2 g(vec2 v, float s);\n\
+                   float f(float x) { return x * 2.0; }\nfloat f(float x);\n\
+                   vec2 g(vec2 v, float s) { return v * s; }\nvec2 g(vec2 v,\n       float s);\n\
+                   void main() { c = vec4(f(k), g(vec2(k), 3.0), 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        for name in ["f", "g"] {
+            assert!(
+                (p.fragment.functions.iter()).any(|(_, f)| f.name.as_deref() == Some(name)),
+                "{name} missing"
+            );
+        }
+    }
+
+    /// A prototype declared again leaves the lines after it where they were: an error below it
+    /// still names its own line.
+    #[test]
+    fn errors_after_a_prototype_declared_again_keep_their_line() {
+        let fsh = "#version 330\nout vec4 c;\nfloat f(float x);\nfloat f(float x\n);\n\
+                   float f(float x) { return x; }\nvoid main() { c = vec4(f(nowhere)); }\n";
+        let errors = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .err()
+        .expect("`nowhere` is not declared");
+        assert!(
+            errors
+                .iter()
+                .all(|e| e.line == 7 && e.message.contains("nowhere")),
+            "{errors:?}"
+        );
     }
 
     /// `if (c) return; else ...` keeps its `else`: the statements the translation guards with
