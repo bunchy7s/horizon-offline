@@ -173,7 +173,8 @@ impl EntityOutline {
     }
 
     /// Uploads this frame's silhouettes (`LevelRenderer.currentFrameRendersEntityOutline`
-    /// when there are any) and sizes the targets like the window.
+    /// when there are any) and sizes the targets like the window. A frame with
+    /// none gives the targets' video memory back until an entity glows again.
     pub(super) fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -184,6 +185,7 @@ impl EntityOutline {
     ) {
         self.quads = (silhouettes.len() / 4) as u32;
         if self.quads == 0 {
+            self.targets = None;
             return;
         }
         let vertices = silhouettes.len() as u64;

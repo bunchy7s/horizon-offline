@@ -179,7 +179,8 @@ and the container screen tests are unchanged).
 ### Splitscreen (`splitscreen`, default off)
 
 **Options → Horizon Settings... → Splitscreen...** turns local joining on or off at once.
-In P1's single-player world, another controller can press a button, then A to join. Each
+In P1's single-player world, a controller P1 isn't using can press a button, then A to join
+(or Y to play as P1, while P1 has no controller). Each
 player picks an instance-local profile with its own options and saved progress. LB/RB on
 the profile page move the view between shared positions, a new window or another monitor.
 A joined player's **Splitscreen Settings** in the pause menu switches profiles in place;

@@ -62,6 +62,7 @@ fn slime_at(world: &World, facts: &BlockFacts, x: i32, y: i32, z: i32) -> bool {
 }
 
 mod fluids;
+pub use fluids::update_entity_fluids;
 
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
@@ -88,6 +89,8 @@ pub struct ItemEntity {
     /// `Entity.stuckSpeedMultiplier`: set after a move by the cobweb or powder snow
     /// the item is in, scales (and stops) the next one.
     pub stuck: Vec3,
+    /// `Entity.noGravity` (`NoGravity` in its save): `applyGravity` does nothing.
+    pub no_gravity: bool,
 }
 /// Environment results needed by the entity owner, including lethal lava damage.
 #[derive(Debug)]
@@ -228,7 +231,9 @@ impl ItemEntity {
                 self.velocity.z * 0.95,
             );
         } else {
-            self.velocity.y -= 0.04;
+            if !self.no_gravity {
+                self.velocity.y -= 0.04;
+            }
         }
         let horizontal = self.velocity.x * self.velocity.x + self.velocity.z * self.velocity.z;
         // ItemEntity.tick: skip move 3 of 4 ticks while grounded with no
@@ -658,6 +663,8 @@ pub struct ExperienceOrb {
     pub ticks: u32,
     /// `ExperienceOrb.health`: damage wears it down from 5 (`hurtServer`).
     pub health: i32,
+    /// `Entity.noGravity`: `ExperienceOrb.tick`'s `applyGravity` does nothing.
+    pub no_gravity: bool,
 }
 impl ExperienceOrb {
     /// `ExperienceOrb.hurtServer`: the damage comes off the health as an
@@ -774,7 +781,7 @@ impl ExperienceOrb {
                 (self.velocity.y + 5.0e-4).min(0.06),
                 self.velocity.z * 0.99,
             );
-        } else if !colliding {
+        } else if !colliding && !self.no_gravity {
             self.velocity.y -= 0.03;
         }
         if facts.get(block).fluid == Fluid::Lava {
@@ -1481,6 +1488,7 @@ mod fire_environment_tests {
             )
             .unwrap();
         let make = |id: &str| ItemEntity {
+            no_gravity: false,
             id: 1,
             thrower: None,
             target: None,
@@ -1627,6 +1635,7 @@ mod merge_tests {
     fn item(id: &str, count: u32, x: f64, age: u32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
+            no_gravity: false,
             id: 0,
             thrower: None,
             target: None,
@@ -1915,9 +1924,57 @@ mod honey_slide_tests {
         );
     }
 
+    /// `Entity.sendBubbleColumnParticles` is for the top of a column only: an item
+    /// inside the column shows nothing, one in its surface block shows the block.
+    #[test]
+    fn an_item_at_the_top_of_a_bubble_column_is_at_its_surface() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let mut column = assets
+            .registry
+            .state(
+                assets
+                    .registry
+                    .default_state("minecraft:bubble_column")
+                    .unwrap(),
+            )
+            .unwrap()
+            .clone();
+        column.properties.insert("drag".into(), "false".into());
+        let column = assets.registry.resolve(&column).unwrap();
+        for y in 4..=8 {
+            world.set(20, y, 20, column).unwrap();
+        }
+        let surfaces = |y: f64| {
+            let item = falling_item(20.5, y, 20.5, 0.0, 0.0, 0.0);
+            crate::motion::bubble_column_surfaces(
+                &world,
+                assets.registry,
+                &facts,
+                &collision,
+                item.bounds(),
+            )
+        };
+        assert_eq!(surfaces(8.2), vec![BlockPos::new(20, 8, 20)]);
+        assert_eq!(surfaces(5.0), Vec::new());
+        // Straddling the two top blocks, it is still at the top of one column.
+        assert_eq!(surfaces(7.9), vec![BlockPos::new(20, 8, 20)]);
+        assert_eq!(surfaces(9.0), Vec::new());
+    }
+
     pub(super) fn falling_item(x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64) -> ItemEntity {
         let at = Vec3::new(x, y, z);
         ItemEntity {
+            no_gravity: false,
             id: 1,
             thrower: None,
             target: None,
@@ -2047,6 +2104,7 @@ mod slime_bounce_tests {
     fn grounded_item() -> ItemEntity {
         let at = Vec3::new(0.5, 2.0, 0.5);
         ItemEntity {
+            no_gravity: false,
             id: 1,
             thrower: None,
             target: None,

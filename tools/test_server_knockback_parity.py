@@ -107,8 +107,14 @@ def mob_case(kind, weapon=SWORD, sprint=False, crit=False, air=False):
     return lines
 
 
+# A shield that blocks half of a melee hit: its own push (blockedByItem) comes before the hit's (hurtServer).
+SHIELD = 'minecraft:shield'
+HALF_SHIELD = ('minecraft:shield[blocks_attacks={block_delay_seconds:0.25,'
+               'damage_reductions:[{base:0,factor:0.5}]}]')
+
+
 def pvp_case(weapon=SWORD, sprint=False, crit=False, shield=False, armour=False, twice=False, mace=False,
-             cooldown=False):
+             cooldown=False, shield_item=SHIELD):
     lines = [f'cmd Alice item replace entity @s weapon.mainhand with {weapon}', 'cmd Bob clear @s',
              'cmd Bob effect give @s minecraft:resistance 1000 4 true',
              'cmd Bob effect give @s minecraft:instant_health 1 5 true', *stand('Alice', A, -90), *stand('Bob', V, 90)]
@@ -117,8 +123,9 @@ def pvp_case(weapon=SWORD, sprint=False, crit=False, shield=False, armour=False,
                   for slot, piece in (('head', 'helmet'), ('chest', 'chestplate'), ('legs', 'leggings'),
                                       ('feet', 'boots'))]
     if shield:
-        # A shield blocks from five ticks after it is raised.
-        lines += ['cmd Bob item replace entity @s weapon.mainhand with minecraft:shield', 'use Bob']
+        # A shield blocks from five ticks after it is raised. Two ticks first: a stack swapped in the tick of an earlier
+        # shield's use still counts as being used, and the server drops the `use`.
+        lines += [f'cmd Bob item replace entity @s weapon.mainhand with {shield_item}', 'ticks 2', 'use Bob']
     lines += ['ticks 30', *stand('Bob', V, 90, ticks=1)]
     if sprint:
         lines.append('sprint Alice on')
@@ -155,6 +162,18 @@ def mob_hits_case(kind):
             'cmd Alice kill @e[type=!player]', 'cmd Alice gamemode survival']
 
 
+def zombie_half_shield_case():
+    """A zombie one block in front of Bob, who holds a raised half-blocking shield, hits him once."""
+    mob = '@e[type=minecraft:zombie,limit=1]'
+    return ['cmd Bob clear @s', 'cmd Alice gamemode creative', *stand('Bob', V, 90),
+            f'cmd Bob item replace entity @s weapon.mainhand with {HALF_SHIELD}', 'ticks 2', 'use Bob', 'ticks 30',
+            *stand('Bob', V, 90, ticks=1), 'mark Bob',
+            f'cmd Alice summon minecraft:zombie {V[0] + 1} {V[1]} {V[2]} {{Rotation:[90f,0f]}}',
+            f'cmd Alice effect give {mob} minecraft:slowness 100000 127 true', 'await Bob', f'cmd Alice kill {mob}',
+            'ticks 20', *stand('Bob', V, 90), 'cmd Bob clear @s', 'cmd Alice kill @e[type=!player]',
+            'cmd Alice gamemode survival']
+
+
 def blast_case(blast, row):
     """A blast two blocks east of Bob in creative, which hurts him not: an end crystal he hits himself, or primed TNT
     about to go off. The push his client is sent (the explosion packet's playerKnockback, ServerExplosion.hitPlayers)
@@ -185,6 +204,8 @@ CASES = {
     'pvp-knockback-2': pvp_case(weapon=KNOCKBACK_SWORD),
     'pvp-crit': pvp_case(crit=True),
     'pvp-shield': pvp_case(shield=True),
+    'pvp-shield-partial': pvp_case(shield=True, shield_item=HALF_SHIELD),
+    'zombie-shield-partial': zombie_half_shield_case(),
     'pvp-netherite': pvp_case(armour=True),
     'pvp-twice': pvp_case(twice=True),
     'pvp-sprint-twice': pvp_case(sprint=True, twice=True),

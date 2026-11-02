@@ -2391,6 +2391,7 @@ impl Game<'_> {
             // Its value (ExperienceOrb.DATA_VALUE) follows in SetEntityData.
             self.orbs.retain(|o| o.id != id as u32);
             self.orbs.push(ExperienceOrb {
+                no_gravity: false,
                 id: id as u32,
                 position: at,
                 previous: at,
@@ -2971,6 +2972,9 @@ impl Game<'_> {
                     &p.spawn.dimension,
                     self.dim.id(),
                 );
+                if dimension_changed {
+                    horizon_client::spans::startup::arm("dimension.change");
+                }
                 self.enter_remote_dimension(&p.spawn, true, reason);
                 if dimension_changed {
                     // LevelExtractor.setLevel: a new level drops the highlights.
@@ -5190,6 +5194,7 @@ impl Game<'_> {
         let at = Vec3::new(p[0], p[1], p[2]);
         let bob_offset = self.world.random.next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            no_gravity: false,
             health: 5,
             fire_ticks: 0,
             thrower: None,
@@ -5462,6 +5467,9 @@ impl Game<'_> {
     /// One client tick while connected (Minecraft.tick with a ClientLevel).
     pub(super) fn tick_remote(&mut self) -> Result<()> {
         self.tick_remote_level()?;
+        // The rockets boosting this player tick after it, also while it waits
+        // for chunks.
+        self.tick_own_rockets();
         // Client mods tick on any server, single player's own included.
         self.native_net.to_server = 0;
         self.native_tick();
@@ -7213,7 +7221,7 @@ impl Game<'_> {
                 self.with_hand(hand, Game::swing_arm);
                 return true;
             } else if let Some(stack) = held.as_ref()
-                && (self.predict_item_on_block(stack, &hit)
+                && (self.predict_item_on_block(stack, &hit, hand)
                     || self.predict_map_on_banner(stack, &hit))
             {
                 // Item.useOn succeeded here (InteractionResult.SUCCESS):
@@ -7279,9 +7287,26 @@ impl Game<'_> {
     /// `playSound(player, ...)`: the server sends them to the others only):
     /// honeycomb waxing copper, and an axe, hoe or shovel transforming a
     /// block (stripping, scraping, removing wax, tilling, making a path).
-    /// A cushion succeeds where it may be placed and spawns on the server.
+    /// A cushion succeeds where it may be placed and spawns on the server, a
+    /// firework rocket wherever it may be used, and the server launches it.
     /// Whether the item's use succeeded, which ends the click.
-    fn predict_item_on_block(&mut self, stack: &ItemStack, hit: &super::Hit) -> bool {
+    fn predict_item_on_block(&mut self, stack: &ItemStack, hit: &super::Hit, hand: Hand) -> bool {
+        // FireworkRocketItem.useOn: SUCCESS on the client too, so neither
+        // UseItem nor the off hand follows. It passes while gliding (the use
+        // boosts instead), cooling down (MultiPlayerGameMode.performUseItemOn
+        // skips useOn) and in adventure mode off its can_place_on
+        // (ItemStack.useOn).
+        if &*stack.item == "minecraft:firework_rocket" {
+            let cooling = self.items().get(&stack.item).is_some_and(|info| {
+                let group = horizon_client::cooldowns::group(stack, info.use_cooldown.as_ref());
+                self.cooldowns.is_on_cooldown(&group)
+            });
+            let gliding = self.player.as_ref().is_some_and(|p| p.fall_flying);
+            return !cooling
+                && !gliding
+                && (self.may_build()
+                    || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos)));
+        }
         let at = [
             f64::from(hit.pos[0]) + 0.5,
             f64::from(hit.pos[1]) + 0.5,
@@ -7679,6 +7704,8 @@ impl Game<'_> {
         // Item.use: Equippable.swapWithEquipmentSlot runs on this client too, so
         // the armor slot and the hand change at once (the server confirms).
         if info.equip_slot.is_some() && self.with_hand(hand, |g| g.equip_from_hand(&held)) {
+            // Equippable.swapWithEquipmentSlot's SUCCESS (SwingSource.CLIENT).
+            self.with_hand(hand, Game::swing_arm);
             return true;
         }
         // `ItemStack.use` runs on this client too: a bucket's own ray and its
@@ -7707,12 +7734,20 @@ impl Game<'_> {
                 };
                 self.audio.play(&name, Some(at), volume, pitch);
             }
+            // BucketItem.use's SUCCESS (SwingSource.CLIENT) on this client.
+            if succeeded {
+                self.with_hand(hand, Game::swing_arm);
+            }
             return succeeded;
         }
         // SpawnEggItem.use on the client succeeds after a SOURCE_ONLY block
         // hit; the server alone tests LiquidBlock and the placement permission.
         if held.item.ends_with("_spawn_egg") {
-            return self.spawn_egg_allowed(&held.item) && self.bucket_hit().is_some();
+            let succeeded = self.spawn_egg_allowed(&held.item) && self.bucket_hit().is_some();
+            if succeeded {
+                self.with_hand(hand, Game::swing_arm);
+            }
+            return succeeded;
         }
         // Food starts being eaten (Consumable.startConsuming). A food that
         // can't be eaten (full and not always-edible) fails the use
@@ -7736,6 +7771,8 @@ impl Game<'_> {
             self.apply_use_cooldown(&held);
         }
         if self.with_hand(hand, |g| g.remote_use_book(&held)) {
+            // WritableBookItem.use's SUCCESS (SwingSource.CLIENT).
+            self.with_hand(hand, Game::swing_arm);
             return true;
         }
         // BowItem.use and CrossbowItem.use FAIL with nothing to shoot: no
@@ -7744,8 +7781,23 @@ impl Game<'_> {
             return false;
         }
         let gliding = self.player.as_ref().is_some_and(|p| p.fall_flying);
+        // FireworkRocketItem.use while gliding: SUCCESS (SwingSource.PREDICTED),
+        // so startUseItem swings this hand itself; a vanilla server swings it
+        // for the other players only.
+        if gliding && &*held.item == "minecraft:firework_rocket" {
+            self.with_hand(hand, Game::swing_arm);
+        }
         // A stack's own `blocks_attacks` raises it as a shield's does.
-        use_ends_click(&info, gliding) || self.blocks_attacks(&held).is_some()
+        let blocks = self.blocks_attacks(&held).is_some();
+        let ends = use_ends_click(&info, gliding) || blocks;
+        // MultiPlayerGameMode.useItem: `ItemStack.use`'s SUCCESS swings
+        // (SwingSource.CLIENT); CONSUME does not — a bow, crossbow, trident
+        // or spear starting its charge, and `ItemUtils.startUsingInstantly`'s
+        // food, drink, spyglass, shield and goat horn.
+        if ends && !blocks && remote_use_swings(&held, info.consumable.is_some()) {
+            self.with_hand(hand, Game::swing_arm);
+        }
+        ends
     }
 
     /// Whether `held`'s `Item.use` needs a target this client sees none of
@@ -8129,9 +8181,26 @@ impl Game<'_> {
             self.stop_remote_mining();
         }
         if !ready {
+            // A screen's opening released the keys (`KeyMapping.releaseAll`).
+            self.hotbar_presses.clear();
             return;
         }
         // MultiPlayerGameMode.tick syncs the carried slot before keybinds.
+        self.remote_send_carried();
+        let (attack, use_item) = (self.left, self.right);
+        // A tick that clicks, attacks or uses acts with the slot its number
+        // keys select (`ensureHasSentCarriedItem` before the packets).
+        let acts = input.has_clicks() || attack || use_item;
+        input.tick(&mut RemoteInputWorld(self, acts), attack, use_item);
+        self.remote_queued_keys();
+        if let Some(r) = self.remote.as_mut() {
+            r.input = input;
+        }
+    }
+
+    /// `MultiPlayerGameMode.ensureHasSentCarriedItem`: the server hears of a
+    /// new selected slot before anything the slot acts with.
+    fn remote_send_carried(&mut self) {
         let carried_changed = self.remote.as_mut().is_some_and(|r| {
             if r.carried == Some(self.selected) {
                 false
@@ -8145,8 +8214,9 @@ impl Game<'_> {
                 slot: self.selected as i16,
             }));
         }
-        let (attack, use_item) = (self.left, self.right);
-        input.tick(&mut RemoteInputWorld(self), attack, use_item);
+    }
+
+    fn remote_queued_keys(&mut self) {
         // handleKeybinds' keybind polls: the queued presses act now, in tick
         // order, so no packet goes out between CLIENT_TICK_END and a pong.
         let pending = self
@@ -8176,9 +8246,6 @@ impl Game<'_> {
         }
         if self.clicks.miss_time > 0 {
             self.clicks.miss_time -= 1;
-        }
-        if let Some(r) = self.remote.as_mut() {
-            r.input = input;
         }
     }
 
@@ -8248,11 +8315,14 @@ impl Game<'_> {
         } else if let Some((i, distance)) = self.mob_hit()
             && self.before_block(distance)
         {
-            self.send(S::Attack(play::Attack {
-                id: self.mobs[i].id as i32,
-            }));
-            self.remote_player_attack(i);
-            self.reset_attack_strength();
+            // Minecraft.startAttack: an item's attack_range must hold the hit.
+            if self.held_range_allows(distance) {
+                self.send(S::Attack(play::Attack {
+                    id: self.mobs[i].id as i32,
+                }));
+                self.remote_player_attack(i);
+                self.reset_attack_strength();
+            }
         } else if !self.entity_targeted()
             && let Some(hit) = self.pick()
         {
@@ -8467,7 +8537,9 @@ impl Game<'_> {
         // `KeyMapping.releaseAll` clears key.use; without this the button still
         // reads held and a use would start again on the first tick back.
         self.right = false;
-        horizon_client::interaction_input::release_on_screen_open(&mut RemoteInputWorld(self));
+        horizon_client::interaction_input::release_on_screen_open(&mut RemoteInputWorld(
+            self, false,
+        ));
     }
     /// `MultiPlayerGameMode.releaseUsingItem`: sends `RELEASE_USE_ITEM` and
     /// runs the client half of `Item.releaseUsing` (a Riptide launch moves the
@@ -9645,6 +9717,27 @@ fn use_ends_click(info: &horizon_client::items::ItemInfo, fall_flying: bool) -> 
     item_has_use(info) || (fall_flying && &*info.id == "minecraft:firework_rocket")
 }
 
+/// Whether `Item.use` of this item answers SUCCESS on this client, which
+/// swings (`MultiPlayerGameMode.useItem`'s `result.shouldSwing()`), rather
+/// than CONSUME, which only ends the click: a bow, crossbow, trident or
+/// spear starting its charge, `ItemUtils.startUsingInstantly`'s food, drink,
+/// spyglass, shield and goat horn, and the ender eye's SUCCESS_SERVER (the
+/// server's swing source, not this client's).
+fn remote_use_swings(held: &ItemStack, consumable: bool) -> bool {
+    let id = &*held.item;
+    !matches!(
+        id,
+        "minecraft:bow"
+            | "minecraft:crossbow"
+            | "minecraft:trident"
+            | "minecraft:spyglass"
+            | "minecraft:goat_horn"
+            | "minecraft:ender_eye"
+            | "minecraft:brush"
+    ) && !consumable
+        && horizon_client::spear::Kinetic::of(id).is_none()
+}
+
 /// Whether `Item.use` usually acts on this item (eats, drinks, equips, raises,
 /// throws, shoots, fills or places), which ends `Minecraft.startUseItem` at
 /// its hand. Tools and materials pass, and the off hand gets its turn. The
@@ -9745,7 +9838,8 @@ fn synced_local_use(
     }
 }
 
-struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>);
+/// The game as the tick's input sees it, and whether the tick acts.
+struct RemoteInputWorld<'g, 'a>(&'g mut Game<'a>, bool);
 
 struct RemoteUseWorld<'g, 'a>(&'g mut Game<'a>);
 
@@ -9763,10 +9857,16 @@ impl horizon_client::interaction_input::TargetUseWorld for RemoteUseWorld<'_, '_
 
 impl horizon_client::interaction_input::InteractionWorld for RemoteInputWorld<'_, '_> {
     fn pick_hit_result(&mut self) {
-        self.0.tick_hit = Some(self.0.pick());
+        self.0.pick_tick_targets();
+        // MultiPlayerGameMode.ensureHasSentCarriedItem: an action this tick
+        // sends the slot the number keys chose first; otherwise the next
+        // tick's MultiPlayerGameMode.tick does.
+        if self.1 {
+            self.0.remote_send_carried();
+        }
     }
     fn release_hit_result(&mut self) {
-        self.0.tick_hit = None;
+        self.0.release_tick_targets();
     }
     fn using_item(&self) -> bool {
         self.0.using.is_some()
@@ -9959,9 +10059,50 @@ fn client_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{keep_client_state, synced_local_use};
-    use horizon_client::containers::{Beacon, BlockEntity};
+    use super::{keep_client_state, remote_use_swings, synced_local_use};
+    use horizon_client::{
+        containers::{Beacon, BlockEntity},
+        items::ItemStack,
+    };
     use horizon_world::nbt::Tag;
+
+    /// `MultiPlayerGameMode.useItem`'s `shouldSwing`: the SUCCESS answers
+    /// swing, CONSUME's do not (#6425).
+    #[test]
+    fn a_thrown_item_swinging_on_a_server_and_a_charge_not() {
+        let stack = |id: &str| ItemStack::new(id, 1);
+        // SUCCESS: the throwables, a bucket, a boat, a bundle, a book, a map.
+        for id in [
+            "minecraft:ender_pearl",
+            "minecraft:splash_potion",
+            "minecraft:wind_charge",
+            "minecraft:snowball",
+            "minecraft:experience_bottle",
+            "minecraft:bucket",
+            "minecraft:oak_boat",
+            "minecraft:bundle",
+            "minecraft:writable_book",
+            "minecraft:map",
+        ] {
+            assert!(remote_use_swings(&stack(id), false), "{id} swings");
+        }
+        // CONSUME: the charges and startUsingInstantly's uses, a drinkable
+        // potion among them (`consumable` set).
+        for id in [
+            "minecraft:bow",
+            "minecraft:crossbow",
+            "minecraft:trident",
+            "minecraft:spyglass",
+            "minecraft:goat_horn",
+            "minecraft:ender_eye",
+        ] {
+            assert!(!remote_use_swings(&stack(id), false), "{id} does not swing");
+        }
+        // The kinetic weapons charge like a trident.
+        assert!(!remote_use_swings(&stack("minecraft:iron_spear"), false));
+        // A consumable (food, a drink) starts its use without a swing.
+        assert!(!remote_use_swings(&stack("minecraft:apple"), true));
+    }
 
     #[test]
     fn a_beacon_update_tag_keeps_the_beam_the_client_walked() {

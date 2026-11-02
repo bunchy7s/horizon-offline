@@ -234,9 +234,16 @@ fn server(resources: &Path) -> Server {
 }
 
 fn server_with(resources: &Path, net: NetConfig) -> Server {
-    let sync = Arc::new(
-        SyncData::load(resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
-    );
+    server_sync(
+        Arc::new(
+            SyncData::load(resources, &horizon_world::loot::PackOverlay::NONE).expect("sync data"),
+        ),
+        net,
+    )
+}
+
+/// A server over already-built sync data (a test's packs layered in).
+fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
     let lan = Lan::start_with(sync.clone(), net).unwrap();
     let biomes: Vec<String> = sync
         .dynamic
@@ -434,6 +441,174 @@ fn recipe_settings_packets_update_only_the_players_book_and_survive_save() {
             .is_err()
         );
     }
+}
+
+/// A server whose pack carries recipes with NeoForge's ingredient shapes:
+/// every guest that joins gets the shapes' items, not empty slots — the
+/// book lists the shaped recipe's compound, the furnace's and the
+/// stonecutter's input sets carry it — and no guest is disconnected over
+/// them (#6368).
+#[test]
+fn neoforge_shapes_items_reach_two_guests() {
+    let Some(resources) = resources() else {
+        return;
+    };
+    let compound = r#"{"type":"neoforge:compound",
+        "children":["minecraft:raw_copper","minecraft:redstone"]}"#;
+    let packs = vec![
+        (
+            "advancement/minecraft:recipes/compound_book".to_owned(),
+            vec![
+                br#"{"criteria":{"tick":{"trigger":"minecraft:tick"}},
+                "rewards":{"recipes":["minecraft:compound_book"]}}"#
+                    .to_vec(),
+            ],
+        ),
+        (
+            "recipe/minecraft:compound_book".to_owned(),
+            vec![
+                format!(
+                    r#"{{"type":"minecraft:crafting_shaped","pattern":["X"],
+                "key":{{"X":{compound}}},
+                "result":{{"id":"minecraft:copper_ingot"}}}}"#
+                )
+                .into_bytes(),
+            ],
+        ),
+        (
+            "recipe/minecraft:compound_smelting".to_owned(),
+            vec![
+                format!(
+                    r#"{{"type":"minecraft:smelting","ingredient":{compound},
+                "result":{{"id":"minecraft:copper_ingot"}}}}"#
+                )
+                .into_bytes(),
+            ],
+        ),
+        (
+            "recipe/minecraft:compound_stonecutting".to_owned(),
+            vec![
+                format!(
+                    r#"{{"type":"minecraft:stonecutting","ingredient":{compound},
+                "result":{{"id":"minecraft:copper_ingot"}}}}"#
+                )
+                .into_bytes(),
+            ],
+        ),
+    ];
+    let sync = Arc::new(
+        SyncData::load(
+            &resources,
+            &horizon_world::loot::PackOverlay { files: &packs },
+        )
+        .expect("sync data"),
+    );
+    let (raw_copper, redstone) = (
+        sync.id("minecraft:item", "minecraft:raw_copper").unwrap(),
+        sync.id("minecraft:item", "minecraft:redstone").unwrap(),
+    );
+    let mut s = server_sync(sync, NetConfig::lan(0, "Test - World".into(), 8));
+    let port = s.hub.lan.port;
+    // Guest one joins first and stays while guest two joins and reads its
+    // own join packets, then guest one reads its own.
+    let mut one = run(&mut s, move || connect(port, "CompoundOne", true));
+    let expected = (raw_copper, redstone);
+    let _two_stays = run(&mut s, move || {
+        let mut two = connect(port, "CompoundTwo", true)?;
+        read_join_recipes(&mut two, expected, "guest two")?;
+        Ok(two)
+    });
+    assert_eq!(s.hub.guests.len(), 2, "both guests stay connected");
+    run(&mut s, move || {
+        read_join_recipes(&mut one, expected, "guest one")
+    });
+}
+
+/// Reads a fresh guest's packets until the recipe update and the book add
+/// arrived, checking the compound's items in each: the furnace's input
+/// set, a stonecutting entry's input, and the book entry's requirements.
+fn read_join_recipes(bot: &mut Bot, expected: (i32, i32), who: &str) -> Result<(), String> {
+    let (raw_copper, redstone) = expected;
+    let mut sets_ok = false;
+    let mut book_ok = false;
+    for _ in 0..400 {
+        let packet = bot.recv_play().map_err(|e| format!("{who}: {e}"))?;
+        match packet {
+            C::Unknown(id, payload)
+                if id == horizon_protocol::ids::play::clientbound::UPDATE_RECIPES =>
+            {
+                let mut r = horizon_protocol::buf::Reader::new(&payload);
+                let mut furnace_input = None;
+                let mut stonecutting = Vec::new();
+                for _ in 0..r.varint().map_err(|e| e.to_string())? {
+                    let key = r.string(64).map_err(|e| e.to_string())?;
+                    let ids: Vec<i32> = (0..r.varint().map_err(|e| e.to_string())?)
+                        .map(|_| r.varint().unwrap_or(-1))
+                        .collect();
+                    if key == "minecraft:furnace_input" {
+                        furnace_input = Some(ids);
+                    }
+                }
+                let furnace_input = furnace_input.expect("furnace_input set");
+                assert!(
+                    furnace_input.contains(&raw_copper) && furnace_input.contains(&redstone),
+                    "{who}: furnace_input holds the compound: first ids {:?}",
+                    &furnace_input[..furnace_input.len().min(8)]
+                );
+                for _ in 0..r.varint().map_err(|e| e.to_string())? {
+                    if let horizon_protocol::packets::recipes::HolderSet::Items(ids) =
+                        horizon_protocol::packets::recipes::HolderSet::read(&mut r)
+                            .map_err(|e| e.to_string())?
+                    {
+                        stonecutting.push(ids);
+                    }
+                    // The result's ItemStackSlotDisplay: its type, the item,
+                    // the count and the two empty component lists.
+                    for _ in 0..5 {
+                        r.varint().map_err(|e| e.to_string())?;
+                    }
+                }
+                assert!(
+                    stonecutting
+                        .iter()
+                        .any(|ids| ids.contains(&raw_copper) && ids.contains(&redstone)),
+                    "{who}: a stonecutting input holds the compound"
+                );
+                sets_ok = true;
+            }
+            C::RecipeBookAdd(add) => {
+                // sendInitialRecipeBook's own add arrives first, empty
+                // until the first tick rewards its recipes.
+                if add.entries.is_empty() {
+                    continue;
+                }
+                let compound = add.entries.iter().any(|e| {
+                    e.requirements.as_deref().unwrap_or(&[]).iter().any(|set| {
+                        matches!(set,
+                            horizon_protocol::packets::recipes::HolderSet::Items(ids)
+                            if ids.contains(&raw_copper) && ids.contains(&redstone))
+                    })
+                });
+                assert!(
+                    compound,
+                    "{who}: the book lists the compound recipe ({} entries: {:?})",
+                    add.entries.len(),
+                    add.entries
+                        .iter()
+                        .map(|e| e.requirements.clone())
+                        .collect::<Vec<_>>()
+                );
+                book_ok = true;
+            }
+            _ => {}
+        }
+        if sets_ok && book_ok {
+            return Ok(());
+        }
+    }
+    Err(format!(
+        "{who}: recipes {sets_ok} book {book_ok} never both arrived"
+    ))
 }
 
 #[test]

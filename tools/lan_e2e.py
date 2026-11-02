@@ -376,7 +376,7 @@ CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'menu-transfer'
           'flow-push', 'bubble-column', 'arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
           'commands', 'recipes', 'machines', 'brewing', 'loom', 'stonecutter', 'grindstone', 'anvil', 'smithing',
           'enchanting', 'beacon', 'crafter', 'lectern', 'cartography', 'trials', 'clicks', 'shift-double-click', 'recipe-shift', 'shift-drag', 'modifier-release', 'wheel', 'sleep', 'sleep-villager', 'bed-occupied', 'sleep-reload', 'predict', 'push',
-          'piston-push', 'piston-slime', 'eat', 'eat-on-block', 'cauldron', 'eating', 'xp', 'objects', 'projectiles', 'thrown', 'sparks', 'hud', 'sidebar', 'border', 'particles',
+          'piston-push', 'piston-entities', 'piston-slime', 'eat', 'eat-on-block', 'cauldron', 'eating', 'xp', 'objects', 'projectiles', 'thrown', 'sparks', 'hud', 'sidebar', 'border', 'particles',
           'worn', 'blast', 'blast-projectiles', 'barter', 'piglin_offspring', 'deflect', 'fireball', 'light', 'time', 'swings', 'cracks', 'plates', 'plate-projectiles', 'effects',
           'portals', 'distance', 'growth', 'doors', 'flight', 'ladder', 'boats', 'boat_ice_reboard', 'boat_shoved', 'minecarts', 'frames', 'hands',
           'lightning', 'riding', 'occupied_horse', 'mounts', 'worldspawn', 'beds', 'shield', 'deathmining', 'contacts', 'absorption',
@@ -3326,6 +3326,40 @@ def wait_state(game, pos, key, want, ticks):
             return want
         game.wait(10)
     return state_of(game, pos, key)
+
+
+def check_piston_entities(host, guest, out):
+    """A moving piston pushes a falling block and an arrow standing in front of it."""
+    hx, _, hz = pos_of(host)
+    x, y, z = (int(hx // 16) * 16 + 8, 100, int(hz // 16) * 16 + 8)
+    host('command', command=f'fill {x-4} {y-1} {z-4} {x+7} {y-1} {z+4} minecraft:stone')
+    host('command', command=f'fill {x-4} {y} {z-4} {x+7} {y+5} {z+4} minecraft:air')
+    host('command', command=f'setblock {x} {y} {z} minecraft:piston[facing=east]')
+    host('command', command=f'tp @s {x+5.5} {y} {z+3.5}')
+    kinds = {
+        'falling_block': '{BlockState:{Name:"minecraft:sand"},Time:1,NoGravity:1b}',
+        'arrow': '{}',
+    }
+    for i, (kind, nbt) in enumerate(kinds.items()):
+        host('command', command=f'summon minecraft:{kind} {x+1.5} {y} {z+0.5} {nbt}')
+    host.wait(20)
+    def xs():
+        got = {}
+        for kind in kinds:
+            objs = [o for o in host('status')['projectiles'] if kind in str(o.get('kind', '')).lower()
+                    and abs(o["position"][2] - z - 0.5) < 0.6]
+            assert objs, f'{kind} not found before the push'
+            got[kind] = objs[0]['position'][0]
+        return got
+    before = xs()
+    host('command', command=f'setblock {x-1} {y} {z} minecraft:redstone_block')
+    host.wait(30)
+    after = xs()
+    results = {}
+    for kind in kinds:
+        results[kind] = after[kind] - before[kind]
+        assert results[kind] > 0.3, f'piston did not push {kind}: {before[kind]} -> {after[kind]}'
+    return results
 
 
 def check_piston_push(host, guest, out):
@@ -6666,7 +6700,7 @@ CHECK_FNS = {'tab': check_tab, 'self': check_self, 'armour': check_armour,
              'shift-drag': check_shift_drag, 'wheel': check_wheel, 'sleep': check_sleep, 'sleep-villager': check_sleep_villager,
              'modifier-release': check_modifier_release,
              'bed-occupied': check_bed_occupied, 'sleep-reload': check_sleep_reload,
-             'push': check_push, 'piston-push': check_piston_push,
+             'push': check_push, 'piston-push': check_piston_push, 'piston-entities': check_piston_entities,
              'piston-slime': check_piston_slime,
              'eat': check_eat, 'eat-on-block': check_eat_on_block, 'cauldron': check_cauldron, 'eating': check_eating, 'xp': check_xp,
              'objects': check_objects, 'projectiles': check_projectiles, 'blast': check_blast, 'blast-projectiles': check_blast_projectiles,
@@ -10955,6 +10989,22 @@ CHECKS += ['pet_death']
 CHECK_FNS['pet_death'] = check_pet_death
 
 
+def check_data_uuid(host, guest, out):
+    """EntityDataAccessor: `/data get entity @s UUID` prints the player who runs it, their own
+    offline UUID, for the guest and for the host (a server player too), not the world owner's."""
+    seen = {}
+    for game, name in ((guest, GUEST_NAME), (host, host.player)):
+        reply = server_reply(game, 'data get entity @s UUID', '[I;')
+        seen[name] = ','.join(re.findall(r'-?\d+', reply.partition('[I;')[2].partition(']')[0]))
+    for name, ints in seen.items():
+        assert ints == offline_uuid_ints(name), f"{name}'s UUID is not their own: {seen}"
+    return seen
+
+
+CHECKS += ['data_uuid']
+CHECK_FNS['data_uuid'] = check_data_uuid
+
+
 def check_arrow_pickup(host, guest, out):
     """ClientPacketListener.handleTakeItemEntity (#4486): an arrow a player picks up
     (AbstractArrow.playerTouch, once in the ground) flies into them on every client, the
@@ -11604,6 +11654,211 @@ def check_blast_bystanders(host, guest, out):
 
 CHECKS += ['blast-bystanders']
 CHECK_FNS['blast-bystanders'] = check_blast_bystanders
+def check_wind_remaining(host, guest, out):
+    """A wind burst pushes a firework rocket and a thrown trident (ServerExplosion.hurtEntities ->
+    Entity.pushFromExplosion; neither overrides ignoreExplosion). Real 26.3 server, wind charge into the floor,
+    tick freeze, tick step 1 after the burst: the rocket's Motion x -0.3174, -0.3650, -0.4197 and y 0.5971, 0.6371,
+    0.6771 on the next three ticks (it starts at (0, 0.08, 0), 0.8 west of the burst, 1.0 above the floor); a
+    trident 0.8 east gets (+0.446, +0.490) on the first tick when NoGravity holds. A summoned trident here
+    ignores NoGravity and falls first, so only its direction is asserted."""
+    hx, hy, hz = (int(v // 1) for v in pos_of(host))
+    x, y, z = hx + 6, hy, hz
+    host('command', command='gamemode spectator')
+
+    def read():
+        found = {}
+        for p in host.raw('simulation')['projectiles']:
+            if p['kind'] in ('minecraft:trident', 'minecraft:firework_rocket') and abs(p['position'][0] - x) < 4:
+                found[p['kind'].split(':')[1]] = p['velocity']
+        return found
+    detail = {}
+    try:
+        host('command', command='tick unfreeze')
+        for c in (f'fill {x - 8} {y - 1} {z - 8} {x + 8} {y - 1} {z + 8} minecraft:bedrock',
+                  f'fill {x - 8} {y} {z - 8} {x + 8} {y + 5} {z + 8} minecraft:air', 'kill @e[type=!player]', 'tick freeze',
+                  f'summon minecraft:trident {x + 1.3} {y + 1.0} {z + 0.5} {{NoGravity:1b}}',
+                  f'summon minecraft:firework_rocket {x - 0.3} {y + 1.0} {z + 0.5} {{LifeTime:200}}', 'tick step 2'):
+            host('command', command=c)
+        host.wait(8)
+        detail['before'] = read()
+        host('command', command=f'summon minecraft:wind_charge {x + 0.5} {y + 0.6} {z + 0.5} {{Motion:[0.0,-1.0,0.0]}}')
+        detail['ticks'] = []
+        for _ in range(3):
+            host('command', command='tick step 1')
+            host.wait(4)
+            detail['ticks'].append(read())
+    finally:
+        host('command', command='tick unfreeze')
+        host('command', command='kill @e[type=!player]')
+        host('command', command='gamemode creative')
+    first = detail['ticks'][0]
+    assert 'firework_rocket' in first and 'trident' in first, f'no rocket listed: {detail}'
+    rocket = first['firework_rocket']
+    assert abs(rocket[0] + 0.3174) < 0.01 and abs(rocket[1] - 0.5971) < 0.01, f'the rocket was not pushed like vanilla: {detail}'
+    trident = first['trident']
+    assert trident[0] > 0.2 and trident[1] > 0.1, f'the trident was not pushed away: {detail}'
+    return detail
+
+
+CHECKS += ['wind-remaining']
+CHECK_FNS['wind-remaining'] = check_wind_remaining
+
+
+def check_selector_tags(host, guest, out):
+    """`@e[tag=]` and `/tag` find summoned experience orbs, arrows, thrown items, fireballs and wind
+    charges, and `/data get entity` reads a wind charge (vanilla 26.3, same scene: every kind is found
+    by its summoned Tags; sbs.py selkinds)."""
+    x, y, z = (int(v // 1) for v in pos_of(host))
+    kinds = ['experience_orb', 'arrow', 'snowball', 'egg', 'ender_pearl', 'fireball', 'small_fireball', 'wind_charge']
+    row = (x, y + 8, z + 4)
+    seen = {}
+
+    def marker(i, selector):
+        spot = (row[0] + i, row[1], row[2])
+        host('command', command=f'setblock {spot[0]} {spot[1]} {spot[2]} minecraft:air')
+        host('command', command=f'execute if {selector} run setblock {spot[0]} {spot[1]} {spot[2]} minecraft:gold_block')
+        host.wait(2)
+        return host.raw('block', *spot).get('block') == 'minecraft:gold_block'
+
+    try:
+        host('command', command='gamemode creative')
+        host('command', command='tick freeze')
+        for i, k in enumerate(kinds):
+            host('command', command=f'summon minecraft:{k} {x + 0.5 + i} {y + 20} {z + 0.5} '
+                                    f'{{NoGravity:1b,Tags:["sel_{k}"],Motion:[0.0d,0.0d,0.0d]}}')
+        host('command', command='summon minecraft:snowball ~ ~20 ~ {NoGravity:1b,Motion:[0.0d,0.0d,0.0d]}')
+        host('command', command='tag @e[type=minecraft:snowball,tag=!sel_snowball] add sel_late')
+        host.wait(4)
+        for i, k in enumerate(kinds):
+            seen[k] = marker(i, f'entity @e[tag=sel_{k}]')
+        seen['late'] = marker(len(kinds), 'entity @e[tag=sel_late]')
+        seen['data'] = marker(len(kinds) + 1, 'data entity @e[type=minecraft:wind_charge,limit=1] Pos')
+    finally:
+        host('command', command='tick unfreeze')
+        host('command', command='kill @e[type=!player]')
+    assert all(seen.values()), f'the selector cannot see these: {[k for k, v in seen.items() if not v]}'
+    return seen
+
+
+CHECKS += ['selector-tags']
+CHECK_FNS['selector-tags'] = check_selector_tags
+
+
+def check_mining_drop_latency(host, guest, out):
+    """An instant survival break sends its drop in the tick that handles START (#4572).
+
+    Queue the click behind the server barrier, then release it at one TPS. A
+    snapshot taken before tick_guests delays the drop until the next second.
+    Both the integrated owner and a LAN guest must see the first snapshot.
+    """
+    hx, _, hz = pos_of(host)
+    x, y, z = int(hx), 100, int(hz)
+    seen = {}
+    try:
+        host('command', command=f'fill {x-5} {y-1} {z-5} {x+5} {y-1} {z+5} minecraft:stone')
+        host('command', command=f'fill {x-5} {y} {z-5} {x+5} {y+4} {z+5} minecraft:air')
+        for player in (host, guest):
+            player('command', command='clear @s')
+            player('command', command='gamemode survival')
+        for player, other in ((host, guest), (guest, host)):
+            host('command', command='tick rate 20')
+            host('command', command='kill @e[type=minecraft:item]')
+            player('command', command=f'tp @s {x+0.5} {y} {z-3.5}')
+            other('command', command=f'tp @s {x+3.5} {y} {z+0.5}')
+            host('command', command=f'setblock {x} {y} {z} minecraft:torch')
+            player.wait(20)
+            assert all(g.raw('block', x, y, z).get('block') == 'minecraft:torch'
+                       for g in (host, guest)), 'torch did not reach both clients'
+            player.raw('look-at', x+0.5, y+0.3, z+0.5)
+            host('command', command='tick rate 1')
+            host.raw('server-hold', 'on')
+            try:
+                player.raw('mouse', 'left', 'click')
+                # The client's input tick also slows to one TPS. Wait for its
+                # prediction while transport runs and the server is still held.
+                deadline = time.monotonic() + 3
+                while player.raw('block', x, y, z).get('block') != 'minecraft:air':
+                    assert time.monotonic() < deadline, \
+                        f'{player.name}: client did not predict the instant break'
+                    time.sleep(0.02)
+            finally:
+                host.raw('server-hold', 'off')
+            started = time.monotonic()
+            arrivals = {}
+            while time.monotonic() - started < 0.75 and len(arrivals) < 2:
+                for viewer in (host, guest):
+                    if viewer.name in arrivals:
+                        continue
+                    entities = viewer.raw('entities', 24, 'minecraft:item')['entities']
+                    if any(abs(e['pos'][0] - x - 0.5) < 2
+                           and abs(e['pos'][2] - z - 0.5) < 2 for e in entities):
+                        arrivals[viewer.name] = round(time.monotonic() - started, 3)
+                time.sleep(0.01)
+            seen[player.name] = arrivals
+            lab.write_json(out / 'mining-drop-latency.json', seen)
+            assert len(arrivals) == 2, \
+                f'{player.name}: drop waited for a second server tick: {seen}'
+    finally:
+        host.raw('server-hold', 'off')
+        host('command', command='tick rate 20')
+        host('command', command='kill @e[type=minecraft:item]')
+        for player in (host, guest):
+            player.raw('release')
+    return seen
+
+
+CHECKS += ['mining-drop-latency']
+CHECK_FNS['mining-drop-latency'] = check_mining_drop_latency
+
+
+def check_scale_body(host, guest, out):
+    """#3684: a player's `minecraft:scale` is the same entity's attribute through a change of level and
+    a death. ServerPlayer.teleport keeps the player; ServerPlayer.restoreFrom copies the base values to
+    the body after a death (assignBaseValues), then sets its health to the max they give. The eye the
+    client sees stays at 0.162 (1.62 * 0.1), not back at 1.62, and a max health base of 40 respawns the
+    player with 40."""
+    seen = {}
+
+    def scale_of(player):
+        # The eye height the player's client has: the server's scale reaches it as an attribute update.
+        state = player('state')['player']
+        return round(state['eye'][1] - state['position'][1], 3)
+
+    for label, player in (('host', host), ('guest', guest)):
+        s = seen[label] = {}
+        player('command', command='gamemode creative')
+        player('command', command='attribute @s minecraft:scale base set 0.1')
+        player('command', command='attribute @s minecraft:max_health base set 40')
+        player.wait(20)
+        s['set'] = scale_of(player)
+        x, z = (int(v // 1) for v in pos_of(player)[::2])
+        into_level(player, NETHER, x, 100, z)
+        s['nether'] = scale_of(player)
+        player('command', command=f'execute in {OVERWORLD} run tp @s {x + 0.5} 200 {z + 0.5}')
+        wait_dimension(player, OVERWORLD, 400)
+        player.wait(40)
+        s['overworld'] = scale_of(player)
+        player('command', command='kill @s')
+        player.wait(30)
+        player.raw('respawn')
+        player.wait(60)
+        back_to_game(player)
+        s['respawned'] = scale_of(player)
+        s['health'] = player('state')['player']['health']
+        player('command', command='attribute @s minecraft:scale base set 1')
+        player('command', command='attribute @s minecraft:max_health base set 20')
+        player.wait(20)
+        s['reset'] = scale_of(player)
+    for label, s in seen.items():
+        for step in ('set', 'nether', 'overworld', 'respawned'):
+            assert s[step] == 0.162, f'{label} after {step}: {s}'
+        assert s['reset'] == 1.62, f'{label} reset: {s}'
+        assert s['health'] == 40, f'{label} respawned health: {s}'
+    return seen
+
+
+CHECKS += ['scale-body']
+CHECK_FNS['scale-body'] = check_scale_body
 
 
 if __name__ == '__main__':

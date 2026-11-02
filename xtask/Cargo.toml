@@ -7,6 +7,9 @@ publish = false
 description = "Repository tasks: cargo run -p xtask -- package BINARY OUTDIR | tokens"
 
 [dependencies]
+syn = { version = "2", features = ["full", "visit", "visit-mut"] }
+quote = "1"
+serde_json = "1"
 horizon-theme = { path = "../crates/horizon-theme" }
 
 [lints]

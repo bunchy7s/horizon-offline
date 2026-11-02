@@ -105,7 +105,8 @@ impl Blink {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(default)
         };
-        let length: u32 = number("blinkLength", LENGTH).max(1);
+        // At least a tick, and short of `u32::MAX` so the frequency can exceed it.
+        let length: u32 = number("blinkLength", LENGTH).clamp(1, u32::MAX - 1);
         let half = format!("{stem}_blink2");
         Self {
             shut: name(&format!("{stem}_blink")),
@@ -219,6 +220,25 @@ mod tests {
                 format!("{variant}_blink").as_str()
             )]
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_huge_blink_length_still_opens_the_eyes() {
+        let (root, b) = pack(
+            "huge",
+            &[
+                (&format!("{ENTITY}/pig/pig.png"), ""),
+                (&format!("{ENTITY}/pig/pig_blink.png"), ""),
+                (
+                    &format!("{ENTITY}/pig/pig_blink.properties"),
+                    "blinkLength=4294967295",
+                ),
+            ],
+        );
+        let pig = b.get("entity/pig/pig").unwrap();
+        assert_eq!((pig.length, pig.frequency), (u32::MAX - 1, u32::MAX));
+        assert_eq!(pig.frame(u32::MAX - 1, 0), None, "the one open tick");
         let _ = fs::remove_dir_all(root);
     }
 }

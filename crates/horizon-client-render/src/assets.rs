@@ -93,6 +93,8 @@ pub struct RenderAssets {
     pub model_gallery: Vec<Value>,
     pub animations: Vec<crate::sprites::SpriteAnimation>,
     pub sprite_layers: std::collections::BTreeMap<String, u32>,
+    /// OptiFine's emissive block overlays: base sprite and overlay sprite names.
+    pub emissive: Vec<(String, String)>,
     pub translucent_layers: Vec<bool>,
     /// Each layer's `MipmapGenerator` settings.
     pub sprite_mips: Vec<crate::mipmap::Settings>,
@@ -242,6 +244,7 @@ impl RenderAssets {
         for stage in 0..10 {
             sprites.insert(root, &format!("minecraft:block/destroy_stage_{stage}"))?;
         }
+        let mut emissive = Vec::new();
         let connected = if draws {
             crate::native_emissive::load(root, &mut sprites);
             // A side's sprite, for rules that connect by tile: the first quad facing it.
@@ -270,6 +273,11 @@ impl RenderAssets {
         } else {
             Default::default()
         };
+        // After the connected tiles: a tile identical to a block shares its layer, and the
+        // overlays skip shared layers.
+        if draws {
+            emissive = crate::native_emissive::load_optifine(root, &mut sprites);
+        }
         sprites.save_disk_cache();
         if draws {
             sprites.finish();
@@ -289,6 +297,7 @@ impl RenderAssets {
             model_gallery: models.states,
             animations: sprites.animations,
             sprite_layers: sprites.layers,
+            emissive,
             translucent_layers: sprites.translucent,
             sprite_mips: sprites.mips,
             pbr_normals: sprites.normals,

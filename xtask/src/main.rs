@@ -17,6 +17,8 @@
 //! into every size the platforms and the website use, and packs `packaging/icons/horizon.ico`
 //! and `horizon.icns`. `docs/media/brand/README.md` lists what goes where.
 
+mod mod_api;
+
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -48,6 +50,8 @@ fn main() -> ExitCode {
         [task, engine, out] if task == "package-server" => {
             package_server(Path::new(engine), Path::new(out))
         }
+        [task] if task == "mod-api" => mod_api::run(false),
+        [task, check] if task == "mod-api" && check == "--check" => mod_api::run(true),
         [task] if task == "tokens" => tokens(),
         [task] if task == "icons" => icons(),
         _ => Err(USAGE.to_string()),

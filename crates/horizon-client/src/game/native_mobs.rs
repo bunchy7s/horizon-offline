@@ -55,6 +55,57 @@ impl Game<'_> {
     }
 }
 
+impl Game<'_> {
+    /// `LivingEntity.collectEquipmentChanges` for the server's players (they are living entities
+    /// too): each slot whose stack differs from what the mods last heard is told, the previous
+    /// stack with it, so a hotbar selection that moves the main hand counts. A player new to the
+    /// level counts from empty, as for mobs, and only while a mod listens.
+    pub(super) fn native_players_equipment(&mut self, host: &mut super::lan::LanHost) {
+        let mut listened = false;
+        self.native_living_equipment_listened(&mut listened);
+        if !listened {
+            return;
+        }
+        let mut changes = Vec::new();
+        for g in host.hub.guests.iter().filter(|g| host.hub.here(g)) {
+            let now: [Option<crate::items::ItemStack>; 6] = [
+                g.inventory.get(g.selected).cloned().flatten(),
+                g.offhand.clone(),
+                g.armor[3].clone(),
+                g.armor[2].clone(),
+                g.armor[1].clone(),
+                g.armor[0].clone(),
+            ];
+            let Some(play) = host.play.get_mut(&g.conn) else {
+                continue;
+            };
+            let heard = play.equipment_heard.get_or_insert_with(Default::default);
+            if **heard == now {
+                continue;
+            }
+            for (slot, name) in PLAYER_SLOTS.into_iter().enumerate() {
+                if now[slot] != heard[slot] {
+                    let from = heard[slot].take();
+                    changes.push((g.entity_id as u32, name, from, now[slot].clone()));
+                }
+            }
+            **heard = now;
+        }
+        for (id, slot, from, to) in changes {
+            self.native_living_equipment_change(
+                id,
+                "minecraft:player",
+                slot,
+                from.as_ref(),
+                to.as_ref(),
+            );
+        }
+    }
+}
+
+/// The `EquipmentSlot` names of a player's equipment, in the order of `native_players_equipment`.
+const PLAYER_SLOTS: [&str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
+
 /// A mob as a native mod reads it.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]

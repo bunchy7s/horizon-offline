@@ -399,6 +399,16 @@ pub fn clash(a: (&str, &[String]), b: (&str, &[String])) -> Option<String> {
 impl Content {
     /// The content of the mod at `path` (a `.hmod` or a mod folder).
     pub fn read(path: &Path, manifest: &Manifest) -> Result<Content, String> {
+        Self::read_declaring(path, manifest, &[])
+    }
+    /// [`Content::read`] for a mod whose native code also declares items (`native_items`):
+    /// a file's `crafting_remainder` may name one of those `declared` ids, which are not in the
+    /// files.
+    pub fn read_declaring(
+        path: &Path,
+        manifest: &Manifest,
+        declared: &[String],
+    ) -> Result<Content, String> {
         let (source, sized) = if path.is_dir() {
             let mut out = Vec::new();
             for top in ["assets", "data"] {
@@ -446,7 +456,7 @@ impl Content {
             menu_types: Vec::new(),
             namespaces: manifest.owned_namespaces().map(str::to_owned).collect(),
         };
-        content.check(manifest)?;
+        content.check(manifest, declared)?;
         Ok(content)
     }
 
@@ -563,7 +573,7 @@ impl Content {
     }
 
     /// Where content may go, and the declarations.
-    fn check(&mut self, manifest: &Manifest) -> Result<(), String> {
+    fn check(&mut self, manifest: &Manifest, declared: &[String]) -> Result<(), String> {
         let id = manifest.id.as_str();
         if !self.files.is_empty() && !manifest.capabilities.contains(&Capability::Registries) {
             return Err(format!(
@@ -699,7 +709,7 @@ impl Content {
                     "{name}: crafting_remainder {rest:?} is no remainder (leave it out)"
                 ));
             }
-            if !vanilla_id(&rest) && !ids.contains(&rest) {
+            if !vanilla_id(&rest) && !ids.contains(&rest) && !declared.contains(&rest) {
                 return Err(format!(
                     "{name}: crafting_remainder {rest:?} is not a vanilla item (minecraft:...) or one of this mod's"
                 ));
@@ -1149,6 +1159,34 @@ capabilities = ["registries"]
             .map(|i| i.crafting_remainder.as_deref())
             .collect();
         assert_eq!(rests, [Some("minecraft:bowl"), Some("ruby:c_flask"), None]);
+    }
+
+    #[test]
+    fn a_file_item_may_leave_a_code_declared_item_as_its_remainder() {
+        // `native_items` declares ruby:wrench in code; a file item names it as its remainder.
+        let files: &[(&str, &[u8])] = &[(
+            "data/ruby/horizon/item/tool.json",
+            br#"{"template": "minecraft:iron_pickaxe", "crafting_remainder": "ruby:wrench"}"#,
+        )];
+        let read = |declared: &[String]| {
+            let dir = scratch("declared-remainder");
+            let path = dir.join("m.hmod");
+            std::fs::write(
+                &path,
+                Package::write_files(MANIFEST_TEXT, None, files).unwrap(),
+            )
+            .unwrap();
+            let package = Package::read(&path).unwrap();
+            let content = Content::read_declaring(&path, &package.manifest, declared);
+            std::fs::remove_dir_all(&dir).unwrap();
+            content
+        };
+        assert!(read(&[]).is_err(), "a remainder nobody declares is refused");
+        let content = read(&["ruby:wrench".to_owned()]).expect("the code-declared item is known");
+        assert_eq!(
+            content.items[0].crafting_remainder.as_deref(),
+            Some("ruby:wrench")
+        );
     }
 
     #[test]

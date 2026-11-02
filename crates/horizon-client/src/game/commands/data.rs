@@ -68,7 +68,12 @@ impl Game<'_> {
             .flatten()
     }
     fn entity_nbt_in_level(&mut self, t: Target) -> Option<Tag> {
-        let player_uuid = self.level.player_uuid;
+        // The acting player's own UUID: a guest's turn (the window's player on
+        // the server thread) keeps the world owner's in `level`.
+        let player_uuid = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid);
         Some(match t {
             Target::Guest(_) => {
                 return self
@@ -149,7 +154,9 @@ impl Game<'_> {
                 self.other_to_nbt(&o, uuid)
             }
             Target::Orb(id) => {
-                entity_nbt::orb_to_nbt(self.orbs.iter().find(|o| o.id == id)?, random_uuid())
+                let tag =
+                    entity_nbt::orb_to_nbt(self.orbs.iter().find(|o| o.id == id)?, random_uuid());
+                crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Projectile(id) => {
                 let p = self.creatures.projectiles.iter().find(|p| p.id == id)?;
@@ -163,19 +170,22 @@ impl Game<'_> {
                     .as_ref()
                     .and_then(|a| a.last_state)
                     .map(|s| self.state_to_nbt(s));
-                entity_nbt::arrow_to_nbt(p, random_uuid(), owner, in_block, None)
-                    .or_else(|| entity_nbt::fireball_to_nbt(p, random_uuid(), owner, None))
-                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, None))?
+                let raw = self.persist.raw.get(&id);
+                entity_nbt::arrow_to_nbt(p, random_uuid(), owner, in_block, raw)
+                    .or_else(|| entity_nbt::fireball_to_nbt(p, random_uuid(), owner, raw))
+                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))?
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
                 let (uuid, raw) = self.persist_anon("minecraft:end_crystal", c.position);
-                c.to_nbt(uuid.unwrap_or_else(random_uuid), raw)
+                let tag = c.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
+                crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Dragon(id) => {
                 let d = self.dragon.as_ref().filter(|d| d.id == id)?;
                 let (uuid, raw) = self.persist_anon("minecraft:ender_dragon", d.position);
-                d.to_nbt(uuid.unwrap_or_else(random_uuid), raw)
+                let tag = d.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
+                crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Tnt(id) => {
                 let uuid = self.uuid_for(id);
@@ -206,6 +216,11 @@ impl Game<'_> {
                     uuid,
                 );
                 crate::game::persist::with_raw(tag, raw)
+            }
+            Target::Rocket(id) => {
+                let uuid = self.uuid_for(id);
+                let r = self.rockets.iter().find(|r| r.id == id)?;
+                r.to_nbt(uuid, player_uuid, self.persist.raw.get(&id))
             }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
@@ -309,6 +324,10 @@ impl Game<'_> {
             // `tags_of` reads a primed TNT's compound; without this arm
             // `/tag` wrote nothing and still reported success.
             | Target::Tnt(id)
+            | Target::Orb(id)
+            | Target::Projectile(id)
+            | Target::Crystal(id)
+            | Target::Dragon(id)
             | Target::Other(id) => Some(self.persist.raw.entry(id).or_insert_with(empty)),
             _ => None,
         }
@@ -833,6 +852,8 @@ impl Game<'_> {
             Some(Target::Tnt(id))
         } else if self.falling.iter().any(|f| f.id == id) {
             Some(Target::Falling(id))
+        } else if self.rockets.iter().any(|r| r.id == id) {
+            Some(Target::Rocket(id))
         } else if self.ominous_spawners.iter().any(|s| s.id == id) {
             Some(Target::Spawner(id))
         } else {

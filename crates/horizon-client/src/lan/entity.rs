@@ -738,6 +738,9 @@ pub struct Entities {
     probes: Vec<Probe>,
     chunks: Vec<(i32, i32)>,
     chunk_index: crate::fast_hash::FxHashMap<(i32, i32), u32>,
+    /// The entities in each of `chunks` (indices into `probes`): a client
+    /// that moved checks only the chunks within its view distance.
+    chunk_members: Vec<Vec<u32>>,
     held: Vec<u8>,
     flags: Vec<Vec<u8>>,
     /// Whether a client starts tracking each entity this tick.
@@ -787,6 +790,9 @@ impl Entities {
         self.probes.clear();
         self.chunks.clear();
         self.chunk_index.clear();
+        for members in &mut self.chunk_members {
+            members.clear();
+        }
         self.moved.clear();
         self.is_moved.clear();
         self.is_moved.resize(entities.len(), false);
@@ -822,7 +828,11 @@ impl Entities {
             let chunk = *self.chunk_index.entry(at).or_insert(next);
             if chunk == next {
                 self.chunks.push(at);
+                if self.chunk_members.len() == chunk as usize {
+                    self.chunk_members.push(Vec::new());
+                }
             }
+            self.chunk_members[chunk as usize].push(index as u32);
             self.probes.push(Probe {
                 x: e.position[0],
                 z: e.position[2],
@@ -861,6 +871,7 @@ impl Entities {
             self.held.clear();
             self.held.resize(self.chunks.len(), 0);
             let (chunks, held, pairs) = (&self.chunks, &mut self.held, &mut self.pairs);
+            let members = &self.chunk_members;
             let mut kept = 0;
             // A client that moved (ChunkMap.move), or whose own entity
             // appeared or changed section (ChunkMap.tick's movedPlayers), has
@@ -871,17 +882,34 @@ impl Entities {
                     .get(&v.entity_id)
                     .is_none_or(|s| s.seen != now || self.is_moved[s.index]);
             if all {
-                flags.extend(self.probes.iter().zip(pairs.iter_mut()).map(|(p, pairs)| {
-                    if p.id == v.entity_id || !sees(v, p, chunks, held) {
-                        0
-                    } else if v.tracker.seen.contains_key(&p.id) {
-                        kept += 1;
-                        SEES | TRACKS
-                    } else {
-                        *pairs = true;
-                        SEES
+                // `sees` caps the range at its view distance, so only the
+                // entities in chunks that far from its own can be seen; the
+                // rest stay 0, as checking each of them gave.
+                flags.resize(self.probes.len(), 0);
+                let reach = v.view_distance + 1;
+                let (vx, vz) = (
+                    (v.position[0].floor() as i32) >> 4,
+                    (v.position[2].floor() as i32) >> 4,
+                );
+                for (&(cx, cz), members) in chunks.iter().zip(members) {
+                    if (cx - vx).abs() > reach || (cz - vz).abs() > reach {
+                        continue;
                     }
-                }));
+                    for &index in members {
+                        let index = index as usize;
+                        let p = &self.probes[index];
+                        if p.id == v.entity_id || !sees(v, p, chunks, held) {
+                            continue;
+                        }
+                        if v.tracker.seen.contains_key(&p.id) {
+                            flags[index] = SEES | TRACKS;
+                            kept += 1;
+                        } else {
+                            flags[index] = SEES;
+                            pairs[index] = true;
+                        }
+                    }
+                }
             } else if v.tracker.seen.len() * 4 > self.probes.len() {
                 // Otherwise its pairs stay as they were, but for the entities
                 // that appeared or changed section; a client tracking much

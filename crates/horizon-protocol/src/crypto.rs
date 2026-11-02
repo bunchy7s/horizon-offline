@@ -5,107 +5,15 @@
 //! needed: CFB8 encrypts the shift register in both directions.
 use sha1::{Digest, Sha1};
 
-const SBOX: [u8; 256] = {
-    // Generated from the AES field inverse and affine transform at compile time.
-    let mut sbox = [0u8; 256];
-    let mut p: u8 = 1;
-    let mut q: u8 = 1;
-    loop {
-        // p *= 3
-        p = p ^ (p << 1) ^ if p & 0x80 != 0 { 0x1B } else { 0 };
-        // q /= 3
-        q ^= q << 1;
-        q ^= q << 2;
-        q ^= q << 4;
-        if q & 0x80 != 0 {
-            q ^= 0x09;
-        }
-        let x = q ^ q.rotate_left(1) ^ q.rotate_left(2) ^ q.rotate_left(3) ^ q.rotate_left(4);
-        sbox[p as usize] = x ^ 0x63;
-        if p == 1 {
-            break;
-        }
-    }
-    sbox[0] = 0x63;
-    sbox
-};
-
-fn xtime(b: u8) -> u8 {
-    (b << 1) ^ if b & 0x80 != 0 { 0x1B } else { 0 }
-}
-
-/// AES-128 block encryption (FIPS-197).
-#[derive(Clone)]
-pub struct Aes128 {
-    round_keys: [[u8; 16]; 11],
-}
-impl Aes128 {
-    pub fn new(key: &[u8; 16]) -> Self {
-        let mut w = [[0u8; 4]; 44];
-        for i in 0..4 {
-            w[i].copy_from_slice(&key[i * 4..i * 4 + 4]);
-        }
-        let mut rcon = 1u8;
-        for i in 4..44 {
-            let mut t = w[i - 1];
-            if i % 4 == 0 {
-                t = [
-                    SBOX[t[1] as usize] ^ rcon,
-                    SBOX[t[2] as usize],
-                    SBOX[t[3] as usize],
-                    SBOX[t[0] as usize],
-                ];
-                rcon = xtime(rcon);
-            }
-            for j in 0..4 {
-                w[i][j] = w[i - 4][j] ^ t[j];
-            }
-        }
-        let mut round_keys = [[0u8; 16]; 11];
-        for (r, key) in round_keys.iter_mut().enumerate() {
-            for c in 0..4 {
-                key[c * 4..c * 4 + 4].copy_from_slice(&w[r * 4 + c]);
-            }
-        }
-        Self { round_keys }
-    }
-    pub fn encrypt_block(&self, block: &mut [u8; 16]) {
-        let add = |s: &mut [u8; 16], k: &[u8; 16]| s.iter_mut().zip(k).for_each(|(a, b)| *a ^= b);
-        add(block, &self.round_keys[0]);
-        for round in 1..=10 {
-            for b in block.iter_mut() {
-                *b = SBOX[*b as usize];
-            }
-            // ShiftRows (column-major state: byte r + 4c).
-            let s = *block;
-            for c in 0..4 {
-                for r in 0..4 {
-                    block[r + 4 * c] = s[r + 4 * ((c + r) % 4)];
-                }
-            }
-            if round != 10 {
-                for c in 0..4 {
-                    let col = [
-                        block[4 * c],
-                        block[4 * c + 1],
-                        block[4 * c + 2],
-                        block[4 * c + 3],
-                    ];
-                    let all = col[0] ^ col[1] ^ col[2] ^ col[3];
-                    for r in 0..4 {
-                        block[4 * c + r] = col[r] ^ all ^ xtime(col[r] ^ col[(r + 1) % 4]);
-                    }
-                }
-            }
-            add(block, &self.round_keys[round]);
-        }
-    }
-}
+mod blocks;
+pub use blocks::Blocks as Aes128;
+use blocks::LANES;
 
 /// AES/CFB8 stream state for one direction of a connection.
 #[derive(Clone)]
 pub struct Cfb8 {
     aes: Aes128,
+    /// The last 16 ciphertext bytes (the IV before any).
     register: [u8; 16],
 }
 impl Cfb8 {
@@ -116,26 +24,28 @@ impl Cfb8 {
             register: *iv,
         }
     }
-    fn keystream(&self) -> u8 {
-        let mut block = self.register;
-        self.aes.encrypt_block(&mut block);
-        block[0]
-    }
-    fn shift(&mut self, cipher_byte: u8) {
-        self.register.copy_within(1.., 0);
-        self.register[15] = cipher_byte;
-    }
+    /// Each byte's keystream is the encrypted register, which holds the
+    /// ciphertext before it: encryption goes one byte at a time.
     pub fn encrypt(&mut self, data: &mut [u8]) {
-        for b in data {
-            *b ^= self.keystream();
-            self.shift(*b);
-        }
+        self.aes.cfb8_encrypt(&mut self.register, data);
     }
+    /// Decryption knows every ciphertext byte up front, so the registers of
+    /// [`LANES`] bytes in a row are known together and encrypted at once.
     pub fn decrypt(&mut self, data: &mut [u8]) {
-        for b in data {
-            let c = *b;
-            *b ^= self.keystream();
-            self.shift(c);
+        for run in data.chunks_mut(LANES) {
+            // The register, then this run's ciphertext: byte i's register
+            // is window[i..i + 16].
+            let mut window = [0u8; 16 + LANES];
+            window[..16].copy_from_slice(&self.register);
+            window[16..16 + run.len()].copy_from_slice(run);
+            let mut blocks: [[u8; 16]; LANES] =
+                std::array::from_fn(|i| window[i..i + 16].try_into().unwrap());
+            self.aes.encrypt_lanes(&mut blocks);
+            for (b, k) in run.iter_mut().zip(&blocks) {
+                *b ^= k[0];
+            }
+            self.register
+                .copy_from_slice(&window[run.len()..run.len() + 16]);
         }
     }
 }
@@ -280,14 +190,6 @@ mod tests {
     }
 
     #[test]
-    fn sbox_spot_checks() {
-        assert_eq!(SBOX[0x00], 0x63);
-        assert_eq!(SBOX[0x01], 0x7c);
-        assert_eq!(SBOX[0x53], 0xed);
-        assert_eq!(SBOX[0xff], 0x16);
-    }
-
-    #[test]
     fn aes128_fips197_vector() {
         let key: [u8; 16] = hex("000102030405060708090a0b0c0d0e0f").try_into().unwrap();
         let mut block: [u8; 16] = hex("00112233445566778899aabbccddeeff").try_into().unwrap();
@@ -311,6 +213,79 @@ mod tests {
         let mut dec = Cfb8::new(&key, &iv);
         dec.decrypt(&mut data);
         assert_eq!(data, plain);
+    }
+
+    /// Bytes from a fixed xorshift: the same every run.
+    fn noise(n: usize, mut seed: u64) -> Vec<u8> {
+        (0..n)
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn lanes_match_single_blocks_and_the_aes_crate() {
+        use aes::cipher::{BlockEncrypt, KeyInit};
+        let key: [u8; 16] = noise(16, 1).try_into().unwrap();
+        let aes = Aes128::new(&key);
+        let reference = aes::Aes128::new(&key.into());
+        let mut lanes: [[u8; 16]; LANES] =
+            std::array::from_fn(|i| noise(16, 7 + i as u64).try_into().unwrap());
+        let inputs = lanes;
+        aes.encrypt_lanes(&mut lanes);
+        for (input, out) in inputs.iter().zip(&lanes) {
+            let mut one = *input;
+            aes.encrypt_block(&mut one);
+            assert_eq!(&one, out);
+            let mut expected = aes::Block::from(*input);
+            reference.encrypt_block(&mut expected);
+            assert_eq!(out[..], expected[..]);
+        }
+    }
+
+    /// Decryption in runs of [`LANES`] gives what the one-byte-at-a-time
+    /// definition gives, however the stream is cut into reads.
+    #[test]
+    fn cfb8_decrypts_like_the_byte_by_byte_definition() {
+        let key: [u8; 16] = noise(16, 3).try_into().unwrap();
+        let iv: [u8; 16] = noise(16, 4).try_into().unwrap();
+        let plain = noise(5000, 5);
+        let mut cipher = plain.clone();
+        Cfb8::new(&key, &iv).encrypt(&mut cipher);
+        // The definition: P[i] = C[i] ^ E(register)[0], register += C[i].
+        let aes = Aes128::new(&key);
+        let mut register = iv;
+        let expected: Vec<u8> = cipher
+            .iter()
+            .map(|&c| {
+                let mut block = register;
+                aes.encrypt_block(&mut block);
+                register.copy_within(1.., 0);
+                register[15] = c;
+                c ^ block[0]
+            })
+            .collect();
+        assert_eq!(expected, plain);
+        for cuts in [
+            &[5000][..],
+            &[1, 7, 8, 9, 15, 16, 17, 1000, 3927],
+            &[3, 4997],
+        ] {
+            let mut data = cipher.clone();
+            let mut dec = Cfb8::new(&key, &iv);
+            let mut rest = &mut data[..];
+            for &n in cuts {
+                let (head, tail) = rest.split_at_mut(n);
+                dec.decrypt(head);
+                rest = tail;
+            }
+            assert!(rest.is_empty());
+            assert_eq!(data, plain, "cuts {cuts:?}");
+        }
     }
 
     /// The digests of single names published with the protocol docs.

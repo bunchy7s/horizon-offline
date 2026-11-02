@@ -42,6 +42,8 @@ struct Plan {
     solid_calls: usize,
     /// Where the shadow camera's solid and translucent calls begin.
     shadow_calls: [usize; 2],
+    /// Where Metal's opaque pass ends and its cutout pass begins in phase 1's calls.
+    pass_calls: [usize; 2],
     total: u64,
 }
 const QUADS: u32 = u32::MAX;
@@ -107,6 +109,9 @@ pub struct Flat {
     pub calls: Vec<Call>,
     pub phase1_calls: usize,
     pub solid_calls: usize,
+    /// Metal's two solid passes over phase 1: the opaque one draws
+    /// `calls[..pass_calls[0]]`, the cutout one `calls[pass_calls[1]..phase1_calls]`.
+    pub pass_calls: [usize; 2],
     /// Where a shader pack's shadow camera's solid and translucent calls
     /// begin (`calls.len()` without them): the camera's translucent calls
     /// end at the first.
@@ -216,7 +221,8 @@ fn buffer(
 /// apart. A phase 2 range names its draw in phase 2 and its call in phase 2
 /// instead of a destination: the call's room holds all of its draws. Draws
 /// from `shadow[0]` (solid) and `shadow[1]` (translucent) on are a shader
-/// pack's shadow camera's, with calls of their own.
+/// pack's shadow camera's, with calls of their own. Phase 1's draws before
+/// `passes[0]` and from `passes[1]` on, the two solid passes' on Metal, too.
 #[allow(clippy::too_many_arguments)]
 fn plan(
     draws: &[[u32; 5]],
@@ -224,6 +230,7 @@ fn plan(
     phase1_draws: usize,
     solid_draws: usize,
     shadow: [usize; 2],
+    passes: [usize; 2],
     align: u64,
     calls: &mut Vec<Call>,
     ranges: &mut Vec<Range>,
@@ -234,6 +241,7 @@ fn plan(
     segments.clear();
     let (mut phase1_calls, mut solid_calls) = (None, None);
     let mut shadow_calls = [None; 2];
+    let mut pass_calls = [None; 2];
     let mut total = 0u64;
     let mut by_source: Vec<(Source, Vec<Range>)> = Vec::new();
     for (i, (d, &(page, sorted))) in draws.iter().zip(pages).enumerate() {
@@ -248,7 +256,13 @@ fn plan(
                 shadow_calls[k].get_or_insert(calls.len());
             }
         }
-        let starts = i == phase1_draws || i == solid_draws || shadow.contains(&i);
+        for (k, &from) in passes.iter().enumerate() {
+            if i == from {
+                pass_calls[k].get_or_insert(calls.len());
+            }
+        }
+        let starts =
+            i == phase1_draws || i == solid_draws || shadow.contains(&i) || passes.contains(&i);
         match calls.last_mut() {
             Some(last) if last.page == page && !starts => last.count += d[0],
             _ => calls.push(Call {
@@ -283,10 +297,12 @@ fn plan(
         ranges.resize(padded as usize, [0; 4]);
     }
     let solid_calls = solid_calls.unwrap_or(calls.len());
+    let phase1_calls = phase1_calls.unwrap_or(calls.len()).min(solid_calls);
     Plan {
-        phase1_calls: phase1_calls.unwrap_or(calls.len()).min(solid_calls),
+        phase1_calls,
         solid_calls,
         shadow_calls: shadow_calls.map(|c| c.unwrap_or(calls.len())),
+        pass_calls: pass_calls.map(|c| c.unwrap_or(calls.len()).min(phase1_calls)),
         total,
     }
 }
@@ -438,6 +454,7 @@ impl Flat {
             calls: Vec::new(),
             phase1_calls: 0,
             solid_calls: 0,
+            pass_calls: [0; 2],
             shadow_calls: [0; 2],
             min_sections,
             range_align: (u64::from(device.limits().min_storage_buffer_offset_alignment) / 16)
@@ -519,6 +536,7 @@ impl Flat {
         phase1_draws: usize,
         solid_draws: usize,
         shadow: [usize; 2],
+        passes: [usize; 2],
         phase2: Option<&wgpu::Buffer>,
         origins: impl Iterator<Item = (u32, [f32; 4])>,
         sorted_page: impl Fn(u32) -> wgpu::Buffer,
@@ -563,6 +581,7 @@ impl Flat {
             phase1_calls,
             solid_calls,
             shadow_calls,
+            pass_calls,
             total,
         } = plan(
             draws,
@@ -570,6 +589,7 @@ impl Flat {
             phase1_draws,
             solid_draws,
             shadow,
+            passes,
             self.range_align,
             &mut self.calls,
             &mut self.range_data,
@@ -578,11 +598,13 @@ impl Flat {
         self.phase1_calls = phase1_calls;
         self.solid_calls = solid_calls;
         self.shadow_calls = shadow_calls;
+        self.pass_calls = pass_calls;
         if total == 0 || total * 4 > device.limits().max_storage_buffer_binding_size {
             self.calls.clear();
             self.phase1_calls = 0;
             self.solid_calls = 0;
             self.shadow_calls = [0; 2];
+            self.pass_calls = [0; 2];
             return false;
         }
         if self.range_data.len() as u64 > self.range_capacity {
@@ -870,6 +892,7 @@ mod tests {
             solid,
             solid,
             [draws.len(); 2],
+            [draws.len(), 0],
             4,
             &mut calls,
             &mut ranges,
@@ -904,6 +927,39 @@ mod tests {
         assert_eq!(ranges.len(), 12);
     }
 
+    /// Metal's opaque pass draws the lists before `passes[0]`, its cutout
+    /// pass those from `passes[1]`: each bound starts a call of its own,
+    /// though its page goes on.
+    #[test]
+    fn plan_splits_calls_where_the_solid_passes_end_and_begin() {
+        let (draws, pages, solid) = sample();
+        let (mut calls, mut ranges, mut segments) = (Vec::new(), Vec::new(), Vec::new());
+        let plan = plan(
+            &draws,
+            &pages,
+            solid,
+            solid,
+            [draws.len(); 2],
+            [3, 1],
+            4,
+            &mut calls,
+            &mut ranges,
+            &mut segments,
+        );
+        assert_eq!((plan.pass_calls, plan.solid_calls), ([3, 1], 4));
+        let call = |page, first, count| Call { page, first, count };
+        assert_eq!(
+            calls,
+            [
+                call(0, 0, 18),
+                call(0, 18, 12),
+                call(1, 30, 6),
+                call(0, 36, 24),
+                call(0, 60, 18)
+            ]
+        );
+    }
+
     /// A shader pack's shadow draws follow the camera's, in calls of their
     /// own even from the same page: solid ones, then translucent ones.
     #[test]
@@ -919,6 +975,7 @@ mod tests {
             solid,
             solid,
             [camera, camera + 2],
+            [camera, 0],
             4,
             &mut calls,
             &mut ranges,
@@ -946,6 +1003,7 @@ mod tests {
             2,
             solid,
             [draws.len(); 2],
+            [draws.len(), 0],
             4,
             &mut calls,
             &mut ranges,
@@ -957,6 +1015,7 @@ mod tests {
                 phase1_calls: 1,
                 solid_calls: 3,
                 shadow_calls: [4, 4],
+                pass_calls: [1, 0],
                 total: 6 * 13
             }
         );
@@ -1061,6 +1120,7 @@ mod tests {
                 phase1,
                 solid,
                 [draws.len(); 2],
+                [draws.len(), 0],
                 align,
                 &mut calls,
                 &mut ranges,

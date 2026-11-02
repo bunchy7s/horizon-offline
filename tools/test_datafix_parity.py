@@ -212,10 +212,10 @@ def main():
                    'file fixes), on the sample worlds saved before it, for developing the fixes of a range of versions')
     args = p.parse_args()
     import datafix_worlds
-    import fcntl
+    import file_lock
     WORLDS.parent.mkdir(parents=True, exist_ok=True)
-    with open(WORLDS.parent / 'generate.lock', 'w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)  # another worktree may be generating them
+    with open(WORLDS.parent / 'generate.lock', 'w') as handle:
+        file_lock.lock(handle)  # another worktree may be generating them
         missing = [v for v in [*datafix_worlds.VERSIONS, *datafix_worlds.VARIANTS] if not (datafix_worlds.worlds_dir(v) / v / 'level.dat').exists()]
         if missing:
             print('generating sample worlds:', ' '.join(missing), flush=True)

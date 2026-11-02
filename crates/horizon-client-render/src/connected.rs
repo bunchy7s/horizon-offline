@@ -79,7 +79,14 @@ struct StateInfo {
     axis: Option<Axis>,
     /// `half=upper`: `linked` random tiles follow the lower half.
     upper: bool,
+    /// A pane's arms (`north`, `east`, `south`, `west` true), as bits of [`ARMS`].
+    arms: u8,
+    /// Rules name the state or one of its sides' sprites ([`ConnectedTextures::stacked_pane_hides`]).
+    has_rules: bool,
 }
+
+/// A pane's arm properties, in [`StateInfo::arms`]' bit order.
+const ARMS: [&str; 4] = ["north", "east", "south", "west"];
 
 #[derive(Default)]
 pub struct ConnectedTextures {
@@ -196,6 +203,23 @@ impl ConnectedTextures {
                 })
                 .collect();
         }
+        // Panes whose sprites tile rules name (`matchTiles=glass`) are connected too, by a rule
+        // that can draw on them: here, one naming no block (a rule naming the pane is in its
+        // own list already).
+        for id in (0..out.states.len()).filter(|_| !out.by_layer.is_empty()) {
+            let pane = registry
+                .state(BlockStateId(id as u32))
+                .is_some_and(|s| s.name.ends_with("glass_pane"));
+            if pane && !out.states[id].has_rules {
+                out.states[id].has_rules = Face::ALL.into_iter().any(|f| {
+                    face_layer(BlockStateId(id as u32), f).is_some_and(|l| {
+                        out.list(&out.by_layer, l as usize)
+                            .iter()
+                            .any(|&i| out.rules[usize::from(i)].rule.match_blocks.is_empty())
+                    })
+                });
+            }
+        }
         out
     }
 
@@ -299,6 +323,13 @@ impl ConnectedTextures {
                     _ => None,
                 },
                 upper: prop("half") == Some("upper"),
+                arms: ARMS
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, arm)| prop(arm) == Some("true"))
+                    .fold(0, |bits, (i, _)| bits | 1 << i),
+                // Set below, with the state's rule list.
+                has_rules: false,
             });
             list.clear();
             if let Some(candidates) = by_block.get(name) {
@@ -308,6 +339,7 @@ impl ConnectedTextures {
                         .filter(|&&i| out.rules[usize::from(i)].rule.matches_block(name, prop)),
                 );
             }
+            out.states.last_mut().expect("pushed above").has_rules = !list.is_empty();
             let range = push_list(&mut out.lists, &list);
             out.by_state.push(range);
         }
@@ -318,6 +350,35 @@ impl ConnectedTextures {
         self.rules.is_empty()
     }
 
+    /// Whether a pane's top or bottom strip, centred at `centre` (block-local x, z), is hidden by
+    /// the pane `other` stacked on it (Continuity's "Glass Pane Culling Fix"): only for a pane
+    /// with connected-texture rules, under or over the same block, where `other` has the same
+    /// part (the post, or the arm toward the strip).
+    pub fn stacked_pane_hides(&self, state: u32, other: u32, [x, z]: [f32; 2]) -> bool {
+        let (Some(own), Some(theirs)) = (
+            self.states.get(state as usize),
+            self.states.get(other as usize),
+        ) else {
+            return false;
+        };
+        if own.block != theirs.block || !own.has_rules {
+            return false;
+        }
+        let (dx, dz) = (x - 0.5, z - 0.5);
+        // The post is 2 pixels wide; an arm runs from it to the block's edge.
+        if dx.abs() <= 1.0 / 16.0 && dz.abs() <= 1.0 / 16.0 {
+            return true;
+        }
+        let arm = if dz.abs() > dx.abs() {
+            if dz < 0.0 { 0 } else { 2 }
+        } else if dx > 0.0 {
+            1
+        } else {
+            3
+        };
+        theirs.arms & 1 << arm != 0
+    }
+
     fn list(&self, ranges: &[(u32, u32)], i: usize) -> &[u16] {
         ranges.get(i).map_or(&[], |&(start, len)| {
             &self.lists[start as usize..(start + len) as usize]
@@ -326,7 +387,8 @@ impl ConnectedTextures {
 
     /// What the `face` of the block `state` at `pos` draws, for a quad with sprite `layer`.
     /// `neighbour` answers the state at an offset from the block; `biome` its biome, asked only
-    /// by rules that test one.
+    /// by rules that test one; `texture` the quad's own texture directions, asked only by rules
+    /// with `orient=texture`.
     pub fn pick<'b>(
         &self,
         state: u32,
@@ -335,6 +397,7 @@ impl ConnectedTextures {
         pos: [i32; 3],
         neighbour: impl Fn([i32; 3]) -> u32,
         biome: impl Fn() -> Option<&'b str>,
+        texture: impl Fn() -> Option<Axes>,
         mut overlay: impl FnMut(Overlay),
     ) -> Pick {
         let (mut by_state, mut by_layer) = (
@@ -366,9 +429,58 @@ impl ConnectedTextures {
             let r = &self.rules[usize::from(i)];
             if (block || r.rule.match_blocks.is_empty())
                 && (tile || r.rule.match_tiles.is_empty())
-                && let Some(pick) =
-                    self.apply(r, state, layer, face, pos, &neighbour, &biome, &mut overlay)
+                && let Some(pick) = self.apply(
+                    r,
+                    state,
+                    layer,
+                    face,
+                    pos,
+                    &neighbour,
+                    &biome,
+                    &texture,
+                    &mut overlay,
+                )
             {
+                // "Tiles output by CTM rules can also be matched by another rule": once, by the
+                // tile rules naming the picked tile (and this block, if they name blocks).
+                // A tile on the face's own sprite (`tiles=stone`) is no new tile.
+                let Pick::Tile(TileLayer::Layer { layer: picked, .. }) = pick else {
+                    return pick;
+                };
+                if picked == layer {
+                    return pick;
+                }
+                let own = self.list(&self.by_state, state as usize);
+                // Rules tried on the face's sprite already (those before this one) are not tried
+                // again: an overlay would draw twice.
+                let first = self.list(&self.by_layer, layer as usize);
+                let again = self
+                    .list(&self.by_layer, picked as usize)
+                    .iter()
+                    .map(|&j| (j, &self.rules[usize::from(j)]))
+                    .filter(|&(j, r)| {
+                        j != i
+                            && !(j < i && first.contains(&j))
+                            && (r.rule.match_blocks.is_empty() || own.contains(&j))
+                    });
+                for (_, r) in again {
+                    // Joins by tile still compare the face's own sprite with its neighbours'.
+                    match self.apply(
+                        r,
+                        state,
+                        layer,
+                        face,
+                        pos,
+                        &neighbour,
+                        &biome,
+                        &texture,
+                        &mut overlay,
+                    ) {
+                        Some(Pick::Keep) => return pick,
+                        Some(chained) => return chained,
+                        None => {}
+                    }
+                }
                 return pick;
             }
         }
@@ -386,6 +498,7 @@ impl ConnectedTextures {
         pos: [i32; 3],
         neighbour: &impl Fn([i32; 3]) -> u32,
         biome: &impl Fn() -> Option<&'b str>,
+        texture: &impl Fn() -> Option<Axes>,
         overlay: &mut impl FnMut(Overlay),
     ) -> Option<Pick> {
         let rule = &r.rule;
@@ -426,7 +539,12 @@ impl ConnectedTextures {
         };
         let axes = |face| match (rule.orient, info.axis) {
             (Orient::StateAxis, Some(axis)) => Axes::column(face, axis),
-            // `orient=texture` follows the quad's own UVs; vanilla cubes are what it is used on.
+            // The quad's own texture directions, whatever face `symmetry` stands it for.
+            // Not for `overlay`, which Continuity's `orient` leaves out: its 17 tiles always face
+            // the standard way.
+            (Orient::Texture, _) if rule.method != Method::Overlay => {
+                texture().unwrap_or(Axes::cube(face))
+            }
             _ => Axes::cube(face),
         };
         let mask = || geometry::neighbours(axes(face), face.normal(), rule.inner_seams, joins);
@@ -588,6 +706,10 @@ mod tests {
             |name| match name {
                 "minecraft:block/stone" => Some(7),
                 "minecraft:block/glass" => Some(3),
+                // The tile `b0` of a rule second in order (`a_picked_tile_can_be_picked_again`).
+                "assets/minecraft/optifine/ctm/b0.png" => Some(2000),
+                // And `a0` of the first rule.
+                "assets/minecraft/optifine/ctm/a0.png" => Some(1000),
                 _ => None,
             },
         )
@@ -610,7 +732,7 @@ mod tests {
         blocks: &[([i32; 3], u32)],
     ) -> Pick {
         let at = |o: [i32; 3]| blocks.iter().find(|(p, _)| *p == o).map_or(0, |b| b.1);
-        ctm.pick(state, layer, face, [0, 64, 0], at, || None, |_| {})
+        ctm.pick(state, layer, face, [0, 64, 0], at, || None, || None, |_| {})
     }
 
     const GLASS: &str = "matchBlocks=glass\nmethod=ctm\ntiles=0-46";
@@ -733,8 +855,26 @@ mod tests {
         )]);
         let mut tiles = std::collections::HashSet::new();
         for x in 0..20 {
-            let lower = ctm.pick(5, 3, Face::North, [x, 64, 0], |_| 0, || None, |_| {});
-            let upper = ctm.pick(6, 3, Face::North, [x, 65, 0], |_| 0, || None, |_| {});
+            let lower = ctm.pick(
+                5,
+                3,
+                Face::North,
+                [x, 64, 0],
+                |_| 0,
+                || None,
+                || None,
+                |_| {},
+            );
+            let upper = ctm.pick(
+                6,
+                3,
+                Face::North,
+                [x, 65, 0],
+                |_| 0,
+                || None,
+                || None,
+                |_| {},
+            );
             assert_eq!(lower, upper, "{x}");
             tiles.insert(format!("{lower:?}"));
         }
@@ -748,7 +888,16 @@ mod tests {
             "matchBlocks=glass\nmethod=fixed\ntiles=0\nheights=0-63\nbiomes=desert",
         )]);
         let at = |y, biome: &'static str| {
-            ctm.pick(1, 3, Face::Up, [0, y, 0], |_| 0, || Some(biome), |_| {})
+            ctm.pick(
+                1,
+                3,
+                Face::Up,
+                [0, y, 0],
+                |_| 0,
+                || Some(biome),
+                || None,
+                |_| {},
+            )
         };
         assert_eq!(at(10, "minecraft:desert"), tile(1000));
         assert_eq!(at(64, "minecraft:desert"), Pick::Keep);
@@ -783,7 +932,7 @@ mod tests {
             "glass.properties",
             "matchBlocks=glass\nmethod=repeat\nwidth=2\nheight=2\ntiles=0-3",
         )]);
-        let at = |pos| ctm.pick(1, 3, Face::North, pos, |_| 0, || None, |_| {});
+        let at = |pos| ctm.pick(1, 3, Face::North, pos, |_| 0, || None, || None, |_| {});
         assert_eq!(at([0, 64, 0]), tile(1000));
         // The north face's right is west; rows run down.
         assert_eq!(at([-1, 64, 0]), tile(1001));
@@ -864,6 +1013,7 @@ mod tests {
             [0, 64, 0],
             at,
             || None,
+            || None,
             |o| out.push(o.layer),
         );
         (out, pick)
@@ -901,6 +1051,7 @@ mod tests {
             [0, 64, 0],
             |o| if o == [0, 0, -1] { 1 } else { 0 },
             || None,
+            || None,
             |o| {
                 tint = Some((o.tint, o.translucent));
             },
@@ -937,6 +1088,7 @@ mod tests {
             Face::Up,
             [0, 64, 0],
             door_north,
+            || None,
             || None,
             |o| got.push(o),
         );
@@ -976,6 +1128,144 @@ mod tests {
         // draws nothing; c draws; the face keeps its own sprite.
         let (layers, pick) = overlays_in(&ctm, 1, Face::North, &[([-1, 0, 0], 1)]);
         assert_eq!((layers, pick), (vec![1001, 3000], Pick::Keep));
+    }
+
+    #[test]
+    fn a_picked_tile_can_be_picked_again() {
+        // b (rule 1) gives glass its tile b0, layer 2000; t (rule 0, a tile rule, tried first)
+        // names that tile, so it draws in b0's place.
+        let chain = |t: &str| {
+            world(&[
+                ("b.properties", "matchBlocks=glass\nmethod=fixed\ntiles=b0"),
+                ("t.properties", t),
+            ])
+        };
+        let ctm = chain("matchTiles=optifine/ctm/b0.png\nmethod=fixed\ntiles=0");
+        assert_eq!(pick_in(&ctm, 1, 3, Face::Up, &[]), tile(1000));
+        // A chained rule keeping the tile (<default>) leaves b's.
+        let ctm = chain("matchTiles=optifine/ctm/b0.png\nmethod=fixed\ntiles=<default>");
+        assert_eq!(pick_in(&ctm, 1, 3, Face::Up, &[]), tile(2000));
+        // One that names another block doesn't chain on glass.
+        let ctm = chain("matchTiles=optifine/ctm/b0.png\nmatchBlocks=stone\nmethod=fixed\ntiles=0");
+        assert_eq!(pick_in(&ctm, 1, 3, Face::Up, &[]), tile(2000));
+        // An overlay tried on the face's own sprite and on the picked tile draws once.
+        let ctm = chain("matchTiles=glass optifine/ctm/b0.png\nmethod=overlay_fixed\ntiles=0");
+        let (overlays, pick) = overlays_in(&ctm, 1, Face::Up, &[]);
+        assert_eq!((overlays, pick), (vec![1000], tile(2000)));
+        // A rule after the one that picked, naming both the face's sprite and the tile, wasn't
+        // tried: it chains.
+        let ctm = world(&[
+            ("a.properties", "matchTiles=glass\nmethod=fixed\ntiles=a0"),
+            (
+                "c.properties",
+                "matchTiles=glass optifine/ctm/a0.png\nmethod=fixed\ntiles=0",
+            ),
+        ]);
+        assert_eq!(pick_in(&ctm, 1, 3, Face::Up, &[]), tile(2000));
+    }
+
+    #[test]
+    fn orient_texture_follows_the_quads_uvs() {
+        let rule = |orient: &str| {
+            world(&[(
+                "glass.properties",
+                &*format!("matchBlocks=glass\nmethod=horizontal\ntiles=0-3\norient={orient}"),
+            )])
+        };
+        // A mirrored north face (a vanilla pane's): its texture's right is east.
+        let mirrored = || {
+            Some(Axes {
+                right: [1, 0, 0],
+                up: [0, 1, 0],
+            })
+        };
+        let east = |o: [i32; 3]| if o == [1, 0, 0] { 1 } else { 0 };
+        let at = |ctm: &ConnectedTextures| {
+            ctm.pick(
+                1,
+                3,
+                Face::North,
+                [0, 64, 0],
+                east,
+                || None,
+                mirrored,
+                |_| {},
+            )
+        };
+        // Glass to the east is to the texture's right: the row's left end.
+        assert_eq!(at(&rule("texture")), tile(1000));
+        // By the cube's directions it is to the left: the row's right end.
+        assert_eq!(at(&rule("none")), tile(1002));
+        // A plain overlay keeps the standard directions: glass north of a top face is above it
+        // (tile 15) whatever the quad's texture says.
+        let overlay = world(&[(
+            "a.properties",
+            "matchBlocks=stone\nmethod=overlay\nconnectBlocks=glass\ntiles=0-16\norient=texture",
+        )]);
+        let turned = || {
+            Some(Axes {
+                right: [0, 0, 1],
+                up: [1, 0, 0],
+            })
+        };
+        let north = |o: [i32; 3]| if o == [0, 0, -1] { 1 } else { 0 };
+        let mut got = Vec::new();
+        overlay.pick(
+            2,
+            7,
+            Face::Up,
+            [0, 64, 0],
+            north,
+            || None,
+            turned,
+            |o| got.push(o.layer),
+        );
+        assert_eq!(got, [1015]);
+    }
+
+    #[test]
+    fn stacked_panes_hide_the_strips_they_share() {
+        let props = |pairs: &[(&str, &str)]| -> BlockProperties {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        // 0 a pane with north and east arms, 1 the same pane with only a north arm, 2 another
+        // pane block, 3 a pane no rule names.
+        let states = [
+            (
+                "minecraft:glass_pane",
+                props(&[("north", "true"), ("east", "true")]),
+            ),
+            ("minecraft:glass_pane", props(&[("north", "true")])),
+            (
+                "minecraft:white_stained_glass_pane",
+                props(&[("north", "true")]),
+            ),
+            ("minecraft:iron_bars", props(&[("north", "true")])),
+        ];
+        let ctm = ConnectedTextures::build(
+            rules(&[(
+                "pane.properties",
+                "matchBlocks=glass_pane white_stained_glass_pane\nmethod=ctm\ntiles=0-46",
+            )]),
+            states.iter().map(|(n, p)| Some((*n, p))),
+            |_| None,
+        );
+        let (post, north, east) = ([0.5, 0.5], [0.5, 0.2], [0.8, 0.5]);
+        assert!(ctm.stacked_pane_hides(0, 1, post));
+        assert!(ctm.stacked_pane_hides(0, 1, north));
+        // The pane above has no east arm: the strip shows; one with it hides it.
+        assert!(!ctm.stacked_pane_hides(0, 1, east));
+        assert!(ctm.stacked_pane_hides(1, 0, east));
+        let (south, west) = ([0.5, 0.8], [0.2, 0.5]);
+        assert!(!ctm.stacked_pane_hides(1, 0, south));
+        assert!(!ctm.stacked_pane_hides(1, 0, west));
+        assert!(ctm.stacked_pane_hides(1, 0, north));
+        // Another block, or a pane without rules, hides nothing.
+        assert!(!ctm.stacked_pane_hides(1, 2, post));
+        assert!(!ctm.stacked_pane_hides(3, 3, post));
     }
 
     #[test]

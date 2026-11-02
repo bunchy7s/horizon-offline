@@ -26,7 +26,12 @@ struct EntityFluidWorld<'a> {
     world: &'a World,
     fluids: &'a FluidResources,
 }
-fn update_entity_fluids(
+/// `Entity.baseTick`'s fluid step for an entity that is pushed by fluid: its
+/// immersion heights, then the current of each fluid it sits in, added to
+/// `velocity` with vanilla's scales (water 0.014, lava 0.007 fast or
+/// 0.0023333 slow). Items and armour stands call it for themselves; a boat
+/// calls it from its own tick, before `floatBoat` scales the velocity.
+pub fn update_entity_fluids(
     bounds: Aabb,
     position: Vec3,
     eye_y: f64,
@@ -224,6 +229,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
+            no_gravity: false,
             id: 1,
             health: 5,
             fire_ticks: 0,
@@ -284,6 +290,54 @@ mod tests {
             );
         }
         assert!(carried.position.x > at.x + 0.5);
+    }
+
+    /// `Entity.baseTick` pushes a boat by the current it sits in: a boat box
+    /// in water[level=1..7] gains velocity along the flow, and the same box in
+    /// still source water does not. Vanilla's boat tick runs this before
+    /// `floatBoat` scales the velocity, which is what `game::boats` does.
+    #[test]
+    fn a_boat_box_is_pushed_by_the_current_it_sits_in() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = FluidResources::new(&assets, &facts).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        let mut state = assets.registry.state(water).unwrap().clone();
+        state.properties.insert("level".into(), "1".into());
+        let flowing = assets.registry.resolve(&state).unwrap();
+        for x in 19..=21 {
+            for z in 19..=21 {
+                world.set(x, 3, z, stone).unwrap();
+                world.set(x, 4, z, water).unwrap();
+            }
+        }
+        // Boat dimensions: 1.375 wide, 0.5625 tall, eye at its top.
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        let half = 1.375 / 2.0;
+        let bounds = Aabb::new(
+            Vec3::new(at.x - half, at.y, at.z - half),
+            Vec3::new(at.x + half, at.y + 0.5625, at.z + half),
+        );
+        let mut still = Vec3::ZERO;
+        update_entity_fluids(bounds, at, at.y + 0.5625, &mut still, &world, &fluids);
+        assert_eq!(still.x, 0.0, "source water has no current");
+        world.set(21, 4, 20, flowing).unwrap();
+        let mut carried = Vec3::ZERO;
+        update_entity_fluids(bounds, at, at.y + 0.5625, &mut carried, &world, &fluids);
+        assert!(
+            carried.x > 0.0,
+            "the flow pushes the boat along +x, got {}",
+            carried.x
+        );
     }
 
     #[test]

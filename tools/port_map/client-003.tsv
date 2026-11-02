@@ -20,11 +20,11 @@ SessionSearchTrees.updateCreativeTags	inline	crates/horizon-client/src/creative.
 SessionSearchTrees.updateCreativeTooltips	inline	crates/horizon-client/src/creative.rs::Creative::from_json	name index comes from the export's tooltip lines
 ChatAbilities.selectVisibleMessages	port	crates/horizon-client-render/src/chat.rs::ChatAbilities::shows	source filter: client lines always, player and server lines per the abilities
 ChatAbilities.Builder.build	inline	crates/horizon-client-render/src/chat.rs::ChatAbilities::new	restrictions come from the Chat option alone; new() maps the visibility to them
-ChatListener.tick	missing		player: the Chat Delay option does nothing; lines show at once instead of after the delay
-ChatListener.setMessageDelay	missing		player: no delayed-message queue, so Chat Delay has no effect
+ChatListener.tick	port	crates/horizon-client/src/game/remote.rs::tick_chat_queue	the queue runs down with the ticks and pauses with the game
+ChatListener.setMessageDelay	port	crates/horizon-client/src/game/remote.rs::chat_delay_ms	Chat Delay in milliseconds, as Java truncates it, read when a chat line arrives
 ChatListener.flushQueue	port	crates/horizon-client/src/game/remote.rs::Game::flush_chat_queue	each message through accept_chat, so it counts as processed
 ChatListener.removeFromDelayedMessageQueue	inline	crates/horizon-client/src/game/remote.rs::Game::handle_delete_chat	
-ChatListener.handleMessage	missing		player: nothing is held back, so Chat Delay is ignored
+ChatListener.handleMessage	port	crates/horizon-client/src/game/remote.rs::handle_player_chat	a line with a delay goes into remote.chat_queue instead of the chat
 ChatListener.handlePlayerChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: player: no Only Show Secure Chat filter, no server filter-mask text, no block or friend-only hiding of chat lines
 ChatListener.handleChatMessageError	port	crates/horizon-client/src/game/remote.rs::Game::handle_chat_message_error	the red italic chat.validation_error in the message's chat type, tagged chatError; gap: minor: a blocked or friends-only sender is not skipped (no social list), no narration, no markMessageAsProcessed
 ChatListener.handleDisguisedChatMessage	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: no narration and no chat log entry

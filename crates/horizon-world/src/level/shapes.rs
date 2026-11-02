@@ -283,12 +283,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             Class::Campfire => {
                 self.waterlogged_tick(state, pos);
                 if dir == Direction::Down {
-                    let hay = table.block_by_name("minecraft:hay_block");
-                    table.set_bool(
-                        state,
-                        p.signal_fire,
-                        hay.is_some_and(|hay| b.is_block(nstate, hay)),
-                    )
+                    table.set_bool(state, p.signal_fire, self.is_smoke_source(nstate))
                 } else {
                     sup!()
                 }

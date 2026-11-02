@@ -475,11 +475,14 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   `RconThread.create` does: no password or a port outside 1 to 65535 leaves it off with vanilla's warning. The
   packets are `RconClient`'s: login (3), command (2), the output in packets of 4096 characters, `-1` for a refused
   login, `Unknown request <hex>` for another type, `Error executing: <command> (<reason>)` for a command that failed.
-  A command goes to the game as `horizon-server cmd` sends it (`console <line>` on the control endpoint), so the
+  A command goes to the game as an `rcon <line>` request on the control endpoint (`horizon-server cmd` sends
+  `console <line>`, the same console under the `Server` source), so the
   output is what the console prints, its messages joined as `RconConsoleSource` joins them. Differences, each one
   named in `rcon.rs`: the packets are read from the stream, the password is compared in constant time, a
-  connection that hasn't logged in within 30 seconds is closed and at most 16 are open. Not yet: the sender
-  `Rcon` and `broadcast-rcon-to-ops` (a command shows as the console's).
+  connection that hasn't logged in within 30 seconds is closed and at most 16 are open. A command runs as
+  `RconConsoleSource` runs it: at level 4 from a source named `Rcon`, whose `say` reads `[Rcon] message` and whose
+  feedback reaches the operators in game as `[Rcon: message]` while `broadcast-rcon-to-ops` is on (the default), and
+  `send_command_feedback` is on; the reply to the client always carries the feedback, whatever those say.
 - **GS4 query.** `enable-query` and `query.port` turn on vanilla's UDP query, which server lists, status pages and
   monitoring tools read the MOTD, the version and the players from. The supervisor serves it (`query.rs`, std
   only), reads its settings as `QueryThreadGs4.create` does (a port outside 1 to 65535 leaves it off with

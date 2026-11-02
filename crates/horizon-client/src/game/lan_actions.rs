@@ -95,6 +95,9 @@ pub(super) struct GuestPlay {
     pub(super) lectern: Option<super::lan_stations::GuestLectern>,
     /// The menu the mods last heard this guest open (`tick_player_menus`).
     pub(super) menu_heard: Option<super::native_menus::HeardMenu>,
+    /// The equipment the mods last heard this guest wear (`native_players_equipment`), by
+    /// `EquipmentSlot`: main hand, off hand, feet, legs, chest, head.
+    pub(super) equipment_heard: Option<Box<[Option<crate::items::ItemStack>; 6]>>,
     /// What the guest's body was given for its effects and enchantments.
     potions: super::potions::BodyPotions,
     /// `ServerPlayer.getStats` and the inventory `inventory_changed` last saw.
@@ -206,7 +209,13 @@ pub(super) struct GuestSwap {
     /// The guest's own damage record, in place while they act.
     combat: super::combat::CombatTracker,
     /// The guest whose turn this one nests in, if any.
-    acting: (Option<u32>, Option<String>, Option<u128>, Option<u8>),
+    acting: (
+        Option<u32>,
+        Option<String>,
+        Option<u128>,
+        Option<u8>,
+        Option<u32>,
+    ),
     /// That turn's `known_movement`.
     known_movement: Vec3,
     /// The packets queued for that guest.
@@ -374,6 +383,15 @@ impl Game<'_> {
                 let _ =
                     m.apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
             }
+            // ServerPlayer.restoreFrom: a body that follows another takes its
+            // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
+            // to another level).
+            let g = &mut host.hub.guests[i];
+            if let Some(carried) = g.carried_attributes.take()
+                && let Some(m) = g.motion.as_mut()
+            {
+                let _ = m.apply_saved_attributes(Some(&carried));
+            }
             // The saved golden hearts go on the first body of a player who
             // has been here before.
             let saved = host.hub.guests[i].saved_absorption.take();
@@ -403,6 +421,10 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return None;
         };
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
         // A new body starts with no record of the last one.
@@ -537,6 +559,7 @@ impl Game<'_> {
             self.lan_acting_name.replace(g.name.clone()),
             self.lan_acting_uuid.replace(g.uuid),
             self.lan_acting_permission.replace(g.permission),
+            self.lan_acting_entity.replace(g.entity_id as u32),
         );
         let packets = std::mem::take(&mut self.guest_packets);
         let entity_events = std::mem::take(&mut self.guest_entity_events);
@@ -759,6 +782,7 @@ impl Game<'_> {
             self.lan_acting_name,
             self.lan_acting_uuid,
             self.lan_acting_permission,
+            self.lan_acting_entity,
         ) = acting;
         self.known_movement = known_movement;
         play.death_cause = std::mem::replace(&mut self.ui.death_cause, death_cause);
@@ -814,12 +838,27 @@ impl Game<'_> {
         // inventory key while riding).
         let guest_mount = std::mem::replace(&mut self.mount_menu, host_mount_menu).opened_mob();
         self.keys = host_keys;
+        // `Entity.addPassenger`: a rider that gets in now sits behind the
+        // players already in the vehicle, which is what tells its
+        // `getControllingPassenger` apart from this one's.
+        let seat_order = (guest_vehicle.is_some() && host.hub.guests[i].vehicle != guest_vehicle)
+            .then(|| {
+                host.hub.seat_order += 1;
+                host.hub.seat_order
+            });
         let g = &mut host.hub.guests[i];
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
             g.vehicle_good = None;
         }
         g.vehicle = guest_vehicle;
+        if let Some(order) = seat_order {
+            g.vehicle_order = order;
+        }
         let fell_asleep = bed.is_some() && g.bed.is_none();
         (g.bed, g.sleep_timer, g.spawn) = (bed, guest_sleep_timer, guest_spawn);
         g.respawn_elsewhere = guest_respawn.map(|c| c.saved());
@@ -2486,8 +2525,9 @@ impl Game<'_> {
         }
         let g = &mut host.hub.guests[gi];
         (g.yaw, g.pitch) = (yaw, pitch);
-        // A new body there: no fall distance or motion carried over.
-        g.motion = None;
+        // A new body there: no fall distance or motion carried over, but the
+        // player's attributes (ServerPlayer.teleport keeps the entity).
+        g.new_body(true);
         host.hub.teleport(gi, Some(at));
     }
     fn guest_tick_death(&mut self, host: &mut LanHost, gi: usize) {
@@ -3154,6 +3194,13 @@ impl Game<'_> {
         if !host.hub.guests[i].dead {
             return;
         }
+        // PlayerList.respawn replaces the player, retaining only opted-in data.
+        let uuid = host.hub.guests[i].uuid;
+        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+            && let Ok(copy) = attachments.copy_on_death()
+        {
+            *attachments = copy;
+        }
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(host, i);
         // AbstractContainerScreen.tick / ServerPlayer.closeContainer: the dead
@@ -3161,6 +3208,11 @@ impl Game<'_> {
         // count) falls instead of staying up for a player who is gone.
         self.guest_container_closed(host, conn);
         host.hub.close_container(conn);
+        // PlayerList.respawn builds a new `ServerPlayer`, whose `lastEquipmentItems` starts
+        // empty: the mods hear each worn item again from empty (`native_players_equipment`).
+        if let Some(play) = host.play.get_mut(&conn) {
+            play.equipment_heard = None;
+        }
         // PlayerList.respawn: a server's player comes back in its respawn
         // point's level: the Overworld, where the world spawn and beds are,
         // or another one's anchor or forced point, which its block resolves
@@ -3206,14 +3258,16 @@ impl Game<'_> {
         g.load_timeout = horizon_client::lan::guest::CLIENT_LOADED_TIMEOUT;
         g.loading = true;
         g.death_time = 0;
-        g.health = 20.0;
         g.food = 20;
         g.saturation = 5.0;
         g.sent_health = None;
-        if let Some(m) = g.motion.take() {
+        // ServerPlayer.restoreFrom(old, false): the base values come back,
+        // and the new player has the max health they give.
+        if let Some(m) = g.new_body(false) {
             let m = *m;
             g.logs_kept = Some((m.hurt_log, m.attack_log));
         }
+        g.health = g.respawn_health(self.motion);
         let mut xp = Experience {
             level: g.xp_level,
             progress: g.xp_progress,
@@ -3242,8 +3296,18 @@ impl Game<'_> {
         // ServerGamePacketListenerImpl.handleClientCommand: a hardcore world's
         // respawned player only watches.
         if self.level.hardcore {
-            host.hub
-                .set_game_mode(conn, SPECTATOR, &self.world, Some(self.collision));
+            let (uuid, name, from) = {
+                let g = &host.hub.guests[i];
+                (g.uuid, g.name.clone(), g.game_mode)
+            };
+            let mut cancel = false;
+            if from != SPECTATOR {
+                self.native_player_game_mode_changed(uuid, &name, from, SPECTATOR, &mut cancel);
+            }
+            if !cancel {
+                host.hub
+                    .set_game_mode(conn, SPECTATOR, &self.world, Some(self.collision));
+            }
         }
         if let Some(config) = elsewhere {
             self.respawn_trip(conn, config);
@@ -3306,6 +3370,7 @@ impl Game<'_> {
         self.lan_containers_tick(host);
         self.tick_lan_mount_menus(host);
         self.tick_player_menus(host);
+        self.native_players_equipment(host);
         self.announce_guest_advancements(host);
         let conns: Vec<u32> = host
             .hub
@@ -3794,6 +3859,12 @@ impl Game<'_> {
                 w.player.fall_distance = 0.0;
             }
             let travelled: Vec<[f64; 3]> = moves.iter().map(|m| m.0).collect();
+            // The tick's whole movement, for the delta movement a glide's wall
+            // hit reads (`handleMovePlayer` gives the server copy the client's
+            // own movement).
+            let tick_movement = travelled.iter().fold(Vec3::ZERO, |sum, d| {
+                sum.add_vector(Vec3::new(d[0], d[1], d[2]))
+            });
             // Entity.move's movementThisTick: each move, from where the
             // tick's first one started.
             let end = w.player.position;
@@ -3904,6 +3975,7 @@ impl Game<'_> {
             let _ = player.peaceful_regeneration(rules);
             let _ = player.food_tick(health, rules);
             events.append(&mut player.events);
+            player.carry_client_movement(tick_movement);
             let _ = MotionWorld {
                 entities: &[],
                 player,

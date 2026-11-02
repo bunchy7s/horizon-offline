@@ -16,7 +16,7 @@ sent the same things over TLS, and every answer is compared exactly:
   vanilla's data generator), `server/status`, the four lists, `players`, kicking nobody, `server/save` and
   `server/system_message` with no one online, the four lists changed (`add`, `remove`, `set`,
   `clear`; with no profile service, players named resolve to offline players on both), the live server
-  message and the difficulty read and changed (an empty message, the saved difficulty property), and
+  message, difficulty and default game mode read and changed (including their saved properties), and
   `server/stop`;
 - the TLS version each server agrees on.
 
@@ -133,6 +133,11 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":47,"method":"minecraft:serversettings/difficulty"}',
     '{"jsonrpc":"2.0","id":48,"method":"minecraft:serversettings/difficulty/set","params":["peaceful"]}',
     '{"jsonrpc":"2.0","id":49,"method":"minecraft:serversettings/difficulty"}',
+    '{"jsonrpc":"2.0","id":50,"method":"minecraft:serversettings/game_mode"}',
+    '{"jsonrpc":"2.0","id":51,"method":"minecraft:serversettings/game_mode/set","params":["creative"]}',
+    '{"jsonrpc":"2.0","id":52,"method":"minecraft:serversettings/game_mode"}',
+    '{"jsonrpc":"2.0","id":53,"method":"minecraft:serversettings/game_mode/set","params":["spectator"]}',
+    '{"jsonrpc":"2.0","id":54,"method":"minecraft:serversettings/game_mode"}',
 ]
 
 
@@ -352,9 +357,13 @@ def main():
                 sides[side]['saved_difficulty'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('difficulty=')), None)
+                sides[side]['saved_game_mode'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('gamemode=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
+                    sides[side]['saved_config_game_mode'] = 'game_mode = "spectator"' in world
             finally:
                 server.stop()
         vanilla, horizon = sides['vanilla'], sides['horizon']
@@ -369,6 +378,10 @@ def main():
             failures.append(f"saved difficulty: vanilla {vanilla['saved_difficulty']!r}, Horizon {horizon['saved_difficulty']!r}")
         if not horizon['saved_config_difficulty']:
             failures.append('Horizon did not save peaceful difficulty in server.toml')
+        if vanilla['saved_game_mode'] != horizon['saved_game_mode'] or vanilla['saved_game_mode'] != 'spectator':
+            failures.append(f"saved game mode: vanilla {vanilla['saved_game_mode']!r}, Horizon {horizon['saved_game_mode']!r}")
+        if not horizon['saved_config_game_mode']:
+            failures.append('Horizon did not save spectator game mode in server.toml')
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
         report = lab.LOCAL / 'datagen/out/reports/json-rpc-api-schema.json'
         discovered = horizon['answers'][MESSAGES.index('{"jsonrpc":"2.0","id":12,"method":"rpc.discover"}')]

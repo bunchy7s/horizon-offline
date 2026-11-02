@@ -12,20 +12,21 @@ use crate::{
     assets::{Assets, RenderAssets},
     biome::Biomes,
     blocks::{BlockFacts, RenderShape},
-    chunk::{Chunk, MIN_Y},
+    chunk::{Chunk, Light, MIN_Y},
     graphics::LeafCullingMode,
     models::catalog::BakedFace,
 };
+use horizon_assets::model::Direction as ModelDirection;
 use horizon_core::{
     biome::BiomeZoom, geometry::Direction, position::BlockPos, random::position_seed,
 };
-use horizon_optifine::ctm::connect::Face as CtmFace;
+use horizon_optifine::ctm::connect::{Axes as CtmAxes, Face as CtmFace};
 use horizon_world::{
     block_render::FaceVisibility,
     fluid::{FluidKind, FluidState},
     registry::BlockStateId,
 };
-pub use sides::Sides;
+pub use sides::{Part, Sides, group_parts};
 use std::sync::Arc;
 
 /// An entity, item and effect vertex (the entity pipelines), with a face
@@ -282,7 +283,7 @@ impl SectionMesh {
     pub const BOUNDS_PAD: f32 = 0.5;
 
     /// Retain geometry capacity after an upload, but none of its old contents.
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.solid.clear();
         self.translucent.clear();
         self.block_entities.clear();
@@ -474,6 +475,9 @@ struct Info {
     overlay: bool,
     /// `LeavesBlock`: with opaque leaves the faces between two leaf blocks are skipped.
     leaves: bool,
+    /// A glass pane: connected-texture tiles take the cube's UVs on it (OptiFine's pane models
+    /// drop vanilla's mirrored faces).
+    pane: bool,
     /// A full opaque cube: `RenderShape::Model`, `can_occlude`, `solid_render`
     /// and a full collision shape. The only block leaf culling treats as solid.
     opaque_cube: bool,
@@ -501,6 +505,10 @@ pub struct MeshFacts {
 }
 pub struct MeshTables {
     info: Vec<Info>,
+    /// `Info::solid` by state, packed apart: the opacity mask of a section
+    /// reads 8,000 states, and a few bytes each stay in cache where `Info`
+    /// does not.
+    solid: Vec<bool>,
     pub visibility: FaceVisibility,
     water_still: u16,
     water_flow: u16,
@@ -654,6 +662,7 @@ impl MeshTables {
                 legacy_solid: s.legacy_solid,
                 overlay: s.has_class("HalfTransparentBlock") || s.has_class("LeavesBlock"),
                 leaves: s.has_class("LeavesBlock"),
+                pane: s.has_class("IronBarsBlock") && name.ends_with("glass_pane"),
                 opaque_cube: leaf_culling::opaque_cube(
                     s.render_shape,
                     s.can_occlude,
@@ -668,6 +677,7 @@ impl MeshTables {
             });
         }
         Ok(Self {
+            solid: info.iter().map(|i| i.solid).collect(),
             info,
             visibility,
             water_still: layer("minecraft:block/water_still")?,
@@ -837,43 +847,66 @@ impl Padded {
     }
     fn fill(&mut self, region: &[[Option<&Chunk>; 3]; 3], sy: i32, own: &mut [u32; 4096]) {
         self.blocks.resize(P * P * P, 0);
-        self.blocks.fill(0);
         self.light.resize(P * P * P, 0);
         let (blocks, light) = (&mut self.blocks, &mut self.light);
         let base_y = region[1][1].map_or(MIN_Y, Chunk::min_y) + sy * 16;
-        // The section itself is unpacked in one pass; the border cells of the
-        // neighbouring sections are read one by one.
+        // The section itself is unpacked in one pass and copied row by row;
+        // the border cells of the neighbouring sections are read one by one,
+        // each run of them from a section found once.
         own.fill(0);
         let center = region[1][1].map(|c| &c.sections[sy as usize]);
         if let Some(section) = center {
             section.unpack(own);
         }
+        // The x runs of a padded row by the chunk column they fall in.
+        const RUNS: [(usize, i32, i32); 3] = [(0, -B, 0), (1, 0, 16), (2, 16, 16 + B)];
         for y in -B..16 + B {
             let wy = base_y + y;
             for z in -B..16 + B {
-                for x in -B..16 + B {
-                    let chunk = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize];
-                    let i = pi(x, y, z);
-                    if let Some(c) = chunk {
-                        blocks[i] =
-                            if (0..16).contains(&x) && (0..16).contains(&y) && (0..16).contains(&z)
-                            {
-                                own[(y << 8 | z << 4 | x) as usize]
-                            } else {
-                                c.get(x & 15, wy, z & 15)
-                            };
-                        light[i] = c.light(x & 15, wy, z & 15);
-                    } else if let Some(c) = region[1][1] {
-                        // A neighbour not loaded continues this chunk's edge
-                        // column. As lit air, the outermost chunks' water drew
-                        // a wall toward it (fluids show both sides), a light
-                        // sheet in the water where far terrain carries on.
-                        // Vanilla draws no chunk without its neighbours.
-                        let (ex, ez) = (x.clamp(0, 15), z.clamp(0, 15));
-                        blocks[i] = c.get(ex, wy, ez);
-                        light[i] = c.light(ex, wy, ez);
+                let row = pi(-B, y, z);
+                let rz = ((z + 16) >> 4) as usize;
+                for (rx, x0, x1) in RUNS {
+                    let (start, end) = (row + (x0 + B) as usize, row + (x1 + B) as usize);
+                    let (blocks, light) = (&mut blocks[start..end], &mut light[start..end]);
+                    let Some(c) = region[rz][rx] else {
+                        match region[1][1] {
+                            // A neighbour not loaded continues this chunk's edge
+                            // column. As lit air, the outermost chunks' water drew
+                            // a wall toward it (fluids show both sides), a light
+                            // sheet in the water where far terrain carries on.
+                            // Vanilla draws no chunk without its neighbours.
+                            Some(c) => {
+                                let ez = z.clamp(0, 15);
+                                for (k, x) in (x0..x1).enumerate() {
+                                    let ex = x.clamp(0, 15);
+                                    blocks[k] = c.get(ex, wy, ez);
+                                    light[k] = c.light(ex, wy, ez);
+                                }
+                            }
+                            None => {
+                                blocks.fill(0);
+                                light.fill(0xF0);
+                            }
+                        }
+                        continue;
+                    };
+                    // `Chunk::get` and `Chunk::light` with the section found once.
+                    let s = (wy - c.min_y()) >> 4;
+                    let Some(section) = c.sections.get(s as usize).filter(|_| s >= 0) else {
+                        blocks.fill(0);
+                        light.fill(if s < 0 { 0 } else { 0xF0 });
+                        continue;
+                    };
+                    let at = crate::chunk::index(x0, wy, z);
+                    if rx == 1 && rz == 1 && (0..16).contains(&y) {
+                        let own_row = (y << 8 | z << 4) as usize;
+                        blocks.copy_from_slice(&own[own_row..own_row + 16]);
                     } else {
-                        light[i] = 0xF0;
+                        section.blocks.get_run(at, blocks);
+                    }
+                    match &section.light {
+                        Light::Uniform(v) => light.fill(*v),
+                        Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
                     }
                 }
             }
@@ -884,11 +917,33 @@ impl Padded {
 /// geometry still owned by the renderer, and total about 150 KiB per worker
 /// (the leaf mask adds 8,000 cells, depths and a queue).
 #[derive(Default)]
-pub(crate) struct MeshScratch {
+pub struct MeshScratch {
     padded: Padded,
     own: Option<Box<[u32; 4096]>>,
     visibility: Vec<usize>,
     leaf: leaf_culling::LeafMask,
+    /// Per padded row (`pi(-B, y, z) / P`), bit `x + B` set where the block
+    /// is `isSolidRender`.
+    opaque: Vec<u32>,
+}
+/// Fills `rows` with the padded section's opacity, one bit per block (`MeshScratch::opaque`).
+fn opaque_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
+    rows.clear();
+    rows.extend(pad.blocks.as_chunks::<P>().0.iter().map(|row| {
+        row.iter().enumerate().fold(0u32, |bits, (x, &id)| {
+            bits | u32::from(solid[id as usize]) << x
+        })
+    }));
+}
+/// Whether the block at `(x, y, z)` (section-local) and its six neighbours
+/// are all `isSolidRender`: none of its faces can show.
+#[inline]
+fn hidden(rows: &[u32], x: i32, y: i32, z: i32) -> bool {
+    let row = |y: i32, z: i32| rows[((y + B) as usize) * P + (z + B) as usize];
+    let r = row(y, z);
+    let around =
+        r & r << 1 & r >> 1 & row(y - 1, z) & row(y + 1, z) & row(y, z - 1) & row(y, z + 1);
+    around >> (x + B) & 1 != 0
 }
 #[cfg(test)]
 mod leaf_culling_tests;
@@ -985,6 +1040,12 @@ enum Resolver {
 /// layer plus the blend radius around it, and the blended colours per column.
 struct Layer {
     zoomed: Vec<u16>,
+    /// Each resolver's colour of every cell of `zoomed`, filled on first use:
+    /// a cell is in the blend square of up to `(2r+1)^2` columns.
+    cells: [Vec<u32>; 4],
+    /// `BiomeZoom::corner_jitter` of the quart cells `zoomed` reaches, by
+    /// their offset from the first: each is shared by up to 16 cells of the layer.
+    jitter: Vec<Option<[[f64; 3]; 8]>>,
     colors: [[u32; 256]; 4],
 }
 /// `ClientLevel.calculateBlockTint` behind a per-layer `BlockTintCache`: each
@@ -1036,6 +1097,16 @@ impl<'a> Tints<'a> {
         [x, y, z]: [i32; 3],
     ) -> u16 {
         let q = zoom.quart_at_block(BlockPos::new(cx * 16 + x, base_y + y, cz * 16 + z));
+        Self::quart_biome(region, plains, [cx, cz], q)
+    }
+    /// The biome of quart cell `q` in the loaded chunks around chunk `(cx, cz)`, plains where
+    /// there is none.
+    fn quart_biome(
+        region: &[[Option<&Chunk>; 3]; 3],
+        plains: u16,
+        [cx, cz]: [i32; 2],
+        q: [i32; 3],
+    ) -> u16 {
         let (rx, rz) = ((q[0] >> 2) - cx + 1, (q[2] >> 2) - cz + 1);
         if (0..3).contains(&rx) && (0..3).contains(&rz) {
             region[rz as usize][rx as usize].map_or(plains, |c| {
@@ -1052,6 +1123,8 @@ impl<'a> Tints<'a> {
         let layer = self.layers[y as usize].get_or_insert_with(|| {
             Box::new(Layer {
                 zoomed: vec![NO_BIOME; dim * dim],
+                cells: Default::default(),
+                jitter: Vec::new(),
                 colors: [[UNSET; 256]; 4],
             })
         });
@@ -1060,21 +1133,45 @@ impl<'a> Tints<'a> {
         if cached != UNSET {
             return cached;
         }
-        let [cx, cz, _] = self.origin;
-        let (bx, bz) = (cx * 16, cz * 16);
+        let [cx, cz, base_y] = self.origin;
+        let (bx, by, bz) = (cx * 16, base_y + y, cz * 16);
         let (mut red, mut green, mut blue) = (0, 0, 0);
+        let cells = &mut layer.cells[resolver as usize];
+        if cells.is_empty() {
+            cells.resize(dim * dim, UNSET);
+        }
         for dz in -r..=r {
             for dx in -r..=r {
                 let cell = ((z + dz + r) as usize) * dim + (x + dx + r) as usize;
+                let known = cells[cell];
+                if known != UNSET {
+                    red += known >> 16 & 255;
+                    green += known >> 8 & 255;
+                    blue += known & 255;
+                    continue;
+                }
                 let mut biome = layer.zoomed[cell];
                 if biome == NO_BIOME {
-                    biome = Self::biome_id(
-                        &self.zoom,
-                        self.region,
-                        self.plains,
-                        self.origin,
-                        [x + dx, y, z + dz],
-                    );
+                    // BiomeManager.getBiome over the loaded chunks (plains
+                    // where there is none): `quart_at_block`, its cell's
+                    // corner jitter mixed once per layer.
+                    let block = BlockPos::new(bx + x + dx, by, bz + z + dz);
+                    let base = [block.x, block.y, block.z].map(|v| v.wrapping_sub(2) >> 2);
+                    let first = [bx - r, bz - r].map(|v| v.wrapping_sub(2) >> 2);
+                    let span = dim / 4 + 2;
+                    let at = (base[2] - first[1]) as usize * span + (base[0] - first[0]) as usize;
+                    if layer.jitter.is_empty() {
+                        layer.jitter.resize(span * span, None);
+                    }
+                    let jitter =
+                        layer.jitter[at].get_or_insert_with(|| self.zoom.corner_jitter(base));
+                    let corner = BiomeZoom::select_corner(block, jitter);
+                    let q = [
+                        base[0].wrapping_add((corner >> 2 & 1) as i32),
+                        base[1].wrapping_add((corner >> 1 & 1) as i32),
+                        base[2].wrapping_add((corner & 1) as i32),
+                    ];
+                    biome = Self::quart_biome(self.region, self.plains, [cx, cz], q);
                     layer.zoomed[cell] = biome;
                 }
                 let c = match resolver {
@@ -1086,6 +1183,7 @@ impl<'a> Tints<'a> {
                     Resolver::Dry => self.biomes.get(biome).dry_foliage,
                     Resolver::Water => self.biomes.get(biome).water,
                 };
+                cells[cell] = c;
                 red += c >> 16 & 255;
                 green += c >> 8 & 255;
                 blue += c & 255;
@@ -1139,7 +1237,9 @@ impl Mesher<'_> {
             &mut MeshScratch::default(),
         )
     }
-    pub(crate) fn mesh_reusing(
+    /// The meshing workers' path: `out`'s buffers and `scratch` are reused
+    /// rather than allocated per section.
+    pub fn mesh_reusing(
         &mut self,
         region: &[[Option<&Chunk>; 3]; 3],
         sy: i32,
@@ -1156,6 +1256,8 @@ impl Mesher<'_> {
         scratch.padded.fill(region, sy, own);
         let pad = &scratch.padded;
         out.visibility = visibility_reusing(pad, &self.tables.info, &mut scratch.visibility);
+        opaque_rows(pad, &self.tables.solid, &mut scratch.opaque);
+        let opaque = &scratch.opaque;
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
             scratch
@@ -1188,12 +1290,7 @@ impl Mesher<'_> {
                         out.lights
                             .push(([center.x * 16 + x, base_y + y, center.z * 16 + z], id));
                     }
-                    if state.solid
-                        && Direction::ALL.iter().all(|d| {
-                            let [dx, dy, dz] = d.normal();
-                            info[pad.blocks[pi(x + dx, y + dy, z + dz)] as usize].solid
-                        })
-                    {
+                    if hidden(opaque, x, y, z) {
                         continue;
                     }
                     if state.fluid.kind() != FluidKind::Empty {
@@ -1251,10 +1348,33 @@ impl Mesher<'_> {
                                 )
                                 .unwrap_or(true);
                     }
+                    let connected = &self.render.connected;
                     for model in &models {
                         for face in &model.faces {
                             if face.quad.cull.is_some_and(|d| !visible[d as usize]) {
                                 continue;
+                            }
+                            // A pane's top and bottom strips between stacked panes, with
+                            // connected textures.
+                            if state.pane
+                                && !connected.is_empty()
+                                && let Some(dy) = match face.quad.facing {
+                                    ModelDirection::Up => Some(1),
+                                    ModelDirection::Down => Some(-1),
+                                    _ => None,
+                                }
+                            {
+                                let p = &face.quad.positions;
+                                // Only on the block's top or bottom plane: a pack's own pane
+                                // model may have ledges between.
+                                let plane = if dy > 0 { 1.0 } else { 0.0 };
+                                let on_edge = p.iter().all(|v| (v[1] - plane).abs() < 1e-4);
+                                let centre =
+                                    [0, 2].map(|k| p.iter().map(|v| v[k]).sum::<f32>() / 4.0);
+                                let other = pad.blocks[pi(x, y + dy, z)];
+                                if on_edge && connected.stacked_pane_hides(id, other, centre) {
+                                    continue;
+                                }
                             }
                             self.face(
                                 pad,
@@ -1349,6 +1469,14 @@ impl Mesher<'_> {
                 [world.x, world.y, world.z],
                 |[dx, dy, dz]| pad.blocks[pi(pos[0] + dx, pos[1] + dy, pos[2] + dz)],
                 || Some(tints.biome(pos[0], pos[1], pos[2])),
+                // A pane's tiles are drawn with the cube's UVs (below), so that is its texture.
+                || {
+                    if state.pane {
+                        Some(CtmAxes::cube(CtmFace::ALL[q.facing as usize]))
+                    } else {
+                        CtmAxes::texture(&q.positions, &q.uv)
+                    }
+                },
                 |overlay| {
                     if let Some(slot) = overlays.get_mut(count) {
                         *slot = Some(overlay);
@@ -1357,7 +1485,7 @@ impl Mesher<'_> {
                 },
             )
         };
-        let vertices = |tint: Option<u32>| {
+        let vertices = |tint: Option<u32>, uv: [[f32; 2]; 4]| {
             std::array::from_fn::<_, 4, _>(|i| {
                 let g = gray[i] as u32;
                 let rgb = match tint {
@@ -1368,16 +1496,27 @@ impl Mesher<'_> {
                 (
                     TerrainVertex::new(
                         [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
-                        q.uv[i],
+                        uv[i],
                         0,
                         emitting(pack_rgb(rgb), tier),
                         pack_coords(lighting::with_emission(coords[i], q.light_emission)),
                     ),
-                    q.uv[i],
+                    uv[i],
                 )
             })
         };
-        let corners = vertices(tint);
+        // Vanilla's pane models mirror some faces' textures; OptiFine's don't, so a tile's borders
+        // land where the neighbours are: on a pane, tiles take the cube's own UVs.
+        let standard = || q.positions.map(|p| standard_uv(q.facing, p));
+        let tiled = !matches!(pick, Pick::Keep);
+        let corners = vertices(
+            tint,
+            if state.pane && tiled {
+                standard()
+            } else {
+                q.uv
+            },
+        );
         // Opaque leaves (forceOpaque) and leaves a leaf-culling mode proved internal draw in the
         // solid layer whatever their sprite.
         let solid_leaves = !self.cutout_leaves && state.leaves || interior_leaf;
@@ -1426,6 +1565,14 @@ impl Mesher<'_> {
             Pick::Tile(t) => self.translucent(tile(t)),
             Pick::Quarters(tiles) => tiles.into_iter().any(|t| self.translucent(tile(t))),
         };
+        // Overlay tiles face the standard way too (Continuity: "overlay textures always have the
+        // standard orientation"), whatever turns the model's own UVs (dirt's and sand's random
+        // rotations).
+        // Over a `ctm_compact` face, the same pieces: the same depths and sort centres.
+        let cuts = match pick {
+            Pick::Quarters(_) => cuts(&corners),
+            _ => Cuts([0.0, 1.0, 1.0, 1.0], 2),
+        };
         for overlay in overlays[..count].iter().flatten().copied() {
             let tint = overlay.tint.and_then(|(index, block)| {
                 let info = block
@@ -1438,7 +1585,14 @@ impl Mesher<'_> {
                 translucent: overlay.translucent || face_translucent,
                 opaque: false,
             };
-            self.quad_as(out, false, tile, vertices(tint).map(|c| c.0), false);
+            let whole = vertices(tint, standard());
+            for s in cuts.windows(2) {
+                for t in cuts.windows(2) {
+                    let piece = [(s[0], t[0]), (s[1], t[0]), (s[1], t[1]), (s[0], t[1])]
+                        .map(|(s, t)| bilinear(&whole, s, t).0);
+                    self.quad_as(out, false, tile, piece, false);
+                }
+            }
         }
     }
     /// One terrain quad with sprite `tile`, in the pass its alpha needs (`solid_leaves`: no
@@ -1547,6 +1701,19 @@ fn cuts(c: &[(TerrainVertex, [f32; 2]); 4]) -> Cuts {
         }
     }
     out
+}
+/// The UV a vanilla cube's face gives the block-local point `p` (`BlockElement`'s default UVs),
+/// in sprite units: up is north on the top face, south on the bottom one, and up on the sides.
+fn standard_uv(facing: horizon_assets::model::Direction, [x, y, z]: [f32; 3]) -> [f32; 2] {
+    use horizon_assets::model::Direction as D;
+    match facing {
+        D::Down => [x, 1.0 - z],
+        D::Up => [x, z],
+        D::North => [1.0 - x, 1.0 - y],
+        D::South => [x, 1.0 - y],
+        D::West => [z, 1.0 - y],
+        D::East => [1.0 - z, 1.0 - y],
+    }
 }
 /// The quarter of the sprite (top-left, top-right, bottom-left, bottom-right) a piece of a
 /// quad lies in, by its UV centre (v grows downward).
@@ -1657,5 +1824,18 @@ mod quarter_tests {
             .map(|p| quarter_of(&p)),
             [0, 1, 2, 3]
         );
+    }
+
+    #[test]
+    fn overlays_take_the_cubes_own_uvs() {
+        use horizon_assets::model::Direction as D;
+        // A top face: the north-west corner is the sprite's top-left, so a tile's top edge is
+        // north whatever the model's turn.
+        assert_eq!(standard_uv(D::Up, [0.0, 1.0, 0.0]), [0.0, 0.0]);
+        assert_eq!(standard_uv(D::Up, [1.0, 1.0, 1.0]), [1.0, 1.0]);
+        // A north face seen from the north: its top-left is the east top corner.
+        assert_eq!(standard_uv(D::North, [1.0, 1.0, 0.0]), [0.0, 0.0]);
+        assert_eq!(standard_uv(D::East, [1.0, 0.0, 1.0]), [0.0, 1.0]);
+        assert_eq!(standard_uv(D::Down, [0.0, 0.0, 1.0]), [0.0, 0.0]);
     }
 }

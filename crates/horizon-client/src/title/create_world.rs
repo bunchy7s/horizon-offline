@@ -32,6 +32,9 @@ pub struct WorldOptions {
     pub commands: Option<bool>,
     /// The world preset the world is created with.
     pub world_type: crate::save::WorldPreset,
+    /// The biome the single-biome preset fixes (`CreateBuffetWorldScreen`'s
+    /// choice), `minecraft:plains` until another is picked.
+    pub single_biome: String,
     /// CreateFlatWorldScreen's layers and biome, kept with the world type.
     pub flat_settings: Option<super::flat::FlatSettings>,
     pub structures: bool,
@@ -52,6 +55,7 @@ impl Default for WorldOptions {
             difficulty: 2,
             commands: None,
             world_type: crate::save::WorldPreset::Normal,
+            single_biome: "minecraft:plains".into(),
             flat_settings: None,
             structures: true,
             bonus_chest: false,
@@ -78,6 +82,7 @@ impl WorldOptions {
                 .unwrap_or(2),
             commands: Some(commands),
             world_type: generation.preset,
+            single_biome: fixed_biome(dir).unwrap_or_else(|| "minecraft:plains".into()),
             flat_settings: (generation.preset == crate::save::WorldPreset::Flat)
                 .then(|| super::flat::FlatSettings::from_world(dir))
                 .flatten(),
@@ -107,6 +112,13 @@ impl WorldOptions {
             structures: self.structures,
             bonus_chest: self.bonus_chest(),
         }
+    }
+    /// The biome the single-biome preset fixes, as
+    /// `write_world_gen_settings_with` takes it; none for another preset,
+    /// which has no fixed biome to honour.
+    pub fn single_biome(&self) -> Option<&str> {
+        (self.world_type == crate::save::WorldPreset::SingleBiomeSurface)
+            .then_some(self.single_biome.as_str())
     }
     /// The custom layers, as `write_world_gen_settings_with` takes them.
     pub fn flat_settings(&self) -> Option<horizon_world::nbt::Tag> {
@@ -144,12 +156,27 @@ impl WorldOptions {
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
                 }
+                // ...and its dimensions replace the ones the preset before it
+                // had, so a fixed biome the player chose starts over at the
+                // single-biome preset's own.
+                self.single_biome = "minecraft:plains".into();
             }
             27 => self.structures = !self.structures,
             28 => self.bonus_chest = !self.bonus_chest,
             _ => {}
         }
     }
+}
+
+/// The biome a saved world's fixed biome source names
+/// (`CreateBuffetWorldScreen`'s initial selection).
+fn fixed_biome(dir: &std::path::Path) -> Option<String> {
+    let settings = crate::save::world_gen_settings(dir)?;
+    let generator = settings
+        .get("dimensions")?
+        .get("minecraft:overworld")?
+        .get("generator")?;
+    crate::save::text(generator.get("biome_source")?.get("biome"))
 }
 
 /// `Mth.roundToward`: up to a multiple of `step`.
@@ -280,13 +307,18 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 true,
                 25,
             ),
-            // CreateFlatWorldScreen: only a flat generator has a preset editor.
+            // PresetEditor.EDITORS: flat worlds have CreateFlatWorldScreen, the
+            // single-biome preset CreateBuffetWorldScreen; the other presets
+            // have no editor, so the button is disabled for them.
             b(
                 gx + 160.0,
                 gy,
                 150.0,
                 tr("selectWorld.customizeType"),
-                o.world_type == crate::save::WorldPreset::Flat,
+                matches!(
+                    o.world_type,
+                    crate::save::WorldPreset::Flat | crate::save::WorldPreset::SingleBiomeSurface
+                ),
                 26,
             ),
             // SwitchGrid: 44-wide value-only buttons at the grid's right.
@@ -503,15 +535,14 @@ impl Title {
                     u32::MAX,
                 );
             }
-            // The label sits 3 pixels lower on unselected tabs.
-            let top = if selected { 0.0 } else { 3.0 };
-            batch.text_styled(
+            ui::menu_tab_label(
+                batch,
                 atlas,
                 &label,
-                x + (tw / 2.0).floor() - (lw / 2.0).floor(),
-                ((top + TAB_BAR - 9.0) / 2.0).floor() + 1.0,
-                u32::MAX,
+                (x, 0.0, tw, TAB_BAR),
+                selected,
                 true,
+                crate::hud_overlays::now_ms(),
             );
         }
         let (gx, gy) = grid(w, h, o.tab);

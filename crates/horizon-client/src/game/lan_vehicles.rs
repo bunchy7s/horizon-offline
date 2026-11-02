@@ -419,7 +419,25 @@ impl Game<'_> {
         g.position = [seat.x, seat.y, seat.z];
     }
 
-    /// `handlePaddleBoat`: the paddles of the boat the player drives.
+    /// `Entity.getControllingPassenger` of a vehicle a server player rides: a
+    /// boat has two seats, and only its first player passenger drives it. The
+    /// window player sits first when it rides; of the server's players it is
+    /// the one that got in first.
+    pub(super) fn guest_controls_vehicle(&self, host: &LanHost, conn: u32, vehicle: u32) -> bool {
+        if self.riding == Some(vehicle) {
+            return false;
+        }
+        host.hub
+            .guests
+            .iter()
+            .filter(|g| g.vehicle == Some(vehicle))
+            .min_by_key(|g| g.vehicle_order)
+            .is_some_and(|g| g.conn == conn)
+    }
+
+    /// `handlePaddleBoat`: the paddles of the boat the player controls
+    /// (`player.getControlledVehicle()`); a passenger in the second seat moves
+    /// no paddle.
     pub(super) fn guest_paddle_boat(&mut self, host: &LanHost, conn: u32, paddles: [bool; 2]) {
         let vehicle = host
             .hub
@@ -427,7 +445,10 @@ impl Game<'_> {
             .iter()
             .find(|g| g.conn == conn)
             .and_then(|g| g.vehicle);
-        if let Some(b) = self.boats.iter_mut().find(|b| Some(b.id) == vehicle) {
+        let Some(vehicle) = vehicle.filter(|&v| self.guest_controls_vehicle(host, conn, v)) else {
+            return;
+        };
+        if let Some(b) = self.boats.iter_mut().find(|b| b.id == vehicle) {
             b.paddling = paddles;
         }
     }

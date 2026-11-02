@@ -422,13 +422,8 @@ impl Game<'_> {
         if self.pack_ids.is_none() {
             return ([0; 2], [0; 2]);
         }
-        if self.luminance.is_none() {
-            self.luminance = Some(horizon_client::dynamic_light::Luminance::new(
-                self.res.facts(),
-                self.pack.assets.registry,
-            ));
-        }
-        let (Some(ids), Some(lum)) = (&self.pack_ids, &self.luminance) else {
+        let lum = self.luminance();
+        let Some(ids) = &self.pack_ids else {
             return ([0; 2], [0; 2]);
         };
         let hands = [self.selected, super::shield::OFFHAND_SLOT].map(|slot| {

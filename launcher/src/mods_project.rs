@@ -21,6 +21,46 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Category and tag names from Modrinth / CurseForge, present in code so the i18n
+/// tables can provide translations for them without failing the unused strings test.
+const CATEGORY_NAMES: &[&str] = &[
+    "adventure",
+    "audio",
+    "blocks",
+    "combat",
+    "core shaders",
+    "cursed",
+    "decoration",
+    "economy",
+    "entities",
+    "environment",
+    "equipment",
+    "food",
+    "fonts",
+    "game mechanics",
+    "gui",
+    "items",
+    "locale",
+    "magic",
+    "management",
+    "minigame",
+    "mobs",
+    "modded",
+    "models",
+    "optimization",
+    "realistic",
+    "simplistic",
+    "social",
+    "storage",
+    "technology",
+    "themed",
+    "transportation",
+    "tweaks",
+    "utility",
+    "vanilla like",
+    "worldgen",
+];
+
 /// A project page's tabs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tab {
@@ -374,6 +414,7 @@ impl Launcher {
                 ),
             );
         }
+        let _ = CATEGORY_NAMES;
         let clear = button("mods-clear", "Clear filters", Kind::Ghost, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.mods_filter(|f| *f = Filters::default());

@@ -1112,16 +1112,22 @@ impl Game<'_> {
             // tables' survives_explosion and explosion_decay draw from their
             // random sequence.
             let decay = (interaction == BlockInteraction::DestroyWithDecay).then_some(radius);
-            let mut drops = world_items!(self).block_drops_exploded(
-                self.pack.assets.registry,
-                state,
-                None,
-                &dynamic,
-                &mut self.world.random,
-                Some((&mut self.rand_sequences, self.level.seed)),
-                decay,
-                false,
+            let place = self.loot_place_at(
+                pos.map(|v| f64::from(v) + 0.5),
+                self.loot_block_entity(pos, &name),
             );
+            let mut drops = horizon_world::loot::with_native_loot_place(place, || {
+                world_items!(self).block_drops_exploded(
+                    self.pack.assets.registry,
+                    state,
+                    None,
+                    &dynamic,
+                    &mut self.world.random,
+                    Some((&mut self.rand_sequences, self.level.seed)),
+                    decay,
+                    false,
+                )
+            });
             self.native_block_drops(pos, state, None, None, Some(radius), &mut drops);
             for mut stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {

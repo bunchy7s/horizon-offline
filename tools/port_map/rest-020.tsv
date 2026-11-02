@@ -39,7 +39,7 @@ PktUtils.stringFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_requ
 PktUtils.intFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the little-endian length, request id and type; the rest of PktUtils is the GS4 query server
 PktUtils.intFromNetworkByteArray	inline	crates/horizon-server/src/query.rs::Query::answer	the token of a stat request: four big-endian bytes at 7, zero when the packet is short
 PktUtils.toHexString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
-RconConsoleSource.createCommandSourceStack	inline	crates/horizon-server/src/rcon.rs::run_on_game	gap: minor: a command runs as the console does, through the game's `console` request; the sender shows as Server, not Rcon, and broadcast-rcon-to-ops is not read
+RconConsoleSource.createCommandSourceStack	port	crates/horizon-client/src/game/dedicated.rs::Game::rcon_line	the console at level 4 from the world respawn position with the source named Rcon (its `say`, and its feedback to the operators as [Rcon: ...]); gap: minor: the dedicated-only console commands keep their own wording
 GenericThread.start	inline	crates/horizon-server/src/rcon.rs::serve	the listener and a thread per connection; GenericThread is also the GS4 query server's helper
 GenericThread.stop	skip:server		the RCON threads end with the supervisor; GenericThread is also the GS4 query server's helper
 QueryThreadGs4.create	port	crates/horizon-server/src/query.rs::setup	query.port 1 to 65535 with vanilla's warning, server-ip (0.0.0.0 when empty)

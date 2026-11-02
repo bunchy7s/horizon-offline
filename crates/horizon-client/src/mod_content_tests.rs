@@ -3541,3 +3541,50 @@ fn blocks_and_items_declared_in_code_get_ids() {
     assert_ne!(fs::read(root.join(STAMP)).unwrap(), stamp);
     let _ = fs::remove_dir_all(&scratch);
 }
+
+#[test]
+fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
+    use horizon_mods::content::Item;
+    let item = |id: &str, remainder: Option<&str>| Item {
+        id: id.into(),
+        template: "minecraft:diamond".into(),
+        crafting_remainder: remainder.map(str::to_owned),
+        ..Item::default()
+    };
+    let make = |id: &str, items: Vec<Item>| {
+        let mut content = Content::declared(id);
+        content.items = items;
+        ContentMod {
+            id: id.into(),
+            content,
+        }
+    };
+    let mut jar = make("jar", vec![item("jar:tool", Some("jar:jar"))]);
+    jar.content.blocks.push(horizon_mods::content::Block {
+        id: "jar:jar".into(),
+        template: "minecraft:glass".into(),
+        item: true,
+        ..Default::default()
+    });
+    let mut mods = vec![
+        jar,
+        make(
+            "good",
+            vec![
+                item("good:tool", Some("good:wrench")),
+                item("good:wrench", None),
+            ],
+        ),
+        make("bad", vec![item("bad:tool", Some("bad:wrench"))]),
+        make(
+            "vanilla",
+            vec![item("vanilla:soup", Some("minecraft:bowl"))],
+        ),
+    ];
+    let dropped = drop_dangling_remainders(&mut mods);
+    assert_eq!(dropped.len(), 1, "{dropped:?}");
+    assert!(dropped[0].contains("bad"), "{dropped:?}");
+    let left: Vec<&str> = mods.iter().map(|m| m.id.as_str()).collect();
+    // A remainder that is the mod's own block item is kept too (`jar`).
+    assert_eq!(left, ["jar", "good", "vanilla"]);
+}

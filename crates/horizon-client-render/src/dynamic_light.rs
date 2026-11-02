@@ -76,6 +76,12 @@ impl Luminance {
         self.0.get(item).copied().unwrap_or(0)
     }
 
+    /// The HDR tier of an item that glows, as its block's (`mesher::hdr_tier`), 0 for the rest.
+    pub fn hdr_tier(&self, item: &str) -> u8 {
+        let name = item.strip_prefix("minecraft:").unwrap_or(item);
+        crate::mesher::hdr_tier(name, self.of(item)) & !crate::mesher::WHOLE
+    }
+
     #[cfg(test)]
     fn from_pairs(pairs: &[(&str, u8)]) -> Self {
         Self(pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect())
@@ -118,6 +124,23 @@ pub fn level_at(pos: [f32; 3], lights: &[[f32; 4]]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn items_shine_as_their_blocks() {
+        use crate::mesher::{BRIGHT, INCANDESCENT};
+        let lum = Luminance::from_pairs(&[
+            ("minecraft:torch", 14),
+            ("minecraft:glowstone", 15),
+            ("minecraft:lava_bucket", 15),
+            ("minecraft:campfire", 15),
+        ]);
+        assert_eq!(lum.hdr_tier("minecraft:torch"), INCANDESCENT);
+        assert_eq!(lum.hdr_tier("minecraft:glowstone"), BRIGHT);
+        assert_eq!(lum.hdr_tier("minecraft:lava_bucket"), INCANDESCENT);
+        // Items carry no sprite thresholds: only the tier, not "all over".
+        assert_eq!(lum.hdr_tier("minecraft:campfire"), BRIGHT);
+        assert_eq!(lum.hdr_tier("minecraft:apple"), 0);
+    }
 
     #[test]
     fn colored_sources_are_camera_relative_and_bounded() {

@@ -1152,6 +1152,53 @@ fn world_fields_edit_at_their_cursor() {
     assert_eq!(f.title.search, "world");
 }
 
+/// `ManageServerScreen`'s focus order: the name, the address, the Server
+/// Resource Packs button, Done, Cancel, then the name again.
+#[test]
+fn tab_walks_the_edit_server_screen_through_its_buttons() {
+    use crate::multiplayer::Screen;
+    let size = (854.0, 480.0);
+    let mut f = Fixture::new();
+    f.title.mode = Mode::Multiplayer(Screen::Edit {
+        index: None,
+        name: "Minecraft Server".into(),
+        address: "localhost".into(),
+        focus: 0,
+        packs: None,
+    });
+    let focus = |f: &Fixture| match &f.title.mode {
+        Mode::Multiplayer(Screen::Edit { focus, .. }) => (*focus, f.title.focused_button),
+        _ => panic!("edit"),
+    };
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        f.title.tab_dir(false, size);
+        seen.push(focus(&f));
+    }
+    // Address, then packs (60), Done (50), Cancel (51), and round to the name.
+    assert_eq!(
+        seen,
+        [
+            (1, None),
+            (2, Some(60)),
+            (2, Some(50)),
+            (2, Some(51)),
+            (0, None)
+        ]
+    );
+    // A button has the focus: typing goes nowhere.
+    f.title.tab_dir(true, size);
+    assert_eq!(focus(&f), (2, Some(51)));
+    f.title.type_text("x");
+    let Mode::Multiplayer(Screen::Edit { name, address, .. }) = &f.title.mode else {
+        panic!("edit");
+    };
+    assert_eq!(
+        (name.as_str(), address.as_str()),
+        ("Minecraft Server", "localhost")
+    );
+}
+
 #[test]
 fn server_fields_edit_at_their_cursor() {
     use winit::keyboard::KeyCode;
@@ -1179,8 +1226,8 @@ fn server_fields_edit_at_their_cursor() {
         panic!("add server");
     };
     assert_eq!(address, "Yhost");
-    // Tab moves to the name, which edits at its own cursor.
-    f.title.tab();
+    // Shift+Tab moves back to the name, which edits at its own cursor.
+    f.title.tab_dir(true, (854.0, 480.0));
     f.title.field_key(KeyCode::ArrowLeft, false, false);
     f.title.type_text("X");
     let Mode::Multiplayer(crate::multiplayer::Screen::Edit { name, .. }) = &f.title.mode else {
@@ -1864,4 +1911,311 @@ fn a_button_label_wider_than_its_button_stays_inside_it() {
         (lo - (b.x + 2.0 + (b.w - 4.0) / 2.0 - (width / 2.0).floor())).abs() < 0.001,
         "a fitting label starts at {lo}"
     );
+}
+
+#[test]
+fn the_single_biome_preset_is_customized_into_the_generator() {
+    let mut f = Fixture::new();
+    fs::create_dir_all(f.root.join("worldgen")).unwrap();
+    fs::write(
+        f.root.join("worldgen/biomes.json"),
+        r#"{"minecraft:jungle":{},"minecraft:plains":{},"minecraft:badlands":{}}"#,
+    )
+    .unwrap();
+    f.click("Singleplayer");
+    let size = (480.0, 262.0);
+    let labels = |f: &Fixture| -> Vec<(String, f32, f32, bool)> {
+        f.title
+            .buttons(size.0, size.1)
+            .into_iter()
+            .map(|b| (b.label, b.x, b.y, b.enabled))
+            .collect()
+    };
+    // The World tab: World Type and Customize (PresetEditor.EDITORS has a
+    // screen for the flat and the single-biome presets only).
+    f.title.click(54.0 + 124.0 + 10.0, 10.0, size);
+    let world = labels(&f);
+    let customize = world[1].clone();
+    assert!(!customize.3);
+    let cycle = (world[0].1 + 10.0, world[0].2 + 10.0);
+    f.title.click(cycle.0, cycle.1, size);
+    assert!(labels(&f)[1].3, "flat worlds have CreateFlatWorldScreen");
+    for _ in 0..3 {
+        f.title.click(cycle.0, cycle.1, size);
+    }
+    let Mode::Create { options, .. } = &f.title.mode else {
+        panic!()
+    };
+    assert_eq!(
+        options.world_type,
+        crate::save::WorldPreset::SingleBiomeSurface
+    );
+    assert!(labels(&f)[1].3, "single biome has CreateBuffetWorldScreen");
+    // Customize opens the biome screen over the worlds' registry data.
+    let (action, sound) = f.title.click(customize.1 + 10.0, customize.2 + 10.0, size);
+    assert!(sound && action == Action::None);
+    let Mode::CreateBuffet { buffet, .. } = &f.title.mode else {
+        panic!("{:?}", f.title.mode)
+    };
+    // Badlands, Jungle and Plains, by name; the preset's own biome is picked.
+    assert_eq!(buffet.rows().len(), 3);
+    assert_eq!(buffet.selected(), Some(2));
+    // A press on the list's second row (rows are 20 high from y 40).
+    f.title.click(240.0, 70.0, size);
+    let Mode::CreateBuffet { buffet, .. } = &f.title.mode else {
+        panic!()
+    };
+    assert_eq!(buffet.biome, "minecraft:jungle");
+    // Done hands it back to Create New World, which writes it as the
+    // overworld's fixed biome source.
+    let done = f
+        .title
+        .buttons(size.0, size.1)
+        .into_iter()
+        .find(|b| b.id == 80)
+        .unwrap();
+    assert!(done.enabled);
+    f.title.click(done.x + 10.0, done.y + 10.0, size);
+    let Mode::Create { options, .. } = &f.title.mode else {
+        panic!("{:?}", f.title.mode)
+    };
+    assert_eq!(options.single_biome, "minecraft:jungle");
+    let Action::Create { options, .. } = f.title.create_action() else {
+        panic!()
+    };
+    let dir = f.root.join("single_biome");
+    crate::save::write_world_gen_settings_with(
+        &dir,
+        1,
+        options.world_gen(),
+        None,
+        options.single_biome(),
+    )
+    .unwrap();
+    let settings = crate::save::world_gen_settings(&dir).unwrap();
+    let generator = settings
+        .get("dimensions")
+        .and_then(|d| d.get("minecraft:overworld"))
+        .and_then(|o| o.get("generator"))
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        crate::save::text(generator.get("biome_source").and_then(|s| s.get("biome"))),
+        Some("minecraft:jungle".to_owned())
+    );
+    assert_eq!(
+        crate::save::WorldGen::read(&dir).map(|g| g.preset),
+        Some(crate::save::WorldPreset::SingleBiomeSurface)
+    );
+    // Re-Create starts the screen on the world's own biome.
+    let options = WorldOptions::of_world(
+        &crate::save::Level::read(&dir).unwrap_or_default(),
+        false,
+        &dir,
+    );
+    assert_eq!(options.single_biome, "minecraft:jungle");
+}
+
+#[test]
+fn the_single_biome_screen_cancels_and_filters_without_choosing() {
+    let mut f = Fixture::new();
+    fs::create_dir_all(f.root.join("worldgen")).unwrap();
+    fs::write(
+        f.root.join("worldgen/biomes.json"),
+        r#"{"minecraft:jungle":{},"minecraft:plains":{},"minecraft:badlands":{}}"#,
+    )
+    .unwrap();
+    f.click("Singleplayer");
+    let size = (480.0, 262.0);
+    f.title.click(54.0 + 124.0 + 10.0, 10.0, size);
+    let cycle = (labels_at(&f).0, labels_at(&f).1 + 10.0);
+    for _ in 0..4 {
+        f.title.click(cycle.0, cycle.1, size);
+    }
+    let customize = labels_at(&f).2;
+    f.title.click(customize.0, customize.1, size);
+    // The search box narrows the rows, and a query that hides the chosen
+    // biome leaves Done disabled until a row is picked.
+    f.title.click(240.0, 32.0, size);
+    f.title.type_text("jung");
+    let Mode::CreateBuffet { buffet, .. } = &f.title.mode else {
+        panic!()
+    };
+    assert_eq!(buffet.rows().len(), 1);
+    assert_eq!(buffet.selected(), None);
+    let done = f
+        .title
+        .buttons(size.0, size.1)
+        .into_iter()
+        .find(|b| b.id == 80)
+        .unwrap();
+    assert!(!done.enabled);
+    // Cancel keeps the preset's own biome (plains).
+    let cancel = f
+        .title
+        .buttons(size.0, size.1)
+        .into_iter()
+        .find(|b| b.id == 81)
+        .unwrap();
+    f.title.click(cancel.x + 10.0, cancel.y + 10.0, size);
+    let Mode::Create { options, .. } = &f.title.mode else {
+        panic!("{:?}", f.title.mode)
+    };
+    assert_eq!(options.single_biome, "minecraft:plains");
+}
+
+/// The World tab's (World Type x, y; Customize centre) for a Create screen.
+fn labels_at(f: &Fixture) -> (f32, f32, (f32, f32)) {
+    let buttons = f.title.buttons(480.0, 262.0);
+    let customize = &buttons[1];
+    (
+        buttons[0].x + 10.0,
+        buttons[0].y,
+        (customize.x + 10.0, customize.y + 10.0),
+    )
+}
+
+/// A button with an icon at its right end (`SpriteIconButton.TextAndIcon`, the
+/// Music & Sounds button of the Accessibility screen): `extractContents` gives
+/// the label `left = x + 2` and `right = x + width - spriteWidth - 4`.
+mod text_and_icon {
+    use super::*;
+
+    fn atlas() -> HudAtlas {
+        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+    fn button(label: &str, icon: Option<(&'static str, f32)>) -> Button {
+        Button {
+            x: 30.0,
+            y: 40.0,
+            w: 150.0,
+            label: label.into(),
+            enabled: true,
+            id: 0,
+            icon: None,
+            trailing: icon,
+        }
+    }
+    /// The x of every vertex of the label's text.
+    fn xs(batch: &HudBatch) -> Vec<f32> {
+        batch
+            .vertices
+            .iter()
+            .filter(|v| v.text == 1)
+            .map(|v| v.pos[0])
+            .collect()
+    }
+    /// The first `n` letters of a text with no repeating pattern.
+    fn label(n: usize) -> String {
+        "Bezpostrzydnie połōnczynie Direct Connection Join Server"
+            .chars()
+            .take(n)
+            .collect()
+    }
+    fn width(atlas: &HudAtlas, label: &str) -> i32 {
+        HudBatch::text_width(atlas, label).ceil() as i32
+    }
+
+    /// A label that fits beside the icon but, centred on the button, would end
+    /// under it (`Settings sa Aksesibilidad...` in `fil_ph`, and about 40 other
+    /// languages) is moved left until it ends where the icon's room begins:
+    /// `Mth.clamp(centerX, left + lineWidth / 2, right - lineWidth / 2)` in
+    /// `defaultScrollingHelper`. It does not scroll. The same label in a plain
+    /// button stays centred.
+    #[test]
+    fn a_label_that_fits_beside_the_icon_is_moved_clear_of_it() {
+        let atlas = atlas();
+        // A 16 px icon: `left = x + 2`, `right = x + 130`, `centerX = x + 75`.
+        let (left, right, center) = (32, 30 + 130, 30 + 75);
+        // The widest label that fits; `right - width / 2 < centerX` by most.
+        let text = (1..60)
+            .map(label)
+            .rfind(|t| width(&atlas, t) <= right - left)
+            .expect("a label that fits");
+        let half = width(&atlas, &text) / 2;
+        assert!(right - half < center, "{text}: {}", width(&atlas, &text));
+        let drawn_from = |from: i32| {
+            let mut batch = HudBatch::new([640, 480]);
+            batch.text(&atlas, &text, from as f32, 46.0, u32::MAX, true);
+            xs(&batch)
+        };
+        let draw = |b: &Button, now_ms: i64| {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            xs(&batch)
+        };
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        // Vanilla: `textX = right - width / 2`, drawn from `textX - width / 2`.
+        assert!(draw(&b, 0) == drawn_from(right - half - half), "{text}");
+        for now_ms in [700, 1500, 31_337] {
+            assert!(draw(&b, now_ms) == draw(&b, 0), "it scrolls at {now_ms}");
+        }
+        let plain = button(&text, None);
+        assert!(draw(&plain, 0) == drawn_from(center - half), "plain {text}");
+    }
+
+    /// A label wider than the room beside the icon scrolls inside
+    /// `x + 2 ..= x + width - spriteWidth - 4`, never under the icon.
+    #[test]
+    fn a_label_wider_than_the_room_beside_the_icon_scrolls_clear_of_it() {
+        let atlas = atlas();
+        let text = label(40);
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        assert!(width(&atlas, &text) > 130 - 2);
+        let mut seen = std::collections::BTreeSet::new();
+        for now_ms in (0..40_000).step_by(250) {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            let xs = xs(&batch);
+            assert!(!xs.is_empty());
+            for x in &xs {
+                assert!(
+                    (32.0..=30.0 + 150.0 - 16.0 - 4.0).contains(x),
+                    "{x} at {now_ms} ms"
+                );
+            }
+            seen.insert(xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        }
+        assert!(seen.len() > 3, "the label hardly moves");
+    }
+}
+
+/// `MenuTabBar.MenuTabButton.renderLabel`: a tab's label slides inside the
+/// tab's box with a 1 px margin when it is wider than the tab (here a window
+/// too narrow for the English labels), instead of running into the next tab.
+#[test]
+fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    // 90 px wide: three 20 px tabs from x = 14, too narrow for "Game".
+    let mut batch = HudBatch::new([90, 262]);
+    f.title.draw(&atlas, &mut batch, (0.0, 100.0), true);
+    let labels: Vec<f32> = batch
+        .vertices
+        .iter()
+        .filter(|v| v.text == 1 && v.pos[1] < 24.0)
+        .map(|v| v.pos[0])
+        .collect();
+    assert!(!labels.is_empty());
+    let boxes: Vec<(f32, f32)> = (0..3)
+        .map(|tab| {
+            (
+                14.0 + 20.0 * tab as f32 + 1.0,
+                14.0 + 20.0 * (tab + 1) as f32 - 1.0,
+            )
+        })
+        .collect();
+    for x in &labels {
+        assert!(
+            boxes.iter().any(|(lo, hi)| (*lo..=*hi).contains(x)),
+            "label vertex at {x} is outside every tab's box"
+        );
+    }
+    for (tab, (lo, hi)) in boxes.iter().enumerate() {
+        assert!(
+            labels.iter().any(|x| (*lo..=*hi).contains(x)),
+            "tab {tab} draws no label"
+        );
+    }
 }

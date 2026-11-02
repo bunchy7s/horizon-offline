@@ -144,25 +144,71 @@ pub fn bubble_column_push(
     bounds: Aabb,
     velocity: &mut Vec3,
 ) -> bool {
+    bubble_column_push_over(world, registry, facts, collision, bounds, velocity, |_| {})
+}
+/// [`bubble_column_push`], telling `surface` the position of each column block
+/// the entity is at the top of: `handleOnAboveBubbleColumn` sends the splash and
+/// bubble particles over it (`Entity.sendBubbleColumnParticles`).
+pub fn bubble_column_push_over(
+    world: &World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &crate::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    bounds: Aabb,
+    velocity: &mut Vec3,
+    mut surface: impl FnMut(BlockPos),
+) -> bool {
+    let mut reset_fall = false;
+    bubble_columns_touching(world, registry, facts, collision, bounds, |pos, column| {
+        reset_fall |= column.push(velocity);
+        if column.surface {
+            surface(pos);
+        }
+    });
+    reset_fall
+}
+/// The column blocks `bounds` touches that it is at the top of: where the
+/// particles of `Entity.sendBubbleColumnParticles` start.
+pub fn bubble_column_surfaces(
+    world: &World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &crate::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    bounds: Aabb,
+) -> Vec<BlockPos> {
+    let mut surfaces = Vec::new();
+    bubble_columns_touching(world, registry, facts, collision, bounds, |pos, column| {
+        if column.surface {
+            surfaces.push(pos);
+        }
+    });
+    surfaces
+}
+/// Every bubble column block the box touches (`Entity.getInsideBlockPoints`).
+fn bubble_columns_touching(
+    world: &World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &crate::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    bounds: Aabb,
+    mut each: impl FnMut(BlockPos, BubbleColumn),
+) {
     let b = bounds.deflate(Vec3::new(
         f64::from(1.0e-5f32),
         f64::from(1.0e-5f32),
         f64::from(1.0e-5f32),
     ));
     let (lo, hi) = (b.min_position(), b.max_position());
-    let mut reset_fall = false;
     for x in lo.x.floor() as i32..=(hi.x.ceil() as i32 - 1) {
         for y in lo.y.floor() as i32..=(hi.y.ceil() as i32 - 1) {
             for z in lo.z.floor() as i32..=(hi.z.ceil() as i32 - 1) {
-                if let Some(column) =
-                    bubble_column_at(world, registry, facts, collision, BlockPos::new(x, y, z))
-                {
-                    reset_fall |= column.push(velocity);
+                let pos = BlockPos::new(x, y, z);
+                if let Some(column) = bubble_column_at(world, registry, facts, collision, pos) {
+                    each(pos, column);
                 }
             }
         }
     }
-    reset_fall
 }
 /// A bubble column block as `BubbleColumnBlock.entityInside` sees it: whether
 /// it drags down (`DRAG_DOWN`), and whether it is the surface (nothing above it

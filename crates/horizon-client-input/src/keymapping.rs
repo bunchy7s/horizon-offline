@@ -207,6 +207,20 @@ impl ToggleKeys {
 
 #[cfg(test)]
 mod tests {
+    /// `KeyMapping.resetToggleKeys` (a new `LocalPlayer`): a sneak and a sprint toggled on in one
+    /// world are off in the next.
+    #[test]
+    fn resetting_the_toggle_keys_puts_every_mapping_up() {
+        let mut keys = ToggleKeys::default();
+        keys.key(0, KeyAction::Press, false, true);
+        keys.key(1, KeyAction::Press, false, true);
+        assert!(keys.is_down(0) && keys.is_down(1));
+        for key in &mut keys.0 {
+            key.reset();
+        }
+        assert!(!keys.is_down(0) && !keys.is_down(1));
+    }
+
     use super::*;
     #[test]
     fn toggle_flips_on_press_and_ignores_release() {

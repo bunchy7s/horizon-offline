@@ -597,6 +597,11 @@ impl Game<'_> {
                     "height": layer.height,
                 })).collect::<Vec<_>>(),
             }),
+            Mode::CreateBuffet { buffet, .. } => json!({
+                "mode": "customize-single-biome",
+                "biome": buffet.biome(),
+                "query": buffet.query(),
+            }),
             Mode::Edit {
                 world,
                 name,

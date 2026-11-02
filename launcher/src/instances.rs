@@ -311,7 +311,9 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
             .instances
             .retain(|id, _| id == DEFAULT || id.contains(':') || own.contains(id));
         if store.instances.len() != before {
-            let _ = store.save(data);
+            if let Err(e) = store.save(data) {
+                eprintln!("Horizon: instances.json is not saved: {e}");
+            }
         }
     }
     for slug in own {

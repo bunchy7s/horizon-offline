@@ -16,6 +16,8 @@
 
 /// The width of a band, in blocks.
 const BAND: f64 = 64.0;
+/// Where a run's group sits in its sort key, above band and page.
+const GROUP_SHIFT: u32 = 62;
 
 /// One section's draws: `start..start + len` of the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,10 +43,24 @@ impl PageRuns {
     /// The draws `start..start + len` of a section `distance` from the
     /// camera (squared, as bits) in arena `page`; runs come nearest first.
     pub fn push(&mut self, distance: u64, page: u32, start: usize, len: usize, tag: [u32; 3]) {
+        self.push_in(0, distance, page, start, len, tag);
+    }
+
+    /// As `push`, in `group` (0 to 3): regrouping puts each group's runs
+    /// before the next group's, then bands and pages within it.
+    pub fn push_in(
+        &mut self,
+        group: u8,
+        distance: u64,
+        page: u32,
+        start: usize,
+        len: usize,
+        tag: [u32; 3],
+    ) {
         if len > 0 {
             let band = (f64::from_bits(distance).sqrt() / BAND) as u64;
             self.runs.push(Run {
-                key: band << 32 | u64::from(page),
+                key: u64::from(group) << GROUP_SHIFT | band << 32 | u64::from(page),
                 start: start as u32,
                 len: len as u32,
                 tag,
@@ -61,7 +77,8 @@ impl PageRuns {
         pages: &mut [(u32, Option<u32>)],
         base: usize,
     ) -> &[Run] {
-        let page = |r: &Run| r.key as u32;
+        // Group and page: one of each needs no reordering.
+        let page = |r: &Run| r.key & (3 << GROUP_SHIFT | u64::from(u32::MAX));
         if self.runs.windows(2).all(|w| page(&w[0]) == page(&w[1])) {
             return &self.runs;
         }
@@ -155,6 +172,24 @@ mod tests {
         grouped.regroup(&mut draws, &mut pages, 0);
         let order: Vec<_> = draws.iter().map(|d| d[0]).collect();
         assert_eq!(order, [0, 1, 2]);
+    }
+
+    /// Metal's two solid passes draw a prefix and a suffix of the list:
+    /// groups come whole and in order, whatever their distance and page.
+    #[test]
+    fn groups_come_before_bands_and_pages() {
+        let mut grouped = PageRuns::default();
+        let mut draws: Vec<_> = (0..5).map(|n| [n, 0, 0, 0, 0]).collect();
+        let mut pages = vec![(0, None); 5];
+        for (n, (group, distance)) in [(2, 10.0), (0, 300.0), (1, 20.0), (0, 30.0), (2, 5.0)]
+            .into_iter()
+            .enumerate()
+        {
+            grouped.push_in(group, bits(distance), 0, n, 1, [0; 3]);
+        }
+        grouped.regroup(&mut draws, &mut pages, 0);
+        let order: Vec<_> = draws.iter().map(|d| d[0]).collect();
+        assert_eq!(order, [3, 1, 2, 0, 4]);
     }
 
     #[test]

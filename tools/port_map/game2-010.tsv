@@ -29,7 +29,7 @@ EnchantmentHelper.updateEnchantments	port	crates/horizon-items/src/item_data.rs:
 EnchantmentHelper.processAmmoUse	port	crates/horizon-client/src/game/enchant_effects.rs::Game::bow_enchantments	Infinity as a flag; the ammo count change is decided by the caller
 EnchantmentHelper.processBlockExperience	inline	crates/horizon-client/src/game.rs::Game::break_block_as_player	Silk Touch zeroes the XP at the call site; spawners keep it
 EnchantmentHelper.processMobExperience	skip:other		no enchantment in the data uses mob_experience, so the amount never changes
-EnchantmentHelper.createBook	missing		player: the creative menu has no enchanted book for each enchantment (CreativeModeTabs); creative.rs lists none
+EnchantmentHelper.createBook	inline	crates/horizon-client/src/creative.rs::from_json	the search tab comes from creative-inventory.json, whose export carries the 171 enchanted book stacks (vanilla CreativeModeTabs generates them)
 EnchantmentHelper.runIterationOnItem	port	crates/horizon-items/src/item_data.rs::ItemStack::enchantments	the (enchantment, level) iteration; callers loop over it
 EnchantmentHelper.runIterationOnEquipment	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_enchantment_attributes	gap: minor: worn armor only; hand slots are not read
 EnchantmentHelper.isImmuneToDamage	port	crates/horizon-client/src/game/enchant_effects.rs::Game::wears_burn_from_stepping_immunity	gap: minor: worn armor only; no requirements or damage source check

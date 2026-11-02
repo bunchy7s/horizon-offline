@@ -1655,10 +1655,12 @@ impl Game<'_> {
                 ("data", Tag::compound([("map", Tag::Int(last))])),
                 ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
             ]);
-            let _ = horizon_client::save::write_dat(
+            if let Err(e) = horizon_client::save::write_dat(
                 &self.world_root.join("data/minecraft/maps/last_id.dat"),
                 tag,
-            );
+            ) {
+                log::warn!("Horizon: the next map id is not saved: {e}");
+            }
         }
     }
     /// The atlas slot showing map `id`, its texture uploaded when it changed.

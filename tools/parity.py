@@ -56,8 +56,10 @@ import time
 
 try:
     from . import parity_reach
+    from . import file_lock
 except ImportError:
     import parity_reach
+    import file_lock
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCAL = ROOT / ".local"
@@ -594,8 +596,9 @@ def java_sources(arguments):
 def run_environment(reuse_oracles=False):
     environment = dict(os.environ, CARGO_TARGET_DIR=str(TARGET), PYTHONDONTWRITEBYTECODE="1", HORIZON_NO_AUDIO="1", **PROFILE)
     environment.pop("CARGO_BUILD_JOBS", None)
-    if reuse_oracles:
-        # tools/parity_shim.py stands in for java and javac and replays unchanged oracle runs.
+    # tools/parity_shim.py stands in for java and javac and replays unchanged oracle runs. Not on Windows: a
+    # program started without a shell is found there only as an .exe, and the shim's execv returns before the program.
+    if reuse_oracles and os.name != "nt":
         SHIM.mkdir(parents=True, exist_ok=True)
         for name in ("java", "javac"):
             link = SHIM / name
@@ -736,16 +739,13 @@ def publish(name, record):
 
 def machine_slot():
     """One of MACHINE_JOBS lock files shared by every runner on this machine, or None if all are taken."""
-    import fcntl
     slots = SHARED / "slots"
     slots.mkdir(parents=True, exist_ok=True)
     for index in range(MACHINE_JOBS):
         handle = open(slots / f"{index}.lock", "w")
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if file_lock.lock(handle, wait=False):
             return handle
-        except OSError:
-            handle.close()
+        handle.close()
     return None
 
 
@@ -792,7 +792,8 @@ def outcome(name, script, passed, elapsed, trace_path, hasher=None):
         trace = None  # killed before writing it, or the disk was full: the pass can't be keyed
     if trace:
         record["dependencies"], record["artifacts"] = dependencies(trace, harness_settings(script).get("PARITY_RUST_SCOPE"))
-        record["peak_bytes"] = trace["peak_bytes"]
+        if "peak_bytes" in trace:
+            record["peak_bytes"] = trace["peak_bytes"]
         if passed:
             clear_large_outputs(name, trace)
         if hasher is not None:
@@ -873,7 +874,7 @@ class LocalExecutor:
             if process.poll() is None and elapsed < self.timeout:
                 continue
             if process.poll() is None:
-                os.killpg(process.pid, 9)
+                kill_tree(process)
                 process.wait()
                 print(f"--- {name}: timed out after {self.timeout}s", file=item["log"])
             item["log"].close()
@@ -884,10 +885,18 @@ class LocalExecutor:
 
     def stop(self):
         for item in self.running.values():
-            try:
-                os.killpg(item["process"].pid, 9)
-            except ProcessLookupError:
-                pass
+            kill_tree(item["process"])
+
+
+def kill_tree(process):
+    """Kill a harness and what it started: its process group (start_new_session), or its tree on Windows."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True)
+        return
+    try:
+        os.killpg(process.pid, 9)
+    except ProcessLookupError:
+        pass
 
 
 def host_config():
@@ -1258,8 +1267,11 @@ def stale(name, state, hasher, environment):
 def trace_main(output, script, arguments):
     """Run one harness and record what it read and executed."""
     import atexit
-    import resource
     import runpy
+    try:
+        import resource
+    except ImportError:  # Windows: no peak to report, the scheduler assumes DEFAULT_MEMORY
+        resource = None
     read, commands = set(), []
 
     def audit(event, details):
@@ -1274,14 +1286,16 @@ def trace_main(output, script, arguments):
 
     def write():
         modules = [getattr(module, "__file__", None) for module in list(sys.modules.values())]
-        peak = max(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
-        peak //= 1024 if sys.platform == "darwin" else 1  # bytes on macOS, KiB elsewhere
-        Path(output).write_text(json.dumps({
+        trace = {
             "modules": sorted({m for m in modules if m and inside(m, ROOT)}),
             "read": sorted(path for path in read if os.path.isabs(path) or not path.startswith("<")),
             "commands": commands,
-            "peak_bytes": peak * 1024,
-        }))
+        }
+        if resource:
+            peak = max(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
+            peak //= 1024 if sys.platform == "darwin" else 1  # bytes on macOS, KiB elsewhere
+            trace["peak_bytes"] = peak * 1024
+        Path(output).write_text(json.dumps(trace))
 
     atexit.register(write)
     sys.addaudithook(audit)

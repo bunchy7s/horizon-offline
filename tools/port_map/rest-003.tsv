@@ -51,7 +51,7 @@ DeltaTracker.Timer.unPause	port	crates/horizon-client/src/clock.rs::Timer::updat
 GameNarrator	missing		minor: no text-to-speech; the narrator option is stored but nothing is spoken
 HotbarManager.get	port	crates/horizon-client/src/hotbar.rs::load	file loaded when the creative hotbar opens (creative_hotbar.rs)
 KeyMapping.forAllKeyMappings	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	one key drives every mapping bound to it
-KeyMapping.setAll	missing		player: held keys are not re-read when the window regains focus; after alt-tab with a move key held, the walk stops until the key is pressed again
+KeyMapping.setAll	port	crates/horizon-client/src/game.rs::handle_window_event_inner	WindowEvent::Focused(false) drops every held key and mouse button, so nothing sticks across alt-tab; ModifiersChanged reconciles the rest
 KeyMapping.resetMapping	skip:other		no lookup table to rebuild; mappings_for reads the current keys
 KeyMapping.compareTo	skip:ui		controls list order is the MAPPINGS table order in keybinds.rs
 KeyMapping.createNameSupplier	skip:ui		key label supplier

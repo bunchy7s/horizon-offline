@@ -520,6 +520,17 @@ pub fn equip_displacement(height: f32, swap_animation_scale: f32) -> f32 {
     swap_animation_scale * (1.0 - height)
 }
 
+/// `Mth.wrapDegrees`: an angle difference in -180..=180.
+fn wrap_degrees(d: f32) -> f32 {
+    let d = d % 360.0;
+    if d >= 180.0 {
+        d - 360.0
+    } else if d < -180.0 {
+        d + 360.0
+    } else {
+        d
+    }
+}
 /// `LocalPlayer.xBob` and `yBob`: the hands lag behind the view when it
 /// turns. `LocalPlayer.applyInput` eases them halfway to the rotation every
 /// tick; `FirstPersonHandsAndItemsRenderer` turns the hands by a tenth of
@@ -530,6 +541,8 @@ pub struct HandSway {
     pub y_bob: f32,
     pub x_bob_o: f32,
     pub y_bob_o: f32,
+    /// The yaw `tick_wrapped` has followed so far, unwrapped like vanilla's.
+    y_rot: f32,
 }
 impl HandSway {
     /// `LocalPlayer.applyInput` with the player's `getXRot` and `getYRot`.
@@ -539,13 +552,23 @@ impl HandSway {
         self.x_bob += (x_rot - self.x_bob) * 0.5;
         self.y_bob += (y_rot - self.y_bob) * 0.5;
     }
+    /// `tick` for a yaw kept in -180..180 (a boat turns its rider through the wrap). Vanilla's
+    /// yaw runs on without wrapping, so `yRot - yBob` is always the short way round; this
+    /// follows the wrapped yaw by its short steps to give `tick` the same unwrapped yaw.
+    pub fn tick_wrapped(&mut self, x_rot: f32, y_rot: f32) {
+        self.y_rot += wrap_degrees(y_rot - self.y_rot);
+        self.tick(x_rot, self.y_rot);
+    }
     /// The degrees the hands turn about X, then Y, before either is drawn:
     /// `(viewXRot - xBob) * 0.1` and `(viewYRot - yBob) * 0.1`, the bobs
     /// interpolated as `extractRenderState` does.
     pub fn rotation(&self, partial: f32, view_x_rot: f32, view_y_rot: f32) -> [f32; 2] {
         let x_bob = crate::camera::lerp(partial, self.x_bob_o, self.x_bob);
         let y_bob = crate::camera::lerp(partial, self.y_bob_o, self.y_bob);
-        [(view_x_rot - x_bob) * 0.1, (view_y_rot - y_bob) * 0.1]
+        [
+            (view_x_rot - x_bob) * 0.1,
+            wrap_degrees(view_y_rot - y_bob) * 0.1,
+        ]
     }
     /// The hands' view space to camera-relative world space, turned by the
     /// sway. The hand pass draws with the camera's view, whose rotation a
@@ -1383,5 +1406,23 @@ mod action_result_tests {
                 None
             );
         }
+    }
+
+    /// The hands' sway turns the short way round when the yaw wraps from 179 to -179 degrees (a
+    /// boat turning its rider), instead of swinging them 36 degrees the long way.
+    #[test]
+    fn hand_sway_takes_the_short_way_over_the_yaw_wrap() {
+        let mut sway = HandSway::default();
+        sway.tick_wrapped(0.0, 179.0);
+        for _ in 0..20 {
+            sway.tick_wrapped(0.0, 179.0);
+        }
+        // The view is still at 179; one tick later it reads -179 (2 degrees on).
+        sway.tick_wrapped(0.0, -179.0);
+        let [_, y] = sway.rotation(1.0, 0.0, -179.0);
+        assert!(
+            y.abs() < 0.5,
+            "a 2 degree turn sways the hands by under half a degree: {y}"
+        );
     }
 }

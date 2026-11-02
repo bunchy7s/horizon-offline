@@ -1,0 +1,6 @@
+{
+  "hooks": [{"name": "ingredient", "target": "horizon_client_lib::crafting::native_ingredient"}],
+  "rust_summary": "a recipe ingredient of a mod's own kind\n(`native_ingredient`, which the unknown ingredient type in a namespace of\nown reaches with the kind, its JSON and the item list to fill).",
+  "doc_summary": "a recipe ingredient of a mod's own kind. The ingredient entry that names a type in a namespace outside minecraft: reaches native_ingredient(kind, data, items) at load time. Fill items with the item ids the ingredient matches (item ids only: components are not checked; a match-time hook follows separately). Duplicates are removed keeping first-seen order. An unclaimed kind leaves the list empty and the recipe fails. The hook may be called more than once per recipe; the answer must be the same. Bundles that use it need \"hooks\": @API:ingredient@.",
+  "comments": ["crates/horizon-client/src/crafting.rs"]
+}

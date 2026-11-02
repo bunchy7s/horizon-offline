@@ -23,6 +23,8 @@ pub(super) struct PrimedTnt {
     pub on_ground: bool,
     pub owner: Option<Who>,
     pub guest: Option<u32>,
+    /// `Entity.noGravity` (`NoGravity` in its save).
+    pub no_gravity: bool,
 }
 impl PrimedTnt {
     const SIZE: f64 = 0.98;
@@ -43,9 +45,11 @@ impl PrimedTnt {
         collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
         assets: &horizon_client::assets::Assets,
         facts: &horizon_client::blocks::BlockFacts,
-    ) -> Result<()> {
+    ) -> Result<Vec<BlockPos>> {
         self.previous = self.position;
-        self.velocity.y -= 0.04;
+        if !self.no_gravity {
+            self.velocity.y -= 0.04;
+        }
         let mut scene = SceneCollisions {
             world,
             binding: collision,
@@ -70,14 +74,17 @@ impl PrimedTnt {
         if moved.y != wanted.y {
             self.velocity.y = 0.0;
         }
-        // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it.
-        horizon_client::motion::bubble_column_push(
+        // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it, and the
+        // columns it is at the top of send their surface particles.
+        let mut tops = Vec::new();
+        horizon_client::motion::bubble_column_push_over(
             world,
             assets.registry,
             facts,
             collision,
             self.bounds(),
             &mut self.velocity,
+            |pos| tops.push(pos),
         );
         self.velocity = Vec3::new(
             self.velocity.x * 0.98,
@@ -116,7 +123,7 @@ impl PrimedTnt {
                 },
             )?;
         }
-        Ok(())
+        Ok(tops)
     }
 }
 
@@ -170,6 +177,7 @@ impl Game<'_> {
         // An id from the entity counter at once, so a command can name it.
         self.next_entity += 1;
         self.tnts.push(PrimedTnt {
+            no_gravity: false,
             id: self.next_entity,
             position,
             previous: position,
@@ -194,12 +202,16 @@ impl Game<'_> {
                 i += 1;
                 continue;
             }
-            t.tick(
+            let tops = t.tick(
                 &self.world,
                 self.collision,
                 &self.pack.assets,
                 self.res.facts(),
             )?;
+            for pos in tops {
+                self.bubble_column_particles(pos);
+            }
+            let t = &mut self.tnts[i];
             if t.fuse <= 0 {
                 let center = [
                     t.position.x,
@@ -584,6 +596,7 @@ mod tests {
         use horizon_core::geometry::Direction;
         use horizon_world::piston_push::bounce_velocity;
         let mut tnt = PrimedTnt {
+            no_gravity: false,
             id: 0,
             position: Vec3::new(0.5, 1.0, 0.5),
             previous: Vec3::new(0.5, 1.0, 0.5),
@@ -626,6 +639,7 @@ mod tests {
         world.set(21, 4, 20, flowing).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         let mut tnt = PrimedTnt {
+            no_gravity: false,
             id: 0,
             position: at,
             previous: at,
@@ -720,6 +734,7 @@ mod tests {
         // (Entity.handleOnInsideBubbleColumn / handleOnAboveBubbleColumn).
         let at = Vec3::new(20.5, 6.0, 20.5);
         let mut tnt = PrimedTnt {
+            no_gravity: false,
             id: 0,
             position: at,
             previous: at,
@@ -757,5 +772,71 @@ mod tests {
             "water alone does not lift it, got {}",
             tnt.position.y
         );
+    }
+
+    /// `Entity.onAboveBubbleColumn` sends the surface particles only from the top of
+    /// a column: `tick` names the column block it is at the top of, and none while
+    /// the column has water above it.
+    #[test]
+    fn primed_tnt_reports_the_surface_of_a_bubble_column() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = horizon_client::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
+        let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        let soul_sand = assets
+            .registry
+            .default_state("minecraft:soul_sand")
+            .unwrap();
+        let default = assets
+            .registry
+            .default_state("minecraft:bubble_column")
+            .unwrap();
+        let mut up = assets.registry.state(default).unwrap().clone();
+        up.properties.insert("drag".into(), "false".into());
+        let column = assets.registry.resolve(&up).unwrap();
+        for y in 3..=8 {
+            world.set(20, y, 20, column).unwrap();
+        }
+        world.set(20, 2, 20, soul_sand).unwrap();
+        let at = Vec3::new(20.5, 6.0, 20.5);
+        let primed = || PrimedTnt {
+            no_gravity: false,
+            id: 0,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            fuse: 80,
+            on_ground: false,
+            owner: None,
+            guest: None,
+        };
+        let mut tops = Vec::new();
+        let mut tnt = primed();
+        for _ in 0..30 {
+            tops.extend(tnt.tick(&world, &collision, &assets, &facts).unwrap());
+        }
+        assert!(!tops.is_empty(), "it reaches the top of the column");
+        assert!(
+            tops.iter().all(|p| *p == BlockPos::new(20, 8, 20)),
+            "only the surface block, got {tops:?}"
+        );
+        // Water above the top block: it is no longer the surface.
+        world.set(20, 9, 20, water).unwrap();
+        let mut tnt = primed();
+        for _ in 0..10 {
+            assert!(
+                tnt.tick(&world, &collision, &assets, &facts)
+                    .unwrap()
+                    .is_empty()
+            );
+        }
     }
 }

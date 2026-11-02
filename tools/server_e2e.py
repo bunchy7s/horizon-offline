@@ -15,6 +15,8 @@ Checks:
           payload (the server's "Received custom click action" line), `wait_for_response` leaves the
           waiting screen, and `/dialog clear` closes a dialog (servers used to see nothing: the game
           dropped the packets).
+- book_menu: an OpenBook packet over a retained container shows only the book; closing it restores
+             the menu with an available pointer.
 - titles: a chest named with styles (`CustomName`, as a plugin's menu is): its screen's title keeps
           the colours and bold (it used to be flattened to plain grey).
 
@@ -25,6 +27,8 @@ import argparse
 import json
 import os
 import shutil
+import socket
+import threading
 import subprocess
 import sys
 import tempfile
@@ -73,6 +77,84 @@ def snbt(value):
     if isinstance(value, dict):
         return '{' + ','.join(f'{k}:{snbt(v)}' for k, v in value.items()) + '}'
     return str(value)
+
+
+class BookPacketProxy:
+    """Forward whole frames; inject the pinned protocol's OpenBook packet.
+
+    Offline vanilla uses compression threshold 256. The injected packet is
+    below that threshold (uncompressed length 0). Forwarded frames stay opaque.
+    """
+    def __init__(self, upstream):
+        self.upstream = upstream
+        self.listener = socket.socket()
+        self.listener.bind(('127.0.0.1', 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.client = None
+        self.server = None
+        self.lock = threading.Lock()
+        self.ready = threading.Event()
+        threading.Thread(target=self.run, daemon=True).start()
+
+    @staticmethod
+    def read(sock, count):
+        data = bytearray()
+        while len(data) < count:
+            chunk = sock.recv(count - len(data))
+            if not chunk:
+                raise EOFError()
+            data.extend(chunk)
+        return bytes(data)
+
+    def run(self):
+        try:
+            self.client, _ = self.listener.accept()
+            self.server = socket.create_connection(('127.0.0.1', self.upstream))
+            self.ready.set()
+            threading.Thread(target=self.upload, daemon=True).start()
+            while True:
+                prefix = bytearray()
+                length = 0
+                for shift in range(0, 35, 7):
+                    byte = self.read(self.server, 1)[0]
+                    prefix.append(byte)
+                    length |= (byte & 127) << shift
+                    if byte < 128:
+                        break
+                else:
+                    raise ValueError('invalid packet length')
+                frame = bytes(prefix) + self.read(self.server, length)
+                with self.lock:
+                    self.client.sendall(frame)
+        except (EOFError, OSError):
+            pass
+
+    def upload(self):
+        try:
+            while data := self.client.recv(65536):
+                self.server.sendall(data)
+        except OSError:
+            pass
+
+    def open_book(self, hand=0):
+        # ClientboundOpenBookPacket: protocol 777, play packet 0x3b.
+        self.send_packet(0x3b, lab.varint(hand))
+
+    def send_packet(self, packet, data):
+        assert self.ready.wait(10), 'client did not connect through the proxy'
+        body = b'\0' + lab.varint(packet) + data
+        with self.lock:
+            self.client.sendall(lab.varint(len(body)) + body)
+
+    def close(self):
+        for sock in (self.client, self.server, self.listener):
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                sock.close()
 
 
 def check_dialog(server, game, out):
@@ -139,6 +221,40 @@ def check_dialog(server, game, out):
     return shown
 
 
+def check_book_menu(server, game, out, proxy):
+    """An active book is the only rendered/interactive screen over a menu."""
+    server.console(f'item replace entity {PLAYER} weapon.mainhand with minecraft:written_book'
+                   '[minecraft:written_book_content={title:"Overlay",author:"Test",pages:["First","Second"]}]')
+    game.until(lambda: game('state')['held'],
+               lambda held: held is not None and held['item'] == 'minecraft:written_book')
+    x, y, z = (int(v // 1) for v in game('state')['player']['position'])
+    at = (x + 2, y, z)
+    server.console(f'setblock {at[0]} {at[1]} {at[2]} minecraft:chest')
+    game.wait(10)
+    game.raw('interact', *at)
+    game.raw('wait-for', 'screen', 'container', '--timeout', 30)
+    assert any(w['kind'] == 'slot' for w in game.raw('ui')['widgets'])
+    proxy.open_book()
+    game.raw('wait-for', 'screen', 'book', '--timeout', 10)
+    game.wait(3)
+    game.shot(out, 'book-over-menu')
+    ui = game.raw('ui')
+    assert not any(w['kind'] == 'slot' for w in ui['widgets']), ui
+    game.raw('book', 'next')
+    assert game.raw('book')['page'] == 1
+    game.raw('book', 'done')
+    game.raw('wait-for', 'screen', 'container', '--timeout', 10)
+    state = game('state')
+    assert not state['pointer_grabbed'], 'book close grabbed the mouse behind the menu'
+    assert any(w['kind'] == 'slot' for w in game.raw('ui')['widgets'])
+    game.shot(out, 'menu-after-book')
+    game.raw('key', 'esc', 'tap')
+    game.raw('wait-for', 'screen', 'playing', '--timeout', 10)
+    server.console(f'setblock {at[0]} {at[1]} {at[2]} minecraft:air')
+    return {'book_excludes_menu': True, 'pages_work': True,
+            'menu_restored': True, 'menu_keeps_mouse': True}
+
+
 def check_titles(server, game, out):
     # AbstractContainerScreen draws the title the server sent, its styles included (#1645). A named
     # chest is what a plugin's menu looks like: its CustomName is the open_screen title.
@@ -160,7 +276,7 @@ def check_titles(server, game, out):
     return {'title': title}
 
 
-CHECKS = {'dialog': check_dialog, 'titles': check_titles}
+CHECKS = {'dialog': check_dialog, 'titles': check_titles, 'book_menu': check_book_menu}
 
 
 def run(bins, out, checks):
@@ -170,12 +286,15 @@ def run(bins, out, checks):
     directory = work / 'server'
     directory.mkdir()
     props = dict(PROPERTIES, **{'server-port': str(port)})
+    if 'book_menu' in checks:
+        props['network-compression-threshold'] = '256'
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
     (directory / 'eula.txt').write_text('eula=true\n')
     (work / 'log4j2.xml').write_text(LOG4J)
     classpath = os.pathsep.join(map(str, [jars['server'], *libraries]))
     server = Server(['java', '-Xmx2g', f'-Dlog4j.configurationFile={work / "log4j2.xml"}', '-cp', classpath,
                      'net.minecraft.server.Main', 'nogui'], directory, 'vanilla')
+    proxy = BookPacketProxy(port) if 'book_menu' in checks else None
     game = Game('client', bins / 'horizon-ctl', lab.RESOURCES.resolve())
     for key in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'HORIZON_LAUNCHER_HOME'):
         game.d.env[key] = str(game.work / key.lower())
@@ -184,20 +303,23 @@ def run(bins, out, checks):
     try:
         server.wait_for(r'Done \(')
         server.console('gamerule spawn_mobs false')
-        game('launch', wait=False, offscreen=sys.platform == 'darwin')
-        game.raw('connect', f'127.0.0.1:{port}', PLAYER)
+        game('launch', wait=False, offscreen=True)
+        game.raw('connect', f'127.0.0.1:{proxy.port if proxy else port}', PLAYER)
         game.raw('wait-for', 'loaded', '--timeout', 300)
         server.wait_for(rf'{PLAYER} joined the game')
         server.console(f'op {PLAYER}')
         game.wait(20)
         for name in checks:
             try:
-                results[name] = {'pass': True, 'detail': CHECKS[name](server, game, out)}
+                detail = CHECKS[name](server, game, out, proxy) if name == 'book_menu' else CHECKS[name](server, game, out)
+                results[name] = {'pass': True, 'detail': detail}
             except (Failed, AssertionError, StopIteration, KeyError) as e:
                 results[name] = {'pass': False, 'detail': repr(e)}
             print(f'[server] {name}: {"PASS" if results[name]["pass"] else "FAIL"} {results[name]["detail"]}')
     finally:
         (out / 'client.log').write_text(game.close())
+        if proxy:
+            proxy.close()
         server.stop()
         shutil.copy(server.log_path, out / 'server.log')
         shutil.rmtree(game.work, ignore_errors=True)

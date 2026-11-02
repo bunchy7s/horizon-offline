@@ -102,10 +102,17 @@ pub(super) struct Minecart {
     pub flipped: bool,
     pub(super) on_ground: bool,
     horizontal_collision: bool,
+    /// The horizontal speed the cart wanted when the collision stopped it:
+    /// `MinecartTNT.tick` reads the delta after the move, which a cart on a
+    /// rail keeps (`AbstractMinecart.moveAlongTrack` re-applies the track's
+    /// velocity), so a cart that ran into a block still counts as moving.
+    collision_speed: f64,
     fall_distance: f64,
     pub hurt_time: i32,
     pub hurt_dir: i32,
     pub damage: f32,
+    /// `Entity.noGravity` (`NoGravity` in its save).
+    pub no_gravity: bool,
     pub items: Vec<Option<ItemStack>>,
     /// Furnace minecarts: fuel ticks and `MinecartFurnace.push`. Its y part
     /// stays between ticks (it sets the push's length), only saving drops it.
@@ -256,10 +263,12 @@ impl Minecart {
             flipped: false,
             on_ground: false,
             horizontal_collision: false,
+            collision_speed: 0.0,
             fall_distance: 0.0,
             hurt_time: 0,
             hurt_dir: 1,
             damage: 0.0,
+            no_gravity: false,
             items: vec![None; kind.slots()],
             fuel: 0,
             push: Vec3::ZERO,
@@ -485,6 +494,9 @@ impl Game<'_> {
             c.on_ground = delta.y < 0.0 && moved.y > delta.y;
             c.horizontal_collision =
                 (moved.x - delta.x).abs() > 1.0e-7 || (moved.z - delta.z).abs() > 1.0e-7;
+            if c.horizontal_collision {
+                c.collision_speed = delta.x * delta.x + delta.z * delta.z;
+            }
             if (moved.x - delta.x).abs() > 1.0e-7 {
                 c.velocity.x = 0.0;
             }
@@ -902,6 +914,11 @@ impl Game<'_> {
         let v = c.velocity;
         let fall = c.fall_distance;
         self.move_cart(c, v);
+        // `comeOffTrack` moves the cart and keeps the delta the move resolved
+        // (then scales it by the air drag), so a cart an obstacle stopped here
+        // is not moving any more and `MinecartTNT.tick` does not detonate it -
+        // unlike the rail paths, which re-apply the track's velocity.
+        c.collision_speed = 0.0;
         if !c.on_ground {
             c.velocity = Vec3::new(
                 c.velocity.x * 0.95,
@@ -923,7 +940,9 @@ impl Game<'_> {
         c.hurt_time = (c.hurt_time - 1).max(0);
         c.damage = (c.damage - 1.0).max(0.0);
         // applyGravity
-        c.velocity.y -= if self.cart_in_water(c) { 0.005 } else { 0.04 };
+        if !c.no_gravity {
+            c.velocity.y -= if self.cart_in_water(c) { 0.005 } else { 0.04 };
+        }
         let pos = self.rail_block(c.position);
         if let Some(rail) = self.rail(pos[0], pos[1], pos[2]) {
             if self.minecart_improvements() {
@@ -983,12 +1002,9 @@ impl Game<'_> {
                     self.explode_cart(c, speed);
                     return false;
                 }
-                if c.horizontal_collision {
-                    let speed = c.velocity.x * c.velocity.x + c.velocity.z * c.velocity.z;
-                    if speed >= f64::from(0.01_f32) {
-                        self.explode_cart(c, speed);
-                        return false;
-                    }
+                if tnt_ignites_by_collision(c.horizontal_collision, c.collision_speed) {
+                    self.explode_cart(c, c.collision_speed);
+                    return false;
                 }
             }
             // MinecartSpawner.tick: `BaseSpawner.serverTick` at the cart's block.
@@ -1200,7 +1216,7 @@ impl Game<'_> {
             || self.ridden_by_guest(id)
             || self.mobs.iter().any(|m| m.extra.mount == Some(id));
         let teams = self.mob_teams();
-        let candidates: Vec<usize> = (0..self.mobs.len())
+        let candidates: Vec<u32> = (0..self.mobs.len())
             .filter(|&j| {
                 let m = &self.mobs[j];
                 if m.removed || !m.pushable() || m.extra.mount == Some(id) {
@@ -1211,23 +1227,29 @@ impl Game<'_> {
                 }
                 pushable_by(None, teams.of(Who::Mob(m.id)), true)
             })
+            .map(|j| self.mobs[j].id)
             .collect();
         drop(teams);
-        for j in candidates {
+        for mob in candidates {
+            // By id: a mod's mount hook may have removed mobs since the list
+            // was made, which moves the others' indices.
+            let Some(j) = self.mobs.iter().position(|m| m.id == mob) else {
+                continue;
+            };
             let species = self.mobs[j].species();
             let player = &*self.mobs[j].kind.id == "minecraft:player";
             let cooldown = self.mobs[j].extra.boarding_cooldown;
             let passenger = self.mobs[j].extra.mount.is_some();
             if pickup_instead_of_push(species, passenger, occupied) && !player {
-                if can_ride_cart(species, cooldown) {
-                    let mob = self.mobs[j].id;
-                    {
-                        let m = &mut self.mobs[j];
-                        m.extra.mount = Some(id);
-                        m.extra.passenger = true;
-                        m.ai.nav.stop();
-                        m.needs_sync = true;
-                    }
+                // Entity.startRiding: a mod may cancel it (EntityMountEvent).
+                if can_ride_cart(species, cooldown)
+                    && self.native_mob_may_ride(mob, id, true)
+                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
+                {
+                    m.extra.mount = Some(id);
+                    m.extra.passenger = true;
+                    m.ai.nav.stop();
+                    m.needs_sync = true;
                     occupied = true;
                     self.break_leash(mob, true, false);
                 }
@@ -2216,6 +2238,7 @@ impl Minecart {
         c.velocity = velocity;
         c.yaw = yaw;
         c.previous_yaw = yaw;
+        c.no_gravity = horizon_client::entity_nbt::flag(tag, "NoGravity");
         let int = |k: &str| match tag.get(k) {
             Some(Tag::Byte(v)) => Some(i32::from(*v)),
             Some(Tag::Short(v)) => Some(i32::from(*v)),
@@ -2252,8 +2275,25 @@ impl Minecart {
     }
 }
 
+/// `MinecartTNT.tick`'s collision detonation: a cart still moving at a tenth
+/// of a block a tick or more when a block stops it blows up.
+fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool {
+    horizontal_collision && speed_sqr >= 0.009_999_999_776_482_582
+}
+
 #[cfg(test)]
 mod tests {
+    /// The collision detonation of a TNT minecart needs both the collision and
+    /// a cart that was still moving: a nudge below a tenth of a block a tick
+    /// does not set it off, and a fast cart on an open track does not either.
+    #[test]
+    fn a_tnt_cart_detonates_only_when_a_collision_stops_a_moving_one() {
+        assert!(tnt_ignites_by_collision(true, 0.01));
+        assert!(tnt_ignites_by_collision(true, 0.36), "three tenths a tick");
+        assert!(!tnt_ignites_by_collision(true, 0.0), "stopped at the wall");
+        assert!(!tnt_ignites_by_collision(true, 0.009), "a nudge");
+        assert!(!tnt_ignites_by_collision(false, 0.36), "nothing in the way");
+    }
     use super::*;
 
     #[test]

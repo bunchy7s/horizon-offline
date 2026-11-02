@@ -11,12 +11,12 @@ ConnectScreen.connect	port	crates/horizon-client/src/net.rs::Session::connect	ba
 ConnectScreen.tick	port	crates/horizon-client/src/game/remote.rs::Game::tick_remote	ticks the pending session while it opens; game.rs tick sends remote sessions here
 ConnectScreen.init	missing		player: no Cancel button while connecting, only the status line; unsure whether Escape aborts the join
 ConnectScreen.extractRenderState	port	crates/horizon-client/src/game/remote.rs::Game::remote_overlay	gap: minor: also draws the address line, vanilla draws only the status
-CreateBuffetWorldScreen.init	missing		minor: the buffet biome picker is not in Horizon's create-world flow
-CreateBuffetWorldScreen.repositionElements	missing		minor: layout of the buffet biome picker, which Horizon lacks
-CreateBuffetWorldScreen.updateButtonValidity	missing		minor: Done needs a biome in the buffet picker, which Horizon lacks
-CreateBuffetWorldScreen.BiomeList.filterEntries	missing		minor: biome search of the buffet picker, which Horizon lacks
-CreateBuffetWorldScreen.BiomeList.setSelected	missing		minor: biome selection of the buffet picker, which Horizon lacks
-CreateBuffetWorldScreen.BiomeList.Entry.extractContent	missing		minor: biome row of the buffet picker, which Horizon lacks
+CreateBuffetWorldScreen.init	port	crates/horizon-client/src/title/buffet.rs::State::new	title, the 200x15 search box, the biome list and the footer's Done and Cancel; the list is drawn each frame
+CreateBuffetWorldScreen.repositionElements	skip:ui		layout only; the list is laid out each frame in buffet.rs::list_area
+CreateBuffetWorldScreen.updateButtonValidity	inline	crates/horizon-client/src/title/buffet.rs::buttons	Done needs a selected biome, that is one the search text still shows
+CreateBuffetWorldScreen.BiomeList.filterEntries	port	crates/horizon-client/src/title/buffet.rs::State::rows	rows sorted by display name; the search text keeps the names that contain it, case-folded; gap: minor: a locale collator's order is approximated by case-folded name then id
+CreateBuffetWorldScreen.BiomeList.setSelected	port	crates/horizon-client/src/title/buffet.rs::click	a press on a row fixes its biome and refreshes Done
+CreateBuffetWorldScreen.BiomeList.Entry.extractContent	port	crates/horizon-client/src/title/buffet.rs::draw	the name at contentX + 5, contentY + 2; gap: minor: the row's highlight is a plain fill
 CreateFlatWorldScreen.setConfig	port	crates/horizon-client/src/title/flat.rs::State::apply_share	applies the preset or typed share text as the layers; gap: minor: the rows are not rebuilt separately
 CreateFlatWorldScreen.init	port	crates/horizon-client/src/title/flat.rs::buttons	Remove Layer, Presets, Done and Cancel buttons
 CreateFlatWorldScreen.repositionElements	skip:ui		layout only; the list is laid out each frame in flat.rs::list_area

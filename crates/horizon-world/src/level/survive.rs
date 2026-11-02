@@ -491,18 +491,34 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.ignite_odds(state) > 0
     }
     pub(crate) fn ignite_odds(&self, state: BlockStateId) -> i32 {
-        if self.b.is_waterlogged(state) {
-            0
-        } else {
-            self.b.data(state).ignite_odds
-        }
+        self.fire_odds(state).0
     }
     pub(crate) fn burn_odds(&self, state: BlockStateId) -> i32 {
+        self.fire_odds(state).1
+    }
+    /// `FireBlock.getIgniteOdds` and `getBurnOdds`: the level's answer, else
+    /// `FireBlock.bootStrap`'s table.
+    fn fire_odds(&self, state: BlockStateId) -> (i32, i32) {
         if self.b.is_waterlogged(state) {
-            0
-        } else {
-            self.b.data(state).burn_odds
+            return (0, 0);
         }
+        let mut odds = None;
+        self.level.before_fire_odds(state, &mut odds);
+        odds.unwrap_or_else(|| {
+            let data = self.b.data(state);
+            (data.ignite_odds, data.burn_odds)
+        })
+    }
+    /// `CampfireBlock.isSmokeSource`: a hay bale, unless the level answers.
+    pub(crate) fn is_smoke_source(&self, state: BlockStateId) -> bool {
+        let mut smoke = None;
+        self.level.before_smoke_source(state, &mut smoke);
+        smoke.unwrap_or_else(|| {
+            self.b
+                .table
+                .block_by_name("minecraft:hay_block")
+                .is_some_and(|hay| self.b.is_block(state, hay))
+        })
     }
     /// `ScaffoldingBlock.getDistance`.
     pub(crate) fn scaffolding_distance(&self, pos: BlockPos) -> i32 {

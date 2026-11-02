@@ -58,7 +58,7 @@ CreateWorldScreen.onCreate	port	crates/horizon-client/src/title.rs::Title::creat
 CreateWorldScreen.createWorldAndCleanup	inline	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	gap: minor: temp datapack folder cleanup not modelled (no datapack copy)
 CreateWorldScreen.createNewWorld	port	crates/horizon-client/src/game.rs::Game::open_world	gap: minor: the folder is made in WorldRequest::prepare and no datapacks are copied in
 CreateWorldScreen.createLevelSettings	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	name, mode, difficulty, hardcore and commands written with the new level; gap: minor: debug world (spectator, peaceful) not modelled
-CreateWorldScreen.keyPressed	missing		player: Enter does not create the world; startup_menu title_key only confirms a focused rename box, so Enter on Create New World does nothing
+CreateWorldScreen.keyPressed	port	crates/horizon-client/src/title.rs::confirm_key_size	player: Enter with no button focused creates the world (Screenless Create mode falls through to create_action), as the screen does after its widgets decline the key
 CreateWorldScreen.extractRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the footer separator
 CreateWorldScreen.extractMenuBackground	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the tab header strip and menu background
 CreateWorldScreen.getOrCreateTempDataPackDir	missing		minor: temp folder for datapacks chosen at creation; Horizon has no create-time datapack picker
@@ -75,7 +75,7 @@ CreateWorldScreen.getDataPackSelectionSettings	missing		minor: temp datapack rep
 CreateWorldScreen.GameTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	Game tab: name box, game mode, difficulty, allow cheats; gap: minor: vanilla's Experiments button sits on this tab in non-stable builds
 CreateWorldScreen.MoreTab.openGameRulesScreen	port	crates/horizon-client/src/title.rs::Title::click_action	Game Rules button (arm 29) over a copy of the rules, via RulesScreen::for_creation
 CreateWorldScreen.WorldTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	World tab: world type, customize, seed box (field 1), structures and bonus chest; gap: player: only Default and Superflat are offered, vanilla also offers Amplified and other presets
-CreateWorldScreen.WorldTab.openPresetEditor	port	crates/horizon-client/src/title.rs::Title::click_action	Customize button (arm 26) opens the Superflat editor (Mode::CreateFlat)
+CreateWorldScreen.WorldTab.openPresetEditor	port	crates/horizon-client/src/title.rs::Title::click_action	Customize button (arm 26) opens CreateFlatWorldScreen (Mode::CreateFlat) for the flat preset and CreateBuffetWorldScreen (Mode::CreateBuffet) for single biome, as PresetEditor.EDITORS has them
 EditWorldScreen.create	port	crates/horizon-client/src/title.rs::Title::click_action	Edit button (arm 13) builds the Edit mode from the list entry; gap: minor: no fixAndGetSummary (file fixing) on open
 EditWorldScreen.<init>	port	crates/horizon-client/src/title.rs::Title::buttons	Edit buttons: reset icon, open folder, backup, backups folder, Optimize, Save, Cancel; gap: player: Optimize World is drawn inactive and does nothing
 EditWorldScreen.keyPressed	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::title_key	Enter confirms a focused name box through confirm_edit; Escape goes back through Title::escape
@@ -122,7 +122,7 @@ WorldCreationUiState.setSeed	port	crates/horizon-client/src/title.rs::parse_seed
 WorldCreationUiState.isBonusChest	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::bonus_chest	never in Hardcore
 WorldCreationUiState.tryUpdateDataConfiguration	skip:data		datapack and feature-flag config; Horizon has neither at creation
 WorldCreationUiState.setWorldType	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::press	Superflat toggle (id 25); gap: player: only Default and Superflat exist, vanilla's other presets such as Amplified are missing
-WorldCreationUiState.getPresetEditor	port	crates/horizon-client/src/title/create_world.rs::buttons	customize button enabled only for Superflat; the editor opens in title.rs click_action arm 26
+WorldCreationUiState.getPresetEditor	port	crates/horizon-client/src/title/create_world.rs::buttons	customize button enabled for the flat and single-biome presets, the two PresetEditor.EDITORS has; the editor opens in title.rs click_action arm 26
 WorldCreationUiState.updatePresetLists	skip:data		preset lists from the registry; Horizon has two built-in types
 WorldCreationUiState.findPreset	skip:data		registry lookup
 WorldCreationUiState.getNonEmptyList	skip:data		registry tag lookup

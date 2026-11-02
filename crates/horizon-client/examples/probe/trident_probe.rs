@@ -92,7 +92,7 @@ pub fn main() -> Result<()> {
                     if in_ground {
                         continue;
                     }
-                    if let Some((stop, _)) =
+                    if let Some((stop, _, _)) =
                         arrows::clip_block_stop(&scene, &facts, &binding, position, velocity)
                     {
                         // onHitBlock: pulled back, stopped, stuck, shaking 7 ticks.

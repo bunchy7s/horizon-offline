@@ -20,9 +20,6 @@ const MIN_SECONDS: f32 = 60.0;
 const CRASH_DETAILS: [&str; 3] = ["Horizon Version", "Graphics Adapter", "Render Settings"];
 
 static STARTED: OnceLock<Instant> = OnceLock::new();
-/// When the menu bundle became ready, so the time to the title screen measures
-/// the menu and not the world bundle loaded behind it.
-static UI_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 static CORE_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 static REST_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The GPU, once the renderer has its adapter: name, maker, kind, driver, backend, its own memory.
@@ -44,14 +41,6 @@ pub struct Gpu {
 /// When the game started, for the time to the title screen. Call first thing in `main`.
 pub fn mark_start() {
     STARTED.get_or_init(Instant::now);
-}
-
-/// The menu bundle is ready: the title screen can draw. The first writer wins.
-pub fn mark_ui_ready() {
-    if let Some(started) = STARTED.get() {
-        let ms = started.elapsed().as_millis() as u32;
-        let _ = UI_READY_MS.compare_exchange(u32::MAX, ms, Ordering::Relaxed, Ordering::Relaxed);
-    }
 }
 
 pub fn mark_core_ready() {
@@ -241,17 +230,18 @@ impl Session {
     pub fn title_shown(&mut self) {
         if !self.title_measured {
             self.title_measured = true;
-            let ui_ms = UI_READY_MS.load(Ordering::Relaxed);
-            self.to_title_ms = if ui_ms != u32::MAX {
-                Some(ui_ms)
-            } else {
-                STARTED.get().map(|s| s.elapsed().as_millis() as u32)
-            };
+            crate::spans::startup::mark("title.shown");
+            // The frame itself: the menu bundle can be ready seconds before
+            // the renderer that draws it (pipelines compiling on a slow driver).
+            self.to_title_ms = STARTED.get().map(|s| s.elapsed().as_millis() as u32);
         }
     }
 
     /// A world starts loading.
     pub fn world_opening(&mut self) {
+        if self.opening.is_none() {
+            crate::spans::startup::arm("world.opening");
+        }
         self.opening.get_or_insert_with(Instant::now);
     }
 
@@ -262,10 +252,11 @@ impl Session {
 
     /// A frame drawn while playing (not in menus or loading).
     pub fn frame(&mut self, ms: f32) {
-        if let Some(opening) = self.opening.take()
-            && self.to_world_ms.is_none()
-        {
-            self.to_world_ms = Some(opening.elapsed().as_millis() as u32);
+        if let Some(opening) = self.opening.take() {
+            crate::spans::startup::mark("world.first_frame");
+            if self.to_world_ms.is_none() {
+                self.to_world_ms = Some(opening.elapsed().as_millis() as u32);
+            }
         }
         self.frames.record(ms);
         self.played_ms += ms;

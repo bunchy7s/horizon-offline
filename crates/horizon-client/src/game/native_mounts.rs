@@ -10,11 +10,14 @@ impl Game<'_> {
         self.serving.is_some() || self.options.dedicated.is_some()
     }
 
-    /// The entity id of the acting player: a guest's while their action runs, else the host's.
+    /// The entity id of the acting player: a guest's while their action runs (kept with the
+    /// action, as the hub is often out of `lan` then), else the host's.
     fn native_acting_entity(&self) -> u32 {
-        let guests = self.lan_guest_entities();
         match self.lan_acting {
-            Some(conn) => guests.iter().find(|g| g.0 == conn).map_or(0, |g| g.1),
+            Some(conn) => self.lan_acting_entity.unwrap_or_else(|| {
+                let guests = self.lan_guest_entities();
+                guests.iter().find(|g| g.0 == conn).map_or(0, |g| g.1)
+            }),
             None => self.lan.as_ref().map_or(0, |host| host.host_entity as u32),
         }
     }

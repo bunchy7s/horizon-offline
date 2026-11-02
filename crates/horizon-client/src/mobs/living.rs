@@ -630,16 +630,24 @@ impl Mob {
         // Entity.checkSupportingBlock
         self.supporting = self.supporting_block(w, moved);
         self.movement_emission(w, moved, events);
-        // Entity.applyEffectsFromBlocks: bubble columns push the mob.
-        if crate::motion::bubble_column_push(
+        // Entity.applyEffectsFromBlocks: bubble columns push the mob, and the
+        // server shows the surface of one it is at the top of.
+        let mut tops = Vec::new();
+        if crate::motion::bubble_column_push_over(
             w.world,
             w.registry,
             w.facts,
             w.collision,
             self.bounds(),
             &mut self.velocity,
+            |pos| tops.push(pos),
         ) {
             self.fall_distance = 0.0;
+        }
+        for pos in tops {
+            events.push(MobEvent::BubbleColumnParticles {
+                pos: [pos.x, pos.y, pos.z],
+            });
         }
     }
     /// LivingEntity.checkFallDamage: the fluid state refreshed out of water

@@ -1104,12 +1104,19 @@ fn files_under(dir: &Path, relative: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_dir_except(from, to, None)
+}
+
+/// Copy a folder, leaving out one directory when given.
+pub(crate) fn copy_dir_except(from: &Path, to: &Path, skip: Option<&Path>) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
+            if Some(entry.path().as_path()) != skip {
+                copy_dir_except(&entry.path(), &target, skip)?;
+            }
         } else {
             horizon_prepare::clone_or_copy(&entry.path(), &target)?;
         }
@@ -1463,7 +1470,9 @@ fn download_for_owner(
         account::store(),
         &mut accounts,
     );
-    let _ = accounts.save();
+    if let Err(e) = accounts.save() {
+        log(format!("Horizon: the accounts are not saved: {e}"));
+    }
     download_for(pins, dir, pass, !accounts.accounts.is_empty(), fetch, log)
 }
 
@@ -3369,11 +3378,18 @@ impl Settings {
         self.keep_versions.unwrap_or(KEEP_NEWEST).max(1)
     }
     pub fn save(&self) {
-        let _ = fs::create_dir_all(data_dir());
-        let _ = fs::write(
-            data_dir().join("settings.json"),
-            serde_json::to_string_pretty(self).unwrap(),
-        );
+        // A write that stops halfway leaves settings.json unreadable, and `load` answers
+        // defaults for it: the file is replaced only once it is whole.
+        let dir = data_dir();
+        let path = dir.join("settings.json");
+        let tmp = dir.join(format!("settings.{}.tmp", std::process::id()));
+        let written = fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(&tmp, serde_json::to_string_pretty(self).unwrap()))
+            .and_then(|()| fs::rename(&tmp, &path));
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp);
+            eprintln!("Horizon: settings.json is not saved: {e}");
+        }
     }
 }
 

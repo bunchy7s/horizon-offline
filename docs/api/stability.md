@@ -18,7 +18,7 @@ promise, how something is deprecated and removed, and the tests that keep old mo
 | --- | --- | --- |
 | Content mods | the manifest's `api` line | `api = "0.2"` in `horizon-mod.toml` |
 | Native mods | the Horizon and horizon-mixins revisions the bundle pins | `horizon_revision` in `horizon-mixin.toml` |
-| Agent control | the control protocol's version (planned: a `hello` reply and MCP `serverInfo`) | `horizon-ctl --api 1` (planned) |
+| Agent control | the control protocol's version (`hello` replies it; MCP `serverInfo` carries the release) | `horizon-ctl --api 0.1` (planned) |
 | Server control API | the path (`/api/v1/`) | the path |
 | `server.toml` | the file's keys; a key is never renamed in place | nothing: old files keep loading |
 | Launcher commands | the command names and their `--json` output | nothing |

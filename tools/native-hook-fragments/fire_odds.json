@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "fire_odds",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds"
+    },
+    {
+      "name": "smoke_source",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source"
+    }
+  ],
+  "rust_summary": "how fire burns a mod block (`native_fire_odds`, `FireBlock.setFlammable`), and a mod block under\na campfire that makes it a signal fire (`native_smoke_source`, `CampfireBlock.isSmokeSource`).",
+  "doc_summary": "how a mod block burns, and whether it makes a campfire over it a signal fire, on an authoritative server. `native_fire_odds(dimension, state, odds)` answers\n`FireBlock`'s flammability table (`FireBlock.setFlammable(block, igniteOdds, burnOdds)`) before vanilla's table: put\n`(ignite, burn)` in `odds` for your own blocks. Ignite odds above zero let fire stand beside the block and spread\nto the air around it (planks 5, wool 30); burn odds are how fast fire destroys it (planks 20, wool 60); `(0, 0)` never\nburns; keep both within vanilla's 0 to 100. A waterlogged state never burns and isn't asked. It runs hundreds of times per fire tick: keep it short.\n`native_smoke_source(dimension, state, smoke)` answers `CampfireBlock.isSmokeSource` for the block under a campfire,\nas the campfire is placed or that block changes: `Some(true)` makes the campfire a signal fire, as a hay bale does.\nAnswer only for your own blocks and leave the answer empty otherwise; the level is read-only. The deprecated in-frame\npath fires neither. Bundles that use them need `\"hooks\": @API:fire_odds@`."
+}

@@ -181,6 +181,7 @@ impl Game<'_> {
             | Target::Dragon(id)
             | Target::Tnt(id)
             | Target::Falling(id)
+            | Target::Rocket(id)
             | Target::Other(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
@@ -220,6 +221,11 @@ impl Game<'_> {
             | Target::Boat(id)
             | Target::Cart(id)
             | Target::Tnt(id)
+            | Target::Orb(id)
+            | Target::Projectile(id)
+            | Target::Crystal(id)
+            | Target::Dragon(id)
+            | Target::Rocket(id)
             | Target::Other(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
             // A server's player: the saved compound the guest's file is written from.
@@ -234,7 +240,6 @@ impl Game<'_> {
                 .iter()
                 .find(|f| f.id == id)
                 .and_then(|f| f.saved.as_ref().map(|s| &s.1)),
-            Target::Orb(_) | Target::Projectile(_) | Target::Crystal(_) | Target::Dragon(_) => None,
         };
         match raw.and_then(|r| r.get("Tags")) {
             Some(Tag::List(l)) => l

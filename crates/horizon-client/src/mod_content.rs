@@ -34,6 +34,44 @@ pub struct ContentMod {
     pub content: Content,
 }
 
+/// Leaves out a mod with an item whose `crafting_remainder` names an item the mod does not have:
+/// a file item that named a code-declared one the declaration check then refused. Left in, the
+/// overlay would fail on it and no content mod at all would load. Returns what was left out.
+pub fn drop_dangling_remainders(mods: &mut Vec<ContentMod>) -> Vec<String> {
+    let mut dropped = Vec::new();
+    mods.retain(|m| {
+        // The mod's items and its blocks that have an item (`Content::read`'s own rule).
+        let ids: BTreeSet<&str> = m
+            .content
+            .items
+            .iter()
+            .map(|i| i.id.as_str())
+            .chain(
+                m.content
+                    .blocks
+                    .iter()
+                    .filter(|b| b.item)
+                    .map(|b| b.id.as_str()),
+            )
+            .collect();
+        let dangling = m.content.items.iter().find(|i| {
+            i.crafting_remainder
+                .as_deref()
+                .is_some_and(|r| !r.starts_with("minecraft:") && !ids.contains(r))
+        });
+        if let Some(item) = dangling {
+            dropped.push(format!(
+                "mod {} content not loaded: {}: crafting_remainder {:?} is not one of its items",
+                m.id,
+                item.id,
+                item.crafting_remainder.as_deref().unwrap_or_default()
+            ));
+        }
+        dangling.is_none()
+    });
+    dropped
+}
+
 /// The mods' mob effects in registry order: by id, as items are. Their
 /// network ids follow vanilla's in this order.
 pub fn mob_effects(mods: &[ContentMod]) -> Vec<&MobEffect> {

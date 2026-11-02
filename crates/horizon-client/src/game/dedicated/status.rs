@@ -58,6 +58,18 @@ impl Game<'_> {
                         .collect();
                     json!({ "output": output })
                 }
+                // An RCON command: run as the console, with the `Rcon` source, whose feedback the
+                // operators are told of when `broadcast-rcon-to-ops` is on.
+                Some(("rcon", line)) => {
+                    let output: Vec<String> = capture_log(|| self.rcon_line(state, line))
+                        .into_iter()
+                        .map(|l| {
+                            l.strip_prefix("System chat: ")
+                                .map_or(l.clone(), str::to_owned)
+                        })
+                        .collect();
+                    json!({ "output": output })
+                }
                 _ => json!({ "error": format!("unknown request {:?}", request.line) }),
             };
             let _ = request.reply.send(reply.to_string());

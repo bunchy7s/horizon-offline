@@ -3,6 +3,8 @@
 
 Drive both paddles, stop one, stop both, resume one, then dismount without
 sending a final paddle packet. Clients must receive the false transitions.
+A boat with two players is driven by its first rider only: the second rider's
+paddle packets leave the metadata alone.
 """
 try:
     from . import test_locator_bar_parity as net
@@ -30,6 +32,36 @@ for kind in ['oak_boat', 'birch_chest_boat', 'bamboo_raft']:
         label = f'{kind}-{step}'
         SCRIPT.append((label, [action]))
         EXPECTED += [f'{label} {index} {str(value).lower()}' for index, value in changes]
+
+
+# Two players in one boat: `ServerGamePacketListenerImpl.handlePaddleBoat`
+# applies a packet only when the sender is the boat's controlling passenger
+# (`player.getControlledVehicle()`), and `Entity.addPassenger` seats the first
+# player in front, so the second rider's paddle packet changes no metadata.
+SCRIPT.append(('two-riders-setup', [
+    'join Bob',
+    'cmd Alice kill @e[type=!player]',
+    'cmd Alice fill -5 79 -5 5 79 5 minecraft:stone',
+    'cmd Alice fill -5 80 -5 5 80 5 minecraft:water',
+    'cmd Alice tp @s 0.5 81 0.5',
+    'cmd Alice summon minecraft:oak_boat 0.5 81 0.5',
+    'cmd Alice ride @s mount @e[type=minecraft:oak_boat,limit=1]',
+    'cmd Bob ride @s mount @e[type=minecraft:oak_boat,limit=1]',
+]))
+SCRIPT.append(('two-riders-both', ['paddle Alice true true']))
+SCRIPT.append(('two-riders-second-left', ['paddle Bob true false']))
+SCRIPT.append(('two-riders-second-stop', ['paddle Bob false false']))
+SCRIPT.append(('two-riders-first-right', ['paddle Alice true false']))
+# The first rider gets out, leaving the second alone in the boat: the seat it
+# took over is the one the boat's paddles follow now.
+SCRIPT.append(('two-riders-first-out', ['cmd Alice ride @s dismount']))
+SCRIPT.append(('two-riders-second-alone', ['paddle Bob true true']))
+# Each client that tracks the boat records the same metadata transition, and
+# the transcript groups a player's lines together (Alice joined first).
+EXPECTED += [f'{label} {index} {value}' for _ in ('Alice', 'Bob')
+             for label, index, value in [('two-riders-both', 11, 'true'), ('two-riders-both', 12, 'true'),
+                                         ('two-riders-first-right', 12, 'false'),
+                                         ('two-riders-second-alone', 12, 'true')]]
 
 
 def shown(lines):

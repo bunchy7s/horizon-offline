@@ -342,6 +342,11 @@ impl Game<'_> {
             return true;
         }
         self.stop_riding();
+        // startRiding stops when stopRiding left the passenger seated (a mod
+        // canceled the dismount).
+        if self.riding.is_some() {
+            return true;
+        }
         self.riding = Some(id);
         let p = self.cushions[i].position;
         self.audio.play(

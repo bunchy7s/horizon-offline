@@ -67,6 +67,8 @@ pub(super) enum Target {
     Tnt(u32),
     /// A falling block, by its entity id (`minecraft:falling_block`).
     Falling(u32),
+    /// A firework rocket, by its entity id (`minecraft:firework_rocket`).
+    Rocket(u32),
     /// An ominous item spawner, by its entity id (`minecraft:ominous_item_spawner`).
     Spawner(u32),
 }
@@ -144,6 +146,7 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Dragon(id)
     | Target::Tnt(id)
     | Target::Falling(id)
+    | Target::Rocket(id)
     | Target::Spawner(id)) = t
     else {
         return None;
@@ -258,9 +261,14 @@ impl Game<'_> {
             self.cart_command_success(cart, message, false);
             return;
         }
-        if self.ui.rules.bool("send_command_feedback") {
+        if self.accepts_success() {
             self.system_message(message);
         }
+    }
+    /// `CommandSource.acceptsSuccess`: a player's source takes success feedback while
+    /// `send_command_feedback` is on; the server console's and an RCON client's always do.
+    fn accepts_success(&self) -> bool {
+        self.console_broadcast.is_some() || self.ui.rules.bool("send_command_feedback")
     }
     /// sendSuccess honouring `send_command_feedback`.
     pub(super) fn feedback(&mut self, message: Text) {
@@ -275,7 +283,7 @@ impl Game<'_> {
             self.cart_command_success(cart, message, true);
             return;
         }
-        if self.ui.rules.bool("send_command_feedback") {
+        if self.accepts_success() {
             self.system_message(message.clone());
         }
         self.broadcast_to_admins(message);
@@ -343,7 +351,9 @@ impl Game<'_> {
         // the server's own source, "Server".
         let who = match self.command_source.and_then(|s| s.entity) {
             Some(entity) => self.target_name(entity),
-            None if self.console_broadcast.is_some() => Text::literal("Server".to_owned()),
+            None if self.console_broadcast.is_some() => {
+                Text::literal(if self.rcon_source { "Rcon" } else { "Server" }.to_owned())
+            }
             None => self.player_display_name(),
         };
         let line = Text::translate("chat.type.admin", &[who, message])
@@ -528,6 +538,11 @@ impl Game<'_> {
                 .iter()
                 .find(|f| f.id == id)
                 .map(|f| [f.position.x, f.position.y, f.position.z]),
+            Target::Rocket(id) => self
+                .rockets
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| [r.position.x, r.position.y, r.position.z]),
             Target::Spawner(id) => self
                 .ominous_spawners
                 .iter()
@@ -581,6 +596,7 @@ impl Game<'_> {
             Target::Dragon(_) => "minecraft:ender_dragon".into(),
             Target::Tnt(_) => "minecraft:tnt".into(),
             Target::Falling(_) => "minecraft:falling_block".into(),
+            Target::Rocket(_) => "minecraft:firework_rocket".into(),
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
         }
     }
@@ -873,6 +889,7 @@ impl Game<'_> {
         }
         candidates.extend(self.tnts.iter().map(|t| Target::Tnt(t.id)));
         candidates.extend(self.falling.iter().map(|f| Target::Falling(f.id)));
+        candidates.extend(self.rockets.iter().map(|r| Target::Rocket(r.id)));
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
         candidates
     }
@@ -907,6 +924,7 @@ impl Game<'_> {
             Target::Dragon(id),
             Target::Tnt(id),
             Target::Falling(id),
+            Target::Rocket(id),
             Target::Spawner(id),
         ]
         .into_iter()
@@ -931,6 +949,7 @@ impl Game<'_> {
             Target::Dragon(id) => self.dragon.as_ref().is_some_and(|d| d.id == id),
             Target::Tnt(id) => self.tnts.iter().any(|t| t.id == id),
             Target::Falling(id) => self.falling.iter().any(|f| f.id == id),
+            Target::Rocket(id) => self.rockets.iter().any(|r| r.id == id),
             Target::Spawner(id) => self.ominous_spawners.iter().any(|s| s.id == id),
         }
     }
@@ -1163,6 +1182,21 @@ impl Game<'_> {
     pub(super) fn set_game_mode(&mut self, mode: GameMode) -> bool {
         if self.mode == mode {
             return false;
+        }
+        // A server player's change is heard by the mods first, who may keep it.
+        if let Some(uuid) = self.lan_acting_uuid {
+            let name = self.acting_player_name().to_owned();
+            let mut cancel = false;
+            self.native_player_game_mode_changed(
+                uuid,
+                &name,
+                self.mode_id(),
+                super::game_mode::mode_id_of(mode),
+                &mut cancel,
+            );
+            if cancel {
+                return false;
+            }
         }
         self.set_mode(mode);
         if self.screen == Screen::Inventory && (self.creative || self.spectator()) {
@@ -1552,6 +1586,12 @@ impl Game<'_> {
                 if let Some(f) = self.falling.iter_mut().find(|f| f.id == id) {
                     f.position = v;
                     f.previous = v;
+                }
+            }
+            Target::Rocket(id) => {
+                if let Some(r) = self.rockets.iter_mut().find(|r| r.id == id) {
+                    r.position = v;
+                    r.previous = v;
                 }
             }
             Target::Spawner(id) => {
@@ -2058,6 +2098,7 @@ impl Game<'_> {
             Target::Dragon(id) => self.kill_dragon(id),
             Target::Tnt(id) => self.tnts.retain(|t| t.id != id),
             Target::Falling(id) => self.falling.retain(|f| f.id != id),
+            Target::Rocket(id) => self.rockets.retain(|r| r.id != id),
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
@@ -2156,6 +2197,7 @@ impl Game<'_> {
                     let at = self.unstuck_orb(pos);
                     self.next_entity += 1;
                     self.orbs.push(horizon_client::entities::ExperienceOrb {
+                        no_gravity: false,
                         id: self.next_entity,
                         position: Vec3::new(at[0], at[1], at[2]),
                         previous: Vec3::new(at[0], at[1], at[2]),
@@ -2244,7 +2286,8 @@ impl Game<'_> {
             self.tnts.len()
                 + self.falling.len()
                 + self.creatures.projectiles.len()
-                + self.rockets.len(),
+                + self.rockets.len()
+                + self.tridents.len(),
         )
     }
     /// BlockStateArgument -> registry state.
@@ -2957,6 +3000,7 @@ impl Game<'_> {
     }
     /// `MinecraftServer.setDifficulty(difficulty, true)`.
     pub(super) fn set_difficulty_forced(&mut self, i: u8) {
+        let from = self.ui.difficulty;
         self.ui.difficulty = i;
         // The level data holds the world's difficulty: it survives the
         // reopen, so it follows the command.
@@ -2974,6 +3018,10 @@ impl Game<'_> {
                     difficulty: i32::from(i),
                     locked: self.level.difficulty_locked,
                 }));
+        }
+        if from != i {
+            let (from, to) = difficulty_names(from, i);
+            self.native_difficulty_changed(from, to);
         }
     }
     fn cmd_spawnpoint(&mut self, ctx: &Context) -> R<i32> {
@@ -3701,6 +3749,30 @@ pub(super) fn block_input_matches(
             .all(|(k, v)| s.properties.get(k) == Some(v))
 }
 
+/// The names `native_difficulty_changed` hears for a change from `from` to
+/// `to`: the four difficulties of `options.difficulty.*`, the index kept in
+/// range as the command and the options keep it.
+fn difficulty_names(from: u8, to: u8) -> (&'static str, &'static str) {
+    (
+        DIFFICULTIES[usize::from(from) & 3],
+        DIFFICULTIES[usize::from(to) & 3],
+    )
+}
+
+#[cfg(test)]
+mod difficulty_tests {
+    use super::difficulty_names;
+
+    #[test]
+    fn a_difficulty_change_names_both_ends() {
+        assert_eq!(difficulty_names(0, 3), ("peaceful", "hard"));
+        assert_eq!(difficulty_names(2, 1), ("normal", "easy"));
+        // The four difficulties are the only indexes the command and the
+        // options keep; an index outside them still names one.
+        assert_eq!(difficulty_names(7, 4), ("hard", "peaceful"));
+    }
+}
+
 #[cfg(test)]
 mod summon_tests {
     #[test]
@@ -3732,6 +3804,7 @@ mod look_at_tests {
             Target::Dragon(7),
             Target::Tnt(7),
             Target::Falling(7),
+            Target::Rocket(7),
             Target::Spawner(7),
         ] {
             assert_eq!(non_player_entity_id(t), Some(7), "{t:?}");

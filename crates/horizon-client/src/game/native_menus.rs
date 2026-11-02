@@ -287,8 +287,16 @@ impl Game<'_> {
             .map(|g| g.conn)
             .collect();
         for conn in conns {
+            // `AbstractContainerScreen.tick` closes the container once the player is no longer
+            // alive, so a death closes the menu now (the lid falls, the mods hear Close), not at
+            // the respawn.
+            let dead = host.hub.guest(conn).is_some_and(|g| g.dead);
+            if dead && host.hub.guest(conn).is_some_and(|g| g.menu.is_some()) {
+                self.guest_container_closed(host, conn);
+                host.hub.close_container(conn);
+            }
             // Compared as borrowed: nothing is built each tick while it stays open.
-            let now = open_menu_of(host, conn);
+            let now = if dead { None } else { open_menu_of(host, conn) };
             let heard = host.play.get(&conn).and_then(|p| p.menu_heard.as_ref());
             if now == heard.map(|h| (h.window, h.menu.as_str(), h.pos)) {
                 continue;

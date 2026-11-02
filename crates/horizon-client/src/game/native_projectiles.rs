@@ -63,16 +63,63 @@ impl Game<'_> {
     fn native_impact_owner(&self, p: &Projectile) -> u32 {
         match p.owner {
             Some(Who::Mob(id)) => id,
-            Some(Who::Player) => match p.guest {
-                Some(conn) => self
-                    .lan_guest_entities()
-                    .into_iter()
-                    .find(|&(c, _)| c == conn)
-                    .map_or(0, |(_, id)| id),
-                None => self.lan.as_ref().map_or(0, |host| host.host_entity as u32),
-            },
+            Some(Who::Player) => self.native_thrower(p.guest),
             None => 0,
         }
+    }
+
+    /// The entity id of the player who threw something: the guest `guest`, or
+    /// the host.
+    fn native_thrower(&self, guest: Option<u32>) -> u32 {
+        match guest {
+            Some(conn) => self
+                .lan_guest_entities()
+                .into_iter()
+                .find(|&(c, _)| c == conn)
+                .map_or(0, |(_, id)| id),
+            None => self.lan.as_ref().map_or(0, |host| host.host_entity as u32),
+        }
+    }
+
+    /// `native_projectile_impact` for a player's thrown trident, which
+    /// `tick_tridents` flies rather than `tick_projectiles`: it hit the mob
+    /// `mob`, or with `mob` None the block at `block` on its `face`, at `at`.
+    /// Whether a mod canceled it.
+    pub(super) fn native_trident_impact(
+        &mut self,
+        trident: u32,
+        guest: Option<u32>,
+        mob: Option<u32>,
+        block: [i32; 3],
+        face: [i32; 3],
+        at: Vec3,
+    ) -> bool {
+        if !self.native_hears_impacts() {
+            return false;
+        }
+        let owner = self.native_thrower(guest);
+        let (entity, entity_kind) = match mob {
+            Some(id) => {
+                let (entity, kind) = self.native_impact_entity(id);
+                (Some(entity), kind)
+            }
+            None => (None, String::new()),
+        };
+        let dimension = self.dim.id();
+        let mut canceled = false;
+        self.native_projectile_impact(
+            dimension,
+            trident,
+            "minecraft:trident",
+            owner,
+            entity,
+            &entity_kind,
+            block,
+            face,
+            [at.x, at.y, at.z],
+            &mut canceled,
+        );
+        canceled
     }
 
     /// The entity id and type a projectile's hit on the reserved or ordinary

@@ -15,7 +15,7 @@ pub enum Cost {
     Low,
     Medium,
     High,
-    /// Turning it on makes frames faster (culling).
+    /// Turning it on makes frames faster (culling, caching, batching).
     Saves,
 }
 impl Cost {

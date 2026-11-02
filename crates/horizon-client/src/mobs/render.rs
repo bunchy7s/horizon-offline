@@ -39,7 +39,7 @@ fn scroll_u(u: f32, scroll: f32) -> f32 {
     if scroll == 0.0 { u } else { (u + scroll) % 1.0 }
 }
 /// Full sky and block light in a vertex's `light`.
-const FULL_BRIGHT: u32 = 240 | 240 << 8;
+pub const FULL_BRIGHT: u32 = 240 | 240 << 8;
 /// How brightly the eyes render type's layers (spiders', endermen's and
 /// phantoms' eyes, the breeze's, the creaking's, the copper golem's) shine in
 /// HDR output, as `mesher::hdr_tier`.
@@ -3084,6 +3084,170 @@ mod scroll_tests {
             ]
         );
     }
+
+    /// `anim::Poses` keys parts by a hash of their name: within any vanilla model, two
+    /// different names never share one (they would share a pose).
+    #[test]
+    fn no_two_part_names_share_a_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        fn names<'a>(p: &'a Part, out: &mut Vec<&'a str>) {
+            out.push(&p.name);
+            for c in &p.children {
+                names(c, out);
+            }
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let mut models = 0;
+        for kind in types.types.values() {
+            for model in std::iter::once(&kind.model).chain(kind.layers.values()) {
+                let mut all = Vec::new();
+                names(model, &mut all);
+                let mut keys = std::collections::HashMap::new();
+                for name in all {
+                    let other = *keys.entry(super::super::anim::key(name)).or_insert(name);
+                    assert_eq!(other, name, "{} shares a key", kind.id);
+                }
+                models += 1;
+            }
+        }
+        assert!(models > 100);
+    }
+
+    /// The CPU cost of posing a mob farm (tools/stress_scenes.py `stress_mobs`): 1000 mobs of
+    /// 8 kinds through `render_with`, as `mob_geometry` draws them each frame. Prints the median
+    /// thread CPU time per frame (busy machines stretch wall time), the vertices and a hash of them (the same hash before and after a speed-up
+    /// means the same picture). `cargo test --profile fast -p horizon-client --lib
+    /// benchmark_mob_farm_geometry -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual benchmark; needs the prepared resources"]
+    fn benchmark_mob_farm_geometry() {
+        use std::{hash::Hasher, hint::black_box, time::Instant};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kinds = [
+            "husk", "creeper", "cow", "pig", "sheep", "chicken", "villager", "spider",
+        ]
+        .map(|k| std::sync::Arc::new(types.types[&format!("minecraft:{k}")].clone()));
+        let mobs: Vec<Mob> = (0..1000u32)
+            .map(|i| {
+                let (layer, row, col) = (i / 200, i / 20 % 10, i % 20);
+                let at = horizon_core::geometry::Vec3::new(
+                    -14.25 + 1.5 * f64::from(col),
+                    1.0 + 2.5 * f64::from(layer),
+                    8.0 + 2.0 * f64::from(row),
+                );
+                let mut m = Mob::new(i + 1, kinds[i as usize % 8].clone(), at, 180.0);
+                m.previous = at;
+                m.age = i;
+                m
+            })
+            .collect();
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name.len() as f32 / 64.0;
+            Some([h, h, h + 0.25, h + 0.25])
+        };
+        let camera = glam::DVec3::new(0.5, 9.6, 0.5);
+        let mut out = Vec::new();
+        let frame = |out: &mut Vec<Vertex>| {
+            out.clear();
+            for m in &mobs {
+                render_with(m, 0.5, camera, &atlas, 0xf0f0, &data, &[], out);
+            }
+        };
+        frame(&mut out);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash.write(bytemuck::cast_slice(&out));
+        // The thread's own CPU time where the platform gives it, else wall time.
+        let timed = |f: &mut dyn FnMut()| {
+            let (wall, cpu) = (Instant::now(), horizon_client_render::spans::thread_cpu());
+            f();
+            match (horizon_client_render::spans::thread_cpu(), cpu) {
+                (Some(end), Some(start)) => (end - start).as_secs_f64() * 1000.0,
+                _ => wall.elapsed().as_secs_f64() * 1000.0,
+            }
+        };
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            times.push(timed(&mut || frame(black_box(&mut out))));
+        }
+        times.sort_by(f64::total_cmp);
+        println!(
+            "mob farm: 1000 mobs, {} vertices, {:.3} ms/frame (median of 30, min {:.3}), hash {:016x}",
+            out.len(),
+            times[15],
+            times[0],
+            hash.finish()
+        );
+        // Where it goes: the body's poses alone (state, pose map, setupAnim), then the
+        // body's vertices alone from those poses.
+        let median = |mut f: Box<dyn FnMut() + '_>| {
+            let mut t: Vec<f64> = (0..30).map(|_| timed(&mut f)).collect();
+            t.sort_by(f64::total_cmp);
+            t[15]
+        };
+        let posed: Vec<(std::sync::Arc<Part>, Poses)> = mobs
+            .iter()
+            .map(|m| {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                (model, poses)
+            })
+            .collect();
+        let poses_ms = median(Box::new(|| {
+            for m in &mobs {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                black_box(&poses);
+            }
+        }));
+        let mut body = Vec::new();
+        let draw_ms = median(Box::new(|| {
+            body.clear();
+            for (m, (model, poses)) in mobs.iter().zip(&posed) {
+                let base = base_transform(m, 0.5, camera);
+                draw(
+                    model,
+                    base,
+                    poses,
+                    [0.0, 0.0, 0.25, 0.25],
+                    u32::MAX,
+                    0xf0f0,
+                    0,
+                    &mut body,
+                );
+            }
+            black_box(&body);
+        }));
+        println!(
+            "  body poses only {poses_ms:.3} ms; body vertices only {draw_ms:.3} ms ({} vertices)",
+            body.len()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3136,8 +3300,9 @@ mod emissive_tests {
             std::fs::write(path, text).unwrap();
         }
         let random = RandomTextures::scan(&root);
-        let emissive = Emissive::scan(&root, &random);
         let blinks = Blinks::scan(&root, &random);
+        let mut emissive = Emissive::scan(&root, &random);
+        emissive.pair_beside(&root, blinks.files());
         let _ = std::fs::remove_dir_all(&root);
         MobData {
             states: Vec::new(),
@@ -3218,6 +3383,43 @@ mod emissive_tests {
         assert!(shut(&uvs(93)));
         assert!(open(&uvs(94)));
         assert!(shut(&uvs(89 + 150)));
+    }
+
+    #[test]
+    fn a_blink_shows_its_own_glow_or_none() {
+        let atlas = |name: &str| {
+            let u = match name {
+                "entity/silverfish" => 0.0,
+                "entity/silverfish_e" => 0.25,
+                "entity/silverfish_blink" => 0.5,
+                "entity/silverfish_blink_e" => 0.75,
+                _ => return None,
+            };
+            Some([u, 0.0, u + 0.25, 1.0])
+        };
+        let base = [
+            "assets/minecraft/textures/entity/silverfish.png",
+            "assets/minecraft/textures/entity/silverfish_e.png",
+            "assets/minecraft/textures/entity/silverfish_blink.png",
+        ];
+        let at = |data: &MobData, age: u32| {
+            let mut m = silverfish();
+            m.age = age;
+            drawn(&m, data, &atlas)
+        };
+        // Age 89 is shut (see above), 0 open.
+        let plain = data(&base);
+        let open = at(&plain, 0);
+        assert_eq!(open.len(), 8);
+        assert!(inside(&open[4..], 0.25), "the texture's glow");
+        let shut = at(&plain, 89);
+        assert_eq!(shut.len(), 4, "no glowing open eyes over the shut ones");
+        assert!(inside(&shut, 0.5));
+        let mut own = base.to_vec();
+        own.push("assets/minecraft/textures/entity/silverfish_blink_e.png");
+        let shut = at(&data(&own), 89);
+        assert_eq!(shut.len(), 8);
+        assert!(inside(&shut[4..], 0.75), "the frame's own glow");
     }
 
     /// Draws `m` and returns each vertex's (uv, light).
@@ -3306,9 +3508,35 @@ mod emissive_tests {
                 assert_eq!(v.len(), 8);
                 assert!(inside(&v[4..], 0.75), "its own overlay, not silverfish_e");
             } else {
-                assert_eq!(v.len(), 4, "zombie_e.png doesn't glow over zombie3.png");
+                assert_eq!(v.len(), 4, "silverfish_e doesn't glow over silverfish2");
             }
         }
+    }
+
+    #[test]
+    fn worn_armour_glows_when_its_extra_layer_says_so() {
+        let m = silverfish();
+        let data = data(&[]);
+        let atlas = |_: &str| Some([0.0, 0.0, 0.5, 0.5]);
+        let part = m.kind.model.clone();
+        let extra = [
+            (part.as_ref(), [0.5, 0.0, 1.0, 0.5], 0xFFFF_FFFF, 0, false),
+            (part.as_ref(), [0.5, 0.5, 1.0, 1.0], 0xFFFF_FFFF, 0, true),
+        ];
+        let mut out = Vec::new();
+        render_with(
+            &m,
+            0.0,
+            glam::DVec3::ZERO,
+            &atlas,
+            7,
+            &data,
+            &extra,
+            &mut out,
+        );
+        assert_eq!(out.len(), 12, "body, armour, armour's glow");
+        assert!(out[..8].iter().all(|v| v.light == 7));
+        assert!(out[8..].iter().all(|v| v.light == FULL_BRIGHT));
     }
 }
 

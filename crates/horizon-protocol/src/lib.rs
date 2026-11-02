@@ -1,7 +1,9 @@
 //! The Minecraft Java Edition network protocol (of the version in `horizon_core::version`):
 //! primitive codecs, framing, compression, encryption, and typed packets for
 //! every connection state, shared by the Horizon client and (later) server.
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: crypto/blocks.rs allows the ARMv8 AES intrinsics, nothing else.
+#![deny(unsafe_code)]
+pub mod adapter;
 pub mod buf;
 pub mod chunk;
 pub mod connection;

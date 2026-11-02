@@ -59,6 +59,10 @@ pub(crate) struct TestLevel {
     /// `analog_states` (`adjust_has_analog_output`).
     pub analog: HashMap<BlockPos, i32>,
     pub analog_states: HashSet<BlockStateId>,
+    /// What `before_fire_odds` answers for a state.
+    pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
+    /// What `before_smoke_source` answers for a state.
+    pub smoke_sources: HashMap<BlockStateId, bool>,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -75,6 +79,8 @@ impl TestLevel {
             block_light: HashMap::new(),
             client_side: false,
             guarded: HashSet::new(),
+            fire_odds: HashMap::new(),
+            smoke_sources: HashMap::new(),
         }
     }
 }
@@ -153,6 +159,16 @@ impl LevelAccess for TestLevel {
             .flat_map(|&p| [p, update::rel(p, direction)])
             .chain(destroy.iter().copied())
             .any(|p| self.guarded.contains(&p))
+    }
+    fn before_fire_odds(&self, state: BlockStateId, odds: &mut Option<(i32, i32)>) {
+        if let Some(&answer) = self.fire_odds.get(&state) {
+            *odds = Some(answer);
+        }
+    }
+    fn before_smoke_source(&self, state: BlockStateId, smoke: &mut Option<bool>) {
+        if let Some(&answer) = self.smoke_sources.get(&state) {
+            *smoke = Some(answer);
+        }
     }
 }
 
@@ -3289,4 +3305,109 @@ fn survive_hooks_answer_for_the_block() {
         PlaceOutcome::Placed { .. }
     ));
     assert!(level.asked.get() > asked);
+}
+
+#[test]
+fn a_level_can_answer_how_a_block_burns() {
+    let mut w = world!();
+    w.floor(0, 10, "stone");
+    let glass = w.id("glass", &[]);
+    let planks = w.id("oak_planks", &[]);
+    let burn = |w: &mut World, fire: BlockPos| {
+        w.set(fire.offset(0, -1, 0), w.id("netherrack", &[]));
+        w.set(fire.offset(1, 0, 0), glass);
+        w.set(fire.offset(-1, 0, 0), planks);
+        w.set(fire, w.id("fire", &[]));
+        for _ in 0..4000 {
+            w.tick();
+        }
+    };
+    // Vanilla's table: glass never burns, planks do.
+    let fire = BlockPos::new(0, 1, 0);
+    burn(&mut w, fire);
+    assert_eq!(w.get(fire.offset(1, 0, 0)), glass, "glass doesn't burn");
+    assert_ne!(w.get(fire.offset(-1, 0, 0)), planks, "planks burn");
+
+    // The level's answer wins over the table, either way.
+    w.level.fire_odds.insert(glass, (30, 60));
+    w.level.fire_odds.insert(planks, (0, 0));
+    let fire = BlockPos::new(0, 1, 6);
+    burn(&mut w, fire);
+    assert_ne!(w.get(fire.offset(1, 0, 0)), glass, "flammable glass burns");
+    assert_eq!(
+        w.get(fire.offset(-1, 0, 0)),
+        planks,
+        "fireproof planks don't"
+    );
+
+    // Fire in the air beside a block stays only while the block's ignite
+    // odds are above zero, and burn odds of zero never destroy the block.
+    let lit_beside = |w: &mut World, at: BlockPos, ticks: usize| {
+        w.set(at.offset(1, 0, 0), glass);
+        w.set(at, w.id("fire", &[]));
+        for _ in 0..ticks {
+            w.tick();
+        }
+        w.get(at)
+    };
+    let fire = w.id("fire", &[]);
+    w.level.fire_odds.clear();
+    let at = BlockPos::new(-6, 5, 0);
+    assert_ne!(
+        w.b().block(lit_beside(&mut w, at, 45)),
+        w.b().block(fire),
+        "fire beside plain glass goes out"
+    );
+    w.level.fire_odds.insert(glass, (5, 0));
+    let at = BlockPos::new(-6, 5, 6);
+    assert_eq!(
+        w.b().block(lit_beside(&mut w, at, 45)),
+        w.b().block(fire),
+        "fire stands beside glass that ignites"
+    );
+    for _ in 0..4000 {
+        w.tick();
+    }
+    assert_eq!(w.get(at.offset(1, 0, 0)), glass, "and never burns it away");
+}
+
+#[test]
+fn a_level_can_answer_what_makes_a_campfire_signal() {
+    let mut w = world!();
+    let (stone, hay) = (w.id("stone", &[]), w.id("hay_block", &[]));
+    let ground = BlockPos::new(0, 0, 0);
+    let campfire = ground.offset(0, 1, 0);
+    let place = |w: &mut World| {
+        w.level.blocks.remove(&campfire);
+        let ctx = PlaceContext {
+            clicked_pos: ground,
+            face: Direction::Up,
+            hit: horizon_core::geometry::Vec3::new(0.5, 1.0, 0.5),
+            inside: false,
+            yaw: 0.0,
+            pitch: 0.0,
+            sneaking: false,
+            item: "minecraft:campfire".into(),
+            can_use_game_master_blocks: false,
+        };
+        let b = w.b();
+        assert!(matches!(
+            b.place_block(&mut w.level, &mut w.ticks, &ctx),
+            PlaceOutcome::Placed { .. }
+        ));
+        w.prop(campfire, "signal_fire")
+    };
+    w.put(ground, stone);
+    assert_eq!(place(&mut w), "false");
+    w.put(ground, hay);
+    assert_eq!(place(&mut w), "true", "vanilla's hay bale");
+
+    // The level makes stone a smoke source and hay not: placed, and as the ground changes.
+    w.level.smoke_sources.insert(stone, true);
+    w.level.smoke_sources.insert(hay, false);
+    assert_eq!(place(&mut w), "false");
+    w.set(ground, stone);
+    assert_eq!(w.prop(campfire, "signal_fire"), "true");
+    w.set(ground, hay);
+    assert_eq!(w.prop(campfire, "signal_fire"), "false");
 }

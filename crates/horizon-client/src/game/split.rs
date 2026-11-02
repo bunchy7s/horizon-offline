@@ -16,10 +16,10 @@
 //! data (`Resources`, the packs), one audio output and P1's server. Not one game process per
 //! player: that needs GPU textures, input and audio shared across processes.
 //!
-//! Controllers: P1's is the first used in a menu (or alone). In P1's world another controller
-//! pressing a button is offered to join, on every view (A joins, B says no); a controller that
-//! disconnects leaves its player waiting, its view dimmed, until it comes back or another takes
-//! over (`pads`).
+//! Controllers: P1's is the first used in a menu. In P1's world a controller it isn't using
+//! pressing a button is offered to join, on every view (A joins, Y gives it to P1, B says no); a
+//! controller that disconnects leaves its player waiting, its view dimmed, until it comes back
+//! or another takes over (`pads`).
 //!
 //! Horizon Settings > Splitscreen... enables joining (off by default).
 //! `HORIZON_SPLIT=N` (testing) enables it too, and
@@ -130,10 +130,11 @@ pub(super) struct Split<'a> {
     window1_shown: bool,
     /// Where each numbered window was when it closed, to open there again (this session).
     window_rects: std::collections::HashMap<u8, (LogicalPosition<f64>, LogicalSize<f64>)>,
-    /// The monitors with their names, left to right, and the one Window 1 is on: read once a
-    /// frame (`refresh_monitors`).
+    /// The monitors with their names, left to right, and the one Window 1 is on: read while
+    /// splitscreen is on, once a second (`refresh_monitors`), and when it last read them.
     screens: Vec<(String, MonitorHandle)>,
     main_screen: Option<String>,
+    screens_read: Option<Instant>,
     /// `HORIZON_SPLIT_WINDOWS`: each seat's window, `1`, `2`... or `m<monitor>`.
     window_plan: Vec<String>,
     /// The views the players were last fitted to.
@@ -182,6 +183,7 @@ impl<'a> Split<'a> {
             window_rects: Default::default(),
             screens: Vec::new(),
             main_screen: None,
+            screens_read: None,
             window_plan: std::env::var("HORIZON_SPLIT_WINDOWS")
                 .map(|w| w.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_default(),
@@ -692,8 +694,17 @@ impl ApplicationHandler for Split<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.refresh_monitors();
         let on = self.host.settings.extras.splitscreen || self.forced;
+        // Only splitscreen places windows on monitors. Listing them is a round trip to the
+        // window server (macOS: 0.1-0.3 ms, more on a busy machine), so not every frame.
+        if (on || !self.surfaces.is_empty())
+            && self
+                .screens_read
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+        {
+            self.screens_read = Some(Instant::now());
+            self.refresh_monitors();
+        }
         self.host.ui.options.split_joined = self.guests.iter().any(|g| g.name.is_some());
         // Off, or the last other player gone: P1 draws on its window again.
         if !self.surfaces.is_empty()

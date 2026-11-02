@@ -473,3 +473,56 @@ fn spread_out_regions_route_like_dense_ones() {
         );
     }
 }
+/// `set_block_worldgen` skips a heightmap's update for writes deep under its
+/// surface; the maps end as when every write updates them.
+#[test]
+fn worldgen_writes_keep_heightmaps_as_updating_each_write() {
+    let registry = registry();
+    for stage in [PreLightChunkStage::Biomes, PreLightChunkStage::Terrain] {
+        let new = || {
+            let mut chunk =
+                TerrainChunk::new(ChunkPos::new(2, -3), -32, 64, &registry, Properties).unwrap();
+            chunk.set_generation_stage(stage);
+            chunk.prime_heightmaps(stage.heightmaps()).unwrap();
+            chunk
+        };
+        let (mut fast, mut each) = (new(), new());
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        for _ in 0..20_000 {
+            let (x, z) = (next(4) as i32, next(4) as i32);
+            // Mostly solid columns written top down, as the surface rule does,
+            // with air and water mixed in.
+            let y = 31 - next(64) as i32;
+            let state = BlockStateId([2, 2, 2, 4, 6, 0, 3, 7][next(8) as usize]);
+            fast.set_block_worldgen(x, y, z, state).unwrap();
+            each.set_block_raw(x, y, z, state).unwrap();
+            for &kind in stage.heightmaps() {
+                each.update_heightmap(kind, x, y, z, state).unwrap();
+            }
+        }
+        for &kind in stage.heightmaps() {
+            for z in 0..16 {
+                for x in 0..16 {
+                    assert_eq!(
+                        fast.heightmap(kind).unwrap().first_available(x, z).unwrap(),
+                        each.heightmap(kind).unwrap().first_available(x, z).unwrap(),
+                        "{kind:?} at {x} {z}"
+                    );
+                }
+            }
+        }
+        for y in -32..32 {
+            for z in 0..4 {
+                for x in 0..4 {
+                    assert_eq!(fast.block(x, y, z), each.block(x, y, z));
+                }
+            }
+        }
+    }
+}

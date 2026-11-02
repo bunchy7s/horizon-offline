@@ -36,9 +36,12 @@ def run_game(command, **kwargs):
 @contextmanager
 def suite_lock():
     """Real-client CI suites share a GPU, even when parity.py runs harnesses in parallel."""
-    import fcntl
-    with (Path(tempfile.gettempdir()) / 'horizon-integration-gpu.lock').open('a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    try:
+        from . import file_lock
+    except ImportError:
+        import file_lock
+    with (Path(tempfile.gettempdir()) / 'horizon-integration-gpu.lock').open('a') as handle:
+        file_lock.lock(handle)
         yield
 
 

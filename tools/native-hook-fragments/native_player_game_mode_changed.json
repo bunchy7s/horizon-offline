@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "name": "player_game_mode_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_game_mode_changed"
+    }
+  ],
+  "rust_summary": "a server player's game mode about to change, cancellable (`native_player_game_mode_changed`).",
+  "doc_summary": "a server player's game mode about to change: `native_player_game_mode_changed(player, name, from, to, cancel)` is heard before the change (NeoForge's `PlayerChangeGameModeEvent`) for the `/gamemode` command, the F3+F4 switcher and a hardcore world's respawn into spectator, once for each change to a different mode (0 survival, 1 creative, 2 adventure, 3 spectator), on a server; not for the default mode a player joins with. A mod sets `cancel` to keep the old mode. Bundles that use it need `\"hooks\": @API:native_player_game_mode_changed@`."
+}

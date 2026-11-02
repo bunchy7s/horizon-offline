@@ -20,7 +20,7 @@ MenuTabBar.Builder.addTabs	skip:java		builder
 MenuTabBar.Builder.build	skip:java		builder
 MenuTabBar.MenuTabButton.extractWidgetRenderState	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	tab loop: sprite by selected and hover state, underline, label
 MenuTabBar.MenuTabButton.renderMenuBackground	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	menu background inside the selected tab
-MenuTabBar.MenuTabButton.renderLabel	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	label centred, 3 px lower on unselected tabs
+MenuTabBar.MenuTabButton.renderLabel	port	crates/horizon-client-render/src/ui.rs::menu_tab_label	the Create World and Statistics tabs: centred, 3 px lower on unselected tabs, gray on inactive ones; a label wider than the tab (margin 1) scrolls
 MenuTabBar.MenuTabButton.renderFocusUnderline	inline	crates/horizon-client/src/title/create_world.rs::Title::draw_create	1 px underline under the selected tab label
 TabManager.setTabArea	skip:ui		tab area layout; create world computes the tab row on every draw (tabs())
 TabManager.setCurrentTab	port	crates/horizon-client/src/title.rs::Title::click	a click on a tab sets options.tab

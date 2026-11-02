@@ -32,7 +32,7 @@ LinearInterpolationHandler.doInterpolate	inline	crates/horizon-client/src/game/r
 LivingEntity.<init>	port	crates/horizon-client/src/mobs.rs::Mob::new	box, health, random yaw
 LivingEntity.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: player: arrow count (12) and stinger count (13) are never kept or sent, so arrows and bee stingers do not stay stuck in a body
 LivingEntity.hasLandedInLiquid	port	crates/horizon-world/src/living_fall.rs::ImpulseContext::landed_in_liquid	water or lava with getDeltaMovement().y below 9.9999997E-6, from the guest move loop; the grace time still defers it
-LivingEntity.getScale	missing		minor: no scale attribute, so /attribute scale and datapack scaling do nothing; baby and slime sizes come from tables in Mob::dims
+LivingEntity.getScale	port	crates/horizon-client/src/mobs/riders.rs::scale	the minecraft:scale a client has for any living entity; the server's player reads its own in PlayerMotion::refresh_dimensions (PlayerMotion.scale keeps it for Guest::dimensions)
 LivingEntity.shouldDropLoot	inline	crates/horizon-client/src/mobs/drops.rs::die	mob_drops rule and not a baby (monsters excepted)
 LivingEntity.decreaseAirSupply	port	crates/horizon-client/src/motion/environment.rs::MotionWorld::tick_environment_damage	gap: minor: only the player reads oxygen_bonus (Respiration); a mob loses one air per tick in ai.rs::base_tick
 LivingEntity.setLastHurtByPlayer	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	ai.last_hurt_by_player = 100 on a player's hit; Game::last_hurt_by_player records which guest

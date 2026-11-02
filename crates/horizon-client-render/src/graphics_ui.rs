@@ -61,6 +61,7 @@ pub enum H {
     BatteryMode,
     ShadowCache,
     GraphicsApi,
+    TranslucentBatching,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -358,6 +359,11 @@ pub fn rows(level: Level) -> Vec<Row> {
                 "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.",
             ),
             h(
+                H::TranslucentBatching,
+                Saves,
+                "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
+            ),
+            h(
                 H::UploadBudget,
                 Low,
                 "Mesh data sent to the GPU per frame. Lower is smoother while loading.",
@@ -370,11 +376,13 @@ pub fn rows(level: Level) -> Vec<Row> {
             ),
         ],
     };
-    // Only Windows and Linux have more than one graphics API.
+    // Only Windows and Linux have more than one graphics API, and translucent batching
+    // (Metal draws flat).
     if cfg!(target_os = "macos") {
-        rows.retain(
-            |row| !matches!(row, Row::Setting(s) if s.item == Item::Horizon(H::GraphicsApi)),
-        );
+        rows.retain(|row| {
+            !matches!(row, Row::Setting(s)
+                if matches!(s.item, Item::Horizon(H::GraphicsApi | H::TranslucentBatching)))
+        });
     }
     rows
 }
@@ -598,24 +606,21 @@ impl H {
             H::HdrPaperWhite => match g.hdr_paper_white {
                 0 => labelled(
                     "Paper White",
-                    lang::tr("Auto (%s nits)", &[&g.paper_white_nits()]),
+                    lang::tr("Auto (%s)", &[&g.paper_white_nits()]),
                 ),
-                n => labelled("Paper White", lang::tr("%s nits", &[&n])),
+                n => labelled("Paper White", n.to_string()),
             },
             H::HdrPeak => match g.hdr_peak {
-                0 => labelled(
-                    "Peak Brightness",
-                    lang::tr("Auto (%s nits)", &[&g.peak_nits()]),
-                ),
-                n => labelled("Peak Brightness", lang::tr("%s nits", &[&n])),
+                0 => labelled("Peak Brightness", lang::tr("Auto (%s)", &[&g.peak_nits()])),
+                n => labelled("Peak Brightness", n.to_string()),
             },
-            H::HdrBlackLevel => labelled(
-                "Black Level",
-                lang::tr(
-                    "%s nits",
-                    &[&format!("{:.2}", g.hdr_black_level as f32 / 100.0)],
+            H::HdrBlackLevel => match g.hdr_black_level {
+                0 => labelled(
+                    "Black Level",
+                    lang::tr("Auto (%s)", &[&format!("{:.2}", g.black_level_nits())]),
                 ),
-            ),
+                n => labelled("Black Level", format!("{:.2}", n as f32 / 100.0)),
+            },
             H::HdrUiBrightness => labelled("UI Brightness", format!("{}%", g.hdr_ui_brightness)),
             H::HdrKey => {
                 Text::translate("Shortcut: %s", &[crate::keybinds::display_name(&g.hdr_key)])
@@ -623,6 +628,12 @@ impl H {
             H::BatteryMode => labelled("Battery Mode", on_off(g.battery)),
             H::ShadowCache => labelled("Shadow Cache", on_off(g.shadow_cache)),
             H::GraphicsApi => labelled("Graphics API", g.api.label()),
+            // Greyed out where the device can't (`Item::blocked`): Off, as it is there,
+            // while the saved value waits for a device that can.
+            H::TranslucentBatching => labelled(
+                "Translucent Batching",
+                on_off(g.translucent_batching && crate::graphics::translucent_batching_offered()),
+            ),
             H::Overlay => labelled(
                 "Performance Overlay",
                 match g.overlay {
@@ -718,6 +729,7 @@ impl H {
             H::BatteryMode => g.battery = !g.battery,
             H::ShadowCache => g.shadow_cache = !g.shadow_cache,
             H::GraphicsApi => g.api = step(GraphicsApi::choices(), g.api, back),
+            H::TranslucentBatching => g.translucent_batching = !g.translucent_batching,
             H::Pacing => {
                 g.pacing = match g.pacing {
                     Pacing::Efficient => Pacing::Precise,
@@ -748,7 +760,8 @@ impl Item {
     /// the display offers HDR output, whatever `horizon-graphics.txt` says (a copied game
     /// folder, a display swapped for an SDR one: the renderer leaves HDR off there, and
     /// the saved values wait for an HDR display), and its sliders do something only
-    /// while it is on.
+    /// while it is on; Translucent Batching switches only where the device can batch
+    /// (`graphics::translucent_batching_offered`), its saved value waiting for one that can.
     fn blocked(self, s: &Settings) -> Option<&'static str> {
         if !self.available() {
             return Some("This feature is not yet available in Horizon.");
@@ -764,6 +777,11 @@ impl Item {
                 | H::HdrPaperWhite
                 | H::HdrUiBrightness,
             ) if !s.horizon.hdr => Some("Turn HDR on to use it."),
+            Item::Horizon(H::TranslucentBatching)
+                if !crate::graphics::translucent_batching_offered() =>
+            {
+                Some("Your GPU or graphics API doesn't support it.")
+            }
             _ => None,
         }
     }
@@ -780,6 +798,7 @@ impl Item {
             Item::Horizon(H::Hdr) => g.hdr,
             Item::Horizon(H::BatteryMode) => g.battery,
             Item::Horizon(H::ShadowCache) => g.shadow_cache,
+            Item::Horizon(H::TranslucentBatching) => g.translucent_batching,
             Item::Vanilla(Opt::ViewBobbing) => s.view_bobbing,
             Item::Vanilla(Opt::Vsync) => s.vsync,
             Item::Vanilla(Opt::Fullscreen) => s.fullscreen,
@@ -843,6 +862,7 @@ impl Item {
                     | H::BatteryMode
                     | H::ShadowCache
                     | H::GraphicsApi
+                    | H::TranslucentBatching
             ) | Item::Vanilla(
                 Opt::GuiScale
                     | Opt::Fullscreen
@@ -1468,6 +1488,12 @@ impl GraphicsUi {
             && let Some(target) = self.focus
         {
             match target {
+                // A click focuses the greyed row; Enter there does nothing, as the click didn't.
+                Target::Item(item @ Item::Horizon(H::TranslucentBatching))
+                    if item.blocked(s).is_some() =>
+                {
+                    return (Vec::new(), true);
+                }
                 Target::Item(item) => {
                     if item.slider(s).is_some() {
                         self.can_change_value = !self.can_change_value;
@@ -1986,6 +2012,66 @@ mod tests {
         assert_eq!(item.label(&s).plain(), "Entity Culling: Asynchronous");
     }
 
+    /// Translucent Batching: a switch on Advanced (not Simple), on by default, no part of a
+    /// preset, and greyed out, reading Off, where the device can't batch.
+    #[test]
+    fn translucent_batching_is_an_advanced_switch_where_the_device_can() {
+        use winit::keyboard::KeyCode as K;
+        let item = Item::Horizon(H::TranslucentBatching);
+        let has = |level| {
+            rows(level)
+                .iter()
+                .any(|r| matches!(r, Row::Setting(x) if x.item == item))
+        };
+        if cfg!(target_os = "macos") {
+            // Metal draws flat: never offered, so not shown.
+            assert!(!has(Level::Advanced));
+            return;
+        }
+        assert!(has(Level::Advanced) && !has(Level::Simple));
+        let mut s = Settings::default();
+        s.horizon.preset = Preset::Balanced;
+        assert_eq!(item.switch(&s), Some(true));
+        let mut ui = GraphicsUi::default();
+        let size = (480.0, 2000.0);
+        let (widgets, _, _) = ui.layout(Level::Advanced, &s, size.0, size.1);
+        let w = widgets
+            .iter()
+            .find(|w| w.target == Target::Item(item))
+            .unwrap();
+        let point = (w.x + 1.0, w.y + 1.0);
+        let click = |ui: &mut GraphicsUi, s: &mut Settings| {
+            ui.click(Level::Advanced, s, point, size, [480, 2000], false, false)
+        };
+        // Where the device can't, the saved On reads Off, and neither a click nor Enter
+        // after it (the click focuses the row) does anything: no sound, no change, no save.
+        crate::graphics::offer_translucent_batching(false);
+        assert!(item.blocked(&s).is_some());
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: Off");
+        assert!(click(&mut ui, &mut s).is_empty());
+        let enter = ui.key_modifiers(Level::Advanced, &mut s, K::Enter, false, size, [480, 2000]);
+        assert!(enter.0.is_empty());
+        assert!(s.horizon.translucent_batching);
+        // Where it can, a click switches it and keeps the preset.
+        crate::graphics::offer_translucent_batching(true);
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: On");
+        assert_eq!(
+            click(&mut ui, &mut s),
+            [Action::ButtonClick, Action::Changed]
+        );
+        assert!(!s.horizon.translucent_batching);
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: Off");
+        assert_eq!(s.horizon.preset, Preset::Balanced);
+        // No preset sets it.
+        for on in [false, true] {
+            s.horizon.translucent_batching = on;
+            for preset in Preset::ALL {
+                crate::graphics::apply_preset(preset, &mut s);
+                assert_eq!(s.horizon.translucent_batching, on, "{preset:?}");
+            }
+        }
+    }
+
     #[test]
     fn graphics_slider_keyboard_navigation_and_selection_toggle_parity() {
         use winit::keyboard::KeyCode as K;
@@ -2138,6 +2224,114 @@ mod tests {
                     "{h:?} step backward from {i}"
                 );
             }
+        }
+    }
+    /// Horizon's graphics captions are English sentences that the language table keys by
+    /// themselves, so a caption, description or value that is not in `en_us.json` shows in
+    /// English in every language. Every text the three pages show, with each setting cycled
+    /// through its values (#1927).
+    #[test]
+    fn every_graphics_text_is_in_the_language_table() {
+        let (_, missed) = lang::scoped(lang::Language::load(&[], "de_de"), || {
+            for hdr in [false, true] {
+                let mut s = Settings::default();
+                s.horizon.hdr = hdr;
+                s.horizon.taa = true;
+                for level in [Level::Simple, Level::Advanced, Level::Hdr] {
+                    for _ in 0..8 {
+                        for row in extra_rows(level, &s) {
+                            match row {
+                                Row::Header(name) => {
+                                    lang::get(name);
+                                }
+                                Row::Setting(row) => {
+                                    row.item.label(&s);
+                                    let text = description(row.item, &s, row.text);
+                                    lang::get(text);
+                                    lang::get(row.cost.label());
+                                    if let Some(why) = row.item.blocked(&s) {
+                                        lang::get(why);
+                                    }
+                                }
+                            }
+                        }
+                        for row in extra_rows(level, &s) {
+                            if let Row::Setting(Setting {
+                                item: Item::Horizon(h),
+                                ..
+                            }) = row
+                            {
+                                h.cycle(&mut s, false);
+                            }
+                        }
+                    }
+                }
+            }
+            for button in ["Advanced...", "Simple...", "Done"] {
+                lang::get(button);
+            }
+        });
+        // `labelled` also looks up values that are already words in the language ("An") or
+        // numbers with a unit ("12 chunks", "Auto (8)"); those are not keys, and "FSR 3.1" is
+        // a name.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|m| !m.starts_with(|c: char| c.is_ascii_digit()) && !m.starts_with("Auto ("))
+            .filter(|m| !["An", "Aus", "FSR 3.1", "key.keyboard.unknown"].contains(&m.as_str()))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+    }
+    /// Leaf Culling, Frame Generation and Shadow Cache came with English captions only (#1927).
+    #[test]
+    fn newer_graphics_settings_are_translated() {
+        let mut s = Settings::default();
+        s.horizon.leaf_culling = LeafCullingMode::Hollow;
+        s.horizon.entity_culling = EntityCullingMode::Asynchronous;
+        for (code, leaf, entity, leaf_text) in [
+            (
+                "de_de",
+                "Laub-Culling: Hohl",
+                "Objekt-Culling: Asynchron",
+                "Lässt Flächen zwischen Blättern weg: schneller, aber Lücken sind durchsichtig.",
+            ),
+            (
+                "pl_pl",
+                "Pomijanie liści: Puste",
+                "Pomijanie bytów: Asynchroniczne",
+                "Pomija ściany między liśćmi: szybciej, ale luki są przezroczyste.",
+            ),
+            (
+                "uk_ua",
+                "Відсікання листя: Порожнє",
+                "Відсік. сутностей: Асинхронно",
+                "Прибирає грані між листям: швидше, але прогалини прозорі.",
+            ),
+            (
+                "zh_cn",
+                "树叶剔除: 镂空",
+                "实体剔除: 异步",
+                "省略树叶之间的面：更快，但缝隙会透视。",
+            ),
+            (
+                "fr_fr",
+                "Occlusion feuillage: Creux",
+                "Occlusion des entités: Asynchrone",
+                "Supprime les faces entre feuilles : plus rapide, mais on voit à travers les trous.",
+            ),
+        ] {
+            let (shown, _) = lang::scoped(lang::Language::load(&[], code), || {
+                let item = |h| Item::Horizon(h);
+                (
+                    item(H::LeafCulling).label(&s).plain(),
+                    item(H::EntityCulling).label(&s).plain(),
+                    lang::get(description(item(H::LeafCulling), &s, "")),
+                )
+            });
+            assert_eq!(
+                shown,
+                (leaf.into(), entity.into(), leaf_text.into()),
+                "{code}"
+            );
         }
     }
 }

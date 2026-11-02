@@ -8,13 +8,15 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
-use crate::lazy_json::LazyJson;
+use crate::{lazy_json::LazyJson, nbt::Tag};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fs, io,
     path::Path,
+    rc::Rc,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -96,11 +98,11 @@ pub struct NativeLootTool {
 
 /// What a mod's own loot kinds see of the roll: the entity, the damage,
 /// the player who killed it, the tool, the block, the luck, the biome,
-/// and a seed from the roll's random. The tool and block are filled by
-/// the items engine (block drops, entity drops, loot_table, interact_loot);
-/// the entity, damage and player by the main loot engine; each is None in
-/// the other. A table without a mod's kinds draws nothing and stays
-/// bit-for-bit the same.
+/// where the roll happens, and a seed from the roll's random. The tool and
+/// block are filled by the items engine (block drops, entity drops,
+/// loot_table, interact_loot); the entity, damage and player by the main
+/// loot engine; each is None in the other. A table without a mod's kinds
+/// draws nothing and stays bit-for-bit the same.
 pub struct NativeLootContext<'a> {
     /// The entity the table names (`this`), if any.
     pub entity: Option<&'a LootEntity>,
@@ -122,6 +124,69 @@ pub struct NativeLootContext<'a> {
     /// A seed from the roll's random, for a mod's own draws. Drawn only
     /// when a mod's kind is in the table.
     pub seed: i64,
+    /// Where the roll happens: the origin, the block entity and the level,
+    /// when the game rolled the table at a place (a broken block's drops,
+    /// a mob's death loot); None for the other rolls. Either engine fills it.
+    /// API @API:loot_context_place@.
+    pub place: Option<Rc<NativeLootPlace>>,
+}
+
+/// Where a loot roll happens, as a mod's own loot kinds see it:
+/// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
+/// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
+/// the time; `WeatherCheck`: the rain and the thunder). The game sets it
+/// around a roll with [`with_native_loot_place`]. API @API:loot_context_place@.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeLootPlace {
+    /// `ORIGIN`: a broken block's centre, a dead mob's position.
+    pub origin: Option<[f64; 3]>,
+    /// `BLOCK_ENTITY`: the broken block's entity as it was before the
+    /// break, saved with its id and position (`saveWithFullMetadata`); a
+    /// mod's block entity carries its own data and its `Items`.
+    pub block_entity: Option<Tag>,
+    /// The level the roll is in.
+    pub level: Option<NativeLootLevel>,
+}
+
+/// The level a loot roll is in, as a mod's own loot kinds see it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeLootLevel {
+    /// The dimension's id (`minecraft:overworld`).
+    pub dimension: String,
+    /// `Level.getGameTime`.
+    pub game_time: i64,
+    /// `Level.getDayTime`: it counts on from day to day, so the time of
+    /// day is `day_time % 24000` (night from 13000 to 23000).
+    pub day_time: i64,
+    /// `Level.isRaining`.
+    pub raining: bool,
+    /// `Level.isThundering`.
+    pub thundering: bool,
+}
+
+thread_local! {
+    static NATIVE_LOOT_PLACE: RefCell<Option<Rc<NativeLootPlace>>> = const { RefCell::new(None) };
+}
+
+/// Runs `roll` with `place` as where its loot rolls happen: every
+/// [`NativeLootContext`] made inside it, by either engine, carries it. The
+/// place before is back when `roll` returns, so these nest.
+/// API @API:loot_context_place@.
+pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Rc<NativeLootPlace>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let before = self.0.take();
+            NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
+        }
+    }
+    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Rc::new(place)))));
+    roll()
+}
+
+/// The place [`with_native_loot_place`] set for the rolls now running, if any.
+pub fn current_native_loot_place() -> Option<Rc<NativeLootPlace>> {
+    NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 
 /// One generated item stack.
@@ -522,7 +587,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
 /// 75.
 #[inline(never)]
 pub fn native_loot_table_load(id: &str, table: &mut Value) {
-    let _ = (id, table);
+    crate::native_load_hooks::loot_table_load(id, table);
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
@@ -1364,6 +1429,7 @@ impl<R: RandomSource> Context<'_, R> {
             luck: self.luck,
             biome: self.biome,
             seed,
+            place: current_native_loot_place(),
         }
     }
     fn run(&mut self, f: &Value, mut stack: LootStack) -> LootStack {
@@ -2131,6 +2197,69 @@ mod native_kinds_tests {
         let mut r6 = horizon_core::random::LegacyRandom::new(42);
         let b = modded.roll("minecraft:test", &mut r6, 0.0, None, None);
         assert_eq!(a, b, "same seed, different result");
+    }
+
+    fn place(x: f64) -> NativeLootPlace {
+        NativeLootPlace {
+            origin: Some([x, 64.0, 0.5]),
+            ..NativeLootPlace::default()
+        }
+    }
+
+    /// A roll sees the innermost place set around it; the outer one is back
+    /// after the inner returns, and nothing after the outer, even when the
+    /// roll panicked.
+    #[test]
+    fn a_place_holds_for_its_roll_only() {
+        assert_eq!(current_native_loot_place(), None);
+        with_native_loot_place(place(1.5), || {
+            with_native_loot_place(place(2.5), || {
+                assert_eq!(
+                    current_native_loot_place().unwrap().origin,
+                    Some([2.5, 64.0, 0.5])
+                );
+            });
+            assert_eq!(
+                current_native_loot_place().unwrap().origin,
+                Some([1.5, 64.0, 0.5])
+            );
+        });
+        assert_eq!(current_native_loot_place(), None);
+
+        let panicked = std::panic::catch_unwind(|| {
+            with_native_loot_place(place(3.5), || panic!("a roll failed"));
+        });
+        assert!(panicked.is_err());
+        assert_eq!(current_native_loot_place(), None);
+    }
+
+    /// A place changes nothing a table rolls: the same items, and the random
+    /// left where it was, with a mod's kind in the table or not.
+    #[test]
+    fn a_place_leaves_the_roll_as_it_was() {
+        for (name, json) in [
+            (
+                "place_vanilla",
+                r#"{"pools":[{"rolls":{"type":"minecraft:uniform","min":1,"max":4},
+                    "entries":[{"type":"minecraft:item","name":"minecraft:stone"},
+                               {"type":"minecraft:item","name":"minecraft:dirt"}]}]}"#,
+            ),
+            (
+                "place_mod",
+                r#"{"pools":[{"rolls":2,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
+                    "modifier":[{"type":"lootmod:x"}]}]}"#,
+            ),
+        ] {
+            let data = table(name, json);
+            let mut plain = horizon_core::random::LegacyRandom::new(7);
+            let mut placed = horizon_core::random::LegacyRandom::new(7);
+            let without = data.roll("minecraft:test", &mut plain, 0.0, None, None);
+            let with = with_native_loot_place(place(0.5), || {
+                data.roll("minecraft:test", &mut placed, 0.0, None, None)
+            });
+            assert_eq!(with, without, "{name}");
+            assert_eq!(placed.next_long(), plain.next_long(), "{name}");
+        }
     }
 
     #[test]

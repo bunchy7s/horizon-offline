@@ -98,6 +98,22 @@ impl Game<'_> {
         if &*stack.item != "minecraft:fishing_rod" {
             return false;
         }
+        // The mods hear a server player's cast or reel-in first.
+        if self.player.is_some()
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let state = match &self.hook {
+                None => 0,
+                Some(h) if matches!(h.state, State::Hooked(_)) => 4,
+                Some(h) if h.nibble > 0 => 2,
+                Some(_) => 3,
+            };
+            let mut cancel = false;
+            self.native_player_fish(uuid, &name, state, &mut cancel);
+            if cancel {
+                return true;
+            }
+        }
         let Some(p) = self.player.as_ref() else {
             return false;
         };
@@ -419,6 +435,19 @@ impl Game<'_> {
                     }
                 }
             } else {
+                // The mods hear a server player's fish bite, and may call it
+                // off: the wait starts over.
+                if let (Some(uuid), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut cancel = false;
+                    self.native_player_fish(uuid, &name, 1, &mut cancel);
+                    if cancel {
+                        h.time_until_lured = 0;
+                        h.time_until_hooked = 0;
+                        return;
+                    }
+                }
                 let pitch =
                     1.0 + (self.world.random.next_float() - self.world.random.next_float()) * 0.4;
                 self.audio.play(

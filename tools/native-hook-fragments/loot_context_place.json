@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "where a loot roll happens, for a mod's own loot kinds\n(`NativeLootContext.place`: the origin, the block entity and the level).",
+  "doc_summary": "where a loot roll happens, for a mod's own loot kinds: `ctx.place` in `native_loot_function` and\n`native_loot_condition` brings `LootContextParams.ORIGIN` (a broken block's centre, a dead mob's position), `BLOCK_ENTITY` (the broken\nblock's entity as it was, saved with its id, position and `Items`) and the level (its dimension, game time, time of day, rain and\nthunder), on a block broken by a player or an explosion and on a mob's death loot; None on the other rolls. The game sets it\naround a roll with `with_native_loot_place`. Bundles that use it need `\"hooks\": @API:loot_context_place@`.",
+  "comments": [
+    "crates/horizon-world/src/loot.rs"
+  ]
+}

@@ -187,7 +187,10 @@ struct Encoded {
     non_air: bool,
     /// LevelChunkSection.write, and its block entity blocks.
     wire: Option<(Arc<[u8]>, Entities)>,
-    /// The section's light as the wire's two DataLayers, when not uniform.
+    /// The section's light as the wire's two DataLayers, when not uniform:
+    /// made by the warm-up threads and taken by the body that sends it.
+    /// Not kept once sent: two layers per lit section of every column the
+    /// level holds cost more memory than repacking them costs time.
     light: Option<Arc<Layers>>,
 }
 
@@ -899,13 +902,10 @@ impl ChunkEncoder {
     /// a client not tracking the block would otherwise keep its old light.
     pub fn light_update(&self, chunk: &Chunk, changed: SectionMask) -> Vec<u8> {
         let first = self.sections.start;
-        let lights: Vec<(usize, SectionLight)> = self
-            .light_sections(chunk, SectionMask::ALL)
-            .into_iter()
-            .filter(|&(b, _)| {
-                // Light section b holds the column's section first + b - 1.
-                (1..=self.sections.len()).contains(&b) && changed.contains(first + b - 1)
-            })
+        // Light section b holds the column's section first + b - 1.
+        let lights: Vec<(usize, SectionLight)> = (1..=self.sections.len())
+            .filter(|&b| changed.contains(first + b - 1))
+            .map(|b| (b, self.section_light(&chunk.sections[first + b - 1])))
             .collect();
         horizon_protocol::packets::play::Clientbound::LightUpdate(
             horizon_protocol::packets::play::LightUpdate {
@@ -1038,24 +1038,27 @@ impl ChunkEncoder {
 
     /// ClientboundLightUpdatePacketData: the light layers of the sections
     /// that exist around the column (`around`: the non-air sections of it
-    /// and its neighbours). A resident section's layers come from
-    /// the cache while it is unchanged (uniform light is quicker to fill than
-    /// to keep).
+    /// and its neighbours), made as they are sent (`section_light`).
     fn light_data(&self, chunk: &Chunk, around: SectionMask) -> LightData {
         light_data_of(&self.light_sections(chunk, around), self.sky)
     }
 
     fn light_sections(&self, chunk: &Chunk, around: SectionMask) -> Vec<(usize, SectionLight)> {
         light_sections(&chunk.sections[self.sections.clone()], around, |s| {
-            if let Light::Uniform(v) = s.light {
-                return SectionLight::Uniform(v);
-            }
-            SectionLight::Layers(self.cached(s, |e| e.light.clone()).unwrap_or_else(|| {
-                let layers = Arc::new(Layers::of(&s.light));
-                self.cached(s, |e| e.light = Some(layers.clone()));
-                layers
-            }))
+            self.section_light(s)
         })
+    }
+
+    /// A section's light: the layers the warm-up threads made for it, taken,
+    /// or made now.
+    fn section_light(&self, s: &Arc<Section>) -> SectionLight {
+        if let Light::Uniform(v) = s.light {
+            return SectionLight::Uniform(v);
+        }
+        SectionLight::Layers(
+            self.cached(s, |e| e.light.take())
+                .unwrap_or_else(|| Arc::new(Layers::of(&s.light))),
+        )
     }
 }
 
@@ -1250,8 +1253,8 @@ fn light_data(sections: &[Arc<Section>], around: SectionMask) -> LightData {
     light_data_of(&lights, true)
 }
 
-/// A light section's two DataLayers: a resident section's from the cache,
-/// or one value everywhere, which is quicker to write than to keep.
+/// A light section's two DataLayers, or one value everywhere, which is
+/// quicker to write than to keep.
 enum SectionLight {
     Layers(Arc<Layers>),
     /// Sky light in the high nibble, block light in the low one.
@@ -1367,6 +1370,7 @@ fn write_light(lights: &[(usize, SectionLight)], sky: bool, w: &mut Writer) {
 mod tests {
     use super::*;
     use crate::chunk::{MIN_Y, SECTIONS};
+    use horizon_protocol::packets::play;
     use horizon_world::nbt::JavaString;
 
     #[test]
@@ -1581,6 +1585,40 @@ mod tests {
         let second = encoder.encode(&chunk, &HashMap::new()).light;
         assert_ne!(first, second);
         assert_eq!(second, light_data(&chunk.sections, SectionMask::ALL));
+        // Sent again unchanged (a player coming back in range), the same light.
+        assert_eq!(encoder.encode(&chunk, &HashMap::new()).light, second);
+    }
+
+    /// A light update carries the layers of the sections that changed, and
+    /// only those.
+    #[test]
+    fn light_updates_carry_the_changed_sections() {
+        let encoder = encoder();
+        let mut chunk = Chunk::empty(0, 0);
+        // Sky light 5 and block light 10 in section 2, others in section 5.
+        Arc::make_mut(&mut chunk.sections[2]).light = Light::Full(Box::new([0x5A; 4096]));
+        Arc::make_mut(&mut chunk.sections[5]).light = Light::Full(Box::new([0x21; 4096]));
+        let mut changed = SectionMask::EMPTY;
+        changed.insert(2);
+        let bytes = encoder.light_update(&chunk, changed);
+        let mut r = horizon_protocol::buf::Reader::new(&bytes);
+        let id = r.varint().unwrap();
+        let Ok(play::Clientbound::LightUpdate(update)) = play::Clientbound::decode(id, r.rest())
+        else {
+            panic!("not a light update");
+        };
+        let light = update.light;
+        // Light section 3 holds section 2, the only one sent.
+        let bit = horizon_protocol::buf::bit;
+        let sent = |mask: &[u8]| {
+            (0..SECTIONS + 2)
+                .filter(|&b| bit(mask, b))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sent(&light.sky_mask), [3]);
+        assert_eq!(sent(&light.block_mask), [3]);
+        assert_eq!(light.sky, [vec![0x55; 2048]]);
+        assert_eq!(light.block, [vec![0xAA; 2048]]);
     }
 
     /// A neighbour still a proto chunk counts for the light layers as it

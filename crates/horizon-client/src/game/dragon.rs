@@ -1814,8 +1814,9 @@ impl Game<'_> {
                     {
                         y -= 1.0;
                     }
+                    let id = self.take_entity_id();
                     self.breath_clouds.push(Breath {
-                        id: 0,
+                        id,
                         at: [x, y.floor() + 1.0, z],
                         radius: 5.0,
                         age: 0,
@@ -2291,8 +2292,9 @@ impl Game<'_> {
         );
         // assignDirectionalMovement: the direction times the acceleration power 0.1.
         let velocity = Vec3::new(v.x * 0.1, v.y * 0.1, v.z * 0.1);
+        let id = self.take_entity_id();
         self.dragon_fireballs.push(DragonFireball {
-            id: 0,
+            id,
             position: at,
             previous: at,
             velocity,
@@ -2338,8 +2340,9 @@ impl Game<'_> {
                 ))
             });
             if hit_block || hit_player || b.age > 600 {
+                let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
-                    id: 0,
+                    id,
                     at: [next.x, next.y, next.z],
                     radius: 3.0,
                     age: 0,
@@ -2751,6 +2754,19 @@ impl Game<'_> {
         horizon_client::mobs::render::draw(model, base, &poses, skin, color, light, overlay, out);
         if let Some(mask) = mask {
             dissolve_mask(&mut out[first..], skin, mask);
+        }
+        // The skin's OptiFine emissive overlay, full bright.
+        let glow = self
+            .res
+            .mob_data()
+            .emissive
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .overlay("entity/enderdragon/dragon")
+            .and_then(sprite);
+        if let Some(glow) = glow.filter(|_| mask.is_none()) {
+            let full = horizon_client::mobs::render::FULL_BRIGHT;
+            horizon_client::mobs::render::draw(model, base, &poses, glow, color, full, 0, out);
         }
         // RenderTypes.eyes: the glowing eyes, added on top.
         let mut eye_quads = Vec::new();

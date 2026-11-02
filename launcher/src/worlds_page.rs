@@ -209,7 +209,7 @@ impl Launcher {
                 .child(blocks::icon("image", 22., t.muted))
                 .into_any_element(),
         };
-        let mut facts = vec![w.mode.to_string()];
+        let mut facts = vec![tr(w.mode).to_string()];
         facts.extend(w.version.clone());
         facts.push(ago(w.last_played));
         facts.push(megabytes(w.size));

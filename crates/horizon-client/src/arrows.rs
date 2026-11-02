@@ -395,14 +395,27 @@ impl ArrowScene<'_, '_> {
 /// `level().clip(new ClipContext(position(), position().add(movement),
 /// ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this))`, then
 /// `AbstractArrow.onHitBlock`'s `position().subtract(signum * 0.05)`. Returns
-/// the position to stop at (pull-back included) and the block that was hit.
+/// the position to stop at (pull-back included), the block that was hit and
+/// the normal of the face it was hit on.
 pub fn clip_block_stop(
     world: &World,
     facts: &BlockFacts,
     collision: &BlockCollisionRegistry<'_>,
     from: Vec3,
     movement: Vec3,
-) -> Option<(Vec3, BlockPos)> {
+) -> Option<(Vec3, BlockPos, [i32; 3])> {
+    let (location, block, normal) = clip_block_hit(world, facts, collision, from, movement)?;
+    Some((back_off(location, movement), block, normal))
+}
+/// The clip of `clip_block_stop` before the back-off: the hit location (what a
+/// `BlockHitResult` carries), the block and the normal of the face.
+pub fn clip_block_hit(
+    world: &World,
+    facts: &BlockFacts,
+    collision: &BlockCollisionRegistry<'_>,
+    from: Vec3,
+    movement: Vec3,
+) -> Option<(Vec3, BlockPos, [i32; 3])> {
     let to = Vec3::new(
         from.x + movement.x,
         from.y + movement.y,
@@ -425,7 +438,7 @@ pub fn clip_block_stop(
     })
     .ok()
     .flatten()?;
-    Some((back_off(hit.location, movement), hit.block))
+    Some((hit.location, hit.block, hit.direction.normal()))
 }
 /// `AbstractArrow.onHitBlock`'s back-off: vanilla scales `(double) 0.05f` by
 /// `Math.signum` per axis, whose value at zero is zero (not Rust's -1.0).
@@ -747,8 +760,8 @@ impl Ticker<'_, '_, '_, '_> {
         if !self.st.was_touching_water {
             self.p.velocity = self.p.velocity.scale(f64::from(0.99f32));
         }
-        if physics && !self.st.in_ground {
-            // Entity.applyGravity: AbstractArrow.getDefaultGravity.
+        if physics && !self.st.in_ground && !self.p.no_gravity {
+            // Entity.applyGravity: AbstractArrow.getDefaultGravity, none with NoGravity.
             self.add_velocity(-0.05);
         }
         // Projectile.tick, then Entity.baseTick's fluid and fire phases.

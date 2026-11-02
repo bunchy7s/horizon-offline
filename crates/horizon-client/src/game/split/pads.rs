@@ -92,7 +92,7 @@ impl Split<'_> {
         state
     }
 
-    /// Controllers: P1's is the first used in a menu, or alone; in a world another one is
+    /// Controllers: P1's is the first used in a menu; in a world a controller nobody holds is
     /// offered to join (A), or to drive P1 (Y) while P1 has none. The pads whose players
     /// should join now.
     /// `solo`: no compositor, P1 alone (its controller's output is lent to it after this).
@@ -123,19 +123,31 @@ impl Split<'_> {
             if !self.pads.connected(id) {
                 continue;
             }
-            // In a menu, or alone in a world, the first controller pressed is P1's (alone it
-            // drives P1 anyway).
-            let offered = self.offers.iter().any(|(o, _)| *o == id);
-            // P1 with controllers off plays on keyboard and mouse: a pad given to it is dead.
-            let p1_takes = self.p1_pad.is_none() && self.host.settings.controller.enabled;
-            if !self.in_world() || (self.guests.is_empty() && p1_takes && !offered) {
-                if p1_takes {
-                    self.p1_pad = Some(id);
-                    self.fresh.push(id);
-                }
+            // In a menu the first controller pressed is P1's, so it can drive the menu, and so
+            // it is when P1's own disconnected and its view asks for another. Elsewhere in a
+            // world it is offered to join (A joins as the next player, Y gives the pad to P1):
+            // the one controller pressed while P1 plays with the keyboard and mouse makes a
+            // second player rather than taking P1's controls.
+            let in_world = self.in_world();
+            // The players waiting for a controller come first: the same kind back takes back
+            // its player, another takes over the one waiting longest (`claim`). Only what that
+            // passes on, with P1 the one waiting, goes to P1 here.
+            if in_world && self.claim_for_lost(id, button) {
                 continue;
             }
-            if self.claim_for_lost(id, button) {
+            let p1_waits = self.lost.iter().any(|l| l.seat == 1);
+            let claims_p1 = p1_takes(
+                in_world,
+                p1_waits,
+                self.host.settings.controller.enabled,
+                self.p1_pad.is_some(),
+            );
+            if claims_p1 {
+                self.p1_pad = Some(id);
+                self.fresh.push(id);
+                continue;
+            }
+            if !in_world {
                 continue;
             }
             match self.offers.iter().position(|(o, _)| *o == id) {
@@ -315,6 +327,16 @@ impl Split<'_> {
     }
 }
 
+/// Whether a controller nobody holds becomes P1's on its first press: in a menu, where it drives
+/// the menus, or in a world while P1's own is gone and P1's view asks for another ("Use
+/// another"). Elsewhere in a world it is offered to join, so a controller pressed while P1 plays
+/// with the keyboard and mouse starts the join flow instead of taking P1's controls; Y in that
+/// offer gives the pad to P1 when it is free. P1 with controllers off plays on the keyboard and
+/// mouse: a pad given to it is dead either way.
+fn p1_takes(in_world: bool, p1_waits: bool, controllers: bool, p1_has_pad: bool) -> bool {
+    (!in_world || p1_waits) && controllers && !p1_has_pad
+}
+
 /// Whether P1 gets the split's reader for its turn (`lend_output`): solo, with a controller.
 fn lends_output(solo: bool, p1_has_pad: bool) -> bool {
     solo && p1_has_pad
@@ -336,6 +358,33 @@ mod tests {
             id: seat,
             uuid,
         }
+    }
+
+    #[test]
+    fn a_controller_pressed_in_a_world_is_offered_to_join_not_taken_by_p1() {
+        // P1 alone on the keyboard and mouse: the press is offered (A joins, Y gives it to P1).
+        assert!(
+            !p1_takes(true, false, true, false),
+            "a controller pressed in a world never takes P1's controls"
+        );
+        // P1's own disconnected and its view asks for another: "Use another" hands it over.
+        assert!(
+            p1_takes(true, true, true, false),
+            "a player waiting for a controller takes the next one"
+        );
+        // The menus still hand the first controller to P1, so it can drive them.
+        assert!(
+            p1_takes(false, false, true, false),
+            "a menu's first controller is P1's"
+        );
+        assert!(
+            !p1_takes(false, false, false, false),
+            "controllers off: P1 has none"
+        );
+        assert!(
+            !p1_takes(false, false, true, true),
+            "P1 has a controller already"
+        );
     }
 
     #[test]

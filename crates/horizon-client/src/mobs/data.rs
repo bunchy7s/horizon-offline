@@ -93,10 +93,11 @@ impl MobData {
                 .unwrap_or_default();
         data.villager_hats = std::sync::RwLock::new(super::villager_hats::VillagerHats::load(root));
         let random = horizon_optifine::random_textures::RandomTextures::scan(root);
-        data.emissive = std::sync::RwLock::new(std::sync::Arc::new(
-            horizon_optifine::emissive::Emissive::scan(root, &random),
-        ));
-        data.blinks = std::sync::RwLock::new(horizon_optifine::blink::Blinks::scan(root, &random));
+        let blinks = horizon_optifine::blink::Blinks::scan(root, &random);
+        let mut emissive = horizon_optifine::emissive::Emissive::scan(root, &random);
+        emissive.pair_beside(root, blinks.files());
+        data.emissive = std::sync::RwLock::new(std::sync::Arc::new(emissive));
+        data.blinks = std::sync::RwLock::new(blinks);
         data.random_textures = std::sync::RwLock::new(random);
         data
     }

@@ -404,9 +404,9 @@ impl FrameUniforms {
             frame.depth_far,
         );
         let camera = frame.camera.as_vec3();
+        let first_frame = self.previous.is_none();
         let (previous_exact, previous_view, previous_projection) =
-            self.previous
-                .unwrap_or((glam::DVec3::ZERO, Mat4::ZERO, Mat4::ZERO));
+            self.previous.unwrap_or((frame.camera, view, projection));
         let previous_camera = previous_exact.as_vec3();
         self.previous = Some((frame.camera, view, projection));
         // The camera's whole blocks and the rest, exact however far from the origin.
@@ -436,6 +436,10 @@ impl FrameUniforms {
         };
         self.wetness = smooth(self.wetness, inputs.rain, half_life / 20.0, dt);
         let eye = inputs.eye_light.map(|l| (l * 16) as f32);
+        if first_frame {
+            self.wetness = inputs.rain;
+            self.eye_smooth = eye;
+        }
         for (smoothed, target) in self.eye_smooth.iter_mut().zip(eye) {
             *smoothed = smooth(*smoothed, target, 10.0 / 20.0, dt);
         }
@@ -847,5 +851,149 @@ mod tests {
             origin.abs_diff_eq(Vec3::new(-0.5, 1.38, 2.5), 1e-3),
             "{origin}"
         );
+    }
+}
+
+#[cfg(test)]
+mod initial_history_tests {
+    use super::*;
+    use crate::hud::HudBatch;
+    fn float(u: &FrameUniforms, name: &str) -> [f32; 16] {
+        match u.values[index(name).unwrap()] {
+            Value::F(v) => v,
+            _ => panic!("float uniform expected"),
+        }
+    }
+    #[test]
+    fn first_history_is_current_then_tracks_the_actual_previous_frame() {
+        let hud = HudBatch::new([800, 450]);
+        let mut f = frame(&hud);
+        let mut u = FrameUniforms::default();
+        f.camera = DVec3::new(1024.25, -3.5, 11.75);
+        f.yaw = 21.0;
+        f.pitch = -16.0;
+        u.update(&f, &PackInputs::default(), [800, 450]);
+        assert_eq!(
+            float(&u, "previousCameraPosition"),
+            float(&u, "cameraPosition")
+        );
+        for (prior, current) in [
+            ("gbufferPreviousProjection", "gbufferProjection"),
+            ("gbufferPreviousModelView", "gbufferModelView"),
+        ] {
+            assert_eq!(float(&u, prior), float(&u, current));
+            assert!(float(&u, prior).iter().any(|v| *v != 0.0));
+        }
+        let camera = float(&u, "cameraPosition");
+        let view = float(&u, "gbufferModelView");
+        let projection = float(&u, "gbufferProjection");
+        f.camera = DVec3::new(-100.0, 20.0, 40.0);
+        f.yaw = 90.0;
+        f.pitch = 50.0;
+        f.fov_degrees = 100.0;
+        u.update(&f, &PackInputs::default(), [1000, 500]);
+        assert_eq!(float(&u, "previousCameraPosition"), camera);
+        assert_eq!(float(&u, "gbufferPreviousModelView"), view);
+        assert_eq!(float(&u, "gbufferPreviousProjection"), projection);
+        assert_ne!(
+            float(&u, "previousCameraPosition"),
+            float(&u, "cameraPosition")
+        );
+    }
+    #[test]
+    fn environmental_smoothing_starts_at_the_first_inputs_without_resetting_each_frame() {
+        let hud = HudBatch::new([800, 450]);
+        let f = frame(&hud);
+        let mut u = FrameUniforms::default();
+        let mut input = PackInputs {
+            rain: 0.75,
+            eye_light: [3, 14],
+            ..Default::default()
+        };
+        u.update(&f, &input, [800, 450]);
+        assert_eq!(float(&u, "wetness")[0], 0.75);
+        match u.values[index("eyeBrightnessSmooth").unwrap()] {
+            Value::I(v) => assert_eq!(&v[..2], &[48, 224]),
+            _ => panic!("integer uniform expected"),
+        }
+        input.rain = 0.0;
+        input.eye_light = [0, 0];
+        u.update(&f, &input, [800, 450]);
+        assert!(float(&u, "wetness")[0] > 0.0);
+        assert!(u.eye_smooth.iter().all(|v| *v > 0.0));
+    }
+    fn frame(hud: &HudBatch) -> Frame<'_> {
+        Frame {
+            eye: glam::DVec3::ZERO,
+            eye_rotation: [0.0; 2],
+            first_person: true,
+            shadow_scene_revision: (0, 0),
+            shadow_cache: false,
+            water_plane: None,
+            weather: &[],
+            weather_time: crate::weather::Time::new(0, 0.0),
+            camera: glam::DVec3::new(0.5, 100.0, 0.5),
+            yaw: 0.0,
+            pitch: 10.0,
+            fov_degrees: 85.0,
+            bob: glam::Mat4::IDENTITY,
+            spin: glam::Mat4::IDENTITY,
+            sky: crate::environment::Sky::default(),
+            distance: 12.0,
+            detail_distance: 12.0,
+            depth_far: 1000.0,
+            underwater: false,
+            cave_culling: false,
+            title: true,
+            sky_blocked: false,
+            skybox: false,
+            end_sky: false,
+            end_sky_sprite: None,
+            environment_fog: None,
+            water_fog: [0.0; 3],
+            fog: None,
+            dark_disc: false,
+            outline: Vec::new(),
+            outline_after_terrain: false,
+            outline_high_contrast: false,
+            debug_lines: &[],
+            debug_lines_on_top: &[],
+            debug_crosshair: &[],
+            hud,
+            glint_alpha: 0.75,
+            glint_ticks: 0.0,
+            nether_lighting: false,
+            entities: &[],
+            entity_motion: &[],
+            colored_lights: &[],
+            emissive_layers: &[],
+            shadow_only: &[],
+            entity_spans: &[],
+            glowing: &[],
+            dynamic_lights: &[],
+            clouds: None,
+            lightning: Default::default(),
+            additive: &[],
+            see_through: &[],
+            celestial: &[],
+            stars: None,
+            hand: &[],
+            hand_fov_degrees: 70.0,
+            screen: &[],
+            pack: Default::default(),
+            border: None,
+            game_time: 0.0,
+            shader_game_time: 0.0,
+            end_portal_sprites: [[0.0; 4]; 2],
+            crumbling_sprite: [0.0; 4],
+            ticks: 0,
+            darkness: (0.0, 0.0),
+            night_vision: 0.0,
+            block_flicker: 0.0,
+            boss_darken: 0.0,
+            menu_blur: None,
+            chunk_fade: 0.0,
+            post_effects: crate::post_chain::Request::none(),
+        }
     }
 }

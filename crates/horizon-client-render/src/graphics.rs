@@ -19,20 +19,28 @@ pub const HDR_MARKER: &str = "horizon-hdr-pending";
 pub struct Reported {
     pub paper_white: u32,
     pub peak: u32,
+    /// The display's darkest black, in hundredths of a nit.
+    pub black: u32,
 }
 
-static REPORTED: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+static REPORTED: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 
 /// Sets what the system reports (the renderer, when it opens its surface).
 pub fn report(reported: Option<Reported>) {
-    let (paper_white, peak) = reported.map_or((0, 0), |r| (r.paper_white, r.peak));
+    let (paper_white, peak, black) =
+        reported.map_or((0, 0, 0), |r| (r.paper_white, r.peak, r.black));
     REPORTED[0].store(paper_white, Ordering::Relaxed);
     REPORTED[1].store(peak, Ordering::Relaxed);
+    REPORTED[2].store(black, Ordering::Relaxed);
 }
 /// What the system reports, if it does.
 pub fn reported() -> Option<Reported> {
-    let [paper_white, peak] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
-    (peak > 0).then_some(Reported { paper_white, peak })
+    let [paper_white, peak, black] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
+    (peak > 0).then_some(Reported {
+        paper_white,
+        peak,
+        black,
+    })
 }
 
 /// Simple-level presets. `Custom` leaves every option as the player set it.
@@ -456,7 +464,7 @@ static TRANSLUCENT_BATCHING_OFFERED: std::sync::atomic::AtomicBool =
 /// Whether the device can batch translucent quads (`Graphics::translucent_batching`): set when
 /// the renderer starts; not without indirect multi-draw or on OpenGL, which loops over a
 /// multi-draw's entries on the CPU, nor where vanilla frames draw flat (they read the section
-/// arena's translucent quads).
+/// arena's translucent quads). Where it can't, the settings grey its switch out.
 pub fn offer_translucent_batching(on: bool) {
     TRANSLUCENT_BATCHING_OFFERED.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -582,8 +590,9 @@ pub struct Graphics {
     /// HDR peak brightness the world's highlights reach, in nits; 0 is Auto:
     /// what the system reports for the display ([`Graphics::peak_nits`]).
     pub hdr_peak: u32,
-    /// HDR black level: the display's darkest black, in hundredths of a nit (0 for
-    /// an OLED's true black). Shadows are lifted onto it, and the HDR metadata says it.
+    /// HDR black level: the display's darkest black, in hundredths of a nit; 0 is Auto:
+    /// what the system reports, else true black. Shadows are lifted onto it, and the HDR
+    /// metadata says it.
     pub hdr_black_level: u32,
     /// HDR brightness of the HUD and menus, in percent of paper white (25..=100); the
     /// first-person hand stays at the world's.
@@ -601,9 +610,11 @@ pub struct Graphics {
     /// The graphics API (Windows only; see `GraphicsApi`).
     pub api: GraphicsApi,
     /// Translucent quads in vertex buffers of their own (`gfx`'s translucent arena), so their
-    /// back-to-front draws go out in a few calls, for a little more video memory. Off by
-    /// default for now; read when a renderer is made (start, resource-pack reload), where it is
-    /// offered (`translucent_batching_offered`).
+    /// back-to-front draws go out in a few calls, for a little more video memory. On by
+    /// default (Translucent Batching, Advanced graphics); read when a renderer is made (start,
+    /// resource-pack reload), where it is offered (`translucent_batching_offered`). Its key is
+    /// `batchTranslucent`: `translucentBatching`, which every save wrote as false while it was
+    /// off by default and had no switch, stays ignored.
     pub translucent_batching: bool,
     /// The shader pack picked in `shaderpacks/` (`shader_pack_list`); empty: none. Its key is
     /// not `shaderPack`, which versions before the clean-room rewrite saved and which stays
@@ -646,7 +657,7 @@ impl Default for Graphics {
             battery: false,
             shadow_cache: false,
             api: GraphicsApi::Auto,
-            translucent_batching: false,
+            translucent_batching: true,
             shader_pack: String::new(),
         }
     }
@@ -739,7 +750,7 @@ impl Graphics {
                 "hdrKey" if value.starts_with("key.") => g.hdr_key = value.to_owned(),
                 "batteryMode" => g.battery = flag(g.battery),
                 "shadowCache" => g.shadow_cache = flag(g.shadow_cache),
-                "translucentBatching" => g.translucent_batching = flag(g.translucent_batching),
+                "batchTranslucent" => g.translucent_batching = flag(g.translucent_batching),
                 "graphicsApi" => g.api = GraphicsApi::from_name(value).unwrap_or_default(),
                 "pickedShaderPack" => g.shader_pack = value.to_owned(),
                 "overlay" => {
@@ -756,7 +767,7 @@ impl Graphics {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\ntranslucentBatching:{}\n",
+            "preset:{}\nlodDistance:{}\nfarDetail:{}\ncaveCulling:{}\nentityCulling:{}\nleafCulling:{}\nchunkUpdates:{}\nuploadBudgetKiB:{}\ntextureBudgetMiB:{}\nsky:{}\nfog:{}\nweather:{}\nanimatedTextures:{}\nditherCutoutMips:{}\npresentMode:{}\nframePacing:{}\nworkers:{}\noverlay:{}\nresolutionScale:{}\nfxaa:{}\ntaa:{}\nupscaling:{}\nscreenshotQuality:{}\nframeGeneration:{}\nhdr:{}\nhdrPaperWhite:{}\nhdrPeak:{}\nhdrBlackLevel:{}\nhdrUiBrightness:{}\nhdrKey:{}\nbatteryMode:{}\nshadowCache:{}\ngraphicsApi:{}\npickedShaderPack:{}\nbatchTranslucent:{}\n",
             self.preset.name(),
             self.lod_distance,
             self.far_detail.name(),
@@ -827,6 +838,14 @@ impl Graphics {
             0 => reported().map_or(1000, |r| r.peak),
             n => n,
         }
+    }
+    /// The black level, in nits: the player's, or on Auto what the system reports, else 0.
+    pub fn black_level_nits(&self) -> f32 {
+        let hundredths = match self.hdr_black_level {
+            0 => reported().map_or(0, |r| r.black),
+            n => n,
+        };
+        hundredths as f32 / 100.0
     }
     /// Worker threads for chunk generation and meshing.
     pub fn worker_threads(&self) -> usize {
@@ -948,7 +967,7 @@ mod tests {
             battery: true,
             shadow_cache: true,
             api: GraphicsApi::Dx12,
-            translucent_batching: true,
+            translucent_batching: false,
             shader_pack: "Golden Hour".into(),
         };
         assert_eq!(Graphics::parse(&g.serialize()), g);
@@ -968,8 +987,12 @@ mod tests {
             EntityCullingMode::Off
         );
         assert_eq!(Graphics::parse(""), Graphics::default());
-        // Translucent Batching is opt-in for now: only the file turns it on.
-        assert!(!Graphics::default().translucent_batching);
+        // Translucent Batching is on, in files from before it too; only false turns it off,
+        // and only under its key: the old one held the false every save wrote while it was
+        // off by default, not a choice.
+        assert!(Graphics::default().translucent_batching);
+        assert!(!Graphics::parse("batchTranslucent:false\n").translucent_batching);
+        assert!(Graphics::parse("translucentBatching:false\n").translucent_batching);
         // 0 is Auto; anything else is a peak the slider reaches.
         assert_eq!(Graphics::parse("hdrPeak:0\n").hdr_peak, 0);
         assert_eq!(Graphics::parse("hdrPeak:50\n").hdr_peak, 200);

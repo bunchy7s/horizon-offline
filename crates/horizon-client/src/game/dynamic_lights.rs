@@ -7,6 +7,11 @@ use horizon_client::dynamic_light::{self, BURNING, Luminance, Source};
 impl Game<'_> {
     /// Fills `dynamic_lights` for the frame: the player's and mobs' held items and fire, and
     /// glowing dropped items, the nearest [`dynamic_light::MAX`] of them.
+    /// How brightly each item glows, built on first use.
+    pub(super) fn luminance(&self) -> &Luminance {
+        self.luminance
+            .get_or_init(|| Luminance::new(self.res.facts(), self.pack.assets.registry))
+    }
     pub(super) fn gather_dynamic_lights(&mut self, camera: DVec3, alpha: f64) {
         let mut out = std::mem::take(&mut self.dynamic_lights);
         out.clear();
@@ -14,10 +19,7 @@ impl Game<'_> {
             self.dynamic_lights = out;
             return;
         }
-        if self.luminance.is_none() {
-            self.luminance = Some(Luminance::new(self.res.facts(), self.pack.assets.registry));
-        }
-        let lum = self.luminance.as_ref().expect("built above");
+        let lum = self.luminance();
         let held = |item: Option<&str>| item.map_or(0, |i| lum.of(i));
         let mut sources = Vec::new();
         if let Some(p) = &self.player

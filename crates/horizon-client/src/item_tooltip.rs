@@ -285,12 +285,24 @@ pub fn name_line(stack: &ItemStack, translate: &dyn Fn(&str) -> Option<String>) 
         .unwrap_or_else(|| path.replace('_', " "))
 }
 
-/// ItemStack.getRarity: the ominous banner override, then the enchantment upgrade.
+/// ItemStack.getRarity: the stack's `minecraft:rarity` (the item's default
+/// unless a command or server set it; the ominous banner's uncommon), then
+/// the enchantment upgrade.
 pub fn rarity<'a>(stack: &ItemStack, default: &'a str) -> &'a str {
+    let set = match stack.data().and_then(|d| d.other("minecraft:rarity")) {
+        Some(Tag::String(s)) => match &*s.to_string_lossy() {
+            "common" => Some("common"),
+            "uncommon" => Some("uncommon"),
+            "rare" => Some("rare"),
+            "epic" => Some("epic"),
+            _ => None,
+        },
+        _ => None,
+    };
     let rarity = if stack.data().is_some_and(|d| d.ominous_banner) {
         "uncommon"
     } else {
-        default
+        set.unwrap_or(default)
     };
     if stack.enchantments().is_empty() {
         rarity
@@ -1325,6 +1337,27 @@ mod tests {
         let plain = ItemStack::new("minecraft:white_banner", 1);
         assert_eq!(name_line(&plain, &translate), "White Banner");
         assert_eq!(rarity(&plain, "common"), "common");
+    }
+
+    /// `/give @a stick[rarity=epic,enchantments={aqua_affinity:1}]`: the
+    /// stack's rarity wins over the item's, and stays epic when enchanted.
+    #[test]
+    fn a_stacks_rarity_component_sets_its_rarity() {
+        let mut stick = ItemStack::new("minecraft:stick", 1);
+        stick
+            .data_mut()
+            .other
+            .push(("minecraft:rarity".into(), Tag::String("epic".into())));
+        assert_eq!(rarity(&stick, "common"), "epic");
+        stick.enchant("minecraft:aqua_affinity", 1);
+        assert_eq!(rarity(&stick, "common"), "epic");
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        sword
+            .data_mut()
+            .other
+            .push(("minecraft:rarity".into(), Tag::String("uncommon".into())));
+        sword.enchant("minecraft:sharpness", 1);
+        assert_eq!(rarity(&sword, "common"), "rare");
     }
 
     #[test]

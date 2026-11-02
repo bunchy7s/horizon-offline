@@ -6,7 +6,7 @@ use super::data::SyncData;
 use horizon_protocol::buf::Writer;
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     path::Path,
     sync::{Arc, Mutex},
 };
@@ -81,18 +81,129 @@ pub(super) fn overlay_recipes(
     }
 }
 
-/// The packet's payload for the vanilla data pack in `resources`.
-pub fn update_recipes(
+/// The network copy's recipes: every recipe file and overlay recipe, each
+/// ingredient object — NeoForge's shapes, a brewing slot's item predicate —
+/// replaced by the flat item list the crafting copy resolves it to. The
+/// crafting copy resolves these shapes where it loads them; this copy reads
+/// the files again, and `holder_set` writes any object it meets as an empty
+/// list. A recipe that keeps an object the loader cannot parse (a mod's own
+/// ingredient kind) is left out: the server does not load it, and an empty
+/// ingredient in its place misleads the client.
+pub(super) fn network_recipes(
     resources: &Path,
-    sync: &SyncData,
     overlay: &horizon_world::loot::PackOverlay,
-) -> Vec<u8> {
+) -> (BTreeMap<String, Box<str>>, HashMap<String, i32>) {
     let mut all = BTreeMap::new();
     recipes(&resources.join("data/minecraft/recipe"), "", &mut all);
     overlay_recipes(overlay, &mut all);
-    // The data's recipe filters, as the server's own tables apply them.
+    // The data's recipe filters, as the server's own tables apply them
+    // (#5910), once, before the ingredient normalization, so a swapped
+    // name resolves and every copy — the book's displays, the property
+    // sets — agrees on the swapped recipe.
     let filters = horizon_items::recipe_filters::RecipeFilters::load(resources, overlay);
-    all.retain(|id, v| filters.apply(id, v));
+    all.retain(|id, r| filters.apply(id, r));
+    match horizon_client::items::Items::catalog(resources, overlay) {
+        Ok(items) => all.retain(|_, r| normalize_ingredients(r, &items)),
+        Err(e) => log::warn!("recipes: NeoForge's ingredient shapes stay unresolved: {e}"),
+    }
+    // RecipeManager.unpackRecipeInfo's group numbers, while the files are
+    // still parsed.
+    let mut groups = HashMap::new();
+    for r in all.values() {
+        if let Some(g) = r["group"].as_str().filter(|g| !g.is_empty()) {
+            let next = groups.len() as i32;
+            groups.entry(g.to_owned()).or_insert(next);
+        }
+    }
+    // Each file as its compact JSON text: a book entry parses the one it
+    // needs, and the parsed files would keep about 5 MB alive for the
+    // server's whole run.
+    let all = all
+        .into_iter()
+        .map(|(id, r)| (id, r.to_string().into_boxed_str()))
+        .collect();
+    (all, groups)
+}
+
+/// An ingredient object's flat item list: the shape NeoForge's standard
+/// kinds resolve to, or a brewing predicate's `item`. `None`: the object is
+/// a kind the loader does not know, a mod's own.
+fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
+    if !ing.is_object() {
+        return None;
+    }
+    let parsed = horizon_client::crafting::Ingredient::parse(ing, items).or_else(|| {
+        // A brewing slot's item predicate: its `ingredient`, as the
+        // property sets have always read it.
+        ing.get("item")
+            .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items))
+    })?;
+    Some(Value::Array(
+        parsed.1.iter().map(|i| Value::String(i.clone())).collect(),
+    ))
+}
+
+/// Replace each of a recipe's ingredient objects with its flat item list,
+/// so `holder_set` writes the items instead of an empty list. `false`: the
+/// recipe keeps an object the loader cannot parse.
+fn normalize_ingredients(r: &mut Value, items: &horizon_client::items::Items) -> bool {
+    let known = r["type"]
+        .as_str()
+        .is_some_and(|t| t.starts_with("minecraft:"));
+    if !known {
+        return true;
+    }
+    let mut parsed = true;
+    // The shaped recipe's key: a map of symbols to ingredients.
+    if let Some(map) = r.get_mut("key").and_then(|k| k.as_object_mut()) {
+        for ing in map.values_mut() {
+            if let Some(replacement) = flat(ing, items) {
+                *ing = replacement;
+            } else if ing.is_object() {
+                parsed = false;
+            }
+        }
+    }
+    // The list and single-ingredient keys, the smithing trio, the brewing
+    // pair.
+    for key in [
+        "ingredients",
+        "ingredient",
+        "base",
+        "addition",
+        "template",
+        "input",
+        "reagent",
+    ] {
+        let Some(ing) = r.get_mut(key) else { continue };
+        if let Some(replacement) = flat(ing, items) {
+            *ing = replacement;
+            continue;
+        }
+        if let Value::Array(a) = ing {
+            for entry in a.iter_mut() {
+                if let Some(replacement) = flat(entry, items) {
+                    *entry = replacement;
+                } else if entry.is_object() {
+                    parsed = false;
+                }
+            }
+        } else if ing.is_object() {
+            parsed = false;
+        }
+    }
+    parsed
+}
+
+/// The packet's payload for the network copy's recipes (`network_recipes`).
+pub fn update_recipes(all: &BTreeMap<String, Box<str>>, sync: &SyncData) -> Vec<u8> {
+    // The copy is already filtered and swapped (`network_recipes`); the
+    // filters never run twice, so one swap cannot feed a later one again.
+    // Parsing every recipe takes about a millisecond.
+    let chosen: Vec<Value> = all
+        .values()
+        .filter_map(|text| serde_json::from_str::<Value>(text).ok())
+        .collect();
     let tags: BTreeMap<&str, &[i32]> = sync
         .tags
         .registries
@@ -101,21 +212,22 @@ pub fn update_recipes(
         .flat_map(|r| r.tags.iter())
         .map(|t| (t.name.trim_start_matches("minecraft:"), t.ids.as_slice()))
         .collect();
-    let item = |name: &str| sync.id("minecraft:item", name).unwrap_or(0);
+    // An item the registries do not know is left out, not sent as id 0.
+    let item = |name: &str| sync.id("minecraft:item", name);
     let items = |i: &Ingredient| -> Vec<i32> {
         match i {
             Ingredient::Tag(t) => tags
                 .get(t.trim_start_matches("minecraft:"))
                 .map(|ids| ids.to_vec())
                 .unwrap_or_default(),
-            Ingredient::Items(list) => list.iter().map(|n| item(n)).collect(),
+            Ingredient::Items(list) => list.iter().filter_map(|n| item(n)).collect(),
         }
     };
     let mut w = Writer::new();
     w.varint(PROPERTY_SETS.len() as i32);
     for (key, kind, fields) in PROPERTY_SETS {
         let mut set = BTreeSet::new();
-        for recipe in all.values() {
+        for recipe in &chosen {
             let t = recipe["type"].as_str().unwrap_or("");
             let matches = if *kind == "smithing" {
                 t.starts_with("minecraft:smithing_")
@@ -138,8 +250,8 @@ pub fn update_recipes(
     }
     // SelectableRecipe.SingleInputSet: each stonecutting recipe's input and
     // its result as an ItemStackSlotDisplay.
-    let stonecutting: Vec<&Value> = all
-        .values()
+    let stonecutting: Vec<&Value> = chosen
+        .iter()
         .filter(|r| r["type"] == "minecraft:stonecutting")
         .collect();
     let item_stack = sync
@@ -162,9 +274,10 @@ pub fn update_recipes(
             None => w.varint(1),
         }
         w.varint(item_stack);
-        w.varint(item(
-            horizon_world::loot::recipe_result_id(&r["result"]).unwrap_or("minecraft:air"),
-        ));
+        w.varint(
+            item(horizon_world::loot::recipe_result_id(&r["result"]).unwrap_or("minecraft:air"))
+                .unwrap_or(0),
+        );
         w.varint(r["result"]["count"].as_i64().unwrap_or(1) as i32);
         w.varint(0); // no components added
         w.varint(0); // nor removed

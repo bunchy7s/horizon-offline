@@ -41,7 +41,7 @@ pub fn motion(tag: &Tag) -> Vec3 {
 pub fn rotation(tag: &Tag) -> [f32; 2] {
     read_doubles::<2>(tag.get("Rotation")).map_or([0.0; 2], |r| [r[0] as f32, r[1] as f32])
 }
-fn flag(tag: &Tag, key: &str) -> bool {
+pub fn flag(tag: &Tag, key: &str) -> bool {
     number(tag.get(key)).unwrap_or(0) != 0
 }
 /// `Entity.saveWithoutId` fields every entity has, over the loaded compound.
@@ -2073,12 +2073,17 @@ pub fn tnt_to_nbt(
     }
     .tag(raw);
     put(&mut tag, "fuse", Tag::Short(fuse as i16));
+    // PrimedTnt writes its block state (a summoned `block_state` is kept).
+    if tag.get("block_state").is_none() {
+        put(&mut tag, "block_state", string("minecraft:tnt"));
+    }
     tag
 }
 pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemEntity> {
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
     Some(ItemEntity {
+        no_gravity: flag(tag, "NoGravity"),
         health: number(tag.get("Health")).unwrap_or(5) as i32,
         fire_ticks: number(tag.get("Fire")).unwrap_or(0) as i32,
         id,
@@ -2167,6 +2172,10 @@ pub fn orb_to_nbt(o: &ExperienceOrb, uuid: [i32; 4]) -> Tag {
     ] {
         put(&mut tag, key, value);
     }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if o.no_gravity {
+        put(&mut tag, "NoGravity", Tag::Byte(1));
+    }
     tag
 }
 /// One orb with its merged `Count`.
@@ -2176,6 +2185,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
     };
     let count = number(tag.get("Count")).unwrap_or(1).max(1) as u32;
     let orb = ExperienceOrb {
+        no_gravity: flag(tag, "NoGravity"),
         id: 0,
         position,
         previous: position,
@@ -2249,6 +2259,10 @@ pub fn arrow_to_nbt(
     if let Some(state) = in_block {
         put(&mut tag, "inBlockState", state);
     }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if p.no_gravity {
+        put(&mut tag, "NoGravity", Tag::Byte(1));
+    }
     if let Some(owner) = owner {
         put(&mut tag, "Owner", Tag::IntArray(owner.to_vec()));
     }
@@ -2279,6 +2293,7 @@ pub fn arrow_from_nbt(
     [p.yaw, p.pitch] = rotation(tag);
     p.left_owner = flag(tag, "LeftOwner");
     p.owner_uuid = owner;
+    p.no_gravity = flag(tag, "NoGravity");
     let a = p.arrow.as_mut()?;
     a.life = number(tag.get("life")).unwrap_or(0) as i16 as i32;
     a.shake = (number(tag.get("shake")).unwrap_or(0) as i8 as u8).into();
@@ -2304,7 +2319,9 @@ pub fn fireball_to_nbt(
 ) -> Option<Tag> {
     let power = match p.kind {
         ProjectileKind::LargeFireball { power } => Some(power),
-        ProjectileKind::SmallFireball => None,
+        ProjectileKind::SmallFireball
+        | ProjectileKind::WindCharge
+        | ProjectileKind::BreezeWindCharge => None,
         _ => return None,
     };
     let base = Base {
@@ -2326,6 +2343,20 @@ pub fn fireball_to_nbt(
     if let Some(power) = power {
         put(&mut tag, "ExplosionPower", Tag::Byte(power as i8));
     }
+    // Fireball.addAdditionalSaveData: the item it is drawn as, one of the loaded
+    // item or else a fire charge (`setItem` refuses an empty stack and keeps one).
+    if matches!(
+        p.kind,
+        ProjectileKind::LargeFireball { .. } | ProjectileKind::SmallFireball
+    ) {
+        let mut item = tag
+            .get("Item")
+            .and_then(item_from_nbt)
+            .filter(|i| i.count > 0 && &*i.item != "minecraft:air")
+            .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:fire_charge", 1));
+        item.count = 1;
+        put(&mut tag, "Item", item_to_nbt(&item));
+    }
     Some(tag)
 }
 
@@ -2338,6 +2369,10 @@ fn put_projectile(tag: &mut Tag, p: &Projectile, owner: Option<[i32; 4]>) {
     }
     if p.left_owner {
         put(tag, "LeftOwner", Tag::Byte(1));
+    }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if p.no_gravity {
+        put(tag, "NoGravity", Tag::Byte(1));
     }
     if p.age > 0 || tag.get("HasBeenShot").is_none() {
         put(tag, "HasBeenShot", Tag::Byte(i8::from(p.age > 0)));
@@ -2454,6 +2489,7 @@ pub fn fireball_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<Projecti
     [p.yaw, p.pitch] = rotation(tag);
     p.left_owner = flag(tag, "LeftOwner");
     p.owner_uuid = owner;
+    p.no_gravity = flag(tag, "NoGravity");
     p.acceleration = float(tag.get("acceleration_power")).unwrap_or(0.1);
     Some(p)
 }
@@ -2482,6 +2518,122 @@ pub fn firework_rocket_from_nbt(tag: &Tag, player: Option<[i32; 4]>) -> Option<R
         angled: flag(tag, "ShotAtAngle"),
         owner: (player.is_some() && owner == player).then_some(Who::Player),
         left_owner: flag(tag, "LeftOwner"),
+    })
+}
+
+/// What `FireworkRocketEntity.addAdditionalSaveData` writes, over `Projectile`'s
+/// Owner and LeftOwner.
+pub struct RocketSave<'a> {
+    pub position: Vec3,
+    pub motion: Vec3,
+    pub life: i32,
+    pub lifetime: i32,
+    pub item: &'a crate::items::ItemStack,
+    pub angled: bool,
+    pub owner: Option<[i32; 4]>,
+    pub left_owner: bool,
+}
+pub fn firework_rocket_to_nbt(r: &RocketSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
+    let mut tag = Base {
+        id: "minecraft:firework_rocket",
+        uuid,
+        position: r.position,
+        motion: r.motion,
+        rotation: [0.0, 0.0],
+        on_ground: false,
+        fall_distance: 0.0,
+    }
+    .tag(raw);
+    for (key, value) in [
+        ("Life", Tag::Int(r.life)),
+        ("LifeTime", Tag::Int(r.lifetime)),
+        ("FireworksItem", item_to_nbt(r.item)),
+        ("ShotAtAngle", Tag::Byte(i8::from(r.angled))),
+        ("HasBeenShot", Tag::Byte(1)),
+    ] {
+        put(&mut tag, key, value);
+    }
+    if r.left_owner {
+        put(&mut tag, "LeftOwner", Tag::Byte(1));
+    }
+    if let Some(owner) = r.owner {
+        put(&mut tag, "Owner", Tag::IntArray(owner.to_vec()));
+    }
+    tag
+}
+
+/// A thrown trident as `AbstractArrow` + `ThrownTrident` save it.
+pub struct TridentSave<'a> {
+    pub position: Vec3,
+    pub motion: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub in_ground: bool,
+    pub life: i32,
+    pub shake: u32,
+    pub dealt_damage: bool,
+    pub creative_only: bool,
+    pub item: &'a crate::items::ItemStack,
+}
+pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
+    let mut tag = Base {
+        id: "minecraft:trident",
+        uuid,
+        position: t.position,
+        motion: t.motion,
+        rotation: [t.yaw, t.pitch],
+        on_ground: false,
+        fall_distance: 0.0,
+    }
+    .tag(raw);
+    for (key, value) in [
+        ("life", Tag::Short(t.life as i16)),
+        ("shake", Tag::Byte(t.shake as i8)),
+        ("inGround", Tag::Byte(i8::from(t.in_ground))),
+        // AbstractArrow.Pickup: 0 disallowed, 1 allowed, 2 creative only.
+        ("pickup", Tag::Byte(if t.creative_only { 2 } else { 1 })),
+        ("damage", Tag::Double(2.0_f64.to_bits())),
+        ("HasBeenShot", Tag::Byte(1)),
+        ("crit", Tag::Byte(0)),
+        ("PierceLevel", Tag::Byte(0)),
+        ("SoundEvent", string("minecraft:item.trident.hit_ground")),
+        ("item", item_to_nbt(t.item)),
+        ("DealtDamage", Tag::Byte(i8::from(t.dealt_damage))),
+    ] {
+        put(&mut tag, key, value);
+    }
+    tag
+}
+/// (position, motion, yaw, pitch, in ground, life, shake, dealt damage,
+/// creative only, the trident item)
+pub struct TridentNbt {
+    pub position: Vec3,
+    pub motion: Vec3,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub in_ground: bool,
+    pub life: i32,
+    pub shake: u32,
+    pub dealt_damage: bool,
+    pub creative_only: bool,
+    pub item: crate::items::ItemStack,
+}
+pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
+    let [yaw, pitch] = rotation(tag);
+    Some(TridentNbt {
+        position: position(tag)?,
+        motion: motion(tag),
+        yaw,
+        pitch,
+        in_ground: flag(tag, "inGround"),
+        life: number(tag.get("life")).unwrap_or(0) as i32,
+        shake: number(tag.get("shake")).unwrap_or(0).max(0) as u32,
+        dealt_damage: flag(tag, "DealtDamage"),
+        creative_only: number(tag.get("pickup")) == Some(2),
+        item: tag
+            .get("item")
+            .and_then(item_from_nbt)
+            .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:trident", 1)),
     })
 }
 
@@ -3058,6 +3210,51 @@ mod tests {
     use super::*;
     use crate::items::ItemStack;
 
+    /// A saved rocket and trident come back with their own Life, LifeTime,
+    /// flags and position (the keys vanilla's addAdditionalSaveData writes).
+    #[test]
+    fn rocket_and_trident_round_trip() {
+        let item = ItemStack::new("minecraft:firework_rocket", 1);
+        let tag = firework_rocket_to_nbt(
+            &RocketSave {
+                position: Vec3::new(1.5, 70.0, -3.25),
+                motion: Vec3::new(0.0, 0.5, 0.0),
+                life: 7,
+                lifetime: 31,
+                item: &item,
+                angled: true,
+                owner: None,
+                left_owner: false,
+            },
+            [1, 2, 3, 4],
+            None,
+        );
+        let r = firework_rocket_from_nbt(&tag, None).unwrap();
+        assert_eq!((r.life, r.lifetime, r.angled), (7, 31, true));
+        assert_eq!(r.position, Vec3::new(1.5, 70.0, -3.25));
+        let trident = ItemStack::new("minecraft:trident", 1);
+        let tag = trident_to_nbt(
+            &TridentSave {
+                position: Vec3::new(2.0, 64.0, 2.0),
+                motion: Vec3::new(0.0, -0.25, 0.0),
+                yaw: 10.0,
+                pitch: 20.0,
+                in_ground: true,
+                life: 9,
+                shake: 3,
+                dealt_damage: true,
+                creative_only: true,
+                item: &trident,
+            },
+            [1, 2, 3, 4],
+            None,
+        );
+        let t = trident_from_nbt(&tag).unwrap();
+        assert_eq!((t.in_ground, t.life, t.shake), (true, 9, 3));
+        assert_eq!((t.dealt_damage, t.creative_only), (true, true));
+        assert_eq!((t.yaw, t.pitch), (10.0, 20.0));
+    }
+
     /// The item, the spawn delay and the fields Horizon doesn't model come
     /// back; a compound without an item is no spawner.
     #[test]
@@ -3159,6 +3356,7 @@ mod tests {
     #[test]
     fn item_entities_round_trip() {
         let e = ItemEntity {
+            no_gravity: false,
             health: 2,
             fire_ticks: 73,
             thrower: Some([5, 6, 7, 8]),
@@ -3217,6 +3415,7 @@ mod tests {
     #[test]
     fn orbs_keep_their_count() {
         let o = ExperienceOrb {
+            no_gravity: false,
             id: 0,
             position: Vec3::new(1.0, 2.0, 3.0),
             previous: Vec3::ZERO,
@@ -4488,6 +4687,61 @@ mod fireball_nbt_tests {
         }
     }
 
+    /// `Fireball.addAdditionalSaveData` / `readAdditionalSaveData`: both fireballs save
+    /// `Item`, a fire charge by default, and a loaded one stays, as one item.
+    #[test]
+    fn a_fireball_saves_its_item() {
+        let item_of = |tag: &Tag| {
+            let item = tag.get("Item").and_then(item_from_nbt).unwrap();
+            (item.item.to_string(), item.count)
+        };
+        for id in ["minecraft:fireball", "minecraft:small_fireball"] {
+            let plain = Tag::compound([
+                ("id", Tag::String(id.into())),
+                ("Pos", doubles(&[0.0, 0.0, 0.0])),
+            ]);
+            let p = fireball_from_nbt(&plain, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&plain)).unwrap();
+            assert_eq!(
+                item_of(&back),
+                ("minecraft:fire_charge".to_owned(), 1),
+                "{id}"
+            );
+            // A loaded item stays, as a single one.
+            let mut loaded = plain.clone();
+            put(
+                &mut loaded,
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 5)),
+            );
+            let p = fireball_from_nbt(&loaded, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&loaded)).unwrap();
+            assert_eq!(item_of(&back), ("minecraft:diamond".to_owned(), 1), "{id}");
+            // An empty one falls back to the fire charge.
+            let mut empty = plain.clone();
+            put(
+                &mut empty,
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:air", 1)),
+            );
+            let p = fireball_from_nbt(&empty, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&empty)).unwrap();
+            assert_eq!(
+                item_of(&back),
+                ("minecraft:fire_charge".to_owned(), 1),
+                "{id}"
+            );
+        }
+        // The wind charges are not `Fireball`s: they save no item.
+        let wind = Tag::compound([
+            ("id", Tag::String("minecraft:wind_charge".into())),
+            ("Pos", doubles(&[0.0, 0.0, 0.0])),
+        ]);
+        let p = fireball_from_nbt(&wind, None).unwrap();
+        let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&wind)).unwrap();
+        assert!(back.get("Item").is_none());
+    }
+
     #[test]
     fn thrown_item_projectiles_round_trip_their_flight_item_and_owner() {
         let player = Some([5, 6, 7, 8]);
@@ -4731,5 +4985,20 @@ mod mod_thrown_nbt_tests {
         assert!(throwable_from_nbt(&tag, None).unwrap().no_gravity);
         // a type no mod declares now is not a thrown kind.
         assert!(throwable_kind("gone:bolt").is_none());
+    }
+    #[test]
+    fn no_gravity_survives_save_and_load_for_orbs() {
+        // Entity.saveWithoutId / load: NoGravity round-trips on a kind that
+        // fall by their own tick (orb, item, arrow, fireball).
+        let mut orb = orbs_from_nbt(&Tag::compound([
+            ("Pos", doubles(&[0.0, 10.0, 0.0])),
+            ("NoGravity", Tag::Byte(1)),
+        ]))
+        .remove(0);
+        assert!(orb.no_gravity);
+        let back = orbs_from_nbt(&orb_to_nbt(&orb, [1; 4])).remove(0);
+        assert!(back.no_gravity);
+        orb.no_gravity = false;
+        assert!(orb_to_nbt(&orb, [1; 4]).get("NoGravity").is_none());
     }
 }

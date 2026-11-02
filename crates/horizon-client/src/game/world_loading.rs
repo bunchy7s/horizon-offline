@@ -174,6 +174,7 @@ impl WorldRequest {
                 level.seed,
                 o.world_gen(),
                 o.flat_settings(),
+                o.single_biome(),
             )?;
             // WorldCreationUiState.getGameRules, written with the level.
             level.game_rules = o.rules.by_name();
@@ -241,6 +242,7 @@ impl WorldRequest {
         )?;
         streaming.radius = settings.render_distance;
         let mut world = World::new(res.facts().air, level.seed);
+        world.attachments = save.load_attachments();
         world.shape = shape;
         world.fast_lava = dim == Dim::Nether;
         world.game_time = level.time;

@@ -38,6 +38,10 @@ fn sign_box() -> EditBox {
     edit
 }
 
+/// The Done button's text, `CommonComponents.GUI_DONE`, in the selected language.
+fn done_label() -> String {
+    super::screen_info::tr("gui.done", &[])
+}
 /// AbstractSignEditScreen.init's Done button: `width / 2 - 100`,
 /// `height / 4 + 144`, int GUI pixels.
 fn done_button(w: f32, h: f32) -> (f32, f32) {
@@ -841,11 +845,7 @@ impl Game<'_> {
         }
         let (bx, by) = done_button(w, h);
         horizon_client::widgets::narratable(|| {
-            horizon_client::widgets::Narratable::button(
-                super::screen_info::tr("gui.done", &[]),
-                [bx, by, 200.0, 20.0],
-                true,
-            )
+            horizon_client::widgets::Narratable::button(done_label(), [bx, by, 200.0, 20.0], true)
         });
         batch.sprite_scaled(
             atlas,
@@ -856,10 +856,11 @@ impl Game<'_> {
             20.0,
             u32::MAX,
         );
-        let tw = HudBatch::text_width(atlas, "Done");
+        let done = done_label();
+        let tw = HudBatch::text_width(atlas, &done);
         batch.text(
             atlas,
-            "Done",
+            &done,
             bx + 100.0 - (tw / 2.0).floor(),
             by + 6.0,
             u32::MAX,
@@ -875,5 +876,28 @@ mod tests {
         // `width / 2 - 100, height / 4 + 144` in ints: 334 high is 83 + 144.
         assert_eq!(super::done_button(427.0, 334.0), (113.0, 227.0));
         assert_eq!(super::done_button(320.0, 240.0), (60.0, 204.0));
+    }
+
+    /// The Done button said "Done" in every language (#1927).
+    #[test]
+    fn done_button_reads_the_selected_language() {
+        use horizon_client::lang::{Language, ResourceSource, scoped};
+        struct Vanilla;
+        impl ResourceSource for Vanilla {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                match path {
+                    "assets/minecraft/lang/en_us.json" => Some(br#"{"gui.done": "Done"}"#.to_vec()),
+                    "assets/minecraft/lang/de_de.json" => {
+                        Some(br#"{"gui.done": "Fertig"}"#.to_vec())
+                    }
+                    _ => None,
+                }
+            }
+        }
+        for (code, want) in [("de_de", "Fertig"), ("en_us", "Done")] {
+            let (label, missed) = scoped(Language::load(&[&Vanilla], code), super::done_label);
+            assert_eq!(label, want, "{code}");
+            assert!(missed.is_empty(), "{code}: {missed:?}");
+        }
     }
 }
