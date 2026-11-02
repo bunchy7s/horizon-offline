@@ -1,0 +1,16 @@
+[package]
+name = "horizon-cosmetics"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Cosmetic items drawn on players by Horizon clients: the item format, attachment to the player model's bones, simple animations"
+
+[dependencies]
+base64 = "0.22"
+glam = "0.30"
+png = "0.18"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.151"
+
+[lints]
+workspace = true
