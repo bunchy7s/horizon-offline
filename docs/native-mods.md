@@ -2294,6 +2294,23 @@ A model that moves (a turning gun barrel, a thrown projectile) is an `item_displ
 the mod's `.hmod` assets: summon it once, then move and pose it from a tick hook. Easing between ticks happens on each
 client, so a call a tick looks smooth.
 
+### Entity and level handles
+
+`crates/horizon-client/src/game/native_entity_refs.rs` (#7387): an `EntityRef` names one entity of the open world and a
+`LevelRef` one level. They are small `Copy` values a mod keeps, and their methods take the host, so a mod can hold
+several at once: `host.entity(id)` makes one from the id an event carries, `host.level("minecraft:the_nether")` one from
+a dimension.
+
+- `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
+  an entity with no UUID yet gets its own) and `level` read the entity.
+- An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
+  gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
+  vanilla), or used on a client reads as `None`.
+- The entities are those of the level in place (the one a hook runs in) and the server's players, whatever their level.
+
+Each read is a `Host` method too (`host.entity_position(entity)`): a helper whose catalog entry names a `receiver`
+(`entity`, `level`) also becomes a method of that handle.
+
 ### Mobs drawn by a mod
 
 `crates/horizon-client/src/game/native_mob_draw.rs`: `native_mob_submit(mob, draw, drawn)` (client) is asked once a frame for
