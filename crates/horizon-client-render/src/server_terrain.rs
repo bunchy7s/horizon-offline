@@ -128,6 +128,13 @@ impl ServerTerrain {
         })
     }
 
+    /// BlueMap's coarser levels at block (x, z) (a void there is `Ready`).
+    fn coarser(&self, x: i32, z: i32) -> Found<Column> {
+        self.blue_map
+            .as_ref()
+            .map_or(Found::Absent, |map| map.coarser_column(x, z))
+    }
+
     /// A chunk's columns: stored, else BlueMap's (`Waiting`: on its way).
     fn chunk_or_map(&self, x: i32, z: i32) -> Found<Columns> {
         if let Some(columns) = self.chunk(x, z) {
@@ -140,9 +147,17 @@ impl ServerTerrain {
 
     /// The stored chunk nearest the middle of the `side` × `side` chunks
     /// from `(x, z)`, found in the region headers without reading any.
+    #[cfg(test)]
     fn nearest(&self, x: i32, z: i32, side: i32) -> Option<(i32, i32)> {
+        self.kept(x, z, side).1
+    }
+
+    /// How many of the `side` × `side` chunks from `(x, z)` are stored, and
+    /// the one nearest their middle (`nearest`).
+    fn kept(&self, x: i32, z: i32, side: i32) -> (usize, Option<(i32, i32)>) {
         let mut state = self.state.lock().unwrap();
         let middle = (x * 2 + side, z * 2 + side);
+        let mut count = 0;
         let mut best: Option<(i64, (i32, i32))> = None;
         for rz in z >> 5..=(z + side - 1) >> 5 {
             for rx in x >> 5..=(x + side - 1) >> 5 {
@@ -153,6 +168,7 @@ impl ServerTerrain {
                     if cx < x || cz < z || cx >= x + side || cz >= z + side {
                         continue;
                     }
+                    count += 1;
                     let (dx, dz) = (
                         i64::from(cx * 2 + 1 - middle.0),
                         i64::from(cz * 2 + 1 - middle.1),
@@ -164,7 +180,7 @@ impl ServerTerrain {
                 }
             }
         }
-        best.map(|(_, chunk)| chunk)
+        (count, best.map(|(_, chunk)| chunk))
     }
 
     /// A stored chunk's columns.
@@ -379,13 +395,37 @@ impl LodSource for ServerTerrain {
         Box::new(Sampler {
             terrain: self,
             details: Vec::new(),
+            waited: false,
         })
+    }
+    fn keeps_observed(&self) -> bool {
+        true
+    }
+}
+
+impl Sampler {
+    /// For a column whose chunk of the map is on its way: its coarser
+    /// levels' meanwhile, as they come first (a void there is drawn as
+    /// one). None there either is a hole (`waited`: the sample isn't drawn);
+    /// either way the column is sampled again when its tile arrives
+    /// (`Lod::refresh`).
+    fn coarser(&mut self, x: i32, z: i32) -> Column {
+        match self.terrain.coarser(x, z) {
+            Found::Ready(column) => column,
+            Found::Waiting | Found::Absent => {
+                self.waited = true;
+                Column::default()
+            }
+        }
     }
 }
 
 struct Sampler {
     terrain: Arc<ServerTerrain>,
     details: Vec<LodDetail>,
+    /// A column was left empty for BlueMap's on its way, with no coarser
+    /// level to stand in (`waited`).
+    waited: bool,
 }
 
 impl LodSampler for Sampler {
@@ -393,10 +433,12 @@ impl LodSampler for Sampler {
         Some(Box::new(Self {
             terrain: self.terrain.clone(),
             details: Vec::new(),
+            waited: false,
         }))
     }
-    /// Stored chunks come back whole, else BlueMap's; the others are known
-    /// empty. One BlueMap is still downloading is asked again later.
+    /// Stored chunks come back whole, else BlueMap's (its coarser levels'
+    /// where the finest is out of reach); the others are known empty. One
+    /// whose BlueMap tile is still downloading is asked again later.
     fn request_detail(&mut self, chunks: &[(i32, i32)], _center: [i32; 2]) {
         for &(x, z) in chunks {
             let columns = match self.terrain.chunk_or_map(x, z) {
@@ -421,41 +463,61 @@ impl LodSampler for Sampler {
     fn column(&mut self, x: i32, z: i32) -> Column {
         match self.terrain.chunk_or_map(x >> 4, z >> 4) {
             Found::Ready(c) => c[((z & 15) * 16 + (x & 15)) as usize].clone(),
-            _ => Column::default(),
+            Found::Waiting => self.coarser(x, z),
+            Found::Absent => Column::default(),
         }
+    }
+    fn waited(&mut self) -> bool {
+        std::mem::take(&mut self.waited)
     }
     /// A cell of `width` blocks from one stored chunk: its own area up to a
     /// chunk, else the stored chunk nearest the cell's middle (the server
-    /// sent only the chunks a player came near). With a BlueMap, a wider
+    /// sent only the chunks a player came near), when most of the cell is
+    /// stored. With a BlueMap, a wider
     /// cell takes the chunk at its middle if stored, else the map's pixel
     /// there, and the nearest stored chunk only while the map has none.
     fn reduced_column(&mut self, x: i32, z: i32, width: i32) -> Column {
         if width <= 16 {
-            let Found::Ready(chunk) = self.terrain.chunk_or_map(x >> 4, z >> 4) else {
-                return Column::default();
+            let chunk = match self.terrain.chunk_or_map(x >> 4, z >> 4) {
+                Found::Ready(chunk) => chunk,
+                Found::Waiting => return self.coarser(x, z),
+                Found::Absent => return Column::default(),
             };
             let width = width.max(1) as usize;
             let lx = (x & 15) as usize & !(width - 1);
             let lz = (z & 15) as usize & !(width - 1);
             return Column::reduced(&chunk, lx, lz, width);
         }
+        let mut waiting = false;
         if let Some(map) = &self.terrain.blue_map {
             let (mx, mz) = ((x + width / 2) >> 4, (z + width / 2) >> 4);
             if let Some(chunk) = self.terrain.chunk(mx, mz) {
                 return Column::reduced(&chunk, 0, 0, 16);
             }
-            if let Found::Ready(column) = map.reduced_column(x, z, width) {
-                return column;
+            match map.reduced_column(x, z, width) {
+                Found::Ready(column) => return column,
+                Found::Waiting => waiting = true,
+                Found::Absent => {}
             }
         }
-        // Searching wider cells would open thousands of region files.
-        if width >> 4 > MAX_KEPT_SIDE {
+        // Only over a cell the server sent most of, as `Column::reduced`
+        // keeps what fills half a cell: one chunk drawn as a whole cell stood
+        // as a flat slab far wider than anything seen there, until finer
+        // tiles replaced it with the nothing they know of.
+        let side = width >> 4;
+        // Wider cells are never mostly sent, and counting them would open
+        // thousands of region files.
+        if side > MAX_KEPT_SIDE {
+            self.waited |= waiting;
             return Column::default();
         }
-        self.terrain
-            .nearest(x >> 4, z >> 4, width >> 4)
-            .and_then(|(cx, cz)| self.terrain.chunk(cx, cz))
-            .map_or_else(Column::default, |chunk| Column::reduced(&chunk, 0, 0, 16))
+        let (count, nearest) = self.terrain.kept(x >> 4, z >> 4, side);
+        let column = (count * 2 >= (side * side) as usize)
+            .then(|| nearest.and_then(|(cx, cz)| self.terrain.chunk(cx, cz)))
+            .flatten()
+            .map(|chunk| Column::reduced(&chunk, 0, 0, 16));
+        self.waited |= waiting && column.is_none();
+        column.unwrap_or_default()
     }
 }
 
@@ -553,8 +615,53 @@ mod tests {
         let mut sampler = terrain.clone().sampler();
         assert_eq!(sampler.sample(-33 * 16 + 1, 5 * 16), columns[1].surface);
         assert_eq!(sampler.column(0, 0), Column::default());
-        // A far cell finds the stored chunk anywhere in it.
-        assert_ne!(sampler.reduced_column(-64 * 16, 0, 1024), Column::default());
+        // One chunk doesn't stand for a far cell of 64 × 64.
+        assert_eq!(sampler.reduced_column(-64 * 16, 0, 1024), Column::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn wide_cells_are_drawn_where_most_of_them_was_kept() {
+        let dir = scratch("server-terrain-wide");
+        let columns = columns();
+        let terrain = ServerTerrain::new(dir.clone(), None);
+        let mut sampler = terrain.clone().sampler();
+        // A cell of 4 × 4 chunks, and a chunk of it kept.
+        terrain.store((2, 1), &columns).unwrap();
+        assert_eq!(sampler.reduced_column(0, 0, 64), Column::default());
+        for (x, z) in [(0, 0), (1, 0), (2, 0), (3, 0), (0, 1), (1, 1)] {
+            terrain.store((x, z), &columns).unwrap();
+            assert_eq!(sampler.reduced_column(0, 0, 64), Column::default());
+        }
+        // Half of it: drawn from the kept chunk nearest its middle.
+        terrain.store((2, 2), &columns).unwrap();
+        assert_eq!(
+            sampler.reduced_column(0, 0, 64),
+            Column::reduced(&columns, 0, 0, 16)
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Far terrain samples a cell before the server sent its chunk, then
+    /// again once it is kept: nothing remembers the empty sample.
+    #[test]
+    fn a_chunk_kept_after_an_empty_sample_is_sampled_next_time() {
+        let dir = scratch("server-terrain-late");
+        let columns = columns();
+        let terrain = ServerTerrain::new(dir.clone(), None);
+        let mut sampler = terrain.clone().sampler();
+        let mut other = sampler.fork().expect("a sampling thread's own");
+        for width in [1, 4, 16] {
+            assert_eq!(other.reduced_column(-16, 32, width), Column::default());
+        }
+        assert_eq!(other.grid(-16, 32, 1, 16), vec![Column::default(); 256]);
+        // `Job::Observe` stores it on the far-terrain worker.
+        sampler.observed((-1, 2), &columns);
+        assert_eq!(other.grid(-16, 32, 1, 16), columns.to_vec());
+        assert_eq!(
+            other.reduced_column(-16, 32, 16),
+            Column::reduced(&columns, 0, 0, 16)
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
