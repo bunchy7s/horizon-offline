@@ -3943,8 +3943,7 @@ impl Game<'_> {
                 match world_items!(self).block_loot_sequence(registry, state) {
                     Some(sequence) => {
                         let random = self.rand_sequences.get(&sequence, self.level.seed);
-                        self.res
-                            .items()
+                        world_items!(self)
                             .block_drops_by_player(registry, state, held, &dynamic, random)
                     }
                     None => world_items!(self).block_drops_by_player(
