@@ -4,7 +4,10 @@
       "name": "player_totem",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_totem",
       "neoforge": "none (NeoForge's LivingUseTotemEvent can cancel the save; this hook only listens. Bukkit's EntityResurrectEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a totem of undying saving a player (`native_player_totem`).",

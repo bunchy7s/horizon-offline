@@ -3692,7 +3692,7 @@ impl Game<'_> {
     /// Once for each totem, on a server; the host of a LAN world's totem is
     /// not heard. @API:native_player_totem@.
     pub(super) fn native_player_totem(&mut self, player: u128, name: &str) {
-        let _ = (player, name);
+        mod_api::dispatch_player_totem(self, mod_api::mods(), player, name);
     }
     /// `player`'s melee blow killed the mob `entity` of `kind` (other deaths
     /// aren't told yet). It only hears, after the blow landed. Server-side.
