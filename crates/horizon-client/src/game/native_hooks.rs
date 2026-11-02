@@ -3856,6 +3856,11 @@ impl Game<'_> {
         let _ = (dimension, from, to, cause, cancel);
     }
 
+    /// The world's spawn point changed to `pos` and `angle`. @API:native_spawn_change@.
+    pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
+        let _ = (pos, angle);
+    }
+
     /// A server game rule changed to its final `value`. @API:native_world_game_rule_change@.
     pub(super) fn native_world_game_rule_change(
         &mut self,
