@@ -1356,6 +1356,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_client_loaded_world(player, name)`**: the server heard that a guest's client finished loading
   the level around them after joining, respawning or changing dimension. The player's state is not swapped in, so
   helpers that look them up through `self.lan` may find nothing while the guest packet is handled.
+- **`native_player_stop_using_item(player, name)`**: a server player released the use-item key before the item
+  finished being used. The player's state is not swapped in, so helpers that look them up through `self.lan` may
+  find nothing during packet handling.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat

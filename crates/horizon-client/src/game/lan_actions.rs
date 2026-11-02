@@ -1835,6 +1835,10 @@ impl Game<'_> {
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
                 6 => {
+                    let (uuid, name) = {
+                        let guest = &host.hub.guests[gi];
+                        (guest.uuid, guest.name.clone())
+                    };
                     self.as_guest(host, conn, |g| {
                         let Some(hand) = g.used_hand() else {
                             return;
@@ -1844,6 +1848,7 @@ impl Game<'_> {
                                 && let Some(stack) = g.stack_in(slot).cloned()
                             {
                                 g.release_used_item(&stack, ticks, false);
+                                g.native_player_stop_using_item(uuid, &name);
                             }
                         });
                     });

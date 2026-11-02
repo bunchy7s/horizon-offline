@@ -4611,6 +4611,13 @@ impl Game<'_> {
     pub(super) fn native_player_client_loaded_world(&mut self, player: u128, name: &str) {
         let _ = (player, name);
     }
+    /// A server player released the use-item key before the item finished
+    /// being used. The guest's state is not swapped in, so helpers that look
+    /// them up through `self.lan` may find nothing during packet handling.
+    /// @API:native_player_stop_using_item@.
+    pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
