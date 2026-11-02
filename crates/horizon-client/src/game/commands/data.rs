@@ -224,6 +224,11 @@ impl Game<'_> {
                 let r = self.rockets.iter().find(|r| r.id == id)?;
                 r.to_nbt(uuid, player_uuid, self.persist.raw.get(&id))
             }
+            Target::Trident(id) => {
+                let uuid = self.uuid_for(id);
+                let t = self.tridents.iter().find(|t| t.id == id)?;
+                t.to_nbt(uuid, self.persist.raw.get(&id))
+            }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
                 let [x, y, z] = s.position;
@@ -856,6 +861,8 @@ impl Game<'_> {
             Some(Target::Falling(id))
         } else if self.rockets.iter().any(|r| r.id == id) {
             Some(Target::Rocket(id))
+        } else if self.tridents.iter().any(|t| t.id == id) {
+            Some(Target::Trident(id))
         } else if self.ominous_spawners.iter().any(|s| s.id == id) {
             Some(Target::Spawner(id))
         } else {

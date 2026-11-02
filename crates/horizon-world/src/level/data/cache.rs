@@ -1,12 +1,14 @@
-//! A disposable, versioned snapshot of resolved behaviour tables.
+//! Disposable, versioned snapshots of resolved data: the behaviour tables
+//! and the block-state registry.
 //!
 //! The source resources remain authoritative. Failed reads, unsupported
 //! versions, corrupt payloads and write failures always use the normal loader.
-//! The snapshot lives in the game's own cache folder ([`set_dir`]), never in the
+//! Snapshots live in the game's own cache folder ([`set_dir`]), never in the
 //! resource folder: that one is shared by worktrees and copied between installed
 //! versions by the launcher. Its key includes the running executable, so a build
 //! that resolves the tables differently never reads another build's snapshot.
 use super::*;
+use crate::registry::snapshot as registry_snapshot;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -22,13 +24,17 @@ use std::{
 const MAGIC: &[u8; 8] = b"HZBEHAV\0";
 const VERSION: u32 = 2;
 const FILE_NAME: &str = "behaviours-v2.bin";
+const REGISTRY_MAGIC: &[u8; 8] = b"HZREGIS\0";
+const REGISTRY_VERSION: u32 = 1;
+const REGISTRY_FILE_NAME: &str = "registry-v1.bin";
 const MAX_FILE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_DECODED_BYTES: usize = 256 * 1024 * 1024;
 static NEXT_TEMP: AtomicU32 = AtomicU32::new(0);
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Keep snapshots in `dir` (the client passes `<game folder>/.horizon-cache`).
-/// Without it (tests, tools, servers), `Behaviours::load` always uses the source loader.
+/// Without it (tests, tools, servers), `Behaviours::load` and `load_registry`
+/// always use the source loaders.
 pub(in crate::level) fn set_dir(dir: PathBuf) {
     let _ = DIR.set(dir);
 }
@@ -135,20 +141,26 @@ struct Item {
     game_master: bool,
 }
 
-fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
-    let mut hasher = Sha256::new();
-    hasher.update(b"horizon resolved behaviours 2");
-    // The build that resolved the tables: the version constant alone misses
-    // loader changes that keep the snapshot layout.
+/// The running executable's stamp: the version constant alone misses loader
+/// changes that keep a snapshot's layout.
+fn hash_executable(hasher: &mut Sha256) -> io::Result<()> {
     let exe = std::env::current_exe()?;
     let built = fs::metadata(&exe)?;
-    hash_str(&mut hasher, &exe.to_string_lossy());
+    hash_str(hasher, &exe.to_string_lossy());
     hasher.update(built.len().to_le_bytes());
     let modified = built
         .modified()?
         .duration_since(UNIX_EPOCH)
         .map_err(|e| invalid(e.to_string()))?;
     hasher.update(modified.as_nanos().to_le_bytes());
+    Ok(())
+}
+
+fn fingerprint(registry: &BlockRegistry, root: &Path) -> io::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"horizon resolved behaviours 2");
+    // The build that resolved the tables.
+    hash_executable(&mut hasher)?;
     hasher.update(sources_digest(root)?);
     // The registry argument may be modified independently of facts.json.
     hasher.update((registry.len() as u64).to_le_bytes());
@@ -200,6 +212,14 @@ fn sources_digest(root: &Path) -> io::Result<[u8; 32]> {
         .collect::<io::Result<_>>()?;
     fluids.sort();
     paths.extend(fluids);
+    paths_digest(root, &paths)
+}
+
+/// `paths` as the hash of their names (relative to `root`), lengths and
+/// contents. Digests already computed by this process are kept by the files'
+/// lengths and modification times in [`SOURCES`]: a file that changed is read
+/// again.
+fn paths_digest(root: &Path, paths: &[PathBuf]) -> io::Result<[u8; 32]> {
     let stamps = paths
         .iter()
         .map(|path| {
@@ -213,7 +233,7 @@ fn sources_digest(root: &Path) -> io::Result<[u8; 32]> {
     }
     drop(known);
     let mut hasher = Sha256::new();
-    for path in &paths {
+    for path in paths {
         hash_file(&mut hasher, root, path)?;
     }
     let digest: [u8; 32] = hasher.finalize().into();
@@ -236,8 +256,53 @@ fn hash_file(hasher: &mut Sha256, root: &Path, path: &Path) -> io::Result<()> {
     hash_str(hasher, &relative.to_string_lossy());
     let bytes = fs::read(path)?;
     hasher.update((bytes.len() as u64).to_le_bytes());
-    hasher.update(bytes);
+    hasher.update(hash_contents(&bytes));
     Ok(())
+}
+
+/// A content hash's piece: files bigger than this hash piece by piece across
+/// the idle cores — one SHA-256 stream over tens of megabytes is the
+/// fingerprint's cost.
+const HASH_PIECE: usize = 4 << 20;
+
+/// `bytes`' digest: one SHA-256 up to [`HASH_PIECE`]; bigger, the SHA-256 of
+/// the per-piece digests in order. The scheme is a function of the bytes
+/// alone, so every machine keys the same file to the same fingerprint.
+fn hash_contents(bytes: &[u8]) -> [u8; 32] {
+    let pieces: Vec<&[u8]> = bytes.chunks(HASH_PIECE).collect();
+    if pieces.len() <= 1 {
+        return Sha256::digest(bytes).into();
+    }
+    let workers = pieces
+        .len()
+        .min(std::thread::available_parallelism().map_or(1, |n| n.get()));
+    if workers <= 1 {
+        let mut hasher = Sha256::new();
+        for piece in pieces {
+            hasher.update(Sha256::digest(piece));
+        }
+        return hasher.finalize().into();
+    }
+    let span = pieces.len().div_ceil(workers);
+    std::thread::scope(|scope| {
+        // The last span hashes here while the workers run.
+        let (rest, last) = pieces.split_at(pieces.len() - span);
+        let tasks: Vec<_> = rest
+            .chunks(span)
+            .map(|run| scope.spawn(move || run.iter().map(Sha256::digest).collect::<Vec<_>>()))
+            .collect();
+        let last: Vec<_> = last.iter().map(Sha256::digest).collect();
+        let mut hasher = Sha256::new();
+        for task in tasks {
+            for digest in task.join().unwrap() {
+                hasher.update(digest);
+            }
+        }
+        for digest in last {
+            hasher.update(digest);
+        }
+        hasher.finalize().into()
+    })
 }
 
 fn direction(index: u8) -> io::Result<Direction> {
@@ -696,20 +761,22 @@ impl Snapshot {
     }
 }
 
-pub(super) fn load(registry: &BlockRegistry, root: &Path) -> Option<Behaviours> {
-    load_from(DIR.get()?, registry, root)
-}
-
-fn load_from(dir: &Path, registry: &BlockRegistry, root: &Path) -> Option<Behaviours> {
-    let bytes = fs::read(dir.join(FILE_NAME)).ok()?;
-    let fingerprint = fingerprint(registry, root).ok()?;
+/// `bytes`' decompressed payload when it is a `magic`/`version` snapshot made
+/// for `fingerprint`; anything else — short, another key, a corrupt body —
+/// is no snapshot.
+fn decode_snapshot(
+    bytes: &[u8],
+    magic: &[u8; 8],
+    version: u32,
+    fingerprint: &[u8; 32],
+) -> Option<Vec<u8>> {
     // Validate bounds before decoding untrusted cache contents.
     if bytes.len() < 8 + 4 + 32 + 32 || bytes.len() > MAX_FILE_BYTES {
         return None;
     }
-    if &bytes[..8] != MAGIC
-        || u32::from_le_bytes(bytes[8..12].try_into().ok()?) != VERSION
-        || bytes[12..44] != fingerprint
+    if &bytes[..8] != magic
+        || u32::from_le_bytes(bytes[8..12].try_into().ok()?) != version
+        || bytes[12..44] != fingerprint[..]
     {
         return None;
     }
@@ -721,7 +788,57 @@ fn load_from(dir: &Path, registry: &BlockRegistry, root: &Path) -> Option<Behavi
     if expanded_len > MAX_DECODED_BYTES {
         return None;
     }
-    let expanded = lz4_flex::decompress_size_prepended(body).ok()?;
+    lz4_flex::decompress_size_prepended(body).ok()
+}
+
+fn write_snapshot(
+    dir: &Path,
+    file_name: &str,
+    magic: &[u8; 8],
+    version: u32,
+    fingerprint: &[u8; 32],
+    serialized: &[u8],
+) -> io::Result<()> {
+    let body = lz4_flex::compress_prepend_size(serialized);
+    if body.len() + 76 > MAX_FILE_BYTES {
+        return Err(invalid("snapshot cache too large"));
+    }
+    let mut bytes = Vec::with_capacity(76 + body.len());
+    bytes.extend_from_slice(magic);
+    bytes.extend_from_slice(&version.to_le_bytes());
+    bytes.extend_from_slice(fingerprint);
+    bytes.extend_from_slice(&Sha256::digest(&body));
+    bytes.extend_from_slice(&body);
+    fs::create_dir_all(dir)?;
+    let path = dir.join(file_name);
+    let tmp = dir.join(format!(
+        "{file_name}.tmp-{}-{}",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        fs::rename(&tmp, &path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
+}
+
+pub(super) fn load(registry: &BlockRegistry, root: &Path) -> Option<Behaviours> {
+    load_from(DIR.get()?, registry, root)
+}
+
+fn load_from(dir: &Path, registry: &BlockRegistry, root: &Path) -> Option<Behaviours> {
+    let bytes = fs::read(dir.join(FILE_NAME)).ok()?;
+    let fingerprint = fingerprint(registry, root).ok()?;
+    let expanded = decode_snapshot(&bytes, MAGIC, VERSION, &fingerprint)?;
     let snapshot: Snapshot = postcard::from_bytes(&expanded).ok()?;
     snapshot.restore(registry).ok()
 }
@@ -741,36 +858,59 @@ fn write(
     let fingerprint = fingerprint(registry, root)?;
     let snapshot = Snapshot::capture(behaviours);
     let serialized = postcard::to_allocvec(&snapshot).map_err(|e| invalid(e.to_string()))?;
-    let body = lz4_flex::compress_prepend_size(&serialized);
-    if body.len() + 76 > MAX_FILE_BYTES {
-        return Err(invalid("behaviour cache too large"));
+    write_snapshot(dir, FILE_NAME, MAGIC, VERSION, &fingerprint, &serialized)
+}
+
+/// `facts.json` is the registry's only source.
+fn registry_fingerprint(root: &Path) -> io::Result<[u8; 32]> {
+    let mut hasher = Sha256::new();
+    hasher.update(b"horizon block registry 1");
+    hash_executable(&mut hasher)?;
+    hasher.update(paths_digest(root, &[root.join("facts.json")])?);
+    Ok(hasher.finalize().into())
+}
+
+/// The registry and each state's `(air, fluid)` facts.json columns.
+type RegistryLoad = (BlockRegistry, Vec<(bool, bool)>);
+
+pub(super) fn load_registry(root: &Path) -> Option<RegistryLoad> {
+    load_registry_from(DIR.get()?, root)
+}
+
+fn load_registry_from(dir: &Path, root: &Path) -> Option<RegistryLoad> {
+    let bytes = fs::read(dir.join(REGISTRY_FILE_NAME)).ok()?;
+    let fingerprint = registry_fingerprint(root).ok()?;
+    let expanded = decode_snapshot(&bytes, REGISTRY_MAGIC, REGISTRY_VERSION, &fingerprint)?;
+    let snapshot: registry_snapshot::Snapshot = postcard::from_bytes(&expanded).ok()?;
+    registry_snapshot::restore(snapshot).ok()
+}
+
+pub(super) fn store_registry(root: &Path, registry: &BlockRegistry, flags: &[(bool, bool)]) {
+    if let Some(dir) = DIR.get() {
+        let _ = write_registry(dir, root, registry, flags);
     }
-    let mut bytes = Vec::with_capacity(76 + body.len());
-    bytes.extend_from_slice(MAGIC);
-    bytes.extend_from_slice(&VERSION.to_le_bytes());
-    bytes.extend_from_slice(&fingerprint);
-    bytes.extend_from_slice(&Sha256::digest(&body));
-    bytes.extend_from_slice(&body);
-    fs::create_dir_all(dir)?;
-    let path = dir.join(FILE_NAME);
-    let tmp = dir.join(format!(
-        "{FILE_NAME}.tmp-{}-{}",
-        std::process::id(),
-        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-    ));
-    let result = (|| {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(&tmp, &path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
+}
+
+fn write_registry(
+    dir: &Path,
+    root: &Path,
+    registry: &BlockRegistry,
+    flags: &[(bool, bool)],
+) -> io::Result<()> {
+    if flags.len() != registry.len() {
+        return Err(invalid("registry flags do not match its states"));
     }
-    result
+    let fingerprint = registry_fingerprint(root)?;
+    let snapshot = registry_snapshot::capture(registry, flags);
+    let serialized = postcard::to_allocvec(&snapshot).map_err(|e| invalid(e.to_string()))?;
+    write_snapshot(
+        dir,
+        REGISTRY_FILE_NAME,
+        REGISTRY_MAGIC,
+        REGISTRY_VERSION,
+        &fingerprint,
+        &serialized,
+    )
 }
 
 #[cfg(test)]
@@ -925,5 +1065,102 @@ mod tests {
         other[12] ^= 1;
         fs::write(&cache_file, other).unwrap();
         assert!(load_from(&dir, &registry, &root.0).is_none());
+    }
+
+    /// The content digest depends on the bytes alone: a small file is its
+    /// SHA-256, a bigger one the digest of its 4 MB pieces' digests — the same
+    /// on any machine and thread count.
+    #[test]
+    fn content_hash_pieces_in_order() {
+        assert_eq!(
+            hash_contents(b"abc"),
+            <[u8; 32]>::from(Sha256::digest(b"abc"))
+        );
+        let bytes = vec![7u8; HASH_PIECE * 2 + 3];
+        let mut hasher = Sha256::new();
+        for piece in bytes.chunks(HASH_PIECE) {
+            hasher.update(Sha256::digest(piece));
+        }
+        assert_eq!(hash_contents(&bytes), <[u8; 32]>::from(hasher.finalize()));
+    }
+
+    /// `facts.json` alone is a registry fixture's whole resource root.
+    fn facts_fixture() -> Option<FixtureDir> {
+        let source = std::env::var_os("HORIZON_RESOURCES")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/horizon-client/26.3")
+            });
+        if !source.join("facts.json").exists() {
+            eprintln!("skipping registry cache test: no client resources");
+            return None;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "horizon-registry-cache-test-{}-{}",
+            std::process::id(),
+            NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        fs::copy(source.join("facts.json"), dir.join("facts.json")).unwrap();
+        Some(FixtureDir(dir))
+    }
+
+    #[test]
+    fn registry_snapshot_roundtrips_and_recovers_from_corruption() {
+        let Some(root) = facts_fixture() else {
+            return;
+        };
+        let (registry, flags) = BlockRegistry::from_facts_json_with_flags(
+            File::open(root.0.join("facts.json")).unwrap(),
+        )
+        .unwrap();
+        // The game's cache folder, apart from the resources.
+        let dir = root.0.join("game/.horizon-cache");
+        assert!(load_registry_from(&dir, &root.0).is_none());
+        write_registry(&dir, &root.0, &registry, &flags).unwrap();
+        assert!(
+            !root.0.join(REGISTRY_FILE_NAME).exists(),
+            "the resource folder stays untouched"
+        );
+        let (hit, hit_flags) = load_registry_from(&dir, &root.0).expect("cache hit");
+        assert_eq!(hit.len(), registry.len());
+        assert_eq!(hit_flags, flags);
+        let mut names = std::collections::BTreeSet::new();
+        for i in 0..registry.len() as u32 {
+            let id = BlockStateId(i);
+            assert_eq!(hit.state(id), registry.state(id));
+            assert_eq!(hit.id(registry.state(id).unwrap()), Some(id));
+            names.insert(&registry.state(id).unwrap().name);
+        }
+        for name in names {
+            assert_eq!(hit.default_state(name), registry.default_state(name));
+        }
+        // A changed source invalidates; the loader rebuilds and replaces it.
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.0.join("facts.json"))
+            .unwrap()
+            .write_all(b"\n")
+            .unwrap();
+        assert!(
+            load_registry_from(&dir, &root.0).is_none(),
+            "changed resource must invalidate"
+        );
+        write_registry(&dir, &root.0, &registry, &flags).unwrap();
+        assert!(load_registry_from(&dir, &root.0).is_some());
+        let cache_file = dir.join(REGISTRY_FILE_NAME);
+        let mut bytes = fs::read(&cache_file).unwrap();
+        bytes[80] ^= 0x80;
+        fs::write(&cache_file, bytes).unwrap();
+        assert!(
+            load_registry_from(&dir, &root.0).is_none(),
+            "checksum failure must invalidate"
+        );
+        // A snapshot written under another key is never trusted.
+        write_registry(&dir, &root.0, &registry, &flags).unwrap();
+        let mut other = fs::read(&cache_file).unwrap();
+        other[12] ^= 1;
+        fs::write(&cache_file, other).unwrap();
+        assert!(load_registry_from(&dir, &root.0).is_none());
     }
 }

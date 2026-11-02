@@ -182,6 +182,7 @@ impl Game<'_> {
             | Target::Tnt(id)
             | Target::Falling(id)
             | Target::Rocket(id)
+            | Target::Trident(id)
             | Target::Other(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
@@ -226,6 +227,7 @@ impl Game<'_> {
             | Target::Crystal(id)
             | Target::Dragon(id)
             | Target::Rocket(id)
+            | Target::Trident(id)
             | Target::Other(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
             // A server's player: the saved compound the guest's file is written from.
@@ -754,6 +756,7 @@ impl Game<'_> {
         for (location, rgba) in ready {
             self.store_skin(location, rgba);
         }
+        self.cosmetics_frame();
     }
     /// `Hud.extractTabList`: the player list while the player-list key is
     /// held. A local world shows it with a joined LAN guest or a `list`

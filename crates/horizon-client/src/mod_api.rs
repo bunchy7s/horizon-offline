@@ -6,7 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
-pub use crate::camera::CameraEntity;
+pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CustomRecipe, Ingredient};
@@ -30,6 +30,7 @@ pub use crate::items::ItemStack;
 pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
+pub use crate::recipe_book::RecipeBookCategory;
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -53,6 +54,24 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
+
+/// Camera values from the most recently extracted world frame.
+#[derive(Clone, Debug)]
+pub struct NativeCamera {
+    pub position: [f64; 3],
+    pub eye_height: f32,
+    pub partial_tick: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Camera-relative view matrix in column-major order.
+    pub view: [f32; 16],
+    /// Reversed-Z projection matrix in column-major order.
+    pub projection: [f32; 16],
+    pub dimension: String,
+}
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
@@ -326,7 +345,7 @@ pub enum NativeAuthority {
 }
 
 /// One open attempt of one world; it rejects a previous open's commands.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct NativeWorldEpoch(u64);
 
 impl NativeWorldEpoch {
@@ -338,6 +357,58 @@ impl NativeWorldEpoch {
     /// Read the epoch number.
     pub fn get(self) -> u64 {
         self.0
+    }
+}
+
+/// An entity of the open world, for the `Host` methods that read or change one
+/// (`entity.position(host)`). It holds the world's epoch and the entity's id: ids
+/// are shared by every level and never reused while the world is open, and an
+/// entity that changes dimension gets a new one, as in vanilla. A handle from an
+/// earlier open, of an entity that is gone, or used on a client reads as `None`
+/// and changes nothing. `Host::entity` makes one from an event's entity id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EntityRef {
+    epoch: NativeWorldEpoch,
+    id: u32,
+}
+
+impl EntityRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, id: u32) -> Self {
+        Self { epoch, id }
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.id
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
+    }
+}
+
+/// A level of the open world, by its dimension (`minecraft:the_nether`).
+/// `Host::level` makes one, and `entity.level(host)` gives an entity's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LevelRef {
+    epoch: NativeWorldEpoch,
+    dimension: &'static str,
+}
+
+impl LevelRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(epoch: NativeWorldEpoch, dimension: &'static str) -> Self {
+        Self { epoch, dimension }
+    }
+    /// The level's dimension (`minecraft:overworld`).
+    pub fn dimension(self) -> &'static str {
+        self.dimension
+    }
+    /// The open of the world the handle belongs to.
+    pub fn epoch(self) -> NativeWorldEpoch {
+        self.epoch
     }
 }
 

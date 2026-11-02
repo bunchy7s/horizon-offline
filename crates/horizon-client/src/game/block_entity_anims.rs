@@ -301,6 +301,8 @@ impl Game<'_> {
             .get("minecraft:conduit_effect_block")
             .cloned()
             .unwrap_or_default();
+        // The lids this tick swept (`moveCollidedEntities`), for the player
+        // this client moves itself.
         let mut shulker_pushes = Vec::new();
         for &(pos, ticker) in &positions {
             match ticker {
@@ -433,9 +435,15 @@ impl Game<'_> {
             }
         }
         self.be_anims.present = positions;
+        // The lid's grown box collides and pushes here too: a client of a
+        // server owns its own player's position, so the server's
+        // `moveCollidedEntities` alone would be undone by the client's next
+        // move, and a lid the client cannot collide with never holds it up.
+        // Only the player: `tick_block_entities` has already pushed the mobs
+        // and the guests, and a second push would double the lift.
         if self.remote.is_some() {
             self.sync_shulkers();
-            self.push_shulker_entities(shulker_pushes);
+            self.push_shulker_local(shulker_pushes);
         }
     }
     /// `ConduitBlockEntity.serverTick` of every conduit in the chunks that

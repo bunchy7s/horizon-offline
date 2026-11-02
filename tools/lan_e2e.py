@@ -30,6 +30,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - leave:     a guest who leaves has leave_game in their saved statistics, and again after the next leave;
 
 - arrows:    the guest and the host shoot each other with a bow; with the pvp game rule off, nothing (#484);
+- flame-arrows: an arrow the host or the guest shoots from a Flame bow burns in flight on both sides
+             (Entity.DATA_SHARED_FLAGS_ID's fire flag), one from a plain bow doesn't (#7356);
 - looks:     mobs look on both sides as the server has them (their synched data): a calf is a
              baby, a red sheep is sheared, a size 4 slime, a tamed wolf sits with its blue collar, a
              cow on fire burns and goes out; then the wither's health drops when it is hurt, the
@@ -374,7 +376,7 @@ from integration_env import game_environment, require_server_reports  # noqa: E4
 ROOT = Path(__file__).resolve().parents[1]
 GUEST_NAME = 'Guest'
 CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'menu-transfer', 'crafting', 'spawned', 'sign', 'damage', 'mobs', 'hazards', 'pvp', 'deaths',
-          'flow-push', 'bubble-column', 'arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
+          'flow-push', 'bubble-column', 'arrows', 'flame-arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
           'commands', 'recipes', 'machines', 'brewing', 'loom', 'stonecutter', 'grindstone', 'anvil', 'smithing',
           'enchanting', 'beacon', 'crafter', 'lectern', 'cartography', 'trials', 'clicks', 'shift-double-click', 'recipe-shift', 'shift-drag', 'modifier-release', 'wheel', 'sleep', 'sleep-villager', 'bed-occupied', 'sleep-reload', 'predict', 'push',
           'piston-push', 'piston-entities', 'piston-slime', 'eat', 'eat-on-block', 'cauldron', 'eating', 'xp', 'objects', 'projectiles', 'thrown', 'sparks', 'hud', 'sidebar', 'border', 'particles',
@@ -1467,6 +1469,52 @@ def check_arrows(host, guest, out):
     assert hits['host shoots guest'][1] < hits['host shoots guest'][0], f"the host's arrow did not hurt the guest: {hits}"
     assert hits['pvp off'][1] >= hits['pvp off'][0], f'pvp off, an arrow still hurts: {hits}'
     return hits
+
+
+def check_flame_arrows(host, guest, out):
+    # BowItem.releaseUsing -> EnchantmentHelper.onProjectileSpawned: Flame sets the arrow on fire, and
+    # Entity.baseTick's setSharedFlagOnFire sends it, so every client draws the flames (#7356).
+    spots = apart(host, guest)
+    seen = {}
+    try:
+        for label, shooter, other in (('host', host, guest), ('guest', guest, host)):
+            x, y, z = spots[label]
+            shooter('command', command='gamemode survival')
+            for bow in ('flame', 'plain'):
+                item = 'minecraft:bow[minecraft:enchantments={"minecraft:flame":1}]' if bow == 'flame' else 'minecraft:bow'
+                shooter('command', command=f'item replace entity @s weapon.mainhand with {item}')
+                shooter('command', command='give @s minecraft:arrow 1')
+                shooter.wait(10)
+                # Straight up into open sky: it slows down over the shooter, where the other player looks.
+                shooter.raw('look-at', f'{x + 0.5:.2f}', f'{y + 60:.2f}', f'{z + 0.52:.2f}')
+                shooter.raw('use-item', '--hold', 1.3)  # a full draw (BowItem: 20 ticks); returns at once
+                case = {'own': set(), 'other': set()}
+                shot = False
+                for _ in range(40):
+                    shooter.wait(2)
+                    for side, game in (('own', shooter), ('other', other)):
+                        for p in game('status')['projectiles']:
+                            if p['kind'] != 'Arrow' or abs(p['position'][0] - (x + 0.5)) > 4:
+                                continue
+                            case[side].add(bool(p.get('on_fire')))
+                            # Near the top of its flight: the other player looks at it and shows it.
+                            if side == 'other' and not shot and abs(p['velocity'][1]) < 0.6:
+                                other.raw('look-at', *(f'{v:.2f}' for v in p['position']))
+                                other.wait(1)
+                                other.shot(out, f'flame-arrows-{label}-{bow}')
+                                shot = True
+                    if shot:
+                        break
+                seen[f'{label} {bow}'] = {k: sorted(v) for k, v in case.items()}
+                shooter('command', command='kill @e[type=minecraft:arrow]')
+                shooter.wait(5)
+    finally:
+        for g in (host, guest):
+            g('command', command='clear @s')
+    for name, case in seen.items():
+        want = [True] if name.endswith('flame') else [False]
+        assert case['own'] == want and case['other'] == want, f'{name}: on_fire seen in flight {seen}'
+    return seen
 
 
 def check_deaths(host, guest, out):
@@ -5795,8 +5843,8 @@ def check_boat_shoved(host, guest, out):
 
 
 def check_minecarts(host, guest, out):
-    """#1222: the host and the guest each get into a minecart on rails with a right click, sneak out
-    beside it, and break it with their fists."""
+    """#1222, #5812: the host and the guest each get into a minecart on rails with a right click, sneak out
+    beside it, and break it with their fists; also check opening a chest minecart's container."""
     result = {}
     spots = apart(host, guest)
     for label, player in (('host', host), ('guest', guest)):
@@ -5818,7 +5866,19 @@ def check_minecarts(host, guest, out):
             player.wait(5)
             break_vehicle(player, cart['id'], 'minecart')
             result[label] = {'cart': cart['id'], 'out_at': [round(v, 2) for v in out_at], 'broken': True}
+
+            player('command', command=f'summon minecraft:chest_minecart {cx + 0.5} {y} {z + 0.5}')
+            player.wait(10)
+            player.raw('look-at', f'{cx + 0.5:.2f}', f'{y + 0.3:.2f}', f'{z + 0.5:.2f}')
+            player.raw('mouse', 'right', 'click')
+            player.raw('wait-for', 'screen', 'container', '--timeout', 10)
+            items, size = container_items(player)
+            assert size == 27, f'the {label} opened chest minecart with {size} slots, expected 27'
+            player.raw('key', 'esc', 'tap')
+            player.wait(10)
+            player('command', command=f'kill @e[type=minecraft:chest_minecart,x={cx},y={y},z={z},distance=..8]')
         finally:
+            player('command', command=f'kill @e[type=minecraft:chest_minecart,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'kill @e[type=minecraft:minecart,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'kill @e[type=minecraft:item,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'fill {cx} {y} {z} {cx} {y} {z + 4} minecraft:air')
@@ -5841,7 +5901,9 @@ def check_frames(host, guest, out):
         frame_kind = 'item_frame' if label == 'host' else 'glow_item_frame'
         player('command', command=f'summon minecraft:{frame_kind} {x + 0.5} {y + 1.5} {z + 2.97} '
                f'{{block_pos:[I;{x},{y + 1},{z + 2}],Facing:2b}}')
-        player('command', command=f'summon minecraft:armor_stand {x - 1.5} {y} {z + 1.5}')
+        stand_tag = f'frame_stand_{label}'
+        player('command', command=f'summon minecraft:armor_stand {x - 1.5} {y} {z + 1.5} '
+               f'{{Tags:["{stand_tag}"]}}')
         player('command', command='clear @s')
         frame_name = f'{label} framed diamond'
         player('command', command='item replace entity @s weapon.mainhand with '
@@ -5888,7 +5950,33 @@ def check_frames(host, guest, out):
             player.wait(10)
             worn = [o for o in player('status')['objects'] if o['id'] == stand[0]['id']][0]['equipment']
             assert 'minecraft:iron_helmet' not in worn, f'taking the helmet back left {worn}'
-            result[label] = {'frame': 'diamond, turned', 'stand': 'helmet on and off'}
+            selector = f'@e[type=minecraft:armor_stand,tag={stand_tag},limit=1]'
+            player('command', command='item replace entity @s weapon.mainhand with minecraft:name_tag 3')
+            player.wait(5)
+            player.raw('look-at', f'{x - 1.5:.2f}', f'{y + 1:.2f}', f'{z + 1.5:.2f}')
+            player.raw('mouse', 'right', 'click')
+            player.wait(10)
+            assert player('inventory')['counts'].get('minecraft:name_tag') == 3, 'unnamed tag was consumed'
+            server_reply(player, f'execute unless data entity {selector} CustomName', 'Test passed')
+            name = f'{label} Bob'
+            player('command', command='item replace entity @s weapon.mainhand with '
+                   f'minecraft:name_tag[minecraft:custom_name="{name}"] 3')
+            player.wait(5)
+            player.raw('mouse', 'right', 'click')
+            player.wait(10)
+            assert player('inventory')['counts'].get('minecraft:name_tag') == 2, 'named tag was not consumed once'
+            server_reply(player, f'data get entity {selector} CustomName', name)
+            server_reply(other, f'data get entity {selector} CustomName', name)
+            # NameTagItem shrinks its stack in creative too.
+            player('command', command='gamemode creative')
+            player('command', command='item replace entity @s weapon.mainhand with '
+                   f'minecraft:name_tag[minecraft:custom_name="{name}"] 3')
+            player.wait(5)
+            player.raw('mouse', 'right', 'click')
+            player.wait(10)
+            assert player('inventory')['counts'].get('minecraft:name_tag') == 2, 'creative tag was not consumed once'
+            player('command', command='gamemode survival')
+            result[label] = {'frame': 'diamond, turned', 'stand': 'helmet on and off; named tag consumed'}
         finally:
             player('command', command=f'kill @e[type=!minecraft:player,x={x - 3},y={y - 1},z={z},dx=6,dy=4,dz=6]')
             player('command', command=f'fill {x - 2} {y} {z + 3} {x + 2} {y + 2} {z + 3} minecraft:air')
@@ -6665,7 +6753,7 @@ CHECK_FNS = {'tab': check_tab, 'self': check_self, 'armour': check_armour,
              'flight': check_flight, 'fireball': check_fireball, 'deflect': check_deflect,
              'barter': check_barter, 'piglin_offspring': check_piglin_offspring,
              'worn': check_worn, 'kills': check_kills, 'looting': check_looting, 'leave': check_leave,
-             'arrows': check_arrows, 'predict': check_predict, 'ladder': check_ladder,
+             'arrows': check_arrows, 'flame-arrows': check_flame_arrows, 'predict': check_predict, 'ladder': check_ladder,
              'boats': check_boats, 'boat_ice_reboard': check_boat_ice_reboard, 'boat_shoved': check_boat_shoved, 'minecarts': check_minecarts, 'frames': check_frames, 'hands': check_hands,
              'lightning': check_lightning, 'riding': check_riding, 'occupied_horse': check_occupied_horse, 'mounts': check_mounts,
              'worldspawn': check_world_spawn, 'beds': check_beds, 'shield': check_shield, 'deathmining': check_death_mining,

@@ -591,7 +591,7 @@ mod tests {
                 ..Default::default()
             },
             model,
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Camel,

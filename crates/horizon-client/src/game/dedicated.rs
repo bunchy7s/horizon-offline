@@ -1736,6 +1736,14 @@ impl Game<'_> {
                 for text in self.chat_capture.take().unwrap_or_default() {
                     self.console_reply(text);
                 }
+                // ServerPlayer.onEffectAdded and onEffectUpdated send an effect
+                // the command gave as it was given: vanilla's console runs after
+                // the players' tick (`DedicatedServer.tickConnection`), so the
+                // next tick is the first to count it down. A player's own
+                // commands sync theirs the same way (`run_guest_command`).
+                if let Some(h) = self.lan.as_mut() {
+                    h.hub.sync_all_effects();
+                }
             }
         }
     }

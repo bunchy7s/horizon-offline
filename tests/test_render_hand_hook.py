@@ -13,7 +13,8 @@ class RenderHandHookTests(unittest.TestCase):
     def test_each_hand_can_be_cancelled(self):
         source = (ROOT / "crates/horizon-client/src/game.rs").read_text()
         start = source.index("            let mut canceled = false;", source.index("fn hand_geometry("))
-        end = source.index("            // The main hand on its arm", start)
+        # The pose hook after it (render_hand_pose) is not part of the cancellation dispatch.
+        end = source.index("            let (mut x, mut y, mut z, mut pitch", start)
         dispatch = source[start:end]
         self.assertLess(source.index("if !shown[i]", source.index("fn hand_geometry(")), start)
         self.assertLess(end, source.index("let Some(stack) = item", end))

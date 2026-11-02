@@ -72,9 +72,7 @@ impl Builder {
         // ticks and the frame leave, so more cores can share it: a third of
         // the threads, rounded up (a 4-thread machine's one thread left idle
         // time while the far trees and structures came in).
-        let count = thread::available_parallelism()
-            .map_or(1, |n| n.get().div_ceil(3))
-            .clamp(1, 12);
+        let count = horizon_threads::worker_count().div_ceil(3).clamp(1, 12);
         let threads = (0..count)
             .map(|_| Self::spawn(terrain.clone(), shared.clone(), tx.clone()))
             .collect();
