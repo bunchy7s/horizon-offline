@@ -869,5 +869,10 @@
   "Update available": "업데이트 가능",
   "You haven't played this one yet. Press Play to start.": "아직 이 항목을 플레이하지 않았습니다. '플레이'를 눌러 시작하세요.",
   "You've played for {time}! Last played {when}.": "{time} 동안 플레이했습니다! 마지막 플레이: {when}.",
-  "{count} screenshots": "스크린샷 {count}개"
+  "{count} screenshots": "스크린샷 {count}개",
+  "1 server in {name}": "{name}의 서버 1개",
+  "Click again to remove": "제거하려면 다시 클릭하세요",
+  "No servers saved in this instance.": "이 인스턴스에 저장된 서버가 없습니다.",
+  "No worlds yet. Make one in the game and it shows up here.": "아직 월드가 없습니다. 게임에서 월드를 만들면 여기에 표시됩니다.",
+  "{count} servers in {name}": "{name}의 서버 {count}개"
 }
