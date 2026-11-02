@@ -25,7 +25,7 @@ Font.PreparedTextBuilder.visit	skip:other		visitor over prepared glyphs for draw
 Font.PreparedTextBuilder.getTextColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	style colour with the base colour's alpha
 Font.PreparedTextBuilder.getShadowColor	inline	crates/horizon-client-render/src/hud.rs::HudBatch::text_styled	gap: minor: style shadow colour is ignored; shadow is always 0.25 of the text colour
 Font.PreparedTextBuilder.bounds	skip:other		bounds of prepared text for vanilla hit tests; Horizon hit-tests by advance
-Gui.update	skip:other		narrator-only update (handleDelayedNarration); Horizon has no narrator
+Gui.update	inline	crates/horizon-client/src/game/narrator.rs::Game::narrate_screen	once a turn after the frame's widgets were read: ScreenNarrator::frame runs the narration handleDelayedNarration makes due and a new screen's
 Gui.isPausing	port	crates/horizon-client/src/game.rs::Game::pauses_game	gap: minor: checks the open screen only, not the overlay part
 Gui.addSocialInteractionsToast	skip:service		social interactions are not offered by Horizon
 Gui.handleKeybinds	port	crates/horizon-client/src/game.rs::Game::key_pressed	gap: minor: the social interactions key has no port (see addSocialInteractionsToast)
@@ -113,8 +113,8 @@ AbstractSelectionList.nextEntry	port	crates/horizon-client/src/game/key_focus.rs
 AbstractSelectionList.extractListItems	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	rows culled to the visible band
 AbstractSelectionList.extractItem	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	selection outline and row content
 AbstractSelectionList.extractSelection	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	two fills: outline colour and black inner
-AbstractSelectionList.getRowBottom	skip:other		only the LAN-found narration uses it; Horizon has no narrator
-AbstractSelectionList.narrationPriority	skip:other		screen-reader priority; Horizon has no narrator
+AbstractSelectionList.getRowBottom	inline	crates/horizon-client/src/multiplayer.rs::Multiplayer::lan_found_narrations	ServerSelectionList.updateNetworkServers is its only caller, testing whether a LAN world found since the last call has its row in view; that test computes the row's top and bottom here (row_top + ROW_HEIGHT)
+AbstractSelectionList.narrationPriority	inline	crates/horizon-client/src/screen_narrator.rs::Ctx::priority	focused, else hovered (a list's is a row under the mouse), else none; a container list is focused with one of its widgets
 AbstractSelectionList.removeEntry	skip:other		rows are rebuilt from the model when they change (update_list, server list), so there is no single-row removal
 AbstractSelectionList.narrateListElementPosition	skip:other		narration only
 AbstractSelectionList.TrackedList.set	skip:java		delegate list wrapper
