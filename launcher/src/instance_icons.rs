@@ -83,7 +83,7 @@ impl Launcher {
     /// The image under `key` at `size` points, made from `bytes` the first time. A missing one is
     /// remembered only when `remember_missing` (a file that may never exist); else it is asked
     /// again next frame (a logo still downloading).
-    fn icon_image(
+    pub(super) fn icon_image(
         &mut self,
         key: String,
         size: f32,

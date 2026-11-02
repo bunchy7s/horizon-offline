@@ -64,7 +64,7 @@ Parrot.get	skip:other		reads the variant as a data component for predicates; Hor
 Parrot.applyImplicitComponent	missing		minor: a spawn egg's parrot_variant component is not applied (only bucketed mobs read item components)
 Parrot.defineSynchedData	skip:other		synched variant id; Horizon keeps it in extra.variant (remote_mob_data.rs reads index 20)
 Parrot.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	Variant clamped to 0 to 4, red and blue when absent
-Parrot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no parrot arm, the lead attaches at the full eye height instead of 0.5 times it
+Parrot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	half of the eye height, the default width/2 forwards
 Parrot.ParrotWanderGoal.getPosition	port	crates/horizon-client/src/mobs/parrot.rs::wander_pos	
 Parrot.ParrotWanderGoal.getTreePos	port	crates/horizon-client/src/mobs/parrot.rs::tree_pos	
 ShoulderRidingEntity.setEntityOnShoulder	port	crates/horizon-client/src/game/shoulders.rs::Game::parrot_to_shoulder	saved into the first free ShoulderEntityLeft or ShoulderEntityRight slot, the parrot removed from the world
@@ -82,7 +82,7 @@ Pig.thunderHit	port	crates/horizon-client/src/game/lightning.rs::Game::thunder_h
 Pig.tickRidden	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	turns to the rider's yaw, pitch halved, and ticks the boost
 Pig.getRiddenSpeed	inline	crates/horizon-client/src/mobs/equine.rs::ridden_step	movement speed times 0.225 times the boost factor
 Pig.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's variant, not either parent's by a coin
-Pig.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no pig arm, the lead attaches at the full eye height instead of 0.6 times it
+Pig.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.6 of the eye height, the default width/2 forwards
 Pig.getSoundSet	inline	crates/horizon-client/src/mobs/ai.rs::voice_sounds	gap: player: only the baby or adult classic sounds are used, so mini and big sound variants (chosen and saved) never sound different
 Pig.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome tag and a random sound variant
 PigSoundVariants.bootstrap	skip:data		sound variant registry; names come from finalize::sound_variants
@@ -110,7 +110,7 @@ Rabbit.applyImplicitComponent	missing		minor: a spawn egg's rabbit variant compo
 Rabbit.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome, shared across a group
 Rabbit.getRandomRabbitVariant	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	white and white splotched in snowy biomes, gold in deserts, else brown, salt or black
 Rabbit.checkRabbitSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Rabbit arm: rabbits_spawnable_on below and bright enough
-Rabbit.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no rabbit arm, the lead attaches at the full eye height instead of 0.6 times it
+Rabbit.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.6 of the eye height, the default width/2 forwards
 Rabbit.shouldPlayIdleAnimation	inline	crates/horizon-client/src/mobs/rabbit.rs::base_tick	idle timeout over, not leashed, not no-AI
 Rabbit.RabbitAvoidEntityGoal.canUse	port	crates/horizon-client/src/mobs/rabbit.rs::register	flees players (8), wolves (10) and monsters (4) unless it is the killer rabbit
 Rabbit.RaidGardenGoal.canUse	port	crates/horizon-client/src/mobs/rabbit.rs::RaidGarden::can_use	a MoveToBlockGoal (0.7, 16) over ripe carrots, delayed 200 to 400 ticks; no raid while mob griefing is off or while moreCarrotTicks is still positive

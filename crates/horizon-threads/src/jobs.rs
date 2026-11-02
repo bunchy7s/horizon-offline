@@ -165,10 +165,7 @@ static POOL: OnceLock<Pool> = OnceLock::new();
 /// but one, which the render and server threads share with them (they run
 /// ahead of the workers: [`crate::favour_current`], [`crate::behind_server`]).
 pub fn default_threads() -> usize {
-    std::thread::available_parallelism()
-        .map_or(2, |n| n.get())
-        .saturating_sub(1)
-        .max(1)
+    crate::worker_count().saturating_sub(1).max(1)
 }
 
 /// Size the process's pool before its first use (later calls change

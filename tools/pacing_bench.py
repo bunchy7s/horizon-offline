@@ -34,6 +34,8 @@ slowest frames' span lines next to each scenario's figures.
 
     python3 tools/pacing_bench.py --build target/fast --label main --distances 32
     python3 tools/pacing_bench.py --compare main mybranch
+    python3 tools/pacing_bench.py --max-fps 60 ...   # a player's frame cap: the limiter's pacing shows
+    python3 tools/pacing_bench.py --vsync --max-fps 120 --size 1920x1080 ...   # vanilla's defaults, in a window
 
 Results: .local/pacing-bench/<label>-rd<N>.json. Use alternated A/B runs on a loaded machine.
 """
@@ -311,6 +313,18 @@ def launch(args, distance, tag):
     game_dir = WORK / f"game-{args.label}-rd{distance}{tag}"
     shutil.rmtree(game_dir, ignore_errors=True)
     pb.write_options(game_dir, distance)
+    if args.max_fps:
+        options = game_dir / "options.txt"
+        text = options.read_text()
+        if "maxFps:260\n" not in text:
+            raise RuntimeError("perf_bench's options no longer set maxFps:260")
+        options.write_text(text.replace("maxFps:260\n", f"maxFps:{args.max_fps}\n"))
+    if args.vsync:
+        options = game_dir / "options.txt"
+        text = options.read_text()
+        if "enableVsync:false\n" not in text:
+            raise RuntimeError("perf_bench's options no longer set enableVsync:false")
+        options.write_text(text.replace("enableVsync:false\n", "enableVsync:true\n"))
     sock = Path("/tmp") / f"horizon-pacing-{os.getpid()}{tag}.sock"
     sock.unlink(missing_ok=True)
     client = Path(args.build).resolve() / "horizon-client"
@@ -456,6 +470,10 @@ def main():
     parser.add_argument("--timeout", type=float, default=600)
     parser.add_argument("--spike-ms", type=float, default=20.0, help="HORIZON_SPIKES threshold (CPU ms)")
     parser.add_argument("--offscreen", action="store_true")
+    parser.add_argument("--max-fps", type=int, help="frame cap (options.txt maxFps; default 260 = none): measures "
+                        "the frame limiter's pacing, and at a player's 60 each frame takes in more streamed work")
+    parser.add_argument("--vsync", action="store_true", help="VSync on (options.txt enableVsync), in a window: "
+                        "frames wait for the display's refresh, as most players' do")
     parser.add_argument("--size", help="window size WxH (default the game's 1280x720); a small one keeps a software "
                         "renderer (lavapipe) from hiding the CPU side")
     parser.add_argument("--env", action="append", default=[], help="KEY=VALUE for the game")

@@ -73,7 +73,7 @@ Minecraft.createUserApiService	skip:service
 Minecraft.abortResourcePackRecovery	missing		minor: no automatic abort when a pack keeps failing; errors stay on the Packs page
 Minecraft.addResourcePackLoadFailToast	port	crates/horizon-client/src/game/packs.rs::Game::reload_packs	gap: minor: the failure is a Packs-page error, not a toast
 Minecraft.triggerResourcePackRecovery	missing		minor: a failing pack at runtime is not removed; reload_packs only reports reload errors
-Minecraft.run	port	crates/horizon-client/src/game.rs::run	the main loop
+Minecraft.run	port	crates/horizon-client/src/game.rs::run_event_loop	the loop that runs the game to its end, the window event loop or Game::run_headless when headless, then the crash report as emergencySaveAndCrash does; run_with is the process entry that reaches it
 Minecraft.saveReport	port	crates/horizon-client-render/src/crash.rs::Report::save	
 Minecraft.saveReportAndShutdownSoundManager	port	crates/horizon-client-render/src/crash.rs::Report::save	gap: minor: sound shutdown is not part of Report::save
 Minecraft.selfTest	skip:debug		dev self-test, disabled in vanilla (the IS_RUNNING_IN_IDE && false check)

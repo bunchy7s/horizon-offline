@@ -94,7 +94,7 @@ Cat.createAttributes	skip:data		attributes come from entity-types.json
 Cat.handleLieDown	inline	crates/horizon-client/src/mobs/tame.rs::cat_ai_step	gap: minor: purring and the amounts are ported; lying on top of a sleeping player (a 0.15 shift of the pose) is not tracked
 Cat.updateLieDownAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
 Cat.updateRelaxStateOneAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
-Cat.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: minor: a sitting cat is refused as a mate, vanilla only needs both tame and in love
+Cat.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	both tamed; the seeker's sitting pose does not matter, and only a wolf's partner is refused while it sits
 Cat.removeWhenFarAway	port	crates/horizon-client/src/mobs/ai.rs::feline_removed_when_far	`!isTame() && tickCount > 2400`, read by check_despawn's removable flag
 Cat.reassessTameGoals	inline	crates/horizon-client/src/mobs/tame.rs::register_cat	the player avoidance goal is conditioned on being untamed instead of added and removed
 Cat.tryToTame	inline	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	one chance in three, then tame, sitting, event 7 or 6 and the advancement trigger
@@ -112,7 +112,7 @@ Ocelot.handleEntityEvent	port	crates/horizon-client-render/src/particles.rs::ent
 Ocelot.reassessTrustingGoals	port	crates/horizon-client/src/mobs/tame.rs::register_cat	gap: player: the player-avoidance and tempt goals are always registered; trust is not modelled, so a trusting ocelot keeps them
 Ocelot.checkSpawnObstruction	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_obstruction	unobstructed, no liquid, at or above sea level on grass or leaves
 Ocelot.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	baby chance 1.0 for a group
-Ocelot.getLeashOffset	missing		minor: the lead ties at full eye height instead of half of it (leash::leash_offset only special-cases llamas)
+Ocelot.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	half of the eye height, the default width/2 forwards
 Ocelot.OcelotAvoidEntityGoal.canUse	port	crates/horizon-client/src/mobs/tame.rs::OcelotAvoid::can_use	gap: player: no isTrusting check (trust is not modelled), so a trusting ocelot still flees the player; 16 blocks, 0.8 and 1.33 match
 Ocelot.OcelotAvoidEntityGoal.canContinueToUse	port	crates/horizon-client/src/mobs/tame.rs::OcelotAvoid::can_continue	`!isTrusting() && super`, the same guard as its canUse
 Ocelot.OcelotTemptGoal.canScare	port	crates/horizon-client/src/mobs/tame.rs::OcelotTempt::scared_unless_trusting	the tempt goal's canScare with a trusting ocelot's scare turned off
