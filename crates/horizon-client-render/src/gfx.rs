@@ -3,7 +3,9 @@
 //! world coordinates keep full precision.
 use crate::{
     Result,
+    block_entity_render::{StaticCacheFrameStats, StaticSectionRevision, StaticSectionSnapshot},
     environment::Sky,
+    fast_hash::FxHashMap,
     graphics::GraphicsApi,
     hud::{HudBatch, HudRenderer},
     mesher::{Part as Quads, SectionMesh, Sides, TerrainVertex, Vertex},
@@ -31,6 +33,12 @@ const TERRAIN_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
 /// entity.wgsl after the OverlayTexture constants it reads.
 fn entity_shader() -> String {
     crate::overlay::wgsl_constants() + include_str!("entity.wgsl")
+}
+
+/// The static block-entity vertex entry point shares entity shading but lives
+/// in its own source file and pipeline.
+fn static_entity_shader() -> String {
+    entity_shader() + include_str!("static_entity.wgsl")
 }
 
 #[cfg(test)]
@@ -332,6 +340,20 @@ struct Globals {
     hdr_windows: [[f32; 4]; 2],
     hdr_light: [f32; 4],
 }
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct StaticEntityUniform {
+    camera_block: [i32; 4],
+    camera_fraction: [f32; 4],
+}
+struct GpuStaticEntitySection {
+    buffer: wgpu::Buffer,
+    origin_buffer: wgpu::Buffer,
+    origin: [i32; 3],
+    capacity: u64,
+    revision: u64,
+    vertices: u32,
+}
 pub type SectionKey = (i32, i32, i32);
 /// The water mirror's targets: the world as a camera mirrored about the water plane sees
 /// it, at half the world's resolution (the material stage's `reflection`).
@@ -525,6 +547,9 @@ const COMPACT_BUDGET: u64 = 32 << 20;
 /// A large translucent page starts to shrink (`Renderer::shrink_translucent`)
 /// this long after terrain last arrived, and `SHRINK_RETRY` after a try found
 /// no room.
+/// `Renderer::remove_columns` filters each store once rather than looking up every
+/// section key from this many keys, or from as many as there are resident sections.
+const BULK_REMOVAL_KEYS: usize = 256;
 const SHRINK_SETTLE: std::time::Duration = std::time::Duration::from_secs(1);
 const SHRINK_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
 /// Not before then may a large translucent page start to shrink.
@@ -620,6 +645,12 @@ pub struct Frame<'a> {
     pub nether_lighting: bool,
     /// Camera-relative entity geometry textured from the shared atlas.
     pub entities: &'a [Vertex],
+    /// Per-section cacheable block-entity models. Positions are section-local.
+    pub static_block_entities: &'a [StaticSectionSnapshot],
+    /// Sections currently intersecting the coarse camera frustum.
+    pub visible_static_block_entity_sections: &'a [[i32; 3]],
+    /// Cache work for this frame, reported in bench summaries.
+    pub static_block_entity_stats: StaticCacheFrameStats,
     /// Which entity `entities`' vertices belong to: (first vertex, entity id), each run up
     /// to the next; id 0 for none. Frame generation follows these entities' own motion.
     pub entity_motion: &'a [(u32, u64)],
@@ -812,6 +843,12 @@ pub struct Renderer {
     mirror_group: wgpu::BindGroup,
     mirror: Option<MirrorTarget>,
     entity_pipeline: wgpu::RenderPipeline,
+    static_entity_pipeline: wgpu::RenderPipeline,
+    static_entity_group: wgpu::BindGroup,
+    static_entity_transform: wgpu::Buffer,
+    static_entity_camera: Option<DVec3>,
+    static_entity_catalog_revision: u64,
+    static_entity_frame_stats: StaticCacheFrameStats,
     hdr_mark_pipeline: wgpu::RenderPipeline,
     hdr_hand_unmark_pipeline: wgpu::RenderPipeline,
     hdr_mark_lightning_pipeline: wgpu::RenderPipeline,
@@ -860,6 +897,9 @@ pub struct Renderer {
     hand_globals: wgpu::Buffer,
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
+    static_entity_sections: HashMap<[i32; 3], GpuStaticEntitySection>,
+    static_entity_indices: wgpu::Buffer,
+    static_entity_index_quads: u32,
     entity_batch: EntityBatch,
     /// Ordinary entity models posed on the GPU; `None` without compute shaders.
     entity_skin: Option<entity_skin::EntitySkin>,
@@ -921,7 +961,7 @@ pub struct Renderer {
     lod_leaving: Vec<(SectionKey, std::time::Instant)>,
     /// Finished tile meshes `upload_lods` has yet to upload.
     lod_pending: Option<lod::Pending>,
-    detail_columns: crate::fast_hash::FxHashMap<(i32, i32), SectionMask>,
+    detail_columns: FxHashMap<(i32, i32), SectionMask>,
     /// Bumped whenever a column becomes or stops being complete.
     detail_revision: u64,
     arena: arena::Arena,
@@ -970,10 +1010,17 @@ pub struct Renderer {
     /// The shadow camera's draws by page, in bands of distance from the light.
     shadow_runs: page_runs::PageRuns,
     /// Block-entity blocks per meshed section (world position, state id).
-    block_entities: crate::fast_hash::FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
+    block_entities: FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
+    /// Changes on every mesh upload for that section; block-entity static
+    /// geometry also depends on the section's packed light.
+    block_entity_section_revisions: FxHashMap<SectionKey, u64>,
+    /// Changes only when the block-entity positions/states in a section
+    /// change. Empty-section tombstones remain until that section unloads so
+    /// the static cache can remove deleted models without a global flush.
+    block_entity_membership_revisions: FxHashMap<SectionKey, u64>,
     /// When each section was first uploaded (`RenderSection.uploadedTime`): kept across meshing
     /// it again, gone with its column. Sections that fade in over far terrain are not in it.
-    section_uploaded: crate::fast_hash::FxHashMap<SectionKey, std::time::Instant>,
+    section_uploaded: FxHashMap<SectionKey, std::time::Instant>,
     /// When `section_uploaded` last gained a section: once the fade time has passed since,
     /// every section is whole and frames skip the per-section lookups.
     newest_upload: Option<std::time::Instant>,
@@ -983,7 +1030,7 @@ pub struct Renderer {
     /// Changes whenever `block_entities` does (unique across renderers).
     block_entity_revision: u64,
     /// The light sources of each section and their revision, for `block_light`.
-    light_blocks: crate::fast_hash::FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
+    light_blocks: FxHashMap<SectionKey, Vec<([i32; 3], u32)>>,
     light_revision: u64,
     /// VisGraph face connectivity per meshed section (cave culling).
     occlusion: occlusion::Occlusion,
@@ -2712,6 +2759,10 @@ impl Renderer {
             label: Some("Horizon entities"),
             source: wgpu::ShaderSource::Wgsl(entity_shader().into()),
         });
+        let static_entity_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Horizon static block entities"),
+            source: wgpu::ShaderSource::Wgsl(static_entity_shader().into()),
+        });
         let entity_bindings = kept.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Entity bindings"),
             entries: &[
@@ -2777,6 +2828,19 @@ impl Renderer {
                 ),
             ],
         });
+        let static_entity_bindings =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Static block-entity transform"),
+                entries: &[entry(
+                    0,
+                    wgpu::ShaderStages::VERTEX,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                )],
+            });
         let weather = weather::Weather::new(
             &device,
             config.format.remove_srgb_suffix(),
@@ -2825,6 +2889,23 @@ impl Renderer {
                 },
             ],
         });
+        let static_entity_transform =
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Static block-entity camera position"),
+                contents: bytemuck::bytes_of(&StaticEntityUniform {
+                    camera_block: [0; 4],
+                    camera_fraction: [0.0; 4],
+                }),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            });
+        let static_entity_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Static block-entity transform"),
+            layout: &static_entity_bindings,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: static_entity_transform.as_entire_binding(),
+            }],
+        });
         let hand_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("First-person hand resources"),
             layout: &entity_bindings,
@@ -2866,6 +2947,11 @@ impl Renderer {
         let entity_layout = kept.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Entity layout"),
             bind_group_layouts: &[Some(&entity_bindings)],
+            ..Default::default()
+        });
+        let static_entity_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Static block-entity layout"),
+            bind_group_layouts: &[Some(&entity_bindings), Some(&static_entity_bindings)],
             ..Default::default()
         });
         let cloud_bindings = kept.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -2911,6 +2997,19 @@ impl Renderer {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &entity_attributes,
         })];
+        let static_entity_origin_attributes = wgpu::vertex_attr_array![7=>Sint32x3];
+        let static_entity_vertex = [
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<Vertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &entity_attributes,
+            }),
+            Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<[i32; 3]>() as u64,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: &static_entity_origin_attributes,
+            }),
+        ];
         #[allow(clippy::too_many_arguments)]
         let entity_pipeline_with = |label,
                                     cull_mode,
@@ -3083,6 +3182,41 @@ impl Renderer {
             alpha_blend,
             false,
         );
+        let static_entity_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Static block entities"),
+                layout: Some(&static_entity_layout),
+                vertex: wgpu::VertexState {
+                    module: &static_entity_shader,
+                    entry_point: Some("vs_static_entity"),
+                    compilation_options: Default::default(),
+                    buffers: &static_entity_vertex,
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &static_entity_shader,
+                    entry_point: Some("fs_entity"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: config.format.remove_srgb_suffix(),
+                        // fs_entity's discard handles binary cutout alpha. Any
+                        // sprite with fractional alpha stays on the blended
+                        // dynamic entity path.
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         // RenderPipelines.ENERGY_SWIRL: BlendFunction.ADDITIVE (one, one), no culling; no depth
         // writes either: vanilla sorts the quads far to near, so every face passes the test.
         let one_one = wgpu::BlendComponent {
@@ -3547,6 +3681,8 @@ impl Renderer {
             usage: entity_skin::EntitySkin::usage(entity_skin.is_some()),
             mapped_at_creation: false,
         });
+        let static_entity_index_quads = 1 << 14;
+        let static_entity_indices = Self::quad_indices(&device, static_entity_index_quads);
         let flat_wanted = flat::wanted(&adapter, &device);
         // Metal draws solid terrain in two passes (`split_solid`): meshes put all
         // their opaque quads first, so each pass draws its part in a run or two.
@@ -3730,6 +3866,7 @@ impl Renderer {
             mirror_group,
             mirror: None,
             entity_pipeline,
+            static_entity_pipeline,
             hdr_mark_pipeline,
             hdr_hand_unmark_pipeline,
             hdr_mark_lightning_pipeline,
@@ -3766,10 +3903,18 @@ impl Renderer {
             screen_capacity,
             entity_group,
             entity_bindings,
+            static_entity_group,
+            static_entity_transform,
+            static_entity_camera: None,
+            static_entity_catalog_revision: 0,
+            static_entity_frame_stats: Default::default(),
             hand_group,
             hand_globals,
             entity_buffer,
             entity_capacity,
+            static_entity_sections: HashMap::default(),
+            static_entity_indices,
+            static_entity_index_quads,
             entity_batch: EntityBatch::default(),
             entity_skin,
             group,
@@ -3835,6 +3980,8 @@ impl Renderer {
             phase2_runs: page_runs::PageRuns::default(),
             shadow_runs: page_runs::PageRuns::default(),
             block_entities: Default::default(),
+            block_entity_section_revisions: Default::default(),
+            block_entity_membership_revisions: Default::default(),
             section_uploaded: Default::default(),
             newest_upload: None,
             newest_lod_fade: None,
@@ -4136,6 +4283,17 @@ impl Renderer {
     pub fn section_count(&self) -> usize {
         self.sections.len()
     }
+    /// Whether the running native pack gives any block a `[[lights]]` colour.
+    pub fn has_light_colors(&self) -> bool {
+        self.native
+            .as_ref()
+            .is_some_and(|native| !native.light_colors.is_empty())
+    }
+    /// The running native pack's `[[lights]]` colour of the block `name`.
+    pub fn light_color(&self, name: &str) -> Option<[f32; 3]> {
+        let native = self.native.as_ref()?;
+        horizon_shader_api::manifest::light_color(&native.light_colors, name)
+    }
     /// The running native pack's `[[particle_lights]]`.
     pub fn particle_lights(&self) -> Option<&[horizon_shader_api::manifest::ParticleLight]> {
         self.native.as_ref().map(|n| n.particle_lights.as_slice())
@@ -4176,6 +4334,17 @@ impl Renderer {
         };
         if changed {
             self.block_entity_revision = next_block_entity_revision();
+            self.block_entity_membership_revisions
+                .insert(key, self.block_entity_revision);
+        }
+        if !mesh.block_entities.is_empty()
+            || self.block_entity_membership_revisions.contains_key(&key)
+        {
+            // Packed light can change with an unchanged BE list. Keep a
+            // tombstone for formerly occupied sections until unload so a
+            // deleted last entity invalidates only its own cached section.
+            self.block_entity_section_revisions
+                .insert(key, next_block_entity_revision());
         }
         let lights_changed = if mesh.lights.is_empty() {
             self.light_blocks.remove(&key).is_some()
@@ -4570,6 +4739,55 @@ impl Renderer {
                 .newest_lod_fade
                 .is_some_and(|t| now.saturating_duration_since(t) < lod::FADE)
     }
+    /// Block entities in sections which can intersect the camera frustum.
+    /// The section bounds include the same one-block margin as the per-block
+    /// check in the game. Sections wholly inside the frustum skip that finer
+    /// check; sections outside it are kept only when a renderer needs to draw
+    /// geometry extending beyond its block (beacon beams, gateways, outlines).
+    pub fn visible_block_entities_in_frustum<'a>(
+        &'a self,
+        fade_seconds: f32,
+        camera: DVec3,
+        frustum: Option<Frustum>,
+        keep_section: impl Fn(u32) -> bool + 'a,
+        keep_long_range: impl Fn(u32) -> bool + 'a,
+    ) -> impl Iterator<Item = (&'a ([i32; 3], u32), bool)> + 'a {
+        let fade = fade_millis(fade_seconds);
+        let now = Instant::now();
+        let min_y = self.layout.min_y();
+        self.block_entities
+            .iter()
+            .filter(move |(key, _)| {
+                chunk_visibility(self.section_elapsed_ms(**key, now), fade)
+                    >= CHUNK_VISIBILITY_THRESHOLD
+            })
+            .filter_map(move |(key, blocks)| {
+                let origin = DVec3::new(
+                    f64::from(key.0 * 16 - 1),
+                    f64::from(min_y + key.1 * 16 - 1),
+                    f64::from(key.2 * 16 - 1),
+                ) - camera;
+                let min = origin.as_vec3();
+                // The last block's expanded bound ends at section_origin + 17.
+                let max = min + Vec3::splat(18.0);
+                let distance_squared = Vec3::ZERO.max(min).min(max).length_squared();
+                let in_range = distance_squared <= 64.0 * 64.0
+                    || (distance_squared <= 256.0 * 256.0
+                        && blocks.iter().any(|(_, state)| keep_long_range(*state)));
+                if !in_range {
+                    return None;
+                }
+                let (intersects, fully_inside) = frustum.map_or((true, true), |view| {
+                    let fully_inside = view.contains(min, max);
+                    (fully_inside || view.intersects(min, max), fully_inside)
+                });
+                (intersects || blocks.iter().any(|(_, state)| keep_section(*state)))
+                    .then_some((blocks, fully_inside))
+            })
+            .flat_map(|(blocks, fully_inside)| {
+                blocks.iter().map(move |block| (block, fully_inside))
+            })
+    }
     /// Milliseconds since `key` was uploaded; a section not in `section_uploaded` is old.
     fn section_elapsed_ms(&self, key: SectionKey, now: std::time::Instant) -> u64 {
         self.section_uploaded.get(&key).map_or(u64::MAX, |t| {
@@ -4580,9 +4798,27 @@ impl Renderer {
     pub fn block_entity_revision(&self) -> u64 {
         self.block_entity_revision
     }
+    /// Both mesh/light and block-entity membership revisions for a section
+    /// key (`x`, section-y relative to the dimension's minimum, `z`).
+    pub fn block_entity_section_revision(
+        &self,
+        section: [i32; 3],
+    ) -> Option<StaticSectionRevision> {
+        let key = (section[0], section[1], section[2]);
+        Some(StaticSectionRevision {
+            mesh: *self.block_entity_section_revisions.get(&key)?,
+            block_entities: *self.block_entity_membership_revisions.get(&key)?,
+        })
+    }
+    /// Block-entity cache work and upload volume from the last rendered frame.
+    pub fn static_block_entity_frame_stats(&self) -> StaticCacheFrameStats {
+        self.static_entity_frame_stats
+    }
     /// Drops every section, for a level whose chunks hold `layout`.
     pub fn clear_sections(&mut self, layout: crate::chunk::ColumnLayout) {
         self.block_entities.clear();
+        self.block_entity_section_revisions.clear();
+        self.block_entity_membership_revisions.clear();
         self.section_uploaded.clear();
         self.newest_upload = None;
         self.newest_lod_fade = None;
@@ -4733,6 +4969,18 @@ impl Renderer {
         }
     }
     pub fn remove_columns(&mut self, columns: impl IntoIterator<Item = (i32, i32)>) {
+        let columns: Vec<(i32, i32)> = columns.into_iter().collect();
+        // Most of the view at once (a teleport at render distance 32 drops some 3700
+        // columns): a pass over each store instead of a lookup per section key, which
+        // took 10 ms of one frame. Far terrain fades the sections out instead.
+        let keys = columns.len() * self.layout.sections();
+        if self.lods.is_empty()
+            && self.lod_cutout.is_empty()
+            && keys >= self.sections.len().max(BULK_REMOVAL_KEYS)
+        {
+            self.remove_columns_at_once(&columns);
+            return;
+        }
         let mut released = Vec::new();
         let mut block_entities = false;
         for (x, z) in columns {
@@ -4744,6 +4992,8 @@ impl Renderer {
             for sy in 0..self.layout.sections() as i32 {
                 let key = (x, sy, z);
                 block_entities |= self.block_entities.remove(&key).is_some();
+                self.block_entity_section_revisions.remove(&key);
+                self.block_entity_membership_revisions.remove(&key);
                 if self.light_blocks.remove(&key).is_some() {
                     self.light_revision += 1;
                 }
@@ -4762,6 +5012,35 @@ impl Renderer {
         if block_entities {
             self.block_entity_revision = next_block_entity_revision();
         }
+        self.release_meshes(released);
+    }
+    /// `remove_columns` for a large share of the resident sections: each store filtered
+    /// once by column.
+    fn remove_columns_at_once(&mut self, columns: &[(i32, i32)]) {
+        let gone: crate::fast_hash::FxHashSet<(i32, i32)> = columns.iter().copied().collect();
+        let complete = self.complete_column();
+        for &(x, z) in columns {
+            if self.detail_columns.remove(&(x, z)) == Some(complete) {
+                self.detail_revision += 1;
+            }
+            self.occlusion.remove_column(x, z);
+        }
+        let kept = |key: &SectionKey| !gone.contains(&(key.0, key.2));
+        let before = self.block_entities.len();
+        self.block_entities.retain(|key, _| kept(key));
+        if self.block_entities.len() != before {
+            self.block_entity_revision = next_block_entity_revision();
+        }
+        let before = self.light_blocks.len();
+        self.light_blocks.retain(|key, _| kept(key));
+        self.light_revision += (before - self.light_blocks.len()) as u64;
+        self.section_uploaded.retain(|key, _| kept(key));
+        let released = self.sections.remove_columns(&gone);
+        self.release_meshes(released);
+    }
+    /// Gives the removed sections' quads back to their arenas; the sections themselves
+    /// (their sort centres) drop on a thread of their own when there are many.
+    fn release_meshes(&mut self, released: Vec<SectionGpu>) {
         if let Some(flat) = &mut self.flat {
             for id in released.iter().filter_map(|s| s.flat_id) {
                 flat.remove(id);
@@ -4777,6 +5056,9 @@ impl Renderer {
             .release_all(released.iter().filter_map(|s| s.vertex_ranges(split).0));
         if let Some(arena) = &mut self.translucent_arena {
             arena.release_all(released.iter().filter_map(|s| s.vertex_ranges(true).1));
+        }
+        if released.len() >= BULK_REMOVAL_KEYS {
+            arena::free_later(released);
         }
     }
     /// Horizon's resolution scale (world pixels per window pixel) and FXAA.
@@ -6676,6 +6958,125 @@ impl Renderer {
                 0,
             );
         }
+        let static_sections = frame.static_block_entities;
+        let mut static_bytes_uploaded = 0;
+        let catalog_revision = frame.static_block_entity_stats.snapshot_revision;
+        if catalog_revision != self.static_entity_catalog_revision {
+            self.static_entity_sections.retain(|section, _| {
+                static_sections
+                    .binary_search_by_key(section, |snapshot| snapshot.section)
+                    .is_ok()
+            });
+            for snapshot in static_sections {
+                let vertices = snapshot.vertices.len() as u64;
+                let gpu = self
+                    .static_entity_sections
+                    .entry(snapshot.section)
+                    .or_insert_with(|| {
+                        let capacity = vertices.next_power_of_two().max(4);
+                        let origin_buffer =
+                            self.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("Static block-entity section origin"),
+                                    contents: bytemuck::bytes_of(&snapshot.origin),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                });
+                        static_bytes_uploaded += std::mem::size_of_val(&snapshot.origin) as u64;
+                        GpuStaticEntitySection {
+                            buffer: self.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("Static block-entity section vertices"),
+                                size: capacity * std::mem::size_of::<Vertex>() as u64,
+                                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            }),
+                            origin_buffer,
+                            origin: snapshot.origin,
+                            capacity,
+                            revision: 0,
+                            vertices: 0,
+                        }
+                    });
+                if gpu.origin != snapshot.origin {
+                    gpu.origin_buffer =
+                        self.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("Static block-entity section origin"),
+                                contents: bytemuck::bytes_of(&snapshot.origin),
+                                usage: wgpu::BufferUsages::VERTEX,
+                            });
+                    gpu.origin = snapshot.origin;
+                    static_bytes_uploaded += std::mem::size_of_val(&snapshot.origin) as u64;
+                }
+                if gpu.revision == snapshot.revision {
+                    continue;
+                }
+                if vertices > gpu.capacity {
+                    gpu.capacity = vertices.next_power_of_two();
+                    gpu.buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Static block-entity section vertices"),
+                        size: gpu.capacity * std::mem::size_of::<Vertex>() as u64,
+                        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                }
+                self.uploads.buffer(
+                    &mut encoder,
+                    &gpu.buffer,
+                    0,
+                    bytemuck::cast_slice(&snapshot.vertices),
+                );
+                static_bytes_uploaded += vertices * std::mem::size_of::<Vertex>() as u64;
+                gpu.revision = snapshot.revision;
+                gpu.vertices = vertices as u32;
+            }
+            self.static_entity_catalog_revision = catalog_revision;
+        }
+        let static_entity_quads = frame
+            .visible_static_block_entity_sections
+            .iter()
+            .filter_map(|section| self.static_entity_sections.get(section))
+            .map(|section| section.vertices / 4)
+            .sum::<u32>();
+        let max_static_section_quads = frame
+            .visible_static_block_entity_sections
+            .iter()
+            .filter_map(|section| self.static_entity_sections.get(section))
+            .map(|section| section.vertices / 4)
+            .max()
+            .unwrap_or(0);
+        if max_static_section_quads > self.static_entity_index_quads {
+            self.static_entity_index_quads = max_static_section_quads.next_power_of_two();
+            self.static_entity_indices =
+                Self::quad_indices(&self.device, self.static_entity_index_quads);
+        }
+        if !frame.visible_static_block_entity_sections.is_empty()
+            && self.static_entity_camera != Some(frame.camera)
+        {
+            let camera_floor = [
+                frame.camera.x.floor() as i32,
+                frame.camera.y.floor() as i32,
+                frame.camera.z.floor() as i32,
+            ];
+            let transform = StaticEntityUniform {
+                camera_block: [camera_floor[0], camera_floor[1], camera_floor[2], 0],
+                camera_fraction: [
+                    (frame.camera.x - f64::from(camera_floor[0])) as f32,
+                    (frame.camera.y - f64::from(camera_floor[1])) as f32,
+                    (frame.camera.z - f64::from(camera_floor[2])) as f32,
+                    0.0,
+                ],
+            };
+            self.uploads.buffer(
+                &mut encoder,
+                &self.static_entity_transform,
+                0,
+                bytemuck::bytes_of(&transform),
+            );
+            static_bytes_uploaded += std::mem::size_of::<StaticEntityUniform>() as u64;
+            self.static_entity_camera = Some(frame.camera);
+        }
+        self.static_entity_frame_stats = frame.static_block_entity_stats;
+        self.static_entity_frame_stats.static_bytes_uploaded = static_bytes_uploaded;
         self.entity_outline.prepare(
             &self.device,
             &mut self.uploads,
@@ -7571,8 +7972,30 @@ impl Renderer {
             if surface.is_some() {
                 drop(pass);
                 pass = plain_pass(&mut encoder);
-                pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             }
+            if static_entity_quads > 0 {
+                pass.set_pipeline(&self.static_entity_pipeline);
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                pass.set_bind_group(1, &self.static_entity_group, &[]);
+                pass.set_index_buffer(
+                    self.static_entity_indices.slice(..),
+                    wgpu::IndexFormat::Uint32,
+                );
+                for section in frame.visible_static_block_entity_sections {
+                    let Some(gpu) = self.static_entity_sections.get(section) else {
+                        continue;
+                    };
+                    let quads = gpu.vertices / 4;
+                    if quads == 0 {
+                        continue;
+                    }
+                    pass.set_vertex_buffer(0, gpu.buffer.slice(..));
+                    pass.set_vertex_buffer(1, gpu.origin_buffer.slice(..));
+                    pass.draw_indexed(0..quads * 6, 0, 0..1);
+                }
+                pass.set_bind_group(0, &self.group, &[]);
+            }
+            pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
             if entity_quads > 0 {
                 pass.set_pipeline(&self.entity_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
@@ -9170,6 +9593,8 @@ fn frustum(m: Mat4) -> [Vec4; 6] {
 
 #[cfg(test)]
 mod tests {
+    use crate::gfx::static_entity_shader;
+
     fn adapter(device_type: wgpu::DeviceType) -> wgpu::AdapterInfo {
         wgpu::AdapterInfo {
             name: "test adapter".into(),
@@ -9577,6 +10002,8 @@ mod tests {
             } else if name == "oit_features.wgsl" {
                 let base = super::entity_shader() + include_str!("oit.wgsl");
                 sources.push((path, base + &text));
+            } else if name == "static_entity.wgsl" {
+                sources.push((path, static_entity_shader()));
             } else if name == "oit_border.wgsl" {
                 let base = include_str!("border.wgsl").to_owned() + include_str!("oit.wgsl");
                 sources.push((path, base + &text));
