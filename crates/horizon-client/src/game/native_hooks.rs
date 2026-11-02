@@ -3410,6 +3410,18 @@ impl Game<'_> {
     pub(super) fn native_player_shield_disable(&mut self, player: u128, name: &str, ticks: u32) {
         let _ = (player, name, ticks);
     }
+    /// A server player selected a loom pattern, after the loom menu accepted
+    /// the button. `pattern` is the zero-based button index. Helpers looking
+    /// up the guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_loom_pattern_select@.
+    pub(super) fn native_player_loom_pattern_select(
+        &mut self,
+        player: u128,
+        name: &str,
+        pattern: i32,
+    ) {
+        let _ = (player, name, pattern);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

@@ -438,9 +438,22 @@ impl Game<'_> {
         }) {
             return;
         }
+        let identity = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()));
+        let mut selected = false;
+        let opened = host
+            .play
+            .get(&conn)
+            .and_then(|p| p.station.as_ref())
+            .is_some_and(|s| s.window == window && s.kind == StationKind::Loom);
         self.lan_station_op(host, conn, Some(window), |menu, env| {
-            menu.button(env, id);
+            selected = menu.button(env, id);
         });
+        if opened
+            && selected
+            && let Some((player, name)) = identity
+        {
+            self.native_player_loom_pattern_select(player, &name, id);
+        }
     }
 
     /// The whole station menu and its changed data slots for the client
