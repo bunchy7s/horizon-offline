@@ -33,7 +33,7 @@ TagPredicate.codec	skip:java		codec
 TagPredicate.is	skip:java		builder
 TagPredicate.isNot	skip:java		builder
 TagPredicate.matches	inline	crates/horizon-client/src/advancements.rs::id_matches	gap: minor: the #tag form is read; the negated expected=false form is not kept
-CubeMobPredicate.matches	missing		minor: type_specific/cube_mob (slime size) is not read; no vanilla advancement uses it
+CubeMobPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/cube_mob arm, the size bounds against the mob's own size; entity() in advancements.rs has no arm for it and answers false, so an advancement asking for one never matches
 DistanceToPlayerPredicate.matches	port	crates/horizon-client/src/advancements.rs::distance	the distance key of entity(): from the player to the entity
 EntityEquipmentPredicate.captainPredicate	skip:data		datagen builder for the raid captain predicate (VanillaAdventureAdvancements)
 EntityEquipmentPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	the equipment key: the seven slots
@@ -66,8 +66,8 @@ PlayerPredicate.Builder.checkAdvancementDone	skip:java		builder
 PlayerPredicate.Builder.checkAdvancementCriterions	skip:java		builder
 PlayerPredicate.Builder.build	skip:java		builder
 PlayerPredicate.StatMatcher.createTypedCodec	skip:java		codec
-RaiderPredicate.matches	missing		minor: type_specific/raider is not read in entity(); no vanilla advancement uses it
-SheepPredicate.matches	missing		minor: type_specific/sheep is not read; no vanilla advancement uses it
+RaiderPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/raider arm: captain matches, and has_raid matches no raid running here; the advancement reader answers false for the key
+SheepPredicate.matches	inline	crates/horizon-world/src/loot.rs::Context::entity_matches	the loot reader's minecraft:type_specific/sheep arm, the sheared flag; the advancement reader answers false for the key
 SteppingOnPredicate.matches	inline	crates/horizon-client/src/advancements.rs::entity	gap: minor: no on-ground test; the block is read 0.5 below the feet
 TargetedEntityPredicate.matches	missing		minor: targeted_entity key is not read; no vanilla advancement uses it
 TeamPredicate.matches	missing		minor: team key is not read though scoreboard teams exist; no vanilla advancement uses it
