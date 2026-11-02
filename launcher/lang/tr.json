@@ -869,5 +869,10 @@
   "No notes yet": "Henüz not yok",
   "No screenshots yet. Press F2 in the game.": "Henüz ekran görüntüsü yok. Oyunda F2'ye bas.",
   "Patch log": "Değişiklik günlüğü",
-  "See all": "Tümünü gör"
+  "See all": "Tümünü gör",
+  "No worlds yet. Make one in the game and it shows up here.": "Henüz dünya yok. Oyunda bir tane oluşturun, burada görünür.",
+  "No servers saved in this instance.": "Bu kurulumda kayıtlı sunucu yok.",
+  "1 server in {name}": "{name} içinde 1 sunucu",
+  "{count} servers in {name}": "{name} içinde {count} sunucu",
+  "Click again to remove": "Kaldırmak için tekrar tıklayın"
 }

@@ -869,5 +869,10 @@
   "No notes yet": "暂无说明",
   "No screenshots yet. Press F2 in the game.": "还没有截图。在游戏中按 F2。",
   "Patch log": "更新日志",
-  "See all": "查看全部"
+  "See all": "查看全部",
+  "No worlds yet. Make one in the game and it shows up here.": "还没有世界。在游戏中创建一个，它就会显示在这里。",
+  "No servers saved in this instance.": "此实例中没有保存的服务器。",
+  "1 server in {name}": "{name} 中有 1 个服务器",
+  "{count} servers in {name}": "{name} 中有 {count} 个服务器",
+  "Click again to remove": "再次点击以移除"
 }

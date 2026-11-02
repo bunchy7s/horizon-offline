@@ -63,9 +63,13 @@ impl Launcher {
             }
             HomeTab::Worlds => (
                 None,
-                self.worlds_section(cx).map(IntoElement::into_any_element),
+                self.glass_worlds(cx).map(IntoElement::into_any_element),
             ),
-            HomeTab::Multiplayer => split(self.multiplayer_section(cx)),
+            HomeTab::Multiplayer => (
+                None,
+                self.glass_multiplayer(cx)
+                    .map(IntoElement::into_any_element),
+            ),
             HomeTab::Packs => split(self.packs_section(cx)),
             HomeTab::Screenshots => split(self.screenshots_section(cx)),
             HomeTab::Console => split(self.console_section(cx)),
