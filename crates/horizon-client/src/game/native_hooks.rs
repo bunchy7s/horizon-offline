@@ -4871,6 +4871,12 @@ impl Game<'_> {
     ) {
         let _ = (kind, damage, cancel);
     }
+    /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
+    /// that prime instead of breaking are not heard. Server-side.
+    /// @API:native_vehicle_destroy@.
+    pub(super) fn native_vehicle_destroy(&mut self, kind: &str, pos: [f64; 3]) {
+        let _ = (kind, pos);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

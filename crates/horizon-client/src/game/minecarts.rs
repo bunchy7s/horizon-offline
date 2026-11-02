@@ -1910,6 +1910,14 @@ impl Game<'_> {
             if !tnt_prime {
                 self.release_vehicle_container(id);
             }
+            if !tnt_prime {
+                let at = [
+                    self.carts[i].position.x,
+                    self.carts[i].position.y,
+                    self.carts[i].position.z,
+                ];
+                self.native_vehicle_destroy(self.carts[i].kind.id(), at);
+            }
             let mut c = self.carts.remove(i);
             if c.kind == CartKind::Tnt && (fire || speed >= f64::from(0.01f32)) {
                 // MinecartTNT.destroy: prime instead of breaking.

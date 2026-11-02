@@ -1391,6 +1391,7 @@ impl Game<'_> {
         let destroyed = creative || b.damage > 40.0;
         if destroyed {
             let at = [b.position.x, b.position.y, b.position.z];
+            self.native_vehicle_destroy("boat", at);
             self.eject_boat_mobs(i, true);
             let id = self.boats[i].id;
             self.release_vehicle_container(id);
