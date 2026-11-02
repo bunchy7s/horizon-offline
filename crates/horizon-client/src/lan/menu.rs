@@ -437,7 +437,7 @@ pub fn click(
                     }
                 }
             }
-            input::PICKUP_ALL => pickup_all(view, slot, rules),
+            input::PICKUP_ALL => pickup_all(view, slot, button, rules),
             _ => {}
         }
     }
@@ -637,15 +637,21 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     view.set(other, a);
 }
 
-fn pickup_all(view: &mut View, slot: i32, rules: &dyn Rules) {
+fn pickup_all(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
     let _ = slot;
     let Some(mut carried) = view.guest.carried.clone() else {
         return;
     };
     let max = rules.max_stack(&carried.item).max(1);
+    // Button 0 walks the slots from the first, button 1 from the last.
+    let order: Vec<usize> = if button == 0 {
+        (0..view.len()).collect()
+    } else {
+        (0..view.len()).rev().collect()
+    };
     // Partial stacks first, then full ones.
     for full in [false, true] {
-        for i in 0..view.len() {
+        for &i in &order {
             if carried.count >= max {
                 break;
             }
