@@ -6,8 +6,16 @@
 //! vanilla renderer. Faces are lit like the `entity` shader: the lightmap at
 //! the block plus `minecraft_mix_light` with the level's two diffuse lights.
 use crate::{
+    Result,
+    bidi::visual_str,
+    block_entity_anim::{self, EnchantingBook},
+    breaking::entity_geometry,
+    fast_hash::FxHashMap,
+    gfx::mark_oit,
     hud::Rect,
     mesher::{CULL_BACK, Vertex},
+    models::load_visibility,
+    signs::{self, SignData, SignText},
     world::World,
 };
 use glam::{DVec3, Mat4, Quat, Vec3};
@@ -20,7 +28,15 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use serde_json::Value;
-use std::{collections::HashMap, f32::consts::PI, path::Path, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    f32::consts::PI,
+    path::Path,
+    sync::{
+        Arc, Mutex, PoisonError, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 /// One baked `ModelPart`: initial pose, textured polygons (pixel units,
 /// normalized UVs) and named children.
@@ -342,6 +358,23 @@ fn intern(facing: &str) -> &'static str {
         _ => "down",
     }
 }
+/// A sign's way of standing: a wall sign faces away from its wall, another
+/// turns by its rotation segment.
+fn sign(hanging: bool, wall: bool, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
+    let angle = if wall {
+        y_rot(intern(&prop("facing").unwrap_or_default()))
+    } else {
+        prop("rotation")
+            .and_then(|r| r.parse::<f32>().ok())
+            .unwrap_or(0.0)
+            * 22.5
+    };
+    Kind::Sign {
+        hanging,
+        wall,
+        angle,
+    }
+}
 fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
     let facing = || intern(&prop("facing").unwrap_or_default());
@@ -370,21 +403,8 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
             double_with: other,
         }
     };
-    if let Some(hanging) = crate::signs::sign_kind(name) {
-        let wall = name.contains("_wall_");
-        let angle = if wall {
-            y_rot(facing())
-        } else {
-            prop("rotation")
-                .and_then(|r| r.parse::<f32>().ok())
-                .unwrap_or(0.0)
-                * 22.5
-        };
-        return Kind::Sign {
-            hanging,
-            wall,
-            angle,
-        };
+    if let Some(hanging) = signs::sign_kind(name) {
+        return sign(hanging, name.contains("_wall_"), prop);
     }
     let unwaxed = name.strip_prefix("waxed_").unwrap_or(name);
     match unwaxed {
@@ -621,8 +641,8 @@ fn sign_text_near(pos: [i32; 3], camera: DVec3) -> bool {
 /// full-bright with an 8x outline in the dark colour.
 fn sign_text_calls(
     scene: &Scene,
-    data: &crate::signs::SignData,
-    text: &crate::signs::SignText,
+    data: &SignData,
+    text: &SignText,
     m: Mat4,
     packed: u8,
     near: bool,
@@ -648,7 +668,7 @@ fn sign_text_calls(
         .map(|(i, line)| {
             // The line that fits, in the order it is drawn (getVisualOrder).
             let shown = first_line(line, data.max_line_width(), &advance);
-            let shown = crate::bidi::visual_str(&shown).into_owned();
+            let shown = visual_str(&shown).into_owned();
             TextCall {
                 matrix: m,
                 x: -((width(&shown) as i32) / 2) as f32,
@@ -744,7 +764,7 @@ pub struct BlockAnim {
     /// `DecoratedPotRenderState` wobble style (positive) and progress.
     pub wobble: Option<(bool, f32)>,
     /// `EnchantingTableBlockEntity` book fields.
-    pub book: crate::block_entity_anim::EnchantingBook,
+    pub book: EnchantingBook,
     /// `TheEndGatewayBlockEntity` age and teleportCooldown.
     pub gateway: (i64, i32),
 }
@@ -781,11 +801,17 @@ pub struct Scene<'a> {
     pub sprites: &'a HashMap<String, Rect>,
     /// The packs' OptiFine emissive overlays of the sprites.
     pub emissive: &'a horizon_optifine::emissive::Emissive,
+    /// Atlas sprites that contain a texel with fractional alpha. Static
+    /// geometry stays on the cutout pipeline; these models keep the blended
+    /// entity path so resource packs retain their alpha behavior.
+    pub translucent_sprites: &'a HashSet<String>,
+    /// Changes on every atlas/resource reload, even if sprite rectangles do not.
+    pub atlas_revision: u64,
     pub nether: bool,
     /// Chest lid openness (`ChestLidController.getOpenNess`) at a position.
     pub lid: &'a dyn Fn([i32; 3]) -> f32,
     /// Sign block-entity data at a position.
-    pub sign: &'a dyn Fn([i32; 3]) -> Option<&'a crate::signs::SignData>,
+    pub sign: &'a dyn Fn([i32; 3]) -> Option<&'a SignData>,
     /// Banner layers at a position: pattern texture and RGB tint, bottom first.
     pub banner: &'a dyn Fn([i32; 3]) -> Vec<(String, u32)>,
     /// The skin sprite a `player_head` shows at a position (`SkullBlockRenderer`
@@ -802,28 +828,149 @@ pub struct Scene<'a> {
 /// Empty by default (a dedicated server): no state has a block entity model.
 #[derive(Default)]
 pub struct BlockEntityRenderer {
-    models: HashMap<&'static str, ModelPart>,
+    vanilla: Arc<BlockEntityShapes>,
+    /// What draws: `vanilla`, or the packs' custom entity models over it.
+    shapes: RwLock<Arc<BlockEntityShapes>>,
     kinds: Vec<Kind>,
-    // Closed chest geometry: dimension lighting, chest part, horizontal facing.
-    closed_chests: [[[Vec<Vertex>; 4]; 3]; 2],
     /// Item id to its `PROVIDES_POTTERY_PATTERN` side texture (`Sheets.DECORATED_POT_MAPPER`).
     pot_patterns: HashMap<String, String>,
     /// `Block.shouldRenderFace` for End gateway faces (its occlusion pair cache needs a lock).
     visibility: Option<Mutex<FaceVisibility>>,
     sign_texts: Mutex<SignTexts>,
+    /// Stable model geometry, relative to its block, for cacheable entities.
+    static_geometry: Mutex<StaticGeometry>,
+    sign_cache_enabled: AtomicBool,
+}
+/// Individually enabled caches for block entities with static or separable
+/// geometry. Sign boards and beds are block models in the terrain mesh; only
+/// sign text has a renderer-side cache.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CacheOptions {
+    pub shulker_boxes: bool,
+    pub signs: bool,
+    pub decorated_pots: bool,
+    pub bells: bool,
+    pub chests: bool,
+    pub banners: bool,
+    pub copper_golem_statues: bool,
+}
+/// Independent section inputs to cached block-entity geometry. `mesh` changes
+/// on every upload (including light updates); `block_entities` changes only
+/// when that section's block-entity membership or states change.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StaticSectionRevision {
+    pub mesh: u64,
+    pub block_entities: u64,
+}
+impl CacheOptions {
+    /// Whether any per-section model cache is on (the sign-text cache is not one).
+    pub fn any_model_cache(self) -> bool {
+        self.shulker_boxes
+            || self.decorated_pots
+            || self.bells
+            || self.chests
+            || self.banners
+            || self.copper_golem_statues
+    }
+}
+/// The block-entity models and what is baked from them: vanilla's, or the packs' custom entity
+/// models over them ([`crate::block_entity_cem`]).
+#[derive(Default)]
+pub struct BlockEntityShapes {
+    models: HashMap<&'static str, ModelPart>,
+    /// Closed chest geometry by chest model: dimension lighting, horizontal facing.
+    closed_chests: HashMap<&'static str, [[Vec<Vertex>; 4]; 2]>,
+    /// A `.jem`'s texture (atlas name) by model, drawn instead of vanilla's.
+    textures: HashMap<&'static str, String>,
+}
+/// The chest models, each baked with its lid closed.
+const CHEST_MODELS: [&str; 7] = [
+    "chest",
+    "double_chest_left",
+    "double_chest_right",
+    "trapped_chest",
+    "trapped_chest_left",
+    "trapped_chest_right",
+    "ender_chest",
+];
+impl BlockEntityShapes {
+    fn new(
+        models: HashMap<&'static str, ModelPart>,
+        textures: HashMap<&'static str, String>,
+    ) -> Self {
+        let closed_chests = CHEST_MODELS
+            .iter()
+            .filter_map(|key| Some((*key, closed_chest(models.get(key)?))))
+            .collect();
+        Self {
+            models,
+            closed_chests,
+            textures,
+        }
+    }
+    /// The texture model `key` draws with: its `.jem`'s when the atlas has it, else `vanilla`.
+    fn texture<'a>(
+        &'a self,
+        key: &str,
+        vanilla: &'a str,
+        sprites: &HashMap<String, Rect>,
+    ) -> &'a str {
+        match self.textures.get(key) {
+            Some(texture) if sprites.contains_key(texture) => texture,
+            _ => vanilla,
+        }
+    }
+}
+/// A chest model with its lid closed, for each dimension lighting and horizontal facing, its UVs
+/// over the whole texture.
+fn closed_chest(model: &ModelPart) -> [[Vec<Vertex>; 4]; 2] {
+    [false, true].map(|nether| {
+        [0.0f32, 90.0, 180.0, 270.0].map(|y_rot| {
+            let mut vertices = Vec::new();
+            draw_part(
+                model,
+                "root",
+                around(
+                    Mat4::from_rotation_y((-y_rot).to_radians()),
+                    Vec3::new(0.5, 0.0, 0.5),
+                ),
+                &|name, p| {
+                    if name == "lid" || name == "lock" {
+                        p[3] = crate::block_entity_anim::chest_lid_x_rot(0.0);
+                    }
+                },
+                Paint {
+                    sprite: Rect {
+                        u0: 0.0,
+                        v0: 0.0,
+                        u1: 1.0,
+                        v1: 1.0,
+                        w: 16,
+                        h: 16,
+                    },
+                    tint: 0xFFFFFF,
+                    light: 0,
+                    lights: diffuse_lights(nether),
+                    glow: None,
+                },
+                &mut vertices,
+            );
+            vertices
+        })
+    })
 }
 /// Laid-out sign text by position. `AbstractSignRenderer` lays the text out
 /// again each frame, glyph by glyph; its vertices only change with what is
 /// in the key, so they are kept relative to the block and moved to the camera.
 #[derive(Default)]
 struct SignTexts {
-    signs: crate::fast_hash::FxHashMap<[i32; 3], SignTextEntry>,
+    signs: FxHashMap<[i32; 3], SignTextEntry>,
     /// Game time of the last sweep of signs out of view.
     swept: i64,
 }
 struct SignTextEntry {
     state: u32,
-    data: crate::signs::SignData,
+    data: SignData,
     packed: u8,
     /// Within the glowing text outline's distance (only kept for glowing text).
     near: bool,
@@ -832,8 +979,267 @@ struct SignTextEntry {
     used: i64,
     vertices: Vec<Vertex>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct StaticKey {
+    state: u32,
+    light: u8,
+    nether: bool,
+    /// Stable model pose inputs, used by opened but settled shulker boxes.
+    pose: [u32; 2],
+    /// Atlas coordinates detect UV changes. The enclosing StaticEntry also
+    /// carries an atlas identity for reloads that preserve these coordinates.
+    /// Static candidates use at most five sprites (a decorated pot's sides).
+    sprite_rects: [Option<[u32; 6]>; 5],
+    sprite_count: u8,
+}
+struct StaticEntry {
+    key: StaticKey,
+    pot_sherds: Option<[Option<String>; 4]>,
+    section_revision: StaticSectionRevision,
+    atlas_revision: u64,
+    used: i64,
+    vertices: Vec<Vertex>,
+}
+/// One section of cached block-entity geometry, stored in section-local space.
+/// The render thread uploads each section independently and only draws the
+/// sections intersecting its coarse frustum set.
+#[derive(Clone)]
+pub struct StaticSectionSnapshot {
+    pub section: [i32; 3],
+    pub origin: [i32; 3],
+    pub revision: u64,
+    pub entities: u32,
+    pub vertices: Arc<[Vertex]>,
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub struct StaticCacheFrameStats {
+    /// Number of per-section CPU snapshots rebuilt this frame.
+    pub snapshot_rebuilds: u64,
+    /// Vertex bytes generated by those CPU rebuilds.
+    pub snapshot_bytes_built: u64,
+    /// Identity of the published section list; changes only when cached
+    /// geometry changes so the GPU cache can skip per-frame scans.
+    pub snapshot_revision: u64,
+    /// Vertex bytes actually written to static GPU buffers this frame.
+    pub static_bytes_uploaded: u64,
+    pub static_entities_drawn: u64,
+    pub dynamic_entities_drawn: u64,
+}
+#[derive(Default)]
+struct StaticSectionGeometry {
+    revision: u64,
+    entities: u32,
+    vertices: Arc<[Vertex]>,
+    dirty: bool,
+}
+#[derive(Default)]
+struct RenderCacheResult {
+    visible_sections: Vec<[i32; 3]>,
+    stats: StaticCacheFrameStats,
+}
+fn static_candidate(kind: &Kind, options: CacheOptions) -> bool {
+    matches!(kind, Kind::Chest { .. } if options.chests)
+        || matches!(kind, Kind::Shulker { .. } if options.shulker_boxes)
+        || matches!(kind, Kind::Bell if options.bells)
+        || matches!(kind, Kind::Banner { .. } if options.banners)
+        || matches!(kind, Kind::DecoratedPot { .. } if options.decorated_pots)
+        || matches!(kind, Kind::CopperGolem { .. } if options.copper_golem_statues)
+}
+fn static_pot_sherds(scene: &Scene, pos: [i32; 3], kind: &Kind) -> Option<[Option<String>; 4]> {
+    matches!(kind, Kind::DecoratedPot { .. }).then(|| (scene.anim)(pos).sherds)
+}
+#[derive(Default)]
+struct StaticGeometry {
+    /// Small sorted lists by section. Block entities arrive section by
+    /// section, so the map is touched only at section boundaries and a local
+    /// 12-bit position index replaces a hash lookup for each model.
+    sections: FxHashMap<[i32; 3], Vec<(u16, StaticEntry)>>,
+    section_geometry: FxHashMap<[i32; 3], StaticSectionGeometry>,
+    dirty_sections: Vec<[i32; 3]>,
+    len: usize,
+    swept: i64,
+    options: Option<CacheOptions>,
+    published: Arc<[StaticSectionSnapshot]>,
+    published_dirty: bool,
+    published_revision: u64,
+    visible_sections: Vec<[i32; 3]>,
+    reconciled_membership_revision: Option<u64>,
+    next_section_revision: u64,
+    snapshot_rebuilds: u64,
+    snapshot_bytes_built: u64,
+}
+impl StaticGeometry {
+    fn mark_section_dirty(&mut self, section: [i32; 3]) {
+        let geometry = self.section_geometry.entry(section).or_default();
+        if !geometry.dirty {
+            geometry.dirty = true;
+            self.dirty_sections.push(section);
+        }
+        self.published_dirty = true;
+    }
+
+    fn reconcile_sections(&mut self, revision: &dyn Fn([i32; 3]) -> Option<StaticSectionRevision>) {
+        let cached = self.sections.keys().copied().collect::<Vec<_>>();
+        for section in cached {
+            let current = revision(section);
+            let membership_changed = self
+                .sections
+                .get(&section)
+                .and_then(|entries| entries.first())
+                .is_some_and(|(_, entry)| {
+                    current.is_none_or(|current| {
+                        current.block_entities != entry.section_revision.block_entities
+                    })
+                });
+            if membership_changed {
+                if let Some(entries) = self.sections.remove(&section) {
+                    self.len = self.len.saturating_sub(entries.len());
+                }
+                self.section_geometry.remove(&section);
+                self.published_dirty = true;
+            }
+        }
+    }
+
+    fn sweep(&mut self, now: i64) {
+        if (now - self.swept).abs() >= SIGN_TEXT_KEEP {
+            self.swept = now;
+            let before = self.len;
+            let mut emptied = Vec::new();
+            let mut changed = Vec::new();
+            self.sections.retain(|section, entries| {
+                let old_len = entries.len();
+                entries.retain(|(_, entry)| (now - SIGN_TEXT_KEEP..=now).contains(&entry.used));
+                if entries.len() != old_len {
+                    changed.push(*section);
+                }
+                if entries.is_empty() {
+                    emptied.push(*section);
+                }
+                !entries.is_empty()
+            });
+            for section in changed {
+                self.mark_section_dirty(section);
+            }
+            for section in emptied {
+                self.section_geometry.remove(&section);
+            }
+            self.len = self.sections.values().map(Vec::len).sum();
+            self.published_dirty |= self.len != before;
+        }
+    }
+
+    fn snapshot(
+        &mut self,
+        min_y: i32,
+        mut visible_sections: Vec<[i32; 3]>,
+    ) -> (
+        Arc<[StaticSectionSnapshot]>,
+        Vec<[i32; 3]>,
+        StaticCacheFrameStats,
+    ) {
+        visible_sections.sort_unstable();
+        visible_sections.dedup();
+        self.visible_sections = visible_sections;
+
+        let mut rebuilt = 0;
+        let mut bytes_built = 0;
+        for section in std::mem::take(&mut self.dirty_sections) {
+            let Some(entries) = self.sections.get(&section) else {
+                continue;
+            };
+            let Some(geometry) = self.section_geometry.get_mut(&section) else {
+                continue;
+            };
+            if !geometry.dirty {
+                continue;
+            }
+            let mut vertices = Vec::new();
+            for &(local, ref entry) in entries {
+                let block_offset = Vec3::new(
+                    f32::from(local & 15),
+                    f32::from((local >> 8) & 15),
+                    f32::from((local >> 4) & 15),
+                );
+                vertices.extend(entry.vertices.iter().map(|vertex| Vertex {
+                    pos: (Vec3::from_array(vertex.pos) + block_offset).to_array(),
+                    ..*vertex
+                }));
+            }
+            bytes_built += (vertices.len() * std::mem::size_of::<Vertex>()) as u64;
+            rebuilt += 1;
+            geometry.vertices = vertices.into();
+            geometry.entities = entries
+                .iter()
+                .filter(|(_, entry)| !entry.vertices.is_empty())
+                .count() as u32;
+            self.next_section_revision = next_static_snapshot_revision();
+            geometry.revision = self.next_section_revision;
+            geometry.dirty = false;
+            self.published_dirty = true;
+        }
+        if self.published_dirty {
+            let mut published = self
+                .section_geometry
+                .iter()
+                .filter(|(_, geometry)| !geometry.vertices.is_empty())
+                .map(|(&section, geometry)| StaticSectionSnapshot {
+                    section,
+                    origin: [section[0] * 16, min_y + section[1] * 16, section[2] * 16],
+                    revision: geometry.revision,
+                    entities: geometry.entities,
+                    vertices: geometry.vertices.clone(),
+                })
+                .collect::<Vec<_>>();
+            published.sort_unstable_by_key(|snapshot| snapshot.section);
+            self.published = published.into();
+            self.published_revision = next_static_snapshot_revision();
+            self.published_dirty = false;
+        }
+        self.snapshot_rebuilds += rebuilt;
+        self.snapshot_bytes_built += bytes_built;
+        let stats = StaticCacheFrameStats {
+            snapshot_rebuilds: rebuilt,
+            snapshot_bytes_built: bytes_built,
+            snapshot_revision: self.published_revision,
+            ..Default::default()
+        };
+        (
+            self.published.clone(),
+            std::mem::take(&mut self.visible_sections),
+            stats,
+        )
+    }
+}
+fn sprite_rect_key(scene: &Scene, texture: &str) -> Option<[u32; 6]> {
+    scene.sprites.get(texture).copied().map(|sprite| {
+        [
+            sprite.u0.to_bits(),
+            sprite.v0.to_bits(),
+            sprite.u1.to_bits(),
+            sprite.v1.to_bits(),
+            sprite.w,
+            sprite.h,
+        ]
+    })
+}
+#[inline]
+fn static_section(pos: [i32; 3], min_y: i32) -> [i32; 3] {
+    [pos[0] >> 4, (pos[1] - min_y) >> 4, pos[2] >> 4]
+}
+#[inline]
+fn static_local_index(pos: [i32; 3], min_y: i32) -> u16 {
+    ((((pos[1] - min_y) & 15) << 8) | ((pos[2] & 15) << 4) | (pos[0] & 15)) as u16
+}
 /// Game ticks a sign's text is kept after it was last drawn.
 const SIGN_TEXT_KEEP: i64 = 100;
+/// Bound retained static model geometry when a player has visited many
+/// block-entity positions in the last few seconds.
+const STATIC_GEOMETRY_MAX_ENTRIES: usize = 4096;
+fn next_static_snapshot_revision() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 const MODELS: [(&str, &str); 27] = [
     ("chest", "minecraft:chest#main"),
     ("double_chest_left", "minecraft:double_chest_left#main"),
@@ -876,8 +1282,8 @@ const MODELS: [(&str, &str); 27] = [
 const VIEW_DISTANCE: f64 = 64.0;
 
 impl BlockEntityRenderer {
-    pub fn load(root: &Path, registry: &BlockRegistry) -> crate::Result<Self> {
-        let visibility = crate::models::load_visibility(root, registry)?;
+    pub fn load(root: &Path, registry: &BlockRegistry) -> Result<Self> {
+        let visibility = load_visibility(root, registry)?;
         Self::load_with_visibility(root, registry, visibility)
     }
     /// [`BlockEntityRenderer::load`] over the face visibility the meshes use
@@ -886,7 +1292,7 @@ impl BlockEntityRenderer {
         root: &Path,
         registry: &BlockRegistry,
         visibility: FaceVisibility,
-    ) -> crate::Result<Self> {
+    ) -> Result<Self> {
         let all: Value = serde_json::from_slice(&std::fs::read(root.join("entity-models.json"))?)?;
         let models = MODELS
             .iter()
@@ -894,6 +1300,8 @@ impl BlockEntityRenderer {
             .collect();
         let mut renderer = Self::new(models, registry);
         renderer.visibility = Some(Mutex::new(visibility));
+        // The packs' custom entity models (`.jem` files), before anything draws.
+        renderer.set_shapes(renderer.shapes_for(root));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
         let items = match horizon_world::item_defaults::read(root) {
             Ok(items) => items,
@@ -920,44 +1328,7 @@ impl BlockEntityRenderer {
         Ok(renderer)
     }
     fn new(models: HashMap<&'static str, ModelPart>, registry: &BlockRegistry) -> Self {
-        let closed_chests = [false, true].map(|nether| {
-            ["chest", "double_chest_left", "double_chest_right"].map(|name| {
-                [0.0f32, 90.0, 180.0, 270.0].map(|y_rot| {
-                    let mut vertices = Vec::new();
-                    if let Some(model) = models.get(name) {
-                        draw_part(
-                            model,
-                            "root",
-                            around(
-                                Mat4::from_rotation_y((-y_rot).to_radians()),
-                                Vec3::new(0.5, 0.0, 0.5),
-                            ),
-                            &|name, p| {
-                                if name == "lid" || name == "lock" {
-                                    p[3] = crate::block_entity_anim::chest_lid_x_rot(0.0);
-                                }
-                            },
-                            Paint {
-                                sprite: Rect {
-                                    u0: 0.0,
-                                    v0: 0.0,
-                                    u1: 1.0,
-                                    v1: 1.0,
-                                    w: 16,
-                                    h: 16,
-                                },
-                                tint: 0xFFFFFF,
-                                light: 0,
-                                lights: diffuse_lights(nether),
-                                glow: None,
-                            },
-                            &mut vertices,
-                        );
-                    }
-                    vertices
-                })
-            })
-        });
+        let vanilla = Arc::new(BlockEntityShapes::new(models, HashMap::new()));
         let kinds = (0..registry.len() as u32)
             .map(|id| {
                 registry.state(BlockStateId(id)).map_or(Kind::None, |s| {
@@ -970,16 +1341,104 @@ impl BlockEntityRenderer {
             })
             .collect();
         Self {
-            models,
+            shapes: RwLock::new(vanilla.clone()),
+            vanilla,
             kinds,
-            closed_chests,
             pot_patterns: HashMap::new(),
             visibility: None,
             sign_texts: Mutex::default(),
+            static_geometry: Mutex::default(),
+            sign_cache_enabled: AtomicBool::new(false),
+        }
+    }
+    /// The models the packs under `root` give, their `.jem` files over vanilla's, for
+    /// [`Self::set_shapes`] (a pack reload): vanilla's own, shared, without any.
+    pub fn shapes_for(&self, root: &Path) -> Arc<BlockEntityShapes> {
+        match crate::block_entity_cem::reshape(root, &self.vanilla.models) {
+            Some((models, textures)) => Arc::new(BlockEntityShapes::new(models, textures)),
+            None => self.vanilla.clone(),
+        }
+    }
+    pub fn set_shapes(&self, shapes: Arc<BlockEntityShapes>) {
+        let changed = {
+            let mut current = self.shapes.write().unwrap_or_else(PoisonError::into_inner);
+            if Arc::ptr_eq(&current, &shapes) {
+                false
+            } else {
+                *current = shapes;
+                true
+            }
+        };
+        if changed && let Ok(mut cache) = self.static_geometry.lock() {
+            *cache = StaticGeometry::default();
+        }
+    }
+    fn shapes(&self) -> Arc<BlockEntityShapes> {
+        self.shapes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+    /// A mod's signs, known by class where vanilla's go by name (`classify`).
+    pub fn add_mod_signs(&mut self, facts: &crate::blocks::BlockFacts, registry: &BlockRegistry) {
+        for (id, kind) in self.kinds.iter_mut().enumerate() {
+            let state = BlockStateId(id as u32);
+            if let (Some(form), Some(s)) = (facts.get(state).sign_form(), registry.state(state)) {
+                let prop = |k: &str| s.properties.get(k).cloned();
+                *kind = sign(form.hanging, form.wall, &prop);
+            }
         }
     }
     fn kind(&self, state: u32) -> &Kind {
         self.kinds.get(state as usize).unwrap_or(&Kind::None)
+    }
+    fn cached_entry_is_current(
+        &self,
+        scene: &Scene,
+        pos: [i32; 3],
+        state: u32,
+        kind: &Kind,
+        options: CacheOptions,
+        entry: &StaticEntry,
+        section_revision: StaticSectionRevision,
+    ) -> bool {
+        if entry.key.state != state
+            || entry.key.nether != scene.nether
+            || entry.section_revision != section_revision
+            || entry.atlas_revision != scene.atlas_revision
+            || !static_candidate(kind, options)
+        {
+            return false;
+        }
+        match kind {
+            Kind::Chest { .. } => {
+                let (open, other) = self.chest_openness(
+                    pos,
+                    kind,
+                    &|p| scene.world.block(p[0], p[1], p[2]).0,
+                    scene.lid,
+                );
+                // Double chests depend on the neighboring half's light too;
+                // let those uncommon models take the full key path.
+                open == 0.0 && other.is_none()
+            }
+            Kind::Shulker { .. } => {
+                let (progress, old) = (scene.anim)(pos).shulker;
+                progress == old && progress.to_bits() == entry.key.pose[0]
+            }
+            Kind::Bell => (scene.anim)(pos).bell_shake.is_none(),
+            Kind::Banner { .. } | Kind::CopperGolem { .. } => true,
+            // Sherd textures come from block-entity NBT. Re-resolve these few
+            // item ids without repeating five atlas lookups on every frame.
+            Kind::DecoratedPot { .. } => {
+                let anim = (scene.anim)(pos);
+                !anim
+                    .wobble
+                    .is_some_and(|(_, progress)| (0.0..=1.0).contains(&progress))
+                    && entry.pot_sherds.as_ref() == Some(&anim.sherds)
+            }
+            _ => false,
+        }
     }
     pub fn render<'a>(
         &self,
@@ -987,37 +1446,599 @@ impl BlockEntityRenderer {
         blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
         out: &mut Vec<Vertex>,
     ) {
-        let lights = diffuse_lights(scene.nether);
-        for (pos, state) in blocks {
-            let kind = self.kind(*state);
-            if matches!(kind, Kind::None) {
-                continue;
-            }
-            let center = DVec3::new(
-                f64::from(pos[0]) + 0.5,
-                f64::from(pos[1]) + 0.5,
-                f64::from(pos[2]) + 0.5,
+        let _ = self.render_inner(
+            scene,
+            blocks,
+            CacheOptions {
+                // Sign geometry has been cached by the renderer for years;
+                // keep that behavior for callers that do not provide settings.
+                signs: true,
+                ..CacheOptions::default()
+            },
+            out,
+            |_, _, _| {},
+            |_, _, _, _| {},
+            false,
+            None,
+            false,
+            None,
+        );
+    }
+    /// Draws block entities with only the requested renderer caches enabled.
+    /// Dynamic portions continue to use their ordinary animation path.
+    pub fn render_with_cache_options<'a>(
+        &self,
+        scene: &Scene,
+        blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
+        options: CacheOptions,
+        out: &mut Vec<Vertex>,
+    ) {
+        let _ = self.render_inner(
+            scene,
+            blocks,
+            options,
+            out,
+            |_, _, _| {},
+            |_, _, _, _| {},
+            false,
+            None,
+            false,
+            None,
+        );
+    }
+    /// Renders cacheable block-entity models into per-section snapshots. The
+    /// frustum-visible set controls only which section buffers draw; it does
+    /// not change their geometry or force an upload.
+    pub fn render_with_gpu_cache_options<'a>(
+        &self,
+        scene: &Scene,
+        blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
+        cache_candidates: impl Iterator<Item = &'a ([i32; 3], u32)>,
+        options: CacheOptions,
+        membership_revision: u64,
+        section_revision: impl Fn([i32; 3]) -> Option<StaticSectionRevision>,
+        out: &mut Vec<Vertex>,
+    ) -> (
+        Arc<[StaticSectionSnapshot]>,
+        Vec<[i32; 3]>,
+        StaticCacheFrameStats,
+    ) {
+        // Warm every static model in the nearby loaded sections. This is
+        // deliberately independent of the camera frustum, so a turn only
+        // changes the section draw list below.
+        if options.any_model_cache() {
+            let _ = self.render_inner(
+                scene,
+                cache_candidates,
+                options,
+                &mut Vec::new(),
+                |_, _, _| {},
+                |_, _, _, _| {},
+                true,
+                Some(&section_revision),
+                true,
+                Some(membership_revision),
             );
-            // BlockEntityRenderer.getViewDistance: 256 for End gateways.
-            let distance = if matches!(kind, Kind::EndGateway { .. }) {
-                256.0
-            } else {
-                VIEW_DISTANCE
-            };
-            if center.distance_squared(scene.camera) > distance * distance {
-                continue;
-            }
-            let origin = (DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
-                - scene.camera)
-                .as_vec3();
-            let packed = scene.world.light(pos[0], pos[1], pos[2]);
-            if matches!(kind, Kind::Sign { .. }) && scene.texts.is_none() {
-                self.sign_text(scene, *pos, *state, origin, packed, out);
-                continue;
-            }
-            let base = Mat4::from_translation(origin);
-            self.render_one(scene, *pos, kind, base, packed, lights, false, true, out);
         }
+        let visible = self.render_inner(
+            scene,
+            blocks,
+            options,
+            out,
+            |_, _, _| {},
+            |_, _, _, _| {},
+            true,
+            Some(&section_revision),
+            false,
+            None,
+        );
+        self.static_geometry
+            .lock()
+            .map(|mut cache| {
+                let (sections, visible_sections, mut stats) =
+                    cache.snapshot(scene.world.layout().min_y(), visible.visible_sections);
+                stats.static_entities_drawn = visible_sections
+                    .iter()
+                    .filter_map(|section| {
+                        sections
+                            .binary_search_by_key(section, |snapshot| snapshot.section)
+                            .ok()
+                            .map(|index| u64::from(sections[index].entities))
+                    })
+                    .sum();
+                stats.dynamic_entities_drawn = visible.stats.dynamic_entities_drawn;
+                (sections, visible_sections, stats)
+            })
+            .unwrap_or_default()
+    }
+    /// Draws block entities in one section-grouped pass while preserving a
+    /// callback boundary around each entity for shader-pack spans.
+    pub fn render_with_cache_options_and_callbacks<'a>(
+        &self,
+        scene: &Scene,
+        blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
+        options: CacheOptions,
+        membership_revision: u64,
+        section_revision: Option<&dyn Fn([i32; 3]) -> Option<StaticSectionRevision>>,
+        out: &mut Vec<Vertex>,
+        before: impl FnMut([i32; 3], u32, usize),
+        after: impl FnMut([i32; 3], u32, usize, &mut Vec<Vertex>),
+    ) -> StaticCacheFrameStats {
+        self.render_inner(
+            scene,
+            blocks,
+            options,
+            out,
+            before,
+            after,
+            false,
+            section_revision,
+            false,
+            Some(membership_revision),
+        )
+        .stats
+    }
+    fn render_inner<'a>(
+        &self,
+        scene: &Scene,
+        blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
+        options: CacheOptions,
+        out: &mut Vec<Vertex>,
+        mut before: impl FnMut([i32; 3], u32, usize),
+        mut after: impl FnMut([i32; 3], u32, usize, &mut Vec<Vertex>),
+        gpu_static: bool,
+        section_revision: Option<&dyn Fn([i32; 3]) -> Option<StaticSectionRevision>>,
+        cache_only: bool,
+        membership_revision: Option<u64>,
+    ) -> RenderCacheResult {
+        let lights = diffuse_lights(scene.nether);
+        let shapes = self.shapes();
+        let clear_sign_texts = self
+            .sign_cache_enabled
+            .swap(options.signs, Ordering::Relaxed)
+            && !options.signs;
+        if clear_sign_texts && let Ok(mut cache) = self.sign_texts.lock() {
+            cache.signs.clear();
+        }
+        let mut cache = if options.any_model_cache() || gpu_static {
+            self.static_geometry.lock().ok()
+        } else {
+            None
+        };
+        if let Some(cache) = &mut cache {
+            if cache.options != Some(options) {
+                cache.sections.clear();
+                cache.section_geometry.clear();
+                cache.dirty_sections.clear();
+                cache.len = 0;
+                cache.published = Arc::from([]);
+                cache.options = Some(options);
+                cache.published_dirty = true;
+            }
+            cache.sweep(scene.game_time);
+            if let (Some(revision), Some(membership_revision)) =
+                (section_revision, membership_revision)
+                && cache.reconciled_membership_revision != Some(membership_revision)
+            {
+                cache.reconcile_sections(revision);
+                cache.reconciled_membership_revision = Some(membership_revision);
+            }
+        }
+        // The renderer supplies block entities grouped by section. Keep that
+        // section's small local cache list out of the map while walking its
+        // blocks, then return it when the input advances to another section.
+        let mut active_section = None;
+        let mut active_section_revision = None;
+        let mut active_section_has_geometry = false;
+        let mut active_entries = Vec::new();
+        let mut result = RenderCacheResult::default();
+        let section_min_y = scene.world.layout().min_y();
+        for block in blocks {
+            let (pos, state) = *block;
+            let start = out.len();
+            before(pos, state, start);
+            let section = static_section(pos, section_min_y);
+            'draw: {
+                if let Some(cache) = &mut cache
+                    && active_section != Some(section)
+                {
+                    if let Some(previous) = active_section {
+                        if active_entries.is_empty() {
+                            cache.sections.remove(&previous);
+                            if cache.section_geometry.remove(&previous).is_some() {
+                                cache.published_dirty = true;
+                            }
+                        } else {
+                            cache
+                                .sections
+                                .insert(previous, std::mem::take(&mut active_entries));
+                        }
+                    }
+                    active_entries = cache.sections.remove(&section).unwrap_or_default();
+                    active_section = Some(section);
+                    active_section_revision =
+                        section_revision.and_then(|revision| revision(section));
+                    active_section_has_geometry = cache.section_geometry.contains_key(&section);
+                }
+                let kind = self.kind(state);
+                if matches!(kind, Kind::None) {
+                    break 'draw;
+                }
+                if cache_only && !static_candidate(kind, options) {
+                    break 'draw;
+                }
+                let center = DVec3::new(
+                    f64::from(pos[0]) + 0.5,
+                    f64::from(pos[1]) + 0.5,
+                    f64::from(pos[2]) + 0.5,
+                );
+                // BlockEntityRenderer.getViewDistance: 256 for End gateways.
+                let distance = if matches!(kind, Kind::EndGateway { .. }) {
+                    256.0
+                } else {
+                    VIEW_DISTANCE
+                };
+                if center.distance_squared(scene.camera) > distance * distance {
+                    break 'draw;
+                }
+                let local = static_local_index(pos, section_min_y);
+                let current_section_revision = active_section_revision.unwrap_or_default();
+                if cache_only && section_revision.is_some() && active_section_revision.is_none() {
+                    break 'draw;
+                }
+                if cache.is_some()
+                    && section_revision.is_some()
+                    && active_section_has_geometry
+                    && let Ok(index) = active_entries.binary_search_by_key(&local, |(i, _)| *i)
+                    && self.cached_entry_is_current(
+                        scene,
+                        pos,
+                        state,
+                        kind,
+                        options,
+                        &active_entries[index].1,
+                        current_section_revision,
+                    )
+                {
+                    let entry = &mut active_entries[index].1;
+                    entry.used = scene.game_time;
+                    if cache_only {
+                        break 'draw;
+                    }
+                    result.visible_sections.push(section);
+                    if !gpu_static {
+                        result.stats.static_entities_drawn += 1;
+                        let origin =
+                            (DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
+                                - scene.camera)
+                                .as_vec3();
+                        out.extend(entry.vertices.iter().map(|vertex| Vertex {
+                            pos: (Vec3::from_array(vertex.pos) + origin).to_array(),
+                            ..*vertex
+                        }));
+                    }
+                    if matches!(kind, Kind::Banner { .. }) {
+                        let packed = scene.world.light(pos[0], pos[1], pos[2]);
+                        let origin =
+                            (DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
+                                - scene.camera)
+                                .as_vec3();
+                        self.render_banner(
+                            &shapes,
+                            scene,
+                            pos,
+                            kind,
+                            Mat4::from_translation(origin),
+                            packed,
+                            lights,
+                            false,
+                            true,
+                            out,
+                        );
+                    }
+                    break 'draw;
+                }
+                let origin = (DVec3::new(f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2]))
+                    - scene.camera)
+                    .as_vec3();
+                let mut packed = scene.world.light(pos[0], pos[1], pos[2]);
+                if matches!(kind, Kind::Sign { .. }) && scene.texts.is_none() {
+                    if options.signs {
+                        self.sign_text(scene, pos, state, origin, packed, out);
+                    } else {
+                        self.render_one(
+                            scene,
+                            pos,
+                            kind,
+                            Mat4::from_translation(origin),
+                            packed,
+                            lights,
+                            false,
+                            true,
+                            out,
+                        );
+                    }
+                    break 'draw;
+                }
+                if let Some(cache) = &mut cache
+                    && let Some(key) =
+                        self.static_key(scene, pos, state, kind, options, &mut packed)
+                {
+                    let slot = active_entries.binary_search_by_key(&local, |(index, _)| *index);
+                    let entry = match slot {
+                        Ok(index) => {
+                            let snapshot_missing =
+                                cache.section_geometry.get(&section).is_none_or(|geometry| {
+                                    geometry.vertices.is_empty()
+                                        && !active_entries[index].1.vertices.is_empty()
+                                });
+                            let cached = &mut active_entries[index].1;
+                            let key_changed =
+                                cached.key != key || cached.atlas_revision != scene.atlas_revision;
+                            if key_changed {
+                                self.render_static_vertices(
+                                    scene,
+                                    pos,
+                                    kind,
+                                    packed,
+                                    lights,
+                                    &mut cached.vertices,
+                                );
+                                cached.key = key;
+                                cached.atlas_revision = scene.atlas_revision;
+                            }
+                            cached.pot_sherds = static_pot_sherds(scene, pos, kind);
+                            if key_changed || snapshot_missing {
+                                cache.mark_section_dirty(section);
+                            }
+                            cached.section_revision = current_section_revision;
+                            cached.used = scene.game_time;
+                            cached
+                        }
+                        Err(_) if cache.len >= STATIC_GEOMETRY_MAX_ENTRIES => {
+                            if cache_only {
+                                break 'draw;
+                            }
+                            let base = Mat4::from_translation(origin);
+                            self.render_one(
+                                scene, pos, kind, base, packed, lights, false, true, out,
+                            );
+                            break 'draw;
+                        }
+                        Err(index) => {
+                            let mut vertices = Vec::new();
+                            self.render_static_vertices(
+                                scene,
+                                pos,
+                                kind,
+                                packed,
+                                lights,
+                                &mut vertices,
+                            );
+                            active_entries.insert(
+                                index,
+                                (
+                                    local,
+                                    StaticEntry {
+                                        key,
+                                        pot_sherds: static_pot_sherds(scene, pos, kind),
+                                        section_revision: current_section_revision,
+                                        atlas_revision: scene.atlas_revision,
+                                        used: scene.game_time,
+                                        vertices,
+                                    },
+                                ),
+                            );
+                            cache.len += 1;
+                            cache.mark_section_dirty(section);
+                            &mut active_entries[index].1
+                        }
+                    };
+                    if cache_only {
+                        break 'draw;
+                    }
+                    if gpu_static {
+                        result.visible_sections.push(section);
+                    }
+                    if !gpu_static {
+                        result.stats.static_entities_drawn += 1;
+                        out.extend(entry.vertices.iter().map(|vertex| Vertex {
+                            pos: (Vec3::from_array(vertex.pos) + origin).to_array(),
+                            ..*vertex
+                        }));
+                    }
+                    if matches!(kind, Kind::Banner { .. }) {
+                        self.render_banner(
+                            &shapes,
+                            scene,
+                            pos,
+                            kind,
+                            Mat4::from_translation(origin),
+                            packed,
+                            lights,
+                            false,
+                            true,
+                            out,
+                        );
+                    }
+                    break 'draw;
+                }
+                if let Some(cache) = &mut cache
+                    && let Ok(index) =
+                        active_entries.binary_search_by_key(&local, |(index, _)| *index)
+                {
+                    active_entries.remove(index);
+                    cache.len -= 1;
+                    cache.mark_section_dirty(section);
+                }
+                if cache_only {
+                    break 'draw;
+                }
+                let base = Mat4::from_translation(origin);
+                self.render_one(scene, pos, kind, base, packed, lights, false, true, out);
+            }
+            after(pos, state, start, out);
+            if out.len() > start && !cache_only {
+                result.stats.dynamic_entities_drawn += 1;
+            }
+        }
+        if let (Some(cache), Some(section)) = (&mut cache, active_section) {
+            if active_entries.is_empty() {
+                cache.sections.remove(&section);
+                if cache.section_geometry.remove(&section).is_some() {
+                    cache.published_dirty = true;
+                }
+            } else {
+                cache.sections.insert(section, active_entries);
+            }
+        }
+        result
+    }
+    fn render_static_vertices(
+        &self,
+        scene: &Scene,
+        pos: [i32; 3],
+        kind: &Kind,
+        packed: u8,
+        lights: (Vec3, Vec3),
+        vertices: &mut Vec<Vertex>,
+    ) {
+        vertices.clear();
+        let shapes = self.shapes();
+        if matches!(kind, Kind::Banner { .. }) {
+            self.render_banner_pole(
+                &shapes,
+                scene,
+                kind,
+                Mat4::IDENTITY,
+                packed,
+                lights,
+                vertices,
+            );
+        } else {
+            self.render_one(
+                scene,
+                pos,
+                kind,
+                Mat4::IDENTITY,
+                packed,
+                lights,
+                false,
+                true,
+                vertices,
+            );
+        }
+    }
+    /// The atlas coordinates and non-animated inputs that determine a static model.
+    /// `packed` is raised to the brighter half for a closed double chest, just
+    /// as `ChestRenderer` does before drawing either half.
+    fn static_key(
+        &self,
+        scene: &Scene,
+        pos: [i32; 3],
+        state: u32,
+        kind: &Kind,
+        options: CacheOptions,
+        packed: &mut u8,
+    ) -> Option<StaticKey> {
+        let mut sprite_rects = [None; 5];
+        let mut sprite_count = 0;
+        let mut pose = [0; 2];
+        let mut has_fractional_alpha = false;
+        let mut add_sprite = |texture: &str| {
+            sprite_rects[usize::from(sprite_count)] = sprite_rect_key(scene, texture);
+            has_fractional_alpha |= scene.translucent_sprites.contains(texture);
+            sprite_count += 1;
+        };
+        match kind {
+            Kind::Chest {
+                block,
+                texture,
+                part,
+                ..
+            } if options.chests => {
+                let (open, other) = self.chest_openness(
+                    pos,
+                    kind,
+                    &|p| scene.world.block(p[0], p[1], p[2]).0,
+                    scene.lid,
+                );
+                if open != 0.0 {
+                    return None;
+                }
+                if let Some(other) = other {
+                    let light = scene.world.light(other[0], other[1], other[2]);
+                    *packed = (*packed >> 4).max(light >> 4) << 4 | (*packed & 15).max(light & 15);
+                }
+                let texture = if matches!(block.as_str(), "chest" | "trapped_chest")
+                    && extended_christmas()
+                {
+                    match part {
+                        ChestPart::Single => "entity/chest/christmas",
+                        ChestPart::Left => "entity/chest/christmas_left",
+                        ChestPart::Right => "entity/chest/christmas_right",
+                    }
+                } else {
+                    *texture
+                };
+                add_sprite(texture);
+            }
+            Kind::Shulker { texture, .. } if options.shulker_boxes => {
+                let (progress, old) = (scene.anim)(pos).shulker;
+                if progress != old {
+                    return None;
+                }
+                pose[0] = progress.to_bits();
+                add_sprite(texture);
+            }
+            Kind::Bell if options.bells => {
+                if (scene.anim)(pos).bell_shake.is_some() {
+                    return None;
+                }
+                add_sprite("entity/bell/bell_body");
+            }
+            Kind::Banner { .. } if options.banners => {
+                // Only the stationary pole is cached; the flag below keeps its
+                // normal frame-by-frame wave and pattern draws.
+                add_sprite("entity/banner/banner_base");
+            }
+            Kind::DecoratedPot { .. } if options.decorated_pots => {
+                let anim = (scene.anim)(pos);
+                if anim
+                    .wobble
+                    .is_some_and(|(_, progress)| (0.0..=1.0).contains(&progress))
+                {
+                    return None;
+                }
+                add_sprite("entity/decorated_pot/decorated_pot_base");
+                for item in &anim.sherds {
+                    let texture = item
+                        .as_ref()
+                        .and_then(|item| self.pot_patterns.get(item))
+                        .map(String::as_str)
+                        .unwrap_or("entity/decorated_pot/decorated_pot_side");
+                    add_sprite(texture);
+                }
+            }
+            Kind::CopperGolem { texture, .. } if options.copper_golem_statues => {
+                add_sprite(texture);
+            }
+            _ => return None,
+        }
+        // Binary alpha is handled by fs_entity's discard. Fractional alpha
+        // needs the ordinary blended entity pipeline, so leave that model
+        // dynamic instead of paying for blending on every cached cutout.
+        if has_fractional_alpha {
+            return None;
+        }
+        Some(StaticKey {
+            state,
+            light: *packed,
+            nether: scene.nether,
+            pose,
+            sprite_rects,
+            sprite_count,
+        })
     }
     /// A sign's text from the cache, laid out again when its data, light,
     /// state, outline or font changed.
@@ -1046,26 +2067,47 @@ impl BlockEntityRenderer {
         }
         let glyphs = scene.glyphs;
         let signs = &mut cache.signs;
-        if !signs.get(&pos).is_some_and(|e| {
-            (e.state, e.packed, e.near, e.glyphs) == (state, packed, near, glyphs)
-                && e.data == *data
-        }) {
-            let mut vertices = signs.remove(&pos).map_or_else(Vec::new, |e| e.vertices);
-            vertices.clear();
-            self.render_one(
-                scene,
-                pos,
-                self.kind(state),
-                Mat4::IDENTITY,
-                packed,
-                diffuse_lights(scene.nether),
-                false,
-                true,
-                &mut vertices,
-            );
-            signs.insert(
-                pos,
-                SignTextEntry {
+        let entry = match signs.entry(pos) {
+            std::collections::hash_map::Entry::Occupied(mut occupied) => {
+                let entry = occupied.get_mut();
+                if (entry.state, entry.packed, entry.near, entry.glyphs)
+                    != (state, packed, near, glyphs)
+                    || entry.data != *data
+                {
+                    entry.vertices.clear();
+                    self.render_one(
+                        scene,
+                        pos,
+                        self.kind(state),
+                        Mat4::IDENTITY,
+                        packed,
+                        diffuse_lights(scene.nether),
+                        false,
+                        true,
+                        &mut entry.vertices,
+                    );
+                    entry.state = state;
+                    entry.data.clone_from(data);
+                    entry.packed = packed;
+                    entry.near = near;
+                    entry.glyphs = glyphs;
+                }
+                occupied.into_mut()
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                let mut vertices = Vec::new();
+                self.render_one(
+                    scene,
+                    pos,
+                    self.kind(state),
+                    Mat4::IDENTITY,
+                    packed,
+                    diffuse_lights(scene.nether),
+                    false,
+                    true,
+                    &mut vertices,
+                );
+                vacant.insert(SignTextEntry {
                     state,
                     data: data.clone(),
                     packed,
@@ -1073,11 +2115,8 @@ impl BlockEntityRenderer {
                     glyphs,
                     used: now,
                     vertices,
-                },
-            );
-        }
-        let Some(entry) = signs.get_mut(&pos) else {
-            return;
+                })
+            }
         };
         entry.used = now;
         out.extend(entry.vertices.iter().map(|v| Vertex {
@@ -1171,7 +2210,7 @@ impl BlockEntityRenderer {
             false,
             out,
         );
-        crate::breaking::entity_geometry(&mut out[start..], origin, stage);
+        entity_geometry(&mut out[start..], origin, stage);
     }
     /// `ChestRenderer.extractRenderState`'s openness for the chest of `state`
     /// at `pos`: `ChestBlock.combine` (`DoubleBlockCombiner.combineWithNeigbour`)
@@ -1224,9 +2263,9 @@ impl BlockEntityRenderer {
                 let other_open = lid(other);
                 // The right half is the first.
                 let open = if *part == ChestPart::Right {
-                    crate::block_entity_anim::combined_openness(open, Some(other_open))
+                    block_entity_anim::combined_openness(open, Some(other_open))
                 } else {
-                    crate::block_entity_anim::combined_openness(other_open, Some(open))
+                    block_entity_anim::combined_openness(other_open, Some(open))
                 };
                 (open, Some(other))
             }
@@ -1271,6 +2310,7 @@ impl BlockEntityRenderer {
         world_chests: bool,
         out: &mut Vec<Vertex>,
     ) {
+        let shapes = self.shapes();
         let sprite = |name: &str| scene.sprites.get(name).copied();
         let paint = |name: &str, tint: u32, packed: u8| {
             let rect = if crumbling {
@@ -1363,12 +2403,34 @@ impl BlockEntityRenderer {
                 } else {
                     *texture
                 };
-                let model = match part {
-                    ChestPart::Single => "chest",
-                    ChestPart::Left => "double_chest_left",
-                    ChestPart::Right => "double_chest_right",
+                // Trapped and ender chests have models of their own when a `.jem` reshapes
+                // them; copper chests have no CEM name and draw vanilla's chest.
+                let shapes: &BlockEntityShapes =
+                    if matches!(block.as_str(), "chest" | "trapped_chest" | "ender_chest") {
+                        &shapes
+                    } else {
+                        &self.vanilla
+                    };
+                let (own, chest) = match (block.as_str(), part) {
+                    ("trapped_chest", ChestPart::Single) => ("trapped_chest", "chest"),
+                    ("trapped_chest", ChestPart::Left) => {
+                        ("trapped_chest_left", "double_chest_left")
+                    }
+                    ("trapped_chest", ChestPart::Right) => {
+                        ("trapped_chest_right", "double_chest_right")
+                    }
+                    ("ender_chest", _) => ("ender_chest", "chest"),
+                    (_, ChestPart::Single) => ("chest", "chest"),
+                    (_, ChestPart::Left) => ("double_chest_left", "double_chest_left"),
+                    (_, ChestPart::Right) => ("double_chest_right", "double_chest_right"),
                 };
-                let Some(model) = self.models.get(model) else {
+                let key = if shapes.models.contains_key(own) {
+                    own
+                } else {
+                    chest
+                };
+                let texture = shapes.texture(key, texture, scene.sprites);
+                let Some(model) = shapes.models.get(key) else {
                     return;
                 };
                 let (open, other) = self.chest_openness(
@@ -1384,9 +2446,11 @@ impl BlockEntityRenderer {
                     packed = (packed >> 4).max(l >> 4) << 4 | (packed & 15).max(l & 15);
                 }
                 if world_chests && open == 0.0 {
-                    if let Some(paint) = paint(texture, 0xFFFFFF, packed) {
-                        let vertices = &self.closed_chests[usize::from(scene.nether)]
-                            [*part as usize][*y_rot as usize / 90];
+                    if let (Some(paint), Some(closed)) = (
+                        paint(texture, 0xFFFFFF, packed),
+                        shapes.closed_chests.get(key),
+                    ) {
+                        let vertices = &closed[usize::from(scene.nether)][*y_rot as usize / 90];
                         let origin = base.w_axis.truncate();
                         let passes = std::iter::once((paint.sprite, paint.light))
                             .chain(paint.glow.map(|g| (g, FULL_BRIGHT)));
@@ -1409,7 +2473,7 @@ impl BlockEntityRenderer {
                         Mat4::from_rotation_y((-y_rot).to_radians()),
                         Vec3::new(0.5, 0.0, 0.5),
                     );
-                let lid = crate::block_entity_anim::chest_lid_x_rot(open);
+                let lid = block_entity_anim::chest_lid_x_rot(open);
                 let adjust = move |name: &str, p: &mut [f32; 9]| {
                     if name == "lid" || name == "lock" {
                         p[3] = lid;
@@ -1421,8 +2485,12 @@ impl BlockEntityRenderer {
             }
             Kind::Shulker { texture, facing } => {
                 let (Some(model), Some(paint)) = (
-                    self.models.get("shulker_box"),
-                    paint(texture, 0xFFFFFF, packed),
+                    shapes.models.get("shulker_box"),
+                    paint(
+                        shapes.texture("shulker_box", texture, scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1445,51 +2513,10 @@ impl BlockEntityRenderer {
                 };
                 draw_part(model, "root", m, &lid, paint, out);
             }
-            Kind::Banner { color, wall, angle } => {
-                let (main, flag) = if *wall {
-                    ("wall_banner", "wall_banner_flag")
-                } else {
-                    ("standing_banner", "standing_banner_flag")
-                };
-                let (Some(main), Some(flag)) = (self.models.get(main), self.models.get(flag))
-                else {
-                    return;
-                };
-                let m = base
-                    * Mat4::from_translation(Vec3::new(0.5, 0.0, 0.5))
-                    * Mat4::from_rotation_y((-angle).to_radians())
-                    * Mat4::from_scale(Vec3::new(2.0 / 3.0, -2.0 / 3.0, -2.0 / 3.0));
-                let time = scene.game_time;
-                let phase = ((i64::from(pos[0]) * 7
-                    + i64::from(pos[1]) * 9
-                    + i64::from(pos[2]) * 13
-                    + time)
-                    .rem_euclid(100) as f32
-                    + scene.partial)
-                    / 100.0;
-                let wave = move |name: &str, p: &mut [f32; 9]| {
-                    if name == "flag" {
-                        p[3] = (-0.0125 + 0.01 * (2.0 * PI * phase).mcos()) * PI;
-                    }
-                };
-                if let Some(paint) = paint("entity/banner/banner_base", 0xFFFFFF, packed) {
-                    draw_part(main, "root", m, &none, paint, out);
-                    draw_part(flag, "root", m, &wave, paint, out);
-                }
-                // Pattern passes must not multiply the crumbling decal.
-                if crumbling {
-                    return;
-                }
-                // BannerRenderer.submitPatterns: the base pattern layer in the dye colour,
-                // then up to 16 pattern layers in order.
-                if let Some(paint) = paint("entity/banner/base", *color, packed) {
-                    draw_part(flag, "root", m, &wave, paint, out);
-                }
-                for (texture, tint) in (scene.banner)(pos).iter().take(16) {
-                    if let Some(paint) = paint(texture, *tint, packed) {
-                        draw_part(flag, "root", m, &wave, paint, out);
-                    }
-                }
+            Kind::Banner { .. } => {
+                self.render_banner(
+                    &shapes, scene, pos, kind, base, packed, lights, crumbling, false, out,
+                );
             }
             Kind::Skull {
                 kind,
@@ -1515,9 +2542,12 @@ impl BlockEntityRenderer {
                     None
                 };
                 let has_profile = skin.is_some();
-                let texture = skin.as_deref().unwrap_or(texture);
+                // A `.jem` texture stands in for the default skin, not a profile's.
+                let texture = skin
+                    .as_deref()
+                    .unwrap_or_else(|| shapes.texture(model, texture, scene.sprites));
                 let (Some(model), Some(paint)) =
-                    (self.models.get(model), paint(texture, 0xFFFFFF, packed))
+                    (shapes.models.get(model), paint(texture, 0xFFFFFF, packed))
                 else {
                     return;
                 };
@@ -1554,13 +2584,17 @@ impl BlockEntityRenderer {
                 // `SkullBlockRenderer.resolveSkullRenderType`: a head with a profile takes
                 // the player skin's `entityTranslucent` render type.
                 if has_profile {
-                    crate::gfx::mark_oit(&mut out[start..]);
+                    mark_oit(&mut out[start..]);
                 }
             }
             Kind::Bell => {
                 let (Some(model), Some(paint)) = (
-                    self.models.get("bell"),
-                    paint("entity/bell/bell_body", 0xFFFFFF, packed),
+                    shapes.models.get("bell"),
+                    paint(
+                        shapes.texture("bell", "entity/bell/bell_body", scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1588,8 +2622,8 @@ impl BlockEntityRenderer {
             }
             Kind::DecoratedPot { y_rot } => {
                 let (Some(base_model), Some(sides)) = (
-                    self.models.get("decorated_pot_base"),
-                    self.models.get("decorated_pot_sides"),
+                    shapes.models.get("decorated_pot_base"),
+                    shapes.models.get("decorated_pot_sides"),
                 ) else {
                     return;
                 };
@@ -1617,17 +2651,20 @@ impl BlockEntityRenderer {
                     }
                 }
                 let first = out.len();
-                if let Some(paint) =
-                    paint("entity/decorated_pot/decorated_pot_base", 0xFFFFFF, packed)
-                {
+                let pot_base = "entity/decorated_pot/decorated_pot_base";
+                let pot_base = shapes.texture("decorated_pot_base", pot_base, scene.sprites);
+                if let Some(paint) = paint(pot_base, 0xFFFFFF, packed) {
                     draw_part(base_model, "root", m, &none, paint, out);
                 }
-                // PotDecorations (back, left, right, front); items without a pattern use the blank side.
+                // PotDecorations (back, left, right, front); items without a pattern use the blank
+                // side (a `.jem`'s texture, if any).
+                let blank = "entity/decorated_pot/decorated_pot_side";
+                let blank = shapes.texture("decorated_pot_sides", blank, scene.sprites);
                 for (side, item) in ["back", "left", "right", "front"].iter().zip(&a.sherds) {
                     let texture = item
                         .as_ref()
                         .and_then(|i| self.pot_patterns.get(i))
-                        .map_or("entity/decorated_pot/decorated_pot_side", String::as_str);
+                        .map_or(blank, String::as_str);
                     if let (Some(part), Some(paint)) =
                         (sides.child(side), paint(texture, 0xFFFFFF, packed))
                     {
@@ -1674,20 +2711,33 @@ impl BlockEntityRenderer {
                 portal_cube(base, &faces, END_GATEWAY_LAYER, out);
             }
             Kind::Conduit => {
+                // HDR output: the conduit shines, not its crumbling overlay.
+                let start = out.len();
+                let shine = |out: &mut Vec<Vertex>| {
+                    if !crumbling {
+                        for v in &mut out[start..] {
+                            v.layer |= u32::from(crate::mesher::BRIGHT) << 16;
+                        }
+                    }
+                };
                 let (ticks, active, hunting, raw_rotation) = (scene.anim)(pos).conduit;
                 // ConduitRenderer.extractRenderState.
                 let rotation = (raw_rotation + if active { scene.partial } else { 0.0 }) * -0.0375;
-                let tex = |name: &str| paint(name, 0xFFFFFF, packed);
+                let tex = |key: &str, name: &str| {
+                    paint(shapes.texture(key, name, scene.sprites), 0xFFFFFF, packed)
+                };
                 if !active {
-                    let (Some(model), Some(paint)) =
-                        (self.models.get("conduit_shell"), tex("entity/conduit/base"))
-                    else {
+                    let (Some(model), Some(paint)) = (
+                        shapes.models.get("conduit_shell"),
+                        tex("conduit_shell", "entity/conduit/base"),
+                    ) else {
                         return;
                     };
                     let m = base
                         * Mat4::from_translation(Vec3::splat(0.5))
                         * Mat4::from_rotation_y(rotation.to_radians());
                     draw_part(model, "root", m, &none, paint, out);
+                    shine(out);
                     return;
                 }
                 let anim_time = ticks as f32 + scene.partial;
@@ -1696,9 +2746,10 @@ impl BlockEntityRenderer {
                 let hh = (anim_time * 0.1).msin() / 2.0 + 0.5;
                 let hh = hh * hh + hh;
                 let lift = Vec3::new(0.5, 0.3 + hh * 0.2, 0.5);
-                if let (Some(model), Some(paint)) =
-                    (self.models.get("conduit_cage"), tex("entity/conduit/cage"))
-                {
+                if let (Some(model), Some(paint)) = (
+                    shapes.models.get("conduit_cage"),
+                    tex("conduit_cage", "entity/conduit/cage"),
+                ) {
                     let axis = Vec3::new(0.5, 1.0, 0.5).normalize();
                     let m = base
                         * Mat4::from_translation(lift)
@@ -1714,7 +2765,9 @@ impl BlockEntityRenderer {
                 } else {
                     "entity/conduit/wind"
                 };
-                if let (Some(model), Some(paint)) = (self.models.get("conduit_wind"), tex(wind)) {
+                if let (Some(model), Some(paint)) =
+                    (shapes.models.get("conduit_wind"), tex("conduit_wind", wind))
+                {
                     let turn = match phase {
                         1 => Mat4::from_rotation_x(PI / 2.0),
                         2 => Mat4::from_rotation_z(PI / 2.0),
@@ -1732,7 +2785,9 @@ impl BlockEntityRenderer {
                 } else {
                     "entity/conduit/closed_eye"
                 };
-                if let (Some(model), Some(paint)) = (self.models.get("conduit_eye"), tex(eye)) {
+                if let (Some(model), Some(paint)) =
+                    (shapes.models.get("conduit_eye"), tex("conduit_eye", eye))
+                {
                     let m = base
                         * Mat4::from_translation(lift)
                         * Mat4::from_scale(Vec3::splat(0.5))
@@ -1741,11 +2796,17 @@ impl BlockEntityRenderer {
                         * Mat4::from_scale(Vec3::splat(1.333_333_4));
                     draw_part(model, "root", m, &none, paint, out);
                 }
+                shine(out);
             }
             Kind::EnchantingTable => {
+                let book = "entity/enchantment/enchanting_table_book";
                 let (Some(model), Some(paint)) = (
-                    self.models.get("book"),
-                    paint("entity/enchantment/enchanting_table_book", 0xFFFFFF, packed),
+                    shapes.models.get("book"),
+                    paint(
+                        shapes.texture("book", book, scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1764,9 +2825,16 @@ impl BlockEntityRenderer {
                 draw_part(model, "root", m, &book_pose(openness, ff1, ff2), paint, out);
             }
             Kind::Lectern { y_rot } => {
+                // Its own `.jem`'s book, else the enchanting table's.
+                let key = if shapes.models.contains_key("lectern_book") {
+                    "lectern_book"
+                } else {
+                    "book"
+                };
+                let book = "entity/enchantment/enchanting_table_book";
                 let (Some(model), Some(paint)) = (
-                    self.models.get("book"),
-                    paint("entity/enchantment/enchanting_table_book", 0xFFFFFF, packed),
+                    shapes.models.get(key),
+                    paint(shapes.texture(key, book, scene.sprites), 0xFFFFFF, packed),
                 ) else {
                     return;
                 };
@@ -1797,7 +2865,7 @@ impl BlockEntityRenderer {
                     _ => "copper_golem",
                 };
                 let (Some(model), Some(paint)) =
-                    (self.models.get(key), paint(texture, 0xFFFFFF, packed))
+                    (shapes.models.get(key), paint(texture, 0xFFFFFF, packed))
                 else {
                     return;
                 };
@@ -1812,6 +2880,145 @@ impl BlockEntityRenderer {
                     }
                 };
                 draw_part(model, "root", m, &statue, paint, out);
+            }
+        }
+    }
+    fn banner_parts<'a>(
+        shapes: &'a BlockEntityShapes,
+        kind: &Kind,
+        base: Mat4,
+    ) -> Option<(
+        &'a ModelPart,
+        &'a ModelPart,
+        Mat4,
+        &'static str,
+        &'static str,
+    )> {
+        let Kind::Banner { wall, angle, .. } = kind else {
+            return None;
+        };
+        let (main_key, flag_key) = if *wall {
+            ("wall_banner", "wall_banner_flag")
+        } else {
+            ("standing_banner", "standing_banner_flag")
+        };
+        let (main, flag) = (shapes.models.get(main_key)?, shapes.models.get(flag_key)?);
+        let transform = base
+            * Mat4::from_translation(Vec3::new(0.5, 0.0, 0.5))
+            * Mat4::from_rotation_y((-angle).to_radians())
+            * Mat4::from_scale(Vec3::new(2.0 / 3.0, -2.0 / 3.0, -2.0 / 3.0));
+        Some((main, flag, transform, main_key, flag_key))
+    }
+    fn render_banner_pole(
+        &self,
+        shapes: &BlockEntityShapes,
+        scene: &Scene,
+        kind: &Kind,
+        base: Mat4,
+        packed: u8,
+        lights: (Vec3, Vec3),
+        out: &mut Vec<Vertex>,
+    ) {
+        let Some((main, _, transform, main_key, _)) = Self::banner_parts(shapes, kind, base) else {
+            return;
+        };
+        let texture = shapes.texture(main_key, "entity/banner/banner_base", scene.sprites);
+        let Some(sprite) = scene.sprites.get(texture).copied() else {
+            return;
+        };
+        let paint = Paint {
+            sprite,
+            tint: 0xFFFFFF,
+            light: vertex_light(packed),
+            lights,
+            glow: scene
+                .emissive
+                .overlay(texture)
+                .and_then(|name| scene.sprites.get(name).copied()),
+        };
+        let none = |_: &str, _: &mut [f32; 9]| {};
+        draw_part(main, "root", transform, &none, paint, out);
+    }
+    fn render_banner(
+        &self,
+        shapes: &BlockEntityShapes,
+        scene: &Scene,
+        pos: [i32; 3],
+        kind: &Kind,
+        base: Mat4,
+        packed: u8,
+        lights: (Vec3, Vec3),
+        crumbling: bool,
+        skip_pole: bool,
+        out: &mut Vec<Vertex>,
+    ) {
+        let Kind::Banner { color, .. } = kind else {
+            return;
+        };
+        let Some((main, flag, transform, main_key, flag_key)) =
+            Self::banner_parts(shapes, kind, base)
+        else {
+            return;
+        };
+        let phase = ((i64::from(pos[0]) * 7
+            + i64::from(pos[1]) * 9
+            + i64::from(pos[2]) * 13
+            + scene.game_time)
+            .rem_euclid(100) as f32
+            + scene.partial)
+            / 100.0;
+        let wave = move |name: &str, p: &mut [f32; 9]| {
+            if name == "flag" {
+                p[3] = (-0.0125 + 0.01 * (2.0 * PI * phase).mcos()) * PI;
+            }
+        };
+        let paint = |texture: &str, tint: u32| {
+            let sprite = if crumbling {
+                Some(Rect {
+                    u0: 0.0,
+                    v0: 0.0,
+                    u1: 1.0,
+                    v1: 1.0,
+                    w: 16,
+                    h: 16,
+                })
+            } else {
+                scene.sprites.get(texture).copied()
+            };
+            sprite.map(|sprite| Paint {
+                sprite,
+                tint,
+                light: vertex_light(packed),
+                lights,
+                glow: (!crumbling)
+                    .then(|| {
+                        scene
+                            .emissive
+                            .overlay(texture)
+                            .and_then(|name| scene.sprites.get(name).copied())
+                    })
+                    .flatten(),
+            })
+        };
+        let banner_base = "entity/banner/banner_base";
+        let main_texture = shapes.texture(main_key, banner_base, scene.sprites);
+        let flag_texture = shapes.texture(flag_key, banner_base, scene.sprites);
+        if !skip_pole && let Some(paint) = paint(main_texture, 0xFFFFFF) {
+            let none = |_: &str, _: &mut [f32; 9]| {};
+            draw_part(main, "root", transform, &none, paint, out);
+        }
+        if let Some(paint) = paint(flag_texture, 0xFFFFFF) {
+            draw_part(flag, "root", transform, &wave, paint, out);
+        }
+        if crumbling {
+            return;
+        }
+        if let Some(paint) = paint("entity/banner/base", *color) {
+            draw_part(flag, "root", transform, &wave, paint, out);
+        }
+        for (texture, tint) in (scene.banner)(pos).iter().take(16) {
+            if let Some(paint) = paint(texture, *tint) {
+                draw_part(flag, "root", transform, &wave, paint, out);
             }
         }
     }
@@ -2003,11 +3210,13 @@ const PORTAL_FACES: [[[f32; 3]; 4]; 6] = [
 ];
 /// `AbstractEndPortalRenderer.submitCube`: position-only quads (the portal
 /// shader projects its textures from the screen; uv, colour and light are unused).
+/// `rendertype_end_portal` culls back faces, as `entitySolid` does, so the cube's
+/// two Y faces are one-sided: only the one facing the camera draws.
 fn portal_cube(m: Mat4, faces: &[Direction], layer: u32, out: &mut Vec<Vertex>) {
     for &d in faces {
         for c in PORTAL_FACES[d as usize] {
             out.push(Vertex {
-                normal: [0; 4],
+                normal: CULL_BACK,
                 pos: m.transform_point3(Vec3::from(c)).to_array(),
                 uv: [0.0; 2],
                 layer,
@@ -2022,9 +3231,10 @@ fn portal_cube(m: Mat4, faces: &[Direction], layer: u32, out: &mut Vec<Vertex>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::Assets;
     #[test]
     #[ignore = "requires prepared models/textures in HORIZON_TEST_RESOURCES"]
-    fn entity_block_particles_and_breaking_use_exported_models() -> crate::Result<()> {
+    fn entity_block_particles_and_breaking_use_exported_models() -> Result<()> {
         use crate::{models::catalog::StateModels, sprites::Sprites};
         use horizon_world::{DATA_VERSION, chunk::BlockState, nbt::Tag};
         let root = std::path::PathBuf::from(
@@ -2125,6 +3335,8 @@ mod tests {
             world: &world,
             sprites: &base_sprites,
             emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
             nether: false,
             lid: &|_| 0.0,
             sign: &|_| None,
@@ -2411,6 +3623,8 @@ mod tests {
             world: &world,
             sprites: &sprites,
             emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
             nether: false,
             lid: &|_| 0.0,
             sign: &|_| None,
@@ -2449,7 +3663,8 @@ mod tests {
     #[test]
     fn cached_sign_text_matches_and_follows_changes() {
         let renderer = BlockEntityRenderer {
-            models: HashMap::new(),
+            vanilla: Default::default(),
+            shapes: Default::default(),
             kinds: vec![
                 Kind::Sign {
                     hanging: false,
@@ -2462,28 +3677,29 @@ mod tests {
                     angle: 90.0,
                 },
             ],
-            closed_chests: Default::default(),
             pot_patterns: HashMap::new(),
             visibility: None,
             sign_texts: Mutex::default(),
+            static_geometry: Mutex::default(),
+            sign_cache_enabled: AtomicBool::new(false),
         };
         let world = World::new(BlockStateId(0), 1);
         let sprites = HashMap::new();
-        let text = |line: &str, glowing| crate::signs::SignText {
+        let text = |line: &str, glowing| SignText {
             lines: [line.into(), "two".into(), String::new(), "four".into()],
             color: 3,
             glowing,
             ..Default::default()
         };
-        let first_text = crate::signs::SignData {
+        let first_text = SignData {
             front: text("one", false),
             ..Default::default()
         };
-        let changed = crate::signs::SignData {
+        let changed = SignData {
             front: text("changed", false),
             ..Default::default()
         };
-        let glowing = crate::signs::SignData {
+        let glowing = SignData {
             back: text("glow", true),
             ..changed.clone()
         };
@@ -2516,6 +3732,8 @@ mod tests {
             world: &world,
             sprites: &sprites,
             emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
             nether: false,
             lid: &|_| 0.0,
             sign: &first_sign,
@@ -2578,6 +3796,35 @@ mod tests {
         assert_eq!(first_line("\u{6771}", 3.0, &advance), "\u{6771}");
         assert_eq!(first_line("ab\ncd", 100.0, &advance), "ab");
     }
+    /// `rendertype_end_portal` culls back faces, and `AbstractEndPortalRenderer`
+    /// submits the unit cube's two Y faces. Both are wound outward, so of each
+    /// face only the side looking at the camera draws: the portal shows one
+    /// surface from above and one from below, never both at once.
+    #[test]
+    fn the_end_portal_cube_is_one_sided() {
+        let mut out = Vec::new();
+        portal_cube(
+            Mat4::IDENTITY,
+            &[Direction::Down, Direction::Up],
+            END_PORTAL_LAYER,
+            &mut out,
+        );
+        // `TheEndPortalBlockEntity.shouldRenderFace` keeps the Y faces only.
+        assert_eq!(out.len(), 8, "the cube submits both Y faces");
+        assert!(
+            out.iter().all(|v| v.normal == CULL_BACK),
+            "rendertype_end_portal culls back faces"
+        );
+        // Each face is wound outward, so the shader's `!front` discard keeps the
+        // camera-facing side of it and drops the other.
+        let facing = |quad: &[Vertex]| {
+            let p = |i: usize| Vec3::from(quad[i].pos);
+            (p(1) - p(0)).cross(p(2) - p(0))
+        };
+        assert!(facing(&out[..4]).y < 0.0, "the Down face looks down");
+        assert!(facing(&out[4..]).y > 0.0, "the Up face looks up");
+    }
+
     /// `DecoratedPotRenderer` submits every part with `RenderTypes.entitySolid`,
     /// whose pipeline culls back faces. The pot's `top` and `bottom` are flat
     /// boxes, so without that cull both sides of each plane are drawn and they
@@ -2590,7 +3837,7 @@ mod tests {
         if !root.join("entity-models.json").exists() {
             return;
         }
-        let assets = crate::assets::Assets::load(&root).unwrap();
+        let assets = Assets::load(&root).unwrap();
         let registry = assets.registry;
         let renderer = BlockEntityRenderer::load(&root, registry).unwrap();
         let state = registry.default_state("minecraft:decorated_pot").unwrap();
@@ -2625,6 +3872,8 @@ mod tests {
             world: &world,
             sprites: &sprites,
             emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
             nether: false,
             lid: &|_| 0.0,
             sign: &|_| None,
@@ -2646,4 +3895,141 @@ mod tests {
             "entitySolid culls the pot's back faces"
         );
     }
+
+    #[test]
+    fn a_chest_jem_reshapes_the_closed_chest_and_paints_its_texture() {
+        use crate::block_entity_cem::tests::{BOX, chest, pack};
+        let vanilla = Arc::new(BlockEntityShapes::new(
+            HashMap::from([("chest", chest())]),
+            HashMap::new(),
+        ));
+        let renderer = BlockEntityRenderer {
+            shapes: RwLock::new(vanilla.clone()),
+            vanilla,
+            kinds: Vec::new(),
+            pot_patterns: HashMap::new(),
+            visibility: None,
+            sign_texts: Mutex::default(),
+            static_geometry: Mutex::default(),
+            sign_cache_enabled: AtomicBool::new(false),
+        };
+        // No block entity's `.jem` (a mob's only): vanilla's shapes, not a copy.
+        let empty = pack("render-none", &[("optifine/cem/zombie.jem", "{}".into())]);
+        assert!(Arc::ptr_eq(&renderer.shapes_for(&empty), &renderer.vanilla));
+        let root = pack(
+            "render-chest",
+            &[(
+                "optifine/cem/chest.jem",
+                format!(
+                    r#"{{"texture": "textures/entity/chest/fancy.png",
+                        "models": [{{"part": "lid", {BOX}}}]}}"#
+                ),
+            )],
+        );
+        renderer.set_shapes(renderer.shapes_for(&root));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&empty);
+        let rect = |u0: f32| Rect {
+            u0,
+            v0: 0.0,
+            u1: u0 + 0.2,
+            v1: 0.2,
+            w: 16,
+            h: 16,
+        };
+        let sprites: HashMap<String, Rect> = [
+            ("entity/chest/normal", rect(0.0)),
+            ("entity/chest/ender", rect(0.2)),
+            ("entity/chest/fancy", rect(0.4)),
+            ("entity/chest/copper", rect(0.6)),
+        ]
+        .map(|(name, r)| (name.to_owned(), r))
+        .into();
+        let world = World::new(BlockStateId(0), 1);
+        let scene = Scene {
+            camera: DVec3::ZERO,
+            orientation: Quat::IDENTITY,
+            anim: &|_| BlockAnim::default(),
+            texts: None,
+            partial: 0.0,
+            game_time: 0,
+            max_y: 320,
+            world: &world,
+            sprites: &sprites,
+            emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
+            nether: false,
+            lid: &|_| 0.0,
+            sign: &|_| None,
+            banner: &|_| Vec::new(),
+            skull: &|_| None,
+            glyph: &|_| (None, 0.0),
+            glyphs: 0,
+        };
+        // A closed single chest of `block` drawn by `renderer`: positions and UVs.
+        let draw = |renderer: &BlockEntityRenderer, block: &str, texture: &'static str| {
+            let kind = Kind::Chest {
+                block: block.into(),
+                texture,
+                part: ChestPart::Single,
+                y_rot: 0.0,
+                double_with: None,
+            };
+            let mut out = Vec::new();
+            renderer.render_one(
+                &scene,
+                [0; 3],
+                &kind,
+                Mat4::IDENTITY,
+                0xF0,
+                diffuse_lights(false),
+                false,
+                true,
+                &mut out,
+            );
+            out.iter().map(|v| (v.pos, v.uv)).collect::<Vec<_>>()
+        };
+        // The chest's three faces become the bottom's, the lock's and the custom lid's six, in
+        // the `.jem`'s texture. Ender and copper chests have no file of their own: vanilla's
+        // three faces in their own textures. (Trapped chests: `block_entity_cem`'s tests; their
+        // texture turns festive in late December.)
+        for (block, texture, u0, faces) in [
+            ("chest", "entity/chest/normal", 0.4, 8),
+            ("ender_chest", "entity/chest/ender", 0.2, 3),
+            ("copper_chest", "entity/chest/copper", 0.6, 3),
+        ] {
+            let out = draw(&renderer, block, texture);
+            assert_eq!(out.len(), faces * 4, "{block}");
+            assert!(
+                out.iter().all(|(_, uv)| (u0..=u0 + 0.2).contains(&uv[0])),
+                "{block}"
+            );
+        }
+        // A copper chest draws exactly what it draws without any pack.
+        let plain = BlockEntityRenderer {
+            shapes: RwLock::new(renderer.vanilla.clone()),
+            vanilla: renderer.vanilla.clone(),
+            kinds: Vec::new(),
+            pot_patterns: HashMap::new(),
+            visibility: None,
+            sign_texts: Mutex::default(),
+            static_geometry: Mutex::default(),
+            sign_cache_enabled: AtomicBool::new(false),
+        };
+        assert_eq!(
+            draw(&renderer, "copper_chest", "entity/chest/copper"),
+            draw(&plain, "copper_chest", "entity/chest/copper")
+        );
+        // The atlas has no such texture: vanilla's.
+        let shapes = renderer.shapes();
+        assert_eq!(
+            shapes.texture("chest", "entity/chest/normal", &HashMap::new()),
+            "entity/chest/normal"
+        );
+    }
 }
+
+#[cfg(test)]
+#[path = "block_entity_render_tests.rs"]
+mod cache_behavior_tests;

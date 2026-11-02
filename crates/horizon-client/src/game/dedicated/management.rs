@@ -3,7 +3,7 @@
 //! `AllowlistService`, `BanlistService`, `IpBanlistService` and `OperatorService` on the running server's lists. Players are found as
 //! `MinecraftPlayerListService.getUser` finds them, each change is logged as `JsonRpcLogger` logs it, and the
 //! players a change shuts out are disconnected. The supervisor answers with the lists, from their files.
-use super::{ServerState, log};
+use super::{GAME_MODES, ServerState, log};
 use crate::game::Game;
 use horizon_client::{
     command::vanilla::DIFFICULTIES,
@@ -69,6 +69,25 @@ impl Game<'_> {
                 // DedicatedServer.setMotd: server.properties keeps it too.
                 self.store_property("motd", value.to_owned());
                 return json!({ "value": value });
+            }
+            "serversettings/game_mode" => {
+                return json!({ "value": GAME_MODES[state.game_mode as usize] });
+            }
+            "serversettings/game_mode/set" => {
+                let Some(value) = body["value"].as_str() else {
+                    return json!({ "error": "game mode must be a string" });
+                };
+                let Some(index) = GAME_MODES.iter().position(|name| *name == value) else {
+                    return json!({ "error": format!("unknown game mode {value:?}") });
+                };
+                rpc(format!(
+                    "Update game mode from '{}' to '{}'",
+                    GAME_MODES[state.game_mode as usize], value
+                ));
+                self.store_property("gamemode", value.to_owned());
+                state.game_mode = index as i32;
+                self.set_default_game_mode(state.game_mode);
+                return json!({ "value": GAME_MODES[state.game_mode as usize] });
             }
             "serversettings/difficulty" => {
                 return json!({ "value": DIFFICULTIES[self.level.difficulty_id() as usize] });

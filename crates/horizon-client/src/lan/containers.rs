@@ -33,7 +33,8 @@ impl Hub {
         }
     }
 
-    /// Send to every placed guest within `range` blocks of `at`.
+    /// Send to every placed guest within `range` blocks of `at`
+    /// (`PlayerList.broadcast`, which leaves out a player exactly at `range`).
     pub fn broadcast_near(&self, at: [f64; 3], range: f64, packet: &C, except: Option<u32>) {
         let body = packet.encode();
         for g in self
@@ -41,8 +42,7 @@ impl Hub {
             .iter()
             .filter(|g| self.here(g) && Some(g.conn) != except)
         {
-            let d: f64 = (0..3).map(|k| (g.position[k] - at[k]).powi(2)).sum();
-            if d <= range * range {
+            if within_range(at, g.position, range) {
                 g.sender.send(body.clone());
             }
         }
@@ -886,9 +886,16 @@ fn next_sound_seed(g: &mut impl RandomSource) -> i64 {
     g.next_long()
 }
 
+/// `PlayerList.broadcast`'s distance test: the summed squared axis distances
+/// against the squared radius, and a player exactly at the radius is out.
+fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
+    let d: f64 = (0..3).map(|k| (pos[k] - at[k]).powi(2)).sum();
+    d < range * range
+}
+
 #[cfg(test)]
 mod tests {
-    use super::next_sound_seed;
+    use super::{next_sound_seed, within_range};
     use horizon_core::random::LegacyRandom;
 
     #[test]
@@ -906,5 +913,16 @@ mod tests {
         let ticks = 12i64;
         let mut g = LegacyRandom::new(0);
         assert_ne!(next_sound_seed(&mut g), ticks);
+    }
+
+    /// `PlayerList.broadcast` compares the squared distances with `ifge`, so a
+    /// player exactly on the radius gets no packet while one a hair inside does.
+    #[test]
+    fn a_guest_exactly_on_the_radius_hears_nothing() {
+        let at = [10.0, 64.0, -3.0];
+        let at_radius = [at[0] + 16.0, at[1], at[2]];
+        assert!(!within_range(at, at_radius, 16.0));
+        assert!(within_range(at, [at[0] + 15.99, at[1], at[2]], 16.0));
+        assert!(within_range(at, at, 16.0));
     }
 }

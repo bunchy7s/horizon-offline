@@ -1,11 +1,16 @@
-//! Custom textures: `texture.<stage>.<name>` and `texture.noise` in `shaders.properties` (3.4).
-//! A texture is a PNG of the pack, a raw dump with its type, formats and size, or a resource
+//! Custom textures: `texture.<stage>.<name>` and `texture.noise` in `shaders.properties` (3.4),
+//! and Iris's `customTexture.<name>`, a sampler of its own that every program may read. A
+//! texture is a PNG of the pack, a raw dump with its type, formats and size, or a resource
 //! location the game resolves (`minecraft:textures/...`, `minecraft:dynamic/lightmap_1`).
 
 use crate::{Format, Kind, Pack, Properties};
 
+/// The stage of a `customTexture.<name>`: every program's.
+pub const EVERY_STAGE: &str = "*";
+
 /// A texture bound to sampler `name` in the programs of `stage` (`gbuffers`, `deferred`,
-/// `composite`...), or the noise texture (stage and name `noise`).
+/// `composite`...; [`EVERY_STAGE`] for a `customTexture`), or the noise texture (stage and
+/// name `noise`).
 #[derive(Clone, Debug)]
 pub struct CustomTexture {
     pub stage: String,
@@ -62,23 +67,27 @@ fn components(channels: u8) -> usize {
     }
 }
 
-/// Every `texture.*` entry, read and decoded, and a note for each that failed.
+/// Every `texture.*` and `customTexture.*` entry, read and decoded, and a note for each that
+/// failed.
 pub fn load_textures(pack: &Pack, properties: &Properties) -> (Vec<CustomTexture>, Vec<String>) {
     let (mut textures, mut notes) = (Vec::new(), Vec::new());
     for e in &properties.entries {
-        let Some(rest) = e.key.strip_prefix("texture.") else {
+        let (stage, name) = if let Some(name) = e.key.strip_prefix("customTexture.") {
+            (EVERY_STAGE, name)
+        } else if let Some(rest) = e.key.strip_prefix("texture.") {
+            match rest {
+                "noise" => ("noise", "noise"),
+                _ => match rest.split_once('.') {
+                    // `.0` to `.9` after the name only keep keys apart.
+                    Some((stage, name)) => (stage, strip_suffix(name)),
+                    None => {
+                        notes.push(format!("`{}`: no sampler name", e.key));
+                        continue;
+                    }
+                },
+            }
+        } else {
             continue;
-        };
-        let (stage, name) = match rest {
-            "noise" => ("noise", "noise"),
-            _ => match rest.split_once('.') {
-                // `.0` to `.9` after the name only keep keys apart.
-                Some((stage, name)) => (stage, strip_suffix(name)),
-                None => {
-                    notes.push(format!("`{}`: no sampler name", e.key));
-                    continue;
-                }
-            },
         };
         match source(pack, e.value.trim()) {
             Ok(source) => textures.push(CustomTexture {
@@ -349,6 +358,38 @@ mod tests {
             ],
         );
         assert!(big.is_err_and(|e| e.starts_with("64 bytes")));
+    }
+
+    /// Iris's `customTexture.<name>`: a raw 3D texture (Shrimple's `texClouds`) under a sampler
+    /// name of its own, for every stage; `texture.*` beside it keeps its stage.
+    #[test]
+    fn custom_textures_are_for_every_stage() {
+        // 2x2x2 RGBA8: texel i holds (i, 255 - i, 7, 255), x fastest.
+        let raw: Vec<u8> = (0..8u8).flat_map(|i| [i, 255 - i, 7, 255]).collect();
+        let files = [("shaders/clouds.dat", raw.as_slice())];
+        let pack = Pack::from_zip_bytes("P.zip", zip(&files)).unwrap();
+        let properties = "customTexture.texClouds = clouds.dat TEXTURE_3D RGBA8 2 2 2 RGBA UNSIGNED_BYTE\n\
+                          customTexture.gone = gone.png\n\
+                          texture.composite.colortex5 = clouds.dat TEXTURE_3D RGBA8 2 2 2 RGBA UNSIGNED_BYTE\n";
+        let (textures, notes) =
+            load_textures(&pack, &Properties::parse(properties, &Macros::standard()));
+        assert_eq!(notes, ["`customTexture.gone`: can't find `gone.png`"]);
+        let found: Vec<(&str, &str)> = textures
+            .iter()
+            .map(|t| (t.stage.as_str(), t.name.as_str()))
+            .collect();
+        assert_eq!(
+            found,
+            [(EVERY_STAGE, "texClouds"), ("composite", "colortex5")]
+        );
+        let TextureSource::Image(clouds) = &textures[0].source else {
+            panic!("{:?}", textures[0].source);
+        };
+        assert_eq!((clouds.dim, clouds.size), (Dim::D3, [2, 2, 2]));
+        let expected: Vec<f32> = (0..8)
+            .flat_map(|i| [i as f32 / 255.0, (255 - i) as f32 / 255.0, 7.0 / 255.0, 1.0])
+            .collect();
+        assert_eq!(clouds.texels, Texels::Float(expected));
     }
 
     #[test]

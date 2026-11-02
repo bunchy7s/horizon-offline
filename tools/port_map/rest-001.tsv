@@ -57,20 +57,20 @@ SharedConstants.debugFlag	skip:debug		debug flag reader
 SharedConstants.debugIntValue	skip:debug		debug value reader
 SharedConstants.setVersion	skip:data		version is a compiled constant
 SharedConstants.debugVoidTerrain	skip:debug		debug world generation switch
-SystemReport.<init>	port	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: no GPU, storage, process or JVM lines
+SystemReport.<init>	port	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: no storage, process or JVM lines
 SystemReport.printMemoryUsage	skip:other		JVM heap usage text; a Rust build has no JVM heap
 SystemReport.printJvmFlags	skip:other		JVM input arguments; a Rust build has none
 SystemReport.setDetail	port	crates/horizon-client-render/src/crash.rs::set_detail	gap: minor: flat detail list
-SystemReport.putHardware	inline	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: CPU and memory are the only hardware lines kept
+SystemReport.putHardware	inline	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: the processor, the memory and the graphics adapter; no storage or memory-slot lines
 SystemReport.putSoftware	port	crates/horizon-client-render/src/crash.rs::operating_system	gap: minor: OS name only; no elevated flag or process details
 SystemReport.ignoreErrors	skip:debug		error isolation for diagnostic collection
 SystemReport.putPhysicalMemory	port	crates/horizon-client-render/src/crash.rs::memory	gap: minor: no per-module memory lines
 SystemReport.putVirtualMemory	missing		minor: no virtual or swap memory lines in the crash details
 SystemReport.putMemory	port	crates/horizon-client-render/src/crash.rs::memory	gap: minor: memory summary only
-SystemReport.putGraphics	missing		minor: no GPU enumeration in the crash details
+SystemReport.putGraphics	inline	crates/horizon-client-render/src/gfx.rs::describe_adapter	the Graphics Adapter detail: the adapter's name, backend, device type and driver
 SystemReport.putProcessor	port	crates/horizon-client-render/src/crash.rs::cpu	gap: minor: CPU name and thread count only; no frequency or package counts
 SystemReport.putStorage	missing		minor: no free-space lines for the storage paths
-SystemReport.putProcessDetails	missing		minor: no process load or memory lines in the crash details
+SystemReport.putProcessDetails	inline	crates/horizon-client-render/src/crash.rs::memory	gap: minor: the resident size of the process only; no process loads or virtual size
 SystemReport.putSpaceForPath	missing		minor: no free-space lines for the storage paths
 SystemReport.appendToCrashReportString	inline	crates/horizon-client-render/src/crash.rs::Report::text	the system section is written by Report::text
 SystemReport.toLineSeparatedString	skip:debug		plain-text dump of the system section

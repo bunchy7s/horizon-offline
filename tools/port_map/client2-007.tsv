@@ -25,7 +25,7 @@ ParticleDescription.fromJson	port	crates/horizon-client-render/src/particles.rs:
 ParticleEngine.makeParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	gap: minor: VibrationSignal options return None here; ParticleEngine::vibration creates them
 ParticleEngine.createParticleGroup	skip:other		no render-type groups: ParticleEngine::render draws every particle in one pass, and the ITEM_PICKUP group is tick_pickups
 ParticleEngine.countParticles	skip:debug		
-ParticleEngine.hasSpaceInParticleLimit	missing		minor: no per-type particle cap; vanilla limits live SPORE_BLOSSOM air particles to 1000
+ParticleEngine.hasSpaceInParticleLimit	port	crates/horizon-client-render/src/particles.rs (test spore_blossom_air_stops_at_its_particle_limit)	per-type particle caps, pinned by that test
 ParticleEngine.clearParticles	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::clear	clears emitters, live and pending particles; no limit counts to clear
 ParticleGroup.tickParticles	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick	ticks live particles and drops the removed ones
 ParticleGroup.tickParticle	skip:debug		crash-report wrapper around particle.tick

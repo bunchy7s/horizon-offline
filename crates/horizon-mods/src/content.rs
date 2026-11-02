@@ -171,6 +171,10 @@ struct BlockFile {
     connects_to: Option<String>,
     #[serde(default)]
     thickness: Option<f32>,
+    #[serde(default)]
+    wood_type: Option<String>,
+    #[serde(default)]
+    wall_block: Option<String>,
     #[serde(default = "yes")]
     item: bool,
     #[serde(default)]
@@ -207,6 +211,15 @@ pub struct Block {
     /// A connecting block's width in pixels (2 to 14): its shapes, the
     /// chorus plant's (10) when unset.
     pub thickness: Option<f32>,
+    /// A sign's `WoodType` (template a vanilla sign), which names its editor's
+    /// background: `<namespace>:<path>` a mod's texture, a bare name vanilla's.
+    /// The template's when unset.
+    pub wood_type: Option<String>,
+    /// The block a standing or ceiling sign's item places on a wall
+    /// (`StandingAndWallBlockItem.wallBlock`): one of this mod's blocks, whose
+    /// template is the matching wall sign and which has no item. The
+    /// template's when unset.
+    pub wall_block: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -516,6 +529,8 @@ impl Content {
                 item_ids.insert(id);
             }
         }
+        let all: Vec<&Block> = self.blocks.iter().chain(blocks).collect();
+        check_sign_walls(&all)?;
         for item in items {
             let id = item.id.as_str();
             if !in_own(id) {
@@ -666,6 +681,8 @@ impl Content {
                     .connects_to
                     .map(|t| t.trim_start_matches('#').to_owned()),
                 thickness: file.thickness,
+                wood_type: file.wood_type,
+                wall_block: file.wall_block,
             };
             check_block(&block).map_err(|e| format!("{name}: {e}"))?;
             if block.item {
@@ -673,6 +690,8 @@ impl Content {
             }
             self.blocks.push(block);
         }
+        // After every block, so a wall form may be declared in a later file.
+        check_sign_walls(&self.blocks.iter().collect::<Vec<_>>())?;
         let mut remainders = Vec::new();
         for (item, name) in items {
             let file: ItemFile =
@@ -958,6 +977,69 @@ fn check_block(file: &Block) -> Result<(), String> {
         }
         _ => {}
     }
+    // Every vanilla `SignBlock`'s id ends in `_sign`, and no other block's does.
+    let sign = file.template.ends_with("_sign");
+    if let Some(wood) = &file.wood_type {
+        if !sign {
+            return Err("wood_type needs a vanilla sign template".into());
+        }
+        let (namespace, path) = wood.split_once(':').unwrap_or(("minecraft", wood));
+        if !namespaced_id(&format!("{namespace}:{path}"))
+            || check_path(&format!("assets/{namespace}/{path}")).is_err()
+        {
+            return Err("wood_type is a name, or namespace:path, in lower case".into());
+        }
+    }
+    if let Some(wall) = &file.wall_block {
+        if !sign || file.template.contains("_wall_") {
+            return Err("wall_block needs a standing or ceiling sign template".into());
+        }
+        if !file.item {
+            return Err("wall_block is where the item places the block, and item is false".into());
+        }
+        if !namespaced_id(wall) {
+            return Err("wall_block is a block id, namespace:path".into());
+        }
+    }
+    Ok(())
+}
+
+/// A sign's `wall_block` is one of the mod's own blocks: the wall form of its
+/// kind, with no item of its own and no other sign. Checked here, a pair that
+/// doesn't fit leaves out its mod alone.
+fn check_sign_walls(blocks: &[&Block]) -> Result<(), String> {
+    let mut paired = BTreeMap::new();
+    for sign in blocks {
+        let Some(wall) = &sign.wall_block else {
+            continue;
+        };
+        let id = &sign.id;
+        let form = if sign.template.ends_with("_hanging_sign") {
+            "_wall_hanging_sign"
+        } else {
+            "_wall_sign"
+        };
+        let Some(block) = blocks.iter().find(|b| b.id == *wall) else {
+            return Err(format!(
+                "{id}: wall_block {wall} is not one of this mod's blocks"
+            ));
+        };
+        if !block.template.ends_with(form) {
+            return Err(format!(
+                "{id}: wall_block {wall} needs a template ending in {form}"
+            ));
+        }
+        if block.item {
+            return Err(format!(
+                "{id}: wall_block {wall} has this sign's item, so its own \"item\" is false"
+            ));
+        }
+        if let Some(other) = paired.insert(wall, id) {
+            return Err(format!(
+                "{id}: wall_block {wall} is already paired with {other}"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -1131,6 +1213,8 @@ capabilities = ["registries"]
                 components: BTreeMap::new(),
                 connects_to: None,
                 thickness: None,
+                wood_type: None,
+                wall_block: None,
             }]
         );
         assert_eq!(content.items[0].id, "ruby:ruby");
@@ -1481,6 +1565,124 @@ capabilities = ["registries"]
             let e = block(&json).unwrap_err();
             assert!(e.contains("block tag"), "{tag}: {e}");
         }
+    }
+
+    /// A sign names its wood; a standing or ceiling sign names the wall form
+    /// its item places. Neither means anything on another template.
+    #[test]
+    fn signs_name_their_wood_and_wall_form() {
+        let block = |json: &str| {
+            let files: &[(&str, &[u8])] =
+                &[("data/ruby/horizon/block/notice.json", json.as_bytes())];
+            hmod("sign", MANIFEST_TEXT, files)
+        };
+        let files: &[(&str, &[u8])] = &[
+            (
+                "data/ruby/horizon/block/notice.json",
+                br#"{"template": "minecraft:oak_sign", "wood_type": "ruby:elm", "wall_block": "ruby:notice_wall"}"#,
+            ),
+            (
+                "data/ruby/horizon/block/notice_wall.json",
+                br#"{"template": "minecraft:oak_wall_sign", "item": false}"#,
+            ),
+        ];
+        let content = hmod("sign-pair", MANIFEST_TEXT, files).unwrap();
+        assert_eq!(content.blocks[0].wood_type.as_deref(), Some("ruby:elm"));
+        assert_eq!(
+            content.blocks[0].wall_block.as_deref(),
+            Some("ruby:notice_wall")
+        );
+        // Vanilla's woods go by their bare names, as `WoodType.name` does.
+        let cherry = r#"{"template": "minecraft:cherry_wall_hanging_sign", "wood_type": "cherry", "item": false}"#;
+        assert_eq!(
+            block(cherry).unwrap().blocks[0].wood_type.as_deref(),
+            Some("cherry")
+        );
+        assert_eq!(
+            block(r#"{"template": "minecraft:oak_sign", "wood_type": "ruby-wood:old/elm"}"#)
+                .unwrap()
+                .blocks[0]
+                .wood_type
+                .as_deref(),
+            Some("ruby-wood:old/elm")
+        );
+        for bad in [
+            r#"{"template": "minecraft:stone", "wood_type": "ruby:elm"}"#,
+            r#"{"template": "minecraft:oak_sign", "wood_type": "Ruby:Elm"}"#,
+            r#"{"template": "minecraft:oak_sign", "wood_type": "a:b:c"}"#,
+            r#"{"template": "minecraft:oak_sign", "wood_type": "../elm"}"#,
+        ] {
+            assert!(block(bad).unwrap_err().contains("wood_type"), "{bad}");
+        }
+        for bad in [
+            r#"{"template": "minecraft:stone", "wall_block": "ruby:notice_wall"}"#,
+            r#"{"template": "minecraft:oak_wall_sign", "wall_block": "ruby:notice_wall", "item": false}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": "notice_wall"}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": ":wall"}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": "ruby:"}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": "Ruby:wall"}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": "ruby:wall:other"}"#,
+            r#"{"template": "minecraft:oak_sign", "wall_block": "ruby:notice_wall", "item": false}"#,
+        ] {
+            assert!(block(bad).unwrap_err().contains("wall_block"), "{bad}");
+        }
+    }
+
+    /// A sign's wall form is one of the mod's blocks, of the matching wall
+    /// template, with no item and no other sign. Anything else refuses this
+    /// mod when it is read, and leaves the other mods alone.
+    #[test]
+    fn a_signs_wall_block_is_its_own_mods_wall_form() {
+        let refused = |template: &str, wall_block: &str, wall: &str, wanted: &str| {
+            let sign =
+                format!(r#"{{"template": "minecraft:{template}", "wall_block": "{wall_block}"}}"#);
+            let second =
+                format!(r#"{{"template": "minecraft:{template}", "wall_block": "ruby:wall"}}"#);
+            let mut files: Vec<(&str, &[u8])> = vec![
+                ("data/ruby/horizon/block/sign.json", sign.as_bytes()),
+                ("data/ruby/horizon/block/wall.json", wall.as_bytes()),
+            ];
+            if wanted == "already paired" {
+                files.push(("data/ruby/horizon/block/second.json", second.as_bytes()));
+            }
+            let e = hmod("sign-wall", MANIFEST_TEXT, &files).unwrap_err();
+            assert!(e.contains(wanted), "{wanted}: {e}");
+        };
+        let wall = r#"{"template": "minecraft:oak_wall_sign", "item": false}"#;
+        for (template, wall_template) in [
+            ("oak_sign", "stone"),
+            ("oak_sign", "oak_wall_hanging_sign"),
+            ("oak_hanging_sign", "oak_wall_sign"),
+        ] {
+            let other = format!(r#"{{"template": "minecraft:{wall_template}", "item": false}}"#);
+            refused(template, "ruby:wall", &other, "needs a template");
+        }
+        refused(
+            "oak_sign",
+            "ruby:wall",
+            r#"{"template": "minecraft:oak_wall_sign"}"#,
+            "\"item\" is false",
+        );
+        refused("oak_sign", "ruby:wall", wall, "already paired");
+        for absent in ["ruby:elsewhere", "other:wall", "minecraft:oak_wall_sign"] {
+            refused("oak_sign", absent, wall, "not one of this mod's blocks");
+        }
+
+        // Declared in code, the same; nothing is added.
+        let block = |id: &str, template: &str, item, wall_block: Option<&str>| Block {
+            id: id.into(),
+            template: template.into(),
+            item,
+            wall_block: wall_block.map(str::to_owned),
+            ..Block::default()
+        };
+        let mut content = Content::declared("ruby");
+        let sign = block("ruby:sign", "minecraft:oak_sign", true, Some("ruby:wall"));
+        assert!(content.declare(std::slice::from_ref(&sign), &[]).is_err());
+        assert!(content.blocks.is_empty());
+        let wall = block("ruby:wall", "minecraft:oak_wall_sign", false, None);
+        content.declare(&[sign, wall], &[]).unwrap();
+        assert_eq!(content.blocks.len(), 2);
     }
 
     /// A creative tab: a title, an icon and its items, all item ids.
