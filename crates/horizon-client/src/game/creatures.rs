@@ -872,6 +872,7 @@ impl Game<'_> {
     /// Advance every mob one tick, then apply their events.
     pub(super) fn tick_creatures(&mut self) -> Result<()> {
         self.attack_ticks = self.attack_ticks.saturating_add(1);
+        self.refresh_gear_knockback_resistance();
         self.tick_leads();
         // Vanilla's spawning and raids run before ChunkMap.tick.
         let from = self.lan_synced_from();
@@ -4480,7 +4481,7 @@ impl Game<'_> {
                         .mobs
                         .iter()
                         .find(|m| m.id == id)
-                        .map_or(0.0, |m| m.attrs.knockback_resistance),
+                        .map_or(0.0, |m| m.knockback_resistance()),
                 };
                 let knockback = if !hurt {
                     0.0
