@@ -3856,6 +3856,17 @@ impl Game<'_> {
         let _ = (dimension, from, to, cause, cancel);
     }
 
+    /// A server game rule changed to its final `value`. @API:native_world_game_rule_change@.
+    pub(super) fn native_world_game_rule_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        rule: &str,
+        value: &str,
+    ) {
+        let _ = (player, name, rule, value);
+    }
+
     /// The server world's border bounds changed, either immediately or when
     /// its timed size change was requested. @API:native_world_border_bounds_changed@.
     pub(super) fn native_world_border_bounds_changed(&mut self) {}

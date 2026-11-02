@@ -2284,6 +2284,13 @@ impl Game<'_> {
             S::SetGameRule(p) if host.hub.guests[gi].permission >= 2 => {
                 for entry in p.entries {
                     if self.ui.rules.set_string(&entry.name, &entry.value) {
+                        let guest = &host.hub.guests[gi];
+                        self.native_world_game_rule_change(
+                            guest.uuid,
+                            &guest.name,
+                            &entry.name,
+                            &entry.value,
+                        );
                         let message = horizon_client::text::Text::tr(
                             "commands.gamerule.set",
                             &[&entry.name, &entry.value],
