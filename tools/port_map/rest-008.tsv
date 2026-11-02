@@ -108,7 +108,7 @@ PatchedDataComponentMap.size	skip:java		generic component map; Horizon sets type
 PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
-TypedDataComponent.encodeValue	skip:java		codec
+TypedDataComponent.encodeValue	port	crates/horizon-protocol/src/item/hash.rs::Component::code	the component's own codec form, hashed; one arm per component kind, with the kinds that have no persistent codec (map_post_processing, creative_slot_lock) as the None
 AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly
 AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested
 BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle
