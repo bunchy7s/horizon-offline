@@ -2537,7 +2537,9 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
-  entity atlas and the shared quad index buffer. Not called on the title screen's panorama.
+  entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
+  player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
+  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
 - `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
   entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
