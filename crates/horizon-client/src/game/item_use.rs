@@ -204,6 +204,15 @@ pub(super) fn release_parts(canceled: bool, hand_changed: bool) -> (bool, bool) 
     (!canceled && !hand_changed, !canceled)
 }
 
+pub(super) fn bow_release_power(has_ammo: bool, charge: i32, canceled: bool) -> Option<f32> {
+    if canceled || charge < 0 || !has_ammo {
+        return None;
+    }
+    let f = charge as f32 / 20.0;
+    let power = ((f * f + f * 2.0) / 3.0).min(1.0);
+    (power >= 0.1).then_some(power)
+}
+
 /// `useItemRemaining` of a use of `duration` ticks, `ticks` old.
 fn ticks_left(duration: i32, ticks: u32) -> i32 {
     duration.saturating_sub_unsigned(ticks)
@@ -272,8 +281,8 @@ pub(super) fn use_pose(
 #[cfg(test)]
 mod tests {
     use super::{
-        consumes_at_once, count_down, duration_leaving, held, release_parts, start_of, tick_left,
-        ticks_left, use_pose,
+        bow_release_power, consumes_at_once, count_down, duration_leaving, held, release_parts,
+        start_of, tick_left, ticks_left, use_pose,
     };
     use horizon_client::first_person::ItemPose;
     use horizon_world::consumable::UseAnimation;
@@ -365,6 +374,16 @@ mod tests {
         assert_eq!(release_parts(true, false), (false, false));
         // another item in the hand: no release (Horizon still lowers a spyglass).
         assert_eq!(release_parts(false, true), (false, true));
+    }
+
+    #[test]
+    fn bow_release_respects_charge_cancel_and_ammo() {
+        assert_eq!(bow_release_power(true, 20, false), Some(1.0));
+        assert_eq!(bow_release_power(true, 10, false), Some(5.0 / 12.0));
+        assert_eq!(bow_release_power(true, 0, false), None);
+        assert_eq!(bow_release_power(true, -1, false), None);
+        assert_eq!(bow_release_power(true, 20, true), None);
+        assert_eq!(bow_release_power(false, 20, false), None);
     }
 
     #[test]

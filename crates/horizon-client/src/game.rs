@@ -13878,15 +13878,17 @@ impl Game<'_> {
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
     fn release_bow(&mut self, ticks: u32) {
-        let f = ticks as f32 / 20.0;
-        let power = ((f * f + f * 2.0) / 3.0).min(1.0);
-        if power < 0.1 {
-            return;
-        }
         let arrow_slot = self.projectile_slot("minecraft:bow");
-        if arrow_slot.is_none() && !self.creative {
+        let has_ammo = arrow_slot.is_some() || self.creative;
+        let Some(stack) = self.held().cloned() else {
             return;
-        }
+        };
+        let mut charge = i32::try_from(ticks).unwrap_or(i32::MAX);
+        let mut canceled = false;
+        self.native_arrow_loose(&stack, has_ammo, &mut charge, &mut canceled);
+        let Some(power) = item_use::bow_release_power(has_ammo, charge, canceled) else {
+            return;
+        };
         let Some(eye) = self.eye_position() else {
             return;
         };
