@@ -1053,9 +1053,9 @@ impl Game<'_> {
                         for e in &mut events[from..] {
                             if let MobEvent::Projectile(p) = e
                                 && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                                && *target == Who::Player
+                                && *target == Some(Who::Player)
                             {
-                                *target = Who::Mob(id);
+                                *target = Some(Who::Mob(id));
                             }
                         }
                     }
@@ -4777,7 +4777,16 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack, _), hit) => {
+            (kind @ (ProjectileKind::Potion(..) | ProjectileKind::ExperienceBottle), hit) => {
+                // A bottle flies as the bottle item (`getDefaultItem`).
+                let bottle;
+                let stack = match kind {
+                    ProjectileKind::Potion(stack, _) => stack,
+                    _ => {
+                        bottle = Box::new(ItemStack::new("minecraft:experience_bottle", 1));
+                        &bottle
+                    }
+                };
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,

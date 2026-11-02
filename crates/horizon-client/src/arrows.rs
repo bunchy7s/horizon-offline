@@ -170,6 +170,8 @@ pub struct ArrowState {
     /// The block it stuck in (`lastState`).
     pub last_state: Option<BlockStateId>,
     pub pickup: Pickup,
+    /// Its entity type is `SpectralArrow` (the type is its own, not the pickup item's).
+    pub spectral: bool,
     /// `pickupItemStack`: what picking the arrow up gives.
     pub pickup_item: crate::items::ItemStack,
     /// `AbstractArrow.firedFromWeapon`: the crossbow or bow it was shot from.
@@ -227,6 +229,7 @@ impl ArrowState {
             shake: 0,
             last_state: None,
             pickup: Pickup::Disallowed,
+            spectral: false,
             pickup_item: crate::items::ItemStack::new("minecraft:arrow", 1),
             fired_from_weapon: None,
             no_physics: false,
