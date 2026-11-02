@@ -145,6 +145,7 @@ impl Game<'_> {
             _ => DamageKind::Generic,
         }
     }
+    /// `DamageCommand.damage`: apply its source and report an accepted hit.
     pub(super) fn cmd_damage(&mut self, ctx: &Context) -> R<i32> {
         let targets = self.entities(ctx, "target", false)?;
         let Some(target) = targets.first().copied() else {
@@ -198,7 +199,7 @@ impl Game<'_> {
             }
             Target::Mob(id) => {
                 let attacker = cause.or(by).and_then(|t| match t {
-                    Target::Player => Some(Who::Player),
+                    Target::Player | Target::Guest(_) => Some(Who::Player),
                     Target::Mob(i) => Some(Who::Mob(i)),
                     _ => None,
                 });
@@ -207,15 +208,30 @@ impl Game<'_> {
                     attacker,
                     from,
                 };
-                let hurt = self
-                    .mobs
-                    .iter_mut()
-                    .find(|m| m.id == id)
-                    .is_some_and(|m| m.damage(amount, damage));
-                if hurt {
-                    self.resolve_player_responsible(id, damage);
+                // DamageSource.getEntity is the causing player, even when
+                // another client issued the command or supplied the direct entity.
+                let guest = match cause.or(by) {
+                    Some(Target::Guest(conn)) if self.lan_acting != Some(conn) => Some(conn),
+                    _ => None,
+                };
+                if let Some(conn) = guest {
+                    if let Some(mut host) = self.lan.take() {
+                        let hurt = self
+                            .as_guest(&mut host, conn, |g| {
+                                g.command_damage_mob(id, amount, damage)
+                            })
+                            .unwrap_or(false);
+                        if hurt {
+                            host.mob_players.insert(id, conn);
+                        }
+                        self.lan = Some(host);
+                        hurt
+                    } else {
+                        false
+                    }
+                } else {
+                    self.command_damage_mob(id, amount, damage)
                 }
-                hurt
             }
             _ => false,
         };
@@ -231,6 +247,32 @@ impl Game<'_> {
             ],
         ));
         Ok(1)
+    }
+
+    /// Retain the mob hit's causing-player connection after the hit is accepted.
+    fn command_damage_mob(&mut self, id: u32, amount: f32, damage: Damage) -> bool {
+        let hurt = self
+            .mobs
+            .iter_mut()
+            .find(|m| m.id == id)
+            .is_some_and(|m| m.damage(amount, damage));
+        if hurt {
+            self.resolve_player_responsible(id, damage);
+            if damage.attacker == Some(Who::Player) {
+                self.last_hurt_by_player.insert(id, self.lan_acting);
+                if let Some(host) = self.lan.as_mut() {
+                    match self.lan_acting {
+                        Some(conn) => {
+                            host.mob_players.insert(id, conn);
+                        }
+                        None => {
+                            host.mob_players.remove(&id);
+                        }
+                    }
+                }
+            }
+        }
+        hurt
     }
 
     // ---- /rotate and /swing -----------------------------------------------------------
