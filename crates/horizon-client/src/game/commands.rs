@@ -173,6 +173,21 @@ impl Game<'_> {
         }
     }
 
+    /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
+    /// points: the amount to give, or `None` when a mod cancelled it.
+    pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
+        if horizon_client::mod_api::mods().is_empty() {
+            return Some(amount);
+        }
+        let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        else {
+            return Some(amount);
+        };
+        let (mut amount, mut cancel) = (amount, false);
+        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        (!cancel).then_some(amount)
+    }
+
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
@@ -2993,7 +3008,7 @@ impl Game<'_> {
                 if self.experience.level == 0 && amount < 0 {
                     self.experience.progress = 0.0;
                 }
-            } else {
+            } else if let Some(amount) = self.xp_change(amount) {
                 self.give_points(amount);
             }
         } else if levels {

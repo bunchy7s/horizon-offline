@@ -4512,6 +4512,20 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A server player tries to sleep in the bed whose head is at `pos`
+    /// (NeoForge's `CanPlayerSleepEvent`, vanilla's `ServerPlayer.startSleepInBed`).
+    /// `problem` is what vanilla found, first problem only: `too_far_away`,
+    /// `obstructed`, `not_possible_now` (not night or thunder, the bed rule),
+    /// `not_safe` (monsters near), or `None`. A mod may set `None` to let the
+    /// player sleep anyway, or one of those names (`other_problem` refuses
+    /// without a message) to refuse. The spawn point is set before it fires,
+    /// as in vanilla, only when vanilla found no problem. After it,
+    /// `native_player_bed_enter` still fires and may cancel. Server-side.
+    /// API @API:can_player_sleep@.
+    fn can_player_sleep(&self, host: &mut dyn Host, event: &mut CanPlayerSleepEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4538,6 +4552,21 @@ pub trait Hooks: Send + Sync {
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
         let _ = event;
+    }
+    /// A server player's experience points are about to change through
+    /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
+    /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
+    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
+    /// an advancement reward gives nothing for a negative amount. Experience
+    /// bottles and furnaces make orbs, so they come through the orb path.
+    /// `native_player_exp_change` is separate and still fires first for an orb
+    /// pickup. Server-side. API @API:player_xp_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn player_xp_change(&self, host: &mut dyn Host, event: &mut PlayerXpChangeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Additional first-person hand and item pose, including empty arms and maps.
     /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
@@ -13866,6 +13895,32 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::can_player_sleep`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CanPlayerSleepEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub problem: &'a mut Option<String>,
+}
+pub fn dispatch_can_player_sleep(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    problem: &mut Option<String>,
+) {
+    let mut event = CanPlayerSleepEvent {
+        player,
+        name,
+        pos,
+        problem,
+    };
+    for mod_hook in super::entered(mods, "can_player_sleep") {
+        mod_hook.can_player_sleep(host, &mut event);
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13941,6 +13996,37 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::player_xp_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerXpChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub amount: i32,
+}
+pub fn dispatch_player_xp_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    amount: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = PlayerXpChangeEvent {
+        player,
+        name,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "player_xp_change") {
+        if matches!(mod_hook.player_xp_change(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
