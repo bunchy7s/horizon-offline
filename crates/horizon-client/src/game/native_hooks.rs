@@ -6317,7 +6317,8 @@ impl GameLevel<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     pub(super) fn native_attachments(
         &mut self,
         holder: Holder,

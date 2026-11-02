@@ -97,15 +97,22 @@ impl Game<'_> {
         self.serving.is_some() || self.options.dedicated.is_some()
     }
 
-    /// Access a server-owned holder's attachment map, to lend to a mod: the
-    /// holder's synced changes are sent at the pass's end.
+    /// Access a holder's attachment map, to lend to a mod: a server's, whose
+    /// synced changes are sent at the pass's end, or a client's copy of what
+    /// its server synced.
     pub(super) fn attachment_map(
         &mut self,
         holder: horizon_client::mod_api::Holder,
     ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
     {
-        self.world.attachment_syncs.insert(holder);
-        self.attachment_map_quiet(holder)
+        if self.native_authoritative() {
+            self.world.attachment_syncs.insert(holder);
+            return self.attachment_map_quiet(holder);
+        }
+        match self.remote.as_mut() {
+            Some(remote) => Ok(remote.attachments.entry(holder).or_default()),
+            None => Err(horizon_client::mod_api::AttachmentError::MissingHolder),
+        }
     }
 
     /// `attachment_map` without recording the holder for the sync.

@@ -66,7 +66,8 @@ pub trait Host {
         owner_yaw: Option<f32>,
         seed: i32,
     ) -> bool;
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments>;
     /// Moves mob `id` to `pos` at once, as `/tp` does: it dismounts, drops its
     /// path and resets its fall. False for no such mob, another dimension or a

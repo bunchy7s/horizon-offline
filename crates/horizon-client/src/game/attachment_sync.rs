@@ -1,13 +1,13 @@
-//! Attachment sync, server side (docs/native-mods.md, "Server attachments"):
-//! the synced values of the holders a level pass lent to mods, and whole
-//! snapshots for the players who started seeing a holder.
+//! Attachment sync (docs/native-mods.md, "Server attachments"): the server
+//! sends the synced values of the holders a level pass lent to mods, and whole
+//! snapshots to the players who started seeing a holder; a client keeps them.
 use super::{Game, lan::LanHost};
 use crate::lan::{
     guest::Guest,
     hub::{AttachmentSnapshot, Hub},
 };
-use horizon_protocol::attachment_sync::Message;
-use horizon_world::attachments::Holder;
+use horizon_protocol::attachment_sync::{self, Message};
+use horizon_world::attachments::{Attachments, Holder};
 
 /// The guests `holder`'s changes go to: those in the level in place who see it.
 fn recipients(hub: &Hub, holder: Holder) -> impl Iterator<Item = &Guest> {
@@ -110,6 +110,26 @@ impl Game<'_> {
             for guest in recipients(hub, holder) {
                 guest.send_attachment_sync(&message);
             }
+        }
+    }
+}
+
+impl Game<'_> {
+    /// A `horizon:attachment_sync` payload the server sent the window.
+    pub(super) fn remote_attachment_sync(&mut self, data: &[u8]) {
+        let message = match attachment_sync::decode(data) {
+            Ok(message) => message,
+            Err(e) => return log::debug!("Horizon: a bad attachment sync: {e}"),
+        };
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+        let map = remote.attachments.entry(message.holder).or_default();
+        if message.replace {
+            *map = Attachments::default();
+        }
+        for change in message.changes {
+            map.apply_sync(change);
         }
     }
 }

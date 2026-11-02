@@ -42,6 +42,7 @@ use horizon_protocol::{
     text::{Language, plain},
 };
 use horizon_world::{
+    attachments::{Attachments, Holder},
     level::InteractionResult,
     nbt::Tag,
     registry::BlockStateId,
@@ -431,6 +432,8 @@ pub(super) struct Remote {
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
     pub mod_net: bool,
+    /// The synced attachments the server sent, by holder.
+    pub attachments: HashMap<Holder, Attachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -945,6 +948,7 @@ impl Game<'_> {
             brand: "unknown".into(),
             quiet_commands: false,
             mod_net: false,
+            attachments: HashMap::new(),
             far_terrain: None,
             builtin: Arc::new(builtin),
             status: lang
@@ -2900,6 +2904,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            // The synced attachments of a holder the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
+                self.remote_attachment_sync(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
@@ -2958,6 +2966,11 @@ impl Game<'_> {
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
+                // The server sends the level, chunks and entities again.
+                if let Some(r) = self.remote.as_mut() {
+                    r.attachments
+                        .retain(|holder, _| matches!(holder, Holder::Player(_)));
+                }
                 self.using = None;
                 self.end_mod_use();
                 // After a death (no KEEP_ENTITY_DATA) the new LocalPlayer
@@ -3029,6 +3042,13 @@ impl Game<'_> {
                 self.world
                     .block_entities
                     .retain(|k, _| (k.0 >> 4, k.2 >> 4) != (x, z));
+                if let Some(r) = self.remote.as_mut() {
+                    r.attachments.retain(|holder, _| match *holder {
+                        Holder::Chunk(at) => at != [x, z],
+                        Holder::BlockEntity([bx, _, bz]) => (bx >> 4, bz >> 4) != (x, z),
+                        _ => true,
+                    });
+                }
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.remove_columns([(x, z)]);
                 }
@@ -3192,6 +3212,7 @@ impl Game<'_> {
                         r.level_players.remove(&id);
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
+                        r.attachments.remove(&Holder::Entity(id as u32));
                     }
                     self.remove_entity(id);
                 }
@@ -4541,6 +4562,7 @@ impl Game<'_> {
                         r.chat_validators.remove(&u);
                         r.skin_textures.remove(&u);
                         r.listed.remove(&u);
+                        r.attachments.remove(&Holder::Player(u));
                     }
                 }
             }
