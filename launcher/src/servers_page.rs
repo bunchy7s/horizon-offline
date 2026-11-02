@@ -1182,7 +1182,7 @@ impl Launcher {
                     super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
                         |this, _: &ClickEvent, _, cx| {
                             this.settings.partner_hidden = true;
-                            this.settings.save();
+                            this.save_settings();
                             cx.notify();
                         },
                     )),

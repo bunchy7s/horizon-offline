@@ -1092,7 +1092,7 @@ impl Launcher {
                             button("native-notice-install", "Install", Kind::Primary, &t).on_click(
                                 cx.listener(|this, _: &ClickEvent, _, cx| {
                                     this.settings.native_mods_noticed = true;
-                                    this.settings.save();
+                                    this.save_settings();
                                     if let Some((source, id, known)) =
                                         this.mods.native_notice.take()
                                     {
@@ -1548,7 +1548,7 @@ impl Launcher {
                         this.settings.native_profile = Some(choice);
                         this.settings.native_release = false;
                         this.native_done = None;
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     });
                 }

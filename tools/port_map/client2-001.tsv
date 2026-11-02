@@ -5,7 +5,7 @@ CloudRenderer.isEastEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mes
 CloudRenderer.isSouthEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
 CloudRenderer.isWestEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
 CloudRenderer.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: one cloud pipeline; fancy vs flat is chosen by the mesh fast flag, not by pipeline
-CloudRenderer.renderOit	port	crates/horizon-client-render/src/gfx/oit.rs	the clouds draw through the OIT pipeline there, with their own depth beside the world's
+CloudRenderer.renderOit	port	crates/horizon-client-render/src/gfx/oit.rs::Oit::render_clouds	the clouds draw through the OIT pipeline there, with their own depth beside the world's
 CloudRenderer.buildMesh	port	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	cell ring walk via cells(radius), nearest first
 CloudRenderer.tryBuildCell	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	skip empty cells, then build the cell's faces
 CloudRenderer.encodeFace	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	3-byte face records replaced by vertex quads
@@ -40,7 +40,7 @@ FaceInfo.Extent.select	skip:data		corner selection; Horizon's unit-cube corner t
 FaceInfo.VertexInfo.select	skip:data		corner selection; Horizon's unit-cube corner table PORTAL_FACES in block_entity_render.rs has the same order
 FirstPersonHandsAndItemsRenderer.calculateMapTilt	inline	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	tilt computed inline with the calculateMapTilt comment
 FirstPersonHandsAndItemsRenderer.renderPlayerHand	port	crates/horizon-client/src/game.rs::Game::hand_geometry	empty main hand's arm model with the player skin
-FirstPersonHandsAndItemsRenderer.renderMapHand	port	crates/horizon-client/src/first_person.rs::map_arm_poses (MapHold::TwoHanded)	both arms behind a two-handed map, at the jar's rotations and offsets
+FirstPersonHandsAndItemsRenderer.renderMapHand	port	crates/horizon-client/src/first_person.rs::map_arm_poses	both arms behind a two-handed map, at the jar's rotations and offsets
 FirstPersonHandsAndItemsRenderer.renderOneHandedMap	port	crates/horizon-client/src/first_person.rs::one_handed_map_pose	gap: player: the arm holding a map is not drawn; the map hand branch skips the arm
 FirstPersonHandsAndItemsRenderer.renderTwoHandedMap	port	crates/horizon-client/src/game/maps.rs::Game::two_handed_map_geometry	gap: player: the arms that hold a two-handed map are not drawn
 FirstPersonHandsAndItemsRenderer.renderMap	port	crates/horizon-client/src/game/maps.rs::Game::held_map	map background with its 7-pixel border, then the map contents
@@ -57,17 +57,17 @@ GameRenderer.processBlurEffect	port	crates/horizon-client-render/src/menu_blur.r
 GameRenderer.preloadUiShader	skip:other		GPU pipeline precompile at load; Horizon builds its pipelines in Renderer::new
 GameRenderer.update	port	crates/horizon-client-render/src/camera.rs::AvatarBob::update_bob	gap: minor: the requested post-effect list (from /postEffect) is not built
 GameRenderer.extract	skip:other		render-state copy for the vanilla render thread; Horizon renders from game state
-GameRenderer.preparePostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects (post_chain::PostEffects, built at gfx.rs:8424)	vanilla post chains are made on first use from the request the game builds
-GameRenderer.applyPostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects	the same chain runs after the world pass
-GameRenderer.tryTakeScreenshotIfNeeded	port	crates/horizon-client/src/game.rs::tick_world_icon (called at game.rs:17852)	a local world without an icon requests a 64x64 ScreenshotRequest for saves/<folder>/icon.png once the streamer, uploads and backlog are idle and more than 10 sections are drawn
+GameRenderer.preparePostEffects	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::apply	vanilla post chains are made on first use from the request the game builds
+GameRenderer.applyPostEffects	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::apply	the same chain runs after the world pass
+GameRenderer.tryTakeScreenshotIfNeeded	port	crates/horizon-client/src/game.rs::Game::tick_world_icon	a local world without an icon requests a 64x64 ScreenshotRequest for saves/<folder>/icon.png once the streamer, uploads and backlog are idle and more than 10 sections are drawn
 GameRenderer.takeAutoScreenshot	inline	crates/horizon-client/src/game.rs::tick_world_icon	the same retry, once a second until the file exists; the path comes from game/integrated.rs:485
-GameRenderer.integrate3DHudDepth	inline	crates/horizon-client-render/src/gfx.rs::post_effects	runs with a post chain applied, which is vanilla's consistentDepthRequired condition
+GameRenderer.integrate3DHudDepth	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::apply	runs with a post chain applied, which is vanilla's consistentDepthRequired condition
 GameRenderer.extractWindow	skip:other		render-state copy of the window size; Horizon reads the window directly
 GameRenderer.extractOptions	skip:other		render-state copy of options; Horizon reads settings directly
 GameRenderer.extractCamera	skip:other		render-state copy of camera and fog; Horizon computes them in camera.rs and fog.rs
 GameRenderer.resetData	inline	crates/horizon-client/src/game.rs::Game::finish_close_world	boss overlay reset on world close; camera and map-texture resets not verified here
 GameRenderer.projectPointToScreen	skip:other		no callers in vanilla 26.3
-GameRenderer.useImprovedTransparency	port	crates/horizon-client-render/src/gfx.rs::improved_transparency / oit: Option<oit::Oit>	the option builds the OIT pass
+GameRenderer.useImprovedTransparency	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	the option builds the OIT pass
 GlobalSettingsUniform.update	skip:other		global uniform (window size, time, gamma, glint) written per pass; Horizon sets its own uniforms
 GpuWarnlistManager.getAllWarnings	missing		minor: no GPU driver warnlist; Horizon does not check the driver against known-bad lists
 GpuWarnlistManager.compilePatterns	missing		minor: no GPU driver warnlist patterns
@@ -82,9 +82,9 @@ LevelRenderer.addMainPass	port	crates/horizon-client-render/src/gfx.rs::Renderer
 LevelRenderer.executeAlwaysOnTop	port	crates/horizon-client/src/game.rs::Game::render	always-on-top debug lines and crosshair drawn over the world
 LevelRenderer.executeSolid	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	solid section draws in arena page order
 LevelRenderer.prepareTranslucents	port	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	translucent quads sorted from the camera each frame
-LevelRenderer.executeOit	port	crates/horizon-client-render/src/gfx/oit.rs + gfx::mark_oit (gfx/entity_batch.rs:31)	translucent geometry is marked and resolved by the OIT pass
-LevelRenderer.executeDepthBoundsCull	inline	crates/horizon-client-render/src/gfx/oit.rs	part of the same pass
-LevelRenderer.executeOitWaterMask	port	crates/horizon-client-render/src/gfx.rs::WATER_MASK_OVERLAY	the water mask overlay of the same pass
+LevelRenderer.executeOit	port	crates/horizon-client-render/src/gfx/oit.rs::Oit::run	translucent geometry is marked and resolved by the OIT pass
+LevelRenderer.executeDepthBoundsCull	inline	crates/horizon-client-render/src/gfx/oit.rs::Oit::execute_depth_bounds_cull	part of the same pass
+LevelRenderer.executeOitWaterMask	port	crates/horizon-client-render/src/gfx/oit.rs::Oit::execute_water_mask	the water mask overlay of the same pass
 LevelRenderer.extractSectionDrawGroups	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	section draws grouped per layer and arena page from the visible sections
 LevelRenderer.prepareChunkRenders	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	per-layer draw list built for the frame, reversed for translucent layers
 LevelRenderer.performTransientBlockRemovals	inline	crates/horizon-client/src/game/transient_blocks.rs::add_transient_block	transient blocks are tracked and dropped by that list
@@ -93,7 +93,7 @@ LevelRenderer.compileSections	port	crates/horizon-client-render/src/streaming.rs
 LevelRenderer.submitEntities	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	entity models drawn with their batches
 LevelRenderer.submitBlockEntities	port	crates/horizon-client-render/src/gfx.rs::Renderer::block_entities	block entity list submitted for drawing
 LevelRenderer.submitBlockDestroyAnimation	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	crumbling overlay drawn on the block being broken
-LevelRenderer.submitTransientBlocks	port	crates/horizon-client/src/game/remote.rs: C::AddTransientBlock => add_transient_block	the packet is handled and the block is drawn
+LevelRenderer.submitTransientBlocks	port	crates/horizon-client/src/game/transient_blocks.rs::Game::transient_block_geometry	the packet is handled and the block is drawn
 LevelRenderer.submitHitOutline	port	crates/horizon-client/src/game.rs::Game::outline_boxes	outline of the block under the crosshair
 LevelRenderer.close	skip:other		GPU resource teardown
 LevelRenderer.invalidateCompiledGeometry	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	all section meshes dropped and rebuilt when settings are applied
@@ -134,11 +134,11 @@ PlayerSkinRenderCache.RenderInfo.textureView	skip:other		GPU texture view cache;
 PlayerSkinRenderCache.RenderInfo.glyphRenderTypes	skip:other		font render types for name tags; Horizon's text uses its own glyph pipeline
 PlayerSkinRenderCache.RenderInfo.equals	skip:java		value equality for a cache key
 PlayerSkinRenderCache.RenderInfo.hashCode	skip:java		hash for a cache key
-PostChain.load	missing		minor: no data-driven post chain loader; only the blur and entity outline chains exist, hard-coded
-PostChain.getReferencedExternalTargets	skip:other		config validation for data-driven post chains
-PostChain.createPass	missing		minor: no data-driven post pass creation; the outline and blur passes are fixed
-PostChain.addToFrame	port	crates/horizon-client-render/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: runs the entity outline chain only; other chains are not built
-PostChain.process	port	crates/horizon-client-render/src/menu_blur.rs::MenuBlur::apply	gap: minor: runs the menu blur only; other chains are not run
+PostChain.load	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	reads the chain's JSON, refuses a target other than the frame ("Referenced external targets are not available in this context"), builds its internal targets and passes; None when the file is absent
+PostChain.getReferencedExternalTargets	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	the external targets a chain names, checked against the frame the only external target Horizon has
+PostChain.createPass	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::translated_pass	the pass's GLSL translated, its targets and images bound, its uniforms packed, and a pass reading the target it writes refused
+PostChain.addToFrame	port	crates/horizon-client-render/src/gfx/entity_outline.rs::EntityOutline::draw	gap: minor: this is the silhouette pass; a chain's own passes run in post_chain.rs::PostEffects::apply, which builds whatever chain id the frame's request names
+PostChain.process	port	crates/horizon-client-render/src/menu_blur.rs::MenuBlur::apply	gap: minor: this is the menu's own two-pass blur; the chain runner is post_chain.rs::PostEffects::apply
 PostChain.getOrCreatePersistentTarget	skip:other		GPU persistent target cache
 PostChain.close	skip:other		GPU resource teardown
 PostChain.TargetBundle.getOrThrow	skip:other		frame-graph target lookup; Horizon has no frame graph
