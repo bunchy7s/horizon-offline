@@ -3,6 +3,7 @@
 //! snowballs, eggs, ender pearls, gravity 0.03) and fireballs
 //! (`AbstractHurtingProjectile`: no gravity, 0.1 acceleration, 0.95 inertia).
 //! The game applies the effects of a hit.
+use crate::entity_rules::EntityRules;
 use crate::mobs::Who;
 use horizon_core::{
     geometry::{Aabb, Vec3},
@@ -273,6 +274,23 @@ fn axis_of(d: u8) -> u8 {
         _ => 0,
     }
 }
+impl crate::entity_rules::EntityRules for Projectile {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// Each projectile class's `getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        match self.kind {
+            ProjectileKind::Arrow { .. } | ProjectileKind::Trident => 0.05,
+            ProjectileKind::SmallFireball
+            | ProjectileKind::LargeFireball { .. }
+            | ProjectileKind::WitherSkull { .. } => 0.0,
+            ProjectileKind::LlamaSpit => 0.06,
+            ProjectileKind::Potion { .. } => 0.05,
+            _ => 0.03,
+        }
+    }
+}
 impl Projectile {
     /// `Entity.getBoundingBox`: its type's square box standing on its position.
     pub fn bounds(&self) -> Aabb {
@@ -442,21 +460,6 @@ impl Projectile {
                 | ProjectileKind::LargeFireball { .. }
                 | ProjectileKind::WitherSkull { .. }
         )
-    }
-    /// `Entity.getGravity`: none with `NoGravity`, else the kind's default.
-    fn gravity(&self) -> f64 {
-        if self.no_gravity {
-            return 0.0;
-        }
-        match self.kind {
-            ProjectileKind::Arrow { .. } | ProjectileKind::Trident => 0.05,
-            ProjectileKind::SmallFireball
-            | ProjectileKind::LargeFireball { .. }
-            | ProjectileKind::WitherSkull { .. } => 0.0,
-            ProjectileKind::LlamaSpit => 0.06,
-            ProjectileKind::Potion(_) => 0.05,
-            _ => 0.03,
-        }
     }
     /// Projectile.shoot: normalized direction plus triangular noise, times speed.
     pub fn shoot(
@@ -858,7 +861,7 @@ impl Projectile {
                 // ThrowableProjectile: gravity, then inertia. Its drag is a
                 // float in vanilla (0.8F in water, `getAirDrag` 0.99F), so
                 // widens to the double that scales the motion.
-                self.velocity.y -= self.gravity();
+                self.velocity.y -= self.get_gravity();
                 let inertia = f64::from(if water { 0.8_f32 } else { 0.99_f32 });
                 self.velocity = Vec3::new(
                     self.velocity.x * inertia,
@@ -927,7 +930,7 @@ impl Projectile {
             self.position = to;
             self.velocity = Vec3::new(
                 self.velocity.x * 0.99,
-                self.velocity.y * 0.99 - self.gravity(),
+                self.velocity.y * 0.99 - self.get_gravity(),
                 self.velocity.z * 0.99,
             );
             self.update_rotation();
