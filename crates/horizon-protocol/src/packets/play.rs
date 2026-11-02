@@ -2589,6 +2589,7 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
     ChatSessionUpdate(ChatSessionUpdate) = CHAT_SESSION_UPDATE,
     PlaceRecipe(super::recipes::PlaceRecipe) = PLACE_RECIPE,
     RecipeBookChangeSettings(super::recipes::RecipeBookChangeSettings) = RECIPE_BOOK_CHANGE_SETTINGS,
+    RecipeBookSeenRecipe(super::recipes::RecipeBookSeenRecipe) = RECIPE_BOOK_SEEN_RECIPE,
     ChunkBatchReceived(ChunkBatchReceived) = CHUNK_BATCH_RECEIVED,
     ClientCommand(ClientCommand) = CLIENT_COMMAND,
     ClientInformation(ClientInformation) = CLIENT_INFORMATION,
@@ -2642,7 +2643,11 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{chunk::BlockEntityInfo, packets::round_trip, text::literal};
+    use crate::{
+        chunk::BlockEntityInfo,
+        packets::{recipes::RecipeBookSeenRecipe, round_trip},
+        text::literal,
+    };
 
     #[test]
     fn merchant_cost_predicate_is_a_typed_list_without_patch_counts() {
