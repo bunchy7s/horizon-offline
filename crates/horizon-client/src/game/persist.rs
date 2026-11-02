@@ -359,6 +359,10 @@ impl Game<'_> {
                     kind.as_str(),
                     "minecraft:experience_orb"
                         | "minecraft:arrow"
+                        | "minecraft:spectral_arrow"
+                        | "minecraft:llama_spit"
+                        | "minecraft:shulker_bullet"
+                        | "minecraft:experience_bottle"
                         | "minecraft:fireball"
                         | "minecraft:small_fireball"
                         | "minecraft:wind_charge"
@@ -402,7 +406,7 @@ impl Game<'_> {
                             self.remember_tags(id, &tag);
                         }
                     }
-                    "minecraft:arrow" => {
+                    "minecraft:arrow" | "minecraft:spectral_arrow" => {
                         if let Some((mut p, in_block)) = entity_nbt::arrow_from_nbt(
                             &tag,
                             player_uuid,
@@ -428,6 +432,17 @@ impl Game<'_> {
                         if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
                             self.claim_owner(&mut p);
                             // A projectile that came through a portal keeps its cooldown.
+                            self.next_entity += 1;
+                            p.id = self.next_entity;
+                            self.restore_portal_cooldown(p.id, &tag);
+                            self.add_projectile(p);
+                            self.remember_last_projectile_tags(&tag);
+                        }
+                    }
+                    "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid)
+                        {
+                            self.claim_owner(&mut p);
                             self.next_entity += 1;
                             p.id = self.next_entity;
                             self.restore_portal_cooldown(p.id, &tag);
@@ -1512,7 +1527,8 @@ impl Game<'_> {
             .map(|s| self.state_to_nbt(s));
         let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
-            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))?;
+            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
+            .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
         Some((
             chunk_of(p.position),
             with_raw(tag, self.persist.raw.get(&p.id)),
