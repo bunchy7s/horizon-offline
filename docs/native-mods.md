@@ -1353,6 +1353,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   what the sign gets (the chat filter does not look at it again), or set `cancel` and it keeps its old text. The
   player's state is swapped in, so `native_tell` reaches them. Not told: the host's own editing on a LAN or
   single-player world, and changes that are no text edit (dye, glow ink, wax, `/data`, `/setblock`).
+- **`native_player_client_loaded_world(player, name)`**: the server heard that a guest's client finished loading
+  the level around them after joining, respawning or changing dimension. The player's state is not swapped in, so
+  helpers that look them up through `self.lan` may find nothing while the guest packet is handled.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat

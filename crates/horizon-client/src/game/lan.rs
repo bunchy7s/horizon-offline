@@ -2029,6 +2029,12 @@ impl Game<'_> {
                         self.native_player_locale_change(uuid, &name, &locale);
                     }
                 }
+                HostEvent::PlayerLoaded(conn) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_client_loaded_world(uuid, &name);
+                    }
+                }
                 HostEvent::Packet(conn, packet) => {
                     self.lan_guest_packet(&mut host, conn, *packet);
                     if !host.commands.is_empty() {

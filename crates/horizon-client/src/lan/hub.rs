@@ -168,6 +168,8 @@ pub enum HostEvent {
     MainHandChanged(u32, bool),
     /// A guest changed their client language option.
     LocaleChanged(u32, String),
+    /// A guest's client finished loading the level around them.
+    PlayerLoaded(u32),
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -2945,6 +2947,7 @@ impl Hub {
                     g.loaded = true;
                     g.loading = false;
                     g.load_timeout = 0;
+                    events.push(HostEvent::PlayerLoaded(conn));
                 }
                 // PlayerChunkSender.onChunkBatchReceivedByClient.
                 S::ChunkBatchReceived(p) => {
