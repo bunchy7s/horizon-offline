@@ -3,7 +3,7 @@
 //! resource-pack reloads remain separate work.
 use crate::{Result, sprites::Sprites};
 use horizon_assets::{
-    bake::{BlockModelTransform, ModelQuad, bake_block_model},
+    bake::{BlockModelTransform, ModelQuad, RenderType, bake_block_model},
     blockstate::{
         BlockStateDefinition, Variant, VariantSet,
         bind::{Properties, PropertySchema, PropertyValues, SelectedModels},
@@ -88,9 +88,19 @@ fn bake_resolved(
         .into_iter()
         .map(|quad| {
             let layer = sprites.insert(root, &quad.material.sprite)?;
+            // A model's `render_type` replaces the pass its sprite would pick.
+            let (translucent, opaque) = match quad.render_type {
+                Some(RenderType::Translucent | RenderType::Tripwire) => (true, false),
+                Some(RenderType::Solid) => (false, true),
+                Some(RenderType::Cutout | RenderType::CutoutMipped) => (false, false),
+                None => (
+                    quad.material.force_translucent || sprites.translucent[layer as usize],
+                    sprites.region_opaque(layer, &quad.uv),
+                ),
+            };
             Ok(BakedFace {
-                translucent: quad.material.force_translucent || sprites.translucent[layer as usize],
-                opaque: sprites.region_opaque(layer, &quad.uv),
+                translucent,
+                opaque,
                 quad,
                 layer,
                 fusion: None,
