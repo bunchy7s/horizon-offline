@@ -11,6 +11,18 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// The lock a running game holds on a world; vanilla's backups leave it out.
 const LOCK: &str = "session.lock";
 
+/// Hold the same exclusive lock as the game until a filesystem operation finishes.
+fn lock_world(world: &World) -> Result<fs::File, String> {
+    let lock = fs::File::options()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(world.path.join(LOCK))
+        .map_err(|e| e.to_string())?;
+    lock.try_lock().map_err(|e| e.to_string())?;
+    Ok(lock)
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct World {
     /// Its folder's name under `saves/`, the id commands take.
@@ -158,6 +170,7 @@ fn backup_at(
     world: &World,
     now: chrono::DateTime<chrono::Local>,
 ) -> Result<PathBuf, String> {
+    let _lock = lock_world(world)?;
     let dir = home.join("backups");
     fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let prefix = format!("{}_{}", now.format("%Y-%m-%d_%H-%M-%S"), world.folder);
@@ -201,6 +214,7 @@ fn backup_at(
 /// Copies the world into a new folder of the same `saves/`, named "<name> (1)", "<name> (2)"...
 /// and gives the copy that name in its level.dat so the game's list tells them apart.
 pub fn copy(world: &World) -> Result<World, String> {
+    let _lock = lock_world(world)?;
     let saves = world.path.parent().ok_or("A world folder has a parent")?;
     let folder = free_name(saves, &world.name, "", 1);
     let to = saves.join(&folder);
@@ -251,6 +265,13 @@ fn rename_level(world: &Path, name: &str) -> std::io::Result<()> {
 
 /// Moves the world to the system's trash, where the player can still get it back.
 pub fn delete(world: &World) -> Result<(), String> {
+    let lock = lock_world(world)?;
+    // Match server deletion: Windows cannot move the folder with this handle open.
+    // If the game opens it after the probe, its handle prevents the move instead.
+    #[cfg(windows)]
+    drop(lock);
+    #[cfg(not(windows))]
+    let _lock = lock;
     crate::desktop_seams::to_trash(&world.path)
         .map_err(|e| format!("Could not move {} to the trash: {e}", world.name))
 }
