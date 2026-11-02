@@ -74,7 +74,7 @@ ChunkMap.sendToTrackingPlayersFiltered	port	crates/horizon-client/src/lan/contai
 ChunkMap.sendToTrackingPlayersAndSelf	port	crates/horizon-client/src/lan/containers.rs::Hub::critical_hit	the one caller, the crit animation, goes to the attacker and the clients tracking them
 ChunkMap.isTrackedByAnyPlayer	skip:debug		only the debug synchronizers ask
 ChunkMap.forEachEntityTrackedBy	skip:debug		only the debug synchronizers ask
-ChunkMap.resendBiomesForChunks	missing		minor: /fillbiome changes the host's biomes but sends guests no ChunksBiomes packet, so LAN guests keep the old biome tints until their chunks are sent again
+ChunkMap.resendBiomesForChunks	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	/fillbiome sends the changed columns' biomes to the guests that have them (Hub::resend_biomes, a ChunksBiomes packet), in the order the columns were gathered
 ChunkMap.waitForLightBeforeSending	inline	crates/horizon-client/src/lan/hub.rs::Hub::next_batch	columns are sent only once lit
 ChunkMap.forEachReadyToSendChunk	skip:debug		only the debug synchronizers ask
 ChunkMap.TrackedEntity.equals	skip:java		identity by entity id; Horizon keys tracked entities by id
@@ -83,7 +83,7 @@ ChunkMap.TrackedEntity.sendToTrackingPlayersAndSelf	port	crates/horizon-client/s
 ChunkMap.TrackedEntity.sendToTrackingPlayersFiltered	port	crates/horizon-client/src/lan/containers.rs::Hub::broadcast_near	gap: minor: only an except-one-guest filter
 ChunkMap.TrackedEntity.broadcastRemoved	inline	crates/horizon-client/src/lan/entity.rs::Entities::tick	removed entities leave each client in one RemoveEntities
 ChunkMap.TrackedEntity.removePlayer	inline	crates/horizon-client/src/lan/entity.rs::Entities::tick	the client's tracker loses entities out of range or level
-ChunkMap.TrackedEntity.updatePlayers	port	crates/horizon-client/src/lan/entity.rs::Entities::tick	gap: player: broadcastToPlayer is not checked, so a spectating player is tracked and shown to non-spectators as a normal player model
+ChunkMap.TrackedEntity.updatePlayers	port	crates/horizon-client/src/lan/entity.rs::Entities::tick	broadcastToPlayer is checked: a spectator is hidden from everyone but other spectators, and sees players only while its camera is itself
 ChunkResult.error	skip:java		result type
 ChunkTaskDispatcher.hasWork	port	crates/horizon-client-render/src/streaming.rs::Streaming::busy	
 ChunkTaskDispatcher.onLevelChange	port	crates/horizon-client-render/src/streaming.rs::Streaming::requeue	
@@ -138,7 +138,7 @@ GenerationChunkHolder.getLatestStatus	port	crates/horizon-client-render/src/stre
 LoadingChunkTracker.getLevel	port	crates/horizon-client/src/ticket_levels.rs::Levels::get	the loading half of the pair
 LoadingChunkTracker.setLevel	inline	crates/horizon-client/src/ticket_levels.rs::ChunkTickets::update	levels are rebuilt when sources change
 PlayerSpawnFinder.scheduleNext	port	crates/horizon-client/src/world_spawn.rs::PlayerSpawnFinder::next_candidate	coprime stride order, then the suggestion
-PlayerSpawnFinder.scheduleCandidate	port	crates/horizon-client/src/game/initial_spawn.rs::Game::search_spawn	gap: minor: the in-frame path waits for the candidate's chunk, but a server tick (LAN, dedicated) passes over candidates in unloaded chunks, so a new guest can stand on another spot of the radius
+PlayerSpawnFinder.scheduleCandidate	port	crates/horizon-client/src/game/initial_spawn.rs::Game::search_spawn	the search waits for a candidate's chunk on both paths: the in-frame one centres streaming on it, a server tick keeps it loading (spawn_wait) and retries
 SectionTracker.checkNeighborsAfterUpdate	inline	crates/horizon-client/src/game/raids.rs::sections_to_village	its only subclass is the POI village distance: Chebyshev distance in sections, 7 when farther than 6
 SectionTracker.getComputedLevel	inline	crates/horizon-client/src/game/raids.rs::sections_to_village	
 SectionTracker.computeLevelFromNeighbor	inline	crates/horizon-client/src/game/raids.rs::sections_to_village	
