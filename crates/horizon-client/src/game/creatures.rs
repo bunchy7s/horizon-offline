@@ -12,6 +12,7 @@ use horizon_client::{
     arrows::EntityHit,
     blocks::Fluid,
     collisions::SceneCollisions,
+    crafting::Recipes,
     health::{HurtSource, Hurting, Knock, knockback_canceled},
     items::ItemStack,
     mesher::Vertex,
@@ -2903,36 +2904,6 @@ impl Game<'_> {
             self.spawn_orbs(at, amount);
         }
     }
-    /// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
-    /// the two dyes, else one of the two picked at random.
-    fn dye_mix(&mut self, a: u8, b: u8) -> u8 {
-        if let Some(mixed) = self.dye_color_mix_in_recipes(a, b) {
-            return mixed;
-        }
-        if self.world.random.next_boolean() {
-            a
-        } else {
-            b
-        }
-    }
-    /// `DyeColor.findColorMixInRecipes`: the dye colour a two-dye crafting
-    /// recipe makes, when its result is a dye.
-    fn dye_color_mix_in_recipes(&self, a: u8, b: u8) -> Option<u8> {
-        let dye = |c: u8| {
-            let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
-            Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
-        };
-        let grid = [dye(a), dye(b), None, None];
-        let (_, result) = self.res.recipes().find(&grid, 2)?;
-        let name = result
-            .item
-            .strip_prefix("minecraft:")?
-            .strip_suffix("_dye")?;
-        let index = horizon_client::mobs::render::DYE_NAMES
-            .iter()
-            .position(|n| *n == name)?;
-        u8::try_from(index).ok()
-    }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
     /// across and 10 up and down get `NeutralMob.playerDied`, when the
     /// `forgive_dead_players` rule is on. A mob's `Who::Player` is the guest
@@ -3163,7 +3134,12 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     // The mix needs all of `self`, so it waits until `child`'s
                     // borrow of the mob list is over.
-                    let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                    let mixed = dye_mix(
+                        self.res.recipes(),
+                        &mut self.world.random,
+                        p.extra.color,
+                        other.extra.color,
+                    );
                     if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                         c.extra.color = mixed;
                     }
@@ -3186,7 +3162,12 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     // The mix needs all of `self`, so it waits until `child`'s
                     // borrow of the mob list is over.
-                    let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                    let mixed = dye_mix(
+                        self.res.recipes(),
+                        &mut self.world.random,
+                        p.extra.color,
+                        other.extra.color,
+                    );
                     if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                         c.extra.color = mixed;
                     }
@@ -3232,7 +3213,12 @@ impl Game<'_> {
             // Sheep.getBreedOffspring: the lamb's wool mixes both parents' dyes.
             if p.species() == Species::Sheep {
                 let other = q.as_ref().unwrap_or(&p);
-                let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                let mixed = dye_mix(
+                    self.res.recipes(),
+                    &mut self.world.random,
+                    p.extra.color,
+                    other.extra.color,
+                );
                 if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                     c.extra.color = mixed;
                 }
@@ -7252,6 +7238,36 @@ fn killed_by_mob(m: &Mob) -> bool {
 /// `Animal.finalizeSpawnChildFromBreeding`'s player: the one who fed the
 /// parent, or else the one who fed the partner (`getLoveCause`). `Some(None)`
 /// is the host, `Some(Some(conn))` a guest. Both animals are spent.
+/// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
+/// the two dyes, else one of the two picked at random.
+fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u8 {
+    if let Some(mixed) = dye_color_mix_in_recipes(recipes, a, b) {
+        return mixed;
+    }
+    if random.next_boolean() { a } else { b }
+}
+
+/// `DyeColor.findColorMixInRecipes`: the dye colour a two-dye crafting recipe
+/// makes, when its result is a dye. The two dyes are the grid's first row
+/// (`CraftingInput.of(2, 1, ...)`) and the recipe manager answers for it; the
+/// result's `_dye` item names the colour.
+fn dye_color_mix_in_recipes(recipes: &Recipes, a: u8, b: u8) -> Option<u8> {
+    let dye = |c: u8| {
+        let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
+        Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
+    };
+    let grid = [dye(a), dye(b), None, None];
+    let (_, result) = recipes.find(&grid, 2)?;
+    let name = result
+        .item
+        .strip_prefix("minecraft:")?
+        .strip_suffix("_dye")?;
+    let index = horizon_client::mobs::render::DYE_NAMES
+        .iter()
+        .position(|n| *n == name)?;
+    u8::try_from(index).ok()
+}
+
 fn breeding_credit(
     love_cause: &mut std::collections::HashMap<u32, Option<u32>>,
     parent: u32,
