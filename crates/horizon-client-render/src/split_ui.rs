@@ -1,7 +1,7 @@
 //! Setup's monitor map and draft window choices. Apply is consumed by the game adapter.
 use crate::{
     gamepad::Button as PadButton,
-    graphics_style::STYLE,
+    graphics_style,
     hud::{HudAtlas, HudBatch, rgba},
     lang,
     split_layout::{Draft, Monitor, Placement, Spot, Warning, ordered},
@@ -568,7 +568,7 @@ impl SplitUi {
     pub fn draw(&self, batch: &mut HudBatch, atlas: &HudAtlas, cursor: (f32, f32), in_world: bool) {
         let (w, h) = (batch.width, batch.height);
         ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
-        STYLE.title(
+        graphics_style::title(
             batch,
             atlas,
             &Text::literal(tr("horizon.pages.split_setup", &[])),

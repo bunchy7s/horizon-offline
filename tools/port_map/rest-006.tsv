@@ -59,7 +59,7 @@ TeamArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::s
 TimeArgument.time	skip:java		builder: Horizon names ArgType::Time in the command tree
 TimeArgument.listSuggestions	port	crates/horizon-command/src/args.rs::ArgType::suggest	ArgType::Time arm
 BlockInput.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT of the input is not compared
-BlockInput.overwriteWithDefinedProperties	missing		unsure: vanilla BlockInput.place keeps neighbour-updated shape properties when the command sets only some; Horizon resolves the given state directly (Game::block_state)
+BlockInput.overwriteWithDefinedProperties	port	crates/horizon-client/src/game/commands.rs::Game::block_input_state	/setblock normalizes neighbour shapes, then reapplies explicit properties; strict skips normalization; gap: /fill still places resolved input directly
 BlockPredicateArgument.parse	port	crates/horizon-command/src/block.rs::parse	
 BlockPredicateArgument.BlockPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared
 BlockPredicateArgument.TagPredicate.test	port	crates/horizon-client/src/game/commands.rs::Game::block_matches	gap: minor: block-entity NBT is not compared

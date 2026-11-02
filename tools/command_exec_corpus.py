@@ -836,6 +836,31 @@ def items_and_loot():
 
 def world_misc():
     return [
+        # BlockInput.place calculates neighbour shapes before setting the block,
+        # then reapplies only properties explicitly supplied by the command.
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        cmd('/setblock 4 219 4 minecraft:gold_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=bell]'),
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block strict'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        # Even an unchanged input state must be normalized before comparison.
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        # An unsupported shape falling back to air retains the requested block.
+        cmd('/setblock 6 220 4 minecraft:poppy'),
+        cmd('/execute if block 6 220 4 minecraft:poppy'),
         cmd('/setblock 1 210 1 minecraft:stone keep'),
         cmd('/setblock 1 210 1 minecraft:dirt keep'),
         cmd('/setblock 1 210 1 minecraft:dirt destroy'),
@@ -1714,8 +1739,76 @@ def trial_spawner_passengers():
             cmd(f'/data get entity @e[tag={parent},limit=1] Passengers[0].Tags'),
             *setup(f'/kill @e[tag={parent}]', f'/kill @e[tag={rider}]',
                    '/setblock 4 220 4 air'),
+            # The killed pair lies dying for 20 ticks, and a dying mob still
+            # obstructs the next spawn (`Mob.checkSpawnObstruction`).
+            {'op': 'tick', 'n': 25},
         ]
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
+
+
+def mob_max_health_bounds():
+    """Raw bases survive effective clamping without changing Health (#7413)."""
+    pig = '00000000-0000-0000-0000-000000000001'
+    attribute = f'/attribute {pig} minecraft:max_health'
+    ops = [*setup('/summon minecraft:pig 4 200 4 '
+                  '{UUID:[I;0,0,0,1],NoAI:1b,NoGravity:1b,PersistenceRequired:1b}')]
+    for base in (-1.75, 0, 20, 1025):
+        ops += [
+            cmd(f'{attribute} base set {base}'),
+            cmd(f'/data get entity {pig} Health'),
+            cmd(f'{attribute} get'),
+            cmd(f'{attribute} base get'),
+            cmd(f'{attribute} get 100'),
+            cmd(f'{attribute} base get 100'),
+        ]
+    ops += [
+        {'op': 'tick', 'n': 25},
+        cmd(f'/execute if entity {pig}'),
+        cmd(f'/data get entity {pig} Health'),
+        cmd(f'{attribute} base reset'),
+        cmd(f'{attribute} get'),
+        cmd(f'{attribute} base get'),
+        cmd(f'/data get entity {pig} Health'),
+        *setup(f'/kill {pig}'),
+    ]
+    return ops
+
+def forceload_query_order():
+    """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
+    return [
+        *setup('/forceload remove all'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add 32 0'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add -16 0'),
+        cmd('/forceload add 0 -16'),
+        # Java 26.3: [0,-1], [2,0], [-1,0]. These replies say nothing
+        # about whether the force-loaded chunks have finished loading.
+        cmd('/forceload query'),
+        cmd('/forceload remove 32 0'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload remove all'),
+        cmd('/forceload query'),
+    ]
+
+
+def creeper_custom_fuse():
+    """Observe timed entity removal, rather than just echoed raw Fuse NBT (#7435)."""
+    ops = setup('/gamerule mob_griefing false')
+    for x, tag, fuse in [(4.5, 'fuse_short', ',Fuse:1s'),
+                         (14.5, 'fuse_default', ''), (24.5, 'fuse_long', ',Fuse:40s')]:
+        ops += setup(f'/summon minecraft:creeper {x} 220 4.5 '
+                     f'{{Tags:["{tag}"],NoAI:1b,NoGravity:1b,ignited:1b{fuse}}}')
+        ops.append(cmd(f'/data get entity @e[tag={tag},limit=1] Fuse'))
+    elapsed = 0
+    for tick in (1, 29, 30, 39, 40):
+        ops.append({'op': 'tick', 'n': tick - elapsed})
+        for tag in ('fuse_short', 'fuse_default', 'fuse_long'):
+            ops.append(cmd(f'/execute if entity @e[tag={tag}]'))
+        elapsed = tick
+    return ops + setup('/gamerule mob_griefing true')
 
 
 def groups():
@@ -1726,7 +1819,10 @@ def groups():
         ('game state', game_state()),
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
+        ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('mob max health bounds', mob_max_health_bounds()),
+        ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
