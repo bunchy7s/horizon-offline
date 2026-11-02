@@ -2869,7 +2869,17 @@ impl Game<'_> {
                 .map(|s| s.as_ref().map(|s| s.item.clone()));
             m.extra.armor = g.armor.clone();
             m.extra.crouching = g.sneaking;
-            m.extra.avatar_pose = g.pose();
+            let from_pose = m.extra.avatar_pose;
+            let to_pose = g.pose();
+            m.extra.avatar_pose = to_pose;
+            if from_pose != to_pose {
+                self.native_entity_pose_change(
+                    g.uuid,
+                    &g.name,
+                    from_pose.name(),
+                    to_pose.name(),
+                );
+            }
             m.extra.sprinting = g.sprinting;
             // Entity.DATA_POSE and the shared and living flags the others
             // get (hub::guest_body): gliding, swimming, Riptide's spin.
