@@ -3060,6 +3060,10 @@ impl Game<'_> {
     pub(super) fn native_compost_item(&self, pos: [i32; 3], item: &str) {
         let _ = (pos, item);
     }
+    /// A crafter at `pos` completed recipe `recipe`. @API:crafter_craft@.
+    pub(super) fn native_crafter_craft(&self, pos: [i32; 3], recipe: &str) {
+        let _ = (pos, recipe);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
