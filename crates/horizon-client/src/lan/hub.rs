@@ -3009,7 +3009,7 @@ impl Hub {
                         if changed {
                             events.push(HostEvent::RecipeBookSettings {
                                 conn,
-                                book: i32::from(p.book_type),
+                                book: p.book_type,
                                 open: p.open,
                                 filtering: p.filtering,
                             });
