@@ -3381,6 +3381,9 @@ impl OptionsUi {
             self.narrate_list(&widgets, list_key, (top, bottom), w, cursor);
         }
         let mut tooltip = None;
+        // The widget a keyboard-focused tooltip belongs to: `MenuTooltipPositioner`
+        // keeps it against that widget, not at the pointer.
+        let mut tooltip_rect: Option<[f32; 4]> = None;
         for (wd_idx, wd) in widgets.iter().enumerate() {
             if !visible(wd) {
                 continue;
@@ -3390,9 +3393,9 @@ impl OptionsUi {
                 .as_ref()
                 .is_some_and(|fid| matches_focus(fid, wd_idx, wd));
             let start = batch.vertices.len();
-            let hover = (ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
-                && (!wd.list || cursor.1 >= top && cursor.1 < bottom))
-                || is_focused;
+            let pointer_over = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            let hover = pointer_over || is_focused;
             // A pack's option: its label within the widget (the name shortened), and on hover
             // the whole label when it was, then what the pack says of it.
             let shader = s.shader_options.as_ref();
@@ -3436,6 +3439,7 @@ impl OptionsUi {
                     .collect();
                 if !lines.is_empty() {
                     tooltip = Some(lines);
+                    tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
                 }
             }
             if hover && let Some(tip) = tooltip_text(s, wd) {
@@ -3450,6 +3454,7 @@ impl OptionsUi {
                         .collect::<Vec<_>>(),
                     _ => atlas.font.split(&tip, 170.0),
                 });
+                tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
             }
             match &wd.kind {
                 WKind::Button { label, active, .. } => {
@@ -3621,7 +3626,10 @@ impl OptionsUi {
             self.settings_search = search;
         }
         if let Some(lines) = tooltip {
-            ui::tooltip(batch, atlas, &lines, cursor);
+            match tooltip_rect {
+                Some(rect) => ui::tooltip_menu(batch, atlas, &lines, cursor, rect),
+                None => ui::tooltip(batch, atlas, &lines, cursor),
+            }
         }
     }
     /// Mouse press/drag. Returns events for the game.
