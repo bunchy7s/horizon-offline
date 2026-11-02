@@ -29,6 +29,7 @@ use horizon_protocol::{
     text::{literal, translatable},
 };
 use horizon_world::{
+    attachments::Holder,
     block_collision::BlockCollisionRegistry,
     block_collision_scan::BlockCollisionScan,
     collision_context::CollisionContext,
@@ -216,10 +217,27 @@ pub struct TrackingBatch {
     pub events: Vec<super::entity::TrackEvent>,
 }
 
-/// Moves a guest's tracking events into `out`, one batch.
-fn take_tracking(g: &mut Guest, out: &mut Vec<TrackingBatch>) {
+/// A holder whose synced attachments one player is sent whole, because the
+/// player started seeing it.
+pub struct AttachmentSnapshot {
+    pub player: u128,
+    pub holder: Holder,
+}
+
+/// Moves a guest's tracking events into `out`, one batch, and the entities it
+/// started tracking into `snapshots`.
+fn take_tracking(
+    g: &mut Guest,
+    out: &mut Vec<TrackingBatch>,
+    snapshots: &mut Vec<AttachmentSnapshot>,
+) {
     let events = g.tracker.take_events();
     if !events.is_empty() {
+        let started = events.iter().filter(|e| e.start);
+        snapshots.extend(started.map(|e| AttachmentSnapshot {
+            player: g.uuid,
+            holder: Holder::Entity(e.entity as u32),
+        }));
         out.push(TrackingBatch {
             player: g.uuid,
             name: g.name.clone(),
@@ -234,6 +252,9 @@ pub struct Hub {
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
+    /// The holders players started seeing, for the game to send their synced
+    /// attachments (`flush_attachment_sync`).
+    pub attachment_snapshots: Vec<AttachmentSnapshot>,
     pub lan: Lan,
     pub config: HubConfig,
     pub encoder: ChunkEncoder,
@@ -576,6 +597,7 @@ impl Hub {
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
             native_tracking: Vec::new(),
+            attachment_snapshots: Vec::new(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
         }
@@ -1345,6 +1367,16 @@ impl Hub {
     fn send_level_info(&mut self, i: usize, ctx: &TickCtx, load_start: bool) {
         let spawn = ctx.spawn;
         let g = &self.guests[i];
+        self.attachment_snapshots.extend([
+            AttachmentSnapshot {
+                player: g.uuid,
+                holder: Holder::Level,
+            },
+            AttachmentSnapshot {
+                player: g.uuid,
+                holder: Holder::Player(g.uuid),
+            },
+        ]);
         g.send(&C::InitializeBorder(super::border::initialize(ctx.border)));
         g.send(&self.time_packet(ctx.world, ctx.clock_rate));
         g.send(&self.default_spawn(spawn));
@@ -1639,7 +1671,11 @@ impl Hub {
     /// are kept in `native_tracking`.
     pub fn collect_tracking(&mut self) {
         for g in &mut self.guests {
-            take_tracking(g, &mut self.native_tracking);
+            take_tracking(
+                g,
+                &mut self.native_tracking,
+                &mut self.attachment_snapshots,
+            );
         }
     }
 
@@ -1667,7 +1703,11 @@ impl Hub {
         }
         // `PlayerList.remove`: the entities it tracked stop (`removePairing`).
         g.tracker.clear();
-        take_tracking(&mut g, &mut self.native_tracking);
+        take_tracking(
+            &mut g,
+            &mut self.native_tracking,
+            &mut self.attachment_snapshots,
+        );
         self.broadcast(&C::PlayerInfoRemove(play::PlayerInfoRemove {
             uuids: vec![g.uuid],
         }));
@@ -1848,6 +1888,10 @@ impl Hub {
             }
             for idx in taken.into_iter().rev() {
                 let key = g.chunk_queue.remove(idx);
+                self.attachment_snapshots.push(AttachmentSnapshot {
+                    player: g.uuid,
+                    holder: Holder::Chunk([key.0, key.1]),
+                });
                 g.sent_chunks.insert(key);
             }
             // A far chunk the save doesn't have leaves the queue unsent.

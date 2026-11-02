@@ -2350,6 +2350,7 @@ impl Game<'_> {
         self.lan_sync_border(&mut host);
         host.hub.anticheat_ping();
         drop(holding);
+        self.flush_attachment_sync(&mut host);
         self.flush_native_net(&mut host);
         self.flush_far_terrain(&mut host);
         lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));

@@ -9,8 +9,12 @@ use crate::{
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_protocol::{
+    attachment_sync,
     item::Stack,
-    packets::{configuration::ClientInformation, play},
+    packets::{
+        configuration::{ClientInformation, CustomPayload},
+        play,
+    },
 };
 use std::{
     collections::VecDeque,
@@ -492,6 +496,20 @@ impl Guest {
             self.note_change(packet);
         }
         self.sender.send(packet.encode());
+    }
+    /// A holder's synced attachments, if the guest is placed and on a Horizon
+    /// client (the only one that reads them).
+    pub fn send_attachment_sync(&self, message: &attachment_sync::Message) {
+        if !self.placed || self.brand != "horizon" {
+            return;
+        }
+        match attachment_sync::encode(message) {
+            Ok(data) => self.send(&play::Clientbound::CustomPayload(CustomPayload {
+                channel: attachment_sync::CHANNEL.into(),
+                data,
+            })),
+            Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
+        }
     }
     /// What `packet` changes about how the client moves, for the prediction's replay: kept until
     /// the tick's ping places it (`Hub::anticheat_ping`).

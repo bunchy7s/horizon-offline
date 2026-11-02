@@ -97,8 +97,19 @@ impl Game<'_> {
         self.serving.is_some() || self.options.dedicated.is_some()
     }
 
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map, to lend to a mod: the
+    /// holder's synced changes are sent at the pass's end.
     pub(super) fn attachment_map(
+        &mut self,
+        holder: horizon_client::mod_api::Holder,
+    ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
+    {
+        self.world.attachment_syncs.insert(holder);
+        self.attachment_map_quiet(holder)
+    }
+
+    /// `attachment_map` without recording the holder for the sync.
+    pub(super) fn attachment_map_quiet(
         &mut self,
         holder: horizon_client::mod_api::Holder,
     ) -> Result<&mut horizon_client::mod_api::Attachments, horizon_client::mod_api::AttachmentError>
@@ -162,6 +173,7 @@ impl horizon_client::mod_api::LevelRandomHost for super::GameLevel<'_> {
         if !self.native_authoritative {
             return Err(horizon_client::mod_api::AttachmentError::MissingHolder);
         }
+        self.world.attachment_syncs.insert(holder);
         world_attachments(self.world, holder)
     }
     fn random(&mut self) -> Option<&mut horizon_client::mod_api::LegacyRandom> {

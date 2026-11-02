@@ -56,6 +56,7 @@ mod agent_settings;
 mod allays;
 mod armor_stands;
 mod atlas_slots;
+mod attachment_sync;
 mod banners;
 mod beacon;
 mod beds;
