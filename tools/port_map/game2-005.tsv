@@ -6,7 +6,7 @@ ZombieVillager.initializeZombieVillagerData	port	crates/horizon-client/src/mobs/
 ZombieVillager.handleEntityEvent	port	crates/horizon-client/src/mobs/zombie_villager.rs::start_converting	cure sound (event 16) is queued when the cure starts
 ZombieVillager.setVillagerData	inline	crates/horizon-client/src/game/zombie_villagers.rs::carry_over	gap: minor: the cure path copies type and profession there; no setter for the implicit component path
 ZombieVillager.get	skip:other		DataComponents getter for the villager variant; Horizon has no entity component map
-ZombieVillager.applyImplicitComponent	missing		minor: a zombie villager spawned from an item carrying a villager variant component keeps a random type; Horizon applies implicit components only to buckets (load_bucket_data)
+ZombieVillager.applyImplicitComponent	missing		an implicit component is applied only to a mob coming out of a bucket (`entity_nbt::bucket_components`), so a zombie villager spawned from an item carrying a villager variant component keeps a random type
 ZombifiedPiglin.createAttributes	skip:data		attribute defaults are entity-type data read in Mob::new (mobs.rs)
 ZombifiedPiglin.maybePlayFirstAngerSound	port	crates/horizon-client/src/mobs/undead.rs::zombified_piglin_step	first-anger counter and sound run in the step
 ZombifiedPiglin.maybeAlertOthers	port	crates/horizon-client/src/mobs/undead.rs::zombified_piglin_step	alert timer and line-of-sight check run in the step
@@ -39,8 +39,8 @@ Villager.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::re
 Villager.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::play_ambient	gap: minor: the trade ambient sound is not played while trading
 Villager.rewardTradeXp	port	crates/horizon-client/src/merchant.rs::Session::notify_trade	gap: minor: no 10 second Regeneration on the villager at level-up
 Villager.die	port	crates/horizon-client/src/game/villagers.rs::Game::villager_murdered	gap: minor: releaseAllPois is not done on death
-Villager.releaseAllPois	missing		unsure: releasePoi frees the bed, job site, potential job site and meeting point claims; Horizon has no claim store, only the block occupied property, so the effect is unclear
-Villager.releasePoi	missing		unsure: same as releaseAllPois; the claim store is not clear in Horizon
+Villager.releaseAllPois	missing		claims are per-mob fields (`extra.bed`, `extra.home` for the job site, `extra.meeting`) with no world-side point-of-interest store to release from; freeing a claim for another villager while this one lives has no counterpart
+Villager.releasePoi	missing		same as `releaseAllPois`: a single claim is that mob's field, dropped with the mob
 Villager.eatUntilFull	port	crates/horizon-client/src/mobs/villager.rs::Ext::eat_and_digest	
 Villager.shouldIncreaseLevel	inline	crates/horizon-client/src/merchant.rs::Session::notify_trade	level-up check: can level up and xp at the maximum
 Villager.increaseMerchantCareer	inline	crates/horizon-client/src/merchant.rs::Session::notify_trade	level plus the new level trade set
@@ -53,7 +53,7 @@ Villager.updateTrades	port	crates/horizon-client/src/game/trading.rs::Game::ensu
 Villager.maybeDecayGossip	port	crates/horizon-client/src/mobs/villager.rs::Ext::maybe_decay	
 Villager.golemSpawnConditionsMet	port	crates/horizon-client/src/mobs/villager.rs::Ext::wants_golem	sleep memory check; the golem cooldown is an extra check here
 Villager.get	skip:other		DataComponents getter for the villager variant; Horizon has no entity component map
-Villager.applyImplicitComponent	missing		minor: a villager spawned from an item carrying a villager variant component keeps its biome type; Horizon applies implicit components only to buckets
+Villager.applyImplicitComponent	missing		the same bucket-only path (`entity_nbt::bucket_components`), so a villager spawned from an item keeps the type its biome gives it
 VillagerData.withType	skip:java		immutable record copy; Horizon keeps type and profession as Mob fields
 VillagerData.withProfession	skip:java		immutable record copy; the profession change is villager::set_profession
 VillagerProfession.bootstrap	skip:data		registry bootstrap of professions; Horizon reads them from data tables
@@ -87,9 +87,9 @@ Inventory.removeFromSelected	port	crates/horizon-world/src/player_inventory.rs::
 Player.defineSynchedData	skip:java		synched data definitions; Horizon keeps the fields in game and player state
 Player.turtleHelmetTick	port	crates/horizon-client/src/game/potions.rs::Game::turtle_helmet_tick	
 Player.isEquipped	inline	crates/horizon-client/src/game/potions.rs::Game::turtle_helmet_tick	the head-slot check for the turtle helmet
-Player.canPlayerFitWithinBlocksAndEntitiesWhen	missing		unsure: the pose fit check (no collision in the new pose box) was not found in Horizon
+Player.canPlayerFitWithinBlocksAndEntitiesWhen	port	crates/horizon-client/src/pose.rs::MotionWorld::can_fit_pose	the box of the pose's dimensions at the player's position, deflated by 1e-7, tested against the player's collision; `update_player_pose` asks it for the swimming, the desired and the crouching pose in that order, as `updatePlayerPose` does
 Player.increaseScore	skip:other		the score is experience.total in Horizon (death screen); there is no separate score counter
-Player.getWeaponItem	missing		unsure: the riptide spin-attack item (autoSpinAttackItemStack) was not found; Horizon keeps spin_attack parts only
+Player.getWeaponItem	missing		the riptide spin attack keeps only `auto_spin_attack_ticks` and `auto_spin_attack_dmg`, not the stack it started with (`autoSpinAttackItemStack`), so there is no item to answer with mid-spin
 Player.destroyVanishingCursedItems	port	crates/horizon-client/src/game.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
 Player.hasCorrectToolForDrops	port	crates/horizon-client/src/game.rs::Game::tick_mining	the correct-tool test for harvest drops
 Player.readAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::read_player	
@@ -100,12 +100,12 @@ Player.canFallAtLeast	inline	crates/horizon-world/src/edge_backoff.rs::back_off_
 Player.deflectProjectile	port	crates/horizon-client/src/game/deflect.rs::Game::attack_redirectable	
 Player.baseDamageScaleFactor	inline	crates/horizon-client/src/game/mace.rs::Game::sweep_damage	
 Player.isEffectiveAi	skip:other		client-side AI gate; Horizon has no effective-AI check in its loop
-Player.hasContainerOpen	missing		unsure: the test for an open container menu (not the inventory menu) was not located
+Player.hasContainerOpen	missing		no test for an open container menu: screens are `self.screen`, and nothing distinguishes a container menu from the inventory menu
 Player.startSleepInBed	port	crates/horizon-client/src/game.rs::Game::try_sleep	
 Player.isSleepingLongEnough	port	crates/horizon-client/src/game/lan_actions.rs::sleep_counts	100 ticks in bed is what counts a sleeper as deep for SleepStatus.update
 Player.updateSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming	
 Player.getXpNeededForNextLevel	port	crates/horizon-client/src/entities.rs::Experience::needed	
-Player.hasEnoughFoodToDoExhaustiveManoeuvres	missing		unsure: the food-or-flying test for exhaustive moves was not found in motion.rs
+Player.hasEnoughFoodToDoExhaustiveManoeuvres	missing		no food-or-flying gate anywhere in `motion.rs`: the exhaustion of a jump or a move is added without asking the food level
 Player.mayUseItemAt	port	crates/horizon-client/src/game.rs::Game::use_hand	the may-build test before use-on in adventure mode
 Player.isSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming	
 Player.decorateDisplayNameComponent	port	crates/horizon-client/src/game/commands.rs::player_display_name	click suggests /tell, hover shows the player entity, plus the insertion
@@ -133,10 +133,10 @@ StackedContents.RecipePicker.getVisitedIngredientIndex	skip:java		bitset index a
 StackedContents.RecipePicker.getVisitiedItemIndex	skip:java		bitset index arithmetic; plain bool vectors in Horizon
 StackedContents.RecipePicker.clearAllVisited	port	crates/horizon-client/src/menu/place.rs::Picker::clear_visited	
 StackedItemContents.getBiggestCraftableStack	port	crates/horizon-client/src/menu/place.rs::Stacked::try_pick_all	the largest craftable count, found by a bounded search
-EvokerFangs.readAdditionalSaveData	missing		minor: fangs are not saved; a save in mid-bite drops them
-EvokerFangs.addAdditionalSaveData	missing		minor: fangs are not saved; the warmup and owner are not written
+EvokerFangs.readAdditionalSaveData	missing		fangs are not saved: `entity_nbt.rs` has no evoker fangs writer, so a save in mid-bite drops them
+EvokerFangs.addAdditionalSaveData	missing		no writer for the warmup delay or the owner either
 EvokerFangs.getAnimationProgress	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	the bite progress that positions the fang model
 EyeOfEnder.setItem	skip:ui		the item sprite a flying eye shows; Horizon draws the eye itself
 EyeOfEnder.shouldRenderAtSqrDistance	skip:ui		render distance culling only
 EyeOfEnder.spawnParticles	port	crates/horizon-client/src/game/end.rs::Game::eye_break_particles	the portal crumbs drawn in toward the eye
-EyeOfEnder.readAdditionalSaveData	missing		minor: flying eyes are not saved; a save mid-flight loses them
+EyeOfEnder.readAdditionalSaveData	missing		a flying eye of ender is not saved: `entity_nbt.rs` has no writer for it (nor `saved_with_chunk` a kind for it), so a save mid-flight loses it

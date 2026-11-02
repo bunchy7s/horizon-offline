@@ -25,6 +25,20 @@ use horizon_world::{
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
+/// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
+/// change the distance and damage multiplier, or cancel fall handling.
+/// 357.
+#[inline(never)]
+pub fn native_living_fall(
+    entity: u32,
+    kind: &str,
+    distance: &mut f64,
+    multiplier: &mut f32,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::living_fall(entity, kind, distance, multiplier, cancel);
+}
+
 pub fn load(root: &Path, properties: &MovementProperties<'_>) -> Result<BlockLandingRegistry> {
     let raw: BTreeMap<String, serde_json::Value> =
         serde_json::from_slice(&fs::read(root.join("landing-definitions.json"))?)?;
@@ -289,6 +303,25 @@ impl MotionWorld<'_, '_, '_> {
                 floor
             }) as i64;
             self.fall_event(FallEvent::Statistic(rounded as i32));
+        }
+        let mut distance = distance;
+        let mut multiplier = multiplier;
+        let mut cancel = false;
+        if !self.player.replaying {
+            native_living_fall(
+                self.player.entity_id as u32,
+                "minecraft:player",
+                &mut distance,
+                &mut multiplier,
+                &mut cancel,
+            );
+        }
+        // A canceled fall still lands on the block (`Block.fallOn`).
+        if cancel {
+            if let Some((state, position, original_distance)) = contact {
+                self.mod_block_fall(state, position, original_distance, 0.0);
+            }
+            return Ok(false);
         }
         living_fall::cause_living_fall_damage(
             &mut FallCall {

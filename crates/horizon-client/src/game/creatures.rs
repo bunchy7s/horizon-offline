@@ -5379,7 +5379,7 @@ impl Game<'_> {
                     .map_or(2.0, |f| f.0 as f32 * 2.0);
                 // TamableAnimal.feed(.., 2.0F, 2.0F): heals twice the nutrition,
                 // then playEatingSound, which wolves leave empty.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
             }
             // Wolf.mobInteract: the owner puts wolf armor on a tamed adult.
@@ -5517,7 +5517,7 @@ impl Game<'_> {
                     .and_then(|i| i.food.as_ref())
                     .map_or(1.0, |f| f.0 as f32);
                 // TamableAnimal.feed.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
                 eat = eating_sound(m, &mut self.world.random);
             }
@@ -5573,7 +5573,7 @@ impl Game<'_> {
             Species::IronGolem
                 if item == "minecraft:iron_ingot" && m.health < m.attrs.max_health =>
             {
-                m.health = (m.health + 25.0).min(m.attrs.max_health);
+                m.heal(25.0);
                 consume = true;
                 sound = Some("entity.iron_golem.repair");
             }
@@ -6308,16 +6308,13 @@ impl Game<'_> {
     /// poses entities: a new frame of draws, the store restarted when the
     /// renderer's no longer matches. Once per frame, before any entity draws.
     pub(super) fn begin_skinning(&self) {
-        let stored = self
-            .renderer
-            .as_ref()
-            .filter(|r| r.skins_entities())
-            .and_then(|r| r.skinned_models());
-        match stored {
-            Some(stored) => self
-                .skin_models
-                .borrow_mut()
-                .begin(&mut self.skin_frame.borrow_mut(), stored),
+        let renderer = self.renderer.as_ref().filter(|r| r.skins_entities());
+        match renderer.and_then(|r| r.skinned_models()) {
+            Some(stored) => {
+                let mut models = self.skin_models.borrow_mut();
+                models.begin(&mut self.skin_frame.borrow_mut(), stored);
+                models.eyes = renderer.is_some_and(|r| r.skins_eyes());
+            }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
     }

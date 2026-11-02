@@ -32,11 +32,11 @@ TabNavigationBar.narrationPriority	inline	crates/horizon-client/src/screen_narra
 TabNavigationBar.updateWidgetNarration	port	crates/horizon-client/src/screen_narrator.rs::narrate	the tabs list's narration: gui.narrate.tab of the tab under the mouse else the open one, plus narration.tab_navigation.usage while the row has focus
 TabNavigationBar.narrateListElementPosition	inline	crates/horizon-client/src/screen_narrator.rs::narrate	narrator.position.tab with the tab's index and the tab count, in the same branch
 TabNavigationBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	tab row drawn in draw_create
-TabNavigationBar.selectTab	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: only clicks pick a tab; no select by index (Ctrl+number, init)
+TabNavigationBar.selectTab	port	crates/horizon-client/src/title.rs::Title::select_create_tab	the tab set by index, the focus cleared, from a click on the row and from Ctrl+number
 TabNavigationBar.setTabActiveState	inline	crates/horizon-client/src/game/stats_screen.rs::Game::stats_tab_active	the Items and Mobs tabs are active only while their list has rows: an inactive tab does not click (stats_screen.rs:582) and its label draws inactive (stats_screen.rs:317-337)
 TabNavigationBar.setTabTooltip	missing		minor: the tab row has no per-tab tooltip
-TabNavigationBar.keyPressed	missing		minor: Ctrl+1 to 9 and Ctrl+Tab do not switch create-world tabs
-TabNavigationBar.getNextTabIndex	missing		minor: index math for Ctrl+number and Ctrl+Tab, which Horizon lacks
+TabNavigationBar.keyPressed	port	crates/horizon-client/src/title.rs::Title::tab_bar_key	Ctrl+1 to Ctrl+0 and Ctrl+Tab (back with Shift) switch the Create World tabs, a digit past the last clamping to it; the rules and experiments screens keep the keys first
+TabNavigationBar.getNextTabIndex	port	crates/horizon-client/src/title/create_world.rs::next_tab_index	the tab Ctrl plus a digit asks for, Ctrl+1 the first and Ctrl+0 the tenth, or one step for Tab, wrapping; the caller clamps to the tabs there are
 TabNavigationBar.currentTabIndex	skip:other		accessor; Horizon keeps the open tab in options.tab
 TabNavigationBar.currentTabButton	skip:other		accessor; Horizon draws the tabs from options.tab
 TabNavigationBar.Builder.addTab	skip:java		builder

@@ -1,8 +1,0 @@
-{
-  "hooks": [],
-  "helpers": [
-    {"name": "item_stack", "target": "horizon_client::game::native_hooks::Game<'_>::native_item_stack"}
-  ],
-  "rust_summary": "drawing a component-bearing item stack and its decorations on a screen (`native_item_stack`).",
-  "doc_summary": "drawing an item stack on a screen: `native_item_stack(batch, stack, at, size)` draws its model, glint, damage bar, cooldown and mod decorations, but not its count. It draws nothing and returns false for an unknown item or an empty stack (air, or a count of 0). Bundles need \"hooks\": @API:item_stack@."
-}

@@ -26,7 +26,7 @@ use std::{
 /// removed keeping first-seen order. The hook may be called more than
 /// once per recipe; the answer must be the same. An unclaimed kind
 /// leaves the list empty and the recipe fails, as an unknown kind does.
-/// API @API:ingredient@.
+/// API 166.
 #[inline(never)]
 pub fn native_ingredient(
     kind: &str,
