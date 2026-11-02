@@ -611,11 +611,20 @@ impl Game<'_> {
         for (ai, ci) in hits {
             let a = &tree.list[ai];
             let was = self.adv.progress.done(a);
-            self.adv.progress.grant(&a.id, &a.criteria[ci].name, &date);
+            let criterion = &a.criteria[ci].name;
+            if self.adv.progress.grant(&a.id, criterion, &date) {
+                self.advancement_progress(&a.id, criterion, true);
+            }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
                 self.award(ai);
             }
+        }
+    }
+    /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
+    fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
         }
     }
     /// `PlayerAdvancements.progressChanged`, kept for a network player's client.
@@ -1962,6 +1971,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
+                self.advancement_progress(&a.id, c, true);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -1975,16 +1985,18 @@ impl Game<'_> {
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
         self.progress_changed(index);
-        match criterion {
-            Some(c) => self.adv.progress.revoke(&a.id, c),
-            None => {
-                let mut any = false;
-                for c in &a.criteria {
-                    any |= self.adv.progress.revoke(&a.id, &c.name);
-                }
-                any
+        let names: Vec<&str> = match criterion {
+            Some(c) => vec![c],
+            None => a.criteria.iter().map(|c| c.name.as_str()).collect(),
+        };
+        let mut changed = false;
+        for c in names {
+            if self.adv.progress.revoke(&a.id, c) {
+                changed = true;
+                self.advancement_progress(&a.id, c, false);
             }
         }
+        changed
     }
 }
 impl Game<'_> {
