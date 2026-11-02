@@ -335,6 +335,24 @@ impl Game<'_> {
             return;
         }
         self.as_guest(host, conn, |g| {
+            let mut cancel = false;
+            let writable = g
+                .stack_in(p.slot as usize)
+                .is_some_and(|stack| &*stack.item == "minecraft:writable_book");
+            if writable
+                && let (Some(player), Some(name)) = (g.lan_acting_uuid, g.lan_acting_name.clone())
+            {
+                g.native_player_edit_book(
+                    player,
+                    &name,
+                    p.pages.len() as i32,
+                    p.title.is_some(),
+                    &mut cancel,
+                );
+            }
+            if cancel {
+                return;
+            }
             g.write_book(p.slot as usize, p.pages, p.title)
         });
     }
