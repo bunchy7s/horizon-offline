@@ -89,8 +89,9 @@ def stamp(check):
             if marker not in text:
                 raise ValueError(f"missing {marker} in {filename}")
             extra[file] = text.replace(marker, str(version))
-        # Most hook comments live in the source itself.
+        # Most hook comments live in the source itself, and some hook lists in the docs.
         source = source.replace(marker, str(version))
+        docs = docs.replace(marker, str(version))
         for file in MOD_API:
             if (ROOT / file).exists():
                 text = extra.get(file, (ROOT / file).read_text())
