@@ -397,6 +397,7 @@ impl Game<'_> {
         exploding: Option<u32>,
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
+        blocks: &[[i32; 3]],
     ) -> Option<[f64; 3]> {
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
@@ -450,6 +451,10 @@ impl Game<'_> {
         let flying = self.player.as_ref().is_some_and(|p| p.flying);
         let mut outcome = horizon_client::health::BlockOutcome::default();
         let mut pushed = None;
+        let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+        if !spectator && !(creative && flying) {
+            self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
+        }
         // The death message names the blast's causing entity. It goes to this
         // player's tracker, the host's or a guest's.
         if let Some((id, name)) = attacker.filter(|_| !creative && !spectator && hurtable) {
@@ -482,7 +487,6 @@ impl Game<'_> {
                 }
             }
             if !spectator && !(creative && flying) {
-                let push = [dir[0] * power, dir[1] * power, dir[2] * power];
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
@@ -544,6 +548,7 @@ impl Game<'_> {
         radius: f32,
         damage_type: &str,
         interaction: BlockInteraction,
+        blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
         if radius < 1.0e-5 {
             return Vec::new();
@@ -575,6 +580,7 @@ impl Game<'_> {
             exploding,
             attacker.as_ref(),
             blast_source.as_ref(),
+            blocks,
         );
         let mut pushed: Vec<_> = self.lan_acting.zip(own).into_iter().collect();
         if let Some(mut host) = self.lan.take() {
@@ -594,6 +600,7 @@ impl Game<'_> {
                         exploding,
                         attacker.as_ref(),
                         blast_source.as_ref(),
+                        blocks,
                     )
                 });
                 if let Some(Some(push)) = push {
@@ -871,7 +878,7 @@ impl Game<'_> {
         let mut targets = self.exploded_positions(center, radius, resists);
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
-        let pushed = self.explosion_hurt_entities(center, radius, damage_type, interaction);
+        let pushed = self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {

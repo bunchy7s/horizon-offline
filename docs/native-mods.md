@@ -1735,6 +1735,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   that is still there (`ServerLevel.tickBlock`), before its own `tick`; the same contract as `native_random_tick`.
 - **`native_explosion_detonate(dimension, center, blocks)`** (API 22): the positions an explosion is about to break,
   before any is hit; take out the ones to spare. Entities are hurt as before.
+- **`native_explosion_knockback(dimension, center, blocks, entity, knockback_velocity)`**: a server explosion's
+  calculated velocity, before it is added to the entity. Replace `knockback_velocity` to change the push;
+  `entity` is None for the acting player. The player packet uses the same replacement.
 - **`native_fill_bucket(stack, pos, canceled)`** and **`native_attack_entity(entity, kind, pos, canceled)`** (API 22):
   a player's bucket at a block, and their blow on an entity, with the acting player swapped in. Canceled, the bucket
   does nothing and the blow does no harm.

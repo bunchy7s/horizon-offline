@@ -5293,6 +5293,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
     }
+    /// Server explosion knockback for `entity` (None for the acting player).
+    /// Replace the velocity added to its existing velocity. API @API:explosion_knockback@.
+    pub(super) fn native_explosion_knockback(
+        &mut self,
+        dimension: &str,
+        center: [f64; 3],
+        blocks: &[[i32; 3]],
+        entity: Option<u32>,
+        knockback_velocity: &mut [f64; 3],
+    ) {
+        let _ = (dimension, center, blocks, entity, knockback_velocity);
+    }
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
     /// and the bucket does nothing. Server-side, for every player of the
