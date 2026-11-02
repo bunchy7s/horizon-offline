@@ -21,7 +21,11 @@ mod github_mods_page;
 mod glass;
 mod glass_home;
 mod glass_home_lists;
+mod glass_home_mods;
+mod glass_home_packs;
 mod glass_home_tabs;
+mod glass_instance;
+mod glass_instance_java;
 mod glass_ui;
 mod home;
 mod home_tabs;
@@ -307,6 +311,8 @@ struct Launcher {
     friend_code: line_edit::LineEdit,
     friend_focused: bool,
     friend_focus: FocusHandle,
+    /// The window's width at the last frame: Home's head lays out by it, as the mockup's `xl`.
+    window_width: f32,
     joining: Option<String>,
     /// Where the next start goes at once: `--world <folder>` or `--server <address>`.
     quick_play: Option<(&'static str, String)>,
@@ -575,6 +581,7 @@ impl Launcher {
             play_when_prepared: None,
             friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
             friend_focused: false,
+            window_width: 0.,
             friend_focus: cx.focus_handle(),
             joining: None,
             quick_play: None,
@@ -661,10 +668,17 @@ impl Launcher {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
         }
-        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots.
-        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("new-instance") {
+        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots
+        // (`new-instance-horizon`, `new-instance-vanilla`: on those).
+        let kind = match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
+            Ok("new-instance") => Some(new_instance::NewKind::Modded),
+            Ok("new-instance-horizon") => Some(new_instance::NewKind::Horizon),
+            Ok("new-instance-vanilla") => Some(new_instance::NewKind::Vanilla),
+            _ => None,
+        };
+        if let Some(kind) = kind {
             this.open_instance_dialog(None);
-            this.pick_kind(new_instance::NewKind::Modded, cx);
+            this.pick_kind(kind, cx);
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
@@ -4752,6 +4766,7 @@ impl Render for Launcher {
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         let size = window.viewport_size();
+        self.window_width = f32::from(size.width);
         let content = match self.page {
             Page::Play => self.play_page(cx),
             Page::Versions => self.versions_page(cx),

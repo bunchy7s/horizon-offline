@@ -2477,7 +2477,7 @@ pub trait Hooks: Send + Sync {
     /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
     /// with read-only force. Fires on the Game running the bow release, including
     /// LAN guests; a remote client's own release path is not covered. Crossbows
-    /// and `ArrowNockEvent` are not covered. 318.
+    /// are not covered; `native_arrow_nock` is the bow's start. 318.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
@@ -4512,10 +4512,43 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:arrow_nock@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn arrow_nock(&self, host: &mut dyn Host, event: &mut ArrowNockEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
         let _ = host;
+        let _ = event;
+    }
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too, except dragons and end crystals. End crystals
+    /// are also omitted from ordinary blasts: Horizon removes them without a
+    /// velocity to change. Server-side. @API:explosion_knockback@.
+    ///
+    /// Every mod gets `event.knockback_velocity` in order and may add, change or remove knockback_velocity.
+    fn explosion_knockback(&self, host: &mut dyn Host, event: &mut ExplosionKnockbackEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mod's own ingredient kind, matching a concrete stack at craft time:
+    /// the ingredient's `test` calls here with the kind, its JSON and the
+    /// stack being matched, `accept` already true (the load-time list named
+    /// the item). Set `accept` to false to refuse the stack — its components
+    /// are the usual reason. The hook may be called many times a craft; the
+    /// answer must be the same for the same stack. API @API:ingredient_test@.
+    fn ingredient_test(&self, event: &mut IngredientTestEvent<'_>) {
         let _ = event;
     }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
@@ -4533,6 +4566,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:living_get_projectile@.
+    ///
+    /// Every mod gets `event.projectile` in order and may add, change or remove projectile.
+    fn living_get_projectile(&self, host: &mut dyn Host, event: &mut LivingGetProjectileEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
@@ -4565,6 +4610,11 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    fn render_name_tag(&self, host: &dyn Host, event: &mut RenderNameTagEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A screen was observed closing, at most once per frame.
     fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
@@ -13874,6 +13924,42 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::arrow_nock`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArrowNockEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub bow: &'a ItemStack,
+    pub hand: Hand,
+    pub has_ammo: bool,
+}
+pub fn dispatch_arrow_nock(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    bow: &ItemStack,
+    hand: Hand,
+    has_ammo: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ArrowNockEvent {
+        player,
+        name,
+        bow,
+        hand,
+        has_ammo,
+    };
+    for mod_hook in super::entered(mods, "arrow_nock") {
+        if matches!(mod_hook.arrow_nock(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13898,6 +13984,61 @@ pub fn dispatch_compute_fov_modifier(
     }
     *modifier = event.modifier;
 }
+/// What [`Hooks::explosion_knockback`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExplosionKnockbackEvent<'a> {
+    pub dimension: &'a str,
+    pub center: [f64; 3],
+    pub blocks: &'a [[i32; 3]],
+    pub entity: Option<u32>,
+    pub knockback_velocity: &'a mut [f64; 3],
+}
+pub fn dispatch_explosion_knockback(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    center: [f64; 3],
+    blocks: &[[i32; 3]],
+    entity: Option<u32>,
+    knockback_velocity: &mut [f64; 3],
+) {
+    let mut event = ExplosionKnockbackEvent {
+        dimension,
+        center,
+        blocks,
+        entity,
+        knockback_velocity,
+    };
+    for mod_hook in super::entered(mods, "explosion_knockback") {
+        mod_hook.explosion_knockback(host, &mut event);
+    }
+}
+/// What [`Hooks::ingredient_test`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct IngredientTestEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a serde_json::Map<String, Value>,
+    pub stack: &'a ItemStack,
+    pub accept: bool,
+}
+pub fn dispatch_ingredient_test(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    let mut event = IngredientTestEvent {
+        kind,
+        data,
+        stack,
+        accept: *accept,
+    };
+    for mod_hook in super::entered(mods, "ingredient_test") {
+        mod_hook.ingredient_test(&mut event);
+    }
+    *accept = event.accept;
+}
 /// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemContainerEvent<'a> {
@@ -13918,6 +14059,38 @@ pub fn dispatch_item_container(
             *slots = Some(replacement);
             break;
         }
+    }
+}
+/// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingGetProjectileEvent<'a> {
+    pub player: Option<u128>,
+    pub name: &'a str,
+    pub entity: Option<u32>,
+    pub kind: &'a str,
+    pub weapon: &'a ItemStack,
+    pub projectile: &'a mut Option<ItemStack>,
+}
+pub fn dispatch_living_get_projectile(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    name: &str,
+    entity: Option<u32>,
+    kind: &str,
+    weapon: &ItemStack,
+    projectile: &mut Option<ItemStack>,
+) {
+    let mut event = LivingGetProjectileEvent {
+        player,
+        name,
+        entity,
+        kind,
+        weapon,
+        projectile,
+    };
+    for mod_hook in super::entered(mods, "living_get_projectile") {
+        mod_hook.living_get_projectile(host, &mut event);
     }
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -14054,6 +14227,36 @@ pub fn dispatch_render_item_in_frame(
             break;
         }
     }
+}
+/// What [`Hooks::render_name_tag`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderNameTagEvent<'a> {
+    pub entity_id: u32,
+    pub kind: &'a str,
+    pub vanilla_visible: bool,
+    pub visible: bool,
+    pub text: &'a mut Option<String>,
+}
+pub fn dispatch_render_name_tag(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    kind: &str,
+    vanilla_visible: bool,
+    visible: &mut bool,
+    text: &mut Option<String>,
+) {
+    let mut event = RenderNameTagEvent {
+        entity_id,
+        kind,
+        vanilla_visible,
+        visible: *visible,
+        text,
+    };
+    for mod_hook in super::entered(mods, "render_name_tag") {
+        mod_hook.render_name_tag(host, &mut event);
+    }
+    *visible = event.visible;
 }
 /// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
