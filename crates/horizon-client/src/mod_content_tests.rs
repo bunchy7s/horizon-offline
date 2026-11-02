@@ -3597,7 +3597,9 @@ fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
 fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
     use horizon_world::level::{Behaviours, ItemKind};
 
-    let base = prepared().expect("this ignored test needs prepared 26.3 resources");
+    let Some(base) = prepared() else {
+        return;
+    };
     let scratch = std::env::temp_dir().join(format!("horizon-mod-signs-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
     let m = folder_mod(
@@ -3696,7 +3698,9 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     use crate::containers::BlockEntity;
     use crate::streaming::{ChunkGenerator, Proto};
 
-    let base = prepared().expect("this ignored test needs prepared 26.3 resources");
+    let Some(base) = prepared() else {
+        return;
+    };
     let scratch =
         std::env::temp_dir().join(format!("horizon-mod-sign-feature-{}", std::process::id()));
     let _ = fs::remove_dir_all(&scratch);
