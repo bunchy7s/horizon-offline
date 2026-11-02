@@ -1424,8 +1424,21 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before and after and `dimension` the level they are in now. Heard after the move has reached the player's state and
   their client (into another level: when that level is entered, before it has loaded around them), so it cannot stop it
   (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `native_tell` and the acting-player helpers
-  work. Not heard yet: ender pearls, chorus fruit, a spectator's teleport menu; portals and respawns are not teleports
-  here.
+  work. Ender pearls and chorus fruit have their own hooks below; not heard yet: a spectator's teleport menu; portals
+  and respawns are not teleports here.
+- **`native_ender_pearl_teleport(player, name, pearl, from, target, damage, cancel)`**: a server player's ender pearl
+  landed and is about to teleport them (NeoForge's `EntityTeleportEvent.EnderPearl`, `ThrownEnderpearl.onHit`).
+  `pearl` is the pearl's entity id, `from` their feet, `target` where the pearl started its last tick and `damage` the
+  fall damage they then take (5). A mod may move `target` or change `damage` (0 or less: none). Canceling keeps the
+  player where they are: no endermite roll, no teleport, no damage, no sound; the pearl is used up either way. Mobs'
+  pearls are not heard. Bundles need `"hooks": @API:ender_pearl_teleport@`.
+- **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
+  consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
+  `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
+  `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
+  the border. Canceling ends the effect: no
+  teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
+  `"hooks": @API:chorus_fruit_teleport@`.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
   their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
   they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor
@@ -1501,6 +1514,13 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_item_frame_change(player, name, entity_id, action, item, rotation)`**: a server player changed a frame (`put`, `rotate`, `remove_item` or `break`), after its contents and comparator output changed. `item` is empty when none remains. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_item_mend(player, name, item, repair, experience)`**: an orb actually repaired `repair` durability on `item` for a server player, after the item changed. `experience` is the orb value. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_trade(player, name, entity_id)`**: a server player completed a villager or wandering trader trade, after the merchant applied it. `entity_id` is the merchant network id. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
+- **`native_trade_with_villager(merchant, kind, offer)`**: NeoForge's `TradeWithVillagerEvent`, heard once per trade a
+  server player makes with a villager or a wandering trader (a shift-click that trades several times is heard for each),
+  after the trade's statistic and `villager_trade` trigger. `merchant` is the trader's entity id, `kind` its type
+  (`minecraft:villager` or `minecraft:wandering_trader`), and `offer` the `MerchantOffer` as it was right after the
+  trade: its costs, `result`, `uses` (this trade counted), `max_uses` and `xp`. Listen only, heard once the whole click
+  is done (its payments taken; NeoForge fires during each take). The player's state is swapped in, so `native_acting_player` names
+  them. Unlike `native_player_trade`, which is heard once per click with no offer.
 - **`native_player_shield_disable(player, name, ticks)`**: a blocked melee hit disabled the server player’s shield for `ticks` ticks. It fires just before the cooldown is set; guest lookup helpers may not find the guest during packet handling.
 - **`native_player_loom_pattern_select(player, name, pattern)`**: a server player selected loom pattern button `pattern`, after the menu accepted it. Guest lookup helpers may not find the guest during packet handling.
 - **`native_player_name_entity(player, name, entity_id, entity_name)`**: a server player used a named name tag on a mob, after it became persistent and was named. Guest lookup helpers may not find the guest during packet handling.

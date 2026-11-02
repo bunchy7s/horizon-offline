@@ -255,6 +255,30 @@ pub mod startup {
         }
     }
 
+    /// Whether a world's view is still filling (between [`arm`] and the
+    /// `world.view_full` mark).
+    #[inline]
+    pub fn filling() -> bool {
+        on() && FILLING.load(Ordering::Relaxed)
+    }
+
+    /// Values at this moment, as a counter track named `name` (Perfetto draws
+    /// each value as a line): what the view waits on while it fills.
+    pub fn counters(name: &'static str, values: &[(&'static str, usize)]) {
+        if !on() {
+            return;
+        }
+        let args: Vec<String> = values
+            .iter()
+            .map(|(k, v)| format!(r#""{k}":{v}"#))
+            .collect();
+        write(format_args!(
+            r#""ph":"C","name":"{name}","ts":{},"args":{{{}}}"#,
+            micros(Instant::now()),
+            args.join(",")
+        ));
+    }
+
     /// Called each frame in a world: marks `world.view_full` the first frame
     /// after [`arm`] where nothing waits to load, generate, light, mesh or
     /// upload and the resident columns cover perf_bench's share of the view

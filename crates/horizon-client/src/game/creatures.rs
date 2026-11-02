@@ -3940,10 +3940,15 @@ impl Game<'_> {
                     .play(name, Some([at.x, at.y, at.z]), volume, pitch);
             }
             ArrowEvent::BubbleColumnParticles { pos } => self.bubble_column_particles(pos),
-            ArrowEvent::Block { pos, reaction } => match reaction {
+            ArrowEvent::Block {
+                pos,
+                reaction,
+                owner,
+            } => match reaction {
                 BlockReaction::PrimeTnt => {
+                    // `TntBlock.onProjectileHit`: the arrow's owner lights it.
                     if self.tnt_prime_allowed(pos) {
-                        self.spawn_primed_tnt(pos, false, None, None);
+                        self.spawn_primed_tnt(pos, false, owner, None);
                         self.with_level(|b, level, ticks| b.remove_block(level, ticks, pos, false));
                         let _ = self.process_level_events();
                     }
@@ -4514,7 +4519,32 @@ impl Game<'_> {
                 {
                     m.damage_projectile(0.0, source, aim, [p.velocity.x, p.velocity.z]);
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() {
+                // To where the pearl started its last tick (oldPosition).
+                let mut to = p.previous;
+                let mut damage = 5.0;
+                let mut cancel = false;
+                // EntityTeleportEvent.EnderPearl: a server player's pearl.
+                if p.owner == Some(Who::Player)
+                    && let Some(from) = self.player.as_ref().map(|pl| pl.position)
+                    && let (Some(uuid), Some(name)) =
+                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut target = [to.x, to.y, to.z];
+                    self.native_ender_pearl_teleport(
+                        uuid,
+                        &name,
+                        p.id,
+                        [from.x, from.y, from.z],
+                        &mut target,
+                        &mut damage,
+                        &mut cancel,
+                    );
+                    // A target that is not a number keeps the pearl's.
+                    if target.iter().all(|v| v.is_finite()) {
+                        to = Vec3::new(target[0], target[1], target[2]);
+                    }
+                }
+                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
@@ -4525,8 +4555,6 @@ impl Game<'_> {
                         let from = pl.position;
                         self.spawn_mob("minecraft:endermite", [from.x, from.y, from.z], false);
                     }
-                    // To where the pearl started its last tick (oldPosition).
-                    let to = p.previous;
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
                         pl.velocity = Vec3::ZERO;
@@ -4534,7 +4562,9 @@ impl Game<'_> {
                         pl.teleported = true;
                     }
                     self.previous_position = to;
-                    self.hurt_player_by("minecraft:ender_pearl", 5.0);
+                    if damage > 0.0 {
+                        self.hurt_player_by("minecraft:ender_pearl", damage);
+                    }
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),
@@ -6154,24 +6184,64 @@ impl Game<'_> {
         }
     }
     /// Mob models and projectiles for the entity pass.
-    pub(super) fn mob_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
-        let atlas = &self.gui.atlas;
-        let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
-        let scale = self.view_scale();
-        self.rendered_mobs.set(0);
-        // Mob models posed on the GPU (mobs::skin), when the renderer takes them this frame.
-        let skinning = self
+    /// The renderer's models for the GPU path (`mobs::skin`) this frame, if it
+    /// poses entities: a new frame of draws, the store restarted when the
+    /// renderer's no longer matches. Once per frame, before any entity draws.
+    pub(super) fn begin_skinning(&self) {
+        let stored = self
             .renderer
             .as_ref()
             .filter(|r| r.skins_entities())
             .and_then(|r| r.skinned_models());
-        match skinning {
+        match stored {
             Some(stored) => self
                 .skin_models
                 .borrow_mut()
                 .begin(&mut self.skin_frame.borrow_mut(), stored),
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
+    }
+
+    /// Whether this frame's models can be posed on the GPU (`begin_skinning`).
+    pub(super) fn skinning(&self) -> bool {
+        self.renderer
+            .as_ref()
+            .is_some_and(|r| r.skins_entities() && r.skinned_models().is_some())
+    }
+
+    /// Culls one entity's vertices from `entity_start`, counting what it drew
+    /// on the GPU path by the corners of `skinned`'s bounds; a culled entity's
+    /// posed draws since `skinned`'s mark are taken back.
+    pub(super) fn cull_skinned(
+        &self,
+        out: &mut Vec<Vertex>,
+        entity_start: usize,
+        skinned: Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>,
+    ) {
+        let corners = skinned.and_then(|(_, bounds)| bounds);
+        if let Some((lo, hi)) = corners {
+            out.extend([lo, hi].map(|pos| Vertex {
+                pos: pos.to_array(),
+                ..bytemuck::Zeroable::zeroed()
+            }));
+        }
+        let len = out.len();
+        self.cull_entity_vertices(out, entity_start);
+        if out.len() < len {
+            if let Some((mark, _)) = skinned {
+                self.skin_frame.borrow_mut().truncate(mark);
+            }
+        } else if corners.is_some() {
+            out.truncate(len - 2);
+        }
+    }
+
+    pub(super) fn mob_geometry(&self, camera: glam::DVec3, alpha: f64, out: &mut Vec<Vertex>) {
+        let atlas = &self.gui.atlas;
+        let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
+        let scale = self.view_scale();
+        self.rendered_mobs.set(0);
+        let skinning = self.skinning();
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -6316,7 +6386,7 @@ impl Game<'_> {
             let body = out.len();
             // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
             // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
-            let posable = skinning.is_some()
+            let posable = skinning
                 && !is_player
                 && !layers_only
                 && outline.is_none()
@@ -6411,22 +6481,7 @@ impl Game<'_> {
                 && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
             {
                 // What the GPU draws of the mob counts by its bounds' corners.
-                let corners = skinned.and_then(|(_, bounds)| bounds);
-                if let Some((lo, hi)) = corners {
-                    out.extend([lo, hi].map(|pos| Vertex {
-                        pos: pos.to_array(),
-                        ..bytemuck::Zeroable::zeroed()
-                    }));
-                }
-                let len = out.len();
-                self.cull_entity_vertices(out, entity_start);
-                if out.len() < len {
-                    if let Some((mark, _)) = skinned {
-                        self.skin_frame.borrow_mut().truncate(mark);
-                    }
-                } else if corners.is_some() {
-                    out.truncate(len - 2);
-                }
+                self.cull_skinned(out, entity_start, skinned);
             }
             // GuardianRenderer: the laser to the locked target.
             if let Some((time, scale)) = horizon_client::mobs::guardian::beam(mob, alpha as f32)

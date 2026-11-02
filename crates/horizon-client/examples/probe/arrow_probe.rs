@@ -195,7 +195,7 @@ pub fn main() -> Result<()> {
                                     ));
                                 }
                             }
-                            ArrowEvent::Block { pos, reaction } => match reaction {
+                            ArrowEvent::Block { pos, reaction, .. } => match reaction {
                                 BlockReaction::PrimeTnt => {
                                     // TntBlock.prime: PrimedTnt draws its push from the
                                     // level random, then removeBlock(pos, false).

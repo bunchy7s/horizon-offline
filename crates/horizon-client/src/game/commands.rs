@@ -101,9 +101,14 @@ fn java_float(v: f64) -> String {
         format!("{v}")
     }
 }
+/// String.format(Locale.ROOT, "%.<decimals>f"): Java rounds the shortest
+/// decimal text half-up, which `{:.N}` (exact value, half-even) does not.
+pub(super) fn percent_f(v: f64, decimals: usize) -> String {
+    horizon_client::java_text::format_fixed(v, decimals)
+}
 /// String.format(Locale.ROOT, "%f").
 fn format_double(v: f64) -> String {
-    format!("{v:.6}")
+    percent_f(v, 6)
 }
 /// `EntitySelectorParser.createRotationPredicate`: the wrapped angle lies in
 /// the wrapped range, which runs through 180 when its minimum is above its
@@ -3878,5 +3883,23 @@ mod look_at_tests {
         assert_eq!(non_player_entity_id(Target::Player), None);
         assert_eq!(non_player_entity_id(Target::Guest(3)), None);
         assert_eq!(non_player_entity_id(Target::Mob(u32::MAX - 4096)), None);
+    }
+}
+
+#[cfg(test)]
+mod percent_f_tests {
+    use super::percent_f;
+
+    #[test]
+    fn rounds_the_shortest_decimal_half_up_like_java() {
+        // WorldBorderCommand: "%.1f" distance, "%.2f" buffer, "%.0f" size.
+        assert_eq!(percent_f(10.35, 1), "10.4");
+        assert_eq!(percent_f(5.125, 2), "5.13");
+        assert_eq!(percent_f(10.5, 0), "11");
+        assert_eq!(percent_f(2.5, 0), "3");
+        // TeleportCommand.formatDouble: "%f".
+        assert_eq!(percent_f(0.1234565, 6), "0.123457");
+        assert_eq!(percent_f(-1.005, 2), "-1.01");
+        assert_eq!(percent_f(3.0, 2), "3.00");
     }
 }
