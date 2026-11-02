@@ -1470,6 +1470,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   frame, a painting or a leash knot (tying a lead to a fence that has none; `pos` is the fence), once it fits and
   before it is placed or the item used. Set `cancel` and nothing happens; the item stays in the hand. The player's
   state is swapped in, so `native_tell` answers them. `/summon` and a lead tied to a mob are not heard.
+- **`native_hanging_break(player, kind, pos, cancel)`**: an item frame, a glow item frame or a painting (`kind`)
+  hanging in `pos` is about to break: a server player's hit (`player`, whose state is swapped in), a blast, or the
+  wall it hangs on gone (`player` None for both), before anything drops or sounds. Set `cancel` and it stays as it
+  was. A hit that only takes a frame's item out, the game's own player and `/kill` are not asked.
 - **`native_bucket_empty(player, name, pos, fluid, cancel)`**: a server player empties a bucket (`fluid` is
   `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
   right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
