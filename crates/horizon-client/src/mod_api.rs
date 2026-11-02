@@ -27,6 +27,7 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;

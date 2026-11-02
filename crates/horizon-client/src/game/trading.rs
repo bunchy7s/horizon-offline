@@ -414,15 +414,16 @@ impl Game<'_> {
         }
     }
     /// What a menu click's session did, applied to the world and its mob;
-    /// with the result of each trade made, for `merchant_traded`.
+    /// with the offer of each trade made (as it is after the trade), for
+    /// `merchant_traded`.
     pub(super) fn merchant_apply(
         &mut self,
         session: Box<merchant::Session>,
         mob: Option<u32>,
-    ) -> (Box<merchant::Session>, Vec<ItemStack>) {
+    ) -> (Box<merchant::Session>, Vec<MerchantOffer>) {
         let mut session = session;
-        let mut traded = Vec::new();
         let events = std::mem::take(&mut session.events);
+        let traded = traded_offers(&events, &session.offers);
         let (villager, origin) = (session.villager, session.origin);
         if let Some(m) = mob.and_then(|id| self.mobs.iter_mut().find(|m| m.id == id)) {
             m.random = session.random.clone();
@@ -450,9 +451,7 @@ impl Game<'_> {
                     };
                     self.audio.play(sound, Some(origin), 1.0, pitch);
                 }
-                merchant::Event::Traded(index) => {
-                    traded.extend(session.offers.get(index).map(|o| o.result.clone()));
-                }
+                merchant::Event::Traded(_) => {}
                 merchant::Event::TradeSound => {
                     let sound = if villager {
                         "minecraft:entity.villager.yes"
@@ -465,16 +464,22 @@ impl Game<'_> {
         }
         (session, traded)
     }
-    /// `MerchantResultSlot.checkTakeAchievements` and `AbstractVillager.notifyTrade`
-    /// for each trade made: the statistic and the `villager_trade` trigger.
-    pub(super) fn merchant_traded(&mut self, mob: Option<u32>, results: &[ItemStack]) {
-        for result in results {
+    /// `MerchantResultSlot.onTake` for each trade made (`offers`, as they
+    /// are after it): `AbstractVillager.notifyTrade`'s `villager_trade`
+    /// trigger, the statistic, then the mods' `native_trade_with_villager`
+    /// for a server's player.
+    pub(super) fn merchant_traded(&mut self, mob: Option<u32>, offers: &[MerchantOffer]) {
+        for offer in offers {
             self.stats.custom("traded_with_villager", 1);
-            let villager = mob
-                .and_then(|id| self.mobs.iter().find(|m| m.id == id))
-                .map(|m| self.mob_entity(m));
+            let merchant = mob.and_then(|id| self.mobs.iter().find(|m| m.id == id));
+            let kind = merchant.map(super::native_hooks::mob_kind);
+            let villager = merchant.map(|m| self.mob_entity(m));
             if let Some(villager) = villager {
-                self.trigger_trade(&villager, result);
+                self.trigger_trade(&villager, &offer.result);
+            }
+            // TradeWithVillagerEvent: on the server, in the player's turn.
+            if let (Some(id), Some(kind), Some(_)) = (mob, kind, self.lan_acting) {
+                self.native_trade_with_villager(id, &kind, offer);
             }
         }
     }
@@ -930,6 +935,33 @@ fn drag_scroll(y: f32, offers: usize) -> usize {
     ((offs * max as f32 + 0.5) as i32).clamp(0, max) as usize
 }
 
+/// Each trade a click made, as its offer was right after it: `offers` are
+/// as they are after all of the click's trades (a shift-click trades
+/// several times), so each copy counts only the uses up to its own trade.
+fn traded_offers(events: &[merchant::Event], offers: &[MerchantOffer]) -> Vec<MerchantOffer> {
+    let mut later = vec![0; offers.len()];
+    for e in events {
+        if let merchant::Event::Traded(index) = e {
+            if let Some(n) = later.get_mut(*index) {
+                *n += 1;
+            }
+        }
+    }
+    let mut traded = Vec::new();
+    for e in events {
+        if let merchant::Event::Traded(index) = *e {
+            if let (Some(offer), Some(n)) = (offers.get(index), later.get_mut(index)) {
+                *n -= 1;
+                traded.push(MerchantOffer {
+                    uses: offer.uses - *n,
+                    ..offer.clone()
+                });
+            }
+        }
+    }
+    traded
+}
+
 /// `MerchantScreen.mouseScrolled`: `Mth.clamp((int)(scrollOff - scrollY), 0, max)`,
 /// so a fractional wheel step that truncates to zero does not move the list.
 fn scrolled(scroll: usize, max: usize, d: f32) -> usize {
@@ -974,5 +1006,53 @@ mod tests {
         assert_eq!(drag_scroll(31.5 + 112.0 / 2.0, 10), 2);
         assert_eq!(drag_scroll(31.5 + 112.0, 10), 3);
         assert_eq!(drag_scroll(500.0, 10), 3);
+    }
+
+    fn offer(result: &str, uses: i32) -> MerchantOffer {
+        MerchantOffer {
+            base_cost_a: merchant::ItemCost {
+                stack: ItemStack::new("minecraft:emerald", 1),
+            },
+            cost_b: None,
+            result: ItemStack::new(result, 1),
+            uses,
+            max_uses: 12,
+            reward_exp: true,
+            special_price_diff: 0,
+            demand: 0,
+            price_multiplier: 0.05,
+            xp: 1,
+        }
+    }
+
+    /// A shift-click that trades offer 1 three times and offer 0 once: each
+    /// trade is heard with its offer's uses as they were right after it
+    /// (MerchantResultSlot.onTake runs per trade), not the click's final count.
+    #[test]
+    fn each_trade_of_a_click_sees_its_own_use_count() {
+        use merchant::Event::{Orb, TradeSound, Traded};
+        // After the click: offer 0 was at 4 uses, offer 1 at 2.
+        let offers = [offer("minecraft:bread", 5), offer("minecraft:arrow", 5)];
+        let events = [
+            Traded(1),
+            Orb(3),
+            Traded(1),
+            TradeSound,
+            Traded(0),
+            Traded(1),
+        ];
+        let traded = traded_offers(&events, &offers);
+        let seen: Vec<_> = traded.iter().map(|o| (&*o.result.item, o.uses)).collect();
+        assert_eq!(
+            seen,
+            [
+                ("minecraft:arrow", 3),
+                ("minecraft:arrow", 4),
+                ("minecraft:bread", 5),
+                ("minecraft:arrow", 5),
+            ]
+        );
+        // A trade of an offer that is gone is not heard.
+        assert!(traded_offers(&[Traded(7)], &offers).is_empty());
     }
 }
