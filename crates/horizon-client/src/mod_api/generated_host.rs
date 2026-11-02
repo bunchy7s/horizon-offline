@@ -93,7 +93,8 @@ pub trait Host {
         let _ = seed;
         unimplemented!("Host::draw_item")
     }
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments> {
         let _ = holder;
         unimplemented!("Host::attachments")
@@ -1179,6 +1180,19 @@ pub trait Host {
         let _ = at;
         let _ = size;
         unimplemented!("Host::item_stack")
+    }
+    /// A mod's own RGBA image, uploaded into the HUD atlas slot
+    /// [`MOD_IMAGE_SPRITE`](crate::hud::MOD_IMAGE_SPRITE) and drawn with
+    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
+    /// is `width * height` pixels of four bytes, each side at most
+    /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
+    /// size. The upload costs a texture patch of the image, so send one when the
+    /// image changed, not every frame. API @API:mod_image@.
+    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let _ = width;
+        let _ = height;
+        let _ = rgba;
+        unimplemented!("Host::mod_image")
     }
     /// The instance (game) folder, which its players share: `saves/`,
     /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the

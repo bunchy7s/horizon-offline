@@ -2521,6 +2521,13 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A server player stopped digging `pos` before the block broke, after
+    /// the server cleared the dig and sent the block back to the client.
+    /// The player's state is not swapped in. @API:block_damage_abort@.
+    fn block_damage_abort(&self, host: &mut dyn Host, event: &mut BlockDamageAbortEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A dispenser equipped `item` on the first eligible `target` in front
     /// of its block at `pos`. `target` is `player`, `mob` or `armor_stand`.
     /// The equip, item consumption, sound and game event have completed.
@@ -2779,6 +2786,12 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A mob is about to drop `count` of `item` at `pos` (Bukkit's
+    /// `EntityDropItemEvent`). @API:entity_drop_item@.
+    fn entity_drop_item(&self, host: &mut dyn Host, event: &mut EntityDropItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A bee entered the hive at `pos` and was stored there.
     /// @API:entity_enter_block@.
     fn entity_enter_block(&self, host: &mut dyn Host, event: &mut EntityEnterBlockEvent<'_>) {
@@ -2841,6 +2854,12 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A leashed mob's leash was removed, before any lead drop is handled
+    /// (Bukkit's `EntityUnleashEvent`). @API:entity_unleash@.
+    fn entity_unleash(&self, host: &mut dyn Host, event: &mut EntityUnleashEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// An experience bottle broke and its experience was awarded.
     /// @API:exp_bottle@.
     fn exp_bottle(&self, host: &mut dyn Host, event: &mut ExpBottleEvent) {
@@ -2884,6 +2903,13 @@ pub trait Hooks: Send + Sync {
     /// Server-side, including `native_give_experience`.
     /// @API:experience_orb_pickup@.
     fn mending_repair(&self, host: &mut dyn Host, event: &mut MendingRepairEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
+    /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
+    /// usual. Server-side, including the single-player server. @API:explosion_prime@.
+    fn explosion_prime(&self, host: &mut dyn Host, event: &mut ExplosionPrimeEvent) {
         let _ = host;
         let _ = event;
     }
@@ -2978,6 +3004,13 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event_;
     }
+    /// A hopper selected a container while searching for items to push or
+    /// pull. Exactly one of `container` and `entity` identifies the target.
+    /// @API:hopper_inventory_search@.
+    fn hopper_inventory_search(&self, host: &dyn Host, event: &mut HopperInventorySearchEvent) {
+        let _ = host;
+        let _ = event;
+    }
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
@@ -3018,6 +3051,16 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A hopper is about to move one item between containers, a composter's
+    /// bone meal included. Set `cancel` to leave it in its source slot. A chest
+    /// boat or minecart is reported at the block it is in. @API:inventory_move_item@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn inventory_move_item(&self, host: &dyn Host, event: &mut InventoryMoveItemEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
     /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
     /// the recipe the grid matched (`minecraft:oak_planks`) and `stack` the
@@ -3027,6 +3070,12 @@ pub trait Hooks: Send + Sync {
     /// included, and not for a stonecutter's, a smithing table's or a
     /// furnace's result. Server-side. API @API:item_crafted@.
     fn item_crafted(&self, host: &mut dyn Host, event: &mut ItemCraftedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A dropped item entity reached its 6000-tick lifetime and is about to be
+    /// removed (Bukkit's `ItemDespawnEvent`). @API:item_despawn@.
+    fn item_despawn(&self, host: &mut dyn Host, event: &mut ItemDespawnEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3297,6 +3346,38 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
+    /// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
+    /// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
+    /// changes to the event field do not affect the vanilla entity event. Asked on
+    /// servers, for the entities `native_living_breathe` is. API @API:native_living_drown@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_drown(&self, event: &mut LivingDrownEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
+    /// change the distance and damage multiplier, or cancel fall handling.
+    /// @API:native_living_fall@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_fall(&self, event: &mut LivingFallEvent<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity is about to heal. Mods may change the amount or cancel.
+    /// `entity` identifies the affected entity. @API:native_living_heal@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_heal(&self, event: &mut LivingHealEvent) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
+    /// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
+    fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
+        let _ = event;
     }
     /// `player` (`name`) changed dimension (NeoForge's
     /// `PlayerChangedDimensionEvent`): `from` and `to` are dimension ids
@@ -3617,6 +3698,30 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A boat or minecart was created at `pos`, after it joined the level.
+    /// `kind` is the vehicle type. Server-side. @API:native_vehicle_create@.
+    fn vehicle_create(&self, host: &mut dyn Host, event: &mut VehicleCreateEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A vehicle is about to take damage from a player's attack. `kind` is
+    /// `boat` or the minecart type; mods may change `damage` or set `cancel`
+    /// to leave its damage and wobble unchanged. The attack itself still
+    /// completes. Server-side. @API:native_vehicle_damage@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn vehicle_damage(&self, host: &mut dyn Host, event: &mut VehicleDamageEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
+    /// that prime instead of breaking are not heard. Server-side.
+    /// @API:native_vehicle_destroy@.
+    fn vehicle_destroy(&self, host: &mut dyn Host, event: &mut VehicleDestroyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
@@ -3671,6 +3776,16 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A server player earned one criterion of an advancement, after the
+    /// progress was recorded. @API:player_advancement_criterion_grant@.
+    fn player_advancement_criterion_grant(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerAdvancementCriterionGrantEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player completed an advancement, after progress was recorded.
     /// Helpers looking up the guest through `self.lan` may find nothing during
     /// its packet. @API:player_advancement_done@.
@@ -3694,6 +3809,11 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerAdvancementProgressEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side. @API:player_arm_swing@.
+    fn player_arm_swing(&self, host: &mut dyn Host, event: &mut PlayerArmSwingEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3733,6 +3853,16 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A server player selected a bundle item in `slot` at `index`. The guest's
+    /// state is not swapped in during packet handling. @API:player_bundle_item_select@.
+    fn player_bundle_item_select(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerBundleItemSelectEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player changed a beacon's selected effects, after they were
     /// stored. Empty effect ids mean no effect. Helpers looking up the guest
     /// through `self.lan` may find nothing during its packet. Server-side.
@@ -3753,6 +3883,18 @@ pub trait Hooks: Send + Sync {
         &self,
         host: &mut dyn Host,
         event: &mut PlayerChangeMainHandEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player finished loading the world around them after joining,
+    /// respawning or changing dimension. The guest's state is not swapped in,
+    /// so helpers that look them up through `self.lan` may find nothing while
+    /// a guest packet is handled. Server-side. @API:player_client_loaded_world@.
+    fn player_client_loaded_world(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerClientLoadedWorldEvent<'_>,
     ) {
         let _ = host;
         let _ = event;
@@ -3811,6 +3953,11 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side. @API:player_input@.
+    fn player_input(&self, host: &mut dyn Host, event: &mut PlayerInputEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while a
@@ -3837,6 +3984,32 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A guest's accepted movement made the server jump them from the ground. Server-side. @API:player_jump@.
+    fn player_jump(&self, host: &mut dyn Host, event: &mut PlayerJumpEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. The guest's state is
+    /// swapped in unless they were already removed in the same poll. @API:player_kicked@.
+    fn player_kicked(&self, host: &mut dyn Host, event: &mut PlayerKickedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player launched a projectile item, after it was created.
+    /// `item` is the projectile's held item. @API:player_launch_projectile@.
+    fn player_launch_projectile(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerLaunchProjectileEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's experience level changed, after the new level was applied. @API:player_level_change@.
+    fn player_level_change(&self, host: &mut dyn Host, event: &mut PlayerLevelChangeEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A server player changed their client language option to `locale`.
     /// The player's state may not be found through `self.lan` during a guest
@@ -3913,6 +4086,12 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A server player released a drawn bow with `arrow` selected. The guest's
+    /// state is not swapped in during packet handling. @API:player_ready_arrow@.
+    fn player_ready_arrow(&self, host: &mut dyn Host, event: &mut PlayerReadyArrowEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player's recipe book requested a known recipe be placed in
     /// their crafting grid. `recipe` is the recipe id; `all` is the shift
     /// click form. The player's state may not be available through `self.lan`
@@ -3921,6 +4100,17 @@ pub trait Hooks: Send + Sync {
         &self,
         host: &mut dyn Host,
         event: &mut PlayerRecipeBookClickEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player's recipe book open or filter setting changed. `book`
+    /// is the book type's protocol id. The guest's state is not swapped in.
+    /// @API:player_recipe_book_settings_change@.
+    fn player_recipe_book_settings_change(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerRecipeBookSettingsChangeEvent<'_>,
     ) {
         let _ = host;
         let _ = event;
@@ -4024,6 +4214,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A server player released the use-item key before the item finished
+    /// being used. The guest's state is not swapped in, so helpers that look
+    /// them up through `self.lan` may find nothing during packet handling.
+    /// @API:player_stop_using_item@.
+    fn player_stop_using_item(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerStopUsingItemEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player swapped their main and off hands, after both inventory
     /// slots changed. Guest lookup helpers may find nothing during packet
     /// handling. Server-side. @API:player_swap_with_equipment_slot@.
@@ -4057,6 +4259,12 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut PlayerToggleEntityAgeLockEvent<'_>,
     ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
+    /// The guest's state is swapped in. Server-side. @API:player_toggle_sneak@.
+    fn player_toggle_sneak(&self, host: &mut dyn Host, event: &mut PlayerToggleSneakEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -4119,6 +4327,13 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// A hopper at `pos` began an item transfer attempt. This runs after its
+    /// cooldown and enabled checks, before pushing or pulling any items.
+    /// Server-side, including the single-player server. @API:prepare_hopper_transfer@.
+    fn prepare_hopper_transfer(&self, host: &dyn Host, event: &mut PrepareHopperTransferEvent) {
+        let _ = host;
+        let _ = event;
     }
     /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:prepare_item_craft@.
     ///
@@ -4256,6 +4471,11 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A vault at `pos` is about to eject a loot item. @API:vault_loot@.
+    fn vault_loot(&self, host: &dyn Host, event: &mut VaultLootEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// The server changed its weather parameters. `raining` and `thundering`
     /// are the requested final states. Set `cancel` to keep the previous
     /// weather parameters. Server-side. @API:weather_change@.
@@ -4268,6 +4488,17 @@ pub trait Hooks: Send + Sync {
     }
     /// The dedicated server's whitelist changed to `enabled`. @API:whitelist_state_update@.
     fn whitelist_state_update(&self, host: &mut dyn Host, event: &mut WhitelistStateUpdateEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A timed world-border size change finished on the server, after its
+    /// final size was applied. Server-side, including the single-player
+    /// server. @API:world_border_bounds_change_finish@.
+    fn world_border_bounds_change_finish(
+        &self,
+        host: &mut dyn Host,
+        event: &mut WorldBorderBoundsChangeFinishEvent,
+    ) {
         let _ = host;
         let _ = event;
     }
@@ -4285,7 +4516,7 @@ pub struct FrameEvent {
 }
 pub fn dispatch_frame(host: &mut dyn Host, mods: &[Box<dyn Hooks>], elapsed: Duration) {
     let mut event = FrameEvent { elapsed };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "frame") {
         mod_hook.frame(host, &mut event);
     }
 }
@@ -4294,7 +4525,7 @@ pub fn dispatch_frame(host: &mut dyn Host, mods: &[Box<dyn Hooks>], elapsed: Dur
 pub struct TickEvent {}
 pub fn dispatch_tick(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
     let mut event = TickEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tick") {
         mod_hook.tick(host, &mut event);
     }
 }
@@ -4311,7 +4542,7 @@ pub fn dispatch_visuals(
     lights: &mut Vec<NativeColoredLight>,
 ) {
     let mut event = VisualsEvent { rims, lights };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "visuals") {
         mod_hook.visuals(host, &mut event);
     }
 }
@@ -4326,7 +4557,7 @@ pub fn dispatch_emissive(
     layers: &mut Vec<(&'static str, &'static str)>,
 ) {
     let mut event = EmissiveEvent { layers };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "emissive") {
         mod_hook.emissive(host, &mut event);
     }
 }
@@ -4349,7 +4580,7 @@ pub fn dispatch_world_lifecycle(
         phase,
         error_text,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "world_lifecycle") {
         mod_hook.world_lifecycle(host, &mut event);
     }
 }
@@ -4364,7 +4595,7 @@ pub fn dispatch_server_about_to_start(
     dedicated: bool,
 ) {
     let mut event = ServerAboutToStartEvent { dedicated };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "server_about_to_start") {
         mod_hook.server_about_to_start(host, &mut event);
     }
 }
@@ -4375,7 +4606,7 @@ pub struct ServerStoppingEvent {
 }
 pub fn dispatch_server_stopping(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dedicated: bool) {
     let mut event = ServerStoppingEvent { dedicated };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "server_stopping") {
         mod_hook.server_stopping(host, &mut event);
     }
 }
@@ -4392,7 +4623,7 @@ pub fn dispatch_server_tick(
     phase: ServerTickPhase,
 ) {
     let mut event = ServerTickEvent { context, phase };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "server_tick") {
         mod_hook.server_tick(host, &mut event);
     }
 }
@@ -4403,7 +4634,7 @@ pub struct LevelTickPreEvent<'a> {
 }
 pub fn dispatch_level_tick_pre(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = LevelTickPreEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "level_tick_pre") {
         mod_hook.level_tick_pre(host, &mut event);
     }
 }
@@ -4414,7 +4645,7 @@ pub struct LevelTickPostEvent<'a> {
 }
 pub fn dispatch_level_tick_post(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = LevelTickPostEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "level_tick_post") {
         mod_hook.level_tick_post(host, &mut event);
     }
 }
@@ -4440,7 +4671,7 @@ pub fn dispatch_block_changed(
         old,
         new,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_changed") {
         mod_hook.block_changed(level, &mut event);
     }
 }
@@ -4469,7 +4700,7 @@ pub fn dispatch_neighbor_changed(
         changed,
         moved,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "neighbor_changed") {
         mod_hook.neighbor_changed(level, &mut event);
     }
 }
@@ -4496,7 +4727,7 @@ pub fn dispatch_random_tick(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "random_tick") {
         if matches!(mod_hook.random_tick(level, &mut event), Flow::Cancel) {
             *handled = true;
             break;
@@ -4526,7 +4757,7 @@ pub fn dispatch_tick_block(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tick_block") {
         if matches!(mod_hook.tick_block(level, &mut event), Flow::Cancel) {
             *handled = true;
             break;
@@ -4565,7 +4796,7 @@ pub fn dispatch_update_shape(
         neighbour_pos,
         neighbour,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "update_shape") {
         if let Some(replacement) = mod_hook.update_shape(level, &mut event) {
             *new = Some(replacement);
             break;
@@ -4585,7 +4816,7 @@ pub fn dispatch_hud(
     corners: &mut Corners,
 ) {
     let mut event = HudEvent { batch, corners };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hud") {
         mod_hook.hud(host, &mut event);
     }
 }
@@ -4597,7 +4828,7 @@ pub struct KeyEvent<'a> {
 }
 pub fn dispatch_key(host: &mut dyn Host, mods: &[Box<dyn Hooks>], key: &str, pressed: bool) {
     let mut event = KeyEvent { key, pressed };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "key") {
         mod_hook.key(host, &mut event);
     }
 }
@@ -4616,7 +4847,7 @@ pub fn dispatch_wheel(
         return;
     }
     let mut event = WheelEvent { steps };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "wheel") {
         if matches!(mod_hook.wheel(host, &mut event), Flow::Cancel) {
             *claimed = true;
             break;
@@ -4638,7 +4869,7 @@ pub fn dispatch_command(
         return;
     }
     let mut event = CommandEvent { command };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "command") {
         if matches!(mod_hook.command(host, &mut event), Flow::Cancel) {
             *ran = true;
             break;
@@ -4656,7 +4887,7 @@ pub fn dispatch_commands(
     commands: &mut Vec<&'static str>,
 ) {
     let mut event = CommandsEvent { commands };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "commands") {
         mod_hook.commands(host, &mut event);
     }
 }
@@ -4668,7 +4899,7 @@ pub fn dispatch_zoom(host: &dyn Host, mods: &[Box<dyn Hooks>], zoom: &mut Option
         return;
     }
     let mut event = ZoomEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "zoom") {
         if let Some(replacement) = mod_hook.zoom(host, &mut event) {
             *zoom = Some(replacement);
             break;
@@ -4687,7 +4918,7 @@ pub fn dispatch_minimap(
         return;
     }
     let mut event = MinimapEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "minimap") {
         if let Some(replacement) = mod_hook.minimap(host, &mut event) {
             *minimap = Some(replacement);
             break;
@@ -4701,7 +4932,7 @@ pub struct ModsEvent<'a> {
 }
 pub fn dispatch_mods(host: &mut dyn Host, mods_: &[Box<dyn Hooks>], mods: &mut Vec<NativeMod>) {
     let mut event = ModsEvent { mods };
-    for mod_hook in mods_ {
+    for mod_hook in super::entered(mods_, "mods") {
         mod_hook.mods(host, &mut event);
     }
 }
@@ -4718,7 +4949,7 @@ pub fn dispatch_settings(
     buttons: &mut Vec<String>,
 ) {
     let mut event = SettingsEvent { mod_id, buttons };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "settings") {
         mod_hook.settings(host, &mut event);
     }
 }
@@ -4735,7 +4966,7 @@ pub fn dispatch_settings_click(
     button: usize,
 ) {
     let mut event = SettingsClickEvent { mod_id, button };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "settings_click") {
         mod_hook.settings_click(host, &mut event);
     }
 }
@@ -4752,7 +4983,7 @@ pub fn dispatch_panel_event(
     event: &NativePanelEvent,
 ) {
     let mut event_ = PanelEventEvent { mod_id, event };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "panel_event") {
         mod_hook.panel_event(host, &mut event_);
     }
 }
@@ -4771,7 +5002,7 @@ pub fn dispatch_block_entity(
         return;
     }
     let mut event = BlockEntityEvent { block };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity") {
         if let Some(replacement) = mod_hook.block_entity(host, &mut event) {
             *entity = Some(replacement);
             break;
@@ -4794,7 +5025,7 @@ pub fn dispatch_block_entity_ticks(
         block,
         ticks: *ticks,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_ticks") {
         mod_hook.block_entity_ticks(host, &mut event);
     }
     *ticks = event.ticks;
@@ -4812,7 +5043,7 @@ pub fn dispatch_block_entity_tick(
     entity: &mut ModBlockEntity,
 ) {
     let mut event = BlockEntityTickEvent { pos, entity };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_tick") {
         mod_hook.block_entity_tick(host, &mut event);
     }
 }
@@ -4832,7 +5063,7 @@ pub fn dispatch_block_entity_update_tag(
         return;
     }
     let mut event = BlockEntityUpdateTagEvent { pos, entity };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_update_tag") {
         if let Some(replacement) = mod_hook.block_entity_update_tag(&mut event) {
             *tag = Some(replacement);
             break;
@@ -4854,7 +5085,7 @@ pub fn dispatch_block_entity_container(
         return;
     }
     let mut event = BlockEntityContainerEvent { block };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_container") {
         if let Some(replacement) = mod_hook.block_entity_container(host, &mut event) {
             *container = Some(replacement);
             break;
@@ -4876,7 +5107,7 @@ pub fn dispatch_screen(
         return;
     }
     let mut event = ScreenEvent { block };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen") {
         if let Some(replacement) = mod_hook.screen(host, &mut event) {
             *screen = Some(replacement);
             break;
@@ -4905,7 +5136,7 @@ pub fn dispatch_screen_draw(
         batch,
         origin,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_draw") {
         mod_hook.screen_draw(host, &mut event);
     }
 }
@@ -4935,7 +5166,7 @@ pub fn dispatch_screen_click(
         at,
         right,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_click") {
         if let Some(replacement) = mod_hook.screen_click(host, &mut event) {
             *button = Some(replacement);
             break;
@@ -4964,7 +5195,7 @@ pub fn dispatch_screen_tooltip(
         at,
         lines,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_tooltip") {
         mod_hook.screen_tooltip(host, &mut event);
     }
 }
@@ -4983,7 +5214,7 @@ pub fn dispatch_menu_button(
     id: i32,
 ) {
     let mut event = MenuButtonEvent { pos, entity, id };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_button") {
         mod_hook.menu_button(host, &mut event);
     }
 }
@@ -4998,7 +5229,7 @@ pub fn dispatch_register_commands(
     commands: &mut Vec<NativeCommand>,
 ) {
     let mut event = RegisterCommandsEvent { commands };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "register_commands") {
         mod_hook.register_commands(host, &mut event);
     }
 }
@@ -5019,7 +5250,7 @@ pub fn dispatch_perform_command(
         return;
     }
     let mut event = PerformCommandEvent { player, command };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "perform_command") {
         if matches!(mod_hook.perform_command(host, &mut event), Flow::Cancel) {
             *ran = true;
             break;
@@ -5051,7 +5282,7 @@ pub fn dispatch_menu_clicked(
         button,
         mode,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_clicked") {
         mod_hook.menu_clicked(host, &mut event);
     }
 }
@@ -5063,7 +5294,7 @@ pub struct MenuClosedEvent {
 }
 pub fn dispatch_menu_closed(host: &mut dyn Host, mods: &[Box<dyn Hooks>], uuid: u128, window: i32) {
     let mut event = MenuClosedEvent { uuid, window };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_closed") {
         mod_hook.menu_closed(host, &mut event);
     }
 }
@@ -5080,7 +5311,7 @@ pub fn dispatch_tooltip(
     lines: &mut Vec<(Text, u32)>,
 ) {
     let mut event = TooltipEvent { stack, lines };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tooltip") {
         mod_hook.tooltip(host, &mut event);
     }
 }
@@ -5103,7 +5334,7 @@ pub fn dispatch_use_item_on(
         return;
     }
     let mut event = UseItemOnEvent { stack, pos, face };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "use_item_on") {
         if matches!(mod_hook.use_item_on(host, &mut event), Flow::Cancel) {
             *claimed = true;
             break;
@@ -5125,7 +5356,7 @@ pub fn dispatch_use_item(
         return;
     }
     let mut event = UseItemEvent { stack };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "use_item") {
         if matches!(mod_hook.use_item(host, &mut event), Flow::Cancel) {
             *claimed = true;
             break;
@@ -5149,7 +5380,7 @@ pub fn dispatch_destroy_block(
         return;
     }
     let mut event = DestroyBlockEvent { pos, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "destroy_block") {
         if matches!(mod_hook.destroy_block(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5171,7 +5402,7 @@ pub fn dispatch_place_block(
     state: BlockStateId,
 ) {
     let mut event = PlaceBlockEvent { stack, pos, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "place_block") {
         mod_hook.place_block(host, &mut event);
     }
 }
@@ -5192,7 +5423,7 @@ pub fn dispatch_right_click_block(
         return;
     }
     let mut event = RightClickBlockEvent { pos, face };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "right_click_block") {
         if matches!(mod_hook.right_click_block(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5225,7 +5456,7 @@ pub fn dispatch_block_spread(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_spread") {
         if matches!(mod_hook.block_spread(level, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5261,7 +5492,7 @@ pub fn dispatch_piston_move(
         push,
         destroy,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "piston_move") {
         if matches!(mod_hook.piston_move(level, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5287,7 +5518,7 @@ pub fn dispatch_explosion_detonate(
         center,
         blocks,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "explosion_detonate") {
         mod_hook.explosion_detonate(host, &mut event);
     }
 }
@@ -5308,7 +5539,7 @@ pub fn dispatch_fill_bucket(
         return;
     }
     let mut event = FillBucketEvent { stack, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "fill_bucket") {
         if matches!(mod_hook.fill_bucket(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5334,7 +5565,7 @@ pub fn dispatch_attack_entity(
         return;
     }
     let mut event = AttackEntityEvent { entity, kind, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "attack_entity") {
         if matches!(mod_hook.attack_entity(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5360,7 +5591,7 @@ pub fn dispatch_net_from_client(
         channel,
         data,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "net_from_client") {
         mod_hook.net_from_client(host, &mut event);
     }
 }
@@ -5377,7 +5608,7 @@ pub fn dispatch_net_from_server(
     data: &[u8],
 ) {
     let mut event = NetFromServerEvent { channel, data };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "net_from_server") {
         mod_hook.net_from_server(host, &mut event);
     }
 }
@@ -5394,7 +5625,7 @@ pub fn dispatch_player_died(
     cause: Option<&str>,
 ) {
     let mut event = PlayerDiedEvent { player, cause };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_died") {
         mod_hook.player_died(host, &mut event);
     }
 }
@@ -5420,7 +5651,7 @@ pub fn dispatch_mob_spawned(
         pos,
         natural,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mob_spawned") {
         mod_hook.mob_spawned(host, &mut event);
     }
 }
@@ -5443,7 +5674,7 @@ pub fn dispatch_mob_killed(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mob_killed") {
         mod_hook.mob_killed(host, &mut event);
     }
 }
@@ -5466,7 +5697,7 @@ pub fn dispatch_item_dropped(
         item,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_dropped") {
         mod_hook.item_dropped(host, &mut event);
     }
 }
@@ -5493,7 +5724,7 @@ pub fn dispatch_item_picked_up(
         item,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_picked_up") {
         if matches!(mod_hook.item_picked_up(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5519,7 +5750,7 @@ pub fn dispatch_hurt_enemy(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hurt_enemy") {
         mod_hook.hurt_enemy(host, &mut event);
     }
 }
@@ -5536,7 +5767,7 @@ pub fn dispatch_inventory_tick(
     selected: bool,
 ) {
     let mut event = InventoryTickEvent { slot, selected };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "inventory_tick") {
         mod_hook.inventory_tick(host, &mut event);
     }
 }
@@ -5553,7 +5784,7 @@ pub fn dispatch_on_equip(
     new: Option<&ItemStack>,
 ) {
     let mut event = OnEquipEvent { slot, new };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "on_equip") {
         mod_hook.on_equip(host, &mut event);
     }
 }
@@ -5585,7 +5816,7 @@ pub fn dispatch_block_signal(
         direct,
         signal: *signal,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_signal") {
         mod_hook.block_signal(level, &mut event);
     }
     *signal = event.signal;
@@ -5606,7 +5837,7 @@ pub fn dispatch_is_signal_source(
         state,
         source: *source,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "is_signal_source") {
         mod_hook.is_signal_source(level, &mut event);
     }
     *source = event.source;
@@ -5630,7 +5861,7 @@ pub fn dispatch_health_hud(
         return;
     }
     let mut event = HealthHudEvent { inputs, wi, hi };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "health_hud") {
         if let Some(replacement) = mod_hook.health_hud(host, &mut event) {
             *draws = Some(replacement);
             break;
@@ -5660,7 +5891,7 @@ pub fn dispatch_interact_entity(
         kind,
         stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "interact_entity") {
         if matches!(mod_hook.interact_entity(host, &mut event), Flow::Cancel) {
             *claimed = true;
             break;
@@ -5686,7 +5917,7 @@ pub fn dispatch_left_click_block(
         return;
     }
     let mut event = LeftClickBlockEvent { pos, face, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "left_click_block") {
         if matches!(mod_hook.left_click_block(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5698,7 +5929,7 @@ pub fn dispatch_left_click_block(
 pub struct PlayerTickEvent {}
 pub fn dispatch_player_tick(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
     let mut event = PlayerTickEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_tick") {
         mod_hook.player_tick(host, &mut event);
     }
 }
@@ -5731,7 +5962,7 @@ pub fn dispatch_entity_join_level(
         pos,
         loaded_from_disk,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_join_level") {
         if matches!(mod_hook.entity_join_level(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5769,7 +6000,7 @@ pub fn dispatch_living_incoming_damage(
         direct,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_incoming_damage") {
         if matches!(mod_hook.living_incoming_damage(&mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -5799,7 +6030,7 @@ pub fn dispatch_menu_button_v2(
         id,
         carried,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_button_v2") {
         mod_hook.menu_button_v2(host, &mut event);
     }
 }
@@ -5822,7 +6053,7 @@ pub fn dispatch_entity_leave_level(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_leave_level") {
         mod_hook.entity_leave_level(host, &mut event);
     }
 }
@@ -5841,7 +6072,7 @@ pub fn dispatch_block_entity_fluids(
         return;
     }
     let mut event = BlockEntityFluidsEvent { block };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_fluids") {
         if let Some(replacement) = mod_hook.block_entity_fluids(host, &mut event) {
             *fluids = Some(replacement);
             break;
@@ -5870,7 +6101,7 @@ pub fn dispatch_should_apply_effect_tick_this_tick(
         amplifier,
         apply: *apply,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "should_apply_effect_tick_this_tick") {
         mod_hook.should_apply_effect_tick_this_tick(host, &mut event);
     }
     *apply = event.apply;
@@ -5900,7 +6131,7 @@ pub fn dispatch_apply_effect_tick(
         amplifier,
         keep: *keep,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "apply_effect_tick") {
         mod_hook.apply_effect_tick(host, &mut event);
     }
     *keep = event.keep;
@@ -5924,7 +6155,7 @@ pub fn dispatch_on_effect_added(
         entity,
         amplifier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "on_effect_added") {
         mod_hook.on_effect_added(host, &mut event);
     }
 }
@@ -5947,7 +6178,7 @@ pub fn dispatch_mob_effect_added(
         entity,
         amplifier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mob_effect_added") {
         mod_hook.mob_effect_added(host, &mut event);
     }
 }
@@ -5970,7 +6201,7 @@ pub fn dispatch_chunk_load(
         chunk,
         new,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "chunk_load") {
         mod_hook.chunk_load(host, &mut event);
     }
 }
@@ -5987,7 +6218,7 @@ pub fn dispatch_chunk_unload(
     chunk: [i32; 2],
 ) {
     let mut event = ChunkUnloadEvent { dimension, chunk };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "chunk_unload") {
         mod_hook.chunk_unload(host, &mut event);
     }
 }
@@ -6004,7 +6235,7 @@ pub fn dispatch_player_logged_in(
     name: &str,
 ) {
     let mut event = PlayerLoggedInEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_logged_in") {
         mod_hook.player_logged_in(host, &mut event);
     }
 }
@@ -6021,7 +6252,7 @@ pub fn dispatch_player_logged_out(
     name: &str,
 ) {
     let mut event = PlayerLoggedOutEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_logged_out") {
         mod_hook.player_logged_out(host, &mut event);
     }
 }
@@ -6038,7 +6269,7 @@ pub fn dispatch_item_bar(
     bar: &mut Option<(i32, u32)>,
 ) {
     let mut event = ItemBarEvent { stack, bar };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_bar") {
         mod_hook.item_bar(host, &mut event);
     }
 }
@@ -6058,7 +6289,7 @@ pub fn dispatch_has_analog_output(
         state,
         output: *output,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "has_analog_output") {
         mod_hook.has_analog_output(level, &mut event);
     }
     *output = event.output;
@@ -6088,7 +6319,7 @@ pub fn dispatch_analog_output(
         face,
         output: *output,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "analog_output") {
         mod_hook.analog_output(level, &mut event);
     }
     *output = event.output;
@@ -6100,7 +6331,7 @@ pub struct ComponentTypesEvent<'a> {
 }
 pub fn dispatch_component_types(mods: &[Box<dyn Hooks>], types: &mut Vec<String>) {
     let mut event = ComponentTypesEvent { types };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "component_types") {
         mod_hook.component_types(&mut event);
     }
 }
@@ -6130,7 +6361,7 @@ pub fn dispatch_dispense_item(
         facing,
         stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "dispense_item") {
         if let Some(replacement) = mod_hook.dispense_item(host, &mut event) {
             *answer = Some(replacement);
             break;
@@ -6152,7 +6383,7 @@ pub fn dispatch_tooltip_component(
         return;
     }
     let mut event = TooltipComponentEvent { stack };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tooltip_component") {
         if let Some(replacement) = mod_hook.tooltip_component(host, &mut event) {
             *size = Some(replacement);
             break;
@@ -6181,7 +6412,7 @@ pub fn dispatch_tooltip_component_draw(
         origin,
         size,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tooltip_component_draw") {
         mod_hook.tooltip_component_draw(host, &mut event);
     }
 }
@@ -6208,7 +6439,7 @@ pub fn dispatch_can_survive(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "can_survive") {
         if let Some(replacement) = mod_hook.can_survive(level, &mut event) {
             *survives = Some(replacement);
             break;
@@ -6241,7 +6472,7 @@ pub fn dispatch_may_place_on(
         ground,
         ground_pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "may_place_on") {
         if let Some(replacement) = mod_hook.may_place_on(level, &mut event) {
             *may = Some(replacement);
             break;
@@ -6273,7 +6504,7 @@ pub fn dispatch_block_entity_submit(
         entity,
         draw,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_submit") {
         mod_hook.block_entity_submit(host, &mut event);
     }
 }
@@ -6302,7 +6533,7 @@ pub fn dispatch_block_entity_render_bounding_box(
         entity,
         bounds,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_render_bounding_box") {
         mod_hook.block_entity_render_bounding_box(host, &mut event);
     }
 }
@@ -6329,7 +6560,7 @@ pub fn dispatch_is_valid_bonemeal_target(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "is_valid_bonemeal_target") {
         if let Some(replacement) = mod_hook.is_valid_bonemeal_target(level, &mut event) {
             *valid = Some(replacement);
             break;
@@ -6358,7 +6589,7 @@ pub fn dispatch_is_bonemeal_success(
         state,
         success: *success,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "is_bonemeal_success") {
         mod_hook.is_bonemeal_success(level, &mut event);
     }
     *success = event.success;
@@ -6382,7 +6613,7 @@ pub fn dispatch_perform_bonemeal(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "perform_bonemeal") {
         mod_hook.perform_bonemeal(level, &mut event);
     }
 }
@@ -6410,7 +6641,7 @@ pub fn dispatch_block_step_on(
         state,
         position,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_step_on") {
         mod_hook.block_step_on(&mut event);
     }
 }
@@ -6438,7 +6669,7 @@ pub fn dispatch_block_entity_inside(
         state,
         position,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_inside") {
         mod_hook.block_entity_inside(&mut event);
     }
 }
@@ -6472,7 +6703,7 @@ pub fn dispatch_block_fall_on(
         distance,
         damage: *damage,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_fall_on") {
         mod_hook.block_fall_on(&mut event);
     }
     *damage = event.damage;
@@ -6490,7 +6721,7 @@ pub fn dispatch_consume_effect(
     data: &serde_json::Value,
 ) {
     let mut event = ConsumeEffectEvent { kind, data };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "consume_effect") {
         mod_hook.consume_effect(host, &mut event);
     }
 }
@@ -6502,7 +6733,7 @@ pub struct LootTableLoadEvent<'a> {
 }
 pub fn dispatch_loot_table_load(mods: &[Box<dyn Hooks>], id: &str, table: &mut Value) {
     let mut event = LootTableLoadEvent { id, table };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "loot_table_load") {
         mod_hook.loot_table_load(&mut event);
     }
 }
@@ -6519,7 +6750,7 @@ pub fn dispatch_loot_drops(
     drops: &mut Vec<ItemStack>,
 ) {
     let mut event = LootDropsEvent { context, drops };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "loot_drops") {
         mod_hook.loot_drops(host, &mut event);
     }
 }
@@ -6549,7 +6780,7 @@ pub fn dispatch_state_for_placement(
         context,
         fluid,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "state_for_placement") {
         if let Some(replacement) = mod_hook.state_for_placement(level, &mut event) {
             *answer = Some(replacement);
             break;
@@ -6581,7 +6812,7 @@ pub fn dispatch_enchant_effect(
         level,
         victim,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "enchant_effect") {
         mod_hook.enchant_effect(host, &mut event);
     }
 }
@@ -6598,7 +6829,7 @@ pub fn dispatch_screen_render_post(
     screen: &NativeScreenView<'_>,
 ) {
     let mut event = ScreenRenderPostEvent { batch, screen };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_render_post") {
         mod_hook.screen_render_post(host, &mut event);
     }
 }
@@ -6614,7 +6845,7 @@ pub fn dispatch_modify_default_components(
     components: &mut Map<String, Value>,
 ) {
     let mut event = ModifyDefaultComponentsEvent { item, components };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "modify_default_components") {
         mod_hook.modify_default_components(&mut event);
     }
 }
@@ -6641,7 +6872,7 @@ pub fn dispatch_screen_mouse_button_pressed_pre(
         button,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_mouse_button_pressed_pre") {
         if matches!(
             mod_hook.screen_mouse_button_pressed_pre(host, &mut event),
             Flow::Cancel
@@ -6674,7 +6905,7 @@ pub fn dispatch_screen_mouse_button_released_pre(
         button,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_mouse_button_released_pre") {
         if matches!(
             mod_hook.screen_mouse_button_released_pre(host, &mut event),
             Flow::Cancel
@@ -6697,7 +6928,7 @@ pub fn dispatch_camera_shake(
     shake: &mut NativeShake,
 ) {
     let mut event = CameraShakeEvent { partial, shake };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "camera_shake") {
         mod_hook.camera_shake(host, &mut event);
     }
 }
@@ -6714,7 +6945,7 @@ pub fn dispatch_shader_params(
     params: &mut [[f32; 4]; 8],
 ) {
     let mut event = ShaderParamsEvent { partial, params };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "shader_params") {
         mod_hook.shader_params(host, &mut event);
     }
 }
@@ -6741,7 +6972,7 @@ pub fn dispatch_block_highlight(
         state,
         partial,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_highlight") {
         if matches!(mod_hook.block_highlight(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -6777,7 +7008,7 @@ pub fn dispatch_render_hand(
         swing,
         equip,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "render_hand") {
         if matches!(mod_hook.render_hand(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -6789,7 +7020,7 @@ pub fn dispatch_render_hand(
 pub struct ClientResourcesReloadedEvent {}
 pub fn dispatch_client_resources_reloaded(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
     let mut event = ClientResourcesReloadedEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "client_resources_reloaded") {
         mod_hook.client_resources_reloaded(host, &mut event);
     }
 }
@@ -6810,7 +7041,7 @@ pub fn dispatch_item_decorations(
     batch: &mut HudBatch,
 ) {
     let mut event = ItemDecorationsEvent { stack, x, y, batch };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_decorations") {
         mod_hook.item_decorations(host, &mut event);
     }
 }
@@ -6830,7 +7061,7 @@ pub fn dispatch_use_duration(
         stack,
         duration: *duration,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "use_duration") {
         mod_hook.use_duration(host, &mut event);
     }
     *duration = event.duration;
@@ -6848,7 +7079,7 @@ pub fn dispatch_use_animation(
     animation: &mut UseAnimation,
 ) {
     let mut event = UseAnimationEvent { stack, animation };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "use_animation") {
         mod_hook.use_animation(host, &mut event);
     }
 }
@@ -6868,7 +7099,7 @@ pub fn dispatch_can_eat(
         stack,
         can_eat: *can_eat,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "can_eat") {
         mod_hook.can_eat(host, &mut event);
     }
     *can_eat = event.can_eat;
@@ -6899,7 +7130,7 @@ pub fn dispatch_living_entity_use_item_start(
         hand,
         duration: *duration,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_entity_use_item_start") {
         if matches!(
             mod_hook.living_entity_use_item_start(host, &mut event),
             Flow::Cancel
@@ -6935,7 +7166,7 @@ pub fn dispatch_living_entity_use_item_finish(
         duration,
         result,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_entity_use_item_finish") {
         mod_hook.living_entity_use_item_finish(host, &mut event);
     }
 }
@@ -6962,7 +7193,7 @@ pub fn dispatch_screen_mouse_scrolled_pre(
         scroll,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_mouse_scrolled_pre") {
         if matches!(
             mod_hook.screen_mouse_scrolled_pre(host, &mut event),
             Flow::Cancel
@@ -6998,7 +7229,7 @@ pub fn dispatch_player_command(
         command,
         replies,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_command") {
         if matches!(mod_hook.player_command(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -7020,7 +7251,7 @@ pub fn dispatch_perform_console_command(
         return;
     }
     let mut event = PerformConsoleCommandEvent { command };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "perform_console_command") {
         if matches!(
             mod_hook.perform_console_command(host, &mut event),
             Flow::Cancel
@@ -7056,7 +7287,7 @@ pub fn dispatch_screen_key_pressed_pre(
         repeat,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_key_pressed_pre") {
         if matches!(
             mod_hook.screen_key_pressed_pre(host, &mut event),
             Flow::Cancel
@@ -7089,7 +7320,7 @@ pub fn dispatch_screen_char_typed_pre(
         c,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_char_typed_pre") {
         if matches!(
             mod_hook.screen_char_typed_pre(host, &mut event),
             Flow::Cancel
@@ -7110,7 +7341,7 @@ pub fn dispatch_data_pack_files(
     files: &mut Vec<(String, Vec<u8>)>,
 ) {
     let mut event = DataPackFilesEvent { files };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "data_pack_files") {
         mod_hook.data_pack_files(host, &mut event);
     }
 }
@@ -7127,7 +7358,7 @@ pub fn dispatch_biome_colors(
     colors: &mut BiomeColors,
 ) {
     let mut event = BiomeColorsEvent { biome, colors };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "biome_colors") {
         mod_hook.biome_colors(host, &mut event);
     }
 }
@@ -7138,7 +7369,7 @@ pub struct ServerDataLoadedEvent {
 }
 pub fn dispatch_server_data_loaded(host: &mut dyn Host, mods: &[Box<dyn Hooks>], reload: bool) {
     let mut event = ServerDataLoadedEvent { reload };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "server_data_loaded") {
         mod_hook.server_data_loaded(host, &mut event);
     }
 }
@@ -7161,7 +7392,7 @@ pub fn dispatch_compute_fov(
         camera,
         degrees: *degrees,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "compute_fov") {
         mod_hook.compute_fov(host, &mut event);
     }
     *degrees = event.degrees;
@@ -7183,7 +7414,7 @@ pub fn dispatch_mob_submit(
         return;
     }
     let mut event = MobSubmitEvent { mob, draw };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mob_submit") {
         if matches!(mod_hook.mob_submit(host, &mut event), Flow::Cancel) {
             *drawn = true;
             break;
@@ -7212,7 +7443,7 @@ pub fn dispatch_camera_distance(
         entity,
         distance: *distance,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "camera_distance") {
         mod_hook.camera_distance(host, &mut event);
     }
     *distance = event.distance;
@@ -7239,7 +7470,7 @@ pub fn dispatch_compute_fog_color(
         fog_type,
         rgb,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "compute_fog_color") {
         mod_hook.compute_fog_color(host, &mut event);
     }
 }
@@ -7266,7 +7497,7 @@ pub fn dispatch_mouse_button_pre(
         pressed,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mouse_button_pre") {
         if matches!(mod_hook.mouse_button_pre(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -7292,7 +7523,7 @@ pub fn dispatch_mouse_button_post(
         pressed,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mouse_button_post") {
         mod_hook.mouse_button_post(host, &mut event);
     }
 }
@@ -7309,7 +7540,7 @@ pub fn dispatch_player_respawned(
     name: &str,
 ) {
     let mut event = PlayerRespawnedEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_respawned") {
         mod_hook.player_respawned(host, &mut event);
     }
 }
@@ -7335,7 +7566,7 @@ pub fn dispatch_render_fog(
         fog_type,
         fog,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "render_fog") {
         mod_hook.render_fog(host, &mut event);
     }
 }
@@ -7362,7 +7593,7 @@ pub fn dispatch_screen_key_released_pre(
         key,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_key_released_pre") {
         if matches!(
             mod_hook.screen_key_released_pre(host, &mut event),
             Flow::Cancel
@@ -7388,7 +7619,7 @@ pub fn dispatch_music(
         music,
         volume: *volume,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "music") {
         mod_hook.music(host, &mut event);
     }
     *volume = event.volume;
@@ -7404,7 +7635,7 @@ pub fn dispatch_music_layers(
     layers: &mut Vec<MusicLayer>,
 ) {
     let mut event = MusicLayersEvent { layers };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "music_layers") {
         mod_hook.music_layers(host, &mut event);
     }
 }
@@ -7419,7 +7650,7 @@ pub fn dispatch_datapack_sync(
     recipe_types: &mut Vec<String>,
 ) {
     let mut event = DatapackSyncEvent { recipe_types };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "datapack_sync") {
         mod_hook.datapack_sync(host, &mut event);
     }
 }
@@ -7434,7 +7665,7 @@ pub fn dispatch_recipes_received(
     recipe_types: &[String],
 ) {
     let mut event = RecipesReceivedEvent { recipe_types };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "recipes_received") {
         mod_hook.recipes_received(host, &mut event);
     }
 }
@@ -7451,7 +7682,7 @@ pub fn dispatch_input_key(
     modifiers: u32,
 ) {
     let mut event_ = InputKeyEvent { event, modifiers };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "input_key") {
         mod_hook.input_key(host, &mut event_);
     }
 }
@@ -7484,7 +7715,7 @@ pub fn dispatch_mouse_scrolling(
         cursor,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mouse_scrolling") {
         if matches!(mod_hook.mouse_scrolling(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -7517,7 +7748,7 @@ pub fn dispatch_screen_mouse_dragged_pre(
         delta,
         modifiers,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "screen_mouse_dragged_pre") {
         if matches!(
             mod_hook.screen_mouse_dragged_pre(host, &mut event),
             Flow::Cancel
@@ -7549,7 +7780,7 @@ pub fn dispatch_mod_container_viewers(
         viewers,
         previous,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mod_container_viewers") {
         mod_hook.mod_container_viewers(host, &mut event);
     }
 }
@@ -7590,7 +7821,7 @@ pub fn dispatch_living_knockback(
         x: *x,
         z: *z,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_knockback") {
         if matches!(mod_hook.living_knockback(&mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -7628,7 +7859,7 @@ pub fn dispatch_experience_orb_can_merge(
         from_value,
         can_merge: *can_merge,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "experience_orb_can_merge") {
         mod_hook.experience_orb_can_merge(host, &mut event);
     }
     *can_merge = event.can_merge;
@@ -7659,7 +7890,7 @@ pub fn dispatch_experience_orb_merge(
         from,
         from_value,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "experience_orb_merge") {
         if matches!(
             mod_hook.experience_orb_merge(host, &mut event),
             Flow::Cancel
@@ -7693,7 +7924,7 @@ pub fn dispatch_menu_slot_rules(
         may_place: *may_place,
         max_stack: *max_stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_slot_rules") {
         mod_hook.menu_slot_rules(&mut event);
     }
     *may_place = event.may_place;
@@ -7725,7 +7956,7 @@ pub fn dispatch_living_entity_use_item_tick(
         hand,
         duration: *duration,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_entity_use_item_tick") {
         if matches!(
             mod_hook.living_entity_use_item_tick(host, &mut event),
             Flow::Cancel
@@ -7755,7 +7986,7 @@ pub fn dispatch_on_use_tick(
         entity,
         remaining,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "on_use_tick") {
         mod_hook.on_use_tick(host, &mut event);
     }
 }
@@ -7785,7 +8016,7 @@ pub fn dispatch_living_entity_use_item_stop(
         hand,
         duration,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_entity_use_item_stop") {
         if matches!(
             mod_hook.living_entity_use_item_stop(host, &mut event),
             Flow::Cancel
@@ -7817,7 +8048,7 @@ pub fn dispatch_release_using(
         time_left,
         used: *used,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "release_using") {
         mod_hook.release_using(host, &mut event);
     }
     *used = event.used;
@@ -7843,7 +8074,7 @@ pub fn dispatch_loot_function(
         ctx,
         stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "loot_function") {
         mod_hook.loot_function(&mut event);
     }
 }
@@ -7868,7 +8099,7 @@ pub fn dispatch_loot_condition(
         ctx,
         holds: *holds,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "loot_condition") {
         mod_hook.loot_condition(&mut event);
     }
     *holds = event.holds;
@@ -7880,7 +8111,7 @@ pub struct LevelLoadEvent<'a> {
 }
 pub fn dispatch_level_load(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = LevelLoadEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "level_load") {
         mod_hook.level_load(host, &mut event);
     }
 }
@@ -7891,7 +8122,7 @@ pub struct LevelUnloadEvent<'a> {
 }
 pub fn dispatch_level_unload(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = LevelUnloadEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "level_unload") {
         mod_hook.level_unload(host, &mut event);
     }
 }
@@ -7902,7 +8133,7 @@ pub struct ClientLevelLoadEvent<'a> {
 }
 pub fn dispatch_client_level_load(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = ClientLevelLoadEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "client_level_load") {
         mod_hook.client_level_load(host, &mut event);
     }
 }
@@ -7913,7 +8144,7 @@ pub struct ClientLevelUnloadEvent<'a> {
 }
 pub fn dispatch_client_level_unload(host: &mut dyn Host, mods: &[Box<dyn Hooks>], dimension: &str) {
     let mut event = ClientLevelUnloadEvent { dimension };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "client_level_unload") {
         mod_hook.client_level_unload(host, &mut event);
     }
 }
@@ -7928,7 +8159,7 @@ pub fn dispatch_hears_projectile_impacts(
     hears: &mut bool,
 ) {
     let mut event = HearsProjectileImpactsEvent { hears: *hears };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hears_projectile_impacts") {
         mod_hook.hears_projectile_impacts(host, &mut event);
     }
     *hears = event.hears;
@@ -7974,7 +8205,7 @@ pub fn dispatch_projectile_impact(
         face,
         at,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "projectile_impact") {
         if matches!(mod_hook.projectile_impact(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8013,7 +8244,7 @@ pub fn dispatch_entity_mount(
         vehicle_kind,
         mounting,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_mount") {
         if matches!(mod_hook.entity_mount(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8046,7 +8277,7 @@ pub fn dispatch_interaction_key(
         hand,
         swing_hand: *swing_hand,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "interaction_key") {
         if matches!(mod_hook.interaction_key(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8071,7 +8302,7 @@ pub fn dispatch_gui_layer_pre(
         return;
     }
     let mut event = GuiLayerPreEvent { layer, batch };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "gui_layer_pre") {
         if matches!(mod_hook.gui_layer_pre(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8091,7 +8322,7 @@ pub fn dispatch_gui_layer_post(
     batch: &mut HudBatch,
 ) {
     let mut event = GuiLayerPostEvent { layer, batch };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "gui_layer_post") {
         mod_hook.gui_layer_post(host, &mut event);
     }
 }
@@ -8108,7 +8339,7 @@ pub fn dispatch_map_decorations(
     decorations: &mut Vec<NativeMapDecoration>,
 ) {
     let mut event = MapDecorationsEvent { map, decorations };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "map_decorations") {
         mod_hook.map_decorations(host, &mut event);
     }
 }
@@ -8137,7 +8368,7 @@ pub fn dispatch_player_start_tracking(
         uuid,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_start_tracking") {
         mod_hook.player_start_tracking(host, &mut event);
     }
 }
@@ -8166,7 +8397,7 @@ pub fn dispatch_player_stop_tracking(
         uuid,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_stop_tracking") {
         mod_hook.player_stop_tracking(host, &mut event);
     }
 }
@@ -8185,7 +8416,7 @@ pub fn dispatch_block_entity_energy(
         return;
     }
     let mut event = BlockEntityEnergyEvent { block };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_entity_energy") {
         if let Some(replacement) = mod_hook.block_entity_energy(host, &mut event) {
             *energy = Some(replacement);
             break;
@@ -8203,7 +8434,7 @@ pub fn dispatch_data_map_types(
     types: &mut Vec<NativeDataMapType>,
 ) {
     let mut event = DataMapTypesEvent { types };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "data_map_types") {
         mod_hook.data_map_types(host, &mut event);
     }
 }
@@ -8231,7 +8462,7 @@ pub fn dispatch_living_breathe(
         consume: *consume,
         refill: *refill,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_breathe") {
         mod_hook.living_breathe(&mut event);
     }
     *can_breathe = event.can_breathe;
@@ -8245,7 +8476,7 @@ pub struct BlocksEvent<'a> {
 }
 pub fn dispatch_blocks(mods: &[Box<dyn Hooks>], blocks: &mut Vec<horizon_mods::content::Block>) {
     let mut event = BlocksEvent { blocks };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "blocks") {
         mod_hook.blocks(&mut event);
     }
 }
@@ -8256,7 +8487,7 @@ pub struct ItemsEvent<'a> {
 }
 pub fn dispatch_items(mods: &[Box<dyn Hooks>], items: &mut Vec<horizon_mods::content::Item>) {
     let mut event = ItemsEvent { items };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "items") {
         mod_hook.items(&mut event);
     }
 }
@@ -8283,7 +8514,7 @@ pub fn dispatch_entity_tick_pre(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_tick_pre") {
         if matches!(mod_hook.entity_tick_pre(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8309,7 +8540,7 @@ pub fn dispatch_entity_tick_post(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_tick_post") {
         mod_hook.entity_tick_post(host, &mut event);
     }
 }
@@ -8326,7 +8557,7 @@ pub fn dispatch_entity_tick_listened(
     let mut event = EntityTickListenedEvent {
         listened: *listened,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_tick_listened") {
         mod_hook.entity_tick_listened(host, &mut event);
     }
     *listened = event.listened;
@@ -8346,7 +8577,7 @@ pub fn dispatch_item_fluid_tank(
         return;
     }
     let mut event = ItemFluidTankEvent { item };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_fluid_tank") {
         if let Some(replacement) = mod_hook.item_fluid_tank(host, &mut event) {
             *capacity = Some(replacement);
             break;
@@ -8378,7 +8609,7 @@ pub fn dispatch_living_equipment_change(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_equipment_change") {
         mod_hook.living_equipment_change(host, &mut event);
     }
 }
@@ -8395,7 +8626,7 @@ pub fn dispatch_living_equipment_listened(
     let mut event = LivingEquipmentListenedEvent {
         listened: *listened,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "living_equipment_listened") {
         mod_hook.living_equipment_listened(host, &mut event);
     }
     *listened = event.listened;
@@ -8419,7 +8650,7 @@ pub fn dispatch_player_submit(
         return;
     }
     let mut event = PlayerSubmitEvent { player, who, draw };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_submit") {
         if matches!(mod_hook.player_submit(host, &mut event), Flow::Cancel) {
             *drawn = true;
             break;
@@ -8441,7 +8672,7 @@ pub fn dispatch_mob_layer(
     draw: &mut BlockEntityDraw,
 ) {
     let mut event = MobLayerEvent { mob, who, draw };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mob_layer") {
         mod_hook.mob_layer(host, &mut event);
     }
 }
@@ -8458,7 +8689,7 @@ pub fn dispatch_player_render_listened(
     let mut event = PlayerRenderListenedEvent {
         listened: *listened,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_render_listened") {
         mod_hook.player_render_listened(host, &mut event);
     }
     *listened = event.listened;
@@ -8495,7 +8726,7 @@ pub fn dispatch_sign_changed(
         front,
         lines,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "sign_changed") {
         if matches!(mod_hook.sign_changed(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8509,7 +8740,7 @@ pub struct StandaloneModelsEvent<'a> {
 }
 pub fn dispatch_standalone_models(mods: &[Box<dyn Hooks>], models: &mut Vec<String>) {
     let mut event = StandaloneModelsEvent { models };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "standalone_models") {
         mod_hook.standalone_models(&mut event);
     }
 }
@@ -8538,7 +8769,7 @@ pub fn dispatch_player_container_open(
         menu,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_container_open") {
         mod_hook.player_container_open(host, &mut event);
     }
 }
@@ -8567,7 +8798,7 @@ pub fn dispatch_player_container_close(
         menu,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_container_close") {
         mod_hook.player_container_close(host, &mut event);
     }
 }
@@ -8594,7 +8825,7 @@ pub fn dispatch_player_toggle_flight(
         name,
         flying,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_toggle_flight") {
         if matches!(
             mod_hook.player_toggle_flight(host, &mut event),
             Flow::Cancel
@@ -8626,7 +8857,7 @@ pub fn dispatch_anvil_damaged(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "anvil_damaged") {
         mod_hook.anvil_damaged(host, &mut event);
     }
 }
@@ -8653,7 +8884,7 @@ pub fn dispatch_arrow_loose(
         has_ammo,
         charge: *charge,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "arrow_loose") {
         if matches!(mod_hook.arrow_loose(host, &mut event), Flow::Cancel) {
             *canceled = true;
             break;
@@ -8680,7 +8911,7 @@ pub fn dispatch_beacon_state_change(
         pos,
         active,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "beacon_state_change") {
         mod_hook.beacon_state_change(host, &mut event);
     }
 }
@@ -8707,7 +8938,7 @@ pub fn dispatch_bell_ring(
         player,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "bell_ring") {
         if matches!(mod_hook.bell_ring(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8736,7 +8967,7 @@ pub fn dispatch_block_break_progress_update(
         pos,
         progress,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_break_progress_update") {
         mod_hook.block_break_progress_update(host, &mut event);
     }
 }
@@ -8757,7 +8988,7 @@ pub fn dispatch_block_burn(
         return;
     }
     let mut event = BlockBurnEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_burn") {
         if matches!(mod_hook.block_burn(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8779,8 +9010,27 @@ pub fn dispatch_block_cook(
     result: &str,
 ) {
     let mut event = BlockCookEvent { pos, item, result };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_cook") {
         mod_hook.block_cook(host, &mut event);
+    }
+}
+/// What [`Hooks::block_damage_abort`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BlockDamageAbortEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_block_damage_abort(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+) {
+    let mut event = BlockDamageAbortEvent { player, name, pos };
+    for mod_hook in super::entered(mods, "block_damage_abort") {
+        mod_hook.block_damage_abort(host, &mut event);
     }
 }
 /// What [`Hooks::block_dispense_armor`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -8805,7 +9055,7 @@ pub fn dispatch_block_dispense_armor(
         item,
         target,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_dispense_armor") {
         mod_hook.block_dispense_armor(host, &mut event);
     }
 }
@@ -8831,7 +9081,7 @@ pub fn dispatch_block_exp(
         block,
         experience: *experience,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_exp") {
         mod_hook.block_exp(level, &mut event);
     }
     *experience = event.experience;
@@ -8862,7 +9112,7 @@ pub fn dispatch_block_fade(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_fade") {
         if matches!(mod_hook.block_fade(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8888,7 +9138,7 @@ pub fn dispatch_block_failed_dispense(
         pos,
         item,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_failed_dispense") {
         mod_hook.block_failed_dispense(host, &mut event);
     }
 }
@@ -8918,7 +9168,7 @@ pub fn dispatch_block_form(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_form") {
         if matches!(mod_hook.block_form(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8951,7 +9201,7 @@ pub fn dispatch_block_ignite(
         pos,
         cause,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_ignite") {
         if matches!(mod_hook.block_ignite(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -8977,7 +9227,7 @@ pub fn dispatch_block_lock_check(
         return;
     }
     let mut event = BlockLockCheckEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_lock_check") {
         if matches!(mod_hook.block_lock_check(host, &mut event), Flow::Cancel) {
             *locked = true;
             break;
@@ -9010,7 +9260,7 @@ pub fn dispatch_block_receive_game(
         block,
         event,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_receive_game") {
         if matches!(mod_hook.block_receive_game(host, &mut event_), Flow::Cancel) {
             *cancel = true;
             break;
@@ -9039,7 +9289,7 @@ pub fn dispatch_block_shear_entity(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "block_shear_entity") {
         mod_hook.block_shear_entity(host, &mut event);
     }
 }
@@ -9050,7 +9300,7 @@ pub struct BrewingCompleteEvent {
 }
 pub fn dispatch_brewing_complete(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3]) {
     let mut event = BrewingCompleteEvent { pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "brewing_complete") {
         mod_hook.brewing_complete(host, &mut event);
     }
 }
@@ -9062,7 +9312,7 @@ pub struct BrewingFuelEvent<'a> {
 }
 pub fn dispatch_brewing_fuel(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], fuel: &str) {
     let mut event = BrewingFuelEvent { pos, fuel };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "brewing_fuel") {
         mod_hook.brewing_fuel(host, &mut event);
     }
 }
@@ -9079,7 +9329,7 @@ pub fn dispatch_brewing_start(
     ingredient: &str,
 ) {
     let mut event = BrewingStartEvent { pos, ingredient };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "brewing_start") {
         mod_hook.brewing_start(host, &mut event);
     }
 }
@@ -9098,7 +9348,7 @@ pub fn dispatch_broadcast_message(
         return;
     }
     let mut event = BroadcastMessageEvent { line };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "broadcast_message") {
         if matches!(mod_hook.broadcast_message(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -9118,7 +9368,7 @@ pub fn dispatch_campfire_start(
     item: &str,
 ) {
     let mut event = CampfireStartEvent { pos, item };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "campfire_start") {
         mod_hook.campfire_start(host, &mut event);
     }
 }
@@ -9154,7 +9404,7 @@ pub fn dispatch_cauldron_level_changed(
         to_level,
         reason,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "cauldron_level_changed") {
         if matches!(
             mod_hook.cauldron_level_changed(level, &mut event),
             Flow::Cancel
@@ -9190,7 +9440,7 @@ pub fn dispatch_chorus_fruit_teleport(
         from,
         target,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "chorus_fruit_teleport") {
         if matches!(
             mod_hook.chorus_fruit_teleport(host, &mut event),
             Flow::Cancel
@@ -9208,7 +9458,7 @@ pub struct CompostItemEvent<'a> {
 }
 pub fn dispatch_compost_item(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], item: &str) {
     let mut event = CompostItemEvent { pos, item };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "compost_item") {
         mod_hook.compost_item(host, &mut event);
     }
 }
@@ -9225,7 +9475,7 @@ pub fn dispatch_crafter_craft(
     recipe: &str,
 ) {
     let mut event = CrafterCraftEvent { pos, recipe };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "crafter_craft") {
         mod_hook.crafter_craft(host, &mut event);
     }
 }
@@ -9248,7 +9498,7 @@ pub fn dispatch_creeper_ignite(
         player,
         item,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "creeper_ignite") {
         mod_hook.creeper_ignite(host, &mut event);
     }
 }
@@ -9265,7 +9515,7 @@ pub fn dispatch_creeper_power(
     lightning: [f64; 3],
 ) {
     let mut event = CreeperPowerEvent { entity, lightning };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "creeper_power") {
         mod_hook.creeper_power(host, &mut event);
     }
 }
@@ -9291,7 +9541,7 @@ pub fn dispatch_critical_hit(
         critical: *critical,
         damage_multiplier: *damage_multiplier,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "critical_hit") {
         mod_hook.critical_hit(host, &mut event);
     }
     *critical = event.critical;
@@ -9310,7 +9560,7 @@ pub fn dispatch_difficulty_changed(
     to: &str,
 ) {
     let mut event = DifficultyChangedEvent { from, to };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "difficulty_changed") {
         mod_hook.difficulty_changed(host, &mut event);
     }
 }
@@ -9331,7 +9581,7 @@ pub fn dispatch_dragon_egg_form(
         return;
     }
     let mut event = DragonEggFormEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "dragon_egg_form") {
         if matches!(mod_hook.dragon_egg_form(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -9363,7 +9613,7 @@ pub fn dispatch_enchant_item(
         item,
         levels,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "enchant_item") {
         mod_hook.enchant_item(host, &mut event);
     }
 }
@@ -9399,7 +9649,7 @@ pub fn dispatch_ender_pearl_teleport(
         target,
         damage: *damage,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "ender_pearl_teleport") {
         if matches!(
             mod_hook.ender_pearl_teleport(host, &mut event),
             Flow::Cancel
@@ -9429,7 +9679,7 @@ pub fn dispatch_entities_load(
         chunk,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entities_load") {
         mod_hook.entities_load(host, &mut event);
     }
 }
@@ -9452,7 +9702,7 @@ pub fn dispatch_entities_unload(
         chunk,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entities_unload") {
         mod_hook.entities_unload(host, &mut event);
     }
 }
@@ -9471,7 +9721,7 @@ pub fn dispatch_entity_break_door(
     pos: [i32; 3],
 ) {
     let mut event = EntityBreakDoorEvent { entity, kind, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_break_door") {
         mod_hook.entity_break_door(host, &mut event);
     }
 }
@@ -9494,7 +9744,7 @@ pub fn dispatch_entity_breed(
         partner,
         child,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_breed") {
         mod_hook.entity_breed(host, &mut event);
     }
 }
@@ -9523,8 +9773,34 @@ pub fn dispatch_entity_change_block(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_change_block") {
         mod_hook.entity_change_block(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_drop_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityDropItemEvent<'a> {
+    pub entity: u32,
+    pub item: &'a str,
+    pub count: i32,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_entity_drop_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    item: &str,
+    count: i32,
+    pos: [f64; 3],
+) {
+    let mut event = EntityDropItemEvent {
+        entity,
+        item,
+        count,
+        pos,
+    };
+    for mod_hook in super::entered(mods, "entity_drop_item") {
+        mod_hook.entity_drop_item(host, &mut event);
     }
 }
 /// What [`Hooks::entity_enter_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -9549,7 +9825,7 @@ pub fn dispatch_entity_enter_block(
         pos,
         block,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_enter_block") {
         mod_hook.entity_enter_block(host, &mut event);
     }
 }
@@ -9572,7 +9848,7 @@ pub fn dispatch_entity_enter_love_mode(
         kind,
         player,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_enter_love_mode") {
         mod_hook.entity_enter_love_mode(host, &mut event);
     }
 }
@@ -9595,7 +9871,7 @@ pub fn dispatch_entity_portal(
         entity,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_portal") {
         mod_hook.entity_portal(host, &mut event);
     }
 }
@@ -9621,7 +9897,7 @@ pub fn dispatch_entity_pose_change(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_pose_change") {
         mod_hook.entity_pose_change(host, &mut event);
     }
 }
@@ -9647,7 +9923,7 @@ pub fn dispatch_entity_shoot_bow(
         projectile,
         force,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_shoot_bow") {
         mod_hook.entity_shoot_bow(host, &mut event);
     }
 }
@@ -9670,7 +9946,7 @@ pub fn dispatch_entity_tame(
         kind,
         owner,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_tame") {
         mod_hook.entity_tame(host, &mut event);
     }
 }
@@ -9696,7 +9972,7 @@ pub fn dispatch_entity_teleport(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_teleport") {
         mod_hook.entity_teleport(host, &mut event);
     }
 }
@@ -9719,7 +9995,7 @@ pub fn dispatch_entity_toggle_glide(
         name,
         gliding,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_toggle_glide") {
         mod_hook.entity_toggle_glide(host, &mut event);
     }
 }
@@ -9745,8 +10021,25 @@ pub fn dispatch_entity_transform(
         transformed,
         transformed_kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "entity_transform") {
         mod_hook.entity_transform(host, &mut event);
+    }
+}
+/// What [`Hooks::entity_unleash`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityUnleashEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_entity_unleash(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+) {
+    let mut event = EntityUnleashEvent { entity, kind };
+    for mod_hook in super::entered(mods, "entity_unleash") {
+        mod_hook.entity_unleash(host, &mut event);
     }
 }
 /// What [`Hooks::exp_bottle`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -9762,7 +10055,7 @@ pub fn dispatch_exp_bottle(
     experience: u32,
 ) {
     let mut event = ExpBottleEvent { pos, experience };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "exp_bottle") {
         mod_hook.exp_bottle(host, &mut event);
     }
 }
@@ -9779,7 +10072,7 @@ pub fn dispatch_experience_orb_pickup_listened(
     let mut event = ExperienceOrbPickupListenedEvent {
         listened: *listened,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "experience_orb_pickup_listened") {
         mod_hook.experience_orb_pickup_listened(host, &mut event);
     }
     *listened = event.listened;
@@ -9813,7 +10106,7 @@ pub fn dispatch_experience_orb_pickup(
         value: *value,
         count: *count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "experience_orb_pickup") {
         if matches!(
             mod_hook.experience_orb_pickup(host, &mut event),
             Flow::Cancel
@@ -9847,10 +10140,27 @@ pub fn dispatch_mending_repair(
         experience,
         repair: *repair,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "mending_repair") {
         mod_hook.mending_repair(host, &mut event);
     }
     *repair = event.repair;
+}
+/// What [`Hooks::explosion_prime`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExplosionPrimeEvent {
+    pub center: [f64; 3],
+    pub radius: f32,
+}
+pub fn dispatch_explosion_prime(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    center: [f64; 3],
+    radius: f32,
+) {
+    let mut event = ExplosionPrimeEvent { center, radius };
+    for mod_hook in super::entered(mods, "explosion_prime") {
+        mod_hook.explosion_prime(host, &mut event);
+    }
 }
 /// What [`Hooks::fire_odds`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -9869,7 +10179,7 @@ pub fn dispatch_fire_odds(
         return;
     }
     let mut event = FireOddsEvent { dimension, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "fire_odds") {
         if let Some(replacement) = mod_hook.fire_odds(level, &mut event) {
             *odds = Some(replacement);
             break;
@@ -9893,7 +10203,7 @@ pub fn dispatch_smoke_source(
         return;
     }
     let mut event = SmokeSourceEvent { dimension, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "smoke_source") {
         if let Some(replacement) = mod_hook.smoke_source(level, &mut event) {
             *smoke = Some(replacement);
             break;
@@ -9919,7 +10229,7 @@ pub fn dispatch_firework_explode(
         pos,
         bursts,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "firework_explode") {
         mod_hook.firework_explode(host, &mut event);
     }
 }
@@ -9952,7 +10262,7 @@ pub fn dispatch_fluid_level_change(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "fluid_level_change") {
         if matches!(mod_hook.fluid_level_change(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -9981,7 +10291,7 @@ pub fn dispatch_framerate_limit(
         in_world,
         limit: *limit,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "framerate_limit") {
         mod_hook.framerate_limit(host, &mut event);
     }
     *limit = event.limit;
@@ -9994,7 +10304,7 @@ pub struct FurnaceBurnEvent<'a> {
 }
 pub fn dispatch_furnace_burn(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], fuel: &str) {
     let mut event = FurnaceBurnEvent { pos, fuel };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "furnace_burn") {
         mod_hook.furnace_burn(host, &mut event);
     }
 }
@@ -10023,7 +10333,7 @@ pub fn dispatch_furnace_extract(
         item,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "furnace_extract") {
         mod_hook.furnace_extract(host, &mut event);
     }
 }
@@ -10042,7 +10352,7 @@ pub fn dispatch_furnace_smelt(
     result: &str,
 ) {
     let mut event = FurnaceSmeltEvent { pos, item, result };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "furnace_smelt") {
         mod_hook.furnace_smelt(host, &mut event);
     }
 }
@@ -10059,7 +10369,7 @@ pub fn dispatch_furnace_start_smelt(
     item: &str,
 ) {
     let mut event = FurnaceStartSmeltEvent { pos, item };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "furnace_start_smelt") {
         mod_hook.furnace_start_smelt(host, &mut event);
     }
 }
@@ -10076,8 +10386,31 @@ pub fn dispatch_game_event(
     pos: [f64; 3],
 ) {
     let mut event_ = GameEventEvent { event, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "game_event") {
         mod_hook.game_event(host, &mut event_);
+    }
+}
+/// What [`Hooks::hopper_inventory_search`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HopperInventorySearchEvent {
+    pub hopper: [i32; 3],
+    pub container: Option<[i32; 3]>,
+    pub entity: Option<u32>,
+}
+pub fn dispatch_hopper_inventory_search(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hopper: [i32; 3],
+    container: Option<[i32; 3]>,
+    entity: Option<u32>,
+) {
+    let mut event = HopperInventorySearchEvent {
+        hopper,
+        container,
+        entity,
+    };
+    for mod_hook in super::entered(mods, "hopper_inventory_search") {
+        mod_hook.hopper_inventory_search(host, &mut event);
     }
 }
 /// What [`Hooks::hopper_pickup_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -10106,7 +10439,7 @@ pub fn dispatch_hopper_pickup_item(
         item,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hopper_pickup_item") {
         if matches!(mod_hook.hopper_pickup_item(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10127,7 +10460,7 @@ pub fn dispatch_ingredient(
     items: &mut Vec<String>,
 ) {
     let mut event = IngredientEvent { kind, data, items };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "ingredient") {
         mod_hook.ingredient(&mut event);
     }
 }
@@ -10150,11 +10483,41 @@ pub fn dispatch_inventory_block_start(
         return;
     }
     let mut event = InventoryBlockStartEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "inventory_block_start") {
         if matches!(
             mod_hook.inventory_block_start(host, &mut event),
             Flow::Cancel
         ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::inventory_move_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct InventoryMoveItemEvent<'a> {
+    pub source: [i32; 3],
+    pub destination: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_inventory_move_item(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    source: [i32; 3],
+    destination: [i32; 3],
+    item: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = InventoryMoveItemEvent {
+        source,
+        destination,
+        item,
+    };
+    for mod_hook in super::entered(mods, "inventory_move_item") {
+        if matches!(mod_hook.inventory_move_item(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
@@ -10179,8 +10542,34 @@ pub fn dispatch_item_crafted(
         recipe,
         stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_crafted") {
         mod_hook.item_crafted(host, &mut event);
+    }
+}
+/// What [`Hooks::item_despawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemDespawnEvent<'a> {
+    pub entity: u32,
+    pub item: &'a str,
+    pub count: i32,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_item_despawn(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    item: &str,
+    count: i32,
+    pos: [f64; 3],
+) {
+    let mut event = ItemDespawnEvent {
+        entity,
+        item,
+        count,
+        pos,
+    };
+    for mod_hook in super::entered(mods, "item_despawn") {
+        mod_hook.item_despawn(host, &mut event);
     }
 }
 /// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -10198,7 +10587,7 @@ pub fn dispatch_item_energy_buffer(
         return;
     }
     let mut event = ItemEnergyBufferEvent { item };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_energy_buffer") {
         if let Some(replacement) = mod_hook.item_energy_buffer(host, &mut event) {
             *buffer = Some(replacement);
             break;
@@ -10224,7 +10613,7 @@ pub fn dispatch_item_expire(
         stack,
         extra_life: *extra_life,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_expire") {
         mod_hook.item_expire(host, &mut event);
     }
     *extra_life = event.extra_life;
@@ -10251,7 +10640,7 @@ pub fn dispatch_item_spawn(
         count,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_spawn") {
         mod_hook.item_spawn(host, &mut event);
     }
 }
@@ -10272,7 +10661,7 @@ pub fn dispatch_leaves_decay(
         return;
     }
     let mut event = LeavesDecayEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "leaves_decay") {
         if matches!(mod_hook.leaves_decay(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10298,7 +10687,7 @@ pub fn dispatch_lightning_strike(
         return;
     }
     let mut event = LightningStrikeEvent { player, pos, cause };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "lightning_strike") {
         if matches!(mod_hook.lightning_strike(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10334,7 +10723,7 @@ pub fn dispatch_menu_quick_move(
         slot,
         stack,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "menu_quick_move") {
         if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
             *handled = true;
             break;
@@ -10367,7 +10756,7 @@ pub fn dispatch_moisture_change(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "moisture_change") {
         if matches!(mod_hook.moisture_change(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10396,7 +10785,7 @@ pub fn dispatch_anvil_craft_post(
         pos,
         craft,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "anvil_craft_post") {
         mod_hook.anvil_craft_post(host, &mut event);
     }
 }
@@ -10426,7 +10815,7 @@ pub fn dispatch_anvil_craft_pre(
         pos,
         craft,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "anvil_craft_pre") {
         if matches!(mod_hook.anvil_craft_pre(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10459,7 +10848,7 @@ pub fn dispatch_armor_stand_manipulate(
         stand_id,
         slot,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "armor_stand_manipulate") {
         if matches!(
             mod_hook.armor_stand_manipulate(host, &mut event),
             Flow::Cancel
@@ -10495,7 +10884,7 @@ pub fn dispatch_bucket_empty(
         pos,
         fluid,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "bucket_empty") {
         if matches!(mod_hook.bucket_empty(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10528,7 +10917,7 @@ pub fn dispatch_container_opened(
         kind,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "container_opened") {
         if matches!(mod_hook.container_opened(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10564,7 +10953,7 @@ pub fn dispatch_creative_slot(
         item,
         count,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "creative_slot") {
         if matches!(mod_hook.creative_slot(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10597,7 +10986,7 @@ pub fn dispatch_food_level_changed(
         from,
         to: *to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "food_level_changed") {
         if matches!(mod_hook.food_level_changed(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10624,7 +11013,7 @@ pub fn dispatch_hanging_break(
         return;
     }
     let mut event = HangingBreakEvent { player, kind, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hanging_break") {
         if matches!(mod_hook.hanging_break(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10657,7 +11046,7 @@ pub fn dispatch_hanging_place(
         kind,
         pos,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "hanging_place") {
         if matches!(mod_hook.hanging_place(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10690,13 +11079,123 @@ pub fn dispatch_item_damaged(
         item,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "item_damaged") {
         if matches!(mod_hook.item_damaged(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
     }
     *amount = event.amount;
+}
+/// What [`Hooks::living_drown`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingDrownEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub is_drowning: bool,
+    pub damage_amount: f32,
+    pub bubble_count: i32,
+}
+pub fn dispatch_living_drown(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    is_drowning: &mut bool,
+    damage_amount: &mut f32,
+    bubble_count: i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingDrownEvent {
+        entity,
+        kind,
+        is_drowning: *is_drowning,
+        damage_amount: *damage_amount,
+        bubble_count,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_drown(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *is_drowning = event.is_drowning;
+    *damage_amount = event.damage_amount;
+}
+/// What [`Hooks::living_fall`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingFallEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub distance: f64,
+    pub multiplier: f32,
+}
+pub fn dispatch_living_fall(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    distance: &mut f64,
+    multiplier: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingFallEvent {
+        entity,
+        kind,
+        distance: *distance,
+        multiplier: *multiplier,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_fall(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *distance = event.distance;
+    *multiplier = event.multiplier;
+}
+/// What [`Hooks::living_heal`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingHealEvent {
+    pub entity: u32,
+    pub amount: f32,
+}
+pub fn dispatch_living_heal(
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    amount: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingHealEvent {
+        entity,
+        amount: *amount,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.living_heal(&mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::living_jump`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingJumpEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
+    let mut event = LivingJumpEvent { entity, kind };
+    for mod_hook in mods {
+        mod_hook.living_jump(&mut event);
+    }
 }
 /// What [`Hooks::player_changed_dimension`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -10720,7 +11219,7 @@ pub fn dispatch_player_changed_dimension(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_changed_dimension") {
         mod_hook.player_changed_dimension(host, &mut event);
     }
 }
@@ -10743,7 +11242,7 @@ pub fn dispatch_player_clone(
         name,
         was_death,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_clone") {
         mod_hook.player_clone(host, &mut event);
     }
 }
@@ -10766,7 +11265,7 @@ pub fn dispatch_player_commands_sent(
         name,
         names,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_commands_sent") {
         mod_hook.player_commands_sent(host, &mut event);
     }
 }
@@ -10792,7 +11291,7 @@ pub fn dispatch_player_destroy_item(
         item,
         slot,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_destroy_item") {
         mod_hook.player_destroy_item(host, &mut event);
     }
 }
@@ -10819,7 +11318,7 @@ pub fn dispatch_player_fish(
         name,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_fish") {
         if matches!(mod_hook.player_fish(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -10848,7 +11347,7 @@ pub fn dispatch_player_flower_pot_manipulate(
         pos,
         plant,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_flower_pot_manipulate") {
         mod_hook.player_flower_pot_manipulate(host, &mut event);
     }
 }
@@ -10878,7 +11377,7 @@ pub fn dispatch_player_game_mode_changed(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_game_mode_changed") {
         if matches!(
             mod_hook.player_game_mode_changed(host, &mut event),
             Flow::Cancel
@@ -10910,7 +11409,7 @@ pub fn dispatch_player_insert_lectern_book(
         pos,
         book,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_insert_lectern_book") {
         mod_hook.player_insert_lectern_book(host, &mut event);
     }
 }
@@ -10942,7 +11441,7 @@ pub fn dispatch_player_item_frame_change(
         item,
         rotation,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_item_frame_change") {
         mod_hook.player_item_frame_change(host, &mut event);
     }
 }
@@ -10971,7 +11470,7 @@ pub fn dispatch_player_item_mend(
         repair,
         experience,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_item_mend") {
         mod_hook.player_item_mend(host, &mut event);
     }
 }
@@ -10997,7 +11496,7 @@ pub fn dispatch_player_lectern_page_change(
         pos,
         page,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_lectern_page_change") {
         mod_hook.player_lectern_page_change(host, &mut event);
     }
 }
@@ -11020,7 +11519,7 @@ pub fn dispatch_player_load_from_file(
         name,
         directory,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_load_from_file") {
         mod_hook.player_load_from_file(host, &mut event);
     }
 }
@@ -11047,7 +11546,7 @@ pub fn dispatch_player_login(
         name,
         reason,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_login") {
         if matches!(mod_hook.player_login(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11073,7 +11572,7 @@ pub fn dispatch_player_save_to_file(
         name,
         directory,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_save_to_file") {
         mod_hook.player_save_to_file(host, &mut event);
     }
 }
@@ -11096,7 +11595,7 @@ pub fn dispatch_player_sprint(
         name,
         sprinting,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_sprint") {
         mod_hook.player_sprint(host, &mut event);
     }
 }
@@ -11117,7 +11616,7 @@ pub fn dispatch_player_swap_hands(
         return;
     }
     let mut event = PlayerSwapHandsEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_swap_hands") {
         if matches!(mod_hook.player_swap_hands(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11146,7 +11645,7 @@ pub fn dispatch_player_take_lectern_book(
         pos,
         book,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_take_lectern_book") {
         mod_hook.player_take_lectern_book(host, &mut event);
     }
 }
@@ -11175,7 +11674,7 @@ pub fn dispatch_player_teleported(
         to,
         dimension,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_teleported") {
         mod_hook.player_teleported(host, &mut event);
     }
 }
@@ -11192,7 +11691,7 @@ pub fn dispatch_player_totem(
     name: &str,
 ) {
     let mut event = PlayerTotemEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_totem") {
         mod_hook.player_totem(host, &mut event);
     }
 }
@@ -11215,7 +11714,7 @@ pub fn dispatch_resource_pack_status(
         name,
         status,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "resource_pack_status") {
         mod_hook.resource_pack_status(host, &mut event);
     }
 }
@@ -11232,7 +11731,7 @@ pub fn dispatch_spawn_change(
     angle: [f32; 2],
 ) {
     let mut event = SpawnChangeEvent { pos, angle };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "spawn_change") {
         mod_hook.spawn_change(host, &mut event);
     }
 }
@@ -11253,11 +11752,73 @@ pub fn dispatch_tnt_primed(
         return;
     }
     let mut event = TntPrimedEvent { player, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tnt_primed") {
         if matches!(mod_hook.tnt_primed(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::vehicle_create`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleCreateEvent<'a> {
+    pub kind: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_vehicle_create(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    pos: [f64; 3],
+) {
+    let mut event = VehicleCreateEvent { kind, pos };
+    for mod_hook in super::entered(mods, "vehicle_create") {
+        mod_hook.vehicle_create(host, &mut event);
+    }
+}
+/// What [`Hooks::vehicle_damage`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleDamageEvent<'a> {
+    pub kind: &'a str,
+    pub damage: f32,
+}
+pub fn dispatch_vehicle_damage(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    damage: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = VehicleDamageEvent {
+        kind,
+        damage: *damage,
+    };
+    for mod_hook in super::entered(mods, "vehicle_damage") {
+        if matches!(mod_hook.vehicle_damage(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *damage = event.damage;
+}
+/// What [`Hooks::vehicle_destroy`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VehicleDestroyEvent<'a> {
+    pub kind: &'a str,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_vehicle_destroy(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    pos: [f64; 3],
+) {
+    let mut event = VehicleDestroyEvent { kind, pos };
+    for mod_hook in super::entered(mods, "vehicle_destroy") {
+        mod_hook.vehicle_destroy(host, &mut event);
     }
 }
 /// What [`Hooks::vehicle_moved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11282,7 +11843,7 @@ pub fn dispatch_vehicle_moved(
         from,
         to,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "vehicle_moved") {
         mod_hook.vehicle_moved(host, &mut event);
     }
 }
@@ -11291,7 +11852,7 @@ pub fn dispatch_vehicle_moved(
 pub struct WorldBorderBoundsChangedEvent {}
 pub fn dispatch_world_border_bounds_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
     let mut event = WorldBorderBoundsChangedEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "world_border_bounds_changed") {
         mod_hook.world_border_bounds_changed(host, &mut event);
     }
 }
@@ -11300,7 +11861,7 @@ pub fn dispatch_world_border_bounds_changed(host: &mut dyn Host, mods: &[Box<dyn
 pub struct WorldBorderCenterChangedEvent {}
 pub fn dispatch_world_border_center_changed(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
     let mut event = WorldBorderCenterChangedEvent {};
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "world_border_center_changed") {
         mod_hook.world_border_center_changed(host, &mut event);
     }
 }
@@ -11326,7 +11887,7 @@ pub fn dispatch_world_game_rule_change(
         rule,
         value,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "world_game_rule_change") {
         mod_hook.world_game_rule_change(host, &mut event);
     }
 }
@@ -11359,11 +11920,37 @@ pub fn dispatch_note_play(
         instrument,
         note,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "note_play") {
         if matches!(mod_hook.note_play(level, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_advancement_criterion_grant`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerAdvancementCriterionGrantEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub advancement: &'a str,
+    pub criterion: &'a str,
+}
+pub fn dispatch_player_advancement_criterion_grant(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    advancement: &str,
+    criterion: &str,
+) {
+    let mut event = PlayerAdvancementCriterionGrantEvent {
+        player,
+        name,
+        advancement,
+        criterion,
+    };
+    for mod_hook in super::entered(mods, "player_advancement_criterion_grant") {
+        mod_hook.player_advancement_criterion_grant(host, &mut event);
     }
 }
 /// What [`Hooks::player_advancement_done`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11385,7 +11972,7 @@ pub fn dispatch_player_advancement_done(
         name,
         advancement,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_advancement_done") {
         mod_hook.player_advancement_done(host, &mut event);
     }
 }
@@ -11414,8 +12001,27 @@ pub fn dispatch_player_advancement_progress(
         criterion,
         granted,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_advancement_progress") {
         mod_hook.player_advancement_progress(host, &mut event);
+    }
+}
+/// What [`Hooks::player_arm_swing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerArmSwingEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub hand: &'a str,
+}
+pub fn dispatch_player_arm_swing(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    hand: &str,
+) {
+    let mut event = PlayerArmSwingEvent { player, name, hand };
+    for mod_hook in super::entered(mods, "player_arm_swing") {
+        mod_hook.player_arm_swing(host, &mut event);
     }
 }
 /// What [`Hooks::player_attack_cooldown_reset`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11431,7 +12037,7 @@ pub fn dispatch_player_attack_cooldown_reset(
     name: &str,
 ) {
     let mut event = PlayerAttackCooldownResetEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_attack_cooldown_reset") {
         mod_hook.player_attack_cooldown_reset(host, &mut event);
     }
 }
@@ -11454,7 +12060,7 @@ pub fn dispatch_player_bed_enter(
         return;
     }
     let mut event = PlayerBedEnterEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_bed_enter") {
         if matches!(mod_hook.player_bed_enter(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11476,7 +12082,7 @@ pub fn dispatch_player_bed_leave(
     pos: [i32; 3],
 ) {
     let mut event = PlayerBedLeaveEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_bed_leave") {
         mod_hook.player_bed_leave(host, &mut event);
     }
 }
@@ -11502,8 +12108,34 @@ pub fn dispatch_player_bucket_entity(
         entity_id,
         entity,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_bucket_entity") {
         mod_hook.player_bucket_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_bundle_item_select`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerBundleItemSelectEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub slot: i32,
+    pub index: i32,
+}
+pub fn dispatch_player_bundle_item_select(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    slot: i32,
+    index: i32,
+) {
+    let mut event = PlayerBundleItemSelectEvent {
+        player,
+        name,
+        slot,
+        index,
+    };
+    for mod_hook in super::entered(mods, "player_bundle_item_select") {
+        mod_hook.player_bundle_item_select(host, &mut event);
     }
 }
 /// What [`Hooks::player_change_beacon_effect`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11531,7 +12163,7 @@ pub fn dispatch_player_change_beacon_effect(
         primary,
         secondary,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_change_beacon_effect") {
         mod_hook.player_change_beacon_effect(host, &mut event);
     }
 }
@@ -11550,8 +12182,25 @@ pub fn dispatch_player_change_main_hand(
     left: bool,
 ) {
     let mut event = PlayerChangeMainHandEvent { player, name, left };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_change_main_hand") {
         mod_hook.player_change_main_hand(host, &mut event);
+    }
+}
+/// What [`Hooks::player_client_loaded_world`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerClientLoadedWorldEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_client_loaded_world(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerClientLoadedWorldEvent { player, name };
+    for mod_hook in super::entered(mods, "player_client_loaded_world") {
+        mod_hook.player_client_loaded_world(host, &mut event);
     }
 }
 /// What [`Hooks::player_deep_sleep`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11567,7 +12216,7 @@ pub fn dispatch_player_deep_sleep(
     name: &str,
 ) {
     let mut event = PlayerDeepSleepEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_deep_sleep") {
         mod_hook.player_deep_sleep(host, &mut event);
     }
 }
@@ -11597,7 +12246,7 @@ pub fn dispatch_player_edit_book(
         pages,
         signing,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_edit_book") {
         if matches!(mod_hook.player_edit_book(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11617,7 +12266,7 @@ pub fn dispatch_player_egg_throw(
     name: &str,
 ) {
     let mut event = PlayerEggThrowEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_egg_throw") {
         mod_hook.player_egg_throw(host, &mut event);
     }
 }
@@ -11634,7 +12283,7 @@ pub fn dispatch_player_elytra_boost(
     name: &str,
 ) {
     let mut event = PlayerElytraBoostEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_elytra_boost") {
         mod_hook.player_elytra_boost(host, &mut event);
     }
 }
@@ -11657,7 +12306,7 @@ pub fn dispatch_player_exp_change(
         name,
         amount: *amount,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_exp_change") {
         mod_hook.player_exp_change(host, &mut event);
     }
     *amount = event.amount;
@@ -11681,8 +12330,31 @@ pub fn dispatch_player_exp_cooldown_change(
         name,
         ticks,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_exp_cooldown_change") {
         mod_hook.player_exp_cooldown_change(host, &mut event);
+    }
+}
+/// What [`Hooks::player_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerInputEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub flags: i32,
+}
+pub fn dispatch_player_input(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    flags: i32,
+) {
+    let mut event = PlayerInputEvent {
+        player,
+        name,
+        flags,
+    };
+    for mod_hook in super::entered(mods, "player_input") {
+        mod_hook.player_input(host, &mut event);
     }
 }
 /// What [`Hooks::player_item_cooldown`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11711,7 +12383,7 @@ pub fn dispatch_player_item_cooldown(
         item,
         ticks,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_item_cooldown") {
         if matches!(
             mod_hook.player_item_cooldown(host, &mut event),
             Flow::Cancel
@@ -11747,11 +12419,96 @@ pub fn dispatch_player_item_held(
         from_slot,
         to_slot,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_item_held") {
         if matches!(mod_hook.player_item_held(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_jump`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerJumpEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_jump(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerJumpEvent { player, name };
+    for mod_hook in super::entered(mods, "player_jump") {
+        mod_hook.player_jump(host, &mut event);
+    }
+}
+/// What [`Hooks::player_kicked`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerKickedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub reason: &'a str,
+}
+pub fn dispatch_player_kicked(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    reason: &str,
+) {
+    let mut event = PlayerKickedEvent {
+        player,
+        name,
+        reason,
+    };
+    for mod_hook in super::entered(mods, "player_kicked") {
+        mod_hook.player_kicked(host, &mut event);
+    }
+}
+/// What [`Hooks::player_launch_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLaunchProjectileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+}
+pub fn dispatch_player_launch_projectile(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+) {
+    let mut event = PlayerLaunchProjectileEvent { player, name, item };
+    for mod_hook in super::entered(mods, "player_launch_projectile") {
+        mod_hook.player_launch_projectile(host, &mut event);
+    }
+}
+/// What [`Hooks::player_level_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLevelChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_player_level_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: i32,
+    to: i32,
+) {
+    let mut event = PlayerLevelChangeEvent {
+        player,
+        name,
+        from,
+        to,
+    };
+    for mod_hook in super::entered(mods, "player_level_change") {
+        mod_hook.player_level_change(host, &mut event);
     }
 }
 /// What [`Hooks::player_locale_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11773,7 +12530,7 @@ pub fn dispatch_player_locale_change(
         name,
         locale,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_locale_change") {
         mod_hook.player_locale_change(host, &mut event);
     }
 }
@@ -11796,7 +12553,7 @@ pub fn dispatch_player_loom_pattern_select(
         name,
         pattern,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_loom_pattern_select") {
         mod_hook.player_loom_pattern_select(host, &mut event);
     }
 }
@@ -11819,7 +12576,7 @@ pub fn dispatch_player_map_filled(
         name,
         map_id,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_map_filled") {
         mod_hook.player_map_filled(host, &mut event);
     }
 }
@@ -11845,7 +12602,7 @@ pub fn dispatch_player_name_entity(
         entity_id,
         entity_name,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_name_entity") {
         mod_hook.player_name_entity(host, &mut event);
     }
 }
@@ -11871,7 +12628,7 @@ pub fn dispatch_player_open_sign(
         pos,
         front,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_open_sign") {
         mod_hook.player_open_sign(host, &mut event);
     }
 }
@@ -11904,7 +12661,7 @@ pub fn dispatch_player_pick_item(
         pos,
         entity_id,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_pick_item") {
         if matches!(mod_hook.player_pick_item(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -11933,7 +12690,7 @@ pub fn dispatch_player_pickup_arrow(
         entity_id,
         item,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_pickup_arrow") {
         mod_hook.player_pickup_arrow(host, &mut event);
     }
 }
@@ -11966,11 +12723,34 @@ pub fn dispatch_player_portal(
         to_dimension,
         cause,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_portal") {
         if matches!(mod_hook.player_portal(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_ready_arrow`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerReadyArrowEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub arrow: &'a str,
+}
+pub fn dispatch_player_ready_arrow(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    arrow: &str,
+) {
+    let mut event = PlayerReadyArrowEvent {
+        player,
+        name,
+        arrow,
+    };
+    for mod_hook in super::entered(mods, "player_ready_arrow") {
+        mod_hook.player_ready_arrow(host, &mut event);
     }
 }
 /// What [`Hooks::player_recipe_book_click`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11995,8 +12775,37 @@ pub fn dispatch_player_recipe_book_click(
         recipe,
         all,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_recipe_book_click") {
         mod_hook.player_recipe_book_click(host, &mut event);
+    }
+}
+/// What [`Hooks::player_recipe_book_settings_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerRecipeBookSettingsChangeEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub book: i32,
+    pub open: bool,
+    pub filtering: bool,
+}
+pub fn dispatch_player_recipe_book_settings_change(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    book: i32,
+    open: bool,
+    filtering: bool,
+) {
+    let mut event = PlayerRecipeBookSettingsChangeEvent {
+        player,
+        name,
+        book,
+        open,
+        filtering,
+    };
+    for mod_hook in super::entered(mods, "player_recipe_book_settings_change") {
+        mod_hook.player_recipe_book_settings_change(host, &mut event);
     }
 }
 /// What [`Hooks::player_recipe_discovered`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12022,7 +12831,7 @@ pub fn dispatch_player_recipe_discovered(
         name,
         recipe,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_recipe_discovered") {
         if matches!(
             mod_hook.player_recipe_discovered(host, &mut event),
             Flow::Cancel
@@ -12045,7 +12854,7 @@ pub fn dispatch_player_riptide(
     name: &str,
 ) {
     let mut event = PlayerRiptideEvent { player, name };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_riptide") {
         mod_hook.player_riptide(host, &mut event);
     }
 }
@@ -12075,7 +12884,7 @@ pub fn dispatch_player_shear_entity(
         entity_id,
         off_hand,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_shear_entity") {
         if matches!(mod_hook.player_shear_entity(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -12101,7 +12910,7 @@ pub fn dispatch_player_shield_disable(
         name,
         ticks,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_shield_disable") {
         mod_hook.player_shield_disable(host, &mut event);
     }
 }
@@ -12134,7 +12943,7 @@ pub fn dispatch_player_spawn_point_set(
         pos,
         cause,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_spawn_point_set") {
         if matches!(
             mod_hook.player_spawn_point_set(host, &mut event),
             Flow::Cancel
@@ -12173,7 +12982,7 @@ pub fn dispatch_player_stat_award(
         stat,
         value,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_stat_award") {
         if matches!(mod_hook.player_stat_award(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -12199,7 +13008,7 @@ pub fn dispatch_player_stonecutter_recipe_select(
         name,
         recipe,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_stonecutter_recipe_select") {
         mod_hook.player_stonecutter_recipe_select(host, &mut event);
     }
 }
@@ -12222,8 +13031,25 @@ pub fn dispatch_player_stop_spectating_entity(
         name,
         entity_id,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_stop_spectating_entity") {
         mod_hook.player_stop_spectating_entity(host, &mut event);
+    }
+}
+/// What [`Hooks::player_stop_using_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerStopUsingItemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+}
+pub fn dispatch_player_stop_using_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+) {
+    let mut event = PlayerStopUsingItemEvent { player, name };
+    for mod_hook in super::entered(mods, "player_stop_using_item") {
+        mod_hook.player_stop_using_item(host, &mut event);
     }
 }
 /// What [`Hooks::player_swap_with_equipment_slot`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12241,7 +13067,7 @@ pub fn dispatch_player_swap_with_equipment_slot(
     slot: &str,
 ) {
     let mut event = PlayerSwapWithEquipmentSlotEvent { player, name, slot };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_swap_with_equipment_slot") {
         mod_hook.player_swap_with_equipment_slot(host, &mut event);
     }
 }
@@ -12268,7 +13094,7 @@ pub fn dispatch_player_teleport_end_gateway(
         name,
         gateway,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_teleport_end_gateway") {
         if matches!(
             mod_hook.player_teleport_end_gateway(host, &mut event),
             Flow::Cancel
@@ -12300,8 +13126,31 @@ pub fn dispatch_player_toggle_entity_age_lock(
         entity_id,
         locked,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_toggle_entity_age_lock") {
         mod_hook.player_toggle_entity_age_lock(host, &mut event);
+    }
+}
+/// What [`Hooks::player_toggle_sneak`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerToggleSneakEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub sneaking: bool,
+}
+pub fn dispatch_player_toggle_sneak(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    sneaking: bool,
+) {
+    let mut event = PlayerToggleSneakEvent {
+        player,
+        name,
+        sneaking,
+    };
+    for mod_hook in super::entered(mods, "player_toggle_sneak") {
+        mod_hook.player_toggle_sneak(host, &mut event);
     }
 }
 /// What [`Hooks::player_trade`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12323,7 +13172,7 @@ pub fn dispatch_player_trade(
         name,
         entity_id,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_trade") {
         mod_hook.player_trade(host, &mut event);
     }
 }
@@ -12346,7 +13195,7 @@ pub fn dispatch_player_unleash_entity(
         name,
         entity_id,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_unleash_entity") {
         mod_hook.player_unleash_entity(host, &mut event);
     }
 }
@@ -12369,7 +13218,7 @@ pub fn dispatch_player_velocity(
         name,
         velocity,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "player_velocity") {
         mod_hook.player_velocity(host, &mut event);
     }
 }
@@ -12386,7 +13235,7 @@ pub fn dispatch_portal_create(
     pos: [i32; 3],
 ) {
     let mut event = PortalCreateEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "portal_create") {
         mod_hook.portal_create(host, &mut event);
     }
 }
@@ -12403,7 +13252,7 @@ pub fn dispatch_potion_splash(
     pos: [f64; 3],
 ) {
     let mut event = PotionSplashEvent { item, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "potion_splash") {
         mod_hook.potion_splash(host, &mut event);
     }
 }
@@ -12433,7 +13282,7 @@ pub fn dispatch_prepare_anvil(
         pos,
         cost: *cost,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "prepare_anvil") {
         if let Some(replacement) = mod_hook.prepare_anvil(host, &mut event) {
             *result = Some(replacement);
             break;
@@ -12460,11 +13309,22 @@ pub fn dispatch_prepare_grindstone(
         return;
     }
     let mut event = PrepareGrindstoneEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "prepare_grindstone") {
         if let Some(replacement) = mod_hook.prepare_grindstone(host, &mut event) {
             *result = Some(replacement);
             break;
         }
+    }
+}
+/// What [`Hooks::prepare_hopper_transfer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PrepareHopperTransferEvent {
+    pub pos: [i32; 3],
+}
+pub fn dispatch_prepare_hopper_transfer(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3]) {
+    let mut event = PrepareHopperTransferEvent { pos };
+    for mod_hook in super::entered(mods, "prepare_hopper_transfer") {
+        mod_hook.prepare_hopper_transfer(host, &mut event);
     }
 }
 /// What [`Hooks::prepare_item_craft`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12486,7 +13346,7 @@ pub fn dispatch_prepare_item_craft(
         return;
     }
     let mut event = PrepareItemCraftEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "prepare_item_craft") {
         if let Some(replacement) = mod_hook.prepare_item_craft(host, &mut event) {
             *result = Some(replacement);
             break;
@@ -12515,7 +13375,7 @@ pub fn dispatch_prepare_item_enchant(
         pos,
         costs,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "prepare_item_enchant") {
         mod_hook.prepare_item_enchant(host, &mut event);
     }
 }
@@ -12538,7 +13398,7 @@ pub fn dispatch_prepare_smithing(
         return;
     }
     let mut event = PrepareSmithingEvent { player, name, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "prepare_smithing") {
         if let Some(replacement) = mod_hook.prepare_smithing(host, &mut event) {
             *result = Some(replacement);
             break;
@@ -12567,7 +13427,7 @@ pub fn dispatch_projectile_launch(
         entity,
         kind,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "projectile_launch") {
         mod_hook.projectile_launch(host, &mut event);
     }
 }
@@ -12593,7 +13453,7 @@ pub fn dispatch_raid_spawn_wave(
         wave,
         raiders,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "raid_spawn_wave") {
         mod_hook.raid_spawn_wave(host, &mut event);
     }
 }
@@ -12612,7 +13472,7 @@ pub fn dispatch_raid_state_change(
     state: &str,
 ) {
     let mut event = RaidStateChangeEvent { raid, pos, state };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "raid_state_change") {
         mod_hook.raid_state_change(host, &mut event);
     }
 }
@@ -12629,7 +13489,7 @@ pub fn dispatch_sculk_bloom(
     pos: [i32; 3],
 ) {
     let mut event = SculkBloomEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "sculk_bloom") {
         mod_hook.sculk_bloom(host, &mut event);
     }
 }
@@ -12652,7 +13512,7 @@ pub fn dispatch_sleep_finished_time(
         current,
         new_time: *new_time,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "sleep_finished_time") {
         mod_hook.sleep_finished_time(host, &mut event);
     }
     *new_time = event.new_time;
@@ -12670,7 +13530,7 @@ pub fn dispatch_sponge_absorb(
     pos: BlockPos,
 ) {
     let mut event = SpongeAbsorbEvent { dimension, pos };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "sponge_absorb") {
         mod_hook.sponge_absorb(level, &mut event);
     }
 }
@@ -12699,7 +13559,7 @@ pub fn dispatch_tab_complete(
         range,
         suggestions,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "tab_complete") {
         mod_hook.tab_complete(host, &mut event);
     }
 }
@@ -12722,7 +13582,7 @@ pub fn dispatch_target_hit(
         pos,
         strength,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "target_hit") {
         mod_hook.target_hit(host, &mut event);
     }
 }
@@ -12746,7 +13606,7 @@ pub fn dispatch_thunder_change(
         dimension,
         thundering,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "thunder_change") {
         if matches!(mod_hook.thunder_change(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -12779,7 +13639,7 @@ pub fn dispatch_time_skip(
         to,
         cause,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "time_skip") {
         if matches!(mod_hook.time_skip(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -12808,7 +13668,7 @@ pub fn dispatch_trade_select(
         villager,
         index,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "trade_select") {
         mod_hook.trade_select(host, &mut event);
     }
 }
@@ -12831,7 +13691,7 @@ pub fn dispatch_trade_with_villager(
         kind,
         offer,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "trade_with_villager") {
         mod_hook.trade_with_villager(host, &mut event);
     }
 }
@@ -12854,8 +13714,20 @@ pub fn dispatch_vault_change_state(
         pos,
         state,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "vault_change_state") {
         mod_hook.vault_change_state(host, &mut event);
+    }
+}
+/// What [`Hooks::vault_loot`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VaultLootEvent<'a> {
+    pub pos: [i32; 3],
+    pub item: &'a str,
+}
+pub fn dispatch_vault_loot(host: &dyn Host, mods: &[Box<dyn Hooks>], pos: [i32; 3], item: &str) {
+    let mut event = VaultLootEvent { pos, item };
+    for mod_hook in super::entered(mods, "vault_loot") {
+        mod_hook.vault_loot(host, &mut event);
     }
 }
 /// What [`Hooks::weather_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12881,7 +13753,7 @@ pub fn dispatch_weather_change(
         raining,
         thundering,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "weather_change") {
         if matches!(mod_hook.weather_change(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
@@ -12899,8 +13771,17 @@ pub fn dispatch_whitelist_state_update(
     enabled: bool,
 ) {
     let mut event = WhitelistStateUpdateEvent { enabled };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "whitelist_state_update") {
         mod_hook.whitelist_state_update(host, &mut event);
+    }
+}
+/// What [`Hooks::world_border_bounds_change_finish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct WorldBorderBoundsChangeFinishEvent {}
+pub fn dispatch_world_border_bounds_change_finish(host: &mut dyn Host, mods: &[Box<dyn Hooks>]) {
+    let mut event = WorldBorderBoundsChangeFinishEvent {};
+    for mod_hook in super::entered(mods, "world_border_bounds_change_finish") {
+        mod_hook.world_border_bounds_change_finish(host, &mut event);
     }
 }
 /// What [`Hooks::world_saved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -12910,7 +13791,7 @@ pub struct WorldSavedEvent {
 }
 pub fn dispatch_world_saved(host: &mut dyn Host, mods: &[Box<dyn Hooks>], wait: bool) {
     let mut event = WorldSavedEvent { wait };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "world_saved") {
         mod_hook.world_saved(host, &mut event);
     }
 }

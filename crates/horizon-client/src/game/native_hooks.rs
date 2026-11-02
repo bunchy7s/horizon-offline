@@ -3162,6 +3162,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_toggle_flight(self, mod_api::mods(), player, name, flying, cancel);
     }
+    /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
+    /// The guest's state is swapped in. Server-side. @API:player_toggle_sneak@.
+    pub(super) fn native_player_toggle_sneak(&mut self, player: u128, name: &str, sneaking: bool) {
+        mod_api::dispatch_player_toggle_sneak(self, mod_api::mods(), player, name, sneaking);
+    }
     /// A player finished editing a sign: `ServerGamePacketListenerImpl.updateSignText`
     /// has taken their update packet and every check has passed (they were
     /// editing that sign, within reach, the sign is not waxed, the chat filter
@@ -4885,6 +4890,223 @@ impl Game<'_> {
         mod_api::dispatch_entity_enter_block(self, mod_api::mods(), entity, kind, pos, block);
     }
 
+    /// A server player finished loading the world around them after joining,
+    /// respawning or changing dimension. The guest's state is not swapped in,
+    /// so helpers that look them up through `self.lan` may find nothing while
+    /// a guest packet is handled. Server-side. @API:player_client_loaded_world@.
+    pub(super) fn native_player_client_loaded_world(&mut self, player: u128, name: &str) {
+        mod_api::dispatch_player_client_loaded_world(self, mod_api::mods(), player, name);
+    }
+    /// A server player released the use-item key before the item finished
+    /// being used. The guest's state is not swapped in, so helpers that look
+    /// them up through `self.lan` may find nothing during packet handling.
+    /// @API:player_stop_using_item@.
+    pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
+        mod_api::dispatch_player_stop_using_item(self, mod_api::mods(), player, name);
+    }
+    /// A server player's recipe book open or filter setting changed. `book`
+    /// is the book type's protocol id. The guest's state is not swapped in.
+    /// @API:player_recipe_book_settings_change@.
+    pub(super) fn native_player_recipe_book_settings_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        book: i32,
+        open: bool,
+        filtering: bool,
+    ) {
+        mod_api::dispatch_player_recipe_book_settings_change(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            book,
+            open,
+            filtering,
+        );
+    }
+    /// A server player earned one criterion of an advancement, after the
+    /// progress was recorded. @API:player_advancement_criterion_grant@.
+    pub(super) fn native_player_advancement_criterion_grant(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+    ) {
+        mod_api::dispatch_player_advancement_criterion_grant(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            advancement,
+            criterion,
+        );
+    }
+    /// A server player released a drawn bow with `arrow` selected. The guest's
+    /// state is not swapped in during packet handling. @API:player_ready_arrow@.
+    pub(super) fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str) {
+        mod_api::dispatch_player_ready_arrow(self, mod_api::mods(), player, name, arrow);
+    }
+    /// A server player selected a bundle item in `slot` at `index`. The guest's
+    /// state is not swapped in during packet handling. @API:player_bundle_item_select@.
+    pub(super) fn native_player_bundle_item_select(
+        &mut self,
+        player: u128,
+        name: &str,
+        slot: i32,
+        index: i32,
+    ) {
+        mod_api::dispatch_player_bundle_item_select(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            slot,
+            index,
+        );
+    }
+    /// A server player stopped digging `pos` before the block broke, after
+    /// the server cleared the dig and sent the block back to the client.
+    /// The player's state is not swapped in. @API:block_damage_abort@.
+    pub(super) fn native_block_damage_abort(&mut self, player: u128, name: &str, pos: [i32; 3]) {
+        mod_api::dispatch_block_damage_abort(self, mod_api::mods(), player, name, pos);
+    }
+    /// A hopper at `pos` began an item transfer attempt. This runs after its
+    /// cooldown and enabled checks, before pushing or pulling any items.
+    /// Server-side, including the single-player server. @API:prepare_hopper_transfer@.
+    pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
+        mod_api::dispatch_prepare_hopper_transfer(self, mod_api::mods(), pos);
+    }
+    /// A hopper is about to move one item between containers, a composter's
+    /// bone meal included. Set `cancel` to leave it in its source slot. A chest
+    /// boat or minecart is reported at the block it is in. @API:inventory_move_item@.
+    pub(super) fn native_inventory_move_item(
+        &self,
+        source: [i32; 3],
+        destination: [i32; 3],
+        item: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_inventory_move_item(
+            self,
+            mod_api::mods(),
+            source,
+            destination,
+            item,
+            cancel,
+        );
+    }
+    /// A hopper selected a container while searching for items to push or
+    /// pull. Exactly one of `container` and `entity` identifies the target.
+    /// @API:hopper_inventory_search@.
+    pub(super) fn native_hopper_inventory_search(
+        &self,
+        hopper: [i32; 3],
+        container: Option<[i32; 3]>,
+        entity: Option<u32>,
+    ) {
+        mod_api::dispatch_hopper_inventory_search(self, mod_api::mods(), hopper, container, entity);
+    }
+    /// A vault at `pos` is about to eject a loot item. @API:vault_loot@.
+    pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
+        mod_api::dispatch_vault_loot(self, mod_api::mods(), pos, item);
+    }
+    /// A timed world-border size change finished on the server, after its
+    /// final size was applied. Server-side, including the single-player
+    /// server. @API:world_border_bounds_change_finish@.
+    pub(super) fn native_world_border_bounds_change_finish(&mut self) {
+        mod_api::dispatch_world_border_bounds_change_finish(self, mod_api::mods());
+    }
+
+    /// A server player launched a projectile item, after it was created.
+    /// `item` is the projectile's held item. @API:player_launch_projectile@.
+    pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
+        mod_api::dispatch_player_launch_projectile(self, mod_api::mods(), player, name, item);
+    }
+    /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
+    /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
+    /// usual. Server-side, including the single-player server. @API:explosion_prime@.
+    pub(super) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32) {
+        mod_api::dispatch_explosion_prime(self, mod_api::mods(), center, radius);
+    }
+    /// A dropped item entity reached its 6000-tick lifetime and is about to be
+    /// removed (Bukkit's `ItemDespawnEvent`). @API:item_despawn@.
+    pub(super) fn native_item_despawn(
+        &mut self,
+        entity: u32,
+        item: &str,
+        count: i32,
+        pos: [f64; 3],
+    ) {
+        mod_api::dispatch_item_despawn(self, mod_api::mods(), entity, item, count, pos);
+    }
+    /// A mob is about to drop `count` of `item` at `pos` (Bukkit's
+    /// `EntityDropItemEvent`). @API:entity_drop_item@.
+    pub(super) fn native_entity_drop_item(
+        &mut self,
+        entity: u32,
+        item: &str,
+        count: i32,
+        pos: [f64; 3],
+    ) {
+        mod_api::dispatch_entity_drop_item(self, mod_api::mods(), entity, item, count, pos);
+    }
+    /// A leashed mob's leash was removed, before any lead drop is handled
+    /// (Bukkit's `EntityUnleashEvent`). @API:entity_unleash@.
+    pub(super) fn native_entity_unleash(&mut self, entity: u32, kind: &str) {
+        mod_api::dispatch_entity_unleash(self, mod_api::mods(), entity, kind);
+    }
+    /// A vehicle is about to take damage from a player's attack. `kind` is
+    /// `boat` or the minecart type; mods may change `damage` or set `cancel`
+    /// to leave its damage and wobble unchanged. The attack itself still
+    /// completes. Server-side. @API:native_vehicle_damage@.
+    pub(super) fn native_vehicle_damage(
+        &mut self,
+        kind: &str,
+        damage: &mut f32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_vehicle_damage(self, mod_api::mods(), kind, damage, cancel);
+    }
+    /// A boat or minecart was created at `pos`, after it joined the level.
+    /// `kind` is the vehicle type. Server-side. @API:native_vehicle_create@.
+    pub(super) fn native_vehicle_create(&mut self, kind: &str, pos: [f64; 3]) {
+        mod_api::dispatch_vehicle_create(self, mod_api::mods(), kind, pos);
+    }
+    /// A boat or minecart is about to be destroyed at `pos`. TNT minecarts
+    /// that prime instead of breaking are not heard. Server-side.
+    /// @API:native_vehicle_destroy@.
+    pub(super) fn native_vehicle_destroy(&mut self, kind: &str, pos: [f64; 3]) {
+        mod_api::dispatch_vehicle_destroy(self, mod_api::mods(), kind, pos);
+    }
+    /// A guest sent the server's current `PlayerInput` flags, after they were applied to the hub. The guest's state is swapped in. Server-side. @API:player_input@.
+    pub(super) fn native_player_input(&mut self, player: u128, name: &str, flags: i32) {
+        mod_api::dispatch_player_input(self, mod_api::mods(), player, name, flags);
+    }
+    /// A guest's arm swing was handled by the server. `hand` is `mainhand`. Server-side. @API:player_arm_swing@.
+    pub(super) fn native_player_arm_swing(&mut self, player: u128, name: &str, hand: &str) {
+        mod_api::dispatch_player_arm_swing(self, mod_api::mods(), player, name, hand);
+    }
+    /// A guest's accepted movement made the server jump them from the ground. Server-side. @API:player_jump@.
+    pub(super) fn native_player_jump(&mut self, player: u128, name: &str) {
+        mod_api::dispatch_player_jump(self, mod_api::mods(), player, name);
+    }
+    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. The guest's state is
+    /// swapped in unless they were already removed in the same poll. @API:player_kicked@.
+    pub(super) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
+        mod_api::dispatch_player_kicked(self, mod_api::mods(), player, name, reason);
+    }
+    /// A server player's experience level changed, after the new level was applied. @API:player_level_change@.
+    pub(super) fn native_player_level_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        from: i32,
+        to: i32,
+    ) {
+        mod_api::dispatch_player_level_change(self, mod_api::mods(), player, name, from, to);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
@@ -6696,7 +6918,8 @@ impl GameLevel<'_> {
 // Native mods use these; nothing in Horizon does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     pub(super) fn native_attachments(
         &mut self,
         holder: Holder,
@@ -7123,6 +7346,36 @@ impl Game<'_> {
         let [x, y, w, h] = rect;
         let [a, r, g, b] = argb.to_be_bytes();
         batch.fill(&self.gui.atlas, x, y, w, h, rgba(r, g, b, a));
+    }
+    /// A mod's own RGBA image, uploaded into the HUD atlas slot
+    /// [`MOD_IMAGE_SPRITE`](crate::hud::MOD_IMAGE_SPRITE) and drawn with
+    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
+    /// is `width * height` pixels of four bytes, each side at most
+    /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
+    /// size. The upload costs a texture patch of the image, so send one when the
+    /// image changed, not every frame. API @API:mod_image@.
+    pub(super) fn native_mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
+        let Some(rect) = self
+            .gui
+            .atlas
+            .sprites
+            .get(crate::hud::MOD_IMAGE_SPRITE)
+            .copied()
+        else {
+            return false;
+        };
+        if !mod_image_fits(width, height, rgba.len(), rect.w, rect.h) {
+            return false;
+        }
+        let (w, h) = (self.gui.atlas.width as f32, self.gui.atlas.height as f32);
+        self.map_patches.push(horizon_client::font::Patch {
+            x: (rect.u0 * w).round() as u32,
+            y: (rect.v0 * h).round() as u32,
+            width,
+            height,
+            rgba: rgba.to_vec(),
+        });
+        true
     }
     /// Part `src` (`[x, y, w, h]` in the sprite's own pixels) of sprite
     /// `name` (vanilla's `gui/...`, or a content mod's GUI texture
@@ -8508,6 +8761,16 @@ impl Game<'_> {
     }
 }
 
+/// Whether `rgba` is a whole `width` x `height` image that fits a
+/// `slot_width` x `slot_height` atlas slot (a native mod's `mod_image`).
+fn mod_image_fits(width: u32, height: u32, rgba: usize, slot_width: u32, slot_height: u32) -> bool {
+    width > 0
+        && height > 0
+        && width <= slot_width
+        && height <= slot_height
+        && rgba == width as usize * height as usize * 4
+}
+
 /// Whether F3's debug screen, open when `debug`, covers `corner`
 /// (`DebugScreenOverlay.extractRenderState`): its left and right columns
 /// the top corners, and its charts the bottom corners `charts` (bottom left,
@@ -9195,6 +9458,9 @@ mod tests {
         let breath_hooks = free_hooks(include_str!("../breathing.rs"));
         // The crafting loaders' (`horizon_client_lib::crafting`).
         let crafting_hooks = free_hooks(include_str!("../crafting.rs"));
+        let hunger_hooks = free_hooks(include_str!("../hunger.rs"));
+        let landing_hooks = free_hooks(include_str!("../landing.rs"));
+        let motion_hooks = free_hooks(include_str!("../motion.rs"));
         let declared: BTreeSet<_> = section
             .lines()
             .chain(level_section.lines())
@@ -9210,6 +9476,9 @@ mod tests {
             .chain(menu_hooks.iter().copied())
             .chain(breath_hooks.iter().copied())
             .chain(crafting_hooks.iter().copied())
+            .chain(hunger_hooks.iter().copied())
+            .chain(landing_hooks.iter().copied())
+            .chain(motion_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
@@ -9231,6 +9500,12 @@ mod tests {
                 // crafting.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::crafting::native_{name}")
+            } else if hunger_hooks.contains(name) {
+                format!("horizon_client_lib::hunger::native_{name}")
+            } else if landing_hooks.contains(name) {
+                format!("horizon_client_lib::landing::native_{name}")
+            } else if motion_hooks.contains(name) {
+                format!("horizon_client_lib::motion::native_{name}")
             } else if menu_hooks.contains(name) {
                 // menu.rs compiles into horizon-client-lib (#5446's
                 // split): horizon-mixins resolves the crate by its package.
@@ -9353,5 +9628,17 @@ mod tests {
         assert!(debug_takes(Corner::BottomLeft, true, [true, false]));
         assert!(!debug_takes(Corner::BottomRight, true, [true, false]));
         assert!(debug_takes(Corner::BottomRight, true, [false, true]));
+    }
+
+    /// An image is taken whole, and only when it fits its slot.
+    #[test]
+    fn a_mod_image_is_taken_whole_and_only_when_it_fits() {
+        use super::mod_image_fits;
+        assert!(mod_image_fits(4, 2, 32, 1024, 1024));
+        assert!(mod_image_fits(1024, 1024, 1024 * 1024 * 4, 1024, 1024));
+        assert!(!mod_image_fits(0, 2, 0, 1024, 1024));
+        assert!(!mod_image_fits(4, 2, 31, 1024, 1024));
+        assert!(!mod_image_fits(4, 2, 33, 1024, 1024));
+        assert!(!mod_image_fits(2048, 1, 2048 * 4, 1024, 1024));
     }
 }

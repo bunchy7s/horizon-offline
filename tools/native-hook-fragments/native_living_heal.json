@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_heal",
+      "target": "horizon_client_lib::hunger::native_living_heal",
+      "neoforge": "LivingHealEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a living entity healing, with a changeable amount and cancellation (`native_living_heal`).",
+  "doc_summary": "a living entity healing (`native_living_heal`), with a changeable amount and cancellation. Bundles need \"hooks\": @API:native_living_heal@.",
+  "comments": ["crates/horizon-client/src/hunger.rs"]
+}

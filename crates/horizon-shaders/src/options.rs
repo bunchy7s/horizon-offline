@@ -86,6 +86,21 @@ pub fn with_options(pack: &Pack, macros: &crate::Macros) -> crate::Macros {
     out
 }
 
+/// A pack's `shaders.properties` as the game reads it before the programs: parsed with the
+/// pack's options over `macros` (the standard set and the renderer's), after which `macros` gets
+/// the features the pack turns on (`iris.features.*`, `Macros::define_features`). Returns the
+/// properties and a note for each required feature Horizon lacks. Whatever reads a pack's
+/// programs (the game, the `real_packs` test) reads them with these macros.
+pub fn read_properties(
+    pack: &Pack,
+    macros: &mut crate::Macros,
+) -> (crate::Properties, Vec<String>) {
+    let text = pack.read_text("shaders.properties").unwrap_or_default();
+    let properties = crate::Properties::parse(&text, &with_options(pack, macros));
+    let notes = macros.define_features(&properties);
+    (properties, notes)
+}
+
 /// An option the player can change (8.1): a switch (`values` are `false` and `true`), a value
 /// option or a `const` with the list of values it may take.
 #[derive(Clone, Debug, PartialEq)]
@@ -371,6 +386,43 @@ fn option_texts(pack: &Pack) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `shaders.properties` read as the game reads it: its conditionals see the pack's options
+    /// and the macros given (the renderer's vendor here), and the features it turns on are then
+    /// defined for the programs, with a note for a required one Horizon lacks.
+    #[test]
+    fn properties_are_read_with_the_options_then_define_the_features() {
+        let bytes = crate::pack::tests::zip(&[
+            (
+                "shaders/options.glsl",
+                "#define LEVEL 2 // [1 2]
+",
+            ),
+            (
+                "shaders/shaders.properties",
+                "#if LEVEL == 2
+screen = x
+#endif
+                 #ifdef MC_GL_VENDOR_OTHER
+vendor = other
+#endif
+                 iris.features.optional = SSBO
+iris.features.required = NOT_A_FEATURE
+",
+            ),
+        ]);
+        let pack = Pack::from_zip_bytes("p.zip", bytes).unwrap();
+        let mut macros = crate::Macros::standard();
+        macros.define_renderer(4);
+        let (properties, notes) = read_properties(&pack, &mut macros);
+        assert_eq!(properties.get("screen"), Some("x"));
+        assert_eq!(properties.get("vendor"), Some("other"));
+        assert!(macros.is_defined("IRIS_FEATURE_SSBO"));
+        assert_eq!(
+            notes,
+            ["the pack requires `NOT_A_FEATURE`, which is not supported yet"]
+        );
+    }
 
     #[test]
     fn declared_defaults_remain_selectable_and_apply() {

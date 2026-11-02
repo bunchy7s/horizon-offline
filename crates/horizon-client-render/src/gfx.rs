@@ -5351,7 +5351,8 @@ impl Renderer {
         self.world_post.upscale = if taa { upscale.clamp(1.0, 4.0) } else { 1.0 };
     }
     /// Runs `post` over the world from now on (`None`: no pack), for the dimension `dimension`;
-    /// `block_ids` gives each block sprite layer's `mc_Entity` (id, fluid) pair.
+    /// `block_ids` gives each block sprite layer's `mc_Entity` (id, fluid) and `at_midBlock.w`
+    /// (its block's light), three values a layer.
     /// Returns the programs that run and the notes of loading them.
     pub fn set_shader_pack(
         &mut self,

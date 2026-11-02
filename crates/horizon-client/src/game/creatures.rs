@@ -2312,21 +2312,29 @@ impl Game<'_> {
                         thrown.thrower = Some(thrower);
                     }
                 }
-                MobEvent::DropItem { item, count, at } => self.spawn_item(
-                    ItemStack {
-                        item,
-                        count,
-                        damage: 0,
-                        extra: None,
-                    },
+                MobEvent::DropItem {
+                    mob,
+                    item,
+                    count,
                     at,
-                    // The ItemEntity constructor's motion, from the entity's
-                    // own random (not the level's), so spawnAtLocation drops
-                    // (a fox's berries, a panda's held food, a goat's horn)
-                    // land apart.
-                    dispenser::new_item_motion(),
-                    10,
-                ),
+                } => {
+                    self.native_entity_drop_item(mob, &item, count as i32, at);
+                    self.spawn_item(
+                        ItemStack {
+                            item,
+                            count,
+                            damage: 0,
+                            extra: None,
+                        },
+                        at,
+                        // The ItemEntity constructor's motion, from the entity's
+                        // own random (not the level's), so spawnAtLocation drops
+                        // (a fox's berries, a panda's held food, a goat's horn)
+                        // land apart.
+                        dispenser::new_item_motion(),
+                        10,
+                    );
+                }
                 MobEvent::DropGoatHorn {
                     mob,
                     screaming,
@@ -5362,7 +5370,7 @@ impl Game<'_> {
                     .map_or(2.0, |f| f.0 as f32 * 2.0);
                 // TamableAnimal.feed(.., 2.0F, 2.0F): heals twice the nutrition,
                 // then playEatingSound, which wolves leave empty.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
             }
             // Wolf.mobInteract: the owner puts wolf armor on a tamed adult.
@@ -5500,7 +5508,7 @@ impl Game<'_> {
                     .and_then(|i| i.food.as_ref())
                     .map_or(1.0, |f| f.0 as f32);
                 // TamableAnimal.feed.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
                 eat = eating_sound(m, &mut self.world.random);
             }
@@ -5556,7 +5564,7 @@ impl Game<'_> {
             Species::IronGolem
                 if item == "minecraft:iron_ingot" && m.health < m.attrs.max_health =>
             {
-                m.health = (m.health + 25.0).min(m.attrs.max_health);
+                m.heal(25.0);
                 consume = true;
                 sound = Some("entity.iron_golem.repair");
             }

@@ -68,37 +68,51 @@ impl Game<'_> {
                     .collect();
                 return json!({ "value": all });
             }
-            // `GameRulesService.update`: the rule is set only when its value changes, and logged.
+            // `GameRulesService.update` through `MinecraftGameRuleServiceImpl.updateGameRule`: the rule is set,
+            // logged and told on every update, even to the value it has (as vanilla's sends its notification
+            // then too, which the parity script checks). What doesn't fit answers with the texts of vanilla's
+            // codecs, as the parity script saw them.
             "gamerules/update" => {
                 let update = &body["value"];
-                let Some(rule) = update["key"]
-                    .as_str()
-                    .and_then(gamerules::rule)
-                    .filter(|r| self.ui.rules.get(r.name).is_some())
-                else {
-                    return json!({ "invalid": format!("Unknown game rule: {}", update["key"]) });
+                let Some(key) = update["key"].as_str() else {
+                    return json!({ "invalid": format!("No key key in MapLike[{update}]") });
+                };
+                let rule = gamerules::rule(key).filter(|r| self.ui.rules.get(r.name).is_some());
+                let Some(rule) = rule else {
+                    let key = if key.contains(':') {
+                        key.to_owned()
+                    } else {
+                        format!("minecraft:{key}")
+                    };
+                    return json!({ "invalid": format!(
+                        "Unknown registry key in ResourceKey[minecraft:root / minecraft:game_rule]: {key}"
+                    ) });
                 };
                 let wanted = &update["value"];
                 let value = match (rule.default, wanted) {
-                    (GameRuleValue::Bool(_), Value::Bool(b)) => Some(GameRuleValue::Bool(*b)),
-                    (GameRuleValue::Int(_), n) => n
-                        .as_i64()
-                        .and_then(|n| i32::try_from(n).ok())
-                        .filter(|n| (rule.min..=rule.max).contains(n))
-                        .map(GameRuleValue::Int),
-                    _ => None,
+                    (GameRuleValue::Bool(_), Value::Bool(b)) => Ok(GameRuleValue::Bool(*b)),
+                    (GameRuleValue::Bool(_), other) => Err(format!("Not a boolean: {other}")),
+                    (GameRuleValue::Int(_), other) => match other.as_i64() {
+                        Some(n) if (i64::from(rule.min)..=i64::from(rule.max)).contains(&n) => {
+                            Ok(GameRuleValue::Int(n as i32))
+                        }
+                        Some(n) => Err(format!(
+                            "Value {n} outside of range [{}:{}]",
+                            rule.min, rule.max
+                        )),
+                        None => Err(format!("Not a number: {other}")),
+                    },
                 };
-                let Some(value) = value else {
-                    return json!({ "invalid": format!("Invalid value {wanted} for game rule {}", rule.name) });
+                let value = match value {
+                    Ok(value) => value,
+                    Err(invalid) => return json!({ "invalid": invalid }),
                 };
                 let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
-                if current != value {
-                    rpc(format!(
-                        "Game rule '{}' updated from '{current}' to '{value}'",
-                        rule.name
-                    ));
-                    self.set_game_rule(rule, value);
-                }
+                rpc(format!(
+                    "Game rule '{}' updated from '{current}' to '{value}'",
+                    rule.name
+                ));
+                self.set_game_rule(rule, value);
                 return json!({ "value": typed_rule(rule, value) });
             }
             "serversettings/autosave" => {
@@ -171,6 +185,23 @@ impl Game<'_> {
                 state.force_game_mode = force;
                 self.set_force_game_mode(force);
                 return json!({ "value": state.force_game_mode });
+            }
+            "serversettings/max_players" => {
+                return json!({ "value": state.max_players });
+            }
+            "serversettings/max_players/set" => {
+                let Some(max_players) = body["value"]
+                    .as_i64()
+                    .and_then(|value| usize::try_from(value).ok())
+                else {
+                    return json!({ "error": "max players must be a non-negative integer" });
+                };
+                rpc(format!(
+                    "Update max players from {} to {}",
+                    state.max_players, max_players
+                ));
+                self.set_max_players(state, max_players);
+                return json!({ "value": state.max_players });
             }
             "serversettings/use_allowlist" => {
                 return json!({
