@@ -841,7 +841,14 @@ enum Merge {
     Font,
     /// `SpriteSourceList.load`: sources from the bottom pack up.
     Atlas,
+    /// `BlockStateModelLoader.loadBlockStateDefinitionStack`: every pack's
+    /// definition binds on its own, and a higher one replaces only the states
+    /// it binds. Kept as its layers ([`BLOCKSTATE_LAYERS`]) for the catalog.
+    BlockStates,
 }
+/// The key of a stacked blockstate file: its definitions, bottom first, each
+/// as the pack wrote it.
+pub const BLOCKSTATE_LAYERS: &str = "horizon:layers";
 fn merge_kind(name: &str) -> Option<Merge> {
     let (_, rest) = name.strip_prefix("assets/")?.split_once('/')?;
     if rest == "sounds.json" {
@@ -852,6 +859,7 @@ fn merge_kind(name: &str) -> Option<Merge> {
         "lang" => Some(Merge::Lang),
         "font" => Some(Merge::Font),
         "atlases" => Some(Merge::Atlas),
+        "blockstates" => Some(Merge::BlockStates),
         _ => None,
     }
 }
@@ -859,7 +867,7 @@ fn merge_kind(name: &str) -> Option<Merge> {
 /// does. Layers that do not parse are skipped, as vanilla logs and skips them.
 fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
     use serde_json::{Map, Value};
-    let parsed: Vec<Map<String, Value>> = layers
+    let mut parsed: Vec<Map<String, Value>> = layers
         .iter()
         // SoundManager skips a sounds.json Gson rejects, whole.
         .filter(|b| kind != Merge::Sounds || crate::sound_events::is_valid_file(b))
@@ -902,6 +910,12 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         }
         Merge::Font => list("providers", &mut parsed.iter().rev()),
         Merge::Atlas => list("sources", &mut parsed.iter()),
+        // One definition is the file as it is.
+        Merge::BlockStates if parsed.len() < 2 => Value::Object(parsed.pop()?),
+        Merge::BlockStates => Value::Object(Map::from_iter([(
+            BLOCKSTATE_LAYERS.to_owned(),
+            Value::Array(parsed.into_iter().map(Value::Object).collect()),
+        )])),
     };
     serde_json::to_vec(&out).ok()
 }
@@ -1405,6 +1419,36 @@ mod tests {
             &[json(r#"{"sources":[1]}"#), json(r#"{"sources":[2]}"#)],
         );
         assert_eq!(parse(atlas.unwrap()), serde_json::json!({"sources":[1,2]}));
+        // BlockStateModelLoader: every definition kept, bottom first, for the
+        // catalog to bind one by one; one that does not parse is skipped.
+        let gate = merge(
+            Merge::BlockStates,
+            &[
+                json(r#"{"variants":{"":{"model":"v"}}}"#),
+                b"not json".to_vec(),
+                json(r#"{"variants":{"powered=true":{"model":"p"}}}"#),
+            ],
+        );
+        assert_eq!(
+            parse(gate.unwrap()),
+            serde_json::json!({BLOCKSTATE_LAYERS:[
+                {"variants":{"":{"model":"v"}}},
+                {"variants":{"powered=true":{"model":"p"}}}
+            ]})
+        );
+        // A single definition stays the file as it is.
+        let alone = merge(
+            Merge::BlockStates,
+            &[json(r#"{"variants":{"":{"model":"p"}}}"#)],
+        );
+        assert_eq!(
+            parse(alone.unwrap()),
+            serde_json::json!({"variants":{"":{"model":"p"}}})
+        );
+        assert_eq!(
+            merge_kind("assets/minecraft/blockstates/oak_fence_gate.json"),
+            Some(Merge::BlockStates)
+        );
         assert_eq!(
             merge_kind("assets/minecraft/lang/en_us.json"),
             Some(Merge::Lang)

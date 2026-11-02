@@ -580,7 +580,7 @@ impl Mob {
             self.velocity = Vec3::ZERO;
         }
         let step = self.kind.step_height as f32;
-        let mut scene = SceneCollisions {
+        let scene = SceneCollisions {
             world: w.world,
             binding: w.collision,
             subject: self.kind.flags.lava_walker.then(|| PowderSnowSubject {
@@ -589,8 +589,10 @@ impl Mob {
                 ..Default::default()
             }),
         };
+        // Entity.collide: the world border's walls stop the mob too.
+        let border = w.border.map(|b| (b, [self.position.x, self.position.z]));
         let moved = scene
-            .resolve(self.bounds(), wanted, step, self.on_ground)
+            .resolve_in_border(self.bounds(), wanted, step, self.on_ground, border)
             .unwrap_or(Vec3::ZERO);
         let length = moved.x * moved.x + moved.y * moved.y + moved.z * moved.z;
         let wanted_length = wanted.x * wanted.x + wanted.y * wanted.y + wanted.z * wanted.z;
@@ -789,25 +791,23 @@ impl Mob {
                 self.ai.steps.next_step = self.next_step();
             } else if self.fluids.in_water {
                 self.ai.steps.next_step = self.next_step();
-                // Entity.waterSwimSound
+                // Entity.waterSwimSound, and SkeletonHorse.playSwimSound's
+                // mapping of the volume it works out.
                 let v = self.velocity;
-                let volume = 1.0_f32.min(
+                let speed =
                     (v.x * v.x * f64::from(0.2_f32) + v.y * v.y + v.z * v.z * f64::from(0.2_f32))
-                        .sqrt() as f32
-                        * 0.35,
-                );
+                        .sqrt() as f32;
+                let volume = super::equine::swim_volume(self, 1.0_f32.min(speed * 0.35));
                 if !super::ai::movement_sounds(self) {
                     return;
                 }
                 let pitch = 1.0 + (self.random.next_float() - self.random.next_float()) * 0.4;
+                // Entity.playSwimSound asks getSwimSound for its sound even
+                // when the mob is silent, and a skeleton horse counts there.
+                let sound = super::ai::swim_sound(self);
                 if !self.silent {
                     let at = [self.position.x, self.position.y, self.position.z];
-                    events.push(MobEvent::Sound(
-                        super::ai::swim_sound(self),
-                        at,
-                        volume,
-                        pitch,
-                    ));
+                    events.push(MobEvent::Sound(sound, at, volume, pitch));
                 }
             }
         } else if w.facts.is_air(state)
@@ -1802,6 +1802,7 @@ mod tests {
                 items: Some(&items),
                 lid_openers: &lid_openers,
                 mod_effects: None,
+                border: None,
             };
             let kind = std::sync::Arc::new(types.types["minecraft:pig"].clone());
             let mut m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 0.5), 0.0);
@@ -1913,6 +1914,7 @@ mod tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            border: None,
         };
         let kind = std::sync::Arc::new(types.types["minecraft:horse"].clone());
         let mut sank = 0.0;
@@ -1947,6 +1949,47 @@ mod tests {
             (lift - f64::from(0.04_f32)).abs() < 1.0e-9,
             "a ridden horse gains 0.04 a tick, got {lift}"
         );
+    }
+
+    /// `Entity.collectColliders`: the world border's wall stops a mob's move
+    /// as it stops the player's (#7080). A border of size 10 around (8, 8)
+    /// has its east wall at x = 13.
+    #[test]
+    fn the_world_border_stops_a_mob() {
+        let border =
+            horizon_core::geometry::border::BorderGeometry::new([8.0, 8.0], 10.0, 29_999_984)
+                .unwrap();
+        let build = |world: &mut crate::world::World,
+                     _: &horizon_world::registry::BlockRegistry| {
+            world.chunks.insert(
+                (0, 0),
+                std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+            );
+        };
+        crate::mobs::world::with_built_test_world(&[], build, |w, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:pig"].clone());
+            let mut east_edge = [0.0; 2];
+            for (i, bordered) in [false, true].into_iter().enumerate() {
+                let w = MobWorld {
+                    border: bordered.then_some(&border),
+                    ..w.clone()
+                };
+                // 1.5 blocks east from x = 11.5: past the wall at 13 if nothing stops it.
+                let mut m = Mob::new(1, kind.clone(), Vec3::new(11.5, 64.0, 8.5), 0.0);
+                m.velocity = Vec3::new(1.5, 0.0, 0.0);
+                m.do_move(&w, &mut Vec::new());
+                east_edge[i] = m.bounds().max_position().x;
+                assert_eq!(m.horizontal_collision, bordered);
+            }
+            assert!(
+                east_edge[0] > 13.0,
+                "no border: the pig walks on, {east_edge:?}"
+            );
+            assert!(
+                (east_edge[1] - 13.0).abs() < 1.0e-7,
+                "the pig's east side stops on the wall at x = 13, {east_edge:?}"
+            );
+        });
     }
 
     /// `LivingEntity.checkFallDamage`'s dust: nothing within the safe distance,

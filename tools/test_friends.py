@@ -15,9 +15,7 @@ is off: nothing leaves the machine.
 
     python3 tools/test_friends.py --client target/fast/horizon-client --relay target/fast/horizon-relay
 
-The host runs on its integrated server thread by default (the window is a
-client of it). `--in-frame` is DEPRECATED (never use it, it will be removed soon);
-`--server-thread` is accepted for compatibility.
+The host runs on its integrated server thread (the window is a client of it).
 
 `--role host|guest` runs one side only (two machines, e.g. over a tailnet):
 the host prints the code, the guest takes it with `--code` (`--relay-url`
@@ -87,12 +85,8 @@ class Game:
     # Extra words before and after the client (`--xvfb`, `--offscreen`).
     prefix = []
     extra = []
-    # The host's world on its server thread (`--server-thread`), else in the window.
-    server_thread = True
 
     def __init__(self, client, resources, work, name, env):
-        # Either way explicitly, whatever the game's default.
-        env = dict(env, HORIZON_SERVER_THREAD='1' if Game.server_thread and name == 'host' else '0')
         self.home = work / name
         self.home.mkdir()
         self.endpoint = self.home / 'c.sock'
@@ -287,16 +281,15 @@ def full(args, work):
         assert "Couldn't reach your friend's game" in reason, reason
         print(f'after stopping: "{reason}"')
         guest.stop()
-        if Game.server_thread:
-            # Leaving the world ends its code; coming back shares a new one.
-            host('friends host')
-            host.wait('friends status', lambda v: v['code'], 30, 'invite code')
-            host('disconnect')
-            host.wait('screen', lambda v: v['screen'] == 'title', 60, 'the title screen')
-            assert host('friends status')['code'] is None, 'the code outlived its world'
-            assert host_world(host) != code
-            host('friends stop')
-            print('leaving the world ends its code')
+        # Leaving the world ends its code; coming back shares a new one.
+        host('friends host')
+        host.wait('friends status', lambda v: v['code'], 30, 'invite code')
+        host('disconnect')
+        host.wait('screen', lambda v: v['screen'] == 'title', 60, 'the title screen')
+        assert host('friends status')['code'] is None, 'the code outlived its world'
+        assert host_world(host) != code
+        host('friends stop')
+        print('leaving the world ends its code')
         # (b) A self-hosted relay, run locally: the short code, relayed.
         relay, relay_log, relay_url = start_relay(args, work)
         set_relay(host, relay_url)
@@ -384,18 +377,12 @@ def main():
     parser.add_argument('--hold', type=float, default=0, help='guest: stay this many seconds before leaving')
     parser.add_argument('--baseline', action='store_true', help='first run the same checks over plain LAN')
     parser.add_argument('--offscreen', action='store_true', help='run the games without a window')
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--server-thread', dest='server_thread', action='store_true', default=True,
-                      help='host on its server thread (default; retained for existing callers)')
-    mode.add_argument('--in-frame', dest='server_thread', action='store_false',
-                      help='DEPRECATED, never use: unsupported, will be removed soon')
+    # The host always runs on its server thread; the flag stays for existing callers.
+    parser.add_argument('--server-thread', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--xvfb', action='store_true', help='run the games under xvfb-run (headless Linux)')
     args = parser.parse_args()
     Game.prefix = ['xvfb-run', '-a'] if args.xvfb else []
     Game.extra = ['--offscreen'] if args.offscreen else []
-    Game.server_thread = args.server_thread
-    if not args.server_thread:
-        print('DEPRECATED: --in-frame is unsupported and will be removed soon. Do not use it.', file=sys.stderr)
     args.client, args.resources = args.client.resolve(), args.resources.resolve()
     try:
         require_server_reports(args.resources)
@@ -404,7 +391,6 @@ def main():
     # Short: Unix socket paths are limited to about 100 bytes.
     with tempfile.TemporaryDirectory(prefix='hzf-', dir='/tmp') as directory:
         work = Path(directory)
-        print(f'Friends host mode: {"server-thread" if Game.server_thread else "in-frame"}')
         if args.role:
             return one_side(args, work)
         assert args.relay, 'give --relay (the relay binary, run locally for the relay half)'

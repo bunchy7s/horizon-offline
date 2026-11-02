@@ -246,10 +246,16 @@ impl Game<'_> {
         // another player.
         let (entity, descending) = match self.camera_mob() {
             Some(m) => (super::remote_camera::mob_camera_entity(m), false),
-            None => (
-                self.player_camera_entity()?,
-                self.player.as_ref()?.shift_key_down,
-            ),
+            None => {
+                let mut entity = self.player_camera_entity()?;
+                if let Some(position) = self.remote_minecart_rider_position(partial) {
+                    // Already evaluated at partial: do not linearly interpolate
+                    // between tick endpoints across a corner a second time.
+                    entity.position = position;
+                    entity.previous = position;
+                }
+                (entity, self.player.as_ref()?.shift_key_down)
+            }
         };
         let mut view = self.view;
         let kind = match self.camera_type {
@@ -352,7 +358,14 @@ impl Game<'_> {
         let ride_turn = self
             .riding
             .and_then(|id| self.boats.iter().find(|b| b.id == id))
-            .map_or(0.0, |b| b.delta_rotation);
+            .map_or_else(
+                || {
+                    self.riding
+                        .and_then(|id| self.carts.iter().find(|c| c.id == id))
+                        .map_or(0.0, |c| c.passenger_yaw_delta)
+                },
+                |b| b.delta_rotation,
+            );
         let entity = CameraEntity {
             position: [p.position.x, p.position.y, p.position.z],
             previous: [
@@ -782,7 +795,12 @@ impl Game<'_> {
             240 | 240 << 8,
             &mut verts,
         );
+        // `WingsLayer` draws through `RenderTypes.armorCutoutNoCull`: the
+        // wings' faces show from both sides (the elytra texture is empty on
+        // the face that looks at the body).
+        let wings_start = verts.len();
         self.player_elytra_geometry(&m, chest, camera, 1.0, 240 | 240 << 8, &mut verts);
+        let wings = wings_start..verts.len();
         self.shoulder_parrots_geometry(&m, camera, 1.0, 240 | 240 << 8, &mut verts);
         self.held_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
         self.head_item_geometry(&m, camera, 1.0, 240 | 240 << 8, false, &mut verts);
@@ -799,7 +817,7 @@ impl Game<'_> {
             .as_ref()
             .filter(|p| p.fire_ticks > 0 && !p.spectator)
             .map(|p| (p.dimensions.width, p.dimensions.height));
-        let quads = player_preview_quads(verts, gui, fire, &atlas.sprites);
+        let quads = player_preview_quads_no_cull(verts, gui, fire, &atlas.sprites, wings);
         let start = batch.vertices.len();
         for (_, p, uv, color) in quads {
             batch.quad_3d(p, uv, color);
@@ -1033,13 +1051,9 @@ impl Game<'_> {
             out,
         );
     }
-    /// The entity id the local player has: the server's, else the LAN host's.
+    /// The entity id the local player has on its server.
     fn own_entity_id(&self) -> i32 {
-        match (&self.remote, &self.lan) {
-            (Some(r), _) => r.entity_id,
-            (None, Some(host)) => host.host_entity,
-            _ => 0,
-        }
+        self.remote.as_ref().map_or(0, |r| r.entity_id)
     }
     /// `ArrowLayer` and `BeeStingerLayer` (`StuckInBodyLayer`) for a player:
     /// the arrows and bee stingers stuck in the body, placed from the entity
@@ -1167,10 +1181,23 @@ fn entity_in_ui_shade(normal: glam::Vec3) -> f32 {
 }
 
 pub(super) fn player_preview_quads(
+    verts: Vec<horizon_client::mesher::Vertex>,
+    gui: glam::Mat4,
+    fire: Option<(f32, f32)>,
+    sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
+) -> Vec<(f32, [[f32; 3]; 4], [[f32; 2]; 4], u32)> {
+    player_preview_quads_no_cull(verts, gui, fire, sprites, 0..0)
+}
+
+/// `player_preview_quads` where the faces of the vertices in `no_cull` are
+/// kept when they look away (a `NoCull` render type); their light still comes
+/// from the face's own outward normal, as the vertex normal gives it.
+pub(super) fn player_preview_quads_no_cull(
     mut verts: Vec<horizon_client::mesher::Vertex>,
     gui: glam::Mat4,
     fire: Option<(f32, f32)>,
     sprites: &std::collections::HashMap<String, horizon_client::hud::Rect>,
+    no_cull: std::ops::Range<usize>,
 ) -> Vec<(f32, [[f32; 3]; 4], [[f32; 2]; 4], u32)> {
     let flame_start = verts.len();
     if let Some((width, height)) = fire {
@@ -1191,7 +1218,8 @@ pub(super) fn player_preview_quads(
             std::array::from_fn(|i| gui.transform_point3(glam::Vec3::from_array(q[i].pos)));
         let n = (p[1] - p[0]).cross(p[2] - p[0]);
         // The winding gives inward normals: faces with n.z >= 0 point away.
-        if n.z >= 0.0 {
+        let back = n.z >= 0.0;
+        if back && !no_cull.contains(&(index * 4)) {
             continue;
         }
         let n = n.normalize_or_zero();
@@ -1204,12 +1232,13 @@ pub(super) fn player_preview_quads(
         let ch = |s: u32| ((((c >> s) & 255) as f32 * shade) as u32) << s;
         let color = (c & 0xFF00_0000) | ch(0) | ch(8) | ch(16);
         let depth = p.iter().map(|v| v.z).sum::<f32>() / 4.0;
-        quads.push((
-            depth,
-            p.map(|v| v.to_array()),
-            std::array::from_fn(|i| q[i].uv),
-            color,
-        ));
+        let (mut pos, mut uv) = (p.map(|v| v.to_array()), std::array::from_fn(|i| q[i].uv));
+        if back {
+            // Seen from behind: the same quad in the opposite winding.
+            pos.reverse();
+            uv.reverse();
+        }
+        quads.push((depth, pos, uv, color));
     }
     // Keep far-to-near order for translucent faces; opaque overlap uses depth.
     quads.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -1383,6 +1412,37 @@ mod preview_tests {
         assert!(shield[0].depth < arm[0].depth);
         assert!(shield[2].depth > arm[2].depth);
         assert_eq!(batch.runs(), vec![(0..12, Blend::Depth([1, 0, 1, 1]))]);
+    }
+
+    #[test]
+    fn no_cull_faces_stay_in_the_preview_when_they_look_away() {
+        use horizon_client::mesher::Vertex;
+        // The wings' `armorCutoutNoCull`: a face turned from the viewer is
+        // dropped by the preview's culling unless its vertices are no-cull.
+        let face = |z: f32| {
+            [[-1.0, -1.0], [-1.0, 1.0], [1.0, 1.0], [1.0, -1.0]].map(|[x, y]| Vertex {
+                pos: [x, y, z],
+                uv: [x, y],
+                layer: 0,
+                color: u32::MAX,
+                light: 0,
+                normal: [0; 4],
+                glint_uv: [0.0, 0.0],
+            })
+        };
+        // Wound one way a face looks at the viewer, the other way it looks away.
+        let mut away = face(0.0);
+        away.reverse();
+        let verts: Vec<_> = face(0.0).into_iter().chain(away).collect();
+        let sprites = Default::default();
+        let gui = glam::Mat4::IDENTITY;
+        let culled = player_preview_quads(verts.clone(), gui, None, &sprites);
+        assert_eq!(culled.len(), 1);
+        let kept = player_preview_quads_no_cull(verts.clone(), gui, None, &sprites, 4..8);
+        assert_eq!(kept.len(), 2);
+        // The first face is outside the range and still culled when it looks away.
+        let first_away = player_preview_quads_no_cull(verts, gui, None, &sprites, 0..0);
+        assert_eq!(first_away.len(), 1);
     }
 
     #[test]

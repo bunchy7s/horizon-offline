@@ -87,7 +87,7 @@ MinecraftServer.fillSystemReport	skip:debug		system report for crash and debug o
 MinecraftServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	gap: player: LAN guests are not sent ChangeDifficulty when /difficulty changes; they get it on join, respawn or dimension change
 MinecraftServer.updateMobSpawningFlags	inline	crates/horizon-client/src/game/natural_spawning.rs::Game::spawn_natural	rules are read at each spawn; no cached spawn flag
 MinecraftServer.sendDifficultyUpdate	inline	crates/horizon-client/src/lan/hub.rs::Hub::place_new_player	gap: player: sent when a guest joins, respawns or changes dimension; see setDifficulty
-MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::Game::lan_apply_settings	gap: player: guests already online keep their mode when force changes; the default applies at join (lan_guest_joined)
+MinecraftServer.enforceGameTypeForPlayers	inline	crates/horizon-client/src/game/lan.rs::enforce_guest_game_mode	applies the default mode to online players when force game mode is enabled
 MinecraftServer.executeIfPossible	skip:java		rejects tasks during shutdown
 MinecraftServer.reloadResources	port	crates/horizon-client/src/game/functions.rs::Game::cmd_reload	gap: minor: data packs only, via reload_datapacks
 MinecraftServer.configurePackRepository	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: picks the enabled packs and adds new ones; no feature-flag check and no safe mode
