@@ -19169,7 +19169,7 @@ struct CoreTables {
     item_renderer: horizon_client::item_render::ItemRenderer,
     visibility: horizon_world::block_render::FaceVisibility,
     gameplay: GameplayTables,
-    biomes: Biomes,
+    biomes: Arc<Biomes>,
     environment: Environment,
     collision: BlockCollisionRegistry<'static>,
 }
@@ -19193,6 +19193,7 @@ fn load_core(
     headless: bool,
     parallel: bool,
     progress: &Progress,
+    launch_world: Option<&str>,
 ) -> std::result::Result<std::result::Result<CoreTables, String>, String> {
     let assets = match startup::time("core.assets", || Assets::load(root)) {
         Ok(assets) => assets,
@@ -19237,7 +19238,17 @@ fn load_core(
                 .map_err(|e| e.to_string())
             });
             let biomes = Step::spawn(scope, parallel, || {
-                startup::time("core.biomes", || Biomes::load(root)).map_err(|e| e.to_string())
+                let biomes = Arc::new(
+                    startup::time("core.biomes", || Biomes::load(root))
+                        .map_err(|e| e.to_string())?,
+                );
+                // A launch that names a world: its data preload needs only the
+                // block registry and the biomes, so it starts here rather than
+                // after the block models and facts (~250 ms later).
+                if let Some(folder) = launch_world {
+                    world_loading::preload_launch_world(folder, root, registry, biomes.clone());
+                }
+                Ok::<_, String>(biomes)
             });
             let environment = Step::spawn(scope, parallel, || {
                 startup::time("core.environment", || Environment::load(root))
@@ -19373,7 +19384,13 @@ fn load_resources(
     let (core, loaded_gui) = loop {
         let (ui, core) = std::thread::scope(|scope| {
             let core = Step::spawn(scope, parallel, || {
-                startup::time("core", || load_core(&root, headless, parallel, progress))
+                // A failed pack starts core again from the game's own
+                // resources, which the world's preload must read: with packs
+                // it waits for the core that loaded.
+                let early = launch_world.filter(|_| root == vanilla_root);
+                startup::time("core", || {
+                    load_core(&root, headless, parallel, progress, early)
+                })
             });
             let ui = load_ui(&root).map(|ui| offer(ui, &root));
             (ui, core.join())
@@ -19418,7 +19435,6 @@ fn load_resources(
     } = core;
     let assets = Arc::new(assets);
     let render = Arc::new(render);
-    let biomes = Arc::new(biomes);
     if let Some(folder) = launch_world {
         world_loading::preload_launch_world(folder, &root, assets.registry, biomes.clone());
     }
