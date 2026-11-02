@@ -2881,6 +2881,24 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// TNT at `pos` is about to be lit (primed): a flint and steel or a fire
+    /// charge on it, fire burning it, a redstone signal, an arrow, or a
+    /// dispenser's flint and steel or TNT item. `player` is the server player
+    /// whose click lit it, with their state swapped in (so `native_tell`
+    /// answers them), None when no player is behind it (fire, redstone, an
+    /// arrow, a dispenser). Set `cancel` and it is not primed: a TNT block
+    /// stays where it is (one that fire or a signal had already taken out is
+    /// put back, without a block update), a dispenser's TNT item stays in it.
+    /// Not asked: TNT set off by a blast (`native_explosion_detonate` spares
+    /// blocks), a TNT minecart and a sulfur cube. Server-side and in single
+    /// player. @API:native_tnt_primed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn tnt_primed(&self, host: &mut dyn Host, event: &mut TntPrimedEvent) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A boat or minecart (`kind`, `minecraft:oak_boat`) moved since the last
     /// tick (`VehicleMoveEvent`): `from` and `to` are its positions, heard
     /// after the tick moved it. Once a tick for each vehicle that carries a
@@ -7924,6 +7942,30 @@ pub fn dispatch_resource_pack_status(
     };
     for mod_hook in mods {
         mod_hook.resource_pack_status(host, &mut event);
+    }
+}
+/// What [`Hooks::tnt_primed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TntPrimedEvent {
+    pub player: Option<u128>,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_tnt_primed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = TntPrimedEvent { player, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.tnt_primed(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
     }
 }
 /// What [`Hooks::vehicle_moved`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

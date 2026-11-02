@@ -128,6 +128,31 @@ impl PrimedTnt {
 }
 
 impl Game<'_> {
+    /// Asks the mods whether the TNT at `pos` may be primed
+    /// (`native_tnt_primed`); the acting guest, if any, is its player.
+    pub(super) fn tnt_prime_allowed(&mut self, pos: BlockPos) -> bool {
+        let mut cancel = false;
+        self.native_tnt_primed(self.lan_acting_uuid, [pos.x, pos.y, pos.z], &mut cancel);
+        !cancel
+    }
+    /// Primes TNT a level event announced, or, when the mods refuse, puts
+    /// back the block the fire or signal had already taken out.
+    pub(super) fn prime_tnt_event(&mut self, pos: BlockPos, rot: f64) {
+        if self.tnt_prime_allowed(pos) {
+            self.add_primed_tnt(pos, rot, 80, None, None);
+            return;
+        }
+        // Refused: the level queued the fuse sound and the game event right
+        // after the prime; they are dropped as they come up.
+        self.tnt_refused = Some(pos);
+        let Some(tnt) = self.pack.assets.registry.default_state("minecraft:tnt") else {
+            return;
+        };
+        if self.world.block(pos.x, pos.y, pos.z) == self.world.air {
+            let flags = level_flags::UPDATE_CLIENTS | level_flags::UPDATE_SKIP_ON_PLACE;
+            self.with_level(|b, level, ticks| b.set_block(level, ticks, pos, tnt, flags));
+        }
+    }
     /// `new PrimedTnt(level, x + 0.5, y, z + 0.5, owner)`; `short` applies
     /// `wasExploded`'s random short fuse. Plays `entity.tnt.primed` for primes.
     pub(super) fn spawn_primed_tnt(
@@ -263,6 +288,9 @@ impl Game<'_> {
             return Ok(false);
         }
         let pos = BlockPos::new(hit.pos[0], hit.pos[1], hit.pos[2]);
+        if !self.tnt_prime_allowed(pos) {
+            return Ok(true);
+        }
         let guest = self.lan_acting;
         self.spawn_primed_tnt(pos, false, Some(Who::Player), guest);
         let air = self.world.air;
