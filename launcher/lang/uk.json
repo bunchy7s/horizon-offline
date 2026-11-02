@@ -805,5 +805,6 @@
   "{file} is not a Horizon game for this computer.": "{file} — не гра Horizon для цього комп'ютера.",
   "Install a release or Nightly first: an imported build plays with its game files.": "Спершу встановіть реліз або Nightly: імпортована збірка використовує його файли гри.",
   "{file} holds no {program}.": "У {file} немає {program}.",
-  "Could not import the build: {error}": "Не вдалося імпортувати збірку: {error}"
+  "Could not import the build: {error}": "Не вдалося імпортувати збірку: {error}",
+  "Sort by: {order}": "Сортування: {order}"
 }

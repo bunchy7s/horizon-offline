@@ -805,5 +805,6 @@
   "{file} is not a Horizon game for this computer.": "{file} no es un juego de Horizon para este ordenador.",
   "Install a release or Nightly first: an imported build plays with its game files.": "Instala primero una versión o una Nightly: una compilación importada usa sus archivos del juego.",
   "{file} holds no {program}.": "{file} no contiene ningún {program}.",
-  "Could not import the build: {error}": "No se pudo importar la compilación: {error}"
+  "Could not import the build: {error}": "No se pudo importar la compilación: {error}",
+  "Sort by: {order}": "Ordenar por: {order}"
 }

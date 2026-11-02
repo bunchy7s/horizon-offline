@@ -805,5 +805,6 @@
   "{file} is not a Horizon game for this computer.": "{file} 不是适用于这台电脑的 Horizon 游戏。",
   "Install a release or Nightly first: an imported build plays with its game files.": "请先安装一个正式版或 Nightly：导入的构建会使用它的游戏文件。",
   "{file} holds no {program}.": "{file} 中没有 {program}。",
-  "Could not import the build: {error}": "无法导入构建：{error}"
+  "Could not import the build: {error}": "无法导入构建：{error}",
+  "Sort by: {order}": "排序方式：{order}"
 }
