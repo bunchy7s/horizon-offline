@@ -222,7 +222,10 @@ impl Game<'_> {
             if r.trial {
                 tag.insert("PersistenceRequired".into(), Tag::Byte(1));
             }
-            let tag = Tag::Compound(tag);
+            let mut tag = Tag::Compound(tag);
+            // EntityType.loadEntityRecursive applies the spawner's placement
+            // callback to every passenger as well as the root.
+            super::commands::place_summoned(&mut tag, r.position);
             let mob = horizon_client::entity_nbt::mob_from_nbt(
                 &tag,
                 self.res.mob_types(),

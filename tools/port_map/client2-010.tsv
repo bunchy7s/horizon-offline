@@ -12,8 +12,8 @@ ChatComponent.scrollChat	port	crates/horizon-client-render/src/chat.rs::Chat::sc
 ChatComponent.getHeight	port	crates/horizon-client-render/src/chat.rs::ChatOptions::height_px	focused or unfocused chat height in px
 ChatComponent.defaultUnfocusedPct	inline	crates/horizon-client-render/src/chat.rs::ChatOptions::default	the default 70/160 is stored as a constant, not computed from the height formula
 ChatComponent.getLineHeight	port	crates/horizon-client-render/src/chat.rs::ChatOptions::line_height	9 * (line spacing + 1)
-ChatComponent.saveAsDraft	missing		player: Save Chat Drafts does nothing (options_ui.rs notes no drafts yet); text left in the box is not kept for the next open
-ChatComponent.createScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	gap: player: no draft is restored; the chat opens with the initial text its caller passes
+ChatComponent.saveAsDraft	port	crates/horizon-client/src/game/chat.rs::Game::keep_chat_draft	the text left in the box becomes the draft unless the screen was closed on purpose without Save Chat Drafts or the text was sent
+ChatComponent.createScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat_method	T or / opens the chat with the draft kept last time, a command draft only for /, else with its prefix, and records whether the box starts on a draft
 ChatComponent.preserveCurrentChatScreen	missing		minor: unsure: Horizon keeps no chat screen across a dimension change; game/nether_portal.rs:577 only leaves Chat alone during a portal effect, the change path was not checked
 ChatComponent.storeState	inline	crates/horizon-client/src/game/remote.rs::Game::poll_remote	no snapshot: the Reconfigured arm only resets boss bars and registries, so the chat survives a reconfigure without a copy
 ChatComponent.restoreState	inline	crates/horizon-client/src/game/remote.rs::Game::poll_remote	no restore: the chat is never cleared on Reconfigured, so there is nothing to put back
