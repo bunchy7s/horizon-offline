@@ -3991,6 +3991,12 @@ impl Game<'_> {
         let _ = (entity, pos, bursts);
     }
 
+    /// An experience bottle broke and its experience was awarded.
+    /// @API:native_exp_bottle@.
+    pub(super) fn native_exp_bottle(&mut self, pos: [f64; 3], experience: u32) {
+        let _ = (pos, experience);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

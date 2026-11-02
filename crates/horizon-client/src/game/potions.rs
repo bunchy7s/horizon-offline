@@ -1551,6 +1551,7 @@ impl Game<'_> {
             let r = &mut self.world.random;
             let value = 3 + r.next_int_bound(5).unwrap_or(0) + r.next_int_bound(5).unwrap_or(0);
             self.spawn_orbs([at.x, at.y, at.z], value as u32);
+            self.native_exp_bottle([at.x, at.y, at.z], value as u32);
             return;
         }
         // Projectile.onHit calls onHitBlock first, then the potion's
