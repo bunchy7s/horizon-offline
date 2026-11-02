@@ -1620,6 +1620,7 @@ pub enum MobEvent {
     /// `BreakDoorGoal.tick` at its end: the door is removed (`removeBlock`),
     /// then level events 1021 and 2001 with the state that is left there.
     BreakDoor {
+        mob: u32,
         pos: [i32; 3],
     },
     /// `Level.destroyBlockProgress` for a mob's crack on a block (`-1`

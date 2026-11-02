@@ -2327,9 +2327,15 @@ impl Game<'_> {
                     self.with_level(|b, level, ticks| b.set_door_open(level, ticks, pos, open));
                     self.process_level_events()?;
                 }
-                MobEvent::BreakDoor { pos } => {
+                MobEvent::BreakDoor { mob, pos } => {
                     // BreakDoorGoal.tick: removeBlock, then level events 1021
                     // and 2001 with the state that is there now.
+                    let kind = self
+                        .mobs
+                        .iter()
+                        .find(|m| m.id == mob)
+                        .map(super::native_hooks::mob_kind)
+                        .unwrap_or_default();
                     let air = self.world.air;
                     let at = BlockPos::new(pos[0], pos[1], pos[2]);
                     self.with_level(|b, level, ticks| b.set_block(level, ticks, at, air, 3));
@@ -2337,6 +2343,7 @@ impl Game<'_> {
                     self.level_event_at(1021, pos, 0);
                     let left = self.world.block(pos[0], pos[1], pos[2]);
                     self.level_event_at(2001, pos, left.0 as i32);
+                    self.native_entity_break_door(mob, &kind, pos);
                 }
                 MobEvent::DestroyProgress { mob, pos, progress } => {
                     self.destroy_block_progress(mob as i32, pos, progress);
