@@ -35,7 +35,7 @@ impl Launcher {
         self.owner_screen_open = false;
         if !self.settings.owner_notice_seen {
             self.settings.owner_notice_seen = true;
-            self.settings.save();
+            self.save_settings();
         }
     }
 
