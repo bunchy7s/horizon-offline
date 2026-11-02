@@ -185,6 +185,15 @@ jobs:
               ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_imports.py "$file"
             fi
           done
+      - name: Baseline x86-64 CPUs only
+        # No POPCNT or LZCNT at all (the script says why only those): a C library's count intrinsic killed the
+        # game before main on a Core 2 (#7264). Not the Mac builds: every Intel Mac that runs macOS 11 has both.
+        if: runner.os != 'macOS'
+        run: |
+          set -euo pipefail
+          rustup component add llvm-tools
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_cpu_baseline.py \
+            $(for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
       - name: Every program starts
         run: |
           set -euo pipefail

@@ -774,12 +774,23 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
             };
             (kind, crate::spans::thread_cpu().unwrap_or_default())
         });
+        let _tag = horizon_threads::heap_tag(match &job.job {
+            Job::Generate(..) => "stream.generate",
+            Job::Decorate(..) => "stream.decorate",
+            Job::Finish(..) => "stream.finish",
+            Job::Light(..) => "stream.light",
+            Job::Mesh(..) => "stream.mesh",
+            _ => "stream.other",
+        });
         let done = self.locals.with(
             worker,
-            || WorkerLocal {
-                worker: self.generator.worker(),
-                faces: None,
-                mesh_scratch: MeshScratch::default(),
+            || {
+                let _tag = horizon_threads::heap_tag("stream.worker_state");
+                WorkerLocal {
+                    worker: self.generator.worker(),
+                    faces: None,
+                    mesh_scratch: MeshScratch::default(),
+                }
             },
             |local| self.run_job(job.job, local),
         );

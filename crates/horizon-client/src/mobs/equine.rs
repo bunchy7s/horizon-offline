@@ -24,6 +24,19 @@ pub const COLORS: [&str; 7] = [
     "gray",
     "darkbrown",
 ];
+/// `Horse.Variant.getSerializedName` in id order (WHITE 0 to DARK_BROWN 6):
+/// the names a `minecraft:horse/variant` component and the save's `Variant`
+/// byte carry. [`COLORS`] is the same order, but names the texture
+/// (`horse_darkbrown`), which drops the underscore.
+pub const VARIANT_NAMES: [&str; 7] = [
+    "white",
+    "creamy",
+    "chestnut",
+    "brown",
+    "black",
+    "gray",
+    "dark_brown",
+];
 pub const MARKINGS: [&str; 5] = ["", "white", "whitefield", "whitedots", "blackdots"];
 
 // AnimState slots.

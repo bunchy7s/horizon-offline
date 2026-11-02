@@ -33,7 +33,7 @@ EvokerFangsRenderer.submit	port	crates/horizon-client/src/game/fangs.rs::Game::f
 EvokerFangsRenderer.extractRenderState	inline	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	yaw and bite progress read there
 ExperienceOrbRenderer.submit	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	orb billboards with the pulsing colour, in the entity pass
 ExperienceOrbRenderer.vertex	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	vertex built inline
-FallingBlockRenderer.shouldRender	missing		minor: a falling block inside an identical block (vanilla hides it that tick) is still drawn; no such check in game.rs or falling_block.rs
+FallingBlockRenderer.shouldRender	port	crates/horizon-client/src/game.rs::falling_block_visible	a falling block whose own state is the state of the cell its feet are in is not drawn, so a NoGravity block or one that has just landed shows no model; the entity draw skips it and a unit test covers both cases
 FallingBlockRenderer.submit	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	falling block pass with its baked block model
 FallingBlockRenderer.extractRenderState	inline	crates/horizon-client/src/game.rs::Game::entity_geometry	position, state, biome tint and light read there
 FireworkEntityRenderer.extractRenderState	port	crates/horizon-client/src/game/fireworks.rs::Game::rocket_geometry	angled rocket keeps its direction
