@@ -69,7 +69,8 @@ impl Game<'_> {
                 | Target::Stand(_)
                 | Target::Frame(_)
                 | Target::Painting(_)
-                | Target::Other(_),
+                | Target::Other(_)
+                | Target::Fangs(_),
             ) => true,
             _ => self.cushions.iter().any(|e| e.id == id),
         }

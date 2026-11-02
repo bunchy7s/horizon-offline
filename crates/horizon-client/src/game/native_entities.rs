@@ -112,6 +112,7 @@ fn target_id(t: Target) -> Option<u32> {
         | Target::Boat(id)
         | Target::Cart(id)
         | Target::Other(id)
+        | Target::Fangs(id)
         | Target::Crystal(id)
         | Target::Dragon(id)
         | Target::Tnt(id)

@@ -140,6 +140,12 @@ impl Game<'_> {
                 .iter()
                 .find(|c| c.id == id)
                 .map_or([0.0; 2], |c| [c.yaw, 0.0]),
+            Target::Fangs(id) => self
+                .fangs
+                .list
+                .iter()
+                .find(|f| f.id == id)
+                .map_or([0.0; 2], |f| [f.yaw, 0.0]),
             Target::Other(id) => self
                 .others
                 .iter()

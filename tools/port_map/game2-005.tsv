@@ -133,8 +133,8 @@ StackedContents.RecipePicker.getVisitedIngredientIndex	skip:java		bitset index a
 StackedContents.RecipePicker.getVisitiedItemIndex	skip:java		bitset index arithmetic; plain bool vectors in Horizon
 StackedContents.RecipePicker.clearAllVisited	port	crates/horizon-client/src/menu/place.rs::Picker::clear_visited	
 StackedItemContents.getBiggestCraftableStack	port	crates/horizon-client/src/menu/place.rs::Stacked::try_pick_all	the largest craftable count, found by a bounded search
-EvokerFangs.readAdditionalSaveData	missing		fangs are not saved: `entity_nbt.rs` has no evoker fangs writer, so a save in mid-bite drops them
-EvokerFangs.addAdditionalSaveData	missing		no writer for the warmup delay or the owner either
+EvokerFangs.readAdditionalSaveData	port	crates/horizon-client/src/game/persist.rs::Game::spawn_loaded_entities	Warmup defaults to 0 and enters active fangs; gap: Owner resolution only finds already-loaded mobs
+EvokerFangs.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::evoker_fangs_to_nbt	live Warmup, known owner UUID, unresolved Owner retained from raw NBT
 EvokerFangs.getAnimationProgress	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	the bite progress that positions the fang model
 EyeOfEnder.setItem	skip:ui		the item sprite a flying eye shows; Horizon draws the eye itself
 EyeOfEnder.shouldRenderAtSqrDistance	skip:ui		render distance culling only
