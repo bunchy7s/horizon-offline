@@ -2050,6 +2050,7 @@ pub struct Seen {
     pub lying: bool,
     /// `Entity.isVehicle` or `isPassenger`.
     pub ridden: bool,
+    pub is_vehicle: bool,
     /// `Attributes.KNOCKBACK_RESISTANCE`.
     pub knockback_resistance: f64,
     /// The active effects, without namespace (`slowness`, `poison`...).
@@ -2230,6 +2231,7 @@ impl Mob {
             silent: m.silent,
             lying: m.species() == Species::Cat && (m.extra.flag || m.extra.relax_one),
             ridden: m.rider.is_some() || m.extra.rider.is_some() || m.extra.mount.is_some(),
+            is_vehicle: equine::is_vehicle(m),
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
