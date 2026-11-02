@@ -212,12 +212,8 @@ pub fn set_unhappy(m: &mut Mob, events: &mut Vec<MobEvent>) {
     } else {
         "entity.villager.no"
     };
-    events.push(MobEvent::Sound(
-        sound,
-        [m.position.x, m.position.y, m.position.z],
-        1.0,
-        1.0,
-    ));
+    // Mob.makeSound: the sound volume and the voice pitch (babies ~1.5).
+    m.voice(sound, events);
 }
 /// `VillagerModel.setupAnim`.
 pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
@@ -955,6 +951,23 @@ mod tests {
         assert!(!map.contains_key(&"sleeping_pos".into()));
         read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
+    }
+    /// `Villager.setUnhappy` -> `Mob.makeSound(VILLAGER_NO)` plays with
+    /// `LivingEntity.getVoicePitch`: a baby is pitched about 1.5, an adult 1.0.
+    #[test]
+    fn the_unhappy_sound_uses_the_voice_pitch() {
+        let sound_pitch = |age: i32| {
+            let mut m = villager();
+            m.extra.age = age;
+            let mut events = Vec::new();
+            set_unhappy(&mut m, &mut events);
+            match events[0] {
+                MobEvent::Sound(_, _, _, pitch) => pitch,
+                _ => panic!("expected a sound"),
+            }
+        };
+        assert!((0.8..=1.2).contains(&sound_pitch(0)));
+        assert!((1.3..=1.7).contains(&sound_pitch(-24000)));
     }
     #[test]
     fn a_new_profession_rolls_new_offers() {

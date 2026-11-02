@@ -46,7 +46,7 @@ Vec3i.cross	inline	crates/horizon-client/src/game/golems.rs::Game::find_golem	ga
 Vec3i.distToCenterSqr	inline	crates/horizon-client/src/mobs/doors.rs::closer_to_center	gap: minor: returns only the closer-than test, not the squared distance
 Vec3i.distToLowCornerSqr	inline	crates/horizon-world/src/worldgen/end_spike.rs::EndSpikeFeature::place_spike	the spike radius test
 Vec3i.distChessboard	inline	crates/horizon-world/src/level/sculk.rs::Sim::sculk_update_cursors	gap: minor: only the sculk cursor distance; GlobalPos.isWithinDistance is not covered
-Vec3i.differsHorizontally	missing		minor: unsure: used by TryFindLand-style AI filters; no horizontal-differ check found in Horizon's mob AI
+Vec3i.differsHorizontally	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn::find	the frog's land search skips its own column with x and z compared inline, which is `TryFindLandNearLiquid`'s use of it; `TryFindLand`'s own copy is not written
 Vec3i.toString	skip:debug		debug string
 CauldronInteraction.Dispatcher.put	skip:java		item-to-interaction table; Horizon matches items in cauldron.rs::interact
 CauldronInteractions.newDispatcher	skip:java		table constructor

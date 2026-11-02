@@ -2636,6 +2636,27 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A server player who ate chorus fruit (or another item with the
+    /// `teleport_randomly` consume effect) is about to try a random spot
+    /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
+    /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
+    /// after they stopped riding. `from` is their feet, `target` the spot
+    /// drawn; a mod may move it (its y kept inside the level's height, a
+    /// value that is not a number ignored), and the game still looks down
+    /// from it for ground it may land on. Canceling ends the effect: no teleport and no
+    /// more attempts. The player's state is swapped in
+    /// (`native_acting_player`). Foxes are not heard. @API:chorus_fruit_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn chorus_fruit_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut ChorusFruitTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A compostable item was added to the composter at `pos`. @API:compost_item@.
     fn compost_item(&self, host: &dyn Host, event: &mut CompostItemEvent<'_>) {
         let _ = host;
@@ -2680,6 +2701,28 @@ pub trait Hooks: Send + Sync {
     fn enchant_item(&self, host: &mut dyn Host, event: &mut EnchantItemEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// A server player's ender pearl landed and is about to teleport them
+    /// (NeoForge's `EntityTeleportEvent.EnderPearl`, vanilla's
+    /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
+    /// entity id, `from` their feet now, `target` where the pearl started
+    /// its last tick and `damage` the fall damage they then take (5). A mod
+    /// may move `target` (a value that is not a number is ignored) or change
+    /// `damage` (0 or less: none). Canceling
+    /// keeps the player where they are: no endermite roll, no teleport, no
+    /// damage and no sound; the pearl is used up either way. The player's
+    /// state is swapped in (`native_acting_player`). The hit itself is
+    /// heard by `native_projectile_impact`. @API:ender_pearl_teleport@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn ender_pearl_teleport(
+        &self,
+        host: &mut dyn Host,
+        event: &mut EnderPearlTeleportEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// Entities from `chunk` finished loading into the server world. `count`
     /// is the number of saved entity records read. @API:native_entities_load@.
@@ -3446,9 +3489,9 @@ pub trait Hooks: Send + Sync {
     /// teleport: when the new level is entered, before it has loaded around
     /// them), so it cannot stop it. The player's state is swapped in, so the
     /// helpers that read the acting player and `native_tell` work. Once for
-    /// each teleported player, on a server. Other teleports are not heard
-    /// yet: ender pearls, chorus fruit, a spectator's teleport menu; portals
-    /// and respawns are not teleports here. @API:native_player_teleported@.
+    /// each teleported player, on a server. Ender pearls and chorus fruit
+    /// have their own hooks; a spectator's teleport menu is not heard yet;
+    /// portals and respawns are not teleports here. @API:native_player_teleported@.
     fn player_teleported(&self, host: &mut dyn Host, event: &mut PlayerTeleportedEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -4231,6 +4274,20 @@ pub trait Hooks: Send + Sync {
     }
     /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
     fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    fn trade_with_villager(&self, host: &mut dyn Host, event: &mut TradeWithVillagerEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -9152,6 +9209,42 @@ pub fn dispatch_cauldron_level_changed(
         }
     }
 }
+/// What [`Hooks::chorus_fruit_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ChorusFruitTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+}
+pub fn dispatch_chorus_fruit_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ChorusFruitTeleportEvent {
+        player,
+        name,
+        from,
+        target,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.chorus_fruit_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compost_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct CompostItemEvent<'a> {
@@ -9290,6 +9383,49 @@ pub fn dispatch_enchant_item(
     for mod_hook in mods {
         mod_hook.enchant_item(host, &mut event);
     }
+}
+/// What [`Hooks::ender_pearl_teleport`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EnderPearlTeleportEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pearl: u32,
+    pub from: [f64; 3],
+    pub target: &'a mut [f64; 3],
+    pub damage: f32,
+}
+pub fn dispatch_ender_pearl_teleport(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pearl: u32,
+    from: [f64; 3],
+    target: &mut [f64; 3],
+    damage: &mut f32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = EnderPearlTeleportEvent {
+        player,
+        name,
+        pearl,
+        from,
+        target,
+        damage: *damage,
+    };
+    for mod_hook in mods {
+        if matches!(
+            mod_hook.ender_pearl_teleport(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+    *damage = event.damage;
 }
 /// What [`Hooks::entities_load`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -12941,6 +13077,29 @@ pub fn dispatch_trade_select(
     };
     for mod_hook in mods {
         mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::trade_with_villager`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeWithVillagerEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a MerchantOffer,
+}
+pub fn dispatch_trade_with_villager(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    merchant: u32,
+    kind: &str,
+    offer: &MerchantOffer,
+) {
+    let mut event = TradeWithVillagerEvent {
+        merchant,
+        kind,
+        offer,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_with_villager(host, &mut event);
     }
 }
 /// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

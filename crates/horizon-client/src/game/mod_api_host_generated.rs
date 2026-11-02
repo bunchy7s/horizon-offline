@@ -450,4 +450,7 @@ impl Host for super::Game<'_> {
     ) -> u32 {
         self.native_move_items(dimension, from, from_face, to, to_face, item, max)
     }
+    fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
+        self.native_item_stack(batch, stack, at, size)
+    }
 }

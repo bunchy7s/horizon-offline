@@ -126,6 +126,17 @@ impl Game<'_> {
         }
         let size = menu.size;
         let window = menu.window;
+        // A mod menu type keeps its drag in the connection's machine menu
+        // (`lan_machine_click`), not in `menu.drag`: a shift-click during it
+        // goes there too, to only end the drag.
+        if host
+            .play
+            .get(&conn)
+            .and_then(|play| play.crafting.machine.as_ref())
+            .is_some_and(|(w, m)| *w == window && m.quick_crafting())
+        {
+            return false;
+        }
         if !matches!(
             self.world.block_entities.get(&pos),
             Some(BlockEntity::Mod(m)) if !m.id.is_empty()
