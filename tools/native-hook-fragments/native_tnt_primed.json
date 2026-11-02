@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "tnt_primed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tnt_primed",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "TNT about to be lit, cancellable (`native_tnt_primed`).",
+  "doc_summary": "TNT about to be primed: `native_tnt_primed(player, pos, cancel)` is heard before a flint and steel, a fire charge, fire, a redstone signal, an arrow or a dispenser lights the TNT at `pos`, with the player whose click lit it (None when no player did). A mod sets `cancel` and it is not primed: the block stays, or is put back when fire or a signal had already taken it out. The clicking player's state is swapped in. TNT set off by a blast, a TNT minecart and a sulfur cube are not asked. Bundles that use it need `\"hooks\": @API:native_tnt_primed@`."
+}

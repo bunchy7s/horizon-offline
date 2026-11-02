@@ -1374,7 +1374,7 @@ impl Game<'_> {
                 None,
             );
         } else if &*name == "minecraft:tnt" {
-            if self.ui.rules.bool("tnt_explodes") {
+            if self.ui.rules.bool("tnt_explodes") && self.tnt_prime_allowed(target_pos) {
                 self.spawn_primed_tnt(target_pos, false, None, None);
                 self.with_level(|b, level, ticks| b.remove_block(level, ticks, target_pos, false));
                 self.process_level_events()?;
@@ -1435,9 +1435,13 @@ impl Game<'_> {
         if self.sulfur_cube_swallow(front, &stack) {
             return (shrink(stack), optional_event("tnt"));
         }
+        let target = Self::pos_of(front);
+        if !self.tnt_prime_allowed(target) {
+            set_success("tnt", false);
+            return (Some(stack), FAIL);
+        }
         set_success("tnt", true);
         // new PrimedTnt(level, x + 0.5, y, z + 0.5, null), its sound and ENTITY_PLACE.
-        let target = Self::pos_of(front);
         let rot = self.world.random.next_double() * f64::from(std::f32::consts::TAU);
         self.add_primed_tnt(target, rot, 80, None, None);
         self.audio.play(

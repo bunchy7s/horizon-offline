@@ -3897,9 +3897,11 @@ impl Game<'_> {
             ArrowEvent::BubbleColumnParticles { pos } => self.bubble_column_particles(pos),
             ArrowEvent::Block { pos, reaction } => match reaction {
                 BlockReaction::PrimeTnt => {
-                    self.spawn_primed_tnt(pos, false, None, None);
-                    self.with_level(|b, level, ticks| b.remove_block(level, ticks, pos, false));
-                    let _ = self.process_level_events();
+                    if self.tnt_prime_allowed(pos) {
+                        self.spawn_primed_tnt(pos, false, None, None);
+                        self.with_level(|b, level, ticks| b.remove_block(level, ticks, pos, false));
+                        let _ = self.process_level_events();
+                    }
                 }
                 BlockReaction::Light(lit) => {
                     let _ = self.level_set([pos.x, pos.y, pos.z], lit);
