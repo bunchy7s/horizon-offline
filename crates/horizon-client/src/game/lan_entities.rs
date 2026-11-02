@@ -131,14 +131,9 @@ impl Game<'_> {
         }
     }
 
-    /// Who rides what (`Entity.getPassengers`): mobs on mobs, and the
-    /// host in its boat or minecart.
-    pub(super) fn lan_riding(
-        &self,
-        host_entity: Option<i32>,
-        guests: &[(u32, i32)],
-        riding: &mut Riding,
-    ) {
+    /// Who rides what (`Entity.getPassengers`): the players in their vehicles and
+    /// mobs on mobs.
+    pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
         // The server's players in their boats and minecarts.
         for &(vehicle, guest) in guests {
@@ -149,16 +144,12 @@ impl Game<'_> {
                 riding.add(vehicle as i32, m.id as i32);
             }
         }
-        if let (Some(host), Some(vehicle)) = (host_entity, self.riding) {
-            riding.add(vehicle as i32, host);
-        }
     }
 
     /// Boats, minecarts, armor stands, item frames, paintings and the
     /// entities kept unsimulated, as guests track them.
     pub(super) fn lan_object_states(
         &mut self,
-        host_entity: Option<i32>,
         hub: &mut Hub,
         out: &mut States,
         drain_minecart_steps: bool,
@@ -173,7 +164,7 @@ impl Game<'_> {
             let p = b.position;
             let mut e = state(b.id, &b.entity_type(), [p.x, p.y, p.z], b.yaw, b.on_ground);
             // Leashable.setLeashedTo / dropLeash: who holds the boat's lead.
-            e.leash = self.boat_leash_link(b, host_entity, &guests);
+            e.leash = self.boat_leash_link(b, &guests);
             e.velocity = [b.velocity.x, b.velocity.y, b.velocity.z];
             e.meta = vehicle_meta(b.hurt_time, b.hurt_dir, b.damage);
             // AbstractBoat.DATA_ID_PADDLE_LEFT and DATA_ID_PADDLE_RIGHT.
@@ -410,7 +401,7 @@ impl Game<'_> {
             ));
             out.push(e);
         }
-        self.lan_projectile_states(host_entity, hub, out);
+        self.lan_projectile_states(hub, out);
         for o in &self.others {
             let p = o.position;
             let mut e = state(o.id, &o.kind, [p.x, p.y, p.z], o.yaw, false);
@@ -550,11 +541,10 @@ impl Game<'_> {
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
     /// end crystals, as guests track them.
-    fn lan_projectile_states(&self, host_entity: Option<i32>, hub: &mut Hub, out: &mut States) {
+    fn lan_projectile_states(&self, hub: &mut Hub, out: &mut States) {
         let owner = |who: Option<horizon_client::mobs::Who>| match who {
             Some(horizon_client::mobs::Who::Mob(id)) => id as i32,
-            Some(horizon_client::mobs::Who::Player) => host_entity.unwrap_or(0),
-            None => 0,
+            Some(horizon_client::mobs::Who::Player) | None => 0,
         };
         let at = |p: horizon_core::geometry::Vec3| [p.x, p.y, p.z];
         for f in &self.fangs.list {
@@ -722,7 +712,7 @@ impl Game<'_> {
                     .iter()
                     .find(|g| g.conn == conn)
                     .map(|g| g.entity_id),
-                None => host_entity,
+                None => None,
             };
             if r.attached
                 && let Some(player) = boosted

@@ -2946,6 +2946,12 @@ pub fn armor_stand_to_nbt(a: &ArmorStand, uuid: [i32; 4], raw: Option<&Tag>) -> 
     } else if let Tag::Compound(map) = &mut tag {
         map.remove(&"Marker".into());
     }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if a.no_gravity {
+        put(&mut tag, "NoGravity", Tag::Byte(1));
+    } else if let Tag::Compound(map) = &mut tag {
+        map.remove(&"NoGravity".into());
+    }
     if a.name_visible {
         put(&mut tag, "CustomNameVisible", Tag::Byte(1));
     } else if let Tag::Compound(map) = &mut tag {
@@ -3011,6 +3017,7 @@ pub fn armor_stand_from_nbt(tag: &Tag, id: u32) -> Option<ArmorStand> {
     a.no_base_plate = flag(tag, "NoBasePlate");
     a.invisible = flag(tag, "Invisible");
     a.marker = flag(tag, "Marker");
+    a.no_gravity = flag(tag, "NoGravity");
     a.on_ground = flag(tag, "OnGround");
     // ArmorStand.readAdditionalSaveData: each part of `Pose` that is a list of
     // three numbers, the others staying at their defaults.
@@ -3412,6 +3419,32 @@ mod tests {
         let restored = armor_stand_from_nbt(&saved, 7).unwrap();
         assert_eq!(restored.custom_name, a.custom_name);
         assert!(restored.name_visible);
+    }
+
+    #[test]
+    fn armor_stand_keeps_no_gravity_through_a_save() {
+        let tag = Tag::compound([
+            ("id", string("minecraft:armor_stand")),
+            (
+                "Pos",
+                Tag::List(vec![
+                    Tag::Double(0.0f64.to_bits()),
+                    Tag::Double(64.0f64.to_bits()),
+                    Tag::Double(0.0f64.to_bits()),
+                ]),
+            ),
+            ("NoGravity", Tag::Byte(1)),
+        ]);
+        let mut a = armor_stand_from_nbt(&tag, 7).unwrap();
+        assert!(a.no_gravity, "summon NBT sets the flag");
+        let saved = armor_stand_to_nbt(&a, [0; 4], Some(&tag));
+        assert_eq!(saved.get("NoGravity"), Some(&Tag::Byte(1)));
+        assert!(armor_stand_from_nbt(&saved, 7).unwrap().no_gravity);
+        // `data merge entity @s {NoGravity:0b}` clears it again.
+        a.no_gravity = false;
+        let cleared = armor_stand_to_nbt(&a, [0; 4], Some(&saved));
+        assert!(cleared.get("NoGravity").is_none());
+        assert!(!armor_stand_from_nbt(&cleared, 7).unwrap().no_gravity);
     }
 
     #[test]

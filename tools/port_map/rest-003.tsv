@@ -48,7 +48,7 @@ DebugQueryHandler.queryEntityTag	inline	crates/horizon-client/src/game/debug_key
 DebugQueryHandler.queryBlockEntityTag	inline	crates/horizon-client/src/game/debug_keys.rs::Game::copy_recreate_command	the query waits in Remote.debug_query
 DeltaTracker.Timer.pause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual kept while paused
 DeltaTracker.Timer.unPause	port	crates/horizon-client/src/clock.rs::Timer::update_pause_state	residual restored on resume
-GameNarrator	missing		minor: no text-to-speech; the narrator option is stored but nothing is spoken
+GameNarrator	home	crates/horizon-narrator/src/lib.rs,crates/horizon-client/src/game/narrator.rs	the struct with its say_* methods in lib.rs; the game-side glue (start, option sync, Ctrl+B, the toast) in game/narrator.rs
 HotbarManager.get	port	crates/horizon-client/src/hotbar.rs::load	file loaded when the creative hotbar opens (creative_hotbar.rs)
 KeyMapping.forAllKeyMappings	port	crates/horizon-client-input/src/keybinds.rs::KeyBinds::mappings_for	one key drives every mapping bound to it
 KeyMapping.setAll	port	crates/horizon-client/src/game.rs::handle_window_event_inner	WindowEvent::Focused(false) drops every held key and mouse button, so nothing sticks across alt-tab; ModifiersChanged reconciles the rest
@@ -125,7 +125,7 @@ MouseHandler.getScaledYPos	port	crates/horizon-client-input/src/window.rs::scale
 MouseHandler.resyncMousePosition	skip:other		winit reports the cursor position; no SDL global-state resync
 MouseHandler.releaseMouse	port	crates/horizon-client/src/game.rs::Game::capture	release path (capture false)
 MouseHandler.drawDebugMouseInfo	skip:debug		F3 mouse coordinates
-NarratorStatus.shouldNarrateSystemOrChat	missing		minor: no narrator output
+NarratorStatus.shouldNarrateSystemOrChat	port	crates/horizon-narrator/src/lib.rs::Status::should_narrate_system_or_chat	All, System or Chat; gates saySystemChatQueued (GameNarrator::say_system_chat_queued)
 OptionInstance.createBoolean	skip:data		option definitions live in options_file.rs
 OptionInstance.createButton	skip:ui		widget creation
 OptionInstance.AltEnum.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	

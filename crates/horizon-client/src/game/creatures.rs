@@ -784,6 +784,7 @@ impl Game<'_> {
             } else {
                 None
             },
+            border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
                 self.level_players()
@@ -1106,7 +1107,6 @@ impl Game<'_> {
         self.tick_apparition();
         self.guardian_bubbles();
         self.villager_reputation_tick();
-        self.merchant_tick();
         self.villager_item_sense();
         self.villager_pickups();
         for m in dead {
@@ -7302,6 +7302,7 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            border: None,
         };
         let pw = ProjWorld {
             w: &w,

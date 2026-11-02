@@ -12,11 +12,11 @@ LavaParticle.Provider.createParticle	inline	crates/horizon-client-render/src/par
 NoteParticle.<init>	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Note arm: colour from the pitch, friction 0.66, lifetime 6, size x1.5
 NoteParticle.getQuadSize	port	crates/horizon-client-render/src/particles.rs::Particle::quad_size	Size::GrowIn over 32 ticks
 NoteParticle.Provider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Note arm
-NoxiousGasCloudParticle.tick	missing		player: potent sulfur in vanilla 26.3 gives off drifting noxious gas clouds; Horizon has no noxious_gas particle type and no PotentSulfurBlockEntity client code, so no cloud appears
-NoxiousGasCloudParticle.pickRandomParticleSpawnPoint	missing		player: potent sulfur in vanilla 26.3 gives off drifting noxious gas clouds; Horizon has no noxious_gas particle type and no PotentSulfurBlockEntity client code, so no cloud appears
-NoxiousGasCloudParticle.spawnNoxiousGasParticle	missing		player: potent sulfur in vanilla 26.3 gives off drifting noxious gas clouds; Horizon has no noxious_gas particle type and no PotentSulfurBlockEntity client code, so no cloud appears
-NoxiousGasParticle.tick	missing		player: potent sulfur in vanilla 26.3 gives off drifting noxious gas clouds; Horizon has no noxious_gas particle type and no PotentSulfurBlockEntity client code, so no cloud appears; the fade-out is missing with it
-NoxiousGasParticle.Provider.createParticle	missing		player: potent sulfur in vanilla 26.3 gives off drifting noxious gas clouds; Horizon has no noxious_gas particle type and no PotentSulfurBlockEntity client code, so no cloud appears
+NoxiousGasCloudParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	the `NoxiousGasCloud` arm: base tick, then every second tick a gas particle at a random spawn point that `canBeReachedByNoxiousGas` accepts
+NoxiousGasCloudParticle.pickRandomParticleSpawnPoint	port	crates/horizon-client-render/src/particles.rs::pick_random_particle_spawn_point	up to three blocks out in a random horizontal direction, a quarter of a block below the source block's centre, from the level's random
+NoxiousGasCloudParticle.spawnNoxiousGasParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::spawn_noxious_gas_particle	the gas is added always visible (`ClientLevel.addAlwaysVisibleParticle`), so the particle level does not thin it
+NoxiousGasParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	the `NoxiousGas` arm: base tick and the sprite by age, then alpha falls from its value to 0 over the ticks past the fade start
+NoxiousGasParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	the `NoxiousGas` arm: white, lifetime `6 / (0.5 to 1) * 3` ticks with the fade half way; the cloud arm lives 20 ticks and draws nothing
 Particle.<init>	port	crates/horizon-client-render/src/particles.rs::Particle::base_at	4-arg constructor (box and lifetime draw); the 7-arg one is Particle::base_moving
 Particle.toString	skip:debug		
 Particle.setLocationFromBoundingbox	port	crates/horizon-client-render/src/particles.rs::Particle::set_location_from_bb	
@@ -25,7 +25,7 @@ ParticleDescription.fromJson	port	crates/horizon-client-render/src/particles.rs:
 ParticleEngine.makeParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	gap: minor: VibrationSignal options return None here; ParticleEngine::vibration creates them
 ParticleEngine.createParticleGroup	skip:other		no render-type groups: ParticleEngine::render draws every particle in one pass, and the ITEM_PICKUP group is tick_pickups
 ParticleEngine.countParticles	skip:debug		
-ParticleEngine.hasSpaceInParticleLimit	port	crates/horizon-client-render/src/particles.rs (test spore_blossom_air_stops_at_its_particle_limit)	per-type particle caps, pinned by that test
+ParticleEngine.hasSpaceInParticleLimit	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::create	the only capped type is `ParticleLimit.SPORE_BLOSSOM`: a spore blossom air particle past `SPORE_BLOSSOM_LIMIT` (1000) is dropped in `create`, counted by scanning the live and queued particles instead of vanilla's counted map
 ParticleEngine.clearParticles	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::clear	clears emitters, live and pending particles; no limit counts to clear
 ParticleGroup.tickParticles	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick	ticks live particles and drops the removed ones
 ParticleGroup.tickParticle	skip:debug		crash-report wrapper around particle.tick
@@ -64,8 +64,8 @@ SnowflakeParticle.<init>	inline	crates/horizon-client-render/src/particles.rs::P
 SnowflakeParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	Behaviour::Snowflake: base tick, sprite from age, drag 0.95/0.9/0.95
 SnowflakeParticle.Provider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Snowflake branch: colour 0.923/0.964/0.999
 SonicBoomParticle.Provider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Explosion|SonicBoom arm, SonicBoom branch: lifetime 16, size 1.5
-SpellParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	gap: player: the spyglass check is missing: while scoping in first person, vanilla makes spell particles within 3 blocks of the eye fully transparent; Horizon only lerps alpha
-SpellParticle.isCloseToScopingPlayer	missing		player: spell particles near the eye stay visible while the player looks through a spyglass in first person; vanilla hides them
+SpellParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	the `Spell` arm: alpha 0 while the particle is close to the scoping eye (`close_to_scoping_player`), else eased back to the original alpha at 0.05
+SpellParticle.isCloseToScopingPlayer	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::close_to_scoping_player	within three blocks of the local player's eye while it scopes in first person; the spell arms set alpha 0 there and ease back to the original alpha at 0.05
 SpellParticle.InstantProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Effect|InstantEffect arm: colour and power from the option
 SpellParticle.MobEffectProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	EntityEffect arm: colour and alpha from the option
 SpellParticle.Provider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	uncoloured spell arm (Infested, TrialOmen, RaidOmen)
@@ -79,7 +79,7 @@ SulfurBubbleParticle.randomHorizontalWiggling	inline	crates/horizon-client-rende
 SulfurBubbleParticle.Provider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SulfurBubbles arm
 SuspendedParticle.<init>	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Underwater/CrimsonSpore/WarpedSpore/SporeBlossomAir arm: spawned 0.125 below the point
 SuspendedParticle.CrimsonSporeProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	CrimsonSpore arm: gaussian drift, colour 0.9/0.4/0.5
-SuspendedParticle.SporeBlossomAirProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	gap: minor: SporeBlossomAir arm; the SPORE_BLOSSOM particle limit (1000) is not applied
+SuspendedParticle.SporeBlossomAirProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	SporeBlossomAir arm: spawned 0.125 below the point; the 1000 `SPORE_BLOSSOM` cap is applied in `ParticleEngine::create`
 SuspendedParticle.UnderwaterProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Underwater arm: colour 0.4/0.4/0.7
 SuspendedParticle.WarpedSporeProvider.createParticle	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	WarpedSpore arm: colour 0.1/0.1/0.3, size 0.001
 SuspendedTownParticle.move	port	crates/horizon-client-render/src/particles.rs::Particle::move_by	free_move path: moves the box without block collision
@@ -133,7 +133,7 @@ ClientLanguage.appendFrom	port	crates/horizon-client-core/src/lang.rs::Language:
 LanguageManager.extractLanguages	port	crates/horizon-client-core/src/lang.rs::available	lists the languages the packs declare
 LanguageManager.onResourceManagerReload	port	crates/horizon-client/src/game/options.rs::Game::load_language	gap: minor: no error screen when the translations are empty or missing
 AnimationMetadataSection.calculateFrameSize	port	crates/horizon-assets/src/animation.rs::AnimationMetadata::frame_size	
-GuiSpriteScaling.NineSlice.validate	missing		minor: Horizon accepts nine-slice metadata whose borders cover the whole sprite (parse_nine_slice has no check)
+GuiSpriteScaling.NineSlice.validate	port	crates/horizon-client-render/src/ui.rs::parse_nine_slice	borders that meet leave no centre slice, so the metadata is dropped and the sprite draws as a plain stretch
 GuiSpriteScaling.NineSlice.Border.unpackValue	skip:java		codec helper that collapses a uniform border to one number; Horizon stores four values
 BlockStateDefinitions.createItemFrameFakeState	skip:data		block state definition for the map property; Horizon chooses the frame model by flags
 BlockStateDefinitions.getItemFrameFakeState	port	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	gap: minor: picks the glow and map frame model by flags; no block state

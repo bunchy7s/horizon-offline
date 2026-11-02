@@ -3,7 +3,7 @@ SetWritableBookPagesFunction	missing		minor: no vanilla loot table uses set_writ
 SetWrittenBookPagesFunction	missing		minor: no vanilla loot table uses set_written_book_pages; Horizon's loot run has no arm for it
 SmeltItemFunction.run	port	crates/horizon-world/src/loot.rs::Context::run	furnace_smelt arm: smelting recipe, use_input_count and stack cap
 SmeltItemFunction.smelted	skip:java		static builder factory
-ToggleTooltips	missing		minor: no vanilla loot table uses toggle_tooltips; Horizon's loot run has no arm for it
+ToggleTooltips	home	crates/horizon-client/src/game/commands/items.rs	the `/item modify` arm toggle_tooltips writes the tooltip_display component's hide_tooltip and hidden_components as run does; the loot run has no arm, and no vanilla loot table uses it
 LootContextParamSets	skip:data		loot parameter set registry and validation; Horizon reads its loot tables
 AllOfCondition.allOf	skip:java		static builder
 AllOfCondition.combine	inline	crates/horizon-items/src/items.rs::LootContext::condition	all_of arm: every term must hold
@@ -121,14 +121,14 @@ PathAllowList.ConfigEntry.parse	skip:server		server file allow-list
 BlockHitResult.hitBorder	missing		minor: BlockHit has no world-border flag; vanilla projectiles check it on a border hit
 BlockHitResult.withDirection	skip:java		copy helper (Rust struct update)
 BlockHitResult.withPosition	skip:java		copy helper (Rust struct update)
-HitResult.distanceTo	missing		minor: only the fishing bobber's block-hit bounce uses it; Horizon's bobber does not bounce back on a block hit
+HitResult.distanceTo	port	crates/horizon-client/src/game/fishing.rs::rebound	the bobber's block-hit bounce: the squared distance to the hook scales the normalised velocity (`FishingHook.onHitBlock`)
 Vec2.add	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.distanceToSqr	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.dot	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.length	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.lengthSquared	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.normalized	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
-Vec2.rotate	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
+Vec2.rotate	port	crates/horizon-client/src/mobs/sulfur_cube.rs::rotate	x cos - y sin, x sin + y cos in floats, for the sulfur cube's 2D maths; the other Vec2 rows stay arithmetic in their callers
 Vec2.scale	skip:other		2D vector maths; Horizon has no Vec2 type and keeps 2D maths in its callers
 Vec2.equals	skip:java		Object equality; Rust derives it
 Vec2.hashCode	skip:java		Object hashing; Rust derives it

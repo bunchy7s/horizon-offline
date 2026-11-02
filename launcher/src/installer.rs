@@ -165,13 +165,7 @@ fn desktop_link() -> Option<PathBuf> {
 }
 
 fn write_link(path: &Path, exe: &Path) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let bytes = shortcut::lnk(&exe.to_string_lossy(), "", APP_NAME);
-    let temp = path.with_extension("horizon-tmp");
-    fs::write(&temp, bytes)?;
-    fs::rename(&temp, path)
+    shortcut::write_windows_link(path, exe, "", APP_NAME).map_err(io::Error::other)
 }
 
 /// Whether the shortcut file names `exe` (its path, as the Shell Link keeps it, in UTF-16).
@@ -505,16 +499,45 @@ mod tests {
         );
     }
 
+    /// What the shell itself reads as the shortcut's target: the field Explorer starts from.
+    fn target_of(link: &Path) -> String {
+        use windows::core::{Interface, HSTRING};
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER,
+            COINIT_APARTMENTTHREADED, STGM_READ,
+        };
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+        // SAFETY: COM calls on interfaces made and dropped here, on this test's own thread.
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let shell: IShellLinkW =
+                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).unwrap();
+            let file: IPersistFile = shell.cast().unwrap();
+            file.Load(&HSTRING::from(link.as_os_str()), STGM_READ)
+                .unwrap();
+            let mut buf = [0u16; 520];
+            shell.GetPath(&mut buf, std::ptr::null_mut(), 0).unwrap();
+            let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+            String::from_utf16_lossy(&buf[..end])
+        }
+    }
+
     #[test]
-    fn a_shortcut_points_at_the_launcher_it_was_made_for() {
+    fn the_shell_reads_the_target_of_the_shortcut_it_gets() {
         let dir = std::env::temp_dir().join(format!("horizon-link-{}", std::process::id()));
-        let _ = fs::create_dir_all(&dir);
+        let _ = fs::remove_dir_all(&dir);
+        let exe = dir.join("Horizon Launcher").join("horizon-launcher.exe");
+        fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        fs::write(&exe, b"x").unwrap();
         let link = dir.join("Horizon Launcher.lnk");
-        let exe = Path::new(
-            r"C:\Users\player\AppData\Local\Programs\Horizon Launcher\horizon-launcher.exe",
+        write_link(&link, &exe).unwrap();
+        // The bug this guards: a link whose target the shell read as empty, so a double click did nothing.
+        assert_eq!(
+            target_of(&link).to_lowercase(),
+            exe.to_string_lossy().to_lowercase()
         );
-        fs::write(&link, shortcut::lnk(&exe.to_string_lossy(), "", APP_NAME)).unwrap();
-        assert!(points_to(&link, exe));
+        // The uninstaller finds its shortcuts by the program's path inside them.
+        assert!(points_to(&link, &exe));
         assert!(!points_to(
             &link,
             Path::new(r"C:\Other\horizon-launcher.exe")
