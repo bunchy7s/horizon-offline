@@ -899,14 +899,7 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         Some(Who::Mob(m.id)),
     );
     p.set_bonus(super::gear::arrow_bonus(m));
-    // WitherSkeleton.getArrow: the arrow its bow made is then
-    // `igniteForSeconds(100)`, so it burns for 2000 ticks and sets alight
-    // what it hits. The species' own effect rides on the same arrow.
-    if m.species() == Species::WitherSkeleton
-        && let Some(a) = p.arrow.as_mut()
-    {
-        a.ignite_for_seconds(100.0);
-    }
+    ignite_for_wither_skeleton(m, &mut p);
     p.shoot(
         &mut arrow_random,
         [xd, yd + dist * 0.2, zd],
@@ -921,6 +914,16 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         1.0,
         pitch,
     ));
+}
+/// `WitherSkeleton.getArrow`: the arrow the parent made is then
+/// `igniteForSeconds(100)` — 2000 fire ticks — so it burns on its way and sets
+/// alight what it hits. The species' own tipped effect rides on the same arrow.
+pub fn ignite_for_wither_skeleton(m: &Mob, p: &mut Projectile) {
+    if m.species() == Species::WitherSkeleton
+        && let Some(a) = p.arrow.as_mut()
+    {
+        a.ignite_for_seconds(100.0);
+    }
 }
 /// Drowned.DrownedGoToWaterGoal (simplified to "head for water by day").
 #[derive(Clone, Debug, Default)]
@@ -1420,11 +1423,51 @@ mod wither_arrow_tests {
     use crate::mobs::world::{test_player, with_test_world};
     use std::sync::Arc;
 
+    fn mob(species: Species) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+    fn arrow() -> Projectile {
+        Projectile::new(
+            ProjectileKind::Arrow {
+                base_damage: 2.0,
+                critical: false,
+                effect: None,
+            },
+            Vec3::ZERO,
+            None,
+        )
+    }
+
     /// `WitherSkeleton.getArrow`: `super.getArrow(...)` then
-    /// `igniteForSeconds(100)` on the arrow, so a wither skeleton's arrow
-    /// burns for 2000 ticks where a plain skeleton's does not burn at all.
+    /// `igniteForSeconds(100)` on the arrow it returns — 2000 fire ticks —
+    /// where a plain skeleton's arrow is not burning at all.
     #[test]
     fn only_a_wither_skeletons_arrow_comes_out_burning() {
+        for (species, fire_ticks) in [(Species::WitherSkeleton, 2000), (Species::Skeleton, 0)] {
+            let m = mob(species);
+            let mut p = arrow();
+            ignite_for_wither_skeleton(&m, &mut p);
+            let a = p.arrow.as_ref().expect("an arrow");
+            assert_eq!(a.fire_ticks, fire_ticks, "{species:?}");
+            assert_eq!(a.on_fire(), fire_ticks > 0, "{species:?}");
+        }
+        // `igniteForTicks` keeps the longer burn: a Flame arrow already alight
+        // for 4000 ticks is not shortened to the wither skeleton's 2000.
+        let m = mob(Species::WitherSkeleton);
+        let mut p = arrow();
+        if let Some(a) = p.arrow.as_mut() {
+            a.ignite_for_seconds(200.0);
+        }
+        ignite_for_wither_skeleton(&m, &mut p);
+        assert_eq!(p.arrow.as_ref().unwrap().fire_ticks, 4000);
+    }
+
+    /// The same rule through the shooting path: `perform_ranged_attack` hands
+    /// the arrow to `ignite_for_wither_skeleton` before it flies.
+    #[test]
+    fn a_wither_skeletons_shot_leaves_with_the_ignite() {
         let ran = with_test_world(&[], |w, types| {
             let mut w = w.clone();
             // A player four blocks away: the aim needs a visible target.
@@ -1451,7 +1494,6 @@ mod wither_arrow_tests {
                     })
                     .unwrap_or_else(|| panic!("{name} shot nothing"));
                 assert_eq!(arrow.fire_ticks, fire_ticks, "{name}");
-                assert_eq!(arrow.on_fire(), fire_ticks > 0, "{name}");
             }
         });
         let _ = ran;
