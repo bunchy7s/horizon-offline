@@ -12,7 +12,7 @@ use std::sync::{
 };
 
 mod generated;
-pub use generated::{RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
+pub use generated::{HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
 pub use wgpu;
 
 static RENDERERS: OnceLock<Box<[&'static dyn RenderHooks]>> = OnceLock::new();
@@ -40,8 +40,8 @@ pub fn world_drawn_hooked() -> bool {
 }
 
 /// What a mod can draw with once the world is drawn: after the sky, terrain, entities,
-/// particles, weather and the world post pass, before the first-person hand, the HUD and the
-/// screens. `color` holds the world's picture (copy it out before reading it: it is the target
+/// particles, weather and the world post pass, before the first-person hand ([`HandDrawn`]),
+/// the HUD and the screens. `color` holds the world's picture (copy it out before reading it: it is the target
 /// drawn into), `depth` the world's depth, reversed (0 is the sky).
 #[non_exhaustive]
 pub struct WorldDrawn<'a> {
@@ -76,6 +76,35 @@ pub struct WorldDrawn<'a> {
     pub quad_indices: &'a wgpu::Buffer,
 }
 
+/// What a mod can draw with once the first-person hand is drawn ([`native_hand_drawn`]): after
+/// the world and the hand, before entity outlines, post effects, screen effects and the HUD.
+/// `color` holds the frame's picture with the hand in it (copy it out before reading it).
+#[non_exhaustive]
+pub struct HandDrawn<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    /// The frame's target and a view of it in `color_format`.
+    pub color: &'a wgpu::Texture,
+    pub color_view: &'a wgpu::TextureView,
+    pub color_format: wgpu::TextureFormat,
+    /// The size of `color`.
+    pub size: [u32; 2],
+    /// The hand and held item just drawn, camera-relative quads of 4 vertices: empty when no
+    /// hand drew (third person, F1, a sleeping or spectating player) or a shader pack drew it.
+    pub hand: &'a [Vertex],
+    /// Camera-relative world to clip space for the hand: its own field of view
+    /// (`hand_fov_degrees`) and the view bob, without TAA's jitter (the hand has none). Its
+    /// depth is the hand's own: the hand's pass clears depth and keeps none.
+    pub view_proj: Mat4,
+    /// The camera's position in the world.
+    pub camera: DVec3,
+    /// The shared atlas the hand's UVs point into.
+    pub atlas: Option<&'a wgpu::Texture>,
+    /// Quad indices (0 1 2 0 2 3 for each 4 vertices).
+    pub quad_indices: &'a wgpu::Buffer,
+}
+
 /// What the mods need from a frame that the game doesn't make for itself. Each mod sets what it
 /// needs and leaves the rest, so several can ask.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -92,6 +121,13 @@ pub struct RenderNeeds {
 #[inline(never)]
 pub fn native_world_drawn(world: &mut WorldDrawn<'_>) {
     generated::dispatch_world_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), world);
+}
+
+/// The first-person hand is drawn (see [`HandDrawn`]), on every frame [`native_world_drawn`]
+/// runs, with no hand too. API @API:hand_drawn@.
+#[inline(never)]
+pub fn native_hand_drawn(hand: &mut HandDrawn<'_>) {
+    generated::dispatch_hand_drawn(RENDERERS.get().map_or(&[], |renderers| renderers), hand);
 }
 
 /// Asked as a frame is built and drawn: set what your mod needs.
