@@ -1515,6 +1515,55 @@ mod tests {
         .unwrap()
     }
 
+    fn try_registry(placement: Value) -> Result<StructureRegistry, DecodeError> {
+        let structures = BTreeMap::from([(
+            "t:s".to_owned(),
+            json!({"type": "minecraft:igloo", "biomes": []}).to_string(),
+        )]);
+        let sets = BTreeMap::from([(
+            "t:set".to_owned(),
+            json!({"structures": [{"structure": "t:s", "weight": 1}],
+                "placement": placement})
+            .to_string(),
+        )]);
+        StructureRegistry::new(
+            &structures,
+            &sets,
+            BTreeMap::new(),
+            &|_| Ok(BTreeSet::new()),
+        )
+    }
+
+    #[test]
+    fn a_random_spread_needs_more_spacing_than_separation() {
+        // RandomSpreadStructurePlacement.validate: "Spacing has to be larger
+        // than separation", and the codec's intRange(0, 4096) on both.
+        let spread = |spacing: i64, separation: i64| {
+            json!({"type": "minecraft:random_spread", "spacing": spacing,
+                "separation": separation})
+        };
+        assert!(try_registry(spread(8, 8)).is_err(), "separation == spacing");
+        assert!(try_registry(spread(4, 8)).is_err(), "separation > spacing");
+        assert!(try_registry(spread(0, 0)).is_err(), "both zero");
+        assert!(try_registry(spread(4097, 0)).is_err(), "spacing past 4096");
+        assert!(try_registry(spread(8, -1)).is_err(), "negative separation");
+        assert!(try_registry(spread(8, 7)).is_ok());
+        assert!(try_registry(spread(4096, 0)).is_ok());
+    }
+
+    #[test]
+    fn a_structure_set_frequency_is_a_fraction() {
+        // Codec.floatRange(0.0F, 1.0F) on frequency.
+        let set = |frequency: Value| {
+            json!({"type": "minecraft:random_spread", "spacing": 8, "separation": 4,
+                "frequency": frequency})
+        };
+        assert!(try_registry(set(json!(1.5))).is_err());
+        assert!(try_registry(set(json!(-0.25))).is_err());
+        assert!(try_registry(set(json!(1.0))).is_ok());
+        assert!(try_registry(set(json!(0.0))).is_ok());
+    }
+
     #[test]
     fn exclusion_zones_may_skip_the_other_sets_own() {
         let set = |avoid: Value| {
