@@ -3470,6 +3470,7 @@ pub(crate) mod tests {
                     }
                 },
                 living_breathe: |_, _, _, _, _| {},
+                living_drown: |_, _, _, _, _, _| {},
                 living_fall: |_, _, _, _, _| {},
                 living_jump: |_, _| {},
                 ingredient: |_, _, _| {},

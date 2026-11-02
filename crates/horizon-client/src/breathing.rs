@@ -56,6 +56,21 @@ pub fn breathe(entity: u32, kind: &str, vanilla: Breath) -> Breath {
     }
 }
 
+/// A drowning decision on the server, with mutable vanilla defaults.
+#[inline(never)]
+pub fn native_living_drown(
+    entity: u32,
+    kind: &str,
+    is_drowning: &mut bool,
+    damage_amount: &mut f32,
+    bubble_count: &mut i32,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::living_drown(
+        entity, kind, is_drowning, damage_amount, bubble_count, cancel,
+    );
+}
+
 /// The air supply after `breath`: raised up to `max` when it can breathe,
 /// lowered otherwise. The second is whether the entity now drowns
 /// (`LivingEntity.shouldTakeDrowningDamage`: -20 or less), and its air is
