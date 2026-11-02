@@ -7299,6 +7299,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_lan_packets", || self.tick_lan_packets());
             horizon_client::spans::time("tick_blocks", || self.tick_blocks())?;
+            self.lan_mark_synced_through();
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7407,6 +7408,9 @@ impl Game<'_> {
         {
             self.use_with_hand()?;
             self.use_delay = 4;
+        }
+        if running {
+            self.lan_note_joined();
         }
         Ok(())
     }

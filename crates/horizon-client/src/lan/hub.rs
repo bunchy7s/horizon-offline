@@ -285,6 +285,12 @@ pub struct Hub {
     entity_types: std::collections::HashMap<String, i32>,
     /// Each level's tracked entities, by dimension.
     entities: std::collections::HashMap<String, Entities>,
+    /// Each level's entities that joined it after its last tracking pass, as
+    /// they were then (`note_joined`): their pairing starts from it.
+    joined: std::collections::HashMap<String, Vec<EntityState>>,
+    /// The last entity id taken before the level's ChunkMap.tick point of
+    /// this tick (`Entities::synced_through`).
+    pub synced_through: i32,
     /// What one tick of entity tracking sends each guest, kept between ticks.
     entity_out: Vec<Vec<Vec<u8>>>,
     /// Each placed guest's entities gone this tick, where they were last sent (only while the
@@ -552,6 +558,8 @@ impl Hub {
             item_ids: Default::default(),
             entity_types: Default::default(),
             entities: Default::default(),
+            joined: Default::default(),
+            synced_through: 0,
             entity_out: Vec::new(),
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
@@ -2431,6 +2439,25 @@ impl Hub {
     }
 
     /// All entities as one client sees them: the world's and the other players.
+    /// The entities of this level its tracking has not met yet, as they are at
+    /// the end of the tick that added them (after the tick's tracking pass:
+    /// falling blocks, primed TNT and block entities tick after it). The next
+    /// pass pairs them as they were, as ChunkMap.addEntity would have.
+    pub fn note_joined(&mut self, entities: &[EntityState]) {
+        let level = self.entities.get(&self.config.dimension);
+        let joined = self
+            .joined
+            .entry(self.config.dimension.clone())
+            .or_default();
+        joined.clear();
+        joined.extend(
+            entities
+                .iter()
+                .filter(|e| level.is_none_or(|l| !l.tracks(e.id)))
+                .cloned(),
+        );
+    }
+
     fn track_entities(&mut self, ctx: &mut TickCtx) {
         let mut all: Vec<EntityState> = Vec::with_capacity(ctx.entities.len() + self.guests.len());
         let placed: Vec<usize> = (0..self.guests.len())
@@ -2478,12 +2505,18 @@ impl Hub {
             })
             .collect();
         all.extend(guest_states);
-        let entities: Vec<&EntityState> = all.iter().chain(ctx.entities).collect();
+        let mut entities: Vec<&EntityState> = all.iter().chain(ctx.entities).collect();
         // ChunkMap.tick: the level's entities, once for all its players.
         let mut level = self
             .entities
             .remove(&self.config.dimension)
             .unwrap_or_default();
+        let joined = self
+            .joined
+            .remove(&self.config.dimension)
+            .unwrap_or_default();
+        level.starting_from(&mut entities, &joined);
+        level.synced_through = self.synced_through;
         let mut outs = std::mem::take(&mut self.entity_out);
         let dimension = &self.config.dimension;
         let here = |g: &Guest| g.placed && g.dimension == *dimension;

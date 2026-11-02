@@ -189,6 +189,9 @@ pub(super) struct LanHost {
     /// The entities the guests track, described again every tick
     /// (`lan_entities`) over last tick's states.
     pub(super) states: lan::entity::States,
+    /// The entity id counter when this tick's states were taken for guests
+    /// (`lan_note_joined`), None when no guest tracked them.
+    pub(super) states_next_entity: Option<u32>,
 }
 
 impl Game<'_> {
@@ -1325,6 +1328,7 @@ impl Game<'_> {
             native_commands: None,
             sleep_ignored: Default::default(),
             states: Default::default(),
+            states_next_entity: None,
         });
         self.audio.capture = Some(Vec::new());
         Ok(())
@@ -2052,6 +2056,43 @@ impl Game<'_> {
     /// single player game is `paused` only the connections run
     /// (`IntegratedServer.tickPaused`): `ServerGamePacketListenerImpl.tick`
     /// skips `tickPlayer`, so no player's air, hunger or damage moves on.
+    /// ServerLevel.tick's ChunkMap.tick point, after the block ticks and
+    /// before the entities': what joined the level up to here (a falling
+    /// block, a dispensed arrow, the last tick's late joins) is paired and
+    /// first updated in this tick's pass (`Entities::synced_through`).
+    pub(super) fn lan_mark_synced_through(&mut self) {
+        if self.lan.as_ref().is_none_or(|h| h.hub.guests.is_empty()) {
+            return;
+        }
+        self.lan_assign_ids();
+        let next = self.next_entity as i32;
+        if let Some(host) = self.lan.as_mut() {
+            host.hub.synced_through = next;
+        }
+    }
+
+    /// The end of the level's tick: the entities added since its states were
+    /// taken for the guests (a falling block's drop, a spawner's mob, the
+    /// host's snowball) are noted as they joined, for the next tick's
+    /// tracking to pair them from (`Hub::note_joined`). Nothing is described
+    /// when the id counter has not moved.
+    pub(super) fn lan_note_joined(&mut self) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        if let Some(next) = host.states_next_entity.take() {
+            self.lan_assign_ids();
+            if self.next_entity != next {
+                let mut states = States::default();
+                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, false);
+                self.lan_hook_states(&host.play, &host.hub, &mut states);
+                self.lan_entity_uuids(&mut states);
+                host.hub.note_joined(states.as_slice());
+            }
+        }
+        self.lan = Some(host);
+    }
+
     pub(super) fn tick_lan(&mut self, paused: bool) {
         // A frozen level does not reach tick_lan_packets through tick_world.
         // Apply its packets before taking the snapshot too.
@@ -2108,7 +2149,9 @@ impl Game<'_> {
                 self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true);
                 self.lan_hook_states(&host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
+                host.states_next_entity = Some(self.next_entity);
             } else {
+                host.states_next_entity = None;
                 states.clear();
                 // Nobody can receive past movement. A returning viewer pairs
                 // from the cart's current position/rotation, as AddEntity does.

@@ -257,7 +257,8 @@ struct ServerEntity {
     /// The lead's holder the clients were told of.
     leash: Option<i32>,
     /// The level tick it was last seen in, its place in that tick's list, and
-    /// whether it was added in it (its first update is the next tick's).
+    /// whether it was added in it (its first update is the next tick's, but
+    /// for one in `Entities::synced_through`).
     seen: u32,
     index: usize,
     added: bool,
@@ -831,6 +832,12 @@ pub struct Entities {
     /// `entity-broadcast-range-percentage` (None: 100), which scales every
     /// type's tracking range (MinecraftServer.getScaledTrackingDistance).
     pub range_percent: Option<i32>,
+    /// ServerLevel.tick runs ChunkMap.tick after the block ticks and before
+    /// the entities: an entity that joined the level by then (the ids up to
+    /// this one; a player aside) has its first update in the pass that
+    /// pairs it, before it moves. One the entities' own ticks added waits
+    /// for the next pass, as vanilla's waits for the next tick.
+    pub synced_through: i32,
     states: crate::fast_hash::FxHashMap<i32, ServerEntity>,
     /// The level tick, stamped on every entity still in the level.
     tick: u32,
@@ -873,6 +880,29 @@ impl Entities {
     }
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
+    }
+
+    /// Whether the entity `id` is tracked (it was in the last tick's pass).
+    pub fn tracks(&self, id: i32) -> bool {
+        self.states.contains_key(&id)
+    }
+
+    /// ChunkMap.addEntity tracks an entity as it joins the level, so its
+    /// clients are paired with it as it was then. An entity the game added
+    /// after the last tick's states were taken is first seen a tick later:
+    /// it starts from the state it joined with (`joined`), not from where
+    /// its first tick took it. One already tracked keeps its own.
+    pub fn starting_from<'a>(&self, entities: &mut [&'a EntityState], joined: &'a [EntityState]) {
+        if joined.is_empty() {
+            return;
+        }
+        for e in entities.iter_mut() {
+            if !self.tracks(e.id)
+                && let Some(j) = joined.iter().find(|j| j.id == e.id)
+            {
+                *e = j;
+            }
+        }
     }
 
     /// One tick of ChunkMap.tick for the entities in the level now and the
@@ -1093,7 +1123,7 @@ impl Entities {
                 continue;
             };
             self.packets.clear();
-            if !s.added {
+            if !s.added || e.id <= self.synced_through && e.kind != "minecraft:player" {
                 s.send_changes(e, riding, &mut self.packets);
             }
             s.added = false;
@@ -1729,6 +1759,83 @@ mod tests {
         c.tick(&mut level, &[&e]);
         assert!(!c.out[0].is_empty());
         assert_eq!(c.out[0], c.out[1]);
+    }
+
+    /// ChunkMap.addEntity pairs an entity as it joined the level: one the
+    /// game added after the last tick's pass (an item a landing falling
+    /// block drops) is paired from where it joined, not from where its first
+    /// tick took it, and its first update moves it from there. Once tracked,
+    /// its own state is used again.
+    #[test]
+    fn an_entity_added_after_the_pass_is_paired_as_it_joined() {
+        let mut level = Entities::default();
+        let mut c = Clients::new();
+        let mut joined = state(1.0);
+        joined.velocity = [0.0, 0.2, 0.0];
+        let joins = [joined];
+        let first = state(1.5);
+        let mut entities = vec![&first];
+        level.starting_from(&mut entities, &joins);
+        c.tick(&mut level, &entities);
+        let add = body(play::Clientbound::AddEntity(AddEntity {
+            id: 7,
+            uuid: 1,
+            kind: 100,
+            position: [1.0, 64.0, 0.0],
+            velocity: [0.0, 0.2, 0.0],
+            pitch: 0,
+            yaw: 0,
+            head_yaw: 0,
+            data: 0,
+        }));
+        assert_eq!(c.out[0], [add]);
+        let later = state(2.0);
+        let mut entities = vec![&later];
+        level.starting_from(&mut entities, &joins);
+        assert!(std::ptr::eq(entities[0], &later));
+        c.tick(&mut level, &entities);
+        let moved = body(play::Clientbound::MoveEntityPos(MoveEntityPos(MoveEntity {
+            id: 7,
+            delta: Some(VecDelta::Linear([4096, 0, 0])),
+            rotation: None,
+            on_ground: true,
+        })));
+        assert!(c.out[0].contains(&moved), "{:?}", c.out[0]);
+    }
+
+    /// An entity that joined before the tick's ChunkMap.tick point (a
+    /// falling block from a block tick) has its first update in the pass
+    /// that pairs it: tick 0 of its interval, before it moves, so a falling
+    /// block that lands within 20 ticks is never sent a move. One added by
+    /// the entities' ticks has its first update in the next pass.
+    #[test]
+    fn an_entity_joined_before_the_chunk_map_tick_is_updated_as_it_is_paired() {
+        let mut sand = state(0.5);
+        sand.kind = "minecraft:falling_block".into();
+        let first_update = |synced_through: i32| {
+            let mut level = Entities {
+                synced_through,
+                ..Entities::default()
+            };
+            let mut c = Clients::new();
+            c.tick(&mut level, &[&sand]);
+            assert_eq!(c.out[0].len(), 1);
+            let mut fallen = sand.clone();
+            fallen.position[1] -= 0.04;
+            c.tick(&mut level, &[&fallen]);
+            c.out[0].clone()
+        };
+        // Updated in place as it was paired; its fall waits for tick 20.
+        let next = first_update(7);
+        assert!(next.is_empty(), "{next:?}");
+        // Its first update is the next pass's, after it fell.
+        let moved = body(play::Clientbound::MoveEntityPos(MoveEntityPos(MoveEntity {
+            id: 7,
+            delta: Some(VecDelta::Linear([0, -164, 0])),
+            rotation: None,
+            on_ground: true,
+        })));
+        assert_eq!(first_update(6), [moved]);
     }
 
     #[test]
