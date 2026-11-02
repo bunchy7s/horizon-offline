@@ -367,6 +367,7 @@ version = "0.1.0"
 dependencies = [
  "horizon-mods",
  "serde_json",
+ "zip",
 ]
 
 [[package]]
