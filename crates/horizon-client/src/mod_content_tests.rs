@@ -2543,8 +2543,6 @@ fn block_base_of(tag: &str, declarations: &[&str], facts: &str) -> (PathBuf, Vec
     (base, mods)
 }
 
-/// A block's states are its template's times the combinations of the state
-/// properties it declares, in a fixed order with every default first.
 #[test]
 fn tuple_shapes_follow_final_state_order_and_separate_collision() {
     let declaration = r#"{"template":"minecraft:test","item":false,
@@ -2626,6 +2624,15 @@ fn collision_only_preserves_outline_and_shape_typos_are_errors() {
             .iter()
             .all(VoxelShape::is_empty)
     );
+    let mut gameplay: J =
+        serde_json::from_str(r#"{"states":[{"outline":[[0,0,0,1,1,1]]},{"outline":[]}]}"#).unwrap();
+    plan.json("gameplay-facts.json", &mut gameplay).unwrap();
+    let Some(J::Arr(rows)) = gameplay.get("states") else {
+        panic!("states")
+    };
+    assert_eq!(rows[0].get("outline"), rows[2].get("outline"));
+    assert_eq!(rows[1].get("outline"), rows[3].get("outline"));
+    assert_eq!(rows[2].get("full_collision"), Some(&J::Bool(false)));
     fs::remove_dir_all(base.parent().unwrap()).unwrap();
     for (index, table) in [
         r#"{"properties":["axis","typo"],"default":[]}"#,
@@ -2642,6 +2649,8 @@ fn collision_only_preserves_outline_and_shape_typos_are_errors() {
     }
 }
 
+/// A block's states are its template's times the combinations of the state
+/// properties it declares, in a fixed order with every default first.
 #[test]
 fn content_block_state_properties_fan_out_its_states() {
     let declaration = r#"{"template":"minecraft:test","item":false,
