@@ -1195,6 +1195,8 @@ pub struct ArmorStand {
     pub enchantment_fall_distance: f64,
     /// Last equipment seen by `collectEquipmentChanges`; not saved to NBT.
     pub enchantment_equipment: [Option<ItemStack>; 6],
+    /// `Entity.mainSupportingBlockPos` after the last move.
+    pub support: horizon_world::ground_support::GroundState,
 }
 impl ArmorStand {
     pub const SLOTS: [&'static str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
@@ -1269,6 +1271,22 @@ impl ArmorStand {
             enchantment_block: None,
             enchantment_fall_distance: 0.0,
             enchantment_equipment: Default::default(),
+            support: Default::default(),
+        }
+    }
+    /// `Entity.getOnPos(0.2)` (`getOnPosLegacy`): the supporting block's
+    /// column 0.2 below the feet, the supporting block itself when `tall`
+    /// says it is a fence, wall or fence gate, else the cell 0.2 below.
+    pub fn on_pos_legacy(&self, tall: impl Fn(BlockPos) -> bool) -> BlockPos {
+        let y = (self.position.y - f64::from(0.2_f32)).floor() as i32;
+        match self.support.supporting_block {
+            Some(p) if tall(p) => p,
+            Some(p) => BlockPos::new(p.x, y, p.z),
+            None => BlockPos::new(
+                self.position.x.floor() as i32,
+                y,
+                self.position.z.floor() as i32,
+            ),
         }
     }
     /// `EquipmentSlot.getFilterFlag` of an `equipment` index (main hand, off
@@ -1407,6 +1425,24 @@ impl ArmorStand {
                 self.position.z + moved.z,
             );
             self.on_ground = wanted.y < 0.0 && moved.y > wanted.y;
+            // Entity.setOnGroundWithMovement: the block under the feet.
+            let context = horizon_world::collision_context::CollisionContext::for_entity(
+                horizon_world::collision_context::CollisionEntity {
+                    identity: horizon_world::entity_obstruction::EntityIdentity(u64::from(self.id)),
+                    y: self.position.y,
+                    descending: false,
+                    main_hand: Some(horizon_world::collision_context::CollisionItem::EMPTY),
+                },
+                false,
+            );
+            let position = self.position;
+            let _ =
+                self.support
+                    .check_support(self.on_ground, self.bounds(), Some(wanted), |area| {
+                        horizon_world::ground_support::find_supporting_block(
+                            scene, context, position, area, 1_000_000,
+                        )
+                    });
             if (wanted.x - moved.x).abs() >= f64::from(1.0e-5_f32) {
                 velocity.x = 0.0;
             }

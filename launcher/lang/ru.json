@@ -805,5 +805,15 @@
   "{file} is not a Horizon game for this computer.": "{file} — не игра Horizon для этого компьютера.",
   "Install a release or Nightly first: an imported build plays with its game files.": "Сначала установите релиз или Nightly: импортированная сборка использует его файлы игры.",
   "{file} holds no {program}.": "В {file} нет {program}.",
-  "Could not import the build: {error}": "Не удалось импортировать сборку: {error}"
+  "Could not import the build: {error}": "Не удалось импортировать сборку: {error}",
+  "Sort by: {order}": "Сортировка: {order}",
+  "Build log": "Журнал сборки",
+  "Native build log": "Журнал нативной сборки",
+  "Copy log": "Скопировать журнал",
+  "Open full log": "Открыть полный журнал",
+  "Loading build log…": "Загрузка журнала сборки…",
+  "No native build log is available yet.": "Журнала нативной сборки пока нет.",
+  "Could not read the build log: {error}": "Не удалось прочитать журнал сборки: {error}",
+  "Copied build log.": "Журнал сборки скопирован.",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "Показаны только последние {lines} строк. Скопируйте или откройте полный журнал, чтобы увидеть все детали."
 }

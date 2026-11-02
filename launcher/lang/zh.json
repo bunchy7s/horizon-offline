@@ -805,5 +805,15 @@
   "{file} is not a Horizon game for this computer.": "{file} 不是适用于这台电脑的 Horizon 游戏。",
   "Install a release or Nightly first: an imported build plays with its game files.": "请先安装一个正式版或 Nightly：导入的构建会使用它的游戏文件。",
   "{file} holds no {program}.": "{file} 中没有 {program}。",
-  "Could not import the build: {error}": "无法导入构建：{error}"
+  "Could not import the build: {error}": "无法导入构建：{error}",
+  "Sort by: {order}": "排序方式：{order}",
+  "Build log": "构建日志",
+  "Native build log": "原生构建日志",
+  "Copy log": "复制日志",
+  "Open full log": "打开完整日志",
+  "Loading build log…": "正在加载构建日志…",
+  "No native build log is available yet.": "尚无原生构建日志。",
+  "Could not read the build log: {error}": "无法读取构建日志：{error}",
+  "Copied build log.": "已复制构建日志。",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "仅显示最后 {lines} 行。复制或打开完整日志以查看全部细节。"
 }

@@ -805,5 +805,15 @@
   "{file} is not a Horizon game for this computer.": "{file} não é um jogo do Horizon para este computador.",
   "Install a release or Nightly first: an imported build plays with its game files.": "Instale primeiro uma versão ou uma Nightly: uma compilação importada usa os arquivos do jogo dela.",
   "{file} holds no {program}.": "{file} não contém nenhum {program}.",
-  "Could not import the build: {error}": "Não foi possível importar a compilação: {error}"
+  "Could not import the build: {error}": "Não foi possível importar a compilação: {error}",
+  "Sort by: {order}": "Ordenar por: {order}",
+  "Build log": "Registro de build",
+  "Native build log": "Registro de build nativo",
+  "Copy log": "Copiar registro",
+  "Open full log": "Abrir o registro completo",
+  "Loading build log…": "Carregando o registro de build…",
+  "No native build log is available yet.": "Ainda não há um registro de build nativo disponível.",
+  "Could not read the build log: {error}": "Não foi possível ler o registro de build: {error}",
+  "Copied build log.": "Registro de build copiado.",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "Somente as últimas {lines} linhas são exibidas. Copie ou abra o registro completo para ver todos os detalhes."
 }
