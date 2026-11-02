@@ -1203,6 +1203,15 @@ pub trait Host {
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
     }
+    /// The most recently extracted world frame's camera, if one exists.
+    fn camera(&self) -> Option<NativeCamera> {
+        unimplemented!("Host::camera")
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        let _ = pos;
+        unimplemented!("Host::block_collision")
+    }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
     /// in the level in place or among the server's players. API

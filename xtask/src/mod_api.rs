@@ -1212,6 +1212,7 @@ mod tests {
         mod horizon_client {
             pub mod camera {
                 pub struct CameraEntity;
+                pub struct FovPlayer;
             }
             pub mod menu {
                 pub struct AnvilCraft;
