@@ -298,9 +298,9 @@ def timed_case(rng, states, case):
     `ComparatorBlock.useWithoutItem`, `DaylightDetectorBlock.useWithoutItem` all answer PASS there).
     A repeater cycles its `delay` through 1 to 4 with `setBlockAndUpdate` and nothing else; a
     comparator cycles `mode` between `compare` and `subtract` with a `block.comparator.click` at
-    volume 0.3 and pitch 0.55 for `subtract` / 0.5 for `compare`, writes the state with flags 2 and
-    refreshes its output; a daylight detector cycles `inverted`, writes the state, sends
-    `block_change` and recomputes the `power` it emits."""
+    volume 0.3 and pitch 0.55 for `subtract` / 0.5 for `compare`, `Level.setBlock` writes the state
+    and the comparator refreshes its output; a daylight detector cycles `inverted`, writes the state,
+    sends `block_change` and recomputes the `power` it emits."""
     name = rng.choice(['repeater'] * 2 + ['comparator'] * 2 + ['daylight_detector'])
     props = {'facing': rng.choice(['north', 'south', 'west', 'east'])}
     if name == 'repeater':
@@ -418,6 +418,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.15:
             anchor_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
+            timed_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case
