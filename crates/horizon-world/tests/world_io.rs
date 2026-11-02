@@ -10,10 +10,10 @@ use std::{
     fs,
     io::{Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
+static NEXT: AtomicU32 = AtomicU32::new(0);
 struct Directory(PathBuf);
 impl Directory {
     fn new() -> Self {
