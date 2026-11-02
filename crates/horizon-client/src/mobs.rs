@@ -1289,6 +1289,13 @@ pub enum MobEvent {
     BubbleColumnParticles {
         pos: [i32; 3],
     },
+    /// `LivingEntity.checkFallDamage`: `count` crumbs of the block `state` a mob
+    /// landed on, thrown up at `at`.
+    LandingDust {
+        state: horizon_world::registry::BlockStateId,
+        at: [f64; 3],
+        count: i32,
+    },
     /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
     /// (`BoneMealItem.growCrop`, then level event 1505).
     Bonemeal {
