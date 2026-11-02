@@ -100,11 +100,11 @@ WallHangingSignBlock.canAttachTo	inline	crates/horizon-world/src/level/place.rs:
 WallHangingSignBlock.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::wall_hanging_sign_can_place	
 WallHangingSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
 WallHangingSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
-WallHangingSignBlock.isHittingEditableSide	inline	crates/horizon-world/src/level/interact.rs::Behaviours::block_use_item_on	the faces of the sign it faces and its opposite are the editable ones; a hanging sign aimed at any other face passes
+WallHangingSignBlock.isHittingEditableSide	inline	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	the face the sign faces and its opposite are the editable sides (a wall sign's FACING is horizontal, so that is getDirection().getAxis() == FACING.getAxis()); a hanging sign aimed at any other face passes
 WallHangingSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-WallHangingSignBlock.shouldTryToChainAnotherHangingSign	inline	crates/horizon-world/src/level/interact.rs::Behaviours::block_use_item_on	passing on a non-editable face lets the held hanging sign place its own block, which chains onto the wall sign
+WallHangingSignBlock.shouldTryToChainAnotherHangingSign	inline	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	gap: player: the HangingSignItem and isHittingEditableSide halves are there, canExecuteClickCommands is read as false because the world sees no sign text; a waxed wall hanging sign whose faced side runs a click command therefore chains a new sign here where vanilla opens its editor (Game::sign_can_execute_click_commands answers it on the client)
 WallHangingSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-WallHangingSignBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	gap: player: chaining a hanging sign onto a wall hanging sign is not ported here
+WallHangingSignBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	gap: player: chaining is there; the click-command condition of shouldTryToChainAnotherHangingSign is not, see that row
 WallSignBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 WallSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
 WallSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	

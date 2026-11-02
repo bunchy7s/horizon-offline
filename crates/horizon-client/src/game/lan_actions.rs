@@ -1349,11 +1349,23 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
+        // A block's or a double chest's menu counts among the openers of its
+        // lid (a vehicle keeps its own `Container`, an ender chest has none).
+        let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
+        }
+        // `ContainerOpenersCounter.incrementOpeners` (`ChestBlockEntity.startOpen`,
+        // `ShulkerBoxBlockEntity.startOpen`): the lid opens for the guest, and
+        // when this is the first opener the open sound plays for everyone
+        // around, the opener included (`playSound(null, …)`, which the capture
+        // relay sends on to the guests). Without it the host's copy never
+        // learned of the open, so a guest's box opened silently.
+        if counts_openers && self.container_openers_changed(pos, true) {
+            self.container_edge_sound(pos, true);
         }
         true
     }

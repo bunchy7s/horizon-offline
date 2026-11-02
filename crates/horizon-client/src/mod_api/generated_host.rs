@@ -1303,6 +1303,13 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
 }
 impl EntityRef {
     /// The entity's position (`Entity.position`): its feet, the middle of
