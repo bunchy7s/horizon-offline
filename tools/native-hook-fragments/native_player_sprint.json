@@ -3,10 +3,7 @@
     {
       "name": "player_sprint",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_sprint",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
+      "side": "server"
     }
   ],
   "rust_summary": "a server player's sprint starting or stopping (`native_player_sprint`).",

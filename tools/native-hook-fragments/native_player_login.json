@@ -5,11 +5,7 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_login",
       "neoforge": "none (Bukkit's PlayerLoginEvent; NeoForge's PlayerNegotiationEvent is not cancellable)",
       "side": "server",
-      "cancellable": true,
-      "mod_api": {
-        "contract": "cancel",
-        "out": "cancel"
-      }
+      "cancellable": true
     }
   ],
   "rust_summary": "a joining player the mods may refuse (`native_player_login`).",

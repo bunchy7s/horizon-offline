@@ -3,10 +3,7 @@
     {
       "name": "resource_pack_status",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_resource_pack_status",
-      "side": "server",
-      "mod_api": {
-        "contract": "listen"
-      }
+      "side": "server"
     }
   ],
   "rust_summary": "a server player's answer to a resource pack (`native_resource_pack_status`).",
