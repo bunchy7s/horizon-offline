@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_stop_using_item",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stop_using_item",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerStopUsingItem)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player released the use-item key (`native_player_stop_using_item`).",
+  "doc_summary": "A server player released the use-item key before the item finished being used: `native_player_stop_using_item(player, name)`. Bundles need \"hooks\": @API:player_stop_using_item@."
+}

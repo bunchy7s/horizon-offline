@@ -172,6 +172,23 @@ impl Game<'_> {
                 self.set_force_game_mode(force);
                 return json!({ "value": state.force_game_mode });
             }
+            "serversettings/max_players" => {
+                return json!({ "value": state.max_players });
+            }
+            "serversettings/max_players/set" => {
+                let Some(max_players) = body["value"]
+                    .as_i64()
+                    .and_then(|value| usize::try_from(value).ok())
+                else {
+                    return json!({ "error": "max players must be a non-negative integer" });
+                };
+                rpc(format!(
+                    "Update max players from {} to {}",
+                    state.max_players, max_players
+                ));
+                self.set_max_players(state, max_players);
+                return json!({ "value": state.max_players });
+            }
             "serversettings/use_allowlist" => {
                 return json!({
                     "value": lists.lock().unwrap().use_whitelist
