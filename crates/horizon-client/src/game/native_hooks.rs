@@ -4821,6 +4821,11 @@ impl Game<'_> {
         mod_api::dispatch_world_border_bounds_change_finish(self, mod_api::mods());
     }
 
+    /// A server player launched a projectile item, after it was created.
+    /// `item` is the projectile's held item. @API:player_launch_projectile@.
+    pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
+        let _ = (player, name, item);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

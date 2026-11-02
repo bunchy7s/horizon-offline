@@ -759,6 +759,30 @@ impl Game<'_> {
                 p.guest = Some(conn);
             }
         }
+        let guest = &host.hub.guests[i];
+        for projectile in projectiles..self.creatures.projectiles.len() {
+            let item = match &self.creatures.projectiles[projectile].kind {
+                horizon_client::projectiles::ProjectileKind::Snowball => {
+                    Some("minecraft:snowball".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Egg => {
+                    Some("minecraft:egg".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::EnderPearl => {
+                    Some("minecraft:ender_pearl".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Trident => {
+                    Some("minecraft:trident".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Potion(stack) => {
+                    Some(stack.item.to_string())
+                }
+                _ => None,
+            };
+            if let Some(item) = item {
+                self.native_player_launch_projectile(guest.uuid, &guest.name, &item);
+            }
+        }
         // The guest's swings are theirs: the host's own count stays the host's.
         play.swings += self.swings_started.wrapping_sub(swings);
         self.swings_started = swings;
