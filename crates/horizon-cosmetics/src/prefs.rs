@@ -79,10 +79,17 @@ impl Prefs {
     pub fn write_into(&self, text: &str) -> String {
         let mut out: String = text
             .lines()
-            .filter(|l| l.split_once(':').is_none_or(|(k, _)| ![OTHERS, AURAS].contains(&k.trim())))
+            .filter(|l| {
+                l.split_once(':')
+                    .is_none_or(|(k, _)| ![OTHERS, AURAS].contains(&k.trim()))
+            })
             .flat_map(|l| [l, "\n"])
             .collect();
-        out.push_str(&format!("{OTHERS}:{}\n{AURAS}:{}\n", self.others.name(), self.auras));
+        out.push_str(&format!(
+            "{OTHERS}:{}\n{AURAS}:{}\n",
+            self.others.name(),
+            self.auras
+        ));
         out
     }
 
