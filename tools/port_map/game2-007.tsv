@@ -91,6 +91,7 @@ AbstractContainerMenu.synchronizeSlotToRemote	port	crates/horizon-client/src/lan
 AbstractContainerMenu.synchronizeDataSlotToRemote	port	crates/horizon-client/src/lan/containers.rs::Hub::sync_container_data	sends each changed furnace, brewing or crafter value
 AbstractContainerMenu.synchronizeCarriedToRemote	inline	crates/horizon-client/src/lan/containers.rs::Hub::answer_click	the cursor item is sent after a click when it differs; gap: minor: no sync on other carried changes
 AbstractContainerMenu.setRemoteSlotUnsafe	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's slot update is applied; gap: minor: no hashed copy of the remote slot is kept
+AbstractContainerMenu.doClick	inline	crates/horizon-client/src/menu.rs::Menu::click	the click dispatch for the player's own and a host's station menus; its QUICK_MOVE arm repeats quickMoveStack while the slot keeps the item, and the guest copy in lan/menu.rs::click does it in one pass whose move_to fills every empty slot
 AbstractContainerMenu.getClickAction	inline	crates/horizon-client/src/menu.rs::Menu::click	button 0 is the primary action, 1 the secondary
 AbstractContainerMenu.tryItemClickBehaviourOverride	port	crates/horizon-client/src/menu/bundle.rs::Menu::bundle_click	a bundle takes or puts items on a click on another stack; the NeoForge event is not modelled
 AbstractContainerMenu.initializeContents	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's full content is applied to the open menu
