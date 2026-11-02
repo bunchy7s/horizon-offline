@@ -1212,6 +1212,50 @@ pub trait Host {
         let _ = pos;
         unimplemented!("Host::block_collision")
     }
+    /// The entity's data as `/data get entity` shows it
+    /// (`Entity.saveWithoutId`): its compound without `id`. An entity with no
+    /// UUID yet gets the one it will be saved with. API @API:entity_data@.
+    fn entity_nbt(&mut self, entity: EntityRef) -> Option<Compound> {
+        let _ = entity;
+        unimplemented!("Host::entity_nbt")
+    }
+    /// Merges `nbt` into the entity's data and loads the entity from it, as
+    /// `/data merge entity` does (`EntityDataAccessor.setData`): true when it
+    /// changed. False for a player (vanilla refuses them too), a kind Horizon
+    /// can't reload yet (only mobs, dropped items, armor stands and item
+    /// frames), data nested too deep, or data that changes nothing. API
+    /// @API:entity_data@.
+    fn entity_merge_nbt(&mut self, entity: EntityRef, nbt: Compound) -> bool {
+        let _ = entity;
+        let _ = nbt;
+        unimplemented!("Host::entity_merge_nbt")
+    }
+    /// The entity's tags (`Entity.getTags`), as `/tag <entity> list` shows
+    /// them. API @API:entity_data@.
+    fn entity_tags(&self, entity: EntityRef) -> Option<Vec<String>> {
+        let _ = entity;
+        unimplemented!("Host::entity_tags")
+    }
+    /// Adds tag `tag` (`Entity.addTag`): false when it has it already, holds
+    /// 1024, or the handle is stale. API @API:entity_data@.
+    fn entity_add_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        let _ = entity;
+        let _ = tag;
+        unimplemented!("Host::entity_add_tag")
+    }
+    /// Removes tag `tag` (`Entity.removeTag`): false when it didn't have it.
+    /// API @API:entity_data@.
+    fn entity_remove_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        let _ = entity;
+        let _ = tag;
+        unimplemented!("Host::entity_remove_tag")
+    }
+    /// The entity's name as plain text (`Entity.getName`): its custom name,
+    /// a player's name, else its type's name. API @API:entity_data@.
+    fn entity_name(&self, entity: EntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::entity_name")
+    }
     /// The entity `id` (the id events carry) as a handle for the `entity_*`
     /// methods: None on a client, with no world open, or for no such entity
     /// in the level in place or among the server's players. API
@@ -1265,6 +1309,41 @@ pub trait Host {
     }
 }
 impl EntityRef {
+    /// The entity's data as `/data get entity` shows it
+    /// (`Entity.saveWithoutId`): its compound without `id`. An entity with no
+    /// UUID yet gets the one it will be saved with. API @API:entity_data@.
+    pub fn nbt(self, host: &mut dyn Host) -> Option<Compound> {
+        host.entity_nbt(self)
+    }
+    /// Merges `nbt` into the entity's data and loads the entity from it, as
+    /// `/data merge entity` does (`EntityDataAccessor.setData`): true when it
+    /// changed. False for a player (vanilla refuses them too), a kind Horizon
+    /// can't reload yet (only mobs, dropped items, armor stands and item
+    /// frames), data nested too deep, or data that changes nothing. API
+    /// @API:entity_data@.
+    pub fn merge_nbt(self, host: &mut dyn Host, nbt: Compound) -> bool {
+        host.entity_merge_nbt(self, nbt)
+    }
+    /// The entity's tags (`Entity.getTags`), as `/tag <entity> list` shows
+    /// them. API @API:entity_data@.
+    pub fn tags(self, host: &dyn Host) -> Option<Vec<String>> {
+        host.entity_tags(self)
+    }
+    /// Adds tag `tag` (`Entity.addTag`): false when it has it already, holds
+    /// 1024, or the handle is stale. API @API:entity_data@.
+    pub fn add_tag(self, host: &mut dyn Host, tag: &str) -> bool {
+        host.entity_add_tag(self, tag)
+    }
+    /// Removes tag `tag` (`Entity.removeTag`): false when it didn't have it.
+    /// API @API:entity_data@.
+    pub fn remove_tag(self, host: &mut dyn Host, tag: &str) -> bool {
+        host.entity_remove_tag(self, tag)
+    }
+    /// The entity's name as plain text (`Entity.getName`): its custom name,
+    /// a player's name, else its type's name. API @API:entity_data@.
+    pub fn name(self, host: &dyn Host) -> Option<String> {
+        host.entity_name(self)
+    }
     /// The entity's position (`Entity.position`): its feet, the middle of
     /// its box for a painting or an item frame. API @API:entity_handles@.
     pub fn position(self, host: &dyn Host) -> Option<[f64; 3]> {

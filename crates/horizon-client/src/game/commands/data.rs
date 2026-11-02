@@ -334,7 +334,7 @@ impl Game<'_> {
             _ => None,
         }
     }
-    fn set_entity_tags(&mut self, t: Target, tags: &[String]) {
+    pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) {
         if let Some(raw) = self.raw_mut(t) {
             let list = tags
                 .iter()

@@ -495,6 +495,24 @@ impl Host for super::Game<'_> {
     fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
         self.native_block_collision(pos)
     }
+    fn entity_nbt(&mut self, entity: EntityRef) -> Option<Compound> {
+        self.native_entity_nbt(entity)
+    }
+    fn entity_merge_nbt(&mut self, entity: EntityRef, nbt: Compound) -> bool {
+        self.native_entity_merge_nbt(entity, nbt)
+    }
+    fn entity_tags(&self, entity: EntityRef) -> Option<Vec<String>> {
+        self.native_entity_tags(entity)
+    }
+    fn entity_add_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        self.native_entity_add_tag(entity, tag)
+    }
+    fn entity_remove_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
+        self.native_entity_remove_tag(entity, tag)
+    }
+    fn entity_name(&self, entity: EntityRef) -> Option<String> {
+        self.native_entity_name(entity)
+    }
     fn entity(&self, id: u32) -> Option<EntityRef> {
         self.native_entity(id)
     }
