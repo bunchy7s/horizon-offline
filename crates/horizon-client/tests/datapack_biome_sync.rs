@@ -4,8 +4,7 @@
 use horizon_client::{
     biome::Biomes,
     chunk::LevelShapes,
-    lan::data::{BIOME_REGISTRY, SyncData},
-    scoreboard::tag_to_json,
+    lan::data::{BIOME_REGISTRY, SyncData, client_biomes},
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -59,23 +58,29 @@ fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
     let sent = sync.registry_packets(true, &LevelShapes::VANILLA);
     let biomes = sent.iter().find(|r| r.registry == BIOME_REGISTRY).unwrap();
     assert!(biomes.entries[0].data.is_none(), "a known one is not sent");
-    let data = biomes.entries[2]
-        .data
-        .as_ref()
-        .expect("the pack's biome is sent");
+    assert!(biomes.entries[2].data.is_some(), "the pack's biome is sent");
 
-    // The client builds its table from what arrived, with the colours of the
-    // server's.
-    let json = tag_to_json(data);
-    let client = base.with_packs([("minecraft:tundra_x", &json)]);
+    // The client builds its table from what arrived: the server's id for
+    // the name, and the pack's colour.
+    let received: Vec<_> = biomes
+        .entries
+        .iter()
+        .map(|e| (e.id.clone(), e.data.clone()))
+        .collect();
+    let client = client_biomes(&base, &received).expect("the pack's biome is new to the client");
     let id = client.id("minecraft:tundra_x");
-    assert_ne!(id, client.id("minecraft:plains"));
-    assert_eq!(
-        client.get(id).grass,
-        world.get(world.id("minecraft:tundra_x")).grass
-    );
+    assert_eq!(id, world.id("minecraft:tundra_x"));
+    assert_eq!(client.get(id).grass, 0x123456);
     assert_ne!(
         client.get(id).grass,
         client.get(client.id("minecraft:plains")).grass
     );
+
+    // Nothing new to a client that knows them all: it keeps its own table.
+    let known: Vec<_> = received
+        .iter()
+        .filter(|(n, _)| base.contains(n))
+        .cloned()
+        .collect();
+    assert!(client_biomes(&base, &known).is_none());
 }

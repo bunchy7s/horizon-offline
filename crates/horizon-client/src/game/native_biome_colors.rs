@@ -19,15 +19,21 @@ impl Game<'_> {
         let base = world_biomes!(self).clone();
         let biomes = base
             .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
-            .map_or(base, Arc::new);
-        if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
-            return;
+            .map_or_else(|| base.clone(), Arc::new);
+        // A world's own table is the one in use, coloured as of the last
+        // call; a plain world's is the pack's.
+        if self.world_biomes.is_some() {
+            if Arc::ptr_eq(&biomes, &base) {
+                return;
+            }
+            self.world_biomes = Some(biomes);
+        } else {
+            if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
+                return;
+            }
+            self.pack.context = self.pack.context_with(biomes);
         }
-        let context = self.pack.context_with(biomes);
-        // A world's own table stays with that world, not the pack.
-        if self.world_biomes.is_none() {
-            self.pack.context = context.clone();
-        }
+        let context = self.worker_context();
         self.clear_lod();
         self.streaming.reload_resources(&mut self.world, context);
     }

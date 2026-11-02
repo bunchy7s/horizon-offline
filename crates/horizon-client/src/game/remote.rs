@@ -17,6 +17,7 @@ use horizon_client::{
     entities::{Experience, ExperienceOrb, ItemEntity},
     hud::HudBatch,
     items::ItemStack,
+    lan::data::{BIOME_REGISTRY, client_biomes},
     menu::Input,
     mobs::{Mob, MobType, Who},
     motion::{MotionWorld, PlayerMotion},
@@ -832,8 +833,11 @@ impl Game<'_> {
         self.reset_tutorial();
         self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
-        // world's packed table must not name its ids.
-        self.world_biomes = None;
+        // world's packed table must not name its ids. The window's own
+        // server thread keeps the one it just set.
+        if local.is_none() {
+            self.world_biomes = None;
+        }
         let root = self.options.resources.clone();
         let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
         let lang = Arc::new(horizon_client::net::load_language(&root));
@@ -2034,34 +2038,21 @@ impl Game<'_> {
         // game's table, from the data it sent: colours, meshing and the
         // chunk format all go through that table. The window's own server
         // thread set the world's table already.
-        if self.integrated.is_none()
-            && let Some(list) = registries.registries.get("minecraft:worldgen/biome")
-        {
-            let known = self.res.biomes();
-            let files: Vec<(&str, serde_json::Value)> = list
-                .iter()
-                .filter(|(name, _)| !known.contains(name))
-                .filter_map(|(name, data)| {
-                    Some((
-                        name.as_str(),
-                        horizon_client::scoreboard::tag_to_json(data.as_ref()?),
-                    ))
-                })
-                .collect();
-            if !files.is_empty() {
-                log::info!(
-                    "Horizon: the server has {} biomes the game lacks",
-                    files.len()
-                );
-                let table = known.with_packs(files.iter().map(|(n, v)| (*n, v)));
-                self.world_biomes = Some(Arc::new(table));
+        if self.integrated.is_none() {
+            let table = registries
+                .registries
+                .get(BIOME_REGISTRY)
+                .and_then(|list| client_biomes(self.res.biomes(), list))
+                .map(Arc::new);
+            if table.is_some() || self.world_biomes.is_some() {
+                self.world_biomes = table;
                 let context = self.worker_context();
                 self.streaming.reload_resources(&mut self.world, context);
             }
         }
         let biomes: Vec<u16> = registries
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|list| {
                 list.iter()
                     .map(|(name, _)| world_biomes!(self).id(name))

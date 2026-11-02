@@ -19066,10 +19066,13 @@ impl Game<'_> {
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
     }
-    /// What the chunk and far-terrain workers mesh with: the pack's tables
-    /// over the world's biomes.
+    /// What the chunk and far-terrain workers mesh with: the pack's context,
+    /// over the world's biomes when it has its own.
     fn worker_context(&self) -> Arc<WorkerContext> {
-        self.pack.context_with(world_biomes!(self).clone())
+        match &self.world_biomes {
+            Some(table) => self.pack.context_with(table.clone()),
+            None => self.pack.context.clone(),
+        }
     }
     fn pack_files(&self) -> horizon_world::loot::PackOverlay<'_> {
         pack_files(&self.world_tables)
