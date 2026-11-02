@@ -307,78 +307,9 @@ fn emit_faces(
 fn emit_flat_cell(vertices: &mut Vec<crate::mesher::Vertex>, x0: f32, z0: f32, uv: [f32; 2]) {
     let x1 = x0 + 12.0;
     let z1 = z0 + 12.0;
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x1, 0.0, z0],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x1, 0.0, z1],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x0, 0.0, z1],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x0, 0.0, z0],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x0, 0.0, z0],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x0, 0.0, z1],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x1, 0.0, z1],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
-    vertices.push(crate::mesher::Vertex {
-        normal: [0; 4],
-        pos: [x1, 0.0, z0],
-        uv,
-        layer: 4,
-        color: u32::MAX,
-        light: 0,
-        glint_uv: [0.0, 0.0],
-    });
+    let p = [[x1, 0.0, z0], [x1, 0.0, z1], [x0, 0.0, z1], [x0, 0.0, z0]];
+    push_quad(vertices, p, 0, [0; 4], uv);
+    push_quad(vertices, [p[3], p[2], p[1], p[0]], 0, [0; 4], uv);
 }
 
 impl Mesh {
@@ -400,101 +331,37 @@ impl Mesh {
         let bottom = uniform.offset[1];
         let uv = input.uv;
 
-        let mut base_mask = 0u16;
-        if bottom <= 0.0 {
-            base_mask |= 1 << 1;
-        }
-        if bottom + 4.0 >= 0.0 {
-            base_mask |= 1;
-        }
+        let (w_i64, h_i64) = (i64::from(*w), i64::from(*h));
+        let filled = |cx: i64, cz: i64| {
+            tex_cells[(cz.rem_euclid(h_i64) * w_i64 + cx.rem_euclid(w_i64)) as usize]
+        };
 
-        let is_pot = *w > 0 && *h > 0 && w.is_power_of_two() && h.is_power_of_two();
-        if is_pot {
-            let mask_x = i64::from(*w - 1);
-            let mask_z = i64::from(*h - 1);
-            let w_usize = *w as usize;
-            let mask_x_usize = (*w - 1) as usize;
-            let mask_z_usize = (*h - 1) as usize;
-            let base_x = (cell_x & mask_x) as usize;
-            let base_z = (cell_z & mask_z) as usize;
-
-            for &(dx, dz) in &self.cells {
-                let tx = (base_x.wrapping_add(dx as usize)) & mask_x_usize;
-                let tz = (base_z.wrapping_add(dz as usize)) & mask_z_usize;
-                let idx = tz * w_usize + tx;
-                if !tex_cells[idx] {
-                    continue;
-                }
-                let x0 = dx as f32 * 12.0;
-                let z0 = dz as f32 * 12.0;
-
-                if input.fast {
-                    emit_flat_cell(&mut self.vertices, x0, z0, uv);
-                    continue;
-                }
-
-                let tz_north = (tz.wrapping_sub(1)) & mask_z_usize;
-                let tz_south = (tz + 1) & mask_z_usize;
-                let tx_west = (tx.wrapping_sub(1)) & mask_x_usize;
-                let tx_east = (tx + 1) & mask_x_usize;
-
-                let empty_north = !tex_cells[tz_north * w_usize + tx];
-                let empty_south = !tex_cells[tz_south * w_usize + tx];
-                let empty_west = !tex_cells[tz * w_usize + tx_west];
-                let empty_east = !tex_cells[tz * w_usize + tx_east];
-
-                let mut mask = base_mask;
-                if dz > 0 && empty_north {
-                    mask |= 1 << 2;
-                }
-                if dz < 0 && empty_south {
-                    mask |= 1 << 3;
-                }
-                if dx > 0 && empty_west {
-                    mask |= 1 << 4;
-                }
-                if dx < 0 && empty_east {
-                    mask |= 1 << 5;
-                }
-                if dx.abs() <= 1 && dz.abs() <= 1 {
-                    mask |= 63 << 6;
-                }
-
-                emit_faces(&mut self.vertices, mask, x0, z0, uv);
+        for &(dx, dz) in &self.cells {
+            let (dx_i64, dz_i64) = (i64::from(dx), i64::from(dz));
+            let (cx, cz) = (cell_x + dx_i64, cell_z + dz_i64);
+            if !filled(cx, cz) {
+                continue;
             }
-        } else {
-            let (w_i64, h_i64) = (i64::from(*w), i64::from(*h));
-            let filled = |cx: i64, cz: i64| {
-                tex_cells[(cz.rem_euclid(h_i64) * w_i64 + cx.rem_euclid(w_i64)) as usize]
-            };
+            let x0 = dx as f32 * 12.0;
+            let z0 = dz as f32 * 12.0;
 
-            for &(dx, dz) in &self.cells {
-                let (dx_i64, dz_i64) = (i64::from(dx), i64::from(dz));
-                let (cx, cz) = (cell_x + dx_i64, cell_z + dz_i64);
-                if !filled(cx, cz) {
-                    continue;
-                }
-                let x0 = dx as f32 * 12.0;
-                let z0 = dz as f32 * 12.0;
-
-                if input.fast {
-                    emit_flat_cell(&mut self.vertices, x0, z0, uv);
-                    continue;
-                }
-
-                let mask = face_mask(
-                    dx,
-                    dz,
-                    bottom,
-                    [
-                        !filled(cx, cz - 1),
-                        !filled(cx, cz + 1),
-                        !filled(cx - 1, cz),
-                        !filled(cx + 1, cz),
-                    ],
-                );
-                emit_faces(&mut self.vertices, mask, x0, z0, uv);
+            if input.fast {
+                emit_flat_cell(&mut self.vertices, x0, z0, uv);
+                continue;
             }
+
+            let mask = face_mask(
+                dx,
+                dz,
+                bottom,
+                [
+                    !filled(cx, cz - 1),
+                    !filled(cx, cz + 1),
+                    !filled(cx - 1, cz),
+                    !filled(cx + 1, cz),
+                ],
+            );
+            emit_faces(&mut self.vertices, mask, x0, z0, uv);
         }
 
         self.key = Some(key);
