@@ -2890,6 +2890,17 @@ impl Game<'_> {
     ) {
         let _ = (player, name, advancement);
     }
+    /// A server player completed an advancement, after progress was recorded.
+    /// Helpers looking up the guest through `self.lan` may find nothing during
+    /// its packet. @API:player_advancement_done@.
+    pub(super) fn native_player_advancement_done(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+    ) {
+        let _ = (player, name, advancement);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

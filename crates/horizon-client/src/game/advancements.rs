@@ -681,6 +681,9 @@ impl Game<'_> {
     fn award(&mut self, index: usize) {
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_advancement_done(player, &name, &a.id);
+        }
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
             self.experience.give(a.rewards.experience);
