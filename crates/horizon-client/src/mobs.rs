@@ -1284,11 +1284,27 @@ pub enum MobEvent {
         speed: f64,
         count: u32,
     },
+    /// `ServerLevel.sendParticles` of an `ItemParticleOption`: `count` crumbs of
+    /// `item`, drawn in this window.
+    ItemParticles {
+        item: &'static str,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: u32,
+    },
     Sound(&'static str, [f64; 3], f32, f32),
     /// `Entity.sendBubbleColumnParticles`: a mob at the top of the bubble column
     /// block at `pos` (the splash and bubble particles over it).
     BubbleColumnParticles {
         pos: [i32; 3],
+    },
+    /// `LivingEntity.checkFallDamage`: `count` crumbs of the block `state` a mob
+    /// landed on, thrown up at `at`.
+    LandingDust {
+        state: horizon_world::registry::BlockStateId,
+        at: [f64; 3],
+        count: i32,
     },
     /// `UseBonemeal`: the villager's bone meal grows the crop at `pos`
     /// (`BoneMealItem.growCrop`, then level event 1505).
@@ -3041,6 +3057,14 @@ impl Mob {
             if crack(before) != crack(after) {
                 self.outbox
                     .push(MobEvent::Sound("item.wolf_armor.crack", at, 1.0, 1.0));
+                // Twenty scutes fly off, a block above the wolf's feet.
+                self.outbox.push(MobEvent::ItemParticles {
+                    item: "minecraft:armadillo_scute",
+                    at: [at[0], at[1] + 1.0, at[2]],
+                    spread: [0.2, 0.1, 0.2],
+                    speed: 0.1,
+                    count: 20,
+                });
             }
         }
     }

@@ -725,6 +725,15 @@ impl Game<'_> {
             None => horizon_client::health::hurt_sound("hurt"),
         }
     }
+    /// Offline local profiles never borrow the account that started P1's game.
+    pub(super) fn auth(&self) -> Option<std::sync::Arc<horizon_client::auth::AuthSession>> {
+        if self.options.split_guest {
+            None
+        } else {
+            horizon_client::auth::current()
+        }
+    }
+
     /// Leave the title for a server (ConnectScreen): an empty world fed by the connection.
     pub(super) fn connect_server(&mut self, address: &str, name: &str) -> Result<()> {
         self.connect_server_with_cookies(address, name, None)
@@ -815,7 +824,7 @@ impl Game<'_> {
             );
         }
         // A signed-in account always plays under its own name.
-        let auth = horizon_client::auth::current();
+        let auth = self.auth();
         let name = auth.as_ref().map_or(name, |a| a.name.as_str());
         let user = auth.as_ref().map_or_else(
             || {
@@ -4910,7 +4919,10 @@ impl Game<'_> {
         };
         match &mut r.own_profile {
             OwnProfile::Idle => {
-                let Some(auth) = horizon_client::auth::current() else {
+                let Some(auth) = (!self.options.split_guest)
+                    .then(horizon_client::auth::current)
+                    .flatten()
+                else {
                     r.own_profile = OwnProfile::Done(None);
                     return;
                 };

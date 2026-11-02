@@ -478,6 +478,46 @@ pub fn hoof_steps(s: Species) -> bool {
             | Species::ZombieHorse
     )
 }
+/// `Entity.isVehicle`: someone on its back, the player steering it
+/// (`rider`) or a mob that boarded it (`extra.rider`).
+pub fn is_vehicle(m: &Mob) -> bool {
+    m.rider.is_some() || m.extra.rider.is_some()
+}
+/// `SkeletonHorse.getSwimSound`: an undead horse splashes its own way. In the
+/// water it swims; on the ground a horse with nobody on it splashes, and a
+/// ridden one counts on the same `gallopSoundCounter` its hoof steps use, so
+/// it splashes for the first five steps, then gallops through the water every
+/// third and swims in between.
+pub fn skeleton_horse_swim_sound(m: &mut Mob) -> &'static str {
+    if !m.on_ground {
+        return "entity.skeleton_horse.swim";
+    }
+    if !is_vehicle(m) {
+        return "entity.skeleton_horse.step_water";
+    }
+    m.ai.steps.gallop += 1;
+    let count = m.ai.steps.gallop;
+    if count > 5 && count % 3 == 0 {
+        "entity.skeleton_horse.gallop_water"
+    } else if count <= 5 {
+        "entity.skeleton_horse.step_water"
+    } else {
+        "entity.skeleton_horse.swim"
+    }
+}
+/// `SkeletonHorse.playSwimSound`: a skeleton horse standing on the ground
+/// splashes at 0.3, and one in the water at `min(0.1, f * 25.0)` - which
+/// saturates at 0.1 for any speed a swim sound plays at.
+pub fn swim_volume(m: &Mob, f: f32) -> f32 {
+    if m.species() != Species::SkeletonHorse {
+        return f;
+    }
+    if m.on_ground {
+        0.3
+    } else {
+        (f * 25.0).min(0.1)
+    }
+}
 /// `AbstractHorse.playStepSound` (and `Horse.playGallopSound`) on the block
 /// `pos`: silent on liquids; a ridden horse walks on wood for five steps,
 /// then gallops every third; unridden, wood or the plain step by age.
@@ -1011,5 +1051,59 @@ mod tests {
         // Llama and Camel: canPerformRearing is false.
         assert_eq!(rears(Species::Llama, "minecraft:llama", 60), 0);
         assert_eq!(rears(Species::Camel, "minecraft:camel", 60), 0);
+    }
+
+    /// `SkeletonHorse.getSwimSound`: an undead horse has its own water sounds,
+    /// and one with someone on it counts its water steps on the same
+    /// `gallopSoundCounter` its hoof steps use - five splashes, then a gallop
+    /// through the water every third step and a swim sound in between.
+    #[test]
+    fn a_skeleton_horse_splashes_and_swims_with_its_own_sounds() {
+        let sound = |m: &mut Mob| crate::mobs::ai::swim_sound(m);
+        let mut m = equine(1, Species::SkeletonHorse, "minecraft:skeleton_horse");
+        // In the water it swims; every other animal's default is the generic
+        // splash (Entity.getSwimSound).
+        m.on_ground = false;
+        assert_eq!(sound(&mut m), "entity.skeleton_horse.swim");
+        // Standing on the ground with nobody on it, it splashes.
+        m.on_ground = true;
+        assert_eq!(sound(&mut m), "entity.skeleton_horse.step_water");
+        m.extra.rider = Some(9);
+        let ridden: Vec<&str> = (0..9).map(|_| sound(&mut m)).collect();
+        assert_eq!(
+            ridden,
+            [
+                "entity.skeleton_horse.step_water",
+                "entity.skeleton_horse.step_water",
+                "entity.skeleton_horse.step_water",
+                "entity.skeleton_horse.step_water",
+                "entity.skeleton_horse.step_water",
+                "entity.skeleton_horse.gallop_water",
+                "entity.skeleton_horse.swim",
+                "entity.skeleton_horse.swim",
+                "entity.skeleton_horse.gallop_water",
+            ]
+        );
+        assert_eq!(m.ai.steps.gallop, 9);
+        // A plain horse keeps the generic splash.
+        let mut horse = equine(2, Species::Horse, "minecraft:horse");
+        assert_eq!(sound(&mut horse), "entity.generic.swim");
+    }
+
+    /// `SkeletonHorse.playSwimSound`: 0.3 on the ground, and no more than 0.1
+    /// in the water, where every other animal keeps the volume
+    /// `waterSwimSound` works out from its speed.
+    #[test]
+    fn a_skeleton_horses_splash_is_quiet_in_the_water() {
+        let mut m = equine(1, Species::SkeletonHorse, "minecraft:skeleton_horse");
+        m.on_ground = true;
+        assert_eq!(swim_volume(&m, 0.35), 0.3);
+        m.on_ground = false;
+        assert_eq!(swim_volume(&m, 0.35), 0.1);
+        assert_eq!(swim_volume(&m, 1.0), 0.1);
+        assert!((swim_volume(&m, 0.001) - 0.025).abs() < 1.0e-6);
+        let mut horse = equine(2, Species::Horse, "minecraft:horse");
+        horse.on_ground = false;
+        assert_eq!(swim_volume(&horse, 0.35), 0.35);
     }
 }
