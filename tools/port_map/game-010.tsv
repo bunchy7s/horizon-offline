@@ -102,7 +102,7 @@ PoiSection.refresh	inline	crates/horizon-client-render/src/poi_sections.rs::PoiS
 PoiSection.Packed.unpack	skip:other		POI files are not loaded into sections
 PoiTypes.registerBlockStates	inline	crates/horizon-client/src/save.rs::poi_type	state to POI type and max tickets in one match
 PoiTypes.bootstrap	port	crates/horizon-client/src/save.rs::poi_type	every POI type with its tickets (bed heads of the sixteen colours only, cauldrons, bell 32); villagers use villager_brain::state_poi for jobs, beds and bell
-Bat.isFlapping	missing		minor: a flying bat's wing beat (every 10 ticks) sends no FLAP vibration, so sculk sensors do not hear it
+Bat.isFlapping	missing		a flying bat's wing beat (every 10 ticks) sends no minecraft:flap vibration, so sculk sensors do not hear it; mobs/living.rs posts that event for a bee every other tick and for a parrot, and nothing else
 Bat.getAmbientSound	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	Species::Bat arm: a resting bat is silent three times in four
 Bat.isResting	port	crates/horizon-client/src/mobs/bat.rs::resting	
 Bat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	BatFlags byte, bit 0 resting
@@ -126,6 +126,6 @@ Dolphin.MoveToItemGoal.start	port	crates/horizon-client/src/mobs/dolphin.rs::Mov
 AbstractChestedHorse.dropEquipment	port	crates/horizon-client/src/mobs/drops.rs::die	the stored items and then a chest drop, chested cleared
 AbstractChestedHorse.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	ChestedHorse and Items for llamas, donkeys and mules
 AbstractChestedHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	ChestedHorse and Items, 15 slots
-AbstractChestedHorse.getSlot	missing		minor: slot 499 (horse.chest) is not mapped for mobs, so /item replace entity ... horse.chest does nothing
+AbstractChestedHorse.getSlot	missing		slot 499 (horse.chest) is not mapped for mobs, so /item replace entity ... horse.chest does nothing; the mob slot names Horizon resolves are the eight of loot::EQUIPMENT_SLOTS
 AbstractChestedHorse.equipChest	port	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	tamed donkey or mule takes a held chest with the sound; llamas do it in game/llamas.rs interact_llama
 AbstractChestedHorse.playChestEquipsSound	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	entity.donkey.chest with the random pitch; llamas play entity.llama.chest in llama_sound
