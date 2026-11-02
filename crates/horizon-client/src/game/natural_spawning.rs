@@ -39,6 +39,7 @@ pub(super) struct SpawnScratch {
 
 /// A player in the level in place, as spawning and despawning see it.
 pub(super) struct LevelPlayer {
+    pub(super) uuid: u128,
     pub(super) position: Vec3,
     pub(super) bounds: Aabb,
     pub(super) alive: bool,
@@ -463,6 +464,7 @@ impl<'a> Game<'a> {
     /// `level_players` one at a time, without collecting them.
     fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
         let local = self.player_view().map(|p| LevelPlayer {
+            uuid: self.level.player_uuid,
             position: p.position,
             bounds: p.bounds,
             alive: p.alive,
@@ -475,6 +477,7 @@ impl<'a> Game<'a> {
                 .iter()
                 .filter(|g| h.hub.here(g))
                 .map(|g| LevelPlayer {
+                    uuid: g.uuid,
                     position: Vec3::new(g.position[0], g.position[1], g.position[2]),
                     bounds: super::lan_mobs::guest_bounds(g),
                     alive: !g.dead,

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "village_siege",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_village_siege",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "VillageSiegeEvent",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ],
+  "rust_summary": "A village siege found a spawn position, cancellable (`native_village_siege`).",
+  "doc_summary": "`native_village_siege(dimension, player, attempted_pos, canceled)` lets server mods stop a village siege. Bundles need \"hooks\": @API:native_village_siege@."
+}

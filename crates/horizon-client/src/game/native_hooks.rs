@@ -4736,6 +4736,19 @@ impl Game<'_> {
         mod_api::dispatch_portal_create(self, mod_api::mods(), dimension, pos);
     }
 
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    pub(super) fn native_village_siege(
+        &mut self,
+        dimension: &str,
+        player: u128,
+        attempted_pos: [f64; 3],
+        canceled: &mut bool,
+    ) {
+        let _ = (dimension, player, attempted_pos, canceled);
+    }
+
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
     /// number and `raiders` counts the raiders, not the mobs they ride. @API:raid_spawn_wave@.
     pub(super) fn native_raid_spawn_wave(
