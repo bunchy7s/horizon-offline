@@ -13,7 +13,7 @@ use super::{
 use horizon_client::{
     containers::BlockEntity,
     items::ItemStack,
-    menu::{Kind, Menu},
+    menu::{AnvilCraft, Kind, Menu},
 };
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -80,6 +80,7 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
+        menu.anvil_hook = kind == Kind::Anvil;
         if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
             && kind == Kind::Enchanting
         {
@@ -137,6 +138,19 @@ impl Game<'_> {
                 (slots, gs.menu.data[0])
             });
             self.guest_menu_op(host, gi, &mut gs.menu, op);
+            // AnvilCraftEvent.Pre: the taken result's onTake waits for the mods.
+            let mut anvil_craft = gs.menu.anvil_craft.take();
+            if let Some(craft) = &anvil_craft {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut cancel = false;
+                self.native_anvil_craft_pre(uuid, &name, gs.pos, craft, &mut cancel);
+                if cancel {
+                    anvil_craft = None;
+                } else {
+                    gs.menu.anvil_take(&self.menu_env());
+                }
+            }
             let recomputed = before.is_some_and(|(slots, cost)| {
                 cost != gs.menu.data[0]
                     || slots
@@ -172,7 +186,7 @@ impl Game<'_> {
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);
             }
-            self.lan_station_combined(host, conn, &mut gs);
+            self.lan_station_combined(host, conn, &mut gs, anvil_craft.as_ref());
             if let Some(button) = gs.menu.enchant_button.take() {
                 self.lan_enchant(host, gi, &mut gs, button);
             }
@@ -305,8 +319,15 @@ impl Game<'_> {
 
     /// The rest of a taken anvil or smithing result's `onTake`: the guest
     /// pays the levels, the anvil wears (level event 1030 or 1029), the
-    /// smithing table sounds (1044).
-    fn lan_station_combined(&mut self, host: &mut LanHost, conn: u32, gs: &mut GuestStation) {
+    /// smithing table sounds (1044). An anvil's `craft` is then reported to
+    /// the mods (`AnvilCraftEvent.Post`).
+    fn lan_station_combined(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        gs: &mut GuestStation,
+        craft: Option<&AnvilCraft>,
+    ) {
         let change = std::mem::take(&mut gs.menu.level_change);
         if change != 0 {
             self.as_guest(host, conn, |g| g.give_levels(change));
@@ -320,6 +341,12 @@ impl Game<'_> {
             let creative = gs.menu.creative;
             // A broken anvil closes the menu on the next stillValid check.
             self.anvil_used(gs.pos, creative);
+            if let Some(craft) = craft
+                && let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn)
+            {
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                self.native_anvil_craft_post(uuid, &name, gs.pos, craft);
+            }
         }
     }
 

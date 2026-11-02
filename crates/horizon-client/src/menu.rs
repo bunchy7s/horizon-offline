@@ -324,6 +324,12 @@ pub struct Menu {
     /// a level) runs the rest of its `onTake` (the anvil's wear and level
     /// event 1030 or 1029, the smithing table's 1044).
     pub combined: bool,
+    /// The caller fires `AnvilCraftEvent.Pre` for a taken anvil result: its
+    /// `onTake` waits in `anvil_craft` for the caller to run `anvil_take`.
+    pub anvil_hook: bool,
+    /// The anvil result taken while `anvil_hook` is set, as it was before
+    /// crafting.
+    pub anvil_craft: Option<AnvilCraft>,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
     /// `access.execute`).
@@ -347,6 +353,15 @@ pub struct Anvil {
     pub repair_count: u32,
     /// `onlyRenaming`.
     pub only_renaming: bool,
+}
+
+/// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
+/// taken, before the crafting changed anything.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilCraft {
+    pub left: Option<ItemStack>,
+    pub right: Option<ItemStack>,
+    pub output: ItemStack,
 }
 
 /// `StonecutterMenu`'s state besides its slots and `selectedRecipeIndex`.
@@ -742,6 +757,8 @@ impl Menu {
             level_change: 0,
             anvil: Anvil::default(),
             combined: false,
+            anvil_hook: false,
+            anvil_craft: None,
             enchant_changed: false,
             enchant_button: None,
             may_build: true,
@@ -1593,7 +1610,7 @@ impl Menu {
     }
 
     /// `AnvilMenu.onTake`: the levels, the material used up, then the input.
-    fn anvil_take(&mut self, env: &Env) {
+    pub fn anvil_take(&mut self, env: &Env) {
         let cost = self.data[0];
         if !self.creative {
             // Player.giveExperienceLevels(-cost).
@@ -1678,6 +1695,14 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult && self.kind == Kind::Anvil {
+            if self.anvil_hook {
+                self.anvil_craft = Some(AnvilCraft {
+                    left: self.containers[MAIN][0].clone(),
+                    right: self.containers[MAIN][1].clone(),
+                    output: taken.clone(),
+                });
+                return;
+            }
             self.anvil_take(env);
             return;
         }

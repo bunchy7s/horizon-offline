@@ -32,6 +32,7 @@ use horizon_client::{
     enchant::Enchantments,
     hud::{HudBatch, rgba},
     items::ItemStack,
+    menu::AnvilCraft,
     stations::{self, AnvilResult, EnchantOffers},
     text::Text,
 };
@@ -892,6 +893,7 @@ impl Game<'_> {
         &mut self,
         menu: &horizon_client::menu::Menu,
         predicting: bool,
+        craft: Option<&AnvilCraft>,
     ) {
         let Some(s) = self.station.as_mut() else {
             return;
@@ -904,15 +906,26 @@ impl Game<'_> {
             s.anvil.result = s.result.clone();
         }
         self.station_after_input();
-        if !menu.combined || predicting {
+        if !menu.combined {
             return;
         }
         if kind == Kind::Smithing {
-            self.level_event_at(1044, pos, 0);
+            if !predicting {
+                self.level_event_at(1044, pos, 0);
+            }
             return;
         }
-        self.give_levels(menu.level_change);
-        if self.anvil_used(pos, self.creative) {
+        let broke = !predicting && {
+            self.give_levels(menu.level_change);
+            self.anvil_used(pos, self.creative)
+        };
+        // AnvilCraftEvent.Post: after the wear, so a broken anvil is air.
+        if let Some(craft) = craft {
+            let player = self.native_acting_id();
+            let name = self.acting_player_name().to_owned();
+            self.native_anvil_craft_post(player, &name, pos, craft);
+        }
+        if broke {
             self.close_station();
             self.screen = Screen::Playing;
             self.capture(true);

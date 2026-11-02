@@ -9937,6 +9937,7 @@ impl Game<'_> {
         menu.selected = self.selected;
         menu.levels = self.experience.level;
         if anvil_open {
+            menu.anvil_hook = true;
             // The rename box as AnvilScreen.onNameChanged gives it to the menu.
             menu.anvil.name = self.station.as_ref().map(|s| self.anvil_item_name(s));
         }
@@ -10000,6 +10001,20 @@ impl Game<'_> {
             None => return false,
             Some(false) => return true,
             Some(true) => {}
+        }
+        // AnvilCraftEvent.Pre: the taken result's onTake waits for the mods.
+        let mut anvil_craft = menu.anvil_craft.take();
+        if let Some(craft) = &anvil_craft {
+            let player = self.native_acting_id();
+            let name = self.acting_player_name().to_owned();
+            let pos = self.station.as_ref().map_or([0; 3], |s| s.pos);
+            let mut cancel = false;
+            self.native_anvil_craft_pre(player, &name, pos, craft, &mut cancel);
+            if cancel {
+                anvil_craft = None;
+            } else {
+                menu.anvil_take(&self.menu_env());
+            }
         }
         // On a server the clicks only predict: the server drops, crafts and
         // makes maps itself.
@@ -10092,7 +10107,7 @@ impl Game<'_> {
             self.grindstone_taken(pos, amount);
         }
         if kind == Kind::Anvil || kind == Kind::Smithing {
-            self.combiner_session_end(&menu, predicting);
+            self.combiner_session_end(&menu, predicting, anvil_craft.as_ref());
         }
         if kind == Kind::Enchanting && (menu.enchant_changed || before[0] != menu.slot(0).cloned())
         {
