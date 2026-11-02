@@ -1042,6 +1042,65 @@ fn create_world_tabs_follow_vanilla_and_their_choices_reach_the_action() {
 }
 
 #[test]
+fn ctrl_digits_and_ctrl_tab_switch_the_create_world_tabs() {
+    use winit::keyboard::KeyCode;
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    let shown = |f: &Fixture| -> (usize, u8) {
+        let Mode::Create { focus, options, .. } = &f.title.mode else {
+            panic!("the Create World screen")
+        };
+        (options.tab, *focus)
+    };
+    // The screen opens on the Game tab with the name box focused.
+    assert_eq!(shown(&f), (0, 0));
+    // `TabNavigationBar.getNextTabIndex`: a digit is floorMod(key - 1, 10), so
+    // Ctrl+2 is the World tab, Ctrl+3 the More tab. The tab's fields are new
+    // widgets, so the name box that had the keys gives them up.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit2, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (1, 2));
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Numpad3, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (2, 2));
+    // The same tab again changes nothing and plays no click sound.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit3, true, false),
+        Some(false)
+    );
+    // Ctrl+4..9 and Ctrl+0 ask for tabs past the third: Mth.clamp keeps the
+    // last tab, and none of them moves or sounds.
+    for key in [KeyCode::Digit4, KeyCode::Digit9, KeyCode::Digit0] {
+        assert_eq!(f.title.tab_bar_key(key, true, false), Some(false));
+        assert_eq!(shown(&f).0, 2);
+    }
+    // Ctrl+Tab steps one tab forward and Ctrl+Shift+Tab one back, wrapping.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit1, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, false), Some(true));
+    assert_eq!(shown(&f).0, 1);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 2);
+    // Without Ctrl the bar leaves the key alone, so the digit still types.
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, false, false), None);
+    assert_eq!(shown(&f).0, 2);
+    // Only the Create World screen has a tab bar under these keys.
+    f.click("Cancel");
+    assert!(matches!(f.title.mode, Mode::Main));
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, true, false), None);
+}
+
+#[test]
 fn new_world_generation_settings_round_trip() {
     let f = Fixture::new();
     let dir = f.root.join("flat");

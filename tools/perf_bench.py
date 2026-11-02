@@ -427,6 +427,10 @@ def poll(control, check, limit, interval=0.05):
 # Fewer section meshes than this in a second is the game remeshing blocks that change (random
 # ticks), not loading.
 QUIET_MESHES_PER_S = 100
+# PERF_BENCH_TRACE=<file>: where a load spends its time, one JSON line each: every status Horizon's wait_loaded
+# reads, after a {"tp", "scene"} line per teleport; the vanilla driver's "progress" every 50 ms while it loads
+# (its loaded chunk count, and "around": the chunks within the render distance minus one it holds, of all).
+TRACE = os.environ.get("PERF_BENCH_TRACE")
 
 
 def view_chunks(distance):
@@ -458,6 +462,11 @@ def wait_loaded(control, near, limit, min_chunks=0):
             s = {}
         player = s.get("player")
         now = time.time()
+        if TRACE:
+            with open(TRACE, "a") as out:
+                out.write(json.dumps({"t": now, "chunks": s.get("chunks"), "generated": s.get("generated_chunks"),
+                                      "pending": s.get("pending_chunks"), "meshed": s.get("meshed_sections"),
+                                      "streaming": s.get("streaming"), "fps": s.get("fps")}) + "\n")
         if not player or not near(player["position"]) or s.get("pending_chunks") != 0 or s.get("screen") == "title":
             last, changed, previous, meshing = None, now, None, now
         else:
@@ -642,6 +651,9 @@ def run_horizon(args, distance):
             meshed = control("status")["meshed_sections"]
             scene_commands(args, control, start, pitch)
             tp = time.time()
+            if TRACE:
+                with open(TRACE, "a") as out:
+                    out.write(json.dumps({"tp": tp, "scene": name}) + "\n")
             # A zero-length flight holds the player at the start, flying.
             control("fly {0} {1} {2} {0} {1} {2} 0.1 {3}".format(*start, pitch))
             control(f"look {yaw(start, end):.3f} {pitch}")
@@ -818,6 +830,7 @@ def run_vanilla(args, distance):
                "--enable-native-access=ALL-UNNAMED",
                f"-Djava.library.path={natives}", f"-Dorg.lwjgl.system.SharedLibraryExtractPath={natives}",
                f"-Dhorizon.bench.script={script}", f"-Dhorizon.bench.out={events}",
+               *([f"-Dhorizon.bench.trace={TRACE}"] if TRACE else []),
                "-Dfabric.log.disableAnsi=true",
                "-cp", os.pathsep.join(map(str, game_jars + fabric)),
                "net.fabricmc.loader.impl.launch.knot.KnotClient",
@@ -862,6 +875,9 @@ def driven(args, distance, command, game_dir, env, log, events, options, loaded_
         stop(proc)
         sampler.stop.set()
     lines = [json.loads(l) for l in events.read_text().splitlines()] if events.exists() else []
+    if TRACE:
+        with open(TRACE, "a") as out:
+            out.writelines(json.dumps(e) + "\n" for e in lines if e["event"] == "progress")
     by = lambda name: [e for e in lines if e["event"] == name]
     if not by("done") or by("timeout"):
         raise RuntimeError(f"{args.game} run failed: {lines[-1:] if lines else 'no events'}; see {log.name}")

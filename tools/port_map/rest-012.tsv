@@ -22,10 +22,10 @@ DiscardedPayload.codec	missing		minor: no 32767-byte cap on unknown custom paylo
 ServerboundCookieResponsePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! CookieResponse {key Ident, payload Option<Bytes>}
 ClientboundAddEntityPacket.<init>	port	crates/horizon-client/src/lan/entity.rs::ServerEntity::pairing	builds the spawn packet from the entity state
 ClientboundAddEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! AddEntity (play.rs) in the vanilla field order
-ClientboundAddTransientBlockPacket.write	inline	crates/horizon-client/src/game/remote.rs: C::AddTransientBlock => add_transient_block	the client applies a transient block when a server sends one; the LAN host does not send them, which is the remaining half of the row
+ClientboundAddTransientBlockPacket.write	inline	crates/horizon-client/src/game/transient_blocks.rs::Game::add_transient_block	written once when the block is placed and again on the tick it goes back to air; the client applies each with no state send, and the LAN host does not send the packet
 ClientboundAnimatePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! Animate {id VarInt, action UByte}
 ClientboundBlockDestructionPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockDestruction {id, pos, progress}
-ClientboundBlockEntityDataPacket.create	port	crates/horizon-client/src/game/command_blocks.rs:952 + game/decorated_pot.rs	block entity changes are pushed to guests as the packet (command block text, decorated pot sherds)
+ClientboundBlockEntityDataPacket.create	port	crates/horizon-client/src/lan/hub.rs::Hub::broadcast_block_changes	the changed block entities of the tick's block updates go out as the packet, a decorated pot's tag coming from its chunk's saved data
 ClientboundBlockEventPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! BlockEvent {pos, b0, b1, block}
 ClientboundBossEventPacket.createUpdateProgressPacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProgress goes out to every viewer of the bar (a guest by connection, the host's own overlay in place)
 ClientboundBossEventPacket.createUpdateNamePacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateName when the bar's name differs from what that viewer was sent
@@ -82,8 +82,8 @@ ClientboundSetEntityDataPacket.pack	port	crates/horizon-protocol/src/entity_data
 ClientboundSetEntityDataPacket.unpack	port	crates/horizon-protocol/src/entity_data.rs::EntityData::read	entries until 0xFF
 ClientboundSetExperiencePacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetExperience {progress Float, level, total VarInt}
 ClientboundSetHealthPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SetHealth {health, food VarInt, saturation}
-ClientboundSetPlayerTeamPacket.createAddOrModifyPacket	port	crates/horizon-client/src/lan/scoreboard.rs:124	team add/modify packets are built for guests from the host's teams
-ClientboundSetPlayerTeamPacket.createPlayerPacket	inline	crates/horizon-client/src/lan/scoreboard.rs	the same builder covers the player add/remove method
+ClientboundSetPlayerTeamPacket.createAddOrModifyPacket	port	crates/horizon-client/src/lan/scoreboard.rs::View::changes	the method and parameters of a team the view gained or changed, sent before its players
+ClientboundSetPlayerTeamPacket.createPlayerPacket	inline	crates/horizon-client/src/lan/scoreboard.rs::View::changes	the same builder sends a player's add and remove methods, every leave before any join
 ClientboundSetPlayerTeamPacket.shouldHavePlayerList	port	crates/horizon-protocol/src/packets/play.rs::SetPlayerTeam::read	the player list is read only for methods 0, 3 and 4
 ClientboundSetTitlesAnimationPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! TitlesAnimation {fade_in, stay, fade_out Int}
 ClientboundSoundEntityPacket.write	port	crates/horizon-protocol/src/buf.rs::write	packet! SoundEntity with the sound holder
@@ -134,7 +134,7 @@ SynchedEntityData.DataValue.read	port	crates/horizon-protocol/src/entity_data.rs
 RealmsConnect.connect	skip:service		Realms
 RealmsConnect.abort	skip:service		Realms
 RealmsConnect.tick	skip:service		Realms
-RepeatedNarrator.narrate	skip:other		accessibility narration; Horizon has no narrator
+RepeatedNarrator.narrate	skip:service		Realms only: the long-running task screen's progress, said through GameNarrator.saySystemNow at most once per repeat period; Horizon has no Realms client
 ServerPlaceRecipe.tryPlaceRecipe	port	crates/horizon-client/src/menu/place.rs::Menu::place_recipe	places when craftable, else clears the grid and shows the ghost
 ServerPlaceRecipe.clearGrid	port	crates/horizon-client/src/menu/place.rs::Menu::clear_grid	returns the grid to the inventory
 ServerPlaceRecipe.clampToMaxStackSize	inline	crates/horizon-client/src/menu/place.rs::Menu::place	gap: minor: clamps by the slot's stack, not by each candidate item

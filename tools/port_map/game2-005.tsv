@@ -25,8 +25,8 @@ AbstractVillager.getSlot	missing		minor: commands cannot address a villager inve
 AbstractVillager.addOffersFromItemListings	port	crates/horizon-client/src/merchant.rs::Trades::offers_from_set	the allow_duplicates path: a picked trade stays in the pool
 AbstractVillager.addOffersFromItemListingsWithoutDuplicates	port	crates/horizon-client/src/merchant.rs::Trades::offers_from_set	the no-duplicates path: a picked trade leaves the pool
 AbstractVillager.getRopeHoldPosition	skip:ui		lead rope drawing point only; the lead is drawn by leash_geometry in game.rs
-AbstractVillager.stillValid	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_merchant_tick	closes when the trader is gone or dead, or the guest passes the interaction range plus 4 (7 blocks survival, 9 creative); the in-frame twin is game/trading.rs::Game::merchant_tick, and lan_e2e merchant-close covers the host and guest screens
-Villager.ageBoundaryReached	missing		player: a villager that grows up keeps the baby brain (the brain is built once with its baby flag), so it never goes to work
+AbstractVillager.stillValid	port	crates/horizon-client/src/game/lan_trading.rs::Game::lan_merchant_tick	closes when the trader is gone or dead, or the guest passes the interaction range plus 4 (7 blocks survival, 9 creative); lan_e2e merchant-close covers the host and guest screens
+Villager.ageBoundaryReached	port	crates/horizon-client/src/mobs/villager_brain.rs::age_boundary_reached	a villager that grows up rebuilds its brain from its memories, so the adult schedule and its work activity take hold
 Villager.startTrading	port	crates/horizon-client/src/game/trading.rs::Game::interact_trader	opens the trade screen for the player
 Villager.resetSpecialPrices	port	crates/horizon-client/src/merchant.rs::update_special_prices	recomputes special prices from scratch, which drops the old diff
 Villager.needsToRestock	inline	crates/horizon-client/src/merchant.rs::Trader::should_restock	any offer with uses left
@@ -60,8 +60,8 @@ VillagerProfession.bootstrap	skip:data		registry bootstrap of professions; Horiz
 VillagerType.bootstrap	skip:data		registry bootstrap of villager types; Horizon reads them from data tables
 WanderingTrader.registerGoals	port	crates/horizon-client/src/mobs/trader.rs::register	the trader goal set; the shared register in mobs/ai.rs is not repeated here
 WanderingTrader.updateTrades	port	crates/horizon-client/src/game/trading.rs::Game::ensure_offers	the buying, uncommon and common sets of the wandering branch
-WanderingTrader.addAdditionalSaveData	missing		minor: DespawnDelay and wander_target are not written; the trader save writes only its offers
-WanderingTrader.readAdditionalSaveData	missing		minor: DespawnDelay and wander_target are not read back
+WanderingTrader.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	DespawnDelay and wander_target are written with the trader
+WanderingTrader.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_villager	DespawnDelay and wander_target are read back
 WanderingTrader.rewardTradeXp	port	crates/horizon-client/src/merchant.rs::Session::notify_trade	the orb for offers that reward experience; the trader gets no villager XP
 WanderingTrader.WanderToPositionGoal.isTooFarAway	port	crates/horizon-client/src/mobs/trader.rs::too_far	
 WanderingTraderSpawner.getTraderData	port	crates/horizon-client/src/game/wandering_trader.rs::Game::load_trader_data	
@@ -102,15 +102,15 @@ Player.baseDamageScaleFactor	inline	crates/horizon-client/src/game/mace.rs::Game
 Player.isEffectiveAi	skip:other		client-side AI gate; Horizon has no effective-AI check in its loop
 Player.hasContainerOpen	missing		unsure: the test for an open container menu (not the inventory menu) was not located
 Player.startSleepInBed	port	crates/horizon-client/src/game.rs::Game::try_sleep	
-Player.isSleepingLongEnough	missing		unsure: the 100-tick sleep counter gate for the night skip was not found; the sleep timer only drives the fade
+Player.isSleepingLongEnough	port	crates/horizon-client/src/game/lan_actions.rs::sleep_counts	100 ticks in bed is what counts a sleeper as deep for SleepStatus.update
 Player.updateSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming	
 Player.getXpNeededForNextLevel	port	crates/horizon-client/src/entities.rs::Experience::needed	
 Player.hasEnoughFoodToDoExhaustiveManoeuvres	missing		unsure: the food-or-flying test for exhaustive moves was not found in motion.rs
 Player.mayUseItemAt	port	crates/horizon-client/src/game.rs::Game::use_hand	the may-build test before use-on in adventure mode
 Player.isSwimming	port	crates/horizon-client/src/motion.rs::MotionWorld::swimming	
-Player.decorateDisplayNameComponent	missing		unsure: click and hover behaviour on player names in chat was not found
+Player.decorateDisplayNameComponent	port	crates/horizon-client/src/game/commands.rs::player_display_name	click suggests /tell, hover shows the player entity, plus the insertion
 Player.getSlot	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	gap: minor: numeric slots 499 (carried item) and 500-503 (crafting grid) are not addressed
-Player.extractParrotVariant	missing		unsure: the parrot variant read from a shoulder parrot NBT was not found in shoulders.rs
+Player.extractParrotVariant	port	crates/horizon-client/src/game/shoulders.rs::shoulder_variants	the saved Variant of the shoulder parrot, clamped by Parrot.Variant.byId
 Player.convertParrotVariant	skip:java		Optional and OptionalInt conversion of the synched parrot variant; Horizon stores the id directly
 Player.getItemSwapScale	port	crates/horizon-client/src/attack_strength.rs::AttackStrength::swap_scale	
 Player.debugInfo	skip:debug		

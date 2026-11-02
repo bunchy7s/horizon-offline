@@ -10,7 +10,7 @@ use crate::{
 use horizon_core::random::{RandomSource, XoroshiroRandom, mix_stafford13, seed_from_hash};
 use horizon_world::loot::PackOverlay;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// `VillagerData.NEXT_LEVEL_XP_THRESHOLDS`.
 pub const LEVEL_XP: [i32; 5] = [0, 10, 70, 150, 250];
@@ -278,8 +278,9 @@ pub enum Event {
     TradeUpdated(bool, f32),
     /// `MerchantMenu.playTradeSound` (a shift-clicked trade).
     TradeSound,
-    /// A trade of this offer was made (`notifyTrade`).
-    Traded(usize),
+    /// A trade of this offer was made (`notifyTrade`), with the offer as
+    /// it was right after that trade's use (before a level-up's prices).
+    Traded(usize, Box<MerchantOffer>),
 }
 /// What the world lends a trading session for offers made while it is open.
 pub struct TradeEnv<'a> {
@@ -373,7 +374,8 @@ impl Session {
         offer.uses += 1;
         let offer = offer.clone();
         self.ambient_sound_time = -80;
-        self.events.push(Event::Traded(index));
+        self.events
+            .push(Event::Traded(index, Box::new(offer.clone())));
         let mut prices = false;
         if self.villager {
             let mut pop = 3 + self.random.next_int_bound(4).unwrap_or(0);
@@ -448,26 +450,15 @@ pub struct Trades {
     /// potion tags, ordered (`set_random_potion` options).
     pub potion_tags: HashMap<String, Vec<String>>,
 }
-fn walk(dir: &Path, base: &Path, out: &mut HashMap<String, Value>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+/// The `.json` files under `dir` as `minecraft:<path>` ids, through `json_folder` (from the
+/// prepared data file when there is one); a file that doesn't parse is left out.
+fn walk(dir: &Path, out: &mut HashMap<String, Value>) {
+    let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return;
     };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, base, out);
-        } else if p.extension().is_some_and(|x| x == "json")
-            && let Ok(rel) = p.strip_prefix(base)
-            && let Ok(bytes) = fs::read(&p)
-            && let Ok(v) = serde_json::from_slice(&bytes)
-        {
-            out.insert(
-                format!(
-                    "minecraft:{}",
-                    rel.with_extension("").to_string_lossy().replace('\\', "/")
-                ),
-                v,
-            );
+    for file in &folder.files {
+        if let Ok(value) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
+            out.insert(format!("minecraft:{}", file.name), value);
         }
     }
 }
@@ -478,23 +469,11 @@ impl Trades {
     pub fn load(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Self {
         let data = root.join("data/minecraft");
         let (mut trades, mut raw_tags, mut sets) = (HashMap::new(), HashMap::new(), HashMap::new());
-        walk(
-            &data.join("villager_trade"),
-            &data.join("villager_trade"),
-            &mut trades,
-        );
-        walk(
-            &data.join("tags/villager_trade"),
-            &data.join("tags/villager_trade"),
-            &mut raw_tags,
-        );
-        walk(&data.join("trade_set"), &data.join("trade_set"), &mut sets);
+        walk(&data.join("villager_trade"), &mut trades);
+        walk(&data.join("tags/villager_trade"), &mut raw_tags);
+        walk(&data.join("trade_set"), &mut sets);
         let mut raw_potions = HashMap::new();
-        walk(
-            &data.join("tags/potion"),
-            &data.join("tags/potion"),
-            &mut raw_potions,
-        );
+        walk(&data.join("tags/potion"), &mut raw_potions);
         // The packs' trade files: a trade or set's top pack file replaces
         // the game's own (`SimpleJsonResourceReloadListener` sees one
         // resource per id), a tag's entries join in pack order with a
@@ -1014,6 +993,28 @@ mod tests {
             price_multiplier: 0.2,
             xp: 1,
         }
+    }
+
+    /// A shift-click trades several times in one session: each `Traded`
+    /// event keeps the offer as it was right after its own trade, which is
+    /// what the mods hear (`TradeWithVillagerEvent` per `onTake`).
+    #[test]
+    fn each_trade_event_keeps_its_own_offer() {
+        let items = items();
+        let mut s = Session::new(vec![offer(4, None), offer(2, None)], false);
+        s.notify_trade(1, None, &items);
+        s.notify_trade(1, None, &items);
+        s.notify_trade(0, None, &items);
+        let seen: Vec<_> = s
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Traded(i, o) => Some((*i, o.uses, o.base_cost_a.stack.count)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seen, [(1, 1, 2), (1, 2, 2), (0, 1, 4)]);
+        assert_eq!((s.offers[0].uses, s.offers[1].uses), (1, 2));
     }
 
     #[test]

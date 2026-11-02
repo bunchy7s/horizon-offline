@@ -6,7 +6,7 @@ ShulkerModel.createShellMesh	skip:data		layer baked into entity-models.json, loa
 ShulkerModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 SilverfishModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 BoggedModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
-BoggedModel.setupAnim	missing		player: a sheared bogged keeps its mushrooms on its head; Bogged shearing sets sheared but nothing hides the mushrooms part
+BoggedModel.setupAnim	inline	crates/horizon-client/src/mobs/anim.rs::setup	the mushrooms part comes off once the bogged is sheared
 SkeletonModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 SkeletonModel.createDefaultSkeletonMesh	skip:data		layer baked into entity-models.json, loaded by key
 SkeletonModel.createSingleModelDualBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
@@ -70,9 +70,9 @@ ElytraModel.setupAnim	port	crates/horizon-client/src/game/perspective.rs::Game::
 ShieldModel.createLayer	skip:data		layer baked into entity-models.json, loaded by key
 LeashKnotModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 ArrowModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
-ArrowModel.setupAnim	missing		player: an arrow that lands in a block does not wobble for 7 ticks; arrows.rs sets shake but the arrow draw has no roll
-ShulkerBulletModel.createBodyLayer	missing		player: shulker bullets draw as a flat spark sprite, not the tumbling 3D orb; the baked shulker_bullet model is never loaded
-ShulkerBulletModel.setupAnim	missing		player: the bullet's spin and facing toward its flight are absent, since no model is drawn
+ArrowModel.setupAnim	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	the root rolls while the shake timer runs
+ShulkerBulletModel.createBodyLayer	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	the model is the baked shulker_bullet#main, drawn there as the tumbling orb
+ShulkerBulletModel.setupAnim	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	yaw and pitch toward the flight, the tumble turned by its age, scaled -0.5
 TridentModel.createLayer	skip:data		layer baked into entity-models.json, loaded by key
 WindChargeModel.createBodyLayer	skip:data		layer baked into entity-models.json, loaded by key
 WindChargeModel.setupAnim	port	crates/horizon-client/src/game/wind.rs::Game::wind_charge_geometry	wind and wind_charge parts spin in opposite directions
@@ -82,9 +82,9 @@ PiglinHeadModel.setupAnim	inline	crates/horizon-client-render/src/block_entity_r
 SkullModel.createHeadModel	skip:data		layer baked into entity-models.json, loaded by key
 SkullModel.createHumanoidHeadLayer	skip:data		layer baked into entity-models.json, loaded by key
 SkullModel.setupAnim	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	head yaw and pitch in the skull branch of render_one
-PlayerCapeModel.createCapeLayer	missing		player: capes never draw; skins.rs downloads the cape texture but nothing draws the cape layer
-PlayerCapeModel.setupAnim	missing		player: the cape does not lean or flap with movement, since no cape is drawn
-PlayerEarsModel.createEarsLayer	missing		minor: extra ears (showExtraEars accounts) are not drawn
+PlayerCapeModel.createCapeLayer	port	crates/horizon-client/src/mobs/render.rs::cape	the layer is the baked player#cape model, posed and drawn there
+PlayerCapeModel.setupAnim	port	crates/horizon-client/src/mobs/render.rs::cape	the cape part turned by the flap and the two leans
+PlayerEarsModel.createEarsLayer	port	crates/horizon-client/src/mobs/render.rs::ears	the layer is the baked player#ears model, drawn there
 PlayerModel.createMesh	skip:data		layer baked into entity-models.json, loaded by key
 PlayerModel.createArmorMeshSet	skip:data		layer baked into entity-models.json, loaded by key
 PlayerModel.setupAnim	port	crates/horizon-client/src/mobs/anim.rs::setup	gap: player: hat, jacket, sleeve and pant toggles (modelPart options) are not read, so a hidden layer still draws; humanoid pose is in the Humanoid branch
@@ -116,7 +116,7 @@ BuiltInBlockModels.createChest	port	crates/horizon-client-render/src/block_entit
 BuiltInBlockModels.createSingletonChest	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Chest kind, single chest
 BuiltInBlockModels.createXmasChest	port	crates/horizon-client-render/src/block_entity_render.rs::classify	Chest kind with the Christmas texture
 BuiltInBlockModels.createCopperGolem	port	crates/horizon-client-render/src/block_entity_render.rs::classify	CopperGolem kind
-BuiltInBlockModels.createFlowerBedModel	missing		minor: the 0.25 block shift for a flower bed shown by a copper golem is not applied
+BuiltInBlockModels.createFlowerBedModel	port	crates/horizon-client/src/game/mob_blocks.rs::antenna_block_matrix	wildflowers and pink petals take the flower bed's 0.25 shift on a golem's antenna
 BuiltInBlockModels.createEnchantingTable	port	crates/horizon-client-render/src/block_entity_render.rs::classify	EnchantingTable kind
 BuiltInBlockModels.specialModelWithPropertyDispatch	port	crates/horizon-client-render/src/block_entity_render.rs::classify	property dispatch by block state values
 BuiltInBlockModels.Builder.put	skip:java		builder map of special models

@@ -55,6 +55,8 @@ public final class VanillaBench implements ClientModInitializer {
     private long phaseStart;
     private long lastFrame;
     private long readyCheck;
+    private long lastTrace;
+    private static final boolean TRACE = System.getProperty("horizon.bench.trace") != null;
     private int lastLoaded = -1;
     private long lastChange;
     private final List<Float> frames = new ArrayList<>();
@@ -161,6 +163,16 @@ public final class VanillaBench implements ClientModInitializer {
                 Vec3 from = vec(s.getAsJsonArray("from"));
                 // Once the teleport has arrived, hold the player there, flying.
                 if (mc.player != null && mc.player.position().distanceToSqr(from) < 1024.0) place(mc, s, 0);
+                if (TRACE && now - lastTrace >= 50_000_000L && mc.level != null) {
+                    // PERF_BENCH_TRACE: when the columns arrive, to compare with Horizon's trace.
+                    lastTrace = now;
+                    JsonObject e = named(s);
+                    e.addProperty("ms", (now - phaseStart) / 1e6);
+                    e.addProperty("chunks", mc.level.getChunkSource().getLoadedChunksCount());
+                    e.addProperty("compiled", mc.levelRenderer.hasRenderedAllSections());
+                    if (mc.player != null) e.addProperty("around", around(mc));
+                    event("progress", e);
+                }
                 if (ready(mc, from, now)) {
                     JsonObject e = named(s);
                     e.addProperty("load_ms", (lastChange - phaseStart) / 1e6);
@@ -272,6 +284,21 @@ public final class VanillaBench implements ClientModInitializer {
             }
         }
         return true;
+    }
+
+    /** The chunks chunksAround waits for that are on the client, and how many it waits for. */
+    private static String around(Minecraft mc) {
+        int r = Math.max(1, mc.options.getEffectiveRenderDistance() - 1), have = 0, all = 0;
+        var center = mc.player.chunkPosition();
+        var chunks = mc.level.getChunkSource();
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                if (dx * dx + dz * dz > r * r) continue;
+                all++;
+                if (chunks.hasChunk(center.x() + dx, center.z() + dz)) have++;
+            }
+        }
+        return have + "/" + all;
     }
 
     /** Puts the player on the scene's line at fraction t, facing along it, as Horizon's flight. */
