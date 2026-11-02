@@ -3965,6 +3965,19 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// A totem of undying saved the server player `player` (`name`): their
+    /// hurt would have killed them and the totem held in either hand fired
+    /// (`LivingEntity.checkTotemDeathProtection`; Bukkit's
+    /// `EntityResurrectEvent`), heard just before it is used up and its
+    /// effects apply. Listen only: whether the totem saves is decided inside
+    /// the health state machine, before a mod is asked, so a mod cannot veto
+    /// it from here. The player's state is swapped in, so
+    /// `native_acting_player`, `native_tell` and the item helpers reach them.
+    /// Once for each totem, on a server; the host of a LAN world's totem is
+    /// not heard. @API:native_player_totem@.
+    pub(super) fn native_player_totem(&mut self, player: u128, name: &str) {
+        mod_api::dispatch_player_totem(self, mod_api::mods(), player, name);
+    }
     /// `player`'s melee blow killed the mob `entity` of `kind` (other deaths
     /// aren't told yet). It only hears, after the blow landed. Server-side.
     /// API 40.
