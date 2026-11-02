@@ -1826,6 +1826,8 @@ impl Game<'_> {
                         }),
                         Some(conn),
                     );
+                    let guest = &host.hub.guests[gi];
+                    self.native_block_damage_abort(guest.uuid, &guest.name, a.pos);
                 }
                 4 | 5 => {
                     if !spectator {

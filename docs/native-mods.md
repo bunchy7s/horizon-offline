@@ -1341,6 +1341,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to travel through a Nether portal, End portal or End gateway; `cause` is `nether_portal`, `end_portal` or
   `end_gateway`. Set `cancel` to leave the player where they are. The player's state is not swapped in, so helpers that
   look them up through `self.lan` may find nothing while a guest tick is handled.
+- **`native_block_damage_abort(player, name, pos)`**: a server player stopped digging `pos` before it broke. It is
+  heard after the server clears the dig and sends the block state back to the client. The player's state is not
+  swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled.
 - **`native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)`**: a server player's middle-click
   pick resolved a block or entity's pick stack and is about to put it in the hotbar. For a block, `pos` is its
   position and `entity_id` is zero; for an entity, `from_entity` is true, `pos` is `[0, 0, 0]` and `entity_id`
