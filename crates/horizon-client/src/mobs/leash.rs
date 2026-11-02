@@ -295,6 +295,10 @@ pub fn can_be_leashed(m: &Mob) -> bool {
         // (`isMobControlled`), which a mob alone cannot see.
         // shortcut: isMobControlled, when a mob can ride a zombie nautilus.
         S::Nautilus | S::ZombieNautilus => !super::nautilus::aggravated(m),
+        // SulfurCube.canBeLeashed: `hasBodyItem()`, so only a cube with a
+        // block in its body takes a lead. Its category is a monster's, which
+        // `Mob.canBeLeashed`'s `!(this instanceof Enemy)` rule would refuse.
+        S::SulfurCube => super::sulfur_cube::has_body(m),
         _ => !m.hostile() && !m.removed,
     }
 }
@@ -485,6 +489,10 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
         // CopperGolem.getLeashOffset: 0.75 of the eye height, on the centre
         // rather than the default `bbWidth / 2` in front.
         [0.0, f64::from(0.75_f32 * m.eye_height() as f32), 0.0]
+    } else if m.species() == super::Species::SulfurCube {
+        // SulfurCube.getLeashOffset: half of `getBbHeight`, on the centre
+        // rather than the default `bbWidth / 2` in front.
+        [0.0, f64::from(m.height() / 2.0), 0.0]
     } else if m.species() == super::Species::Fox {
         // Fox.getLeashOffset: 0.55 of the eye height.
         [

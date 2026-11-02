@@ -118,7 +118,8 @@ SulfurCube.applyVerticalHitAnglePowerTransfer	port	crates/horizon-client/src/mob
 SulfurCube.applyVerticalPositionAnglePowerRotation	port	crates/horizon-client/src/mobs/sulfur_cube.rs::knockback	feet-to-feet rotation at 0.8 with the power ratio clamp
 SulfurCube.get	skip:other		data component view of the body item; Horizon reads the body item directly (sulfur_cube::body)
 SulfurCube.applyImplicitComponent	skip:other		component copy when a cube is built from an item; Horizon sets the body directly
-SulfurCube.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: cube rope point is half the box height; the eye-height default is used
+SulfurCube.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	half the box height on the cube's centre
+SulfurCube.canBeLeashed	port	crates/horizon-client/src/mobs/leash.rs::can_be_leashed	hasBodyItem: only a cube with a block in its body takes a lead
 SulfurCube.SulfurCubeTemptGoal.stopNavigation	port	crates/horizon-client/src/mobs/sulfur_cube.rs::SulfurTempt::stop	stops the cube's wanted movement
 SulfurCube.SulfurCubeTemptGoal.navigateTowards	port	crates/horizon-client/src/mobs/sulfur_cube.rs::SulfurTempt::tick	looks at the player and sets the cube's direction
 Hoglin.createAttributes	skip:data		attribute defaults come from the data tables (mobs.rs attr lookup)
