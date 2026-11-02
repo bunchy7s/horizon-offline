@@ -1,7 +1,10 @@
-//! What the player wants to see of other players' cosmetics: two lines of the game's
-//! `horizon-extras.txt` (in the game's home, beside `options.txt`), so the launcher's Wardrobe and
-//! the game's settings read and write the same switches. "Show my cosmetics" is not here: it is
-//! the account's, kept by the cosmetics service.
+//! The cosmetics switches: three lines of the game's `horizon-extras.txt` (in the game's home,
+//! beside `options.txt`), so the launcher's Wardrobe and the game's settings read and write the
+//! same ones.
+//!
+//! "Show my cosmetics" is the account's, kept by the cosmetics service: its line here is what the
+//! player last asked for, and `cosmetics-visible.txt` what the service confirmed per account.
+//! While the two differ, the game (or the launcher) sends the wish again.
 use std::{fs, io, path::Path};
 
 /// The game's extras file.
@@ -10,6 +13,10 @@ pub const FILE: &str = "horizon-extras.txt";
 pub const OTHERS: &str = "cosmeticsOthers";
 /// Other players' auras and trails: `true` or `false` (the default).
 pub const AURAS: &str = "cosmeticsAuras";
+/// Show my cosmetics: `true` (the default) or `false`.
+pub const MINE: &str = "cosmeticsMine";
+/// What the service confirmed, a `<uuid hex>:<true|false>` line per account.
+pub const CONFIRMED: &str = "cosmetics-visible.txt";
 
 /// How much of other players' cosmetics this player sees.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -50,10 +57,22 @@ impl Others {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Prefs {
+    /// Show my cosmetics, as last asked for.
+    pub mine: bool,
     pub others: Others,
     pub auras: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            mine: true,
+            others: Others::Shown,
+            auras: false,
+        }
+    }
 }
 
 impl Prefs {
@@ -64,6 +83,7 @@ impl Prefs {
             match key.trim() {
                 OTHERS => prefs.others = Others::parse(value).unwrap_or(prefs.others),
                 AURAS => prefs.auras = value.trim() == "true",
+                MINE => prefs.mine = value.trim() != "false",
                 _ => {}
             }
         }
@@ -75,18 +95,19 @@ impl Prefs {
         fs::read_to_string(home.join(FILE)).map_or_else(|_| Self::default(), |t| Self::parse(&t))
     }
 
-    /// `text` with these two lines set, every other line kept as it was.
+    /// `text` with these three lines set, every other line kept as it was.
     pub fn write_into(&self, text: &str) -> String {
         let mut out: String = text
             .lines()
             .filter(|l| {
                 l.split_once(':')
-                    .is_none_or(|(k, _)| ![OTHERS, AURAS].contains(&k.trim()))
+                    .is_none_or(|(k, _)| ![MINE, OTHERS, AURAS].contains(&k.trim()))
             })
             .flat_map(|l| [l, "\n"])
             .collect();
         out.push_str(&format!(
-            "{OTHERS}:{}\n{AURAS}:{}\n",
+            "{MINE}:{}\n{OTHERS}:{}\n{AURAS}:{}\n",
+            self.mine,
             self.others.name(),
             self.auras
         ));
@@ -106,6 +127,36 @@ impl Prefs {
     }
 }
 
+/// Whether the service last confirmed `uuid`'s cosmetics shown; None: never told this game.
+pub fn confirmed(home: &Path, uuid: &str) -> Option<bool> {
+    let text = fs::read_to_string(home.join(CONFIRMED)).ok()?;
+    text.lines()
+        .filter_map(|l| l.split_once(':'))
+        .find(|(u, _)| u.trim() == uuid)
+        .map(|(_, v)| v.trim() == "true")
+}
+
+/// Notes what the service confirmed for `uuid`, keeping the other accounts' lines.
+pub fn set_confirmed(home: &Path, uuid: &str, visible: bool) -> io::Result<()> {
+    let path = home.join(CONFIRMED);
+    let text = fs::read_to_string(&path).unwrap_or_default();
+    let mut out: String = text
+        .lines()
+        .filter(|l| l.split_once(':').is_some_and(|(u, _)| u.trim() != uuid))
+        .flat_map(|l| [l, "\n"])
+        .collect();
+    out.push_str(&format!("{uuid}:{visible}\n"));
+    fs::create_dir_all(home)?;
+    fs::write(path, out)
+}
+
+/// Whether the wish for `uuid` still has to reach the service: the player asked for something
+/// it never confirmed (shown is its default for an account it never heard about).
+pub fn unsent(home: &Path, uuid: &str) -> Option<bool> {
+    let wish = Prefs::load(home).mine;
+    (confirmed(home, uuid).unwrap_or(true) != wish).then_some(wish)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -119,13 +170,14 @@ mod tests {
         assert_eq!(Prefs::parse("cosmeticsOthers:true").others, Others::Shown);
         let text = "zoom:true\ncosmeticsOthers:false\nnoAi:true\n";
         let prefs = Prefs {
+            mine: false,
             others: Others::NameTags,
             auras: true,
         };
         let written = prefs.write_into(text);
         assert_eq!(
             written,
-            "zoom:true\nnoAi:true\ncosmeticsOthers:name_tags\ncosmeticsAuras:true\n"
+            "zoom:true\nnoAi:true\ncosmeticsMine:false\ncosmeticsOthers:name_tags\ncosmeticsAuras:true\n"
         );
         assert_eq!(Prefs::parse(&written), prefs);
     }
@@ -140,5 +192,27 @@ mod tests {
             })
             .collect();
         assert_eq!(seen, [Others::NameTags, Others::Hidden, Others::Shown]);
+    }
+
+    #[test]
+    fn a_wish_waits_until_the_service_confirms_it() {
+        let home = std::env::temp_dir().join(format!("cosmetics-prefs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let (alex, steve) = ("a".repeat(32), "b".repeat(32));
+        // Nothing asked: shown, which the service assumes too.
+        assert_eq!(unsent(&home, &alex), None);
+        let hide = Prefs {
+            mine: false,
+            ..Prefs::default()
+        };
+        hide.save(&home).unwrap();
+        assert_eq!(unsent(&home, &alex), Some(false));
+        set_confirmed(&home, &steve, true).unwrap();
+        set_confirmed(&home, &alex, false).unwrap();
+        assert_eq!(unsent(&home, &alex), None);
+        // Each account keeps its own line; Steve's account still shows its cosmetics.
+        assert_eq!(unsent(&home, &steve), Some(false));
+        assert_eq!(confirmed(&home, &steve), Some(true));
+        let _ = fs::remove_dir_all(&home);
     }
 }

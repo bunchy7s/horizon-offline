@@ -334,7 +334,12 @@
   "horizon.pages.split_setup.tooltip": "Spieler an diesem Computer: Controller können deiner Welt beitreten.",
   "horizon.extras.header.cosmetics": "Kosmetik",
   "horizon.extras.cosmetics_mine": "Meine Kosmetik",
-  "horizon.extras.cosmetics_mine.tooltip": "Zeigt die Kosmetik, die du trägst, an deinem eigenen Spieler, in der dritten Person und im Inventar.",
+  "horizon.extras.cosmetics_mine.tooltip": "Ausgeblendet: Alle Horizon-Spieler sehen dich ohne deine Kosmetik, du selbst auch. Derselbe Schalter wie in der Garderobe des Launchers.",
   "horizon.extras.cosmetics_others": "Kosmetik anderer Spieler",
-  "horizon.extras.cosmetics_others.tooltip": "Zeigt die Kosmetik anderer Horizon-Spieler. Aus fragt das Spiel nie, was sie tragen."
+  "horizon.extras.cosmetics_others.tooltip": "Was andere Horizon-Spieler tragen: alles, nur ihre Namensschild-Stile oder nichts. Ausgeblendet fragt das Spiel nie, was sie tragen.",
+  "horizon.extras.cosmetics_auras": "Auren und Spuren anderer",
+  "horizon.extras.cosmetics_auras.tooltip": "Auren und Spuren, die andere Spieler tragen. Standardmäßig aus.",
+  "horizon.extras.cosmetics.shown": "Angezeigt",
+  "horizon.extras.cosmetics.hidden": "Ausgeblendet",
+  "horizon.extras.cosmetics.name_tags": "Nur Namensschilder"
 }

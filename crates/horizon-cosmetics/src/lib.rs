@@ -8,6 +8,7 @@
 //! style is a small mark and a line colour, with no model. This crate
 //! reads and checks items and poses them; the game draws them.
 
+pub mod account;
 mod fetch;
 mod item;
 mod pose;

@@ -7,9 +7,12 @@ use super::Game;
 use horizon_client::fast_hash::FxHashMap;
 use horizon_client::mobs::anim::Poses;
 use horizon_client::mobs::{Mob, Part, Polygon};
+use horizon_cosmetics::prefs::{self, Others};
 use horizon_cosmetics::{Item, Slot};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
+use std::time::{Duration, Instant};
 
 /// An item as the renderer takes it.
 struct Baked {
@@ -33,6 +36,41 @@ pub(super) struct Cosmetics {
     poses: RefCell<(Poses, Poses)>,
     /// Item files from a folder (`HORIZON_COSMETICS_LOCAL`): mannequins wear them too.
     local: bool,
+    /// Show my cosmetics on its way to the service.
+    mine: MineSync,
+}
+
+/// Sending Show my cosmetics: the wish it last looked at, the request on its way, and when to try
+/// again after a failure (15 s, doubling to 10 minutes).
+#[derive(Default)]
+struct MineSync {
+    wish: Option<bool>,
+    sending: Option<Receiver<Result<(), String>>>,
+    retry: Option<(Instant, Duration)>,
+}
+
+/// Makes the service keep `wish` for the signed-in account, unless it already confirmed it
+/// (`prefs::confirmed`, in the game folder). An offline account has nothing to send.
+fn send_mine(wish: bool) -> Result<(), String> {
+    let Some(session) = horizon_client::auth::current() else {
+        return Ok(());
+    };
+    let home = std::env::current_dir().map_err(|e| e.to_string())?;
+    let uuid = format!("{:032x}", session.uuid);
+    if prefs::confirmed(&home, &uuid).unwrap_or(true) == wish {
+        return Ok(());
+    }
+    let api =
+        std::env::var("HORIZON_COSMETICS_API").unwrap_or_else(|_| horizon_cosmetics::API.into());
+    let http =
+        horizon_cosmetics::Http::new(&api, &format!("Horizon/{}", env!("CARGO_PKG_VERSION")));
+    let kept = horizon_cosmetics::account::set_visible(
+        &http,
+        &session.name,
+        |id| horizon_client::auth::join_server(&session, id).map_err(|e| format!("{e:?}")),
+        wish,
+    )?;
+    prefs::set_confirmed(&home, &uuid, kept).map_err(|e| e.to_string())
 }
 
 impl Cosmetics {
@@ -107,6 +145,35 @@ impl Game<'_> {
             c.local = local;
         }
         c.frame.set(c.frame.get().wrapping_add(1));
+        // Show my cosmetics: sent once per change of the wish, then retried until confirmed.
+        if !c.local {
+            let wish = self.settings.extras.cosmetics_mine;
+            let m = &mut c.mine;
+            if let Some(done) = m.sending.as_ref().and_then(|rx| rx.try_recv().ok()) {
+                m.sending = None;
+                m.retry = match done {
+                    Ok(()) => None,
+                    Err(_) => {
+                        let wait = m.retry.map_or(Duration::from_secs(15), |(_, w)| {
+                            (w * 2).min(Duration::from_secs(600))
+                        });
+                        Some((Instant::now() + wait, wait))
+                    }
+                };
+            }
+            let due = m.wish != Some(wish) || m.retry.is_some_and(|(at, _)| Instant::now() >= at);
+            if due && m.sending.is_none() {
+                m.wish = Some(wish);
+                let (tx, rx) = channel();
+                m.sending = Some(rx);
+                std::thread::Builder::new()
+                    .name("Cosmetics account".into())
+                    .spawn(move || {
+                        let _ = tx.send(send_mine(wish));
+                    })
+                    .ok();
+            }
+        }
         let uploads = std::mem::take(&mut *c.uploads.borrow_mut());
         for item in uploads {
             let location = format!("cosmetics/{:x}", Arc::as_ptr(&item) as usize);
@@ -121,15 +188,48 @@ impl Game<'_> {
             .retain(|_, b| Arc::strong_count(&b.item) > 1);
     }
 
+    /// The name tag style `m` wears, if cosmetics are shown for it (name tags only counts): its
+    /// mark's place in the atlas and its line's colour. None until the mark is in the atlas.
+    pub(super) fn cosmetics_tag(&self, m: &Mob, own: bool) -> Option<super::names::TagStyle> {
+        let worn = self.worn(m, own)?;
+        let item = worn.iter().find(|i| i.slot == Slot::NameTag)?;
+        let [r, g, b] = item.tag?.line;
+        let frame = self.cosmetics.frame.get();
+        let mut baked = self.cosmetics.baked.borrow_mut();
+        let entry = baked
+            .entry(Arc::as_ptr(item) as usize)
+            .or_insert_with(|| Baked {
+                item: item.clone(),
+                model: Arc::new(part(&item.root)),
+                location: format!("cosmetics/{:x}", Arc::as_ptr(item) as usize),
+                marked: Cell::new(frame.wrapping_sub(1)),
+            });
+        let Some(slot) = self.gui.atlas.sprites.get(&entry.location) else {
+            self.cosmetics.uploads.borrow_mut().push(item.clone());
+            return None;
+        };
+        if entry.marked.replace(frame) != frame {
+            self.skin_downloads.borrow_mut().drawn(&entry.location);
+        }
+        // The mark sits in the slot's top left corner.
+        let mut mark = *slot;
+        mark.u1 = mark.u0 + (slot.u1 - slot.u0) * item.texture.width as f32 / 64.0;
+        mark.v1 = mark.v0 + (slot.v1 - slot.v0) * item.texture.height as f32 / 64.0;
+        Some(super::names::TagStyle {
+            mark,
+            line: u32::from_be_bytes([0, r, g, b]),
+        })
+    }
+
     /// What `m` wears, if cosmetics are shown for it: `own` for the player's own model.
     fn worn(&self, m: &Mob, own: bool) -> Option<horizon_cosmetics::Worn> {
         let client = self.cosmetics.client.as_ref()?;
         let extras = &self.settings.extras;
-        if !(if own {
-            extras.cosmetics_mine
+        if if own {
+            !extras.cosmetics_mine
         } else {
-            extras.cosmetics_others
-        }) {
+            extras.cosmetics_others == Others::Hidden
+        } {
             return None;
         }
         let uuid = if own {
@@ -176,8 +276,10 @@ impl Game<'_> {
         let mut bounds = None;
         // Items on one bone (a back item and a shoulder pet both ride the body) share its matrix.
         let mut bones: [Option<(horizon_cosmetics::Bone, glam::Mat4)>; 3] = [None; 3];
+        // "Name tags only": other players' styles beside their names, nothing on their bodies.
+        let bodies = own || self.settings.extras.cosmetics_others == Others::Shown;
         for item in worn.iter() {
-            if covered(m, item.slot) {
+            if !bodies || covered(m, item.slot) {
                 continue;
             }
             let mut baked = self.cosmetics.baked.borrow_mut();

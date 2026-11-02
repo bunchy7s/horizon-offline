@@ -10,7 +10,7 @@
 //! is `horizon_launcher::wardrobe`'s, on a background thread.
 use super::*;
 use gpui::RenderImage;
-use horizon_cosmetics::prefs::{Others, Prefs};
+use horizon_cosmetics::prefs::{self, Others, Prefs};
 use horizon_cosmetics::{preview, Item, Texture};
 use horizon_launcher::wardrobe::{Catalogue, Change, ClaimState, Error, Saved, Service, Session};
 use std::collections::HashMap;
@@ -174,6 +174,31 @@ fn title_case(id: &str) -> String {
         .join(" ")
 }
 
+/// The service answered: what it keeps for Show my cosmetics is what the game's switch shows and
+/// what the game knows is confirmed, unless a newer wish still waits to be sent.
+fn tell_the_game(uuid: &str, saved: &Saved) {
+    let Some(me) = &saved.me else {
+        return;
+    };
+    if saved
+        .pending
+        .iter()
+        .any(|c| matches!(c, Change::Visible(_)))
+    {
+        return;
+    }
+    let home = backend::game_home();
+    let _ = prefs::set_confirmed(&home, uuid, me.visible);
+    let wish = Prefs::load(&home);
+    if wish.mine != me.visible {
+        let _ = Prefs {
+            mine: me.visible,
+            ..wish
+        }
+        .save(&home);
+    }
+}
+
 /// A day, in the player's time zone (Unix seconds).
 fn day(secs: i64) -> String {
     chrono::DateTime::from_timestamp(secs, 0)
@@ -276,6 +301,9 @@ impl Launcher {
             w.session = trip.session;
         }
         w.saved = trip.saved;
+        if trip.result.is_ok() {
+            tell_the_game(&w.uuid, &w.saved);
+        }
         w.status = match trip.result {
             Ok(()) => Status::Ready,
             Err(Error::Offline) => Status::Offline,
@@ -326,6 +354,15 @@ impl Launcher {
             Change::Visible(true) => tr("Other players see your cosmetics again.").into(),
             Change::Visible(false) => tr("Other players see you without your cosmetics.").into(),
         };
+        if let Change::Visible(on) = change {
+            // The game's switch shows the wish at once; its confirmation follows the service.
+            let home = backend::game_home();
+            let _ = Prefs {
+                mine: on,
+                ..Prefs::load(&home)
+            }
+            .save(&home);
+        }
         w.saved.change(change);
         let _ = w.saved.save(&dir(), &w.uuid);
         w.seen = None;
