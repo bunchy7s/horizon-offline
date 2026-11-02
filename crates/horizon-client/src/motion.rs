@@ -43,7 +43,7 @@ use std::{
     sync::Arc,
 };
 
-/// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`). 359.
 #[inline(never)]
 pub fn native_living_jump(entity: u32, kind: &str) {
     crate::native_client_hooks::living_jump(entity, kind);
