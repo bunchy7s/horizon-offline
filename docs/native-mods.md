@@ -1582,10 +1582,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
   to the time chosen here and may still cancel it; the players wake either way. Bundles need
   `"hooks": @API:sleep_finished_time@`.
-- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
-- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
-- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
-- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:spawn_change@`.
+- **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:native_world_border_bounds_changed@`.
+- **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:native_world_border_center_changed@`.
+- **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:native_world_game_rule_change@`.
+- **`native_spawn_change(pos, angle)`**: `/setworldspawn` moved the world's spawn point, after its position and rotation are applied. Bundles need `"hooks": @API:native_spawn_change@`.
 - **`native_portal_create(dimension, pos)`**: a Nether portal built for dimension travel or the End arrival platform was completed in `dimension`; `pos` is its lower corner or platform origin. Bundles need `"hooks": @API:portal_create@`.
 - **`native_raid_spawn_wave(raid, pos, wave, raiders)`**: a raid wave is about to be spawned at `pos`; `raiders` is the count Horizon will spawn.
 - **`native_raid_state_change(raid, pos, state)`**: a raid at `pos` was triggered or changed to `victory`, `loss`, or `stopped`.
@@ -2209,7 +2209,8 @@ Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
 mod draws come in vanilla's order. `LevelTicksHost` adds scheduling through
 `native_schedule_block_tick` and `native_schedule_fluid_tick`, while
-`LevelWriteHost` adds random access and `native_set_block_property`. Whole-block writes wait for a
+`LevelWriteHost` adds random access, `native_set_block_property`, `native_play_sound` and
+`native_send_particles`. Whole-block writes wait for a
 later slice that creates block entities, as vanilla's `setBlock` does. The game owns
 the tick queue; mods do not pass it back to these helpers.
 For frame hooks, implement `RenderHooks` and return it from `Hooks::render`. The ordered
@@ -2286,7 +2287,8 @@ handler, conditional serialization or sync APIs.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
-receiver and documentation. Level services stay on the level hosts above.
+receiver and documentation; a helper without `self` (`config_dir`) takes
+`&self` in `Host`. Level services stay on the level hosts above.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,

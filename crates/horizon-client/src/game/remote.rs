@@ -223,13 +223,13 @@ struct Lerp {
     steps: u32,
 }
 
-/// `NewMinecartBehavior.MinecartStep` (its xRot is not kept: a minecart here
-/// pitches along its rails).
+/// `NewMinecartBehavior.MinecartStep`, including the server's rail pitch.
 #[derive(Clone, Copy)]
 struct CartStep {
     position: Vec3,
     movement: Vec3,
     yaw: f32,
+    pitch: f32,
     weight: f32,
 }
 
@@ -255,15 +255,16 @@ impl CartLerp {
                 position: Vec3::ZERO,
                 movement: Vec3::ZERO,
                 yaw: 0.0,
+                pitch: 0.0,
                 weight: 0.0,
             },
         }
     }
 
     /// `NewMinecartBehavior.getCartLerpPosition`, `getCartLerpMovements` and
-    /// `getCartLerpYRot` at `partial`: the step the weights put this moment
-    /// in, and how far along it, between it and the one before.
-    fn at(&self, partial: f32) -> (Vec3, Vec3, f32) {
+    /// `getCartLerpYRot` / `getCartLerpXRot` at `partial`: the step the weights
+    /// put this moment in, and how far along it from the one before.
+    fn at(&self, partial: f32) -> (Vec3, Vec3, f32, f32) {
         let alpha = ((3 - self.delay) as f32 + partial) / 3.0;
         let mut count_up = 0.0f32;
         let mut in_step = 1.0f32;
@@ -300,6 +301,7 @@ impl CartLerp {
             lerp(previous.position, current.position),
             lerp(previous.movement, current.movement),
             previous.yaw + in_step * wrap_degrees(current.yaw - previous.yaw),
+            previous.pitch + in_step * wrap_degrees(current.pitch - previous.pitch),
         )
     }
 
@@ -314,6 +316,7 @@ impl CartLerp {
                 position: c.position,
                 movement: c.velocity,
                 yaw: c.yaw,
+                pitch: c.pitch,
                 weight: 0.0,
             };
             self.current.clear();
@@ -326,10 +329,11 @@ impl CartLerp {
         if self.current.is_empty() {
             return false;
         }
-        let (position, movement, yaw) = self.at(1.0);
+        let (position, movement, yaw, pitch) = self.at(1.0);
         c.position = position;
         c.velocity = movement;
         c.yaw = yaw;
+        c.pitch = pitch;
         true
     }
 }
@@ -427,6 +431,8 @@ enum OwnProfile {
 pub(super) struct Remote {
     pub session: Session,
     pub brand: String,
+    /// This connection's configured feature flags, carried through reconfiguration.
+    pub(super) features: Vec<String>,
     /// The server announced it runs mods' quiet commands.
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
@@ -956,6 +962,7 @@ impl Game<'_> {
         self.remote = Some(Remote {
             session,
             brand: "unknown".into(),
+            features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
             far_terrain: None,
@@ -1795,6 +1802,11 @@ impl Game<'_> {
                             "multiplayer.downloadingTerrain",
                             "Loading terrain...",
                         );
+                    }
+                }
+                Event::Features(features) => {
+                    if let Some(remote) = &mut self.remote {
+                        remote.features = features;
                     }
                 }
                 Event::Brand(brand) => {
@@ -2691,10 +2703,14 @@ impl Game<'_> {
             if r.cart_lerps.contains_key(&id) {
                 // A minecart on NewMinecartBehavior keeps Entity's NO_OP
                 // InterpolationHandler: a teleport puts it there at once.
-                if path.is_some()
-                    && let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32)
-                {
-                    c.position = at;
+                if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
+                    if path.is_some() {
+                        c.position = at;
+                    }
+                    if let Some((yaw, pitch)) = rotation {
+                        c.yaw = yaw;
+                        c.pitch = pitch;
+                    }
                 }
             } else {
                 // AbstractInterpolationHandler.interpolateTo: without a
@@ -3217,9 +3233,17 @@ impl Game<'_> {
                     horizon_client::lan::playerdata::uuid_ints(p.uuid),
                 );
                 self.spawn_entity(p.id, &kind, p.position, rotation);
-                // Entity.recreateFromPacket: setDeltaMovement(packet.getMovement()).
-                self.remote_motion(p.id, p.velocity);
-                if !self.spawn_remote_object(p.id, &kind, p.position, rotation[0], p.data) {
+                if let Some(r) = self.remote.as_mut() {
+                    r.cart_lerps.remove(&p.id);
+                    r.lerps.remove(&p.id);
+                }
+                if !self.spawn_remote_object(
+                    p.id,
+                    &kind,
+                    p.position,
+                    (rotation[0], rotation[1]),
+                    p.data,
+                ) {
                     self.spawn_remote_projectile(
                         p.id,
                         &kind,
@@ -3228,6 +3252,14 @@ impl Game<'_> {
                         p.velocity,
                         p.data,
                     );
+                }
+                // Entity.recreateFromPacket: objects must exist before applying motion.
+                self.remote_motion(p.id, p.velocity);
+                if self.minecart_improvements()
+                    && self.carts.iter().any(|c| c.id == p.id as u32)
+                    && let Some(r) = self.remote.as_mut()
+                {
+                    r.cart_lerps.insert(p.id, CartLerp::new());
                 }
                 self.move_remote_text_display(p.id, p.position, Some((rotation[0], rotation[1])));
                 self.move_remote_interaction(p.id, p.position);
@@ -5291,6 +5323,8 @@ impl Game<'_> {
             t.velocity = v;
         } else if let Some(o) = self.orbs.iter_mut().find(|o| o.id == id as u32) {
             o.velocity = v;
+        } else if let Some(c) = self.carts.iter_mut().find(|c| c.id == id as u32) {
+            c.velocity = v;
         } else if let Some(p) = self
             .creatures
             .projectiles
@@ -6554,10 +6588,25 @@ impl Game<'_> {
             }
         }
     }
+    /// `AbstractMinecartRenderer.newExtractState`: sample the same weighted
+    /// steps at the frame's partial tick, including corners within one tick.
+    pub(super) fn remote_minecart_lerp(
+        &self,
+        id: u32,
+        partial: f32,
+    ) -> Option<([f64; 3], f32, f32)> {
+        let lerp = self.remote.as_ref()?.cart_lerps.get(&(id as i32))?;
+        if lerp.current.is_empty() {
+            return None;
+        }
+        let (p, _, yaw, pitch) = lerp.at(partial);
+        Some(([p.x, p.y, p.z], yaw, pitch))
+    }
+
     /// `ClientPacketListener.handleMinecartAlongTrack`: the steps join the ones
     /// the minecart has queued, if it runs `NewMinecartBehavior`.
     fn remote_move_minecart(&mut self, p: play::MoveMinecartAlongTrack) {
-        if !self.carts.iter().any(|c| c.id == p.id as u32) {
+        if !self.minecart_improvements() || !self.carts.iter().any(|c| c.id == p.id as u32) {
             return;
         }
         let Some(r) = self.remote.as_mut() else {
@@ -6572,6 +6621,7 @@ impl Game<'_> {
                 position: at(s.position),
                 movement: at(s.movement),
                 yaw: horizon_protocol::buf::unpack_degrees(s.yaw),
+                pitch: horizon_protocol::buf::unpack_degrees(s.pitch),
                 weight: s.weight,
             }));
     }
@@ -7070,6 +7120,16 @@ impl Game<'_> {
             }));
             if passes {
                 return false;
+            }
+            // Minecart.interact resets the passenger's easing baseline on
+            // a successful boarding click, not on SetPassengers (commands
+            // can mount a player without this interaction).
+            if let Some(c) = self
+                .carts
+                .iter_mut()
+                .find(|c| c.id as i32 == hit.id && c.kind == super::minecarts::CartKind::Rideable)
+            {
+                c.player_rotation_offset = c.rotation_offset;
             }
             // MinecartCommandBlock.interact on the client: the editor opens.
             if self.carts.iter().any(|c| {

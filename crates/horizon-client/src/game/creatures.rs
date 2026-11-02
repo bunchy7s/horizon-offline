@@ -1710,6 +1710,16 @@ impl Game<'_> {
         self.creatures.projectiles.push(p);
         self.native_projectile_launch(player, &name, id, kind);
     }
+    /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
+    /// one puff over a sheared mooshroom, half its `height` up, shown here and to
+    /// the players within range.
+    pub(super) fn mooshroom_shear_puff(&mut self, at: [f64; 3], height: f64) {
+        let at = [at[0], at[1] + 0.5 * height, at[2]];
+        let options = ParticleOptions::simple(ParticleType::Explosion);
+        self.particles
+            .send_particles(&options, at, [0.0; 3], 0.0, 1);
+        self.lan_level_particles(None, &options, at, [0.0; 3], 0.0, 1, None);
+    }
     /// `Entity.sendBubbleColumnParticles` at the top of the column block `pos`: two
     /// splashes and two bubbles over it, which the level random places, shown here
     /// and to the players within range.
@@ -5164,6 +5174,8 @@ impl Game<'_> {
         // `Some(true)` for the four spell particles, `Some(false)` for the two
         // smoke puffs of a cow that already holds effects.
         let mut stew_particles: Option<bool> = None;
+        // `MushroomCow.shear`: where, and how tall, the mooshroom that was sheared stood.
+        let mut shear_puff: Option<([f64; 3], f64)> = None;
         // `Ocelot.mobInteract`: whether the fish won its trust.
         let mut ocelot_trust: Option<bool> = None;
         match species {
@@ -5207,6 +5219,10 @@ impl Game<'_> {
                     "minecraft:red_mushroom"
                 };
                 drops.push((mushroom.into(), 5));
+                shear_puff = Some((
+                    [m.position.x, m.position.y, m.position.z],
+                    f64::from(m.height()),
+                ));
                 m.removed = true;
                 let setup = SpawnSetup {
                     yaw: m.yaw,
@@ -5751,6 +5767,9 @@ impl Game<'_> {
             let target = self.mob_entity(&self.mobs[index]);
             self.trigger_item_entity("minecraft:player_sheared_equipment", &stack, &target);
             self.spawn_item(stack, [center[0], center[1] + 0.5, center[2]], [0.0; 3], 10);
+        }
+        if let Some((at, height)) = shear_puff {
+            self.mooshroom_shear_puff(at, height);
         }
         let mut drops: Vec<ItemStack> = drops
             .into_iter()

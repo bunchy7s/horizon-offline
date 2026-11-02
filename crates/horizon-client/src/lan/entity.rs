@@ -47,6 +47,9 @@ pub struct EntityState {
     pub head_yaw: f32,
     pub on_ground: bool,
     pub velocity: [f64; 3],
+    /// NewMinecartBehavior steps drained from the simulation since its last
+    /// export. None selects the ordinary entity movement packets.
+    pub minecart_steps: Option<Vec<play::MinecartStep>>,
     /// ClientboundAddEntityPacket.data (item frame direction, block state ...).
     pub data: i32,
     /// SynchedEntityData entries that differ from the defaults.
@@ -98,6 +101,7 @@ impl EntityState {
         (self.yaw, self.pitch, self.head_yaw) = (0.0, 0.0, 0.0);
         self.on_ground = false;
         self.velocity = [0.0; 3];
+        self.minecart_steps = None;
         self.data = 0;
         self.meta.clear();
         self.defaults.clear();
@@ -236,6 +240,8 @@ struct ServerEntity {
     head: i8,
     /// lastSentMovement.
     velocity: [f64; 3],
+    /// NewMinecartBehavior.lerpSteps accumulated across tracking intervals.
+    minecart_steps: Vec<play::MinecartStep>,
     /// trackedDataValues: the entity data the clients hold.
     meta: Vec<(u8, i32, Value)>,
     equipment: Vec<(u8, Option<Stack>)>,
@@ -313,6 +319,7 @@ impl ServerEntity {
             rotation: (pack_degrees(e.pitch), pack_degrees(e.yaw)),
             head: pack_degrees(e.head_yaw),
             velocity: e.velocity,
+            minecart_steps: e.minecart_steps.clone().unwrap_or_default(),
             meta: e.meta.clone(),
             equipment: e.equipment.clone(),
             attributes: e.attributes.clone(),
@@ -391,6 +398,11 @@ impl ServerEntity {
     /// full position sync every 400 or when the entity lands or leaves the
     /// ground), velocity for types that track it, changed data at once.
     fn send_changes(&mut self, e: &EntityState, riding: &Riding, out: &mut Vec<play::Clientbound>) {
+        if let Some(steps) = &e.minecart_steps {
+            self.minecart_steps.extend_from_slice(steps);
+        } else {
+            self.minecart_steps.clear();
+        }
         let passengers = riding.passengers(e.id);
         if passengers != self.passengers.as_slice() {
             out.push(riding.set_passengers(e.id));
@@ -430,6 +442,14 @@ impl ServerEntity {
                 self.base = e.position;
                 self.was_riding = true;
                 self.send_dirty(e, dirty, out);
+                self.send_head(e, out);
+                self.tick += 1;
+                self.send_equipment(e, out);
+                return;
+            }
+            if e.minecart_steps.is_some() {
+                self.send_dirty(e, dirty, out);
+                self.send_minecart(e, rotation, rotate, out);
                 self.send_head(e, out);
                 self.tick += 1;
                 self.send_equipment(e, out);
@@ -532,6 +552,49 @@ impl ServerEntity {
         }
         self.tick += 1;
         self.send_equipment(e, out);
+    }
+
+    /// ServerEntity.handleMinecartPosRot: send every recorded substep in order.
+    /// Only an empty queue uses the fallback endpoint (e.g. a stationary cart
+    /// teleported by a command); this never replaces a curved track's steps.
+    fn send_minecart(
+        &mut self,
+        e: &EntityState,
+        rotation: (i8, i8),
+        rotate: bool,
+        out: &mut Vec<play::Clientbound>,
+    ) {
+        if self.minecart_steps.is_empty() {
+            let distance: f64 = (0..3).map(|k| (e.position[k] - self.base[k]).powi(2)).sum();
+            let motion: f64 = (0..3)
+                .map(|k| (e.velocity[k] - self.velocity[k]).powi(2))
+                .sum();
+            if distance >= 7.629_394_531_25e-6
+                || self.tick.is_multiple_of(60)
+                || rotate
+                || motion > 1.0e-7
+            {
+                self.minecart_steps.push(play::MinecartStep {
+                    position: e.position,
+                    movement: e.velocity,
+                    yaw: rotation.1,
+                    pitch: rotation.0,
+                    weight: 1.0,
+                });
+            }
+        }
+        if !self.minecart_steps.is_empty() {
+            out.push(play::Clientbound::MoveMinecartAlongTrack(
+                play::MoveMinecartAlongTrack {
+                    id: e.id,
+                    steps: std::mem::take(&mut self.minecart_steps),
+                },
+            ));
+        }
+        // Vanilla updates these even when no packet was needed; its
+        // lastSentMovement is deliberately unchanged in this branch.
+        self.rotation = rotation;
+        self.base = e.position;
     }
 
     /// ServerEntity.sendDirtyEntityData: the changed entity data, then the
@@ -1093,6 +1156,7 @@ mod tests {
             head_yaw: 0.0,
             on_ground: true,
             velocity: [0.0; 3],
+            minecart_steps: None,
             data: 0,
             meta: Vec::new(),
             defaults: Vec::new(),

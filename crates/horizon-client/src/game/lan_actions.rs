@@ -2384,8 +2384,10 @@ impl Game<'_> {
                 host.hub.send_to(
                     conn,
                     &C::GameRuleValues(play::GameRuleValues {
-                        entries: horizon_client::gamerules::RULES
-                            .iter()
+                        entries: self
+                            .ui
+                            .rules
+                            .available_rules()
                             .map(|r| play::GameRuleEntry {
                                 name: format!("minecraft:{}", r.name),
                                 value: self.ui.rules.get(r.name).unwrap_or(r.default).to_string(),
@@ -3271,7 +3273,7 @@ impl Game<'_> {
         };
         let skip = usize::from(text.starts_with('/'));
         let command = &text[skip..];
-        let d = vanilla::game_dispatcher();
+        let d = vanilla::game_dispatcher_with_features(&self.level.enabled_features);
         // The completions come from the server's players and lists, not from the host's own registries: a
         // dedicated server has no local player (they would list "Player"), and a LAN world's guests are not in
         // the host's list.
