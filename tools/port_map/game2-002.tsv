@@ -15,6 +15,7 @@ LeashFenceKnotEntity.recalculateBoundingBox	port	crates/horizon-client/src/mobs/
 LeashFenceKnotEntity.getOrCreateKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	knots are not entities in game; the knot is used when a lead is tied
 LeashFenceKnotEntity.getKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	the existing knot is the leashed-holder check at the fence position
 LeashFenceKnotEntity.createKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	no in-game knot entity is created; LAN knot ids are assigned in lan_assign_ids
+LeashFenceKnotEntity.interact	port	crates/horizon-client/src/game/leads.rs::Game::use_knot	a client sends it for the knot its crosshair meets (remote_knot_hit); Horizon attacks still go to the fence behind
 Painting.defineSynchedData	skip:other		entity data default variant; Horizon picks the variant in place_painting
 Painting.get	port	crates/horizon-client/src/game/paintings.rs::PaintingVariants::get	lookup of the variant by id; there is no component getter
 Painting.applyImplicitComponent	inline	crates/horizon-client/src/game/paintings.rs::Game::place_painting	the stack's painting/variant replaces the random pick (PaintingVariants::of_stack), and that variant has to survive where it goes
