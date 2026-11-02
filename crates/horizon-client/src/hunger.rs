@@ -13,6 +13,13 @@ use horizon_world::{
     synced_floats::SyncedFloats,
 };
 
+/// A living entity is about to heal. Mods may change the amount or cancel.
+/// `entity` identifies the affected entity. @API:native_living_heal@.
+#[inline(never)]
+pub fn native_living_heal(entity: u32, amount: &mut f32, cancel: &mut bool) {
+    crate::native_client_hooks::living_heal(entity, amount, cancel);
+}
+
 impl PlayerMotion {
     /// Player.causeFoodExhaustion: creative and spectator abilities suppress
     /// exhaustion from movement, attacks and effects.
@@ -33,16 +40,21 @@ impl PlayerMotion {
             let health = self.health.health();
             let maximum = self.attribute("minecraft:max_health")? as f32;
             if health < maximum {
-                let h = &mut self.health;
-                let mut observer = Updates(&mut self.events);
-                PlayerAttributeHealth::new(
-                    &mut self.attributes,
-                    &mut h.data,
-                    h.ids,
-                    h.dead,
-                    &mut observer,
-                )?
-                .heal(1.0)?;
+                let mut amount = 1.0;
+                let mut cancel = false;
+                native_living_heal(self.entity_id as u32, &mut amount, &mut cancel);
+                if !cancel {
+                    let h = &mut self.health;
+                    let mut observer = Updates(&mut self.events);
+                    PlayerAttributeHealth::new(
+                        &mut self.attributes,
+                        &mut h.data,
+                        h.ids,
+                        h.dead,
+                        &mut observer,
+                    )?
+                    .heal(amount)?;
+                }
             }
             let saturation = self.health.food.saturation;
             if saturation < 20.0 {
@@ -117,7 +129,12 @@ impl FoodWorld for TickWorld<'_> {
         )?
         .is_hurt()?)
     }
-    fn heal(&mut self, _: &mut FoodData, amount: f32) -> Result<()> {
+    fn heal(&mut self, _: &mut FoodData, mut amount: f32) -> Result<()> {
+        let mut cancel = false;
+        native_living_heal(self.entity as u32, &mut amount, &mut cancel);
+        if cancel {
+            return Ok(());
+        }
         let mut observer = Updates(self.events);
         Ok(PlayerAttributeHealth::new(
             self.attributes,
