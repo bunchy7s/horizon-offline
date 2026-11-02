@@ -2373,7 +2373,7 @@ impl Game<'_> {
             // handlePickItemFromBlock: a block within the block reach plus 1, its
             // data only with infinite materials.
             S::PickItemFromBlock(p) => {
-                self.guest_pick_item(host, conn, |g| {
+                self.guest_pick_item(host, conn, false, p.pos, 0, |g| {
                     // handlePickItemFromBlock: within reach and loaded.
                     if !g.world.loaded(p.pos[0], p.pos[2]) {
                         return None;
@@ -2394,7 +2394,7 @@ impl Game<'_> {
             }
             // handlePickItemFromEntity.
             S::PickItemFromEntity(p) => {
-                self.guest_pick_item(host, conn, |g| {
+                self.guest_pick_item(host, conn, true, [0; 3], p.id, |g| {
                     g.within_entity_range(p.id)
                         .then(|| g.entity_pick_result(p.id))
                         .flatten()
@@ -2436,11 +2436,22 @@ impl Game<'_> {
         &mut self,
         host: &mut LanHost,
         conn: u32,
+        from_entity: bool,
+        pos: [i32; 3],
+        entity_id: i32,
         stack: impl FnOnce(&mut Self) -> Option<ItemStack>,
     ) {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return;
+        };
         let picked = self.as_guest(host, conn, |g| {
             let stack = stack(g)?;
             let infinite = g.creative;
+            let mut cancel = false;
+            g.native_player_pick_item(uuid, &name, from_entity, pos, entity_id, &mut cancel);
+            if cancel {
+                return None;
+            }
             horizon_client::pick_item::pick(
                 &mut g.inventory[..36],
                 &mut g.selected,

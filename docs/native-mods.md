@@ -1238,6 +1238,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   hotbar slot, after the slot range check and before it changes. The player's state is not swapped in, so helpers
   that look them up through `self.lan` may find nothing while a guest packet is being handled. Set `cancel` to
   keep the old slot; the client is sent that slot again.
+- **`native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)`**: a server player's middle-click
+  pick resolved a block or entity's pick stack and is about to put it in the hotbar. For a block, `pos` is its
+  position and `entity_id` is zero; for an entity, `from_entity` is true, `pos` is `[0, 0, 0]` and `entity_id`
+  is its network id. The player's state is swapped in, though helpers that look them up through `self.lan` may
+  find nothing while a guest packet is handled. Set `cancel` to leave the inventory and client unchanged. A
+  pick with no result is not heard.
 - **`native_sign_changed(player, name, dimension, pos, front, lines, cancel)`**: a player finished a sign they were
   editing, heard once every check has passed (editing that sign, in reach, not waxed, the chat filter) and right before
   the text goes on it. `lines` holds the four lines as written, formatting codes still in; rewrite them and that is

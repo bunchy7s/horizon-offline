@@ -2760,6 +2760,22 @@ impl Game<'_> {
     ) {
         let _ = (player, name, from_slot, to_slot, cancel);
     }
+    /// A server player picked an item from a block or entity, before it enters
+    /// the hotbar. `pos` is zero for an entity; `entity_id` is zero for a
+    /// block. The player's state is swapped in, though helpers that look them
+    /// up through `self.lan` may find nothing while a guest packet is handled.
+    /// Set `cancel` to leave the inventory and client unchanged. @API:native_player_pick_item@.
+    pub(super) fn native_player_pick_item(
+        &mut self,
+        player: u128,
+        name: &str,
+        from_entity: bool,
+        pos: [i32; 3],
+        entity_id: i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, from_entity, pos, entity_id, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
