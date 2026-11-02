@@ -80,6 +80,8 @@ pub(super) fn content_root(
     paths.extend(dev.iter().cloned());
     let mut known = None;
     let mut mods: Vec<ContentMod> = Vec::new();
+    // The first load's list stays (`set_local`): a reload does not hash the files again.
+    let announce = !horizon_protocol::mod_list::is_set();
     let mut announced = Vec::new();
     for path in &paths {
         let Ok(package) = Package::read(path) else {
@@ -123,7 +125,8 @@ pub(super) fn content_root(
             content,
         };
         match mod_content::accept_mod(&mut mods, candidate, known) {
-            Ok(_) => announced.push(announced_entry(m, path)),
+            Ok(_) if announce => announced.push(announced_entry(m, path)),
+            Ok(_) => {}
             Err(e) => log::warn!("Horizon: mod {} content not loaded: {e}", m.id),
         }
     }
@@ -148,7 +151,9 @@ pub(super) fn content_root(
     }
     match mod_content::resource_root(root, &mods, &here.join(".horizon-cache")) {
         Ok(out) => {
-            horizon_protocol::mod_list::set_local(announced);
+            if announce {
+                horizon_protocol::mod_list::set_local(announced);
+            }
             if out != root {
                 log::info!(
                     "Horizon: content from {} mod(s) in {}",

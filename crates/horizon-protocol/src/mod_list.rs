@@ -76,6 +76,12 @@ pub fn set_local(mut entries: Vec<Entry>) -> bool {
     LOCAL.set(entries).is_ok()
 }
 
+/// Whether `set_local` has run: a pack reload then skips reading and hashing
+/// the mods' files again, since the first list stays.
+pub fn is_set() -> bool {
+    LOCAL.get().is_some()
+}
+
 /// The mods this game has on, by id.
 pub fn local() -> Vec<Entry> {
     LOCAL.get().cloned().unwrap_or_default()
