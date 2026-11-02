@@ -195,7 +195,7 @@ impl Game<'_> {
                 victim.id as i32,
                 &kind,
                 super::creatures::source_damage_type(source),
-                self.motion.entity_id,
+                self.player.as_ref().map_or(0, |player| player.entity_id),
                 source.from,
                 [position.x, position.y, position.z],
                 view,

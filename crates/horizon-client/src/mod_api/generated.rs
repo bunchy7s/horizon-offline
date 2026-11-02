@@ -4524,7 +4524,7 @@ pub trait Hooks: Send + Sync {
     /// DamageSource position. The acting player's network id is `causing`
     /// (also the direct entity). Weapon enchantments include their levels.
     /// Runs before the victim's immunity guards and v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1. API next.
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn living_incoming_damage_v2(

@@ -7042,7 +7042,7 @@ impl Game<'_> {
     /// DamageSource position. The acting player's network id is `causing`
     /// (also the direct entity). Weapon enchantments include their levels.
     /// Runs before the victim's immunity guards and v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1. API next.
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
     pub(super) fn native_living_incoming_damage_v2(
         &mut self,
         entity: i32,
