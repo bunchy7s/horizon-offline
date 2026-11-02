@@ -13885,14 +13885,14 @@ pub fn dispatch_compute_fov_modifier(
 #[non_exhaustive]
 pub struct ItemModelPropertyEvent<'a> {
     pub property: &'a str,
-    pub stack: &'a mod_api::StackView,
+    pub stack: &'a StackView,
     pub value: bool,
 }
 pub fn dispatch_item_model_property(
     host: &dyn Host,
     mods: &[Box<dyn Hooks>],
     property: &str,
-    stack: &mod_api::StackView,
+    stack: &StackView,
     value: &mut bool,
 ) {
     let mut event = ItemModelPropertyEvent {

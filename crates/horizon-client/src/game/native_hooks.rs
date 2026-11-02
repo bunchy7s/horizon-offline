@@ -880,6 +880,7 @@ use super::{
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
+use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
     self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     ServerTickPhase, WorldPhase,
@@ -2034,7 +2035,7 @@ impl Game<'_> {
     pub(super) fn native_item_model_property(
         &self,
         property: &str,
-        stack: &mod_api::StackView,
+        stack: &StackView,
         value: &mut bool,
     ) {
         mod_api::dispatch_item_model_property(self, mod_api::mods(), property, stack, value);

@@ -38,6 +38,13 @@ fn custom_condition_is_evaluated_per_stack_at_branch_selection() {
     .unwrap();
     let mut models = ItemModels::default();
     models.definitions.insert("example:tool".into(), definition);
+    models.prototypes.insert(
+        "example:tool".into(),
+        BTreeMap::from([(
+            "minecraft:item_model".into(),
+            Value::String("example:tool".into()),
+        )]),
+    );
     let context = Context {
         display: DisplayContext::Gui,
         owner: None,

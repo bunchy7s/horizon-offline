@@ -25,18 +25,16 @@ when no trait mods are loaded. Vanilla properties do not enter the hook.
 fn item_model_property(
     &self,
     _host: &dyn Host,
-    property: &str,
-    stack: &StackView,
-    value: &mut bool,
+    event: &mut ItemModelPropertyEvent<'_>,
 ) {
-    if property == "example:charged" {
-        *value = stack.patch.get("example:charged").and_then(Option::as_ref)
+    if event.property == "example:charged" {
+        event.value = event.stack.patch.get("example:charged").and_then(Option::as_ref)
             .and_then(serde_json::Value::as_bool) == Some(true);
     }
 }
 ```
 
-`Host` and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
 including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
 defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
 Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's

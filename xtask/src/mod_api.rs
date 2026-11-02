@@ -1791,15 +1791,9 @@ mod tests {
     fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
         struct Property;
         impl Hooks for Property {
-            fn item_model_property(
-                &self,
-                _: &dyn Host,
-                property: &str,
-                stack: &StackView,
-                value: &mut bool,
-            ) {
-                if property == "example:charged" {
-                    *value = stack.count > 1;
+            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+                if event.property == "example:charged" {
+                    event.value = event.stack.count > 1;
                 }
             }
         }
