@@ -425,9 +425,9 @@ mod tests {
                 )
             };
             let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
-            let chicken = f32::from(0.4);
+            let chicken = 0.4_f32;
             // Wider than either spider (the boat's 1.375 is not).
-            let wide = 2.0;
+            let wide = 2.0_f32;
             let spider = new("minecraft:spider");
             let cave = new("minecraft:cave_spider");
             assert!(spider.width() > chicken && cave.width() > chicken);
