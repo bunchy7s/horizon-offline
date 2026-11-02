@@ -5,8 +5,7 @@
 //! A server (the dedicated server and single player's server thread) keeps
 //! the other dimensions' levels here and ticks each one with players or forced
 //! chunks by swapping it into place (`enter_level`), the way `as_guest` swaps a player
-//! in, so the tick code runs unchanged, one level at a time. The in-frame
-//! game holds one level, which follows its player (`enter_dimension`).
+//! in, so the tick code runs unchanged, one level at a time.
 //!
 //! Shared by every level, as vanilla's derived levels share the
 //! Overworld's level data: the game time, the day time and the weather, the
@@ -309,7 +308,7 @@ impl Game<'_> {
         mut host: Option<&mut LanHost>,
         target: Dim,
     ) -> Result<()> {
-        // The in-frame game keeps its one level (`enter_dimension`).
+        // A client holds no levels.
         if self.options.execution_role.is_client() {
             return Ok(());
         }
@@ -425,6 +424,7 @@ impl Game<'_> {
         let observe_level =
             running.is_some() && (self.serving.is_some() || self.options.dedicated.is_some());
         let dims = self.levels_to_tick();
+        let order = dims.clone();
         let n = dims.len();
         let mut result = Ok(());
         for (k, dim) in dims.into_iter().enumerate() {
@@ -467,6 +467,22 @@ impl Game<'_> {
                 self.native_level_tick_post(dim.id());
             }
             self.publish_server_debug(dim);
+            // An entity that crossed into a level that already ticked this
+            // server tick is in it when the tick ends (`addDuringTeleport`).
+            if running == Some(true) {
+                let mut moved = false;
+                for &earlier in &order[..k] {
+                    if !self.arrival_chunks(earlier).is_empty()
+                        && self.enter_level(None, earlier).is_ok()
+                    {
+                        self.land_portal_arrivals();
+                        moved = true;
+                    }
+                }
+                if moved {
+                    self.enter_level(None, dim)?;
+                }
+            }
         }
         self.level_pass = Pass::default();
         if result.is_err() {

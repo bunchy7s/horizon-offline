@@ -116,7 +116,7 @@ fn entity_state(mob: &mut Mob, species: Species, case: &Value) {
                 for (i, flags) in ticks.iter().enumerate() {
                     mob.age = i as u32 + 1;
                     bat::set_resting(mob, flags.as_i64().unwrap_or(0) & 1 != 0);
-                    if flag("@batInFrame") {
+                    if flag("@batServerTick") {
                         bat::tick(mob);
                     } else {
                         bat::setup_animation_states(mob);

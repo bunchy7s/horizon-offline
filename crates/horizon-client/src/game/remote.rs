@@ -921,7 +921,6 @@ impl Game<'_> {
         self.pickups.clear();
         self.orbs.clear();
         self.falling.clear();
-        self.travelling = None;
         self.mining = None;
         self.container = None;
         self.carried = None;
@@ -8674,8 +8673,7 @@ impl Game<'_> {
     /// dialogs release on the first tick after closing instead, as vanilla
     /// does.
     pub(super) fn release_use_for_keybind_screen(&mut self) {
-        // In-frame (deprecated) has no server client; `tick_used_item` releases
-        // the use on its own.
+        // Only a server's client holds a use to release.
         if self.remote.is_none() {
             return;
         }

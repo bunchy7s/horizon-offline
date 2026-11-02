@@ -809,7 +809,6 @@ mod tests {
             allow_flight: false,
             seed: 0,
             max_players: 20,
-            dedicated: false,
             integrated: false,
             levels: Default::default(),
         };

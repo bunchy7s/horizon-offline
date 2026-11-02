@@ -10,7 +10,7 @@ use horizon_client::{
         chunks::ChunkEncoder,
         data::SyncData,
         entity::EntityState,
-        hub::{HostEvent, HostState, Hub, HubConfig, TickCtx},
+        hub::{HostEvent, Hub, HubConfig, TickCtx},
     },
     world::World,
 };
@@ -172,30 +172,8 @@ struct Server {
 }
 impl Server {
     fn tick(&mut self, entities: &[EntityState]) {
-        let host = HostState {
-            uuid: 42,
-            name: "Host".into(),
-            entity_id: 1,
-            position: [0.5, -59.0, 0.5],
-            yaw: 0.0,
-            pitch: 0.0,
-            head_yaw: 0.0,
-            on_ground: true,
-            game_mode: 1,
-            sneaking: false,
-            sprinting: false,
-            equipment: Default::default(),
-            health: 20.0,
-            shoulders: [None; 2],
-            attributes: Vec::new(),
-            bed: None,
-            living_flags: 0,
-            stuck: (0, 0),
-            body: Default::default(),
-        };
         let mut ctx = TickCtx {
             world: &mut self.world,
-            host: Some(&host),
             entities,
             next_entity: &mut self.next_entity,
             spawn: [8.5, f64::from(MIN_Y + 5), 8.5],
@@ -269,8 +247,7 @@ fn server_sync(sync: Arc<SyncData>, net: NetConfig) -> Server {
             hardcore: false,
             view_distance: 3,
             simulation_distance: 3,
-            dedicated: false,
-            integrated: false,
+            integrated: true,
             dimension: "minecraft:overworld".into(),
             seed: 1234,
             max_players: 8,
@@ -951,7 +928,7 @@ fn status_and_join() {
                 // forceGameTimeSynchronization sends no clocks and may come first.
                 C::SetTime(t) if !t.clocks.is_empty() => time = true,
                 C::PlayerInfoUpdate(u) => {
-                    info |= u.entries.iter().any(|e| e.name.as_deref() == Some("Host"));
+                    info |= u.entries.iter().any(|e| e.name.as_deref() == Some("Steve"));
                 }
                 C::Commands(_) => commands = true,
                 C::LevelChunkWithLight(l) => {
@@ -1590,7 +1567,6 @@ fn a_respawned_guest_is_immune_until_its_client_loads_the_world() {
     let at = [8.5, f64::from(MIN_Y + 5), 8.5];
     let ctx = TickCtx {
         world: &mut s.world,
-        host: None,
         entities: &[],
         next_entity: &mut s.next_entity,
         spawn: at,

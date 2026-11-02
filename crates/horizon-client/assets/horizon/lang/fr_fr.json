@@ -207,8 +207,6 @@
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Données de maillage vers le GPU par image. Moins : plus fluide.",
   "Frame rate and frame times over the game, with a graph.": "Fréquence et temps d'image par-dessus le jeu, avec un graphique.",
   "horizon.multiplayer.finding_friend": "Recherche du monde de votre ami...",
-  "horizon.loading.opening_world": "Ouverture du monde",
-  "horizon.loading.cancelling_world": "Annulation en cours",
   "horizon.title.not_affiliated": "Non affilié à Mojang ou à Microsoft",
   "horizon.extras.header.lighting": "Éclairage",
   "horizon.extras.header.third_person": "Troisième personne",

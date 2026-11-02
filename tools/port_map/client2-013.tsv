@@ -94,7 +94,7 @@ OversizedItemRenderer.textureIsReadyToBlit	skip:other		cache check for the pictu
 PictureInPictureRenderer.blitTexture	skip:other		picture-in-picture texture blit; Horizon draws each preview into the batch directly (draw_player_preview, draw_banner_result)
 PictureInPictureRenderer.prepareTexturesAndProjection	skip:other		GPU texture allocation for a picture-in-picture
 PictureInPictureRenderer.close	skip:other		GPU texture release
-AccessibilityOnboardingScreen.init	port	crates/horizon-client/src/title/onboarding.rs::Title::onboarding_buttons	gap: minor: the Narrator button stays inactive and reads Not Available (no narrator output)
+AccessibilityOnboardingScreen.init	port	crates/horizon-client/src/title/onboarding.rs::Title::onboarding_buttons	gap: minor: the Narrator button is drawn disabled and labelled Narrator: Not Available where vanilla builds it from Options.narrator's own button and enables it while the narrator can speak, so the narrator cannot be turned on here; handleInitialNarrationDelay's accessibility.onboarding.screen.narrator line is not said
 AccessibilityOnboardingScreen.setInitialFocus	missing		minor: the onboarding screen itself is ported (title/onboarding.rs); the focus starting on the Narrator button is not
 AccessibilityOnboardingScreen.closeAndSetScreen	port	crates/horizon-client/src/title.rs::Title::click_action	
 AccessibilityOnboardingScreen.extractRenderState	port	crates/horizon-client/src/title/onboarding.rs::Title::draw_onboarding	

@@ -1,8 +1,8 @@
-MessageArgument.getMessage	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	gap: minor: plain text only, no chat signing or text filter
-MessageArgument.resolveChatMessage	port	crates/horizon-client/src/game/commands.rs::Game::cmd_say	gap: minor: no chat signing, decorator or text filter
-MessageArgument.resolveSignedMessage	missing		minor: signed chat (signature, ChatDecorator, text filter) is not ported; /say sends plain text
-MessageArgument.resolveDisguisedMessage	missing		minor: ChatDecorator for unsigned messages is not ported
-MessageArgument.filterPlainText	missing		minor: text filtering service is not ported
+MessageArgument.getMessage	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	gap: minor: plain text only, no chat signing
+MessageArgument.resolveChatMessage	port	crates/horizon-client/src/game/commands.rs::Game::cmd_say	gap: minor: no chat signing or decorator; the text filter is chat_filter_command
+MessageArgument.resolveSignedMessage	missing		minor: no signed chat (signature, ChatDecorator); /say sends plain text, its arguments filtered by chat_filter_command
+MessageArgument.resolveDisguisedMessage	inline	crates/horizon-client/src/lan/hub.rs::Hub::say	the /say of a source with no player: a disguised chat of type say_command named after the source
+MessageArgument.filterPlainText	port	crates/horizon-client/src/game/chat_filter.rs::Game::chat_filter_command	the message arguments of a guest's command (/say, /me, /msg, /teammsg) through the server's text filter
 MessageArgument.Message.toComponent	port	crates/horizon-client/src/game/commands.rs::Game::expand_selectors	@-selector expansion into names
 NbtPathArgument.readUnquotedName	port	crates/horizon-client-core/src/nbt_path.rs::parse_node	unquoted node name read in the bare-name arm of parse_node
 NbtPathArgument.isAllowedInUnquotedName	inline	crates/horizon-client-core/src/nbt_path.rs::parse_node	the excluded-character set of parse_node's bare-name arm

@@ -198,8 +198,6 @@
   "Mesh data sent to the GPU per frame. Lower is smoother while loading.": "Datos de malla enviados a la GPU por fotograma. Menos es más fluido durante la carga.",
   "Frame rate and frame times over the game, with a graph.": "Fotogramas por segundo y tiempos de fotograma sobre el juego, con un gráfico.",
   "horizon.multiplayer.finding_friend": "Buscando el mundo de tu amigo…",
-  "horizon.loading.opening_world": "Abriendo el mundo",
-  "horizon.loading.cancelling_world": "Cancelando",
   "horizon.multiplayer.not_signed_in": "Este servidor está en modo en línea. Inicia sesión con tu cuenta de Microsoft en el launcher de Horizon para unirte.",
   "horizon.multiplayer.invalid_address": "Dirección de servidor no válida: %s",
   "horizon.multiplayer.connected_friend_direct": "Conectado directamente con tu amigo…",

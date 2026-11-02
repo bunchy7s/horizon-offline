@@ -1077,7 +1077,7 @@ impl Game<'_> {
                     pending.opened = true;
                 }
             }
-            if !self.loaded() || self.pending_entry.is_some() || self.world_loader.is_some() {
+            if !self.loaded() || self.pending_entry.is_some() {
                 return;
             }
         }
