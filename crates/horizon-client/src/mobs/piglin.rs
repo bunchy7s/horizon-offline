@@ -1711,6 +1711,7 @@ pub fn ai_step(
                     || m.extra.piglin.seen_admire > 0;
                 if admiring && let Some(item) = m.extra.off_hand.take() {
                     events.push(MobEvent::DropItem {
+                        mob: m.id,
                         item,
                         count: 1,
                         at: [m.position.x, m.position.y, m.position.z],

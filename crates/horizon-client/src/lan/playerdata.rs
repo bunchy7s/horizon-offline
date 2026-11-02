@@ -429,6 +429,7 @@ mod tests {
                 },
             }),
             copy_on_death: true,
+            sync: false,
         };
         let dir = world("attachments");
         let mut original = guest();

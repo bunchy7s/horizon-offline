@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_fall",
+      "target": "horizon_client_lib::landing::native_living_fall",
+      "neoforge": "LivingFallEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a living entity's fall, with changeable distance and multiplier and cancellation (`native_living_fall`).",
+  "doc_summary": "a living entity's fall (`native_living_fall`), with changeable distance and multiplier and cancellation. Bundles need \"hooks\": @API:native_living_fall@.",
+  "comments": ["crates/horizon-client/src/landing.rs"]
+}
