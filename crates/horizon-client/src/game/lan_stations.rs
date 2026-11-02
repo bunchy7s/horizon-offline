@@ -140,6 +140,7 @@ impl Game<'_> {
             self.guest_menu_op(host, gi, &mut gs.menu, op);
             // AnvilCraftEvent.Pre: the taken result's onTake waits for the mods.
             let mut anvil_craft = gs.menu.anvil_craft.take();
+            let mut cancelled = false;
             if let Some(craft) = &anvil_craft {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());
@@ -147,17 +148,20 @@ impl Game<'_> {
                 self.native_anvil_craft_pre(uuid, &name, gs.pos, craft, &mut cancel);
                 if cancel {
                     anvil_craft = None;
+                    cancelled = true;
                 } else {
                     gs.menu.anvil_take(&self.menu_env());
                 }
             }
-            let recomputed = before.is_some_and(|(slots, cost)| {
-                cost != gs.menu.data[0]
-                    || slots
-                        .iter()
-                        .enumerate()
-                        .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
-            });
+            // A cancelled take runs no createResult: the inputs are untouched.
+            let recomputed = !cancelled
+                && before.is_some_and(|(slots, cost)| {
+                    cost != gs.menu.data[0]
+                        || slots
+                            .iter()
+                            .enumerate()
+                            .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
+                });
             if recomputed && gs.kind == StationKind::Anvil {
                 let guest = &host.hub.guests[gi];
                 let (uuid, name) = (guest.uuid, guest.name.clone());

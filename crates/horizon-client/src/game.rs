@@ -9937,7 +9937,9 @@ impl Game<'_> {
         menu.selected = self.selected;
         menu.levels = self.experience.level;
         if anvil_open {
-            menu.anvil_hook = true;
+            // A server runs the hook; the client predicts the whole take, so the
+            // packet lists the cleared inputs as vanilla's does.
+            menu.anvil_hook = self.remote.is_none();
             // The rename box as AnvilScreen.onNameChanged gives it to the menu.
             menu.anvil.name = self.station.as_ref().map(|s| self.anvil_item_name(s));
         }
