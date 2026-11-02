@@ -776,7 +776,7 @@ fn players(id: &str, ctx: &Context, env: &mut dyn Env) -> CmdResult<i32> {
     }
 }
 
-/// `OperationArgument`: the new (target, source) values.
+/// `OperationArgument.getSimpleOperation`: the new (target, source) values.
 pub fn apply_operation(op: &str, a: i32, b: i32) -> CmdResult<(i32, i32)> {
     let div0 = || err("arguments.operation.div0", &[]);
     Ok(match op {
@@ -789,7 +789,7 @@ pub fn apply_operation(op: &str, a: i32, b: i32) -> CmdResult<(i32, i32)> {
                 return Err(div0());
             }
             (
-                a.wrapping_div(b) - i32::from((a % b != 0) && ((a < 0) != (b < 0))),
+                a.wrapping_div(b) - i32::from((a.wrapping_rem(b) != 0) && ((a < 0) != (b < 0))),
                 b,
             )
         }
