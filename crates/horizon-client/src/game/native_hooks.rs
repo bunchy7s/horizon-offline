@@ -7262,6 +7262,15 @@ impl Game<'_> {
         };
         knockback_from_holding(attacker, held)
     }
+    /// [`Self::knockback_scope`] for the attacker a damage source names: the player, a mob, or
+    /// (none) whoever the enclosing scope already names.
+    pub(super) fn knockback_scope_for(&self, attacker: Option<Who>) -> impl Drop + use<> {
+        self.knockback_scope(match attacker {
+            Some(Who::Player) => self.player.as_ref().map_or(0, |p| p.entity_id),
+            Some(Who::Mob(id)) => id as i32,
+            None => horizon_client::health::knockback_attacker(),
+        })
+    }
 }
 
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
