@@ -806,5 +806,14 @@
   "Install a release or Nightly first: an imported build plays with its game files.": "Installez d'abord une version ou une Nightly : une compilation importée utilise les fichiers du jeu de celle-ci.",
   "{file} holds no {program}.": "{file} ne contient aucun {program}.",
   "Could not import the build: {error}": "Impossible d'importer la compilation : {error}",
-  "Sort by: {order}": "Trier par : {order}"
+  "Sort by: {order}": "Trier par : {order}",
+  "Build log": "Journal de compilation",
+  "Native build log": "Journal de compilation native",
+  "Copy log": "Copier le journal",
+  "Open full log": "Ouvrir le journal complet",
+  "Loading build log…": "Chargement du journal de compilation…",
+  "No native build log is available yet.": "Aucun journal de compilation native n'est disponible pour le moment.",
+  "Could not read the build log: {error}": "Impossible de lire le journal de compilation : {error}",
+  "Copied build log.": "Journal de compilation copié.",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "Seules les {lines} dernières lignes sont affichées. Copiez ou ouvrez le journal complet pour tous les détails."
 }

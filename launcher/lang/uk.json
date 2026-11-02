@@ -806,5 +806,14 @@
   "Install a release or Nightly first: an imported build plays with its game files.": "Спершу встановіть реліз або Nightly: імпортована збірка використовує його файли гри.",
   "{file} holds no {program}.": "У {file} немає {program}.",
   "Could not import the build: {error}": "Не вдалося імпортувати збірку: {error}",
-  "Sort by: {order}": "Сортування: {order}"
+  "Sort by: {order}": "Сортування: {order}",
+  "Build log": "Журнал збірки",
+  "Native build log": "Журнал нативної збірки",
+  "Copy log": "Копіювати журнал",
+  "Open full log": "Відкрити повний журнал",
+  "Loading build log…": "Завантаження журналу збірки…",
+  "No native build log is available yet.": "Журналу нативної збірки ще немає.",
+  "Could not read the build log: {error}": "Не вдалося прочитати журнал збірки: {error}",
+  "Copied build log.": "Журнал збірки скопійовано.",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "Показано лише останні {lines} рядків. Скопіюйте або відкрийте повний журнал, щоб побачити всі деталі."
 }

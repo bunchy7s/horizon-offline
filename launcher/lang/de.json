@@ -806,5 +806,14 @@
   "Install a release or Nightly first: an imported build plays with its game files.": "Installiere zuerst ein Release oder eine Nightly: Ein importierter Build nutzt deren Spieldateien.",
   "{file} holds no {program}.": "{file} enthält kein {program}.",
   "Could not import the build: {error}": "Der Build konnte nicht importiert werden: {error}",
-  "Sort by: {order}": "Sortieren nach: {order}"
+  "Sort by: {order}": "Sortieren nach: {order}",
+  "Build log": "Build-Log",
+  "Native build log": "Natives Build-Log",
+  "Copy log": "Log kopieren",
+  "Open full log": "Vollständiges Log öffnen",
+  "Loading build log…": "Build-Log wird geladen…",
+  "No native build log is available yet.": "Noch kein natives Build-Log verfügbar.",
+  "Could not read the build log: {error}": "Build-Log konnte nicht gelesen werden: {error}",
+  "Copied build log.": "Build-Log kopiert.",
+  "Only the last {lines} lines are shown. Copy or open the full log for all details.": "Nur die letzten {lines} Zeilen werden angezeigt. Kopieren oder öffnen Sie das vollständige Log für alle Details."
 }
