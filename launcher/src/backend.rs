@@ -558,15 +558,22 @@ fn ascii(path: &Path) -> bool {
     path.as_os_str().to_str().is_some_and(str::is_ascii)
 }
 
+/// `path` as Windows' MinGW-w64 tools can take it: [`ascii`], and on Windows without a space.
+/// `windres` hands its include folders to the preprocessor unquoted, so a user name with a space
+/// in %APPDATA% splits there ("cc1.exe: fatal error: v\: No such file or directory").
+fn tool_safe(path: &Path) -> bool {
+    ascii(path) && !(cfg!(windows) && path.as_os_str().to_str().is_some_and(|p| p.contains(' ')))
+}
+
 /// Where builds happen — the Rust toolchain, its Cargo home and `native_mods::root` — as a
 /// path every build tool can read: `data_dir()` resolved, so the tools are never handed a
 /// link (horizon-mixins refuses one, and macOS's /tmp is one). On Windows, when the resolved
-/// path isn't [`ascii`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
+/// path isn't [`tool_safe`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
 pub fn build_dir() -> PathBuf {
     let data = data_dir();
     let _ = fs::create_dir_all(&data);
     let real = data.canonicalize().map(plain).unwrap_or(data);
-    if ascii(&real) {
+    if tool_safe(&real) {
         return real;
     }
     #[cfg(windows)]
@@ -575,7 +582,7 @@ pub fn build_dir() -> PathBuf {
     real
 }
 
-/// [`build_dir`] when `real` isn't [`ascii`]: [`ascii_build_dir`], a real folder of
+/// [`build_dir`] when `real` isn't [`tool_safe`]: [`ascii_build_dir`], a real folder of
 /// ProgramData's. Only when it can't be created, the data folder's short (8.3) name.
 ///
 /// The short name came first until #6009, and wasn't enough: it is only another spelling of the
@@ -589,7 +596,7 @@ fn windows_build_dir(real: &Path) -> PathBuf {
     if fs::create_dir_all(&dir).is_ok() {
         return dir;
     }
-    short_path(real).filter(|p| ascii(p)).unwrap_or(dir)
+    short_path(real).filter(|p| tool_safe(p)).unwrap_or(dir)
 }
 
 /// The build folder for a data folder `real` whose path isn't [`ascii`]: in `program_data`
@@ -599,7 +606,7 @@ fn windows_build_dir(real: &Path) -> PathBuf {
 fn ascii_build_dir(real: &Path, program_data: Option<PathBuf>) -> PathBuf {
     use sha2::{Digest, Sha256};
     let public = program_data
-        .filter(|p| p.is_absolute() && ascii(p))
+        .filter(|p| p.is_absolute() && tool_safe(p))
         .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
     let key = Sha256::digest(real.as_os_str().as_encoded_bytes());
     let key: String = key[..4].iter().map(|b| format!("{b:02x}")).collect();
@@ -3439,6 +3446,10 @@ mod tests {
             r"C:\Users\Кириченко Павло\AppData\Roaming\horizon-launcher"
         )));
         assert!(!ascii(Path::new("/høme/me/horizon-launcher")));
+        // A space splits windres' include folders, which matters on Windows only.
+        let spaced = Path::new(r"C:\Users\Jane Doe\AppData\Roaming\horizon-launcher");
+        assert!(ascii(spaced));
+        assert_eq!(tool_safe(spaced), !cfg!(windows));
         let built = build_dir();
         assert!(ascii(&built) || cfg!(windows), "{}", built.display());
         // Resolved: the build never sees a link in the path (where the answer is the data
