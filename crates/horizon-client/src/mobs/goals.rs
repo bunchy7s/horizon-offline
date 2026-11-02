@@ -2155,9 +2155,11 @@ impl Goal for Breed {
             return false;
         }
         let species = m.species();
-        // Wolf.canMate: both tame and standing.
+        // Wolf.canMate and Cat.canMate: both tame. The sitting pose sits on the
+        // partner side only, and only for a wolf (`wolf.isInSittingPose()`), so
+        // a tamed mob ordered to sit still walks off to breed.
         let tamable = matches!(species, Species::Wolf | Species::Cat);
-        if tamable && (!m.extra.tame || m.extra.sitting) {
+        if tamable && !m.extra.tame {
             return false;
         }
         // AbstractHorse.canMate is false and Mule keeps it: mules never breed.

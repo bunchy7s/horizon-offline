@@ -2,7 +2,10 @@
 //! `/particle`, `/attribute`, `/ride` and `/spreadplayers`.
 use super::{Arg, Context, Game, R, Target, err, wrap_degrees};
 use horizon_client::{
-    mobs::{Damage, DamageKind, Who},
+    mobs::{
+        Damage, DamageKind, Who,
+        finalize::{self, Attr},
+    },
     scoreboard_cmd::{Holder, Tracker},
     settings::SOUND_SOURCES,
     text::Text,
@@ -918,9 +921,13 @@ impl Game<'_> {
                 let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob_id) else {
                     return Ok(0);
                 };
-                // Mobs keep three attributes as plain values.
+                // Core mob attributes also have cached gameplay fields.
                 let slot: Option<f64> = match short.as_str() {
-                    "max_health" => Some(f64::from(m.attrs.max_health)),
+                    "max_health" => Some(if id == "attribute.base.get" {
+                        finalize::base_value(m, Attr::MaxHealth)
+                    } else {
+                        finalize::value(m, Attr::MaxHealth)
+                    }),
                     "movement_speed" => Some(m.attrs.speed),
                     "attack_damage" => Some(f64::from(m.attrs.attack_damage)),
                     _ => None,
@@ -944,8 +951,9 @@ impl Game<'_> {
                     "attribute.base.set" => {
                         match short.as_str() {
                             "max_health" => {
-                                m.attrs.max_health = value_arg as f32;
-                                m.health = m.health.min(m.attrs.max_health);
+                                // AttributeInstance keeps the raw base, clamps only
+                                // the effective value, and does not change Health.
+                                finalize::set_base(m, Attr::MaxHealth, value_arg);
                             }
                             "movement_speed" => m.attrs.speed = value_arg,
                             _ => m.attrs.attack_damage = value_arg as f32,
@@ -958,12 +966,15 @@ impl Game<'_> {
                     }
                     "attribute.base.reset" => {
                         match short.as_str() {
-                            "max_health" => m.attrs.max_health = m.kind.max_health,
+                            "max_health" => {
+                                let default = f64::from(m.kind.max_health);
+                                finalize::set_base(m, Attr::MaxHealth, default);
+                            }
                             "movement_speed" => m.attrs.speed = m.kind.speed,
                             _ => m.attrs.attack_damage = m.kind.attack_damage,
                         }
                         let v = match short.as_str() {
-                            "max_health" => f64::from(m.attrs.max_health),
+                            "max_health" => finalize::base_value(m, Attr::MaxHealth),
                             "movement_speed" => m.attrs.speed,
                             _ => f64::from(m.attrs.attack_damage),
                         };

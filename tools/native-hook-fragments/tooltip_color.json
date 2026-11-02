@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "tooltip_color",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tooltip_color",
+      "side": "client",
+      "neoforge": "RenderTooltipEvent.Color",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "tooltip box colours (`native_tooltip_color`).",
+  "doc_summary": "tooltip box colours (`native_tooltip_color`). Bundles need \"hooks\": @API:tooltip_color@."
+}

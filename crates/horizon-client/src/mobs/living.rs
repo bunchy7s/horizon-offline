@@ -1011,7 +1011,7 @@ impl Mob {
         // Creeper.causeFallDamage: the fall swells the fuse, up to five ticks
         // short of exploding.
         if self.species() == super::Species::Creeper {
-            self.swell = (self.swell + (distance * 1.5) as i32).min(30 - 5);
+            self.swell = (self.swell + (distance * 1.5) as i32).min(self.max_swell - 5);
         }
         // AbstractHorse.causeFallDamage (llamas override it): a landing of more
         // than a block thuds, and the horse's fall makes no generic fall sound.
