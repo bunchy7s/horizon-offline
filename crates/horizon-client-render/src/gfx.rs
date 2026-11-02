@@ -4817,11 +4817,13 @@ impl Renderer {
     ) -> impl Iterator<Item = (&'a ([i32; 3], u32), bool)> + 'a {
         let fade = fade_millis(fade_seconds);
         let now = Instant::now();
+        // No section uploaded within the fade: all are whole, none is looked up.
+        let all = !self.sections_fading_in(fade, now);
         let min_y = self.layout.min_y();
         self.block_entities
             .iter()
             .filter(move |(key, _)| {
-                chunk_visibility(self.section_elapsed_ms(**key, now), fade)
+                all || chunk_visibility(self.section_elapsed_ms(**key, now), fade)
                     >= CHUNK_VISIBILITY_THRESHOLD
             })
             .filter_map(move |(key, blocks)| {
@@ -6232,8 +6234,9 @@ impl Renderer {
             self.config.height.max(1) as f32,
             frame.depth_far,
         ));
+        let hand_view_proj = hand_projection * frame.bob * view;
         let hand_globals = Globals {
-            view_proj: (hand_projection * frame.bob * view).to_cols_array_2d(),
+            view_proj: hand_view_proj.to_cols_array_2d(),
             ..globals
         };
         self.uploads.buffer(
@@ -8755,6 +8758,8 @@ impl Renderer {
                     first_crosshair: debug_depth + debug_top,
                     world_depth: false,
                     real: false,
+                    hand_drawn: !pack_draws_hand,
+                    hand_view_proj,
                 };
                 self.draw_overlay(&mut encoder, frame, &generated_view, generated, &overlay);
             }
@@ -8797,6 +8802,8 @@ impl Renderer {
             first_crosshair: debug_depth + debug_top,
             world_depth: scaled.is_none(),
             real: true,
+            hand_drawn: !pack_draws_hand,
+            hand_view_proj,
         };
         let readback =
             self.draw_overlay(&mut encoder, frame, &view_target, &target_texture, &overlay);
@@ -9083,6 +9090,23 @@ impl Renderer {
                     pass.draw_indexed(quads, overlay.first_hand_vertex, 0..1);
                 }
             }
+        }
+        // A native mod's turn after the hand, on the real frame only.
+        if overlay.real && !frame.title {
+            native_render::native_hand_drawn(&mut native_render::HandDrawn {
+                device: &self.device,
+                queue: &self.queue,
+                encoder: &mut *encoder,
+                color: target_texture,
+                color_view: view_target,
+                color_format: self.config.format.remove_srgb_suffix(),
+                size: [self.config.width, self.config.height],
+                hand: if overlay.hand_drawn { frame.hand } else { &[] },
+                view_proj: overlay.hand_view_proj,
+                camera: frame.camera,
+                atlas: self.hud.atlas_texture.as_ref(),
+                quad_indices: &self.indices,
+            });
         }
         // GameRenderer.render: LevelRenderer.blitEntityOutline after the level and the hand.
         self.entity_outline.draw(
@@ -9621,6 +9645,11 @@ struct Overlay {
     world_depth: bool,
     /// The real frame, not frame generation's made one: the world icon grabs it.
     real: bool,
+    /// The game drew the first-person hand, in its own pass or at the end of the world's
+    /// (`hand_in_world`), not a shader pack.
+    hand_drawn: bool,
+    /// Camera-relative world to clip space for the hand: its own field of view and the bob.
+    hand_view_proj: Mat4,
 }
 
 fn world_projection(fov_degrees: f32, aspect: f32, far: f32) -> Mat4 {

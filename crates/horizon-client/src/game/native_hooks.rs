@@ -881,7 +881,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
@@ -935,6 +935,106 @@ use std::{
     time::Duration,
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
+
+pub(super) struct ObservedScreen {
+    id: &'static str,
+    menu: Option<String>,
+    title: Option<Text>,
+    rect: [f32; 4],
+    slots: usize,
+    mouse: [f32; 2],
+    partial_tick: f32,
+}
+
+impl ObservedScreen {
+    fn view(&self) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: self.id,
+            menu: self.menu.as_deref(),
+            title: self.title.as_ref(),
+            rect: self.rect,
+            slots: self.slots,
+            mouse: self.mouse,
+            partial_tick: self.partial_tick,
+        }
+    }
+}
+
+fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
+    overlays.iter().find_map(|(open, id)| open.then_some(*id))
+}
+
+impl Game<'_> {
+    fn observed_screen_view(&self) -> Option<NativeScreenView<'_>> {
+        let book = match &self.book {
+            Some(super::books::BookScreen::Edit { signing: true, .. }) => Some("book_sign"),
+            Some(super::books::BookScreen::Edit { .. }) => Some("book_edit"),
+            Some(super::books::BookScreen::View {
+                lectern: Some(_), ..
+            }) => Some("lectern"),
+            Some(super::books::BookScreen::View { .. }) => Some("book_view"),
+            None => None,
+        };
+        let overlay = observed_overlay_id(&[
+            (self.command_prompt.is_some(), "command_prompt"),
+            (self.link_prompt.is_some(), "link_prompt"),
+            (self.code_of_conduct.is_some(), "code_of_conduct"),
+            (self.server_packs.prompt.is_some(), "server_pack_prompt"),
+            (self.dialog_open(), "dialog"),
+            (book.is_some(), book.unwrap_or("book_view")),
+            (self.sign_edit.is_some(), "sign_editor"),
+        ]);
+        let Some(id) = overlay else {
+            return self.screen_view_now();
+        };
+        let renderer = self.renderer.as_ref()?;
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        Some(NativeScreenView {
+            id,
+            menu: None,
+            title: None,
+            rect: [0.0, 0.0, batch.width, batch.height],
+            slots: 0,
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        })
+    }
+
+    pub(super) fn observe_screen(&mut self) {
+        // Free with no native mod: the snapshot clones the title and menu.
+        if mod_api::mods().is_empty() {
+            return;
+        }
+        let current = self.observed_screen_view().map(|view| ObservedScreen {
+            id: view.id,
+            menu: view.menu.map(str::to_owned),
+            title: view.title.cloned(),
+            rect: view.rect,
+            slots: view.slots,
+            mouse: view.mouse,
+            partial_tick: view.partial_tick,
+        });
+        let changed = match (&self.observed_screen, &current) {
+            (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            if let Some(old) = &self.observed_screen {
+                self.native_screen_closing(&old.view());
+            }
+            if let Some(new) = &current {
+                self.native_screen_opening(&new.view());
+                self.native_screen_init_post(&new.view());
+            }
+        } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
+            && old.rect != new.rect
+        {
+            self.native_screen_init_post(&new.view());
+        }
+        self.observed_screen = current;
+    }
+}
 
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
@@ -2309,6 +2409,16 @@ impl Game<'_> {
     pub(super) fn native_commands(&mut self, commands: &mut Vec<&'static str>) {
         mod_api::dispatch_commands(self, mod_api::mods(), commands);
     }
+    /// Player FOV scale, after vanilla effects and before zoom and easing.
+    /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
+    pub(super) fn native_compute_fov_modifier(
+        &self,
+        player: &horizon_client::camera::FovPlayer,
+        base: f32,
+        modifier: &mut f32,
+    ) {
+        mod_api::dispatch_compute_fov_modifier(self, mod_api::mods(), player, base, modifier);
+    }
     /// Local player movement input, after reading it and before applying it.
     pub(super) fn native_movement_input(
         &self,
@@ -2383,6 +2493,24 @@ impl Game<'_> {
             partial,
             swing,
             equip,
+            canceled,
+        );
+    }
+
+    /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
+    pub(super) fn native_render_item_in_frame(
+        &self,
+        entity_id: u32,
+        pos: [i32; 3],
+        stack: &ItemStack,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_render_item_in_frame(
+            self,
+            mod_api::mods(),
+            entity_id,
+            pos,
+            stack,
             canceled,
         );
     }
@@ -2839,6 +2967,20 @@ impl Game<'_> {
         origin: [f32; 2],
     ) {
         mod_api::dispatch_screen_draw(self, mod_api::mods(), block, data, batch, origin);
+    }
+    /// A screen was observed opening, at most once per frame.
+    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_opening(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_init_post(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed closing, at most once per frame.
+    pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_closing(self, mod_api::mods(), screen);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -7984,6 +8126,22 @@ impl Game<'_> {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.res.facts().get(state).name.to_string()
     }
+    /// The most recently extracted world frame's camera, if one exists.
+    pub(super) fn native_camera(&self) -> Option<NativeCamera> {
+        self.native_camera_frame.clone()
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.block_collision_shape(pos)
+            .boxes()
+            .iter()
+            .map(|bounds| {
+                let min = bounds.min_position();
+                let max = bounds.max_position();
+                [min.x, min.y, min.z, max.x, max.y, max.z]
+            })
+            .collect()
+    }
     /// Property `key` of the block at `pos` (a machine's `facing`), if it
     /// has one. API 20.
     pub(super) fn native_block_property(&self, pos: [i32; 3], key: &str) -> Option<String> {
@@ -9243,6 +9401,22 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn observed_overlay_prefers_first_open_screen() {
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (false, "book")]),
+            None
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (true, "book")]),
+            Some("book")
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(true, "sign"), (true, "book")]),
+            Some("sign")
+        );
+    }
+
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.
     #[test]

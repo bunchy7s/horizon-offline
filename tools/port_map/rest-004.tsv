@@ -97,19 +97,19 @@ PreeditEvent.fromSdlTextEditing	port	crates/horizon-client-render/src/preedit.rs
 PreeditEvent.toFormattedText	inline	crates/horizon-client-render/src/preedit.rs::PreeditEvent::to_formatted_text	the composing text is drawn as the field's preedit, not as formatted chat
 GameConfig.FolderData.getExternalAssetSource	skip:data		Horizon reads assets from the prepared resources folder
 net/minecraft/client/main/Main#getQuickPlayVariant	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: only the quick play flags of the launch parser; realms branch not checked
-net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::read	
-net/minecraft/client/main/Main#hasValidUuid	missing		minor: unsure: no --uuid argument found in the client
-net/minecraft/client/main/Main#isUuidValid	missing		minor: unsure: see hasValidUuid
+net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::parse	the argument loop itself (Options::read is the wrapper that feeds it std::env::args)
+net/minecraft/client/main/Main#hasValidUuid	skip:other		the --uuid argument is what reaches it, and Horizon's client parses none (game.rs::Options::parse takes its own flags)
+net/minecraft/client/main/Main#isUuidValid	skip:other		the check behind hasValidUuid, which no --uuid argument reaches
 AbstractClientPlayer.getPlayerInfo	inline	crates/horizon-client/src/game/remote.rs::Game::remote_pushes	the entity id -> uuid -> tab entry lookups stand in for the PlayerInfo; the name, team and game mode are read from that entry
 AbstractClientPlayer.getSkin	port	crates/horizon-client/src/game/remote.rs::Game::update_remote_skins	the downloaded skin and slim flag, else DefaultPlayerSkin by uuid, as PlayerInfo.getSkin
 AbstractClientPlayer.getParrotVariantOnShoulder	port	crates/horizon-client/src/mobs/render.rs::shoulder_parrot	the shoulder slot's stored variant picks the parrot texture and model in the layer
 ClientInput.makeJump	inline	crates/horizon-client/src/motion.rs::MotionWorld::controlled_simulation_tick	gap: minor: carries the auto-jump flag; no separate jump input
 FirstPersonHandsAndItems.extractRenderState	inline	crates/horizon-client/src/game/hand.rs::Game::visible_hand_items	gap: minor: bob, swing and map state are read elsewhere; no render-state struct
-FirstPersonHandsAndItems.shouldInstantlyReplaceVisibleItem	missing		minor: unsure: no instant swap rule found in first_person.rs; HandHeights::tick takes a changed flag
+FirstPersonHandsAndItems.shouldInstantlyReplaceVisibleItem	port	crates/horizon-client/src/game/hand.rs::shows_held_stack	the same stack object, or an equal one, which plays no swap animation; the slot a replaced hand changed is the exception
 FirstPersonHandsAndItems.extractMapRenderState	inline	crates/horizon-client/src/game/maps.rs::Game::held_map	the MAP_ID component picks the map data drawn in the hand, its decorations included, and decides the checkerboard background
 FirstPersonHandsAndItems.isChargedCrossbow	inline	crates/horizon-client/src/first_person.rs::hands_to_render	
-ItemActivation.tick	missing		player: the totem-of-undying item pop is never drawn; game/totem.rs draws particles and sound only
-ItemActivation.activate	missing		player: same as tick
+ItemActivation.tick	port	crates/horizon-client/src/item_activation.rs::ItemActivation::tick	the count down to 0, where the item goes; game.rs::tick_item_activation runs it
+ItemActivation.activate	port	crates/horizon-client/src/item_activation.rs::ItemActivation::activate	a copy of the stack, the 40 ticks and two offsets in [-1, 1); game/totem.rs sets it from findTotem
 KeyboardInput.calculateImpulse	inline	crates/horizon-client-input/src/input.rs::keyboard_direction	
 LocalPlayer.<init>	inline	crates/horizon-client/src/ambience.rs::Ambience::new	gap: minor: the three ambient handlers are the Ambience loops; no connection set-up
 LocalPlayer.sendChanges	port	crates/horizon-client/src/game/remote.rs::Game::remote_send_state	
@@ -117,7 +117,7 @@ LocalPlayer.getCurrentMood	inline	crates/horizon-client/src/ambience.rs::Ambienc
 LocalPlayer.sendIsSprintingIfNeeded	inline	crates/horizon-client/src/game/remote.rs::Game::remote_send_state	sprint start and stop commands
 LocalPlayer.closeContainer	port	crates/horizon-client/src/game/remote.rs::Game::remote_close_container	
 LocalPlayer.isSuppressingSlidingDownLadder	port	crates/horizon-client/src/motion.rs::MotionWorld::suppressing_ladder_slide	gap: minor: sneak only; vanilla also requires not flying
-LocalPlayer.canSpawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: flying check is the caller's
+LocalPlayer.canSpawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: the test there is Entity.canSpawnSprintParticle's (sprinting, not spectator, not crouching, alive, out of water and lava) without the !abilities.flying LocalPlayer adds
 LocalPlayer.sendRidingJump	port	crates/horizon-client/src/game/remote_vehicles.rs::riding_jump	START_RIDING_JUMP carrying the jump scale
 LocalPlayer.removeRecipeHighlight	port	crates/horizon-client/src/recipe_book.rs::Settings::remove_highlight	gap: minor: the seen-recipe packet is not sent, so the server keeps the highlight
 LocalPlayer.moveTowardsClosestSpace	port	crates/horizon-client/src/game.rs::Game::closest_space_nudge	the four body corners, 0.1 towards the nearest free side on its axis, a later corner overwriting an earlier one
