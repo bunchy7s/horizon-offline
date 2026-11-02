@@ -708,6 +708,12 @@ fn start_shaking(m: &mut Mob) {
     m.anim.v[SHAKE] = 0.0;
     m.anim.vo[SHAKE] = 0.0;
 }
+/// `Wolf.die`: the wet and shake state is cleared before the rest of the
+/// death, so a wolf killed mid-shake does not shake on the ground.
+pub fn die(m: &mut Mob) {
+    m.extra.flag2 = false;
+    cancel_shake(m);
+}
 /// `Wolf.cancelShake`: it stays wet.
 fn cancel_shake(m: &mut Mob) {
     m.extra.counter2 = 0;
