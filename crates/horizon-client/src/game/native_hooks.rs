@@ -3186,6 +3186,19 @@ impl Game<'_> {
         let _ = (dimension, pos, active);
     }
 
+    /// An anvil at `pos` took damage, changing its block from `from` to `to`.
+    /// `to` is air when the anvil broke. Server-side.
+    /// @API:native_anvil_damaged@.
+    pub(super) fn native_anvil_damaged(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        from: &str,
+        to: &str,
+    ) {
+        let _ = (dimension, pos, from, to);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

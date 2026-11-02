@@ -932,13 +932,16 @@ impl Game<'_> {
             match &*name {
                 "minecraft:anvil" => {
                     let _ = self.set_state_named(pos, "minecraft:chipped_anvil", &["facing"]);
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:chipped_anvil");
                 }
                 "minecraft:chipped_anvil" => {
                     let _ = self.set_state_named(pos, "minecraft:damaged_anvil", &["facing"]);
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:damaged_anvil");
                 }
                 _ => {
                     let _ = self.world.set(pos[0], pos[1], pos[2], self.world.air);
                     self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:air");
                     self.level_event_at(1029, pos, 0);
                     return true;
                 }
