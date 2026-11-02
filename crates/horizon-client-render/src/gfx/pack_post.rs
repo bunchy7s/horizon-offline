@@ -1400,7 +1400,13 @@ fn build_pass(
         ));
         return None;
     }
-    if p.geometry_triangles > 0 && (pack.indices.is_none() || !pack.gpu.vertex_storage) {
+    // Terrain's geometry stage reads the draw's indices at set 5; entities' walk their quads.
+    let reads_indices = p.geometry_triangles > 0
+        && (program.vertex.global_variables.iter())
+            .any(|(_, v)| v.binding.as_ref().is_some_and(|b| b.group == 5));
+    if p.geometry_triangles > 0
+        && ((reads_indices && pack.indices.is_none()) || !pack.gpu.vertex_storage)
+    {
         notes.push(format!(
             "{}: this GPU can't run a geometry stage; skipped",
             p.name
@@ -1485,7 +1491,7 @@ fn build_pass(
                 draw.then_some(draws),
                 geometry.and_then(|g| g.ids),
                 (!interface.buffers.is_empty()).then_some(&pack.buffers.layout),
-                pack.indices.filter(|_| p.geometry_triangles > 0),
+                pack.indices.filter(|_| reads_indices),
             ],
             ..Default::default()
         });
@@ -3053,7 +3059,15 @@ impl PackPost {
                 if pass.draw {
                     rp.set_bind_group(2, &geometry.group, &[geometry.offset(d.slot)]);
                 }
-                rp.draw_indexed(0..d.quads * 6, d.base as i32, 0..1);
+                if pass.geometry > 0 {
+                    // A geometry stage reads its vertices itself: corner `c` of the run is
+                    // vertex `c` past the run's first quad's six (`geometry_inputs`), one
+                    // instance per triangle the stage can emit.
+                    let first = d.base / 4 * 6;
+                    rp.draw(first..first + d.quads * 6, 0..pass.geometry);
+                } else {
+                    rp.draw_indexed(0..d.quads * 6, d.base as i32, 0..1);
+                }
             }
         }
         self.entities = Some(entities);
