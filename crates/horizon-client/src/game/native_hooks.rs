@@ -2934,6 +2934,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, item, ticks, cancel);
     }
+    /// A recipe is about to be unlocked for a server player. Set `cancel` to
+    /// keep it locked. The player's state is not swapped in, so helpers that
+    /// look them up through `self.lan` may find nothing while a guest packet
+    /// is handled. Server-side. @API:native_player_recipe_discovered@.
+    pub(super) fn native_player_recipe_discovered(
+        &mut self,
+        player: u128,
+        name: &str,
+        recipe: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, recipe, cancel);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

@@ -1247,6 +1247,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound.
   The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest
   packet is being handled.
+- **`native_player_recipe_discovered(player, name, recipe, cancel)`**: a recipe id is about to become known to a
+  server player through an advancement reward, a knowledge book or `/recipe give`. Set `cancel` to keep it locked;
+  the client is sent the matching removal. The player's state is not swapped in, so helpers that look them up through
+  `self.lan` may find nothing while a guest packet is being handled.
 - **`native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)`**: a server player's middle-click
   pick resolved a block or entity's pick stack and is about to put it in the hotbar. For a block, `pos` is its
   position and `entity_id` is zero; for an entity, `from_entity` is true, `pos` is `[0, 0, 0]` and `entity_id`
