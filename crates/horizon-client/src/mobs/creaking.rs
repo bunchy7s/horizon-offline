@@ -418,16 +418,16 @@ mod portal_tests {
     fn only_a_creaking_bound_to_a_heart_is_refused_the_portal() {
         let mut m = mob(Species::Creaking);
         assert!(!heart_bound(&m), "born free");
-        assert!(can_use_portal(&m), "a free creaking travels");
+        assert!(crate::mobs::mob_can_use_portal(&m), "a free creaking travels");
         m.extra.home = Some([4, 64, -7]);
         assert!(heart_bound(&m));
         assert!(
-            !can_use_portal(&m),
+            !crate::mobs::mob_can_use_portal(&m),
             "a creaking bound to its heart must not leave it behind"
         );
         let mut wolf = mob(Species::Wolf);
         wolf.extra.home = Some([4, 64, -7]);
         assert!(!heart_bound(&wolf));
-        assert!(can_use_portal(&wolf));
+        assert!(crate::mobs::mob_can_use_portal(&wolf));
     }
 }
