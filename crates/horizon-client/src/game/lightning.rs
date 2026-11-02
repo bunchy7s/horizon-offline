@@ -88,6 +88,9 @@ impl Game<'_> {
             let trap = self.ui.rules.bool("spawn_mobs")
                 && self.world.random.next_double() < difficulty * 0.01
                 && !below.ends_with("lightning_rod");
+            if !self.lightning_strike_allowed(None, pos, "weather") {
+                continue;
+            }
             if trap {
                 let at = [f64::from(pos[0]), f64::from(pos[1]), f64::from(pos[2])];
                 // ServerLevel.tickChunk: a trap horse waits for a player.
@@ -242,6 +245,16 @@ impl Game<'_> {
             fires: 0,
             cause: None,
         });
+    }
+    pub(super) fn lightning_strike_allowed(
+        &mut self,
+        player: Option<u128>,
+        pos: [i32; 3],
+        cause: &str,
+    ) -> bool {
+        let mut cancel = false;
+        self.native_lightning_strike(player, pos, cause, &mut cancel);
+        !cancel
     }
     /// `ClientLevel.addEntity` for a server's lightning bolt: on a client it
     /// only flashes, sounds and draws (`LightningBolt.tick` off the server).

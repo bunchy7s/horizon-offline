@@ -286,6 +286,9 @@ impl Game<'_> {
         if self.world.light(x, y, z) >> 4 != 15 {
             return;
         }
+        if !self.lightning_strike_allowed(self.lan_acting_uuid, [x, y, z], "trident") {
+            return;
+        }
         self.spawn_bolt(at, false);
         // The summon effect's owner is the thrower: LightningBolt.setCause.
         if let Some(bolt) = self.bolts.last_mut() {
