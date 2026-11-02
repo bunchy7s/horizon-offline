@@ -4701,6 +4701,13 @@ impl Game<'_> {
     pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
         let _ = (pos, item);
     }
+    /// A timed world-border size change finished on the server, after its
+    /// final size was applied. Server-side, including the single-player
+    /// server. @API:native_world_border_bounds_change_finish@.
+    pub(super) fn native_world_border_bounds_change_finish(&mut self) {
+        let _ = ();
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

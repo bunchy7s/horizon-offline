@@ -276,7 +276,14 @@ impl Game<'_> {
         }
     }
     pub(in crate::game) fn tick_worldborder(&mut self) {
+        let remaining = self.border.remaining_ticks();
         self.border.tick();
+        if remaining > 0
+            && self.border.remaining_ticks() == 0
+            && (self.serving.is_some() || self.options.dedicated.is_some())
+        {
+            self.native_world_border_bounds_change_finish();
+        }
         self.player_border();
         self.border_damage();
     }
