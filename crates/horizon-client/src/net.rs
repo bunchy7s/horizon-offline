@@ -910,6 +910,17 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
+            // The server names its mods; the answer is ours, and the server judges.
+            cfg::Clientbound::CustomPayload(p)
+                if p.channel == horizon_protocol::mod_list::CHANNEL =>
+            {
+                reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                    channel: horizon_protocol::mod_list::CHANNEL.into(),
+                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
+                        &horizon_protocol::mod_list::local(),
+                    )),
+                }))?;
+            }
             cfg::Clientbound::CustomPayload(p) => receive_brand(&p, send),
             cfg::Clientbound::Ping(p) => reply(cfg::Serverbound::Pong(p))?,
             // Know no packs: the server then sends every registry entry in full.
