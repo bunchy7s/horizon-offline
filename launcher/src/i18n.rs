@@ -35,10 +35,12 @@ pub enum Language {
     Japanese,
     #[serde(rename = "tr")]
     Turkish,
+    #[serde(rename = "hi")]
+    Hindi,
 }
 
 impl Language {
-    pub const ALL: [Language; 11] = [
+    pub const ALL: [Language; 12] = [
         Self::English,
         Self::French,
         Self::Russian,
@@ -50,6 +52,7 @@ impl Language {
         Self::PortugueseBrazil,
         Self::Japanese,
         Self::Turkish,
+        Self::Hindi,
     ];
 
     /// Its code in `settings.json` and on the command line.
@@ -66,6 +69,7 @@ impl Language {
             Self::PortugueseBrazil => "pt-br",
             Self::Japanese => "ja",
             Self::Turkish => "tr",
+            Self::Hindi => "hi",
         }
     }
 
@@ -83,6 +87,7 @@ impl Language {
             Self::PortugueseBrazil => "Português (Brasil)",
             Self::Japanese => "日本語",
             Self::Turkish => "Türkçe",
+            Self::Hindi => "हिन्दी",
         }
     }
 
@@ -137,6 +142,7 @@ impl Language {
             Self::PortugueseBrazil => include_str!("../lang/pt-br.json"),
             Self::Japanese => include_str!("../lang/ja.json"),
             Self::Turkish => include_str!("../lang/tr.json"),
+            Self::Hindi => include_str!("../lang/hi.json"),
         }
     }
 }
