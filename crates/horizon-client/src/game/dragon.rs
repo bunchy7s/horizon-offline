@@ -139,6 +139,16 @@ pub(super) struct Crystal {
     /// `setPermanentlyInvulnerable` (respawned spike crystals).
     pub invulnerable: bool,
 }
+impl Crystal {
+    /// `EntityType.END_CRYSTAL`: 2 x 2.
+    pub(super) fn bounds(&self) -> Aabb {
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
+            Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
+        )
+    }
+}
 #[derive(Clone, Debug, Default)]
 struct Path {
     nodes: Vec<[i32; 3]>,
@@ -635,6 +645,40 @@ impl Dragon {
             })
             .collect()
     }
+    /// `ServerExplosion.hurtEntities` knockback on the dragon itself:
+    /// `pushFromExplosion` adds `(1 - dist) * exposure` along the blast to
+    /// its eye to the motion (`Entity.push`); the parts are not pushed.
+    fn whole_box(&self) -> Aabb {
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+            Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+        )
+    }
+    fn explosion_push(&mut self, center: [f64; 3], radius: f32, exposure: f32) {
+        let diameter = f64::from(radius * 2.0);
+        let p = self.position;
+        let at = |y: f64| [p.x - center[0], y - center[1], p.z - center[2]];
+        let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let dist = len(at(p.y)) / diameter;
+        if dist > 1.0 {
+            return;
+        }
+        // The dragon's eye is 0.85 of its 8 block height, in floats.
+        let away = at(p.y + f64::from(8.0f32 * 0.85f32));
+        let l = len(away);
+        // `Vec3.normalize` gives zero below 1.0E-5F, then `scale(power)`.
+        if l < 9.999_999_747_378_752e-6 {
+            return;
+        }
+        let dir = [away[0] / l, away[1] / l, away[2] / l];
+        let power = (1.0 - dist) * f64::from(exposure);
+        self.velocity = Vec3::new(
+            self.velocity.x + dir[0] * power,
+            self.velocity.y + dir[1] * power,
+            self.velocity.z + dir[2] * power,
+        );
+    }
     /// `DragonHoldingPatternPhase.onCrystalDestroyed`: strafe `player` if
     /// the dragon can attack them (`EnderDragon.canAttack`, on Peaceful too).
     /// The first such crystal wins: the dragon strafes from then on, and
@@ -822,15 +866,15 @@ impl Game<'_> {
         (-2..=1).all(|cz| (-2..=1).all(|cx| self.streaming.is_lit(cx, cz)))
     }
     /// A player's entity id: the acting player's body has it, another
-    /// player's comes from the LAN host (0 when it is out on a guest's turn,
-    /// and for an in-frame host with none).
+    /// player's comes from the hub (0 when it is out on a guest's turn, and
+    /// for no player).
     fn fight_entity(&self, who: FightWho) -> i32 {
         if who == self.acting_player() {
             return self.player.as_ref().map_or(0, |p| p.entity_id);
         }
         let host = self.lan.as_ref();
         match who {
-            FightWho::Host => host.map_or(0, |h| h.host_entity),
+            FightWho::Host => 0,
             FightWho::Guest(conn) => host
                 .and_then(|h| h.hub.guest(conn))
                 .map_or(0, |g| g.entity_id),
@@ -906,9 +950,6 @@ impl Game<'_> {
     /// `EnderDragonFight.tick` and the fight's entities, while the End is
     /// ticked (in place for its player, or on a server with players in it).
     pub(super) fn tick_fight(&mut self) {
-        if self.travelling.is_some() {
-            return;
-        }
         // A dragon outside the End (`/summon`) has no fight: `ServerLevel.getDragonFight` is
         // null there, but `EnderDragon.aiStep` still flies it.
         if self.dim != Dim::End {
@@ -1275,8 +1316,8 @@ impl Game<'_> {
         view: &horizon_client::advancements::EntityView,
         blow: Option<(DamageKind, bool)>,
     ) {
-        self.stats.add("killed", "minecraft:ender_dragon", 1);
-        self.stats.custom("mob_kills", 1);
+        self.award_stat("killed", "minecraft:ender_dragon", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(id));
         // KilledTrigger: the damage source `die` was given.
         let blow = blow.map(|(kind, by_player)| {
@@ -1345,7 +1386,7 @@ impl Game<'_> {
         let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         // The sweep and the sounds read the charge, which the hit then spends.
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(area, None, super::mace::Spared::Nothing, None);
+            self.attack_effects(area, None, false, super::mace::Spared::Nothing, None);
         }
         self.attack_ticks = 0;
         true
@@ -2144,6 +2185,27 @@ impl Game<'_> {
             set(d, 3 + i, x, y, z);
         }
     }
+    /// `Level.getEntity`: revenge goals must resolve the dragon too.
+    pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
+        let d = self.dragon.as_ref().filter(|d| d.alive())?;
+        let p = d.position;
+        Some((
+            d.id,
+            horizon_client::mobs::TargetInfo {
+                position: p,
+                eye_y: p.y + 6.8,
+                bounds: Aabb::new(
+                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+                ),
+                alive: true,
+                can_be_seen_as_enemy: true,
+                is_player: false,
+                creative: false,
+                passenger: false,
+            },
+        ))
+    }
     /// Wing knockback, head and neck damage, and breaking blocks in the way.
     fn dragon_contacts(&mut self) {
         let Some(d) = self.dragon.as_ref() else {
@@ -2186,6 +2248,35 @@ impl Game<'_> {
                         });
                     }
                 }
+            }
+        }
+        // EnderDragon.aiStep queries living entities, not only players.
+        if let Some(d) = self.dragon.as_ref() {
+            let frame = horizon_client::mobs::dragon_contacts::Frame {
+                dragon_id: d.id,
+                origin: d.position,
+                center: (bc, bz),
+                wings: wings.map(|w| {
+                    w.inflate(Vec3::new(4.0, 2.0, 4.0))
+                        .move_by(Vec3::new(0.0, -2.0, 0.0))
+                }),
+                heads: heads.map(|h| h.inflate(Vec3::new(1.0, 1.0, 1.0))),
+                sitting,
+                recently_hurt,
+            };
+            // Keep team lookup in Game (including tamed pets' owner teams).
+            let allowed: Vec<bool> = self
+                .mobs
+                .iter()
+                .map(|m| {
+                    horizon_client::scoreboard::teams_allow_damage(
+                        self.mob_team(d.id),
+                        self.mob_team_of(m),
+                    )
+                })
+                .collect();
+            for (mob, allowed) in self.mobs.iter_mut().zip(allowed) {
+                horizon_client::mobs::dragon_contacts::contact(mob, &frame, allowed);
             }
         }
         // checkWalls over head, neck and body.
@@ -3172,8 +3263,14 @@ impl Game<'_> {
             let (lo, hi) = (b.min_position(), b.max_position());
             self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z])
         });
+        let whole = d.whole_box();
+        let (lo, hi) = (whole.min_position(), whole.max_position());
+        let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
         for (part, amount) in hits {
             self.hurt_dragon(part, amount, true, by, DamageKind::Explosion);
+        }
+        if let Some(d) = self.dragon.as_mut().filter(|d| d.alive()) {
+            d.explosion_push(center, radius, exposure);
         }
     }
 }
@@ -3204,16 +3301,20 @@ impl Game<'_> {
             head_yaw: d.yaw,
             on_ground: false,
             velocity: [d.velocity.x, d.velocity.y, d.velocity.z],
+            minecart_steps: None,
             data: 0,
             meta,
             defaults: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         })
     }
 }
@@ -4553,6 +4654,21 @@ mod tests {
         d.hurt(0, 21.0, HIT, false);
         assert!(matches!(d.phase, Phase::Takeoff { .. }));
         assert_eq!(d.sitting_damage, 0.0);
+    }
+
+    #[test]
+    fn an_explosion_pushes_the_dragon_along_the_blast() {
+        let mut d = dragon(flying());
+        d.position = Vec3::new(0.0, 70.0, 0.0);
+        d.velocity = Vec3::ZERO;
+        // Power 5 right under the dragon: it is thrown up, away from the blast.
+        d.explosion_push([0.0, 66.0, 0.0], 5.0, 1.0);
+        assert!(d.velocity.y > 0.0 && d.velocity.x == 0.0 && d.velocity.z == 0.0);
+        let up = d.velocity.y;
+        // Out of reach or fully covered: no push.
+        d.explosion_push([0.0, 40.0, 0.0], 5.0, 1.0);
+        d.explosion_push([0.0, 66.0, 0.0], 5.0, 0.0);
+        assert_eq!(d.velocity.y, up);
     }
 
     #[test]

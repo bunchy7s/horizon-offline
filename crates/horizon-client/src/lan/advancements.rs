@@ -35,6 +35,13 @@ pub struct ServerAdvancements {
 pub struct FirstTick {
     pub recipe_book_add: Option<Vec<u8>>,
     pub update_advancements: Vec<u8>,
+    pub granted: Vec<CriterionGrant>,
+}
+
+/// A criterion `CriteriaTriggers.TICK` newly granted, for the game to tell the mods.
+pub struct CriterionGrant {
+    pub advancement: String,
+    pub criterion: String,
 }
 
 impl ServerAdvancements {
@@ -89,9 +96,15 @@ impl ServerAdvancements {
             })
             .collect();
         let date = crate::advancements::date_text(now_millis.div_euclid(1000));
+        let mut granted = Vec::new();
         for (a, got) in self.tree.list.iter().zip(&obtained) {
             for c in got {
-                progress.grant(&a.id, c, &date);
+                if progress.grant(&a.id, c, &date) {
+                    granted.push(CriterionGrant {
+                        advancement: a.id.clone(),
+                        criterion: (*c).to_owned(),
+                    });
+                }
             }
         }
         // AdvancementRewards.grant: the recipes, in the advancements' order.
@@ -126,6 +139,7 @@ impl ServerAdvancements {
         FirstTick {
             recipe_book_add,
             update_advancements: w.data,
+            granted,
         }
     }
 
@@ -135,13 +149,15 @@ impl ServerAdvancements {
     /// drops a criterion it lost), the next `flushDirty` is a first packet
     /// again, and the next `CriteriaTriggers.TICK` meets the new tree's
     /// `minecraft:tick` criteria, rewarding the recipes of the advancements
-    /// that complete. Returns the recipe book packet those recipes need.
+    /// that complete. The criteria it grants are added to `granted`. Returns
+    /// the recipe book packet those recipes need.
     pub fn reload(
         &self,
         sync: &SyncData,
         now_millis: i64,
         progress: &mut Progress,
         book: &mut Settings,
+        granted: &mut Vec<CriterionGrant>,
     ) -> Option<Vec<u8>> {
         let by_id: HashMap<&str, &crate::advancements::Advancement> =
             self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -159,8 +175,14 @@ impl ServerAdvancements {
         for a in &self.tree.list {
             let was_done = progress.done(a);
             for c in &a.criteria {
-                if c.trigger == "minecraft:tick" && c.conditions.is_null() {
-                    progress.grant(&a.id, &c.name, &date);
+                if c.trigger == "minecraft:tick"
+                    && c.conditions.is_null()
+                    && progress.grant(&a.id, &c.name, &date)
+                {
+                    granted.push(CriterionGrant {
+                        advancement: a.id.clone(),
+                        criterion: c.name.clone(),
+                    });
                 }
             }
             if !was_done && progress.done(a) {

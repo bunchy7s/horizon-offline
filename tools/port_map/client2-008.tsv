@@ -128,7 +128,7 @@ DownloadedPackSource.onRecoveryFailure	port	crates/horizon-client/src/server_pac
 DownloadedPackSource.waitForPackFeedback	skip:java		future over the feedback callback; replies go through ServerPacks::take_replies
 ServerPackManager.markExistingPacksAsRemoved	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::push	packs with the same id are removed as ServerReplaced
 ServerPackManager.pushPack	port	crates/horizon-client/src/server_packs.rs::ServerPacks::push	declined prompt answers DECLINED
-ServerPackManager.pushLocalPack	missing		player: a world's own resource pack (resources.zip in the save) is not loaded when the world opens
+ServerPackManager.pushLocalPack	port	crates/horizon-client/src/server_packs.rs::ServerPacks::push_local	the world's `resourcepacks/resources.zip` is pushed as a pack already on disk (`Download::Done`, no url or sha1); a declined prompt reports DECLINED
 ServerPackManager.pushNewPack	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::push	adds the pack and accepts it when allowed
 ServerPackManager.findPackInfo	inline	crates/horizon-client/src/server_packs.rs::ServerPacks::pop	finds the live pack with the id
 ServerPackManager.popPack	port	crates/horizon-client/src/server_packs.rs::ServerPacks::pop	marks the pack ServerRemoved
@@ -139,9 +139,9 @@ ServerPackManager.updateDownloads	port	crates/horizon-client/src/server_packs.rs
 AbstractSoundInstance.getOrResolve	port	crates/horizon-client-render/src/sound_engine.rs::SoundEngine::resolve	event lookup, then a random sound from it
 BeeSoundInstance.tick	port	crates/horizon-client-render/src/sound_engine.rs::SoundInstance::tick	Ticking::Bee follows the bee; pitch and volume from speed
 DirectionalSoundInstance.setPosition	port	crates/horizon-client/src/game/end.rs::Game::tick_end	gap: minor: the end flash plays without a position, so the 10-block offset toward the view is not kept
-ElytraOnPlayerSoundInstance.tick	missing		player: no elytra wind loop (entity.elytra.flying) while gliding; gliding is silent
+ElytraOnPlayerSoundInstance.tick	port	crates/horizon-client-render/src/sound_engine.rs::SoundInstance::tick	the `Elytra` arm: `item.elytra.flying` follows the player each tick, stops 20 ticks after gliding ends, volume `speed / 4` clamped, silent for a second then fading in over the next
 EntityBoundSoundInstance.tick	missing		minor: a sound tied to an entity does not follow it; it stays at its start point
-RidingEntitySoundInstance.tick	missing		player: no riding loop for a happy ghast or nautilus (HAPPY_GHAST_RIDING, NAUTILUS_RIDING)
+RidingEntitySoundInstance.tick	port	crates/horizon-client-render/src/sound_engine.rs::SoundInstance::tick	the `RidingEntity` arm for `entity.happy_ghast.riding` and `entity.nautilus.riding`: stops when the ridden mob is gone or silent, volume 0 unless the underwater test matches and the speed is at least 0.01, else the clamped lerp
 RidingMinecartSoundInstance.shoudlPlaySound	port	crates/horizon-client-render/src/sound_engine.rs::SoundInstance::tick	RidingMinecart arm; the predicate is always true for OldMinecartBehavior, Horizon's only minecart
 SnifferSoundInstance.tick	port	crates/horizon-client/src/game/sniffers.rs::Game::tick_sniffer_effects	gap: player: the digging sound plays once when digging starts; vanilla loops it while digging
 Sound.Type.getByName	port	crates/horizon-client-render/src/sound_events.rs::parse_sound	type file or event; other values reject the sound

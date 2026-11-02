@@ -170,6 +170,12 @@ impl Game<'_> {
             }
             // defaultHandleGameClickEvent: the dialog opens over the book.
             ClickEvent::ShowDialog(dialog) => self.show_dialog_ref(&dialog),
+            // Screen.defaultHandleGameClickEvent: custom actions retain the book.
+            ClickEvent::Custom { id, payload } => {
+                if let Some(remote) = &self.remote {
+                    remote.session.send_custom_click(&id, payload);
+                }
+            }
             // SuggestCommand's insertText does nothing on a book; a server's
             // text never opens a file.
             ClickEvent::SuggestCommand(_) | ClickEvent::OpenFile(_) => {}
@@ -773,8 +779,7 @@ impl Game<'_> {
         let p = BlockPos::new(key.0, key.1, key.2);
         let state = self.world.block(key.0, key.1, key.2);
         self.with_level(|b, level, ticks| {
-            let block = b.block(state);
-            b.update_neighbors_at(level, ticks, BlockPos::new(p.x, p.y - 1, p.z), block);
+            b.lectern_update_below(level, ticks, p, state);
         });
     }
     fn set_lectern_property(&mut self, key: (i32, i32, i32), name: &str, value: bool) {
@@ -868,7 +873,7 @@ impl Game<'_> {
         let Some(book) = &l.book else { return false };
         let pages = view_pages(book.data());
         let page = (l.page.max(0) as usize).min(pages.len().saturating_sub(1));
-        self.stats.custom("interact_with_lectern", 1);
+        self.award_custom_stat("interact_with_lectern", 1);
         self.open_book(BookScreen::View {
             pages,
             page,

@@ -7,7 +7,7 @@ BlockCollisions.getChunk	inline	crates/horizon-world/src/block_collision_scan.rs
 CardinalLighting.byFace	port	crates/horizon-client-render/src/mesher/lighting.rs::cardinal	per-face directional shade; nether flag handled in the same fn
 ClipContext.getFluidShape	inline	crates/horizon-world/src/world_ray.rs::clip_world	pick_fluid decides canPick; the shape is clipped in clip_world
 ColorMapColorUtil.get	port	crates/horizon-client-render/src/biome.rs::sample	colormap lookup by temperature and downfall
-EntityBasedExplosionDamageCalculator.getBlockExplosionResistance	missing		unsure: source-entity overrides (wither skull, minecart TNT, primed TNT keeping nether portals) are not read; explosion_hit_block uses the block's own resistance
+EntityBasedExplosionDamageCalculator.getBlockExplosionResistance	port	crates/horizon-client/src/game/explosion.rs::Game::exploded_positions	the blast source's own override: one block's resistance is passed in (the respawn anchor's water-like block), a dangerous wither skull caps a destroyable block at 0.8 and a TNT minecart spares rails
 ExplosionDamageCalculator.getEntityDamageAmount	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	damage formula inline; the player copy is in explosion_hurt_player
 LevelSettings.copy	skip:java		immutable record copy; Horizon keeps level fields on its own struct
 LevelSettings.parse	port	crates/horizon-client/src/save.rs::Level::read	reads difficulty, lock, allowCommands and game type from level.dat
@@ -20,8 +20,8 @@ PathNavigationRegion	skip:other		pathfinding reads the live level (mobs/path.rs)
 SimpleExplosionDamageCalculator.getBlockExplosionResistance	inline	crates/horizon-client/src/game/wind.rs::Game::wind_positions	gap: minor: only the wind charge tag stops the rays; enchantment immune_blocks are not read
 SimpleExplosionDamageCalculator.getKnockbackMultiplier	inline	crates/horizon-client/src/game/wind.rs::Game::wind_push_player	creative-flying zero is here; the enchantment multiplier is in post_attack_bursts (enchant_effects.rs)
 TicketStorage.activateAllDeactivatedTickets	skip:other		no deactivated-ticket state; ticket_levels.rs recomputes from players and forced chunks
-TicketStorage.addTicket	missing		unsure: portal and teleport tickets are not modelled; ticket_levels.rs counts only players and forced chunks
-TicketStorage.addTicketWithRadius	missing		unsure: radius tickets (portal, teleport) are not modelled; ticket_levels.rs counts only players and forced chunks
+TicketStorage.addTicket	port	crates/horizon-client/src/ticket_levels.rs::ChunkTickets::add_portal	the PORTAL ticket `Entity.placePortalTicket` adds: same type and level restarts the 300-tick timeout (`Ticket.resetTicksLeft`), else the ticket is added
+TicketStorage.addTicketWithRadius	inline	crates/horizon-client/src/ticket_levels.rs::ChunkTickets::add_portal	the one radius add is `addTicketWithRadius(PORTAL, pos, 3)`, so the radius is the fixed `PORTAL_RADIUS` and the level is `FULL - 3` in ticket_levels::compute
 TicketStorage.canTicketExpire	skip:other		ticket expiry is not modelled; no timed tickets in ticket_levels.rs
 TicketStorage.deactivateTicketsOnClosing	skip:other		chunk-unload bookkeeping; no per-ticket state
 TicketStorage.forEachTicket	skip:other		iteration over stored tickets; ticket_levels.rs walks its own sources
@@ -38,7 +38,7 @@ TicketStorage.removeTicket	inline	crates/horizon-client/src/game/commands/terrai
 TicketStorage.removeTicketIf	skip:other		predicate removal over stored tickets; forced chunks are changed by cmd_forceload
 TicketStorage.removeTicketWithRadius	missing		unsure: radius tickets (portal, teleport) are not modelled
 TicketStorage.replaceTicketLevelOfType	skip:other		re-levels stored tickets; ticket_levels.rs computes levels from positions
-TicketStorage.shouldKeepDimensionActive	missing		unsure: whether a dimension stays ticking because of forced chunks was not checked
+TicketStorage.shouldKeepDimensionActive	port	crates/horizon-client/src/game/levels.rs::Game::levels_to_tick	a dimension with a portal ticket keeps ticking with no player in it
 TicketStorage.updateChunkForced	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	the per-chunk add or remove of a forced chunk
 TicketStorage.updateForcedChunks	inline	crates/horizon-client/src/save.rs::SaveDir::load_forced_chunks	gap: minor: restores the saved forced set on load; no forced-chunk packet is sent here
 BiomeSpecialEffects.Builder.build	skip:java		builder for biome effects; Horizon reads the effects from biome data (biome.rs)
@@ -62,7 +62,7 @@ AmethystClusterBlock.getFluidState	port	crates/horizon-world/src/registry_fluid.
 AmethystClusterBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 AmethystClusterBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
 AmethystClusterBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-AttachedStemBlock.getCloneItemStack	missing		unsure: middle-click pick of an attached stem; pick_item.rs was not checked for block-to-item picks
+AttachedStemBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::clone_item	an attached pumpkin or melon stem picks its seed, since a stem has no block item
 AttachedStemBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
 AttachedStemBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
 AzaleaBlock.isBonemealSuccess	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_success	

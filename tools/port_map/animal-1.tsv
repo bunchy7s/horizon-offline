@@ -11,7 +11,7 @@ Allay.isLikedPlayer	inline	crates/horizon-client/src/mobs/ai.rs::accepts_damage	
 Allay.setJukeboxPlaying	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	polls playing jukeboxes within 10 blocks every tick instead of listening for jukebox events; no remembered jukebox
 Allay.wantsToPickUp	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	same item within 32 blocks, mob_griefing on
 Allay.allayConsidersItemEqual	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	gap: compares item ids only, the held item keeps no potion contents
-Allay.hasNonMatchingPotion	missing		an allay holding a potion also fetches other potion types; the held item is only an id
+Allay.hasNonMatchingPotion	inline	crates/horizon-client/src/mobs/allay.rs::considers_item_equal	the potion half of considers_item_equal (held.potion() == candidate.potion()); gap: the potion id only, not custom effects or colour
 Allay.updateDynamicGameEventListener	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	no listener registry: the vibration half is mobs/allay.rs::listen (game/sculk.rs dispatches each event) and the jukebox half is polled here; vanilla's re-registration on a chunk-section change has no counterpart
 Allay.setDancing	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	dancing set while a jukebox plays and not panicking
 Allay.shouldStopDancing	inline	crates/horizon-client/src/game/allays.rs::Game::tick_allays	no jukebox within 10 blocks stops the dance
@@ -47,11 +47,11 @@ Axolotl.soloAnimation	inline	crates/horizon-client/src/mobs/axolotl.rs::Animatio
 Axolotl.tickAdultAnimations	inline	crates/horizon-client/src/mobs/axolotl.rs::Animation::tick	the binary animators
 Axolotl.rehydrate	port	crates/horizon-client/src/game/splash_water.rs::Game::affect_entities_around	water potion on #rehydrates_axolotls: 1800 more air up to MAX_AIR (6000)
 Axolotl.get	port	crates/horizon-client/src/entity_nbt.rs::bucket_components	axolotl/variant component written to the bucket
-Axolotl.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	axolotl/variant read from the bucket
+Axolotl.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	axolotl/variant read from the bucket or spawn egg
 Axolotl.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: baby takes the first parent's colour; no random parent, no 1-in-1200 blue, not set persistent
 Axolotl.createAttributes	skip:data		attributes come from entity-types.json
 Axolotl.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	a water bucket scoops it up (bucketable)
-Axolotl.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::load_bucket_data	age, age lock and hunting cooldown
+Axolotl.loadFromBucketTag	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	age, age lock and hunting cooldown from the bucket_entity_data component
 Axolotl.applySupportingEffects	inline	crates/horizon-client/src/game/creatures.rs::Game::handle_mob_events	the AxolotlSupportPlayer event: regeneration and no mining fatigue, host player only
 Axolotl.usePlayerItem	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	a fed tropical fish bucket leaves a water bucket in its place (creative keeps the fish bucket and adds the bucket)
 Axolotl.Variant.getSpawnVariant	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	the common pick for a spawn group; the 1-in-1200 blue draw is the breeding path's (crates/horizon-client/src/game/creatures.rs::Game::breed)
@@ -117,8 +117,8 @@ Chicken.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	g
 Chicken.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	EggLayTime, variant, sound_variant; jockey in riders.rs
 Chicken.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	
 Chicken.get	port	crates/horizon-client/src/mobs/finalize.rs::variant_component	gap: chicken/variant only, no chicken/sound_variant
-Chicken.applyImplicitComponents	missing		variant components on a spawn egg or item are ignored; the mob gets its biome variant
-Chicken.applyImplicitComponent	missing		see applyImplicitComponents
+Chicken.applyImplicitComponents	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	chicken/variant and chicken/sound_variant from the stack that spawns or buckets it
+Chicken.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the same fn reads both components
 Chicken.positionRider	inline	crates/horizon-client/src/game/passengers.rs::Game::position_riders	every mob rider copies its vehicle's body yaw, not only chicken riders
 ChickenVariants	skip:data		chicken variants come from the registry data files
 AbstractCow.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	

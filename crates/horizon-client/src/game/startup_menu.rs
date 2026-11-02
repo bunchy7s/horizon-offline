@@ -259,6 +259,21 @@ impl StartupMenu {
             }
             return Action::None;
         }
+        // `TabNavigationBar.keyPressed` comes before the open tab's own
+        // widgets: Ctrl plus a digit or Tab picks a tab instead of reaching
+        // them.
+        let ctrl = if cfg!(target_os = "macos") {
+            self.modifiers.super_key()
+        } else {
+            self.modifiers.control_key()
+        };
+        if let PhysicalKey::Code(key) = event.physical_key
+            && title
+                .tab_bar_key(key, ctrl, self.modifiers.shift_key())
+                .is_some()
+        {
+            return Action::None;
+        }
         match event.physical_key {
             PhysicalKey::Code(KeyCode::Escape) => title.escape(),
             PhysicalKey::Code(KeyCode::F5) => title.refresh_servers(),

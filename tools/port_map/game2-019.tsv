@@ -48,7 +48,7 @@ ChunkGenerator.getStructureGeneratingAt	port	crates/horizon-client/src/vanillage
 ChunkGenerator.applyBiomeDecoration	port	crates/horizon-world/src/worldgen/generator_decoration.rs::Decoration::decorate	biome feature placement; structure starts are placed in structure/start.rs
 ChunkGenerator.tryGenerateStructure	port	crates/horizon-world/src/worldgen/structure/start.rs::try_generate	-
 ChunkGenerator.fetchReferences	missing	-	minor: unsure: new starts begin at 0 references (start.rs); a previous start's reference count is not read
-ChunkGeneratorStructureState.createForFlat	missing	-	unsure: no superflat or flat-preset structure path found in worldgen
+ChunkGeneratorStructureState.createForFlat	inline	crates/horizon-world/src/worldgen/generator.rs::OverworldGenerator::flat	the flat generator's structure state: the flat level's minimum Y, structure_overrides narrowed with restrict_to, and stronghold rings on seed 0
 ChunkGeneratorStructureState.createForNormal	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::new	-
 ChunkGeneratorStructureState.hasBiomesForStructureSet	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::new	keeps the sets with a structure in a possible biome
 ChunkGeneratorStructureState.getRingPositionsFor	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::ring_positions	-
@@ -106,9 +106,9 @@ ProtoChunk.addEntity	port	crates/horizon-world/src/worldgen/generator_decoration
 ProtoChunk.setStartForStructure	missing	-	minor: unsure: no below-zero retrogen bounds check on structure starts found
 ProtoChunk.setPersistedStatus	missing	-	minor: unsure: no setter for a proto chunk's persisted status found
 ProtoChunk.packOffsetCoordinates	inline	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::mark_postprocessing	the packed x|y|z offset is built inline
-ProtoChunk.unpackOffsetCoordinates	missing	-	minor: unsure: no replay of stored post-process offsets found
+ProtoChunk.unpackOffsetCoordinates	inline	crates/horizon-client/src/save.rs::decode_proto	the stored PostProcessing shorts are unpacked to block positions: chunk x/z, the section's Y, and the packed 4-bit offsets
 ProtoChunk.markPosForPostProcessing	port	crates/horizon-world/src/worldgen/terrain.rs::TerrainChunk::mark_postprocessing	-
-ProtoChunk.getBlockEntityNbtForSaving	missing	-	minor: unsure: no proto chunk block entity NBT save step found
+ProtoChunk.getBlockEntityNbtForSaving	port	crates/horizon-client/src/save.rs::encode_block_entity	the tag a chunk writes per block entity: id, x, y, z, keepPacked and the components
 ProtoChunk.removeBlockEntity	inline	crates/horizon-world/src/worldgen/generator_decoration.rs::World::set_block	entry is dropped when the block at the position changes
 Strategy.getIndex	port	crates/horizon-client-render/src/chunk.rs::index	block form (y<<8 | z<<4 | x); the biome form is biome_chunk.rs::index
 ChunkStatus.register	skip:data	-	status registry entry
@@ -116,10 +116,10 @@ ChunkStatus.getStatusList	skip:data	-	status list is the ALL constant in chunk_s
 EntityStorage.storeEntities	port	crates/horizon-client/src/save.rs::SaveDir::save_entities	-
 EntityStorage.reportSaveFailureIfPresent	skip:other	-	error reporting plumbing; failures come back as Result from save_entities
 EntityStorage.reportLoadFailureIfPresent	skip:other	-	error reporting plumbing; failures come back as Result from load_entities
-IOWorker.isOldChunkAround	missing	-	minor: unsure: no old-chunk scan around a position found
+IOWorker.isOldChunkAround	port	crates/horizon-client/src/old_world.rs::SavedOldWorld::is_old_chunk_around	the region files within range are scanned once each (SaveDir::old_chunk_bits) and searched for an old chunk
 IOWorker.getOrCreateOldDataForRegion	skip:java	-	cache of old-chunk data per region
 IOWorker.createOldDataForRegion	skip:java	-	cache of old-chunk data per region
-IOWorker.isOldChunk	missing	-	minor: unsure: same old-chunk check as isOldChunkAround; not found
+IOWorker.isOldChunk	inline	crates/horizon-client/src/save.rs::SaveDir::old_chunk_bits	the per-record test: DataVersion below 4997, or a blending_data compound
 IOWorker.store	port	crates/horizon-client/src/save.rs::write_region_records	-
 IOWorker.loadAsync	port	crates/horizon-client-render/src/streaming.rs::ChunkGenerator::load	gap: minor: the saved-chunk hook only; the disk read is in save.rs
 IOWorker.synchronize	skip:java	-	waits for queued async writes; Horizon's save takes a wait flag (streaming.rs Streaming::save)
@@ -140,7 +140,7 @@ RegionFile.doesChunkExist	port	crates/horizon-world/src/region.rs::RegionFile::r
 RegionFile.getChunkDataOutputStream	skip:java	-	Java stream factory; RegionFile::write takes the record directly
 RegionFile.createExternalStub	inline	crates/horizon-world/src/region.rs::RegionFile::write	-
 RegionFile.writeToExternalFile	inline	crates/horizon-world/src/region.rs::RegionFile::write	-
-RegionFile.writeHeader	port	crates/horizon-world/src/region.rs::RegionFile::write_header_entry	-
+RegionFile.writeHeader	port	crates/horizon-world/src/region.rs::RegionFile::write_header	both header sectors from memory, so entries dropped as invalid on open are zero on disk too
 RegionFile.close	skip:java	-	file handle is released when the RegionFile is dropped
 RegionFile.padToFullSector	inline	crates/horizon-world/src/region.rs::RegionFile::write	last sector is padded with zeros
 RegionFile.ChunkBuffer.close	skip:java	-	Java stream close
