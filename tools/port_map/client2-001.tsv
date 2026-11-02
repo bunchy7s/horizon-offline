@@ -100,7 +100,7 @@ LevelRenderer.invalidateCompiledGeometry	port	crates/horizon-client-render/src/g
 LevelRenderer.scheduleTranslucentSectionResort	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	resort scheduled when the camera point of view changes
 LevelRenderer.scheduleResort	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	per-section resort gated by point-of-view change and translucent geometry
 LevelRenderer.resetLevelRenderData	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	section data released when a level is left
-LevelRenderer.hasRenderedAllSections	inline	crates/horizon-client/src/game.rs::tick_world_icon: renderer.drawn_sections > 10	the icon waits on the same count vanilla's hasRenderedAllSections asks for
+LevelRenderer.hasRenderedAllSections	inline	crates/horizon-client/src/game.rs::tick_world_icon	renderer.drawn_sections > 10: the icon waits on the same count vanilla's hasRenderedAllSections asks for
 LevelRenderer.isSectionCompiledAndVisible	port	crates/horizon-client-render/src/gfx/resident.rs::Resident::contains	gap: minor: no section fade-in, so the 0.3 visibility threshold is not checked
 LevelRenderer.finalizeGizmoCollection	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	debug gizmos collected for the frame
 LevelTargetBundle.replace	skip:other		render-target bundle for post chains; Horizon has no frame graph
