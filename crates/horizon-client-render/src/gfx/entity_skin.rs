@@ -10,7 +10,8 @@
 //!
 //! The game decides which draws come here (`SkinFrame`): models whose
 //! polygons all face an axis, drawn as ordinary opaque or cutout entities.
-//! The rest stays on the CPU path.
+//! The rest stays on the CPU path. Item models come too ([`SkinJob::item`]):
+//! their quads all face an axis, and their shading is baked into the colour.
 
 use super::upload::Uploads;
 use crate::mesher::Vertex;
@@ -35,6 +36,20 @@ pub struct SkinPart {
     pub normal: [f32; 9],
 }
 
+impl SkinPart {
+    /// An item layer's part: its pose, and its quads' colours by axis.
+    pub fn item(matrix: glam::Mat4, colors: [u32; 6]) -> Self {
+        let mut normal = [0.0; 9];
+        for (word, color) in normal.iter_mut().zip(colors) {
+            *word = f32::from_bits(color);
+        }
+        Self {
+            matrix: matrix.to_cols_array(),
+            normal,
+        }
+    }
+}
+
 /// One run of a model's vertices drawn with one texture rect, colour, light
 /// and overlay. `dst` counts from the frame's first posed vertex.
 #[repr(C)]
@@ -51,7 +66,15 @@ pub struct SkinJob {
     pub overlay: u32,
     /// 1 when the overlay is the armour glint: the model UV rides in `glint_uv`.
     pub glint: u32,
-    pub spare: [u32; 3],
+    /// 1 for an item model's quads (`item_render::WorldSink`): the colour by the
+    /// face's axis rides in the part's first 6 normal words ([`SkinPart::item`]),
+    /// shaded on the CPU, and the normal is `mesher::CULL_BACK`.
+    pub item: u32,
+    /// 1 for a model whose render type culls back faces (`mobs::Polygon::cull_back`):
+    /// the normal's w is `mesher::SHADED_CULL_W` instead of -127.
+    pub cull: u32,
+    /// Always 0: the shader reads it as a zero it cannot fold away.
+    pub spare: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 44);
@@ -352,13 +375,24 @@ pub fn expand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
                 (v.uv[0] + job.scroll) % 1.0
             };
             let r = job.rect;
+            let (color, normal) = if job.item != 0 {
+                let color = part.normal[v.axis as usize].to_bits();
+                (color, crate::mesher::CULL_BACK)
+            } else {
+                let w = if job.cull != 0 {
+                    crate::mesher::SHADED_CULL_W
+                } else {
+                    -127
+                };
+                (job.color, [packed[0], packed[1], packed[2], w])
+            };
             out[(job.dst + k) as usize] = Vertex {
                 pos: pos.to_array(),
                 uv: [r[0] + (r[2] - r[0]) * u, r[1] + (r[3] - r[1]) * v.uv[1]],
                 layer: job.overlay,
-                color: job.color,
+                color,
                 light: job.light,
-                normal: [packed[0], packed[1], packed[2], -127],
+                normal,
                 glint_uv: if job.glint != 0 { v.uv } else { [0.0, 0.0] },
             };
         }
@@ -406,8 +440,8 @@ mod tests {
     }
 
     /// Two draws of a two-part model with turned, scaled parts, a scrolled
-    /// texture and the armour glint: the shader writes what `expand` does,
-    /// to the bit, after the vertices before them.
+    /// texture and the armour glint, and an item's: the shader writes what
+    /// `expand` does, to the bit, after the vertices before them.
     #[test]
     fn the_shader_writes_what_the_cpu_reference_computes() {
         let Some((device, queue)) = device() else {
@@ -440,6 +474,18 @@ mod tests {
                 part(child, normals),
                 part(base * turn, glam::Mat3::from_mat4(turn * turn)),
                 part(child * turn, glam::Mat3::IDENTITY),
+                // Colours whose bits as floats are NaNs and denormals: copied, never computed.
+                SkinPart::item(
+                    child * turn,
+                    [
+                        0xff80_4020,
+                        0x7fc0_0001,
+                        0x0000_0001,
+                        0xffff_ffff,
+                        0x7f80_0001,
+                        0x1234_5678,
+                    ],
+                ),
             ],
             jobs: vec![
                 SkinJob {
@@ -452,6 +498,8 @@ mod tests {
                     color: 0xff80_40ff,
                     light: 0xf0_70,
                     overlay: 1,
+                    // The bat's encoding: the shader must write -126 like `expand`.
+                    cull: 1,
                     ..Default::default()
                 },
                 SkinJob {
@@ -467,8 +515,20 @@ mod tests {
                     glint: 1,
                     ..Default::default()
                 },
+                // An item's quads: colour by axis from its part, `CULL_BACK` normals.
+                SkinJob {
+                    first: 0,
+                    count: 24,
+                    part: 4,
+                    dst: 72,
+                    rect: [0.5, 0.25, 0.5625, 0.3125],
+                    light: 0xa0_30,
+                    overlay: 2 << 16,
+                    item: 1,
+                    ..Default::default()
+                },
             ],
-            vertices: 72,
+            vertices: 96,
         };
         let expected = expand(&model, &frame);
         // The posed vertices land after 5 others, which they leave alone.

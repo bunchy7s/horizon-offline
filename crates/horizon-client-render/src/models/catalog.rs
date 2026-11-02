@@ -105,6 +105,35 @@ fn bake_resolved(
         cube,
     })
 }
+/// The definitions a blockstate file holds, bottom first: the layers of a
+/// file the pack overlay stacked (`packs::BLOCKSTATE_LAYERS`), else the
+/// file itself.
+fn definition_layers(text: &str) -> std::result::Result<Vec<String>, String> {
+    if !text.contains(crate::packs::BLOCKSTATE_LAYERS) {
+        return Ok(vec![text.to_owned()]);
+    }
+    let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    match value.get(crate::packs::BLOCKSTATE_LAYERS) {
+        Some(Value::Array(layers)) => Ok(layers.iter().map(Value::to_string).collect()),
+        _ => Ok(vec![text.to_owned()]),
+    }
+}
+/// Each state's model from definitions bound bottom first: the topmost one
+/// that binds the state, as (its layer, its selection). A higher pack's
+/// definition replaces only the states it binds (`putAll` in
+/// `loadBlockStateDefinitionStack`).
+fn topmost(layers: Vec<Vec<Option<SelectedModels>>>) -> Vec<Option<(usize, SelectedModels)>> {
+    let mut picked: Vec<Option<(usize, SelectedModels)>> = Vec::new();
+    for (layer, bound) in layers.into_iter().enumerate() {
+        picked.resize(picked.len().max(bound.len()), None);
+        for (slot, selected) in picked.iter_mut().zip(bound) {
+            if let Some(selected) = selected {
+                *slot = Some((layer, selected));
+            }
+        }
+    }
+    picked
+}
 impl StateModels {
     pub fn load(
         root: &Path,
@@ -194,21 +223,17 @@ impl StateModels {
                 .collect::<Result<_>>()?;
             let possible: Vec<Properties> = serde_json::from_value(facts["states"].clone())?;
             // Vanilla's BlockStateModelLoader: a definition that does not
-            // read or bind is logged and its block gets no model; the other
-            // blocks still load.
-            let loaded = fs::read_to_string(
-                root.join(format!("assets/{namespace}/blockstates/{path}.json")),
+            // read or bind is logged and left out; with none left the block
+            // gets no model, and the other blocks still load. A file several
+            // packs provide binds each pack's definition on its own, bottom
+            // first (`loadBlockStateDefinitionStack`).
+            let layers = match horizon_core::prepared_files::read_to_string(
+                &root.join(format!("assets/{namespace}/blockstates/{path}.json")),
             )
             .map_err(|e| e.to_string())
-            .and_then(|text| BlockStateDefinition::from_json(&text).map_err(|e| e.to_string()))
-            .and_then(|definition| {
-                let bound = definition
-                    .bind(&schema, &possible)
-                    .map_err(|e| e.to_string())?;
-                Ok((definition, bound))
-            });
-            let (definition, bound) = match loaded {
-                Ok(loaded) => loaded,
+            .and_then(|text| definition_layers(&text))
+            {
+                Ok(layers) => layers,
                 Err(e) => {
                     log::warn!(
                         "Horizon: blockstate definition of {namespace}:{path} not loaded: {e}"
@@ -216,6 +241,26 @@ impl StateModels {
                     continue;
                 }
             };
+            let mut loaded = Vec::with_capacity(layers.len());
+            for text in &layers {
+                let layer = BlockStateDefinition::from_json(text)
+                    .map_err(|e| e.to_string())
+                    .and_then(|definition| {
+                        let bound = definition
+                            .bind(&schema, &possible)
+                            .map_err(|e| e.to_string())?;
+                        Ok((definition, bound))
+                    });
+                match layer {
+                    Ok(layer) => loaded.push(layer),
+                    Err(e) => log::warn!(
+                        "Horizon: blockstate definition of {namespace}:{path} not loaded: {e}"
+                    ),
+                }
+            }
+            if loaded.is_empty() {
+                continue;
+            }
             let native_order: Vec<_> = by_name
                 .get(name.as_str())
                 .map(Vec::as_slice)
@@ -233,32 +278,36 @@ impl StateModels {
                     "model state definitions disagree with the imported block registry".into(),
                 );
             }
-            for ((id, _), selected) in native_order.into_iter().zip(bound) {
-                if let Some(selected) = selected {
-                    states[id.0 as usize] = Some((choices.len(), selected));
+            let (definitions, bound): (Vec<_>, Vec<_>) = loaded.into_iter().unzip();
+            let first = choices.len();
+            for ((id, _), picked) in native_order.into_iter().zip(topmost(bound)) {
+                if let Some((layer, selected)) = picked {
+                    states[id.0 as usize] = Some((first + layer, selected));
                 }
             }
-            for choice in definition
-                .variants
-                .iter()
-                .flatten()
-                .map(|(_, choice)| choice)
-                .chain(
-                    definition
-                        .multipart
-                        .iter()
-                        .flatten()
-                        .map(|selector| &selector.variant),
-                )
-            {
-                match choice {
-                    VariantSet::Single(v) => {
-                        variants.insert(key(v));
+            for definition in definitions {
+                for choice in definition
+                    .variants
+                    .iter()
+                    .flatten()
+                    .map(|(_, choice)| choice)
+                    .chain(
+                        definition
+                            .multipart
+                            .iter()
+                            .flatten()
+                            .map(|selector| &selector.variant),
+                    )
+                {
+                    match choice {
+                        VariantSet::Single(v) => {
+                            variants.insert(key(v));
+                        }
+                        VariantSet::Weighted(v) => variants.extend(v.iter().map(|(v, _)| key(v))),
                     }
-                    VariantSet::Weighted(v) => variants.extend(v.iter().map(|(v, _)| key(v))),
                 }
+                choices.push(CompiledChoices::new(&definition)?);
             }
-            choices.push(CompiledChoices::new(&definition)?);
         }
         let names: Vec<String> = variants.iter().map(|(name, _, _)| name.clone()).collect();
         let library = match models.block_library(root, names.clone()) {
@@ -427,6 +476,44 @@ pub fn descriptor(name: &str, overrides: &[(&str, &str)]) -> BlockState {
 mod tests {
     use super::*;
     use crate::model_library::ParsedModels;
+
+    /// #7013: a pack's blockstate file that defines only some states (here
+    /// a fence gate's `powered=true` ones) keeps vanilla's model for the
+    /// rest, as vanilla binds each pack's definition and lets a higher one
+    /// replace only what it binds.
+    #[test]
+    fn a_partial_pack_blockstate_keeps_vanilla_for_the_other_states() {
+        let schema: PropertySchema = BTreeMap::from([(
+            "powered".to_owned(),
+            PropertyValues::Named(BTreeSet::from(["false".to_owned(), "true".to_owned()])),
+        )]);
+        let states: Vec<Properties> = ["false", "true"]
+            .iter()
+            .map(|p| BTreeMap::from([("powered".to_owned(), (*p).to_owned())]))
+            .collect();
+        let stacked = serde_json::json!({ crate::packs::BLOCKSTATE_LAYERS: [
+            {"variants":{"":{"model":"minecraft:block/oak_fence_gate"}}},
+            {"variants":{"powered=true":{"model":"minecraft:block/stone"}}}
+        ]})
+        .to_string();
+        let layers = definition_layers(&stacked).unwrap();
+        assert_eq!(layers.len(), 2);
+        let bound = layers
+            .iter()
+            .map(|text| {
+                BlockStateDefinition::from_json(text)
+                    .unwrap()
+                    .bind(&schema, &states)
+                    .unwrap()
+            })
+            .collect();
+        let picked = topmost(bound);
+        assert_eq!(picked[0], Some((0, SelectedModels::Variant(0))));
+        assert_eq!(picked[1], Some((1, SelectedModels::Variant(0))));
+        // A file that isn't stacked is one definition.
+        let plain = r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#;
+        assert_eq!(definition_layers(plain).unwrap(), vec![plain.to_owned()]);
+    }
 
     struct Fixture(std::path::PathBuf);
     impl Fixture {

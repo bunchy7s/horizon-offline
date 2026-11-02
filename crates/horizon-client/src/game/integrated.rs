@@ -6,10 +6,8 @@
 //! the world's options) with [`Integrated::call`], as vanilla's client calls
 //! into its `IntegratedServer`.
 //!
-//! On by default. `--in-frame` (or `--no-server-thread`, or
-//! `HORIZON_SERVER_THREAD=0`) runs the world in the frame instead. That path
-//! is DEPRECATED: never use it, it gets no fixes and will be removed soon.
-//! LAN guests and dedicated servers use the same code either way.
+//! Every single-player world runs this way; LAN guests and dedicated servers
+//! use the same server code.
 use super::{
     Dim, Game, Options, PackResources, Resources, UiResources, WorldIcon,
     execution_role::ExecutionRole,
@@ -79,6 +77,9 @@ struct Flags {
     /// What the server's `LevelLoadListener` reports, for the window's
     /// `LevelLoadingScreen` (`LevelLoadTracker.serverProgress/statusView`).
     load: Arc<horizon_client::level_loading::ServerLoadView>,
+    /// What the world's upgrade has done (`UpgradeProgress`): the window shows it on
+    /// `FileFixerProgressScreen` while the file fixers run, and its Cancel stops them.
+    upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     /// Where the window's debug entries want the server's lines for (its
     /// dimension and feet), and the lines of the last tick there.
     debug_at: Mutex<Option<(Dim, [i32; 3])>>,
@@ -107,6 +108,10 @@ impl Integrated {
     /// The server's load progress and chunk status map.
     pub fn load_view(&self) -> &Arc<horizon_client::level_loading::ServerLoadView> {
         &self.flags.load
+    }
+    /// The world's upgrade while the server opens it.
+    pub fn upgrade(&self) -> &horizon_world::datafix::progress::UpgradeProgress {
+        &self.flags.upgrade
     }
     pub fn smoothed_tick_ms(&self) -> f32 {
         f32::from_bits(self.flags.smoothed_tick_ms.load(Ordering::Relaxed))
@@ -378,7 +383,6 @@ impl Game<'_> {
         // A server without a console: no local player, no window, no control socket.
         // Compatibility for gameplay checks outside startup/world loading.
         options.dedicated = Some(Vec::new());
-        options.server_thread = false;
         options.execution_role = ExecutionRole::IntegratedServer;
         options.control = None;
         options.benchmark = None;
@@ -473,6 +477,12 @@ impl Game<'_> {
         let (pipe, world_name) = match starting.ready.try_recv() {
             Ok(Ok(ready)) => ready,
             Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(()),
+            // FileFixerProgressScreen's Cancel: the upgrade stopped, back to the title.
+            Ok(Err(_)) if starting.handle.upgrade().is_canceled() => {
+                self.integrated_starting = None;
+                self.perf.cancel_world_opening();
+                return Ok(());
+            }
             Ok(Err(e)) => {
                 self.integrated_starting = None;
                 return Err(e.into());
@@ -738,7 +748,6 @@ impl Game<'_> {
             seed: self.level.seed,
             max_players: MAX_PLAYERS,
             // No player of its own: the hub runs without a host.
-            dedicated: true,
             integrated: true,
         };
         let owner = launch.owner;
@@ -777,9 +786,7 @@ impl Game<'_> {
             guest_commands: false,
             force_game_mode: false,
         };
-        startup::time("server.lan_host", || {
-            self.lan_host(settings, net, config, None)
-        })?;
+        startup::time("server.lan_host", || self.lan_host(settings, net, config))?;
         let commands = self.allow_commands();
         let pipe = {
             let host = self
@@ -827,7 +834,7 @@ impl Game<'_> {
         if let Some(mut host) = self.lan.take() {
             self.flush_native_net(&mut host);
             // PlayerList.removeAll: the owner and every guest leave the game.
-            host.award_leave_game_to_all();
+            self.award_leave_game_to_all(&mut host);
             self.save_leaving_guests(&mut host);
             let conns: Vec<u32> = host.hub.guests.iter().map(|g| g.conn).collect();
             for conn in conns {
@@ -1163,6 +1170,7 @@ fn serve(
             pack.clone(),
             options.clone(),
             settings.clone(),
+            flags.upgrade.clone(),
         )
     });
     let opening = Opening {
@@ -1203,7 +1211,6 @@ impl Game<'_> {
         let mut options = self.options.clone();
         options.execution_role = ExecutionRole::IntegratedServer;
         options.dedicated = Some(Vec::new());
-        options.server_thread = false;
         let result = std::thread::Builder::new()
             .name("Server thread".into())
             .spawn(move || {

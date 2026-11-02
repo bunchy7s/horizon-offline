@@ -8,16 +8,21 @@
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
 use super::commands::Target;
+use super::persist::ChunkKey;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
+use horizon_world::nbt::Tag;
 use horizon_world::{level::data::PushReaction, piston_push};
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
 /// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
@@ -47,7 +52,9 @@ pub(super) struct Blast {
     pub(super) spared: Option<u32>,
 }
 
-pub(super) trait Entity {
+pub(super) trait Entity: EntityRules {
+    /// `Entity.getId`.
+    fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
@@ -55,6 +62,16 @@ pub(super) trait Entity {
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
     fn selector_target(&self) -> Option<Target>;
+    /// The entity type id a native mod's join hook names (`minecraft:oak_boat`).
+    fn native_type(&self) -> Cow<'static, str>;
+    /// Saves entity `index` of this kind into its chunk's entity list: the
+    /// chunk and the NBT when it lies in `keys` and is saved with its chunk.
+    /// Required, so a new kind states how it saves.
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)>;
 
     fn on_ground(&self) -> bool {
         false
@@ -132,9 +149,81 @@ pub(super) trait Entity {
     fn is_supported_by(&self, _pos: BlockPos) -> bool {
         false
     }
+    /// `Entity.getEyeY`, where `updateFluidHeightAndDoFluidPushing` reads the
+    /// eye's fluid; the top of the box unless a kind sets it.
+    fn fluid_eye_y(&self) -> f64 {
+        self.bounds().max_position().y
+    }
+    /// `Entity.updateFluidHeightAndDoFluidPushing`: its water and lava heights
+    /// (`(0, 0)` for a kind that is not pushed by fluid), and the current of
+    /// each fluid added to its velocity. One body for every kind.
+    fn push_by_fluid(
+        &mut self,
+        world: &horizon_client::world::World,
+        fluids: &horizon_client::motion::FluidResources,
+    ) -> (f64, f64) {
+        if !self.is_pushed_by_fluid() {
+            return (0.0, 0.0);
+        }
+        let (bounds, at, eye) = (self.bounds(), self.position(), self.fluid_eye_y());
+        horizon_client::entities::update_entity_fluids(
+            bounds,
+            at,
+            eye,
+            self.velocity_mut(),
+            world,
+            fluids,
+        )
+    }
+    /// `BubbleColumnBlock.entityInside` through `applyEffectsFromBlocks`: a
+    /// column lifts or drags every kind alike.
+    fn push_by_bubble_column(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    ) -> bool {
+        let bounds = self.bounds();
+        horizon_client::motion::bubble_column_push(
+            world,
+            registry,
+            facts,
+            collision,
+            bounds,
+            self.velocity_mut(),
+        )
+    }
     /// `Entity.getPistonPushReaction`.
     fn get_piston_push_reaction(&self) -> PushReaction {
         PushReaction::PushPull
+    }
+    /// Width and height of the box a portal sweep follows, or None for a kind
+    /// the game does not carry through portals (so far armor stands and
+    /// falling blocks; fishing hooks are off the walk, and
+    /// `FishingHook.canUsePortal` is false in vanilla).
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        None
+    }
+    /// `Entity.canUsePortal(false)` for a kind in `portal_size`. A kind that
+    /// cannot stays tracked, so its cooldown and process run out.
+    fn can_use_portal(&self, _game: &Game<'_>) -> bool {
+        true
+    }
+    /// A boat or minecart: the kinds whose portal pass opens the tick, before
+    /// they move (`AbstractMinecart.tick` handles its portal first).
+    fn is_vehicle(&self) -> bool {
+        false
+    }
+    /// Where it stood at the start of its tick, for the kinds that store it
+    /// (None: `portals.before` has it).
+    fn portal_from(&self) -> Option<Vec3> {
+        None
+    }
+    /// Whether this tick's movement can have entered a portal block: a stuck
+    /// arrow or a trident in the ground that did not move enters none.
+    fn portal_sweeps(&self) -> bool {
+        true
     }
     /// `Entity.move(MoverType.PISTON, …)` once the movement is resolved.
     fn move_by_piston(&mut self, movement: Vec3) {
@@ -152,6 +241,9 @@ pub(super) trait Entity {
 /// The fields every kind stores under the same names.
 macro_rules! stored_motion {
     () => {
+        fn id(&self) -> u32 {
+            self.id
+        }
         fn position(&self) -> Vec3 {
             self.position
         }
@@ -222,6 +314,15 @@ macro_rules! define_entity_handles {
             pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
                 std::iter::empty()
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
+            }
+
+            /// Takes the entity out of its list (`Entity.discard` before it ever ticked).
+            pub(super) fn discard_entity(&mut self, handle: EntityHandle) {
+                match handle {
+                    $(EntityHandle::$kind(i) => {
+                        self$(.$list)+.remove(i);
+                    })*
+                }
             }
 
             /// [`Self::entity_handles`], last of each list first, so the
@@ -329,8 +430,57 @@ macro_rules! with_entity_mut {
 }
 pub(super) use with_entity_mut;
 
+macro_rules! save_lists {
+    (($game:expr, $keys:expr, $out:expr)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for i in 0..$game$(.$list)+.len() {
+            if let Some((key, tag)) = <$ty as $crate::game::entity::Entity>::save_nbt($game, i, $keys) {
+                $out.entry(key).or_default().push(tag);
+            }
+        })*
+    };
+}
+pub(crate) use save_lists;
+
+/// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
+/// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
+/// nothing allocated beyond the tags. A kind added to the lists cannot be left
+/// out, since `save_nbt` has no default.
+macro_rules! save_entities_of_every_kind {
+    ($game:expr, $keys:expr, $out:expr) => {
+        $crate::game::entity::entity_lists!(save_lists, $game, $keys, $out)
+    };
+}
+
+impl Game<'_> {
+    /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
+    pub(super) fn save_every_entity(
+        &mut self,
+        keys: &HashSet<ChunkKey>,
+        out: &mut HashMap<ChunkKey, Vec<Tag>>,
+    ) {
+        save_entities_of_every_kind!(self, keys, out);
+    }
+}
+
 impl Entity for Mob {
+    fn native_type(&self) -> Cow<'static, str> {
+        super::native_hooks::mob_kind(self).into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_mob(index, keys)
+    }
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((self.width(), self.height()))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.mob_can_use_portal(self)
+    }
     fn selector_target(&self) -> Option<Target> {
         (self.death_time == 0).then_some(Target::Mob(self.id))
     }
@@ -363,16 +513,11 @@ impl Entity for Mob {
             || (self.species() == Species::Warden
                 && horizon_client::mobs::warden::digging_or_emerging(self))
     }
-    /// The kind's own box, not the baby's or the slime's.
-    fn explosion_box(&self) -> Aabb {
-        let (feet, half) = (self.position, self.kind.width / 2.0);
-        Aabb::new(
-            Vec3::new(feet.x - half, feet.y, feet.z - half),
-            Vec3::new(feet.x + half, feet.y + self.kind.height, feet.z + half),
-        )
-    }
+    /// `getEyeHeight` of the mob as it stands: a baby's, a slime's or a
+    /// phantom's own scaled eye height, not the adult kind's. The blast's box
+    /// is its real `bounds`, so it needs no override.
     fn explosion_eye_height(&self) -> f64 {
-        self.kind.eye_height
+        self.eye_height()
     }
     /// `Entity.push` sets `needsSync`.
     fn push_from_explosion(&mut self, push: Vec3) {
@@ -404,7 +549,20 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:item".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_item(index, keys)
+    }
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.25, 0.25))
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Item(self.id))
     }
@@ -436,7 +594,20 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:experience_orb".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_orb(index, keys)
+    }
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Orb(self.id))
     }
@@ -465,7 +636,30 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.entity_type().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_boat(index, keys)
+    }
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
+    /// `Boat.getEyeY`: the top of the 0.5625 box.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + super::boats::HEIGHT
+    }
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Boat(self.id))
     }
@@ -488,7 +682,29 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_cart(index, keys)
+    }
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((
+            super::minecarts::WIDTH as f32,
+            super::minecarts::HEIGHT as f32,
+        ))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Cart(self.id))
     }
@@ -522,6 +738,16 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:armor_stand".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_armor_stand(index, keys)
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Stand(self.id))
@@ -567,6 +793,12 @@ impl Entity for ArmorStand {
     fn is_ignoring_block_triggers(&self) -> bool {
         self.marker
     }
+    /// A NoGravity stand is not swept for the blocks it stands in (plates,
+    /// fire): measured beside the real server, it never presses a plate nor
+    /// catches fire, and does again once `NoGravity` is cleared.
+    fn sweeps_blocks_inside(&self) -> bool {
+        !self.no_gravity
+    }
     fn pushed_by_explosion(&self) -> bool {
         false
     }
@@ -581,7 +813,28 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:tnt".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_tnt(index, keys)
+    }
     stored_motion!();
+    /// `PrimedTnt` eye height: `0.98 * 0.85`.
+    fn fluid_eye_y(&self) -> f64 {
+        self.position.y + f64::from(0.98f32 * 0.85f32)
+    }
+    /// `PrimedTnt` is 0.98 across.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.98, 0.98))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.tnt_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Tnt(self.id))
     }
@@ -604,6 +857,16 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:falling_block".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_falling(index, keys)
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Falling(self.id))
@@ -614,7 +877,28 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_projectile(index, keys)
+    }
     stored_motion!();
+    /// Arrows and the thrown items and fireballs a chunk saves.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (super::nether_portal::is_arrow(self) || super::nether_portal::is_portal_projectile(self))
+            .then(|| super::nether_portal::projectile_box(self))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !super::nether_portal::is_arrow(self) || !self.stuck || self.previous != self.position
+    }
     fn selector_target(&self) -> Option<Target> {
         use horizon_client::projectiles::ProjectileKind as K;
         // The kinds /data can write (entity_nbt).
@@ -656,7 +940,24 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:firework_rocket".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_rocket(index, keys)
+    }
     stored_motion!();
+    /// A rocket that carries its owner stays.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (self.attached_to.is_none() && !self.attached).then_some((0.25, 0.25))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Rocket(self.id))
     }
@@ -674,7 +975,26 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:trident".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_trident(index, keys)
+    }
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !self.in_ground || self.previous != self.position
+    }
     fn selector_target(&self) -> Option<Target> {
         // No `Target` variant for it yet: `@e` does not find tridents.
         None
@@ -697,5 +1017,64 @@ impl Entity for ThrownTrident {
     /// `GameLevel::tick_blocks` sweeps tridents itself.
     fn sweeps_blocks_inside(&self) -> bool {
         false
+    }
+}
+
+impl EntityRules for Rocket {}
+impl EntityRules for ThrownTrident {}
+impl EntityRules for Boat {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractBoat.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for Minecart {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `AbstractMinecart.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        if self.in_water { 0.005 } else { 0.04 }
+    }
+}
+impl EntityRules for PrimedTnt {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `PrimedTnt.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+impl EntityRules for FallingBlock {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+    /// `FallingBlockEntity.getDefaultGravity`.
+    fn get_default_gravity(&self) -> f64 {
+        0.04
+    }
+}
+
+#[cfg(test)]
+mod no_gravity_stand_tests {
+    use super::Entity as _;
+    use horizon_client::entities::ArmorStand;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    fn a_no_gravity_stand_is_not_swept_for_the_blocks_it_is_in() {
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        // A resting stand presses a plate (measured beside the real server)...
+        assert!(stand.sweeps_blocks_inside() && stand.triggers_blocks());
+        // ...a NoGravity one does not, nor does a marker.
+        stand.no_gravity = true;
+        assert!(!stand.sweeps_blocks_inside());
+        stand.no_gravity = false;
+        stand.marker = true;
+        assert!(!stand.triggers_blocks());
     }
 }

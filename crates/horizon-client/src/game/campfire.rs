@@ -51,7 +51,7 @@ impl Game<'_> {
             self.native_campfire_start(pos, &held.item);
             // ItemStack.consumeAndReturn: creative keeps the item.
             self.consume_held();
-            self.stats.custom("interact_with_campfire", 1);
+            self.award_custom_stat("interact_with_campfire", 1);
             self.post_block_game_event(
                 "minecraft:block_change",
                 pos,

@@ -75,7 +75,7 @@ impl Game<'_> {
         let pitch = 0.4 / (self.world.random.next_float() * 0.4 + 0.8);
         self.audio
             .play("minecraft:entity.wind_charge.throw", Some(eye), 0.5, pitch);
-        self.stats.add("used", "minecraft:wind_charge", 1);
+        self.award_stat("used", "minecraft:wind_charge", 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()

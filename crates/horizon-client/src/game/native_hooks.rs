@@ -278,7 +278,7 @@
 //! change a cauldron.
 //!
 //! API 53 adds entities leaving a level (`native_entity_leave_level`), for
-//! item entities and experience orbs so far.
+//! item entities, experience orbs and mobs so far.
 //!
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
@@ -296,8 +296,10 @@
 //! `native_extract_item`, `native_move_items`, and `native_dimension` for a
 //! machine's tick, in `machines/native_items.rs`).
 //!
-//! API 47 adds entities joining a level (`native_entity_join_level`), for
-//! item entities and experience orbs so far.
+//! API 47 adds entities joining a level (`native_entity_join_level`); it tells
+//! every kind the game keeps in its entity lists (items, orbs, mobs, boats,
+//! minecarts, armor stands, TNT, falling blocks, projectiles, rockets,
+//! tridents).
 //!
 //! API 46 adds bounded world-space rim and colored-light requests
 //! (`native_visuals`) and opt-in texture-matched emissive material
@@ -528,7 +530,7 @@ pub(super) use horizon_world::level::flags;
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
 impl GameLevel<'_> {
-    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:native_hopper_pickup_item@.
+    /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
     #[inline(always)]
     pub(super) fn native_hopper_pickup_item(
         &self,
@@ -550,7 +552,7 @@ impl GameLevel<'_> {
     }
     /// A broken block is about to drop `experience` points at `pos`. The
     /// vanilla block drop rule has been checked; change the amount before its
-    /// orbs are awarded. Server-side. @API:native_block_exp@.
+    /// orbs are awarded. Server-side. @API:block_exp@.
     #[inline(always)]
     pub(super) fn native_block_exp(
         &self,
@@ -577,7 +579,7 @@ impl GameLevel<'_> {
 
     /// A flowing fluid at `pos` is about to change level. `fluid` is `water`
     /// or `lava`; the levels are 0 through 8. Set `cancel` to keep the old
-    /// level. Server-side. @API:native_fluid_level_change@.
+    /// level. Server-side. @API:fluid_level_change@.
     #[inline(always)]
     pub(super) fn native_fluid_level_change(
         &self,
@@ -601,7 +603,7 @@ impl GameLevel<'_> {
     }
 
     /// A non-persistent leaf block at distance 7 is about to decay at `pos`.
-    /// Set `cancel` to keep it. Server-side. @API:native_leaves_decay@.
+    /// Set `cancel` to keep it. Server-side. @API:leaves_decay@.
     #[inline(always)]
     pub(super) fn native_leaves_decay(
         &self,
@@ -614,7 +616,7 @@ impl GameLevel<'_> {
 
     /// Farmland at `pos` is about to change moisture from `from` to `to`.
     /// Set `cancel` to keep its old moisture. Server-side.
-    /// @API:native_moisture_change@.
+    /// @API:moisture_change@.
     #[inline(always)]
     pub(super) fn native_moisture_change(
         &self,
@@ -628,7 +630,7 @@ impl GameLevel<'_> {
     }
 
     /// A sponge at `pos` absorbed water and became wet. Server-side.
-    /// @API:native_sponge_absorb@.
+    /// @API:sponge_absorb@.
     #[inline(always)]
     pub(super) fn native_sponge_absorb(&self, dimension: LevelDimension, pos: BlockPos) {
         mod_api::dispatch_sponge_absorb(self, mod_api::mods(), dimension, pos);
@@ -636,7 +638,7 @@ impl GameLevel<'_> {
 
     /// A block at `pos` is about to fade from `from` to `to` because of
     /// melting or coral death. Set `cancel` to keep it. Server-side.
-    /// @API:native_block_fade@.
+    /// @API:block_fade@.
     #[inline(always)]
     pub(super) fn native_block_fade(
         &self,
@@ -651,7 +653,7 @@ impl GameLevel<'_> {
 
     /// Precipitation is about to form or add to a block at `pos`. `from` and
     /// `to` are block state IDs. Set `cancel` to keep the old state. Server-side.
-    /// @API:native_block_form@.
+    /// @API:block_form@.
     #[inline(always)]
     pub(super) fn native_block_form(
         &self,
@@ -665,7 +667,7 @@ impl GameLevel<'_> {
     }
 
     /// The Ender Dragon fight is about to place its first dragon egg at `pos`.
-    /// Set `cancel` to leave the block unchanged. Server-side. @API:native_dragon_egg_form@.
+    /// Set `cancel` to leave the block unchanged. Server-side. @API:dragon_egg_form@.
     #[inline(always)]
     pub(super) fn native_dragon_egg_form(
         &self,
@@ -718,7 +720,7 @@ impl GameLevel<'_> {
     /// On an authoritative server, fire is about to be placed at `pos` by
     /// flint and steel, a fire charge, lava, lightning or fire spread. Set
     /// `player` is the acting server player when there is one. Set `cancel` to
-    /// leave the position unchanged. @API:native_block_ignite@.
+    /// leave the position unchanged. @API:block_ignite@.
     #[inline(always)]
     pub(super) fn native_block_ignite(
         &self,
@@ -740,7 +742,7 @@ impl GameLevel<'_> {
     }
 
     /// On an authoritative server, fire is about to burn the block at `pos`
-    /// away. Set `cancel` to keep that block. @API:native_block_burn@.
+    /// away. Set `cancel` to keep that block. @API:block_burn@.
     #[inline(always)]
     pub(super) fn native_block_burn(
         &self,
@@ -753,7 +755,7 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, a note block at `pos` is about to sound.
     /// `player` is the acting server player when there is one. Set `cancel` to silence it.
-    /// @API:native_note_play@.
+    /// @API:note_play@.
     #[inline(always)]
     pub(super) fn native_note_play(
         &self,
@@ -777,7 +779,7 @@ impl GameLevel<'_> {
     }
 
     /// On an authoritative server, a bell at `pos` is about to ring. Set
-    /// `cancel` to stop the ring and its raider reveal. @API:native_bell_ring@.
+    /// `cancel` to stop the ring and its raider reveal. @API:bell_ring@.
     #[inline(always)]
     pub(super) fn native_bell_ring(
         &self,
@@ -791,7 +793,7 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, a cauldron at `pos` is about to change
     /// fill level from `from_level` to `to_level` for `reason`. Set `cancel`
-    /// to leave it unchanged. @API:native_cauldron_level_changed@.
+    /// to leave it unchanged. @API:cauldron_level_changed@.
     #[inline(always)]
     pub(super) fn native_cauldron_level_changed(
         &self,
@@ -1565,8 +1567,7 @@ impl Game<'_> {
         mod_api::dispatch_emissive(self, mod_api::mods(), layers);
     }
     /// The world's phases, read-only; `error_text` carries the engine's
-    /// own open-failure text, empty otherwise. Server-side; the deprecated
-    /// in-frame path delivers no lifecycle events. A server loop or final
+    /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
     pub(super) fn native_world_lifecycle(
         &mut self,
@@ -3401,6 +3402,25 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_hanging_place(self, mod_api::mods(), player, name, kind, pos, cancel);
     }
+    /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
+    /// a painting (`minecraft:painting`), `kind` its entity type and `pos` the
+    /// block it hangs in, is about to break: a server player's hit
+    /// (`player`, their state swapped in, so `native_tell` answers them), a
+    /// blast, or the wall it hangs on gone (`player` None for both). Where
+    /// `BlockAttachedEntity.hurtServer` and its survival check would kill
+    /// it, before anything drops or sounds. Set `cancel` and it stays, as it
+    /// was. A hit that only takes the item out of a frame does not break the
+    /// frame and is not asked. The game's own player's hit is not asked, nor
+    /// is `/kill`. @API:native_hanging_break@.
+    pub(super) fn native_hanging_break(
+        &mut self,
+        player: Option<u128>,
+        kind: &str,
+        pos: [i32; 3],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_hanging_break(self, mod_api::mods(), player, kind, pos, cancel);
+    }
     /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
     /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
     /// empties `minecraft:water`): where `BucketItem.use` has found the block
@@ -3443,7 +3463,7 @@ impl Game<'_> {
     /// A server player selected a new hotbar slot. The player's state is not
     /// swapped in, and helpers that look them up through `self.lan` may find
     /// nothing while a guest packet is being handled. Set `cancel` to keep
-    /// the old slot; the client is sent that slot again. @API:native_player_item_held@.
+    /// the old slot; the client is sent that slot again. @API:player_item_held@.
     pub(super) fn native_player_item_held(
         &mut self,
         player: u128,
@@ -3466,7 +3486,7 @@ impl Game<'_> {
     /// the hotbar. `pos` is zero for an entity; `entity_id` is zero for a
     /// block. The player's state is swapped in, though helpers that look them
     /// up through `self.lan` may find nothing while a guest packet is handled.
-    /// Set `cancel` to leave the inventory and client unchanged. @API:native_player_pick_item@.
+    /// Set `cancel` to leave the inventory and client unchanged. @API:player_pick_item@.
     pub(super) fn native_player_pick_item(
         &mut self,
         player: u128,
@@ -3559,11 +3579,62 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_advancement_done(self, mod_api::mods(), player, name, advancement);
     }
+    /// A criterion of a server player's advancement was granted or revoked,
+    /// after its progress changed and before any completion rewards, except
+    /// the `minecraft:tick` criteria granted on a network player's first tick
+    /// or a reload, which are heard after that tick's rewards and packets. A
+    /// grant or revoke that changes nothing is not heard. `granted` is false for a
+    /// revoke. Helpers looking up the guest through `self.lan` may find
+    /// nothing during its packet. @API:player_advancement_progress@.
+    pub(super) fn native_player_advancement_progress(
+        &mut self,
+        player: u128,
+        name: &str,
+        advancement: &str,
+        criterion: &str,
+        granted: bool,
+    ) {
+        mod_api::dispatch_player_advancement_progress(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            advancement,
+            criterion,
+            granted,
+        );
+    }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    pub(super) fn native_player_stat_award(
+        &mut self,
+        player: u128,
+        name: &str,
+        stat_type: &str,
+        stat: &str,
+        value: i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_stat_award(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            stat_type,
+            stat,
+            value,
+            cancel,
+        );
+    }
     /// A server player's experience points are about to increase from an orb pickup,
     /// after mending has taken its share. Change `amount` to change the points
     /// added. The player's state is not swapped in, so helpers that look them up
     /// through `self.lan` may find nothing while a guest packet is handled.
-    /// Server-side. @API:native_player_exp_change@.
+    /// Server-side. @API:player_exp_change@.
     pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
     }
@@ -3571,7 +3642,7 @@ impl Game<'_> {
     /// item id and `ticks` its duration. The player's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while a
     /// guest packet is handled. Set `cancel` to skip starting the cooldown.
-    /// Server-side. @API:native_player_item_cooldown@.
+    /// Server-side. @API:player_item_cooldown@.
     pub(super) fn native_player_item_cooldown(
         &mut self,
         player: u128,
@@ -3593,7 +3664,7 @@ impl Game<'_> {
     /// A recipe is about to be unlocked for a server player. Set `cancel` to
     /// keep it locked. The player's state is not swapped in, so helpers that
     /// look them up through `self.lan` may find nothing while a guest packet
-    /// is handled. Server-side. @API:native_player_recipe_discovered@.
+    /// is handled. Server-side. @API:player_recipe_discovered@.
     pub(super) fn native_player_recipe_discovered(
         &mut self,
         player: u128,
@@ -3615,7 +3686,7 @@ impl Game<'_> {
     /// position. The player's state is not swapped in, so helpers that look
     /// them up through `self.lan` may find nothing while a guest packet is
     /// handled. Set `cancel` to keep the old point. Server-side.
-    /// @API:native_player_spawn_point_set@.
+    /// @API:player_spawn_point_set@.
     pub(super) fn native_player_spawn_point_set(
         &mut self,
         player: u128,
@@ -3641,7 +3712,7 @@ impl Game<'_> {
     /// The player's state is not swapped in, so helpers that look them up
     /// through `self.lan` may find nothing while a guest packet is handled.
     /// Set `cancel` to keep them in their current place. Server-side.
-    /// @API:native_player_portal@.
+    /// @API:player_portal@.
     pub(super) fn native_player_portal(
         &mut self,
         player: u128,
@@ -3693,7 +3764,7 @@ impl Game<'_> {
     }
     /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
     /// Set `cancel` to suppress its response. Server-side.
-    /// @API:native_block_receive_game@.
+    /// @API:block_receive_game@.
     pub(super) fn native_block_receive_game(
         &mut self,
         dimension: &str,
@@ -3714,7 +3785,7 @@ impl Game<'_> {
     }
     /// A dispenser sheared `entity` of kind `kind` at the block in front of
     /// its own block at `pos`, after the shearing effects. Server-side.
-    /// @API:native_block_shear_entity@.
+    /// @API:block_shear_entity@.
     pub(super) fn native_block_shear_entity(
         &mut self,
         dimension: &str,
@@ -3727,7 +3798,7 @@ impl Game<'_> {
     /// A dispenser equipped `item` on the first eligible `target` in front
     /// of its block at `pos`. `target` is `player`, `mob` or `armor_stand`.
     /// The equip, item consumption, sound and game event have completed.
-    /// Server-side. @API:native_block_dispense_armor@.
+    /// Server-side. @API:block_dispense_armor@.
     pub(super) fn native_block_dispense_armor(
         &mut self,
         dimension: &str,
@@ -3768,7 +3839,7 @@ impl Game<'_> {
     }
     /// A server player is about to open an inventory supplied by a block at
     /// `pos`. Set `cancel` to leave the inventory closed. The player's state
-    /// is not swapped in. @API:native_inventory_block_start@.
+    /// is not swapped in. @API:inventory_block_start@.
     pub(super) fn native_inventory_block_start(
         &mut self,
         player: u128,
@@ -3781,19 +3852,19 @@ impl Game<'_> {
 
     /// A sculk catalyst at `pos` has begun blooming after taking experience.
     /// The catalyst block state has changed. Server-side.
-    /// @API:native_sculk_bloom@.
+    /// @API:sculk_bloom@.
     pub(super) fn native_sculk_bloom(&mut self, dimension: &str, pos: [i32; 3]) {
         mod_api::dispatch_sculk_bloom(self, mod_api::mods(), dimension, pos);
     }
 
     /// A projectile hit the target block at `pos`, which now has `strength`
-    /// output power. Server-side. @API:native_target_hit@.
+    /// output power. Server-side. @API:target_hit@.
     pub(super) fn native_target_hit(&mut self, dimension: &str, pos: [i32; 3], strength: i32) {
         mod_api::dispatch_target_hit(self, mod_api::mods(), dimension, pos, strength);
     }
 
     /// A vault at `pos` changed to `state`. Its block state is updated.
-    /// Server-side. @API:native_vault_change_state@.
+    /// Server-side. @API:vault_change_state@.
     pub(super) fn native_vault_change_state(
         &mut self,
         dimension: &str,
@@ -3804,7 +3875,7 @@ impl Game<'_> {
     }
 
     /// A dispenser at `pos` failed to dispense `item`. Server-side.
-    /// @API:native_block_failed_dispense@.
+    /// @API:block_failed_dispense@.
     pub(super) fn native_block_failed_dispense(
         &mut self,
         dimension: &str,
@@ -3816,7 +3887,7 @@ impl Game<'_> {
 
     /// A beacon at `pos` activated or deactivated after its beam was checked.
     /// `active` says whether it now has a complete pyramid. Server-side.
-    /// @API:native_beacon_state_change@.
+    /// @API:beacon_state_change@.
     pub(super) fn native_beacon_state_change(
         &mut self,
         dimension: &str,
@@ -3828,7 +3899,7 @@ impl Game<'_> {
 
     /// An anvil at `pos` took damage, changing its block from `from` to `to`.
     /// `to` is air when the anvil broke. Server-side.
-    /// @API:native_anvil_damaged@.
+    /// @API:anvil_damaged@.
     pub(super) fn native_anvil_damaged(
         &mut self,
         dimension: &str,
@@ -3840,7 +3911,7 @@ impl Game<'_> {
     }
 
     /// A server guest's block-breaking animation changed to `progress` at
-    /// `pos` (0 through 9). @API:native_block_break_progress_update@.
+    /// `pos` (0 through 9). @API:block_break_progress_update@.
     pub(super) fn native_block_break_progress_update(
         &mut self,
         player: u128,
@@ -3860,7 +3931,7 @@ impl Game<'_> {
 
     /// A guest's block inventory lock check at `pos`. `locked` is the
     /// vanilla result and may be changed. The guest's state is not swapped in.
-    /// @API:native_block_lock_check@.
+    /// @API:block_lock_check@.
     pub(super) fn native_block_lock_check(
         &mut self,
         player: u128,
@@ -3929,7 +4000,7 @@ impl Game<'_> {
     /// A server player changed their client option for the dominant hand. `left` is true for
     /// left-handed. Their state is not swapped in, and helpers looking them up through `self.lan`
     /// may find nothing during guest packet handling. Server-side.
-    /// @API:native_player_change_main_hand@.
+    /// @API:player_change_main_hand@.
     pub(super) fn native_player_change_main_hand(&mut self, player: u128, name: &str, left: bool) {
         mod_api::dispatch_player_change_main_hand(self, mod_api::mods(), player, name, left);
     }
@@ -3949,7 +4020,7 @@ impl Game<'_> {
     /// A server player put a plant into a flower pot, after the potted block
     /// state was stored and the item consumed. `plant` is the item id and
     /// `pos` the pot position. Helpers looking up the guest through `self.lan`
-    /// may find nothing during packet handling. Server-side. @API:player_flower_pot_manipulate@.
+    /// may find nothing during packet handling. Server-side. @API:native_player_flower_pot_manipulate@.
     pub(super) fn native_player_flower_pot_manipulate(
         &mut self,
         player: u128,
@@ -3969,7 +4040,7 @@ impl Game<'_> {
     /// A server player inserted a book into a lectern, after the block entity
     /// and inventory changed. `book` is the item id. Helpers looking up a
     /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. @API:player_insert_lectern_book@.
+    /// Server-side. @API:native_player_insert_lectern_book@.
     pub(super) fn native_player_insert_lectern_book(
         &mut self,
         player: u128,
@@ -3989,7 +4060,7 @@ impl Game<'_> {
     /// A server player took the book from a lectern, after the menu and block
     /// entity changed. `book` is the removed item id. Helpers looking up a
     /// guest through `self.lan` may find nothing during packet handling.
-    /// Server-side. @API:player_take_lectern_book@.
+    /// Server-side. @API:native_player_take_lectern_book@.
     pub(super) fn native_player_take_lectern_book(
         &mut self,
         player: u128,
@@ -4002,7 +4073,7 @@ impl Game<'_> {
     /// A server player changed the page of a lectern, after its page and
     /// redstone pulse changed. `page` is the zero-based new page. Helpers
     /// looking up a guest through `self.lan` may find nothing during packet
-    /// handling. Server-side. @API:player_lectern_page_change@.
+    /// handling. Server-side. @API:native_player_lectern_page_change@.
     pub(super) fn native_player_lectern_page_change(
         &mut self,
         player: u128,
@@ -4023,7 +4094,7 @@ impl Game<'_> {
     /// changed. `action` is `put`, `rotate`, `remove_item` or `break`; `item`
     /// is empty when no item remains, and `rotation` is the resulting step.
     /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. @API:player_item_frame_change@.
+    /// packet handling. Server-side. @API:native_player_item_frame_change@.
     pub(super) fn native_player_item_frame_change(
         &mut self,
         player: u128,
@@ -4047,7 +4118,7 @@ impl Game<'_> {
     /// Mending repaired a server player's item with experience from an orb.
     /// `repair` is durability restored and `experience` is the orb's value.
     /// Helpers looking up the guest through `self.lan` may find nothing during
-    /// packet handling. Server-side. @API:player_item_mend@.
+    /// packet handling. Server-side. @API:native_player_item_mend@.
     pub(super) fn native_player_item_mend(
         &mut self,
         player: u128,
@@ -4252,7 +4323,7 @@ impl Game<'_> {
     /// A server player is about to travel through an End gateway at `gateway`.
     /// Set `cancel` to leave them at the entrance; the gateway is not consumed
     /// and its cooldown does not start. Helpers may find no guest through
-    /// `self.lan` during its packet. Server-side. @API:native_player_teleport_end_gateway@.
+    /// `self.lan` during its packet. Server-side. @API:player_teleport_end_gateway@.
     pub(super) fn native_player_teleport_end_gateway(
         &mut self,
         player: u128,
@@ -4272,7 +4343,7 @@ impl Game<'_> {
     /// A server player's recipe book requested a known recipe be placed in
     /// their crafting grid. `recipe` is the recipe id; `all` is the shift
     /// click form. The player's state may not be available through `self.lan`
-    /// while a guest packet is handled. Server-side. @API:native_player_recipe_book_click@.
+    /// while a guest packet is handled. Server-side. @API:player_recipe_book_click@.
     pub(super) fn native_player_recipe_book_click(
         &mut self,
         player: u128,
@@ -4292,7 +4363,7 @@ impl Game<'_> {
     /// A server player's XP orb pickup cooldown changed to `ticks`. It is
     /// reported after the value changes; the player's state may not be found
     /// through `self.lan` while a guest packet is handled. Server-side.
-    /// @API:native_player_exp_cooldown_change@.
+    /// @API:player_exp_cooldown_change@.
     pub(super) fn native_player_exp_cooldown_change(
         &mut self,
         player: u128,
@@ -4303,7 +4374,7 @@ impl Game<'_> {
     }
     /// A server player changed their client language option to `locale`.
     /// The player's state may not be found through `self.lan` during a guest
-    /// packet. Server-side. @API:native_player_locale_change@.
+    /// packet. Server-side. @API:player_locale_change@.
     pub(super) fn native_player_locale_change(&mut self, player: u128, name: &str, locale: &str) {
         mod_api::dispatch_player_locale_change(self, mod_api::mods(), player, name, locale);
     }
@@ -4311,7 +4382,7 @@ impl Game<'_> {
     /// position changed. `entity` is its network id; `from` and `to` are
     /// coordinates in `dimension`. This hook reports command teleports that
     /// use Horizon's same-level target path; it does not change vanilla's
-    /// movement. @API:native_entity_teleport@.
+    /// movement. @API:entity_teleport@.
     pub(super) fn native_entity_teleport(
         &mut self,
         dimension: &str,
@@ -4324,13 +4395,13 @@ impl Game<'_> {
 
     /// A server entity finished its portal wait and is beginning to leave
     /// `dimension` through `pos`. The destination follows the portal rules.
-    /// @API:native_entity_portal@.
+    /// @API:entity_portal@.
     pub(super) fn native_entity_portal(&mut self, dimension: &str, entity: u32, pos: [i32; 3]) {
         mod_api::dispatch_entity_portal(self, mod_api::mods(), dimension, entity, pos);
     }
 
     /// A server projectile was added to the level. `player` is set only for
-    /// a player launch; other sources have an empty `name`. @API:native_projectile_launch@.
+    /// a player launch; other sources have an empty `name`. @API:projectile_launch@.
     pub(super) fn native_projectile_launch(
         &mut self,
         player: Option<u128>,
@@ -4342,7 +4413,7 @@ impl Game<'_> {
     }
 
     /// A player bow or crossbow launched an arrow with `force`, after the
-    /// projectile entered the level. @API:native_entity_shoot_bow@.
+    /// projectile entered the level. @API:entity_shoot_bow@.
     pub(super) fn native_entity_shoot_bow(
         &mut self,
         player: u128,
@@ -4354,13 +4425,13 @@ impl Game<'_> {
     }
 
     /// A guest's fall flying state changed on the server. The change has
-    /// already been applied. @API:native_entity_toggle_glide@.
+    /// already been applied. @API:entity_toggle_glide@.
     pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {
         mod_api::dispatch_entity_toggle_glide(self, mod_api::mods(), player, name, gliding);
     }
 
     /// A guest player's synchronized pose changed from `from` to `to`.
-    /// @API:native_entity_pose_change@.
+    /// @API:entity_pose_change@.
     pub(super) fn native_entity_pose_change(
         &mut self,
         player: u128,
@@ -4372,19 +4443,19 @@ impl Game<'_> {
     }
 
     /// A dropped item entity was successfully added to the server level.
-    /// @API:native_item_spawn@.
+    /// @API:item_spawn@.
     pub(super) fn native_item_spawn(&mut self, entity: u32, item: &str, count: i32, pos: [f64; 3]) {
         mod_api::dispatch_item_spawn(self, mod_api::mods(), entity, item, count, pos);
     }
 
     /// A mob became tamed after its owner and persistent state were set.
-    /// @API:native_entity_tame@.
+    /// @API:entity_tame@.
     pub(super) fn native_entity_tame(&mut self, entity: u32, kind: &str, owner: Option<u128>) {
         mod_api::dispatch_entity_tame(self, mod_api::mods(), entity, kind, owner);
     }
 
     /// Two mobs completed a breeding action. `child` is absent when vanilla
-    /// lays an egg instead of creating a baby. @API:native_entity_breed@.
+    /// lays an egg instead of creating a baby. @API:entity_breed@.
     pub(super) fn native_entity_breed(&mut self, parent: u32, partner: u32, child: Option<u32>) {
         mod_api::dispatch_entity_breed(self, mod_api::mods(), parent, partner, child);
     }
@@ -4409,7 +4480,7 @@ impl Game<'_> {
     /// A server player took an output from a furnace at `pos`; `item` is the
     /// output item id and `count` is how many were taken. The player's state is
     /// not swapped in, so helpers that look them up through `self.lan` may find
-    /// nothing during guest packet handling. @API:native_furnace_extract@.
+    /// nothing during guest packet handling. @API:furnace_extract@.
     pub(super) fn native_furnace_extract(
         &mut self,
         player: u128,
@@ -4420,7 +4491,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_furnace_extract(self, mod_api::mods(), player, name, pos, item, count);
     }
-    /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in. @API:native_enchant_item@.
+    /// A server player applied an enchantment at `pos`; `item` is the finished item and `levels` the levels charged. The player's state is not swapped in. @API:enchant_item@.
     pub(super) fn native_enchant_item(
         &mut self,
         player: u128,
@@ -4431,7 +4502,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_enchant_item(self, mod_api::mods(), player, name, pos, item, levels);
     }
-    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:native_prepare_item_enchant@.
+    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:prepare_item_enchant@.
     pub(super) fn native_prepare_item_enchant(
         &mut self,
         player: u128,
@@ -4441,7 +4512,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_item_enchant(self, mod_api::mods(), player, name, pos, costs);
     }
-    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. @API:native_prepare_anvil@.
+    /// An anvil result was prepared for a server player at `pos`. Change `result` or its level `cost` before it is sent. @API:prepare_anvil@.
     pub(super) fn native_prepare_anvil(
         &mut self,
         player: u128,
@@ -4452,7 +4523,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_anvil(self, mod_api::mods(), player, name, pos, cost, result);
     }
-    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_grindstone@.
+    /// A grindstone result was prepared for a server player at `pos`. Change it before it is sent. @API:prepare_grindstone@.
     pub(super) fn native_prepare_grindstone(
         &mut self,
         player: u128,
@@ -4462,7 +4533,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_grindstone(self, mod_api::mods(), player, name, pos, result);
     }
-    /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. @API:native_prepare_smithing@.
+    /// A smithing result was prepared for a server player at `pos`. Change it before it is sent. @API:prepare_smithing@.
     pub(super) fn native_prepare_smithing(
         &mut self,
         player: u128,
@@ -4472,7 +4543,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_smithing(self, mod_api::mods(), player, name, pos, result);
     }
-    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:native_prepare_item_craft@.
+    /// A crafting-grid result was prepared for a server player; `pos` is the crafting table, or None for the inventory grid. Change `result` before it is sent. @API:prepare_item_craft@.
     pub(super) fn native_prepare_item_craft(
         &mut self,
         player: u128,
@@ -4482,7 +4553,7 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_prepare_item_craft(self, mod_api::mods(), player, name, pos, result);
     }
-    /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
+    /// A server player selected trade `index` from `villager` in the trading menu. @API:trade_select@.
     pub(super) fn native_trade_select(
         &mut self,
         player: u128,
@@ -4494,7 +4565,7 @@ impl Game<'_> {
     }
     /// The server changed its weather parameters. `raining` and `thundering`
     /// are the requested final states. Set `cancel` to keep the previous
-    /// weather parameters. Server-side. @API:native_weather_change@.
+    /// weather parameters. Server-side. @API:weather_change@.
     pub(super) fn native_weather_change(
         &mut self,
         dimension: &str,
@@ -4514,7 +4585,7 @@ impl Game<'_> {
 
     /// The server changed its thunder state through `/weather`. Set `cancel`
     /// to keep the previous thunder state and timer. Server-side.
-    /// @API:native_thunder_change@.
+    /// @API:thunder_change@.
     pub(super) fn native_thunder_change(
         &mut self,
         dimension: &str,
@@ -4526,7 +4597,7 @@ impl Game<'_> {
 
     /// A server lightning bolt is about to be created. `cause` is `weather`,
     /// `trident` or `command`; `player` is the responsible player when known.
-    /// Set `cancel` to prevent the bolt and its effects. @API:native_lightning_strike@.
+    /// Set `cancel` to prevent the bolt and its effects. @API:lightning_strike@.
     pub(super) fn native_lightning_strike(
         &mut self,
         player: Option<u128>,
@@ -4561,7 +4632,7 @@ impl Game<'_> {
     }
 
     /// The overworld clock is about to jump, from sleep or `/time`. Set
-    /// `cancel` to keep `from`. @API:native_time_skip@.
+    /// `cancel` to keep `from`. @API:time_skip@.
     pub(super) fn native_time_skip(
         &mut self,
         dimension: &str,
@@ -4603,13 +4674,13 @@ impl Game<'_> {
     /// A Nether portal was built for a dimension travel, or an End platform
     /// was made for an arrival. `pos` is the lower corner of the Nether
     /// portal rectangle or the End platform origin. The completed blocks are
-    /// already in the world. @API:native_portal_create@.
+    /// already in the world. @API:portal_create@.
     pub(super) fn native_portal_create(&mut self, dimension: &str, pos: [i32; 3]) {
         mod_api::dispatch_portal_create(self, mod_api::mods(), dimension, pos);
     }
 
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
-    /// number and `raiders` counts the raiders, not the mobs they ride. @API:native_raid_spawn_wave@.
+    /// number and `raiders` counts the raiders, not the mobs they ride. @API:raid_spawn_wave@.
     pub(super) fn native_raid_spawn_wave(
         &mut self,
         raid: i32,
@@ -4621,25 +4692,25 @@ impl Game<'_> {
     }
 
     /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
-    /// `stopped`). @API:native_raid_state_change@.
+    /// `stopped`). @API:raid_state_change@.
     pub(super) fn native_raid_state_change(&mut self, raid: i32, pos: [i32; 3], state: &str) {
         mod_api::dispatch_raid_state_change(self, mod_api::mods(), raid, pos, state);
     }
 
     /// The server completed a world save cycle. `wait` says chunk writes were
-    /// flushed before returning. @API:native_world_saved@.
+    /// flushed before returning. @API:world_saved@.
     pub(super) fn native_world_saved(&mut self, wait: bool) {
         mod_api::dispatch_world_saved(self, mod_api::mods(), wait);
     }
 
     /// Entities from `chunk` finished loading into the server world. `count`
-    /// is the number of saved entity records read. @API:native_entities_load@.
+    /// is the number of saved entity records read. @API:entities_load@.
     pub(super) fn native_entities_load(&mut self, dimension: &str, chunk: [i32; 2], count: usize) {
         mod_api::dispatch_entities_load(self, mod_api::mods(), dimension, chunk, count);
     }
 
     /// Entities in `chunk` left the active server world and were queued for
-    /// saving. `count` is the number of entity records. @API:native_entities_unload@.
+    /// saving. `count` is the number of entity records. @API:entities_unload@.
     pub(super) fn native_entities_unload(
         &mut self,
         dimension: &str,
@@ -4649,13 +4720,13 @@ impl Game<'_> {
         mod_api::dispatch_entities_unload(self, mod_api::mods(), dimension, chunk, count);
     }
 
-    /// A generic world game event was fired at `pos`. @API:native_game_event@.
+    /// A generic world game event was fired at `pos`. @API:game_event@.
     pub(super) fn native_game_event(&mut self, event: &str, pos: [f64; 3]) {
         mod_api::dispatch_game_event(self, mod_api::mods(), event, pos);
     }
 
     /// A guest asked to complete `command`; `suggestions` may be added to or
-    /// filtered. `range` is the replaced byte range. @API:native_tab_complete@.
+    /// filtered. `range` is the replaced byte range. @API:tab_complete@.
     pub(super) fn native_tab_complete(
         &mut self,
         player: u128,
@@ -4676,18 +4747,18 @@ impl Game<'_> {
     }
 
     /// A server broadcast line is about to be logged and sent. Change `line`
-    /// or set `cancel` to drop it. @API:native_broadcast_message@.
+    /// or set `cancel` to drop it. @API:broadcast_message@.
     pub(super) fn native_broadcast_message(&self, line: &mut Text, cancel: &mut bool) {
         mod_api::dispatch_broadcast_message(self, mod_api::mods(), line, cancel);
     }
 
-    /// The dedicated server's whitelist changed to `enabled`. @API:native_whitelist_state_update@.
+    /// The dedicated server's whitelist changed to `enabled`. @API:whitelist_state_update@.
     pub(super) fn native_whitelist_state_update(&mut self, enabled: bool) {
         mod_api::dispatch_whitelist_state_update(self, mod_api::mods(), enabled);
     }
 
     /// A mob entered love mode after player interaction. `player` is the
-    /// feeder when known. @API:native_entity_enter_love_mode@.
+    /// feeder when known. @API:entity_enter_love_mode@.
     pub(super) fn native_entity_enter_love_mode(
         &mut self,
         entity: u32,
@@ -4698,7 +4769,7 @@ impl Game<'_> {
     }
 
     /// A mob conversion completed; both ids and entity types are reported.
-    /// @API:native_entity_transform@.
+    /// @API:entity_transform@.
     pub(super) fn native_entity_transform(
         &mut self,
         entity: u32,
@@ -4717,39 +4788,39 @@ impl Game<'_> {
     }
 
     /// A thrown splash or lingering potion applied its hit effects.
-    /// @API:native_potion_splash@.
+    /// @API:potion_splash@.
     pub(super) fn native_potion_splash(&mut self, item: &str, pos: [f64; 3]) {
         mod_api::dispatch_potion_splash(self, mod_api::mods(), item, pos);
     }
 
-    /// A firework rocket completed its explosion effects. @API:native_firework_explode@.
+    /// A firework rocket completed its explosion effects. @API:firework_explode@.
     pub(super) fn native_firework_explode(&mut self, entity: u32, pos: [f64; 3], bursts: usize) {
         mod_api::dispatch_firework_explode(self, mod_api::mods(), entity, pos, bursts);
     }
 
     /// An experience bottle broke and its experience was awarded.
-    /// @API:native_exp_bottle@.
+    /// @API:exp_bottle@.
     pub(super) fn native_exp_bottle(&mut self, pos: [f64; 3], experience: u32) {
         mod_api::dispatch_exp_bottle(self, mod_api::mods(), pos, experience);
     }
 
-    /// A player ignited a creeper with an item. @API:native_creeper_ignite@.
+    /// A player ignited a creeper with an item. @API:creeper_ignite@.
     pub(super) fn native_creeper_ignite(&mut self, entity: u32, player: u128, item: &str) {
         mod_api::dispatch_creeper_ignite(self, mod_api::mods(), entity, player, item);
     }
 
-    /// Lightning charged a creeper. @API:native_creeper_power@.
+    /// Lightning charged a creeper. @API:creeper_power@.
     pub(super) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3]) {
         mod_api::dispatch_creeper_power(self, mod_api::mods(), entity, lightning);
     }
 
-    /// A mob broke the door at `pos`. @API:native_entity_break_door@.
+    /// A mob broke the door at `pos`. @API:entity_break_door@.
     pub(super) fn native_entity_break_door(&mut self, entity: u32, kind: &str, pos: [i32; 3]) {
         mod_api::dispatch_entity_break_door(self, mod_api::mods(), entity, kind, pos);
     }
 
     /// A mob changed a block at `pos`, after the new state was applied.
-    /// @API:native_entity_change_block@.
+    /// @API:entity_change_block@.
     pub(super) fn native_entity_change_block(
         &mut self,
         entity: u32,
@@ -4762,7 +4833,7 @@ impl Game<'_> {
     }
 
     /// A bee entered the hive at `pos` and was stored there.
-    /// @API:native_entity_enter_block@.
+    /// @API:entity_enter_block@.
     pub(super) fn native_entity_enter_block(
         &mut self,
         entity: u32,
@@ -5157,12 +5228,10 @@ impl Game<'_> {
     /// 0 runs it out on its first tick, as `native_living_entity_use_item_tick`
     /// running it out, unless the item's own is 0 already), or set
     /// `canceled` and the use doesn't start. Both sides, as
-    /// vanilla's: wherever the world runs (the server, single player
-    /// in-frame, a LAN host) for every player of the world, and on a
+    /// vanilla's: on the server for every player of the world, and on a
     /// server's client for the uses it predicts. Answer the same on both,
-    /// and change the world only where this `Game` runs the world, not on a
-    /// server's client: no helper tells the two apart yet (`native_window`
-    /// is also true in-frame and on an in-frame LAN host). API 90.
+    /// and change the world only on the server (`native_window` is false
+    /// there), not on a server's client. API 90.
     pub(super) fn native_living_entity_use_item_start(
         &mut self,
         stack: &ItemStack,
@@ -5224,9 +5293,8 @@ impl Game<'_> {
     /// the code. On a server's client a run-out use stays in use, frozen,
     /// so letting go still tells the server. Both sides, as vanilla's
     /// `updatingUsingItem`: answer the same on both, and change the world
-    /// only where this `Game` runs the world, not on a server's client (no
-    /// helper tells the two apart yet; `native_window` is also true
-    /// in-frame and on an in-frame LAN host). Runs every tick of every use:
+    /// only on the server (`native_window` is false there), not on a
+    /// server's client. Runs every tick of every use:
     /// check the item first. API 131.
     pub(super) fn native_living_entity_use_item_tick(
         &mut self,
@@ -5288,6 +5356,49 @@ impl Game<'_> {
             hand,
             duration,
             canceled,
+        );
+    }
+    /// NeoForge's `ArrowLooseEvent`: the player releases a bow `stack` with
+    /// `has_ammo` and `charge` ticks held. Change `charge` or set `canceled`
+    /// to prevent the shot; negative charge also prevents it. Unlike
+    /// `native_living_entity_use_item_stop`, this does not skip the whole item
+    /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
+    /// with read-only force. Fires on the Game running the bow release, including
+    /// LAN guests; a remote client's own release path is not covered. Crossbows
+    /// and `ArrowNockEvent` are not covered. @API:arrow_loose@.
+    pub(super) fn native_arrow_loose(
+        &mut self,
+        stack: &ItemStack,
+        has_ammo: bool,
+        charge: &mut i32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_arrow_loose(self, mod_api::mods(), stack, has_ammo, charge, canceled);
+    }
+    /// NeoForge's `CriticalHitEvent`: a player's melee hit on a living
+    /// `target_kind` (`minecraft:zombie`, `minecraft:armor_stand`) that deals
+    /// damage, where `Player.attack` decides whether it is critical.
+    /// `vanilla_critical` is vanilla's answer; `critical` starts as it and may
+    /// be forced or denied (as in vanilla a critical hit prevents the sweep, so
+    /// a forced crit loses it; a denied crit loses the crit sound and
+    /// particles); `damage_multiplier` starts at 1.5 for vanilla's critical and
+    /// 1.0 otherwise, and scales the damage only while `critical` ends true. Not fired for a
+    /// target that is no living entity (a dragon part) or when the hit does
+    /// no damage. Fires on the Game that runs the attack. @API:critical_hit@.
+    pub(super) fn native_critical_hit(
+        &mut self,
+        target_kind: &str,
+        vanilla_critical: bool,
+        critical: &mut bool,
+        damage_multiplier: &mut f32,
+    ) {
+        mod_api::dispatch_critical_hit(
+            self,
+            mod_api::mods(),
+            target_kind,
+            vanilla_critical,
+            critical,
+            damage_multiplier,
         );
     }
     /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
@@ -5479,6 +5590,48 @@ impl Game<'_> {
     /// 115.
     pub(super) fn native_player_respawned(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
+    }
+    /// A player was saved to the world's store (NeoForge's
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// is the world's player directory (`players/data`): write your own file
+    /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
+    /// may be leaving, so no player's state is swapped in. Not cancellable.
+    pub(super) fn native_player_save_to_file(
+        &mut self,
+        player: u128,
+        name: &str,
+        directory: &std::path::Path,
+    ) {
+        mod_api::dispatch_player_save_to_file(self, mod_api::mods(), player, name, directory);
+    }
+    /// A player was loaded from the world's save (NeoForge's
+    /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
+    /// has been read and applied, and they are not placed in a level yet.
+    /// `directory` is the world's player directory (`players/data`): a mod
+    /// reads its own file there, named `<uuid>.<suffix>` as
+    /// `getPlayerFile(suffix)` names it. Heard once for each join, for the
+    /// owner of an integrated server as for anyone else, on a server, with no
+    /// player's state swapped in. Not cancellable.
+    pub(super) fn native_player_load_from_file(
+        &mut self,
+        player: u128,
+        name: &str,
+        directory: &std::path::Path,
+    ) {
+        mod_api::dispatch_player_load_from_file(self, mod_api::mods(), player, name, directory);
+    }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    pub(super) fn native_player_clone(&mut self, player: u128, name: &str, was_death: bool) {
+        mod_api::dispatch_player_clone(self, mod_api::mods(), player, name, was_death);
     }
     /// The number of players with the mod container at `pos` of `dimension`
     /// open went from `previous` to `viewers` (vanilla's
@@ -5702,8 +5855,8 @@ impl Game<'_> {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities and experience orbs; later
-    /// APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
+    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
     pub(super) fn native_entity_leave_level(&mut self, dimension: &str, entity: u32, kind: &str) {
         mod_api::dispatch_entity_leave_level(self, mod_api::mods(), dimension, entity, kind);
     }
@@ -5714,9 +5867,15 @@ impl Game<'_> {
     /// an arrival through a portal). `entity` is its ID and `kind` its type
     /// (`minecraft:item`). It is already in the level's lists, so helpers that
     /// take an entity ID find it. Set `canceled` to keep it out: it is taken
-    /// back out as if never added, and a `/summon` of it fails. 47 tells
-    /// item entities and experience orbs; later APIs add other kinds, so check
-    /// `kind`. Server-side.
+    /// back out as if never added, and a `/summon` of it fails. Tells every
+    /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
+    /// armor stands, primed TNT, falling blocks, projectiles, rockets,
+    /// tridents), once each, in the order they were created; check `kind`. A
+    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
+    /// `/summon` and a chunk's entities are told at once). A mod that
+    /// cancels one of the others sees it removed before it ticks again.
+    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
+    /// the entities Horizon keeps without simulating. Server-side.
     pub(super) fn native_entity_join_level(
         &mut self,
         dimension: &str,
@@ -5873,6 +6032,22 @@ impl Game<'_> {
     pub(super) fn native_player_totem(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_totem(self, mod_api::mods(), player, name);
     }
+    /// The item `item` of the server player `player` (`name`) broke in `slot`
+    /// (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body` or
+    /// `saddle`): `LivingEntity.onEquippedItemBroken`, Bukkit's
+    /// `PlayerItemBreakEvent`. Listen only; armour has a slot, not a hand.
+    /// The player's state is swapped in. Once for each break, on a server; a
+    /// creative player and the host of a LAN world are not heard.
+    /// @API:native_player_destroy_item@.
+    pub(super) fn native_player_destroy_item(
+        &mut self,
+        player: u128,
+        name: &str,
+        item: &str,
+        slot: &str,
+    ) {
+        mod_api::dispatch_player_destroy_item(self, mod_api::mods(), player, name, item, slot);
+    }
     /// `player`'s melee blow killed the mob `entity` of `kind` (other deaths
     /// aren't told yet). It only hears, after the blow landed. Server-side.
     /// API 40.
@@ -5942,6 +6117,19 @@ impl Game<'_> {
         canceled: &mut bool,
     ) {
         mod_api::dispatch_item_picked_up(self, mod_api::mods(), player, item, count, canceled);
+    }
+    /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
+    /// NeoForge's `ItemExpireEvent`). Every mod may set or add to `extra_life`,
+    /// in ticks, which starts at zero; a positive total keeps the item that much
+    /// longer, zero or less lets it expire. Extensions are capped at 32766
+    /// ticks. @API:item_expire@.
+    pub(super) fn native_item_expire(
+        &mut self,
+        entity: u32,
+        stack: &ItemStack,
+        extra_life: &mut i32,
+    ) {
+        mod_api::dispatch_item_expire(self, mod_api::mods(), entity, stack, extra_life);
     }
     /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
     /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
@@ -6133,8 +6321,7 @@ impl Game<'_> {
     /// as on a refused hit, except that a canceled hit on the ender dragon
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
-    /// on the thread that ticks the world (the server thread; the window's
-    /// in-frame): state shared with render thread hooks needs synchronising.
+    /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
     /// No `self`: the game is in the middle of the hit. API 50.
     pub(super) fn native_living_incoming_damage(
         entity: i32,
@@ -6176,7 +6363,7 @@ impl Game<'_> {
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
     /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
-    /// on the thread that ticks the world (the server thread; the window's in-frame): state
+    /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
     pub(super) fn native_living_knockback(
@@ -7157,7 +7344,9 @@ impl Game<'_> {
         true
     }
     /// Draw a stack and its slot decorations, except the count, at `at`,
-    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    /// `size` GUI pixels square. False when nothing was drawn: an unknown item
+    /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
+    /// API @API:item_stack@.
     pub(super) fn native_item_stack(
         &self,
         batch: &mut HudBatch,
@@ -7165,6 +7354,11 @@ impl Game<'_> {
         at: [f32; 2],
         size: f32,
     ) -> bool {
+        // GuiGraphicsExtractor.item and itemDecorations draw nothing for an
+        // empty stack.
+        if &*stack.item == "minecraft:air" || stack.count == 0 {
+            return false;
+        }
         if self.res.items().get(&stack.item).is_none() {
             return false;
         }
@@ -7427,8 +7621,8 @@ impl Game<'_> {
     /// (`config/<id>.json`, or a folder of its own). The same folder on the
     /// window, its server thread and a LAN host; a dedicated server's is in
     /// its own folder, beside `server.properties`. Made when missing. No
-    /// `self`, so it works from any hook (`Game::native_config_dir()`), the
-    /// level's too. API 26.
+    /// `self`, so a mixin helper calls `Game::native_config_dir()` and a trait
+    /// mod `Host::config_dir`. API 26.
     pub(super) fn native_config_dir() -> Result<PathBuf, String> {
         config_dir(&Self::game_dir())
     }
@@ -7562,6 +7756,22 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The ids of `before` (id, kind) that are not in `now`, grouped by kind in
+/// first-seen order: the entities that left the level.
+fn vanished_by_kind(
+    before: &[(u32, String)],
+    now: &std::collections::HashSet<u32>,
+) -> Vec<(String, Vec<u32>)> {
+    let mut out: Vec<(String, Vec<u32>)> = Vec::new();
+    for (id, kind) in before.iter().filter(|(id, _)| !now.contains(id)) {
+        match out.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, ids)) => ids.push(*id),
+            None => out.push((kind.clone(), Vec::from([*id]))),
+        }
+    }
+    out
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// The acting player as the hook points name one: the guest whose turn
@@ -7675,6 +7885,8 @@ impl Game<'_> {
     }
     /// The mobs from index `from` on are new in the world.
     pub(super) fn native_mobs_joined(&mut self, from: usize, natural: bool) {
+        // A mod can keep a mob out; it is then taken out and not told of.
+        self.native_joins_flush(false, 0);
         for i in from..self.mobs.len() {
             let m = &self.mobs[i];
             let (kind, pos) = (mob_kind(m), [m.position.x, m.position.y, m.position.z]);
@@ -7695,20 +7907,44 @@ impl Game<'_> {
     /// The IDs of the level's item entities, for `native_items_left_since`
     /// (none on a client of a server, which tells nothing).
     pub(super) fn dropped_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.dropped.iter().map(|e| e.id).collect()
     }
     /// The IDs of the level's experience orbs, for `native_orbs_left_since`.
     pub(super) fn orb_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.orbs.iter().map(|o| o.id).collect()
     }
+    /// The (id, kind) of the level's mobs, for `native_mobs_left_since` (none
+    /// on a client of a server, which tells nothing).
+    pub(super) fn mob_ids(&self) -> Vec<(u32, String)> {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
+            return Vec::new();
+        }
+        self.mobs.iter().map(|m| (m.id, mob_kind(m))).collect()
+    }
+    /// The mobs of `before` gone since have left the level (died, despawned,
+    /// entered a hive, unloaded). Mobs spawned meanwhile are not counted.
+    pub(super) fn native_mobs_left_since(&mut self, before: &[(u32, String)]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
+        let now: std::collections::HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
+        for (kind, ids) in vanished_by_kind(before, &now) {
+            self.native_entities_left(&kind, &ids);
+        }
+    }
     /// The item entities of `before` gone since have left the level.
     pub(super) fn native_items_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.dropped.iter().map(|e| e.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7719,6 +7955,10 @@ impl Game<'_> {
     }
     /// The experience orbs of `before` gone since have left the level.
     pub(super) fn native_orbs_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.orbs.iter().map(|o| o.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7726,34 +7966,6 @@ impl Game<'_> {
             .filter(|id| !now.contains(id))
             .collect();
         self.native_entities_left("minecraft:experience_orb", &gone);
-    }
-    /// `native_entity_join_level` for `entity`, just put at the end of its
-    /// list: false when a mod canceled, and the caller takes it back out.
-    /// A client of a server tells nothing.
-    pub(super) fn native_entity_joins(
-        &mut self,
-        entity: u32,
-        kind: &str,
-        pos: [f64; 3],
-        loaded_from_disk: bool,
-    ) -> bool {
-        if self.remote.is_some() {
-            return true;
-        }
-        let mut canceled = false;
-        let dimension = self.dim.id();
-        self.native_entity_join_level(
-            dimension,
-            entity,
-            kind,
-            pos,
-            loaded_from_disk,
-            &mut canceled,
-        );
-        if canceled {
-            self.persist.joins_canceled += 1;
-        }
-        !canceled
     }
     /// The acting player's blow killed mob `index`.
     pub(super) fn native_kill_event(&mut self, index: usize) {
@@ -8595,6 +8807,25 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vanished_mobs_are_reported_by_kind() {
+        use std::collections::HashSet;
+        let z = || "minecraft:zombie".to_string();
+        let b = || "minecraft:bee".to_string();
+        let before = vec![(1, z()), (2, b()), (3, z()), (4, b())];
+        let now: HashSet<u32> = [1, 4, 99].into_iter().collect(); // 99 spawned meanwhile
+        assert_eq!(
+            super::vanished_by_kind(&before, &now),
+            vec![(b(), vec![2]), (z(), vec![3])]
+        );
+        let all: HashSet<u32> = [1, 2, 3, 4, 5].into_iter().collect();
+        assert!(super::vanished_by_kind(&before, &all).is_empty());
+        assert_eq!(
+            super::vanished_by_kind(&before, &HashSet::new()),
+            vec![(z(), vec![1, 3]), (b(), vec![2, 4])]
+        );
+        assert!(super::vanished_by_kind(&[], &now).is_empty());
+    }
 
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.
@@ -9171,9 +9402,12 @@ mod tests {
                 // split): horizon-mixins resolves the crate by its package.
                 format!("horizon_client_lib::crafting::native_{name}")
             } else if menu_hooks.contains(name) {
-                format!("horizon_client::menu::native_{name}")
+                // menu.rs compiles into horizon-client-lib (#5446's
+                // split): horizon-mixins resolves the crate by its package.
+                format!("horizon_client_lib::menu::native_{name}")
             } else if breath_hooks.contains(name) {
-                format!("horizon_client::breathing::native_{name}")
+                // breathing.rs compiles into horizon-client-lib too.
+                format!("horizon_client_lib::breathing::native_{name}")
             } else if level_hooks.contains(name) {
                 format!("horizon_client::game::native_hooks::GameLevel<'_>::native_{name}")
             } else {
@@ -9182,6 +9416,32 @@ mod tests {
             assert_eq!(hook["target"].as_str().unwrap(), target);
         }
         assert_eq!(names, declared);
+        // Every target's crate really compiles its module: #5446 moved
+        // files between horizon-client and horizon-client-lib, and a
+        // target left on the old crate applies to no bundle — the string
+        // comparison above shares its expectation with the catalog, so it
+        // alone cannot catch a move. The first path segment after the
+        // crate must be a module of that crate's lib root.
+        let client_root = include_str!("../lib.rs");
+        let lib_root = include_str!("../client_lib.rs");
+        for hook in &hooks {
+            let target = hook["target"].as_str().unwrap();
+            let (root, crate_name, rest) =
+                if let Some(rest) = target.strip_prefix("horizon_client::") {
+                    (client_root, "horizon_client", rest)
+                } else if let Some(rest) = target.strip_prefix("horizon_client_lib::") {
+                    (lib_root, "horizon_client_lib", rest)
+                } else {
+                    // The other crates (render, world) are their own packages,
+                    // never split.
+                    continue;
+                };
+            let module = rest.split("::").next().unwrap_or(rest);
+            assert!(
+                root.contains(&format!("mod {module};")),
+                "{crate_name} does not compile module `{module}` (target {target})"
+            );
+        }
     }
 
     /// The damage hook gets a mob's source from its damage: the causing mob,

@@ -10,7 +10,7 @@ use crate::{
 use horizon_core::random::{RandomSource, XoroshiroRandom, mix_stafford13, seed_from_hash};
 use horizon_world::loot::PackOverlay;
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 /// `VillagerData.NEXT_LEVEL_XP_THRESHOLDS`.
 pub const LEVEL_XP: [i32; 5] = [0, 10, 70, 150, 250];
@@ -450,26 +450,15 @@ pub struct Trades {
     /// potion tags, ordered (`set_random_potion` options).
     pub potion_tags: HashMap<String, Vec<String>>,
 }
-fn walk(dir: &Path, base: &Path, out: &mut HashMap<String, Value>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+/// The `.json` files under `dir` as `minecraft:<path>` ids, through `json_folder` (from the
+/// prepared data file when there is one); a file that doesn't parse is left out.
+fn walk(dir: &Path, out: &mut HashMap<String, Value>) {
+    let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return;
     };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            walk(&p, base, out);
-        } else if p.extension().is_some_and(|x| x == "json")
-            && let Ok(rel) = p.strip_prefix(base)
-            && let Ok(bytes) = fs::read(&p)
-            && let Ok(v) = serde_json::from_slice(&bytes)
-        {
-            out.insert(
-                format!(
-                    "minecraft:{}",
-                    rel.with_extension("").to_string_lossy().replace('\\', "/")
-                ),
-                v,
-            );
+    for file in &folder.files {
+        if let Ok(value) = serde_json::from_slice(file.bytes().unwrap_or_default()) {
+            out.insert(format!("minecraft:{}", file.name), value);
         }
     }
 }
@@ -480,23 +469,11 @@ impl Trades {
     pub fn load(root: &Path, overlay: &horizon_world::loot::PackOverlay) -> Self {
         let data = root.join("data/minecraft");
         let (mut trades, mut raw_tags, mut sets) = (HashMap::new(), HashMap::new(), HashMap::new());
-        walk(
-            &data.join("villager_trade"),
-            &data.join("villager_trade"),
-            &mut trades,
-        );
-        walk(
-            &data.join("tags/villager_trade"),
-            &data.join("tags/villager_trade"),
-            &mut raw_tags,
-        );
-        walk(&data.join("trade_set"), &data.join("trade_set"), &mut sets);
+        walk(&data.join("villager_trade"), &mut trades);
+        walk(&data.join("tags/villager_trade"), &mut raw_tags);
+        walk(&data.join("trade_set"), &mut sets);
         let mut raw_potions = HashMap::new();
-        walk(
-            &data.join("tags/potion"),
-            &data.join("tags/potion"),
-            &mut raw_potions,
-        );
+        walk(&data.join("tags/potion"), &mut raw_potions);
         // The packs' trade files: a trade or set's top pack file replaces
         // the game's own (`SimpleJsonResourceReloadListener` sees one
         // resource per id), a tag's entries join in pack order with a

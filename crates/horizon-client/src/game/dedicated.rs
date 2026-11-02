@@ -637,6 +637,20 @@ struct ServerState {
     max_players: usize,
     /// The mutable `gamemode` server property (`DedicatedServer.gameMode`).
     game_mode: i32,
+    /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
+    force_game_mode: bool,
+}
+
+/// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
+fn auto_save(state: &ServerState) -> bool {
+    state.autosave
+}
+
+/// `MinecraftServer.setAutoSave`: enable or disable periodic saves and report whether it changed.
+fn set_auto_save(state: &mut ServerState, enabled: bool) -> bool {
+    let changed = state.autosave != enabled;
+    state.autosave = enabled;
+    changed
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -931,7 +945,6 @@ impl Game<'_> {
             levels: self.level_shapes,
             seed: self.level.seed,
             max_players: props.max_players.max(0) as usize,
-            dedicated: true,
             integrated: false,
         };
         let settings = LanSettings {
@@ -942,7 +955,7 @@ impl Game<'_> {
         if let Some(sync) = sync {
             sync.adopt(&self.pack_files());
         }
-        if let Err(e) = self.lan_host(settings, net, config, None) {
+        if let Err(e) = self.lan_host(settings, net, config) {
             log("WARN", "**** FAILED TO BIND TO PORT!");
             log("WARN", &format!("The exception was: {e}"));
             log("WARN", "Perhaps a server is already running on that port?");
@@ -1005,6 +1018,7 @@ impl Game<'_> {
             broadcast_rcon: props.broadcast_rcon_to_ops,
             op_level: props.op_permission_level,
             game_mode: props.game_mode,
+            force_game_mode: props.force_game_mode,
             report: None,
             view: (
                 props.view_distance.clamp(2, 32) as u32,
@@ -1061,8 +1075,12 @@ impl Game<'_> {
                 self.save_game()?;
             }
             if !paused && !state.autosave {
-                // `save-off`: the periodic save inside the tick is skipped.
-                self.ticks = self.ticks.max(1);
+                // `MinecraftServer.autoSave` keeps its schedule while every level's
+                // `noSave` flag is set, but writes nothing. The tick below counts down
+                // once, so reset one tick early when this save would have been due.
+                if self.ticks_until_autosave <= 1 {
+                    self.ticks_until_autosave = self.next_autosave_interval() + 1;
+                }
             }
             // MinecraftServer.tickServer: while paused only the connections run.
             // `MinecraftServer.runServer` catches what the tick throws, writes the crash
@@ -1370,19 +1388,17 @@ impl Game<'_> {
                 }
             }
             "save-off" => {
-                if state.autosave {
-                    state.autosave = false;
+                if set_auto_save(state, false) {
                     self.console_reply(Text::translate("commands.save.disabled", &[]));
                 } else {
                     self.console_reply(Text::translate("commands.save.alreadyOff", &[]));
                 }
             }
             "save-on" => {
-                if state.autosave {
-                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
-                } else {
-                    state.autosave = true;
+                if set_auto_save(state, true) {
                     self.console_reply(Text::translate("commands.save.enabled", &[]));
+                } else {
+                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
                 }
             }
             "list" => {

@@ -34,7 +34,7 @@ from vanilla 26.3's own methods, and the hooks stay Horizon's own Rust.
    ([Events](https://docs.neoforged.net/docs/concepts/events/), "Sided Events"); the rest fire on whichever
    side runs the method. Horizon has one binary with several
    `Game`s (the window, the server thread, a dedicated server), so each hook says its side:
-   - `server`: the server's `Game` (single player's server thread, LAN host, dedicated) and the in-frame path.
+   - `server`: the server's `Game` (single player's server thread, LAN host, dedicated).
    - `client`: the window's `Game`.
    - `both`: both, with the `Game`'s role available (`native_window`). Interactions are `both`: the client
      predicts, the server acts, and a mod that claims a use on one side only gets the two out of step.
