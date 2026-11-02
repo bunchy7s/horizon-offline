@@ -99,7 +99,7 @@ ServerPlayer.respawnEntityOnShoulder	port	crates/horizon-client/src/game/shoulde
 ServerPlayer.trackStartFallingPosition	port	crates/horizon-client/src/game/advancements.rs::Game::tick_marks	the fall start and the lava ride feed `DistanceTrigger` (`fall_from_height`, `ride_entity_in_lava`)
 ServerPlayer.trackEnteredOrExitedLavaOnVehicle	port	crates/horizon-client/src/game/advancements.rs::Game::tick_marks	the fall start and the lava ride feed `DistanceTrigger` (`fall_from_height`, `ride_entity_in_lava`)
 ServerPlayer.updateScoreForCriteria	port	crates/horizon-client/src/game/scoreboard.rs::Game::tick_scoreboard	health, food, air, armor, xp and level objectives
-ServerPlayer.tellNeutralMobsThatIDied	missing		player: wolves, bees, piglins and other mobs that were angry at the player stay angry after the player dies and respawns (vanilla forgives them with forgive_dead_players)
+ServerPlayer.tellNeutralMobsThatIDied	port	crates/horizon-client/src/game/creatures.rs::Game::tell_neutral_mobs_player_died	mobs within 32 blocks across and 10 up and down forgive a dead player when the rule is on
 ServerPlayer.handleTeamKill	inline	crates/horizon-client/src/game/scoreboard.rs::Game::score_player_killed	teamkill and killedByTeam objectives
 ServerPlayer.hurtServer	port	crates/horizon-client/src/game/lan_pvp.rs::Game::pvp_land	pvp rule and team friendly fire gate the damage
 ServerPlayer.addPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: minor: one list shared by every target, nothing is sent to guests (an empty list at join) and no post shader is drawn
@@ -125,7 +125,7 @@ ServerPlayer.magicCrit	port	crates/horizon-client/src/lan/containers.rs::Hub::cr
 ServerPlayer.onUpdateAbilities	inline	crates/horizon-client/src/lan/hub.rs::Hub::set_game_mode	abilities go out with a game mode change; there is no other way abilities change
 ServerPlayer.createCommandSourceStack	inline	crates/horizon-client/src/game/lan_actions.rs::Game::run_guest_command	the guest is swapped in as the acting player and its permission level applied
 ServerPlayer.sendSystemMessage	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message	
-ServerPlayer.sendBuildLimitMessage	missing		player: placing a block at the build limit fails silently; the red build.tooHigh / build.tooLow overlay never shows
+ServerPlayer.sendBuildLimitMessage	port	crates/horizon-client/src/game/lan_actions.rs::Game::build_limit_message	the build.tooHigh and build.tooLow overlay at the world height limits
 ServerPlayer.getIpAddress	skip:server		for ban-ip and the dedicated server log
 ServerPlayer.updateOptions	port	crates/horizon-client/src/lan/hub.rs::Hub::process_inbox	the ClientInformation arm: view distance, main hand, model parts and chat visibility are kept
 ServerPlayer.clientInformation	skip:java		getter

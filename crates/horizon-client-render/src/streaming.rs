@@ -173,6 +173,8 @@ pub trait LodSampler: Send {
     fn drain_details(&mut self) -> Vec<LodDetail> {
         Vec::new()
     }
+    /// A loaded chunk's summary, made on the far-terrain worker.
+    fn observed(&mut self, _key: (i32, i32), _columns: &Arc<[crate::lod::Column; 256]>) {}
     /// Reduced far detail (`graphics::FarDetail::Reduced`): `grid` may then
     /// approximate wide cells.
     fn set_approximate(&mut self, _approximate: bool) {}

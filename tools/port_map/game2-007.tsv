@@ -39,7 +39,7 @@ AbstractMinecart.animateHurt	port	crates/horizon-client/src/game/minecarts.rs::G
 AbstractMinecart.getCurrentBlockPosOrRailBelow	port	crates/horizon-client/src/game/minecarts.rs::Game::rail_block	the rail one block below counts; the experimental y offset is not used
 AbstractMinecart.comeOffTrack	port	crates/horizon-client/src/game/minecarts.rs::Game::come_off_track	clamps speed, halves it on the ground, moves and drags in the air
 AbstractMinecart.move	port	crates/horizon-client/src/game/minecarts.rs::Game::move_cart	collision movement only; gap: minor: no push or pickup during the move, which push_carts and the cart tick do instead
-AbstractMinecart.applyEffectsFromBlocks	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_lava_tick	lava is applied there; gap: minor: other block effects on a cart (cobweb, berry bush, bubble column) are not applied
+AbstractMinecart.applyEffectsFromBlocks	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_lava_tick	lava is applied there; gap: minor: other block effects on a cart (cobweb, berry bush) are not applied; under minecart_improvements, NewMinecartBehavior.moveAlongTrack applies block effects twice per step, and Horizon keeps the old order
 AbstractMinecart.getRedstoneDirection	skip:other		used only by the experimental NewMinecartBehavior; Horizon runs the old track behaviour
 AbstractMinecart.applyNaturalSlowdown	port	crates/horizon-client/src/game/minecarts.rs::Game::natural_slowdown	slowdown per ride state, the furnace push and water
 AbstractMinecart.readAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	flipped and HasTicked read back; gap: minor: a custom display block and offset are not kept
