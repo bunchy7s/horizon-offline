@@ -1363,6 +1363,11 @@ impl GraphicsUi {
         framebuffer: [i32; 2],
         amount: f32,
     ) -> Vec<Action> {
+        // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
+        if !s.extras.wheel_cycles_settings {
+            self.scroll(level, s, h, amount);
+            return Vec::new();
+        }
         // Horizon improvement: focused slider/cycle intercepts wheel first.
         if amount != 0.0
             && self.can_change_value
@@ -2253,6 +2258,15 @@ mod tests {
         let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, 1.0);
         assert_eq!(actions, vec![Action::ButtonClick, Action::Changed]);
         assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        // With the "Scroll wheel changes settings" extra off, it scrolls instead.
+        s.extras.wheel_cycles_settings = false;
+        let scroll_before = ui.scroll.amount;
+        let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, -1.0);
+        assert!(actions.is_empty());
+        assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        assert!(ui.scroll.amount > scroll_before);
+        s.extras.wheel_cycles_settings = true;
+        ui.scroll.amount = scroll_before;
 
         // 2. Wheel over a slider: Chunk Updates scrolls the page, doesn't change slider value
         s.horizon.chunk_updates = 16;
