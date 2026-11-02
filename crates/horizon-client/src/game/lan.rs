@@ -8,7 +8,7 @@ use horizon_client::{
     lan::{
         self, Lan, NetConfig,
         chunks::ChunkEncoder,
-        data::SyncData,
+        data::{BIOME_REGISTRY, SyncData},
         entity::{EntityState, States},
         hub::{HostEvent, Hub, HubConfig, TickCtx},
         playerdata,
@@ -1253,12 +1253,20 @@ impl Game<'_> {
         } else {
             self.level.enabled_features.clone()
         };
-        if sync.features.iter().any(|f| !features.contains(f))
+        // A world whose packs change biomes sends its own biome registry.
+        let packed = self.world_biomes.clone().filter(|b| b.has_packs());
+        if packed.is_some()
+            || sync.features.iter().any(|f| !features.contains(f))
             || features.iter().any(|f| !sync.features.contains(f))
         {
-            // The shared resource preload has vanilla flags. Feature flags belong
-            // to this world, not to the cached resources or the next world opened.
-            let mut world_sync = SyncData::load(&self.options.resources, &self.pack_files())?;
+            // The shared resource preload has vanilla flags and vanilla biomes.
+            // Feature flags and biomes belong to this world, not to the cached
+            // resources or the next world opened.
+            let mut world_sync = SyncData::load_with(
+                &self.options.resources,
+                &self.pack_files(),
+                packed.as_deref(),
+            )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
         }
@@ -1274,7 +1282,7 @@ impl Game<'_> {
         let registry: Vec<String> = sync
             .dynamic
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|v| v.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_default();
         let mut encoder = ChunkEncoder::with_signs(

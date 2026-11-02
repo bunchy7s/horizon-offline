@@ -4,8 +4,9 @@ both food and blocks (sweet and glow berries, carrots, potatoes), for sweet
 berry bushes, for spawn eggs used on a monster spawner, for shears carving
 pumpkins or cropping a growing plant's head (kelp, weeping and twisting vines,
 cave vines) to its top age, for copper golem statues turned to their next pose,
-for blocks placed where mobs and armor stands stand, for respawn anchors and for
-beds in the Nether and the End.
+for blocks placed where mobs and armor stands stand, for respawn anchors, for
+beds in the Nether and the End, and for dragon eggs, which a click moves somewhere
+else nearby (`DragonEggBlock.useWithoutItem`).
 
 Every case has a block at the origin, something above it, and a player three
 blocks south, survival or creative, hungry or full, sneaking or not, who
@@ -331,6 +332,32 @@ def jukebox_case(rng, states, case):
                         'creative': True, 'sneaking': False, 'food': 20}
 
 
+def dragon_egg_case(rng, states, case):
+    """A dragon egg clicked with anything, or an empty hand (`DragonEggBlock.useWithoutItem`, which
+    takes the click before the item is placed): `teleport` draws 16/8/16-wide offsets up to 1000
+    times and moves the egg to the first air block inside the build height that has a block under it,
+    sending level event 2015 with `BlockUtil.packDifferenceInPosition` of the move. A floor gives the
+    search somewhere to land; in a bare sky only the cell above the egg has a block under it, and a
+    block in that cell leaves the 1000 draws with nowhere to go and the egg where it was."""
+    cells = [[0, 0, 0, states.get('dragon_egg')]]
+    if rng.random() < 0.8:
+        # A floor for the egg to land on: it only moves to air with a block under it.
+        cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'grass_block', 'netherrack', 'sand']))])
+        for dx in range(-2, 3):
+            for dz in range(-2, 3):
+                if (dx, dz) == (0, 0) or rng.random() < 0.15:
+                    continue
+                cells.append([dx, -1, dz, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'glass',
+                                                                 'snow_block', 'gravel']))])
+    if rng.random() < 0.3:
+        # Something above it, whose own block below is air, so the search never takes it.
+        cells.append([0, 1, 0, states.get(rng.choice(['stone', 'oak_slab', 'glass']))])
+    item = rng.choice(['-', '-', 'stick', 'stone', 'torch', 'dragon_egg'])
+    case['use_item'] = {'item': '-' if item == '-' else d_plain(item, rng.choice([1, 16])),
+                        'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15, 'food': 20}
+    case['cells'] = cells
+
+
 # A block placed from an item carrying `minecraft:block_state`: the block and the properties the
 # component sets, none of them the ones the click would have chosen. The last two name a property the
 # block has no such thing as, and no property at all, which `BlockItemStateProperties.apply` skips.
@@ -419,6 +446,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             jukebox_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.1:
+            dragon_egg_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case

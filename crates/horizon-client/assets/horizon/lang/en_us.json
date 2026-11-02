@@ -473,5 +473,10 @@
   "horizon.repro.bundle": "Repro bundle: %s",
   "horizon.repro.error": "Repro: %s",
   "horizon.repro.no_recording": "There is no recording to export yet.",
-  "horizon.repro.replay_started": "Replay started: %s"
+  "horizon.repro.replay_started": "Replay started: %s",
+  "horizon.extras.header.cosmetics": "Cosmetics",
+  "horizon.extras.cosmetics_mine": "My cosmetics",
+  "horizon.extras.cosmetics_mine.tooltip": "Shows the cosmetics you wear on your own player, in third person and the inventory.",
+  "horizon.extras.cosmetics_others": "Other players' cosmetics",
+  "horizon.extras.cosmetics_others.tooltip": "Shows the cosmetics other Horizon players wear. Off, the game never asks what they wear."
 }
