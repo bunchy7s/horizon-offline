@@ -5036,12 +5036,13 @@ impl OptionsUi {
                     return events;
                 }
                 Some(FocusId::Lang(code)) => {
+                    // `LanguageSelectionList.Entry.keyPressed`: the selection
+                    // key (`isSelection`: Enter, Space, keypad Enter) selects
+                    // the row and finishes the screen at once (`onDone`), so
+                    // the language applies on that one press.
                     let mut events = vec![Event::ButtonClick];
-                    if self.language_choice.as_deref() == Some(code.as_str()) {
-                        events.extend(self.back(s));
-                    } else {
-                        self.language_choice = Some(code.clone());
-                    }
+                    self.language_choice = Some(code.clone());
+                    events.extend(self.back(s));
                     return events;
                 }
                 _ => {}
