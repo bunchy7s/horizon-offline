@@ -2441,10 +2441,14 @@ Ok::<(), AttachmentError>(())
 For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
-`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
-entities, boats, minecarts, armor stands, cushions, item frames, paintings and the
-server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
-not covered. Player UUIDs cover online guests and the acting player. Mutable level
+`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover every entity in
+the level apart from players: mobs, items, experience orbs, projectiles, tridents,
+falling blocks, primed TNT, fireworks, boats, minecarts, armor stands, cushions, item
+frames, paintings, End crystals, the ender dragon, ominous item spawners and the
+server's `OtherEntity` records. An entity keeps its UUID through saves, so its saved
+attachments load back with it; an orb saved with a `count` above one loads as several
+orbs, and only the first keeps the attachments. Player UUIDs cover online guests and
+the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. These maps live on the server only: there is **no client
 synchronization**. Unserialized values disappear on unload or restart. A saved value
