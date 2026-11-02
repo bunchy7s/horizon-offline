@@ -15,7 +15,7 @@ pub struct Frame {
 }
 
 /// Wings push even while perched and even when teams forbid damage.
-/// Mob::damage owns armor, invulnerability frames and last-attacker bookkeeping.
+/// The normal mob damage handler owns armor, invulnerability frames and last-attacker bookkeeping.
 pub fn contact(m: &mut Mob, f: &Frame, teams_allow: bool) {
     if f.recently_hurt || m.removed || m.id == f.dragon_id {
         return;
