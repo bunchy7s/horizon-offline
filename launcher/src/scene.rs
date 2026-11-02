@@ -926,7 +926,7 @@ impl Render for Scene {
             .left_0()
             .size_full()
             .overflow_hidden()
-            .bg(gpui::rgb(SKY[0]))
+            .bg(gpui::rgb(horizon_theme::glass::PAGE))
             .child(layer(baked.sky.clone(), None))
             .child(
                 div()
