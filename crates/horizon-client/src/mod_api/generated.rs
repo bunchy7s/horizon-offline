@@ -4518,8 +4518,31 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
+    /// `slots` when the item is yours, for a backpack, a storage cell or a
+    /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
+    /// the item without slots, and vanilla's items have none. Asked at each
+    /// call of the item container helpers (`native_item_container_slots`,
+    /// `native_item_container_insert`, `native_item_container_extract`, in
+    /// `native_item_container.rs`). The contents are kept in the stack's
+    /// `minecraft:container`, as a shulker box item keeps them.
+    /// API @API:item_container@.
+    ///
+    /// Return `Some` to set `slots`; the first mod returning `Some` wins.
+    fn item_container(&self, host: &dyn Host, event: &mut ItemContainerEvent<'_>) -> Option<u32> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Additional first-person hand and item pose, including empty arms and maps.
+    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
+    /// API @API:render_hand_pose@.
+    fn render_hand_pose(&self, host: &dyn Host, event: &mut RenderHandPoseEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -4534,6 +4557,27 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A screen was observed closing, at most once per frame.
+    fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    fn screen_init_post(&self, host: &dyn Host, event: &mut ScreenInitPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening, at most once per frame.
+    fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Change a tooltip box's background and border gradient colors, as ARGB.
+    /// Stack is None for tooltips not associated with an item.
+    fn tooltip_color(&self, host: &dyn Host, event: &mut TooltipColorEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -13846,6 +13890,28 @@ pub fn dispatch_compute_fov_modifier(
     }
     *modifier = event.modifier;
 }
+/// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemContainerEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_container(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    slots: &mut Option<u32>,
+) {
+    if slots.is_some() {
+        return;
+    }
+    let mut event = ItemContainerEvent { item };
+    for mod_hook in super::entered(mods, "item_container") {
+        if let Some(replacement) = mod_hook.item_container(host, &mut event) {
+            *slots = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -13875,6 +13941,63 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderHandPoseEvent<'a> {
+    pub hand: horizon_client::first_person::Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub swing: f32,
+    pub equip: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub pitch: f32,
+    pub yaw: f32,
+    pub roll: f32,
+    pub scale: f32,
+}
+pub fn dispatch_render_hand_pose(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hand: horizon_client::first_person::Hand,
+    stack: Option<&ItemStack>,
+    partial: f32,
+    swing: f32,
+    equip: f32,
+    x: &mut f32,
+    y: &mut f32,
+    z: &mut f32,
+    pitch: &mut f32,
+    yaw: &mut f32,
+    roll: &mut f32,
+    scale: &mut f32,
+) {
+    let mut event = RenderHandPoseEvent {
+        hand,
+        stack,
+        partial,
+        swing,
+        equip,
+        x: *x,
+        y: *y,
+        z: *z,
+        pitch: *pitch,
+        yaw: *yaw,
+        roll: *roll,
+        scale: *scale,
+    };
+    for mod_hook in super::entered(mods, "render_hand_pose") {
+        mod_hook.render_hand_pose(host, &mut event);
+    }
+    *x = event.x;
+    *y = event.y;
+    *z = event.z;
+    *pitch = event.pitch;
+    *yaw = event.yaw;
+    *roll = event.roll;
+    *scale = event.scale;
 }
 /// What [`Hooks::render_item_in_frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13908,4 +14031,78 @@ pub fn dispatch_render_item_in_frame(
             break;
         }
     }
+}
+/// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenClosingEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_closing(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenClosingEvent { screen };
+    for mod_hook in super::entered(mods, "screen_closing") {
+        mod_hook.screen_closing(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_init_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenInitPostEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_init_post(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenInitPostEvent { screen };
+    for mod_hook in super::entered(mods, "screen_init_post") {
+        mod_hook.screen_init_post(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_opening`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenOpeningEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_opening(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenOpeningEvent { screen };
+    for mod_hook in super::entered(mods, "screen_opening") {
+        mod_hook.screen_opening(host, &mut event);
+    }
+}
+/// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TooltipColorEvent<'a> {
+    pub stack: Option<&'a ItemStack>,
+    pub background: u32,
+    pub border_top: u32,
+    pub border_bottom: u32,
+}
+pub fn dispatch_tooltip_color(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: Option<&ItemStack>,
+    background: &mut u32,
+    border_top: &mut u32,
+    border_bottom: &mut u32,
+) {
+    let mut event = TooltipColorEvent {
+        stack,
+        background: *background,
+        border_top: *border_top,
+        border_bottom: *border_bottom,
+    };
+    for mod_hook in super::entered(mods, "tooltip_color") {
+        mod_hook.tooltip_color(host, &mut event);
+    }
+    *background = event.background;
+    *border_top = event.border_top;
+    *border_bottom = event.border_bottom;
 }

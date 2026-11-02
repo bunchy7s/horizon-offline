@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "screen_closing",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_closing",
+      "neoforge": "ScreenEvent.Closing",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "the screen_closing screen lifecycle observation (`native_screen_closing`) at most once per frame.",
+  "doc_summary": "`native_screen_closing` receives a NativeScreenView, observed at most once per frame, including sign, book, dialog and prompt overlays; cancelling an opening is not possible because transitions do not share a single choke point. Bundles need hooks version @API:screen_closing@."
+}

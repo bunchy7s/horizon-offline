@@ -36,6 +36,17 @@ by The Pixelify Sans Project Authors, licensed under the SIL Open Font License 1
 license (`crates/horizon-theme/icons/pixel/LICENSE-pixelarticons.txt`). `star.svg` is Horizon's own, drawn on
 the same grid.
 
+## Hugeicons
+
+`crates/horizon-theme/icons/glass/*.svg` are icons from the free set of
+[Hugeicons](https://github.com/hugeicons/hugeicons) (`@hugeicons/core-free-icons` 4.4.0), under
+the MIT license (`crates/horizon-theme/icons/glass/LICENSE-hugeicons.txt`), exported with a 1.6
+stroke in `currentColor`.
+
+`crates/horizon-theme/icons/glass/discord.svg` is Discord's logo as drawn by
+[Simple Icons](https://github.com/simple-icons/simple-icons) 13.21.0 (CC0 1.0). The logo is Discord's
+trademark, used only on the button that opens Horizon's Discord server.
+
 ## AMD FidelityFX SDK (FSR 3.1 frame generation)
 
 `crates/horizon-client-render/src/gfx/frame_gen/optical_flow.wgsl` and `interpolation.wgsl` are

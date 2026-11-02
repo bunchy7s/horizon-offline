@@ -1420,6 +1420,20 @@ pub fn mob_from_nbt(
                     crate::mobs::finalize::Attr::MovementSpeed,
                     v,
                 ),
+                // A saved base other than the type's default is the
+                // attribute's base, which `/attribute ... base get` reads.
+                "minecraft:max_health"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                        v,
+                    )
+                }
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
                 "minecraft:movement_speed" => m.attrs.speed = v,
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
@@ -2703,6 +2717,7 @@ pub struct TridentSave<'a> {
     pub shake: u32,
     pub dealt_damage: bool,
     pub creative_only: bool,
+    pub no_gravity: bool,
     pub item: &'a crate::items::ItemStack,
 }
 pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag {
@@ -2732,6 +2747,12 @@ pub fn trident_to_nbt(t: &TridentSave, uuid: [i32; 4], raw: Option<&Tag>) -> Tag
     ] {
         put(&mut tag, key, value);
     }
+    // Entity.saveWithoutId writes NoGravity only when set.
+    if t.no_gravity {
+        put(&mut tag, "NoGravity", Tag::Byte(1));
+    } else if let Tag::Compound(map) = &mut tag {
+        map.remove(&"NoGravity".into());
+    }
     tag
 }
 /// (position, motion, yaw, pitch, in ground, life, shake, dealt damage,
@@ -2746,6 +2767,7 @@ pub struct TridentNbt {
     pub shake: u32,
     pub dealt_damage: bool,
     pub creative_only: bool,
+    pub no_gravity: bool,
     pub item: crate::items::ItemStack,
 }
 pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
@@ -2760,6 +2782,7 @@ pub fn trident_from_nbt(tag: &Tag) -> Option<TridentNbt> {
         shake: number(tag.get("shake")).unwrap_or(0).max(0) as u32,
         dealt_damage: flag(tag, "DealtDamage"),
         creative_only: number(tag.get("pickup")) == Some(2),
+        no_gravity: flag(tag, "NoGravity"),
         item: tag
             .get("item")
             .and_then(item_from_nbt)
@@ -3445,12 +3468,16 @@ mod tests {
                 shake: 3,
                 dealt_damage: true,
                 creative_only: true,
+                no_gravity: true,
                 item: &trident,
             },
             [1, 2, 3, 4],
             None,
         );
         let t = trident_from_nbt(&tag).unwrap();
+        // `Entity.saveWithoutId` writes NoGravity only when set.
+        assert!(t.no_gravity);
+        assert!(matches!(tag.get("NoGravity"), Some(Tag::Byte(1))));
         assert_eq!((t.in_ground, t.life, t.shake), (true, 9, 3));
         assert_eq!((t.dealt_damage, t.creative_only), (true, true));
         assert_eq!((t.yaw, t.pitch), (10.0, 20.0));
