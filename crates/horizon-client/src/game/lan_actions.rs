@@ -2174,6 +2174,17 @@ impl Game<'_> {
                 {
                     return;
                 }
+                // LeashFenceKnotEntity.interact: a knot has no entity here, only its fence.
+                if let Some(knot) = self.knot_at_id(p.id) {
+                    let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
+                    let swung = self.as_guest(host, conn, |g| {
+                        let swings = g.swings_started;
+                        g.with_hand(hand, |g| g.use_knot(knot, true));
+                        g.swings_started != swings
+                    });
+                    self.lan_swing_back(host, conn, swung);
+                    return;
+                }
                 let before = host.hub.guests[gi].vehicle;
                 if self
                     .look_at_entity(host, gi, p.id, Some(p.location))
@@ -2958,11 +2969,28 @@ impl Game<'_> {
         if let Some(b) = self.tracked_special_box(id) {
             return Some(b);
         }
+        if let Some(knot) = self.knot_at_id(id) {
+            let knot = horizon_client::mobs::leash::knot_state(knot);
+            let p = knot.position;
+            let half = knot.width / 2.0;
+            return Some(Aabb::new(
+                Vec3::new(p.x - half, p.y, p.z - half),
+                Vec3::new(p.x + half, p.y + knot.height, p.z + half),
+            ));
+        }
         self.creatures
             .projectiles
             .iter()
             .find(|p| p.id != 0 && p.id as i32 == id)
             .map(|p| p.bounds())
+    }
+
+    /// The fence of the knot whose entity id is `id` (`lan_assign_ids`).
+    fn knot_at_id(&self, id: i32) -> Option<[i32; 3]> {
+        self.knot_ids
+            .iter()
+            .find(|&(_, &knot)| knot as i32 == id)
+            .map(|(&fence, _)| fence)
     }
 
     fn guest_attack(&mut self, host: &mut LanHost, conn: u32, id: i32) {

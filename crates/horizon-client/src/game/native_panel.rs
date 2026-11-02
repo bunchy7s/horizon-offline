@@ -365,8 +365,7 @@ impl Game<'_> {
         if self.carried.is_some() {
             self.draw_carried(batch);
         } else if let Some(stack) = self.browser_pointed_stack(&layout) {
-            let lines = self.stack_tooltip(&stack.1);
-            self.draw_tooltip_lines(batch, &lines, cursor.0, cursor.1);
+            self.draw_stack_tooltip(batch, &stack.1, cursor.0, cursor.1);
         } else {
             self.draw_slot_tooltip(batch);
         }
