@@ -103,7 +103,7 @@ pub(super) struct GuestPlay {
     /// `ServerPlayer.getStats` and the inventory `inventory_changed` last saw.
     pub(super) stats: super::stats::Stats,
     /// `Stats.LEAVE_GAME` is counted: a guest is saved more than once on the
-    /// way out, the statistic is awarded once (`LanHost::award_leave_game`).
+    /// way out, the statistic is awarded once (`Game::award_leave_game`).
     pub(super) left_game: bool,
     last_inventory: u64,
     /// `ServerPlayer.levitationStartPos` and `levitationStartTime`.
@@ -767,6 +767,34 @@ impl Game<'_> {
         for p in self.creatures.projectiles.iter_mut().skip(projectiles) {
             if p.owner == Some(horizon_client::mobs::Who::Player) && p.guest.is_none() {
                 p.guest = Some(conn);
+            }
+        }
+        let guest = &host.hub.guests[i];
+        let listening = !horizon_client::mod_api::mods().is_empty();
+        for projectile in projectiles..self.creatures.projectiles.len() {
+            if !listening {
+                break;
+            }
+            let item = match &self.creatures.projectiles[projectile].kind {
+                horizon_client::projectiles::ProjectileKind::Snowball => {
+                    Some("minecraft:snowball".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Egg => {
+                    Some("minecraft:egg".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::EnderPearl => {
+                    Some("minecraft:ender_pearl".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Trident => {
+                    Some("minecraft:trident".to_owned())
+                }
+                horizon_client::projectiles::ProjectileKind::Potion(stack, _) => {
+                    Some(stack.item.to_string())
+                }
+                _ => None,
+            };
+            if let Some(item) = item {
+                self.native_player_launch_projectile(guest.uuid, &guest.name, &item);
             }
         }
         // The guest's swings are theirs: the host's own count stays the host's.
@@ -1836,6 +1864,8 @@ impl Game<'_> {
                         }),
                         Some(conn),
                     );
+                    let guest = &host.hub.guests[gi];
+                    self.native_block_damage_abort(guest.uuid, &guest.name, a.pos);
                 }
                 4 | 5 => {
                     if !spectator {
@@ -1845,6 +1875,13 @@ impl Game<'_> {
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
                 6 => {
+                    let listening = !horizon_client::mod_api::mods().is_empty();
+                    let (uuid, name) = if listening {
+                        let guest = &host.hub.guests[gi];
+                        (guest.uuid, guest.name.clone())
+                    } else {
+                        (0, String::new())
+                    };
                     self.as_guest(host, conn, |g| {
                         let Some(hand) = g.used_hand() else {
                             return;
@@ -1853,7 +1890,18 @@ impl Game<'_> {
                             if let Some((slot, ticks)) = g.using.take()
                                 && let Some(stack) = g.stack_in(slot).cloned()
                             {
+                                if listening
+                                    && &*stack.item == "minecraft:bow"
+                                    && let Some(arrow) = g
+                                        .projectile_slot("minecraft:bow")
+                                        .and_then(|slot| g.stack_in(slot).map(|s| s.item.clone()))
+                                {
+                                    g.native_player_ready_arrow(uuid, &name, &arrow);
+                                }
                                 g.release_used_item(&stack, ticks, false);
+                                if listening {
+                                    g.native_player_stop_using_item(uuid, &name);
+                                }
                             }
                         });
                     });
@@ -1957,6 +2005,7 @@ impl Game<'_> {
                     g.reset_attack_strength();
                 });
                 self.native_player_attack_cooldown_reset(player, &name);
+                self.native_player_arm_swing(player, &name, "mainhand");
             }
             S::UseItemOn(p) => {
                 host.hub.ack(conn, p.sequence);
@@ -2291,6 +2340,8 @@ impl Game<'_> {
                 if !spectator && let Some(slot) = slot {
                     host.hub
                         .select_bundle_item(conn, slot, p.index, &mut self.world);
+                    let guest = &host.hub.guests[gi];
+                    self.native_player_bundle_item_select(guest.uuid, &guest.name, p.slot, p.index);
                 }
             }
             S::ContainerClick(p) => {
@@ -3453,6 +3504,10 @@ impl Game<'_> {
         };
         xp.respawn(self.ui.rules.bool("keep_inventory") || g.game_mode == SPECTATOR);
         (g.xp_level, g.xp_progress, g.xp_total) = (xp.level, xp.progress, xp.total);
+        // PlayerEvent.Clone, at the end of `restoreFrom`: the data is copied,
+        // the new player not yet placed.
+        let (cloned, name) = (g.uuid, g.name.clone());
+        self.native_player_clone(cloned, &name, true);
         let clock_rate = self.network_clock_rate();
         let ctx = TickCtx {
             world: &mut self.world,
@@ -4019,6 +4074,7 @@ impl Game<'_> {
         let (sneaking, sleeping) = (g.sneaking, g.sleeping);
         let riding = g.vehicle.is_some();
         let mut soul = None;
+        let mut jumps = 0;
         let events = self.as_guest(host, conn, |game| {
             let (rules, motion) = (game.world.health_rules, game.motion);
             let health = &motion.health;
@@ -4079,6 +4135,7 @@ impl Game<'_> {
                     // ServerGamePacketListenerImpl.handlePlayerPositionChange:
                     // the server's copy jumps with the player, so the velocity
                     // it sends them keeps the jump.
+                    jumps += 1;
                     let _ = w.jump_from_ground();
                 }
                 let landed = (|| -> horizon_client::Result<()> {
@@ -4183,7 +4240,7 @@ impl Game<'_> {
             for event in &events {
                 if let MotionEvent::Fall(horizon_client::landing::FallEvent::Statistic(cm)) = event
                 {
-                    game.stats.custom("fall_one_cm", *cm);
+                    game.award_custom_stat("fall_one_cm", *cm);
                 }
             }
             game.record_combat(&events);
@@ -4193,6 +4250,16 @@ impl Game<'_> {
         let Some((events, marked)) = events else {
             return;
         };
+        if jumps > 0
+            && !horizon_client::mod_api::mods().is_empty()
+            && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+        {
+            self.as_guest(host, conn, |game| {
+                for _ in 0..jumps {
+                    game.native_player_jump(uuid, &name);
+                }
+            });
+        }
         if let Some((at, velocity)) = soul {
             super::lan_particles::send_soul_particle(host, at, velocity);
         }

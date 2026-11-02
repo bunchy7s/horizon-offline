@@ -562,7 +562,7 @@ impl Game<'_> {
             _ => "",
         };
         if !stat.is_empty() {
-            self.stats.custom(stat, 1);
+            self.award_custom_stat(stat, 1);
         }
         true
     }
@@ -979,6 +979,7 @@ impl Game<'_> {
     }
     /// `Player.giveExperienceLevels`.
     pub(super) fn give_levels(&mut self, levels: i32) {
+        let old_level = self.experience.level;
         let xp = &mut self.experience;
         xp.level = xp.level.saturating_add(levels);
         if xp.level < 0 {
@@ -986,6 +987,7 @@ impl Game<'_> {
             xp.progress = 0.0;
             xp.total = 0;
         }
+        self.native_player_level_changed(old_level);
     }
     /// Whether the result slot may be taken (`mayPickup`).
     fn may_take_result(&self) -> bool {
@@ -1051,7 +1053,7 @@ impl Game<'_> {
             }
         }
         let pitch = self.world.random.next_float() * 0.1 + 0.9;
-        self.stats.custom("enchant_item", 1);
+        self.award_custom_stat("enchant_item", 1);
         self.trigger_enchanted_item(&enchanted_item, lapis_needed as i32);
         self.play_at("minecraft:block.enchantment_table.use", pos, 1.0, pitch);
         self.station_changed();
