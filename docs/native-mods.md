@@ -2216,7 +2216,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_explosion_knockback(dimension, center, blocks, entity, knockback_velocity)`**: a server explosion's
   calculated velocity, before it is added to the entity. Replace `knockback_velocity` to change the push;
   `entity` is None for the acting player. The player packet uses the same replacement. Wind bursts are heard too.
-  Bundles need `"hooks": @API:native_explosion_knockback@`.
+  Bundles need `"hooks": @API:explosion_knockback@`.
 - **`native_fill_bucket(stack, pos, canceled)`** and **`native_attack_entity(entity, kind, pos, canceled)`** (API 22):
   a player's bucket at a block, and their blow on an entity, with the acting player swapped in. Canceled, the bucket
   does nothing and the blow does no harm.

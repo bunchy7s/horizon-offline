@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "Explosion velocity replacement (`native_explosion_knockback`).",
-  "doc_summary": "A server explosion calculates an entity's added velocity: `native_explosion_knockback(dimension, center, blocks, entity, knockback_velocity)` can replace it. Bundles need \"hooks\": @API:native_explosion_knockback@."
+  "doc_summary": "A server explosion calculates an entity's added velocity: `native_explosion_knockback(dimension, center, blocks, entity, knockback_velocity)` can replace it. Bundles need \"hooks\": @API:explosion_knockback@."
 }
