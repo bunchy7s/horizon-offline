@@ -2342,6 +2342,37 @@ impl Game<'_> {
             state,
         )
     }
+    /// `BlockInput.overwriteWithDefinedProperties`: restore explicit command
+    /// properties after normalizing the state against neighbouring blocks.
+    fn block_input_state(
+        &mut self,
+        pos: [i32; 3],
+        input: &BlockInput,
+        state: BlockStateId,
+        strict: bool,
+    ) -> R<BlockStateId> {
+        if strict {
+            return Ok(state);
+        }
+        let updated = self.with_level(|b, level, ticks| {
+            let at = horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]);
+            let updated = b.update_from_neighbour_shapes(level, ticks, at, state);
+            if b.is_air(updated) { state } else { updated }
+        });
+        let registry = self.pack.assets.registry;
+        let mut descriptor = registry
+            .state(updated)
+            .expect("registered block state")
+            .clone();
+        for (key, value) in &input.properties {
+            if descriptor.properties.contains_key(key) {
+                descriptor.properties.insert(key.clone(), value.clone());
+            }
+        }
+        registry
+            .resolve(&descriptor)
+            .map_err(|_| err("argument.block.id.invalid", &[&input.id]))
+    }
     /// Place a state like BlockInput.place: false when nothing changed.
     pub(super) fn place_state(
         &mut self,
@@ -2410,6 +2441,7 @@ impl Game<'_> {
         if ctx.has("destroy") && current != self.world.air {
             self.destroy_block_dropping(pos)?;
         }
+        let state = self.block_input_state(pos, &b, state, ctx.has("strict"))?;
         let placed = self.place_state(pos, state, ctx.has("strict"))?;
         let loaded = match &b.nbt {
             Some(nbt) => self.load_block_entity_nbt(pos, nbt),

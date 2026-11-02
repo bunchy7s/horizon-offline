@@ -155,7 +155,12 @@ impl Game<'_> {
         if let Some(id) = self.spawn_mob("minecraft:happy_ghast", at, true)
             && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
-            m.extra.age = -24000;
+            // DriedGhastBlock.spawnGhastling sets the baby age before
+            // addFreshEntity, so ageBoundaryReached runs the ghastling setup
+            // (`babyGhastSetup`) while the mob is still being hatched: its
+            // goals, navigation and brain are a ghastling's before its first
+            // tick, not an adult's until the next aiStep.
+            horizon_client::mobs::finalize::set_age(m, -24000);
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;

@@ -147,15 +147,22 @@ Geist (400, 500, 600) and Geist Mono (400), bundled under the SIL Open Font Lice
   sunset) behind the hero. Light and dark follow the system, with a toggle. A giant wordmark in
   pixels sits in the footer.
 - **Game**: vanilla's screens. The on-screen keyboard is a rounded plate of keys in the page
-  colour, the focused key in the accent.
+  colour, the focused key in the accent. Horizon's graphics settings screen takes the Blocks
+  palette below in a lighter form (`graphics_style.rs`).
 
 ## Blocks
 
-A blocky, Minecraft-like look in Horizon's purple, for the website and the redesigned launcher:
+A blocky, Minecraft-like look in Horizon's purple, for the website, the redesigned launcher and
+the game's graphics settings screen:
 Minecraft's inventory rather than a document. Its colours are `horizon_theme::Blocks`
 (`BLOCKS_LIGHT`, `BLOCKS_DARK`), which `tokens.css` carries under the same names as before plus
 `--panel`, `--raised`, `--button`, `--well`, `--bevel`, `--lip`, `--outline` and the `--face`
-of the main action. The game's menus keep `LIGHT` and `DARK`.
+of the main action. The game's other menus keep `LIGHT` and `DARK`.
+
+In the game the graphics settings screen draws the Blocks palette in GUI pixels, lighter than the
+website's blocks so the world stays in view: square panels of the page colour, see-through, with a
+1 px edge and no bevel or lip, flat controls, the violet face on Done, and vanilla's font rather
+than Pixelify. Hover and focus are vanilla's white edge.
 
 - **Pixel type for what names and what you act on.** Headings, navigation, buttons and the
   wordmark use Pixelify Sans (OFL; Medium, SemiBold, Bold); paragraphs and numbers stay in Geist
@@ -298,6 +305,36 @@ Light); `tokens.css` carries them as `--night-*`. The game's menus don't use it.
   Snapshots, Old; the newest release chosen), Modded adds the loader (Fabric or Quilt, at its newest
   stable version), and the name follows the choice ("Fabric 1.21.4") until the player types one.
   Create is the main action.
+
+## Glass
+
+The launcher's next look, designed by Anthony S. (dezer-x) as a web mockup: playhorizon.dev/launcher,
+source in horizon-site `app/launcher/` and `components/launcher/`. The launcher ports it one to one,
+screen by screen, replacing Night where they differ; the mockup is the reference for every size,
+colour, state and motion. Its tokens are `horizon_theme::glass`; `tokens.css` carries the colours
+as `--glass-*`.
+
+- **The scene is the background**: a pixel sunset over three ridges with trees, clouds, stars, a
+  meteor now and then and fireflies (`launcher/src/scene.rs`), a port of the website's
+  `HorizonScene` with its seeds and sums, so a window shows the picture the mockup shows at the
+  same size. It eases with the pointer and stops 10 s after the window loses focus;
+  `HORIZON_LAUNCHER_MOTION` works as for Night. Dark appearance only so far; Light keeps the dawn.
+- **Frosted plates, round corners, no borders.** A plate is the scene behind it blurred 24 px and
+  saturated 140 %, under white at 6 % and the accent's dark violet (`base`) at 22 %. Menus and
+  popovers blur 48 px and darken to 62 %. Corners (`glass::radius`): dialogs 28, panels 20,
+  menus 16, the Play group 14, rows and chips 12, buttons and tabs 10. No pixel steps, no strokes.
+- **One accent, mixed like the mockup.** `accent` (`#6b4bff`) fills the main action;
+  `accent-soft` (half accent, half white in OKLab) draws progress, ticks, links and the focus ring;
+  text on the accent turns dark when a player's accent is light. `Glass::new` does the mockup's
+  `color-mix` sums, so a player's own accent comes out as the website's would.
+- **White text at a few opacities** (`glass::ink`: 100, 80, 70, 60, 50, 45, 40 %) and white fills
+  for states (`glass::fill`: hover 5 %, field 7 %, button 8 %, selected 10 %, active 12 %).
+  Live `#4ade80`, busy `#f2c46b`, destructive `#ff8a8a`.
+- **Type**: Geist for everything; Bricolage Grotesque SemiBold for page, instance and dialog names,
+  at the optical size a browser picks for them: `Bricolage Grotesque Display` (56) and
+  `Bricolage Grotesque Heading` (28), cut by `tools/bake_bricolage.py`.
+- **Icons**: Hugeicons' free set (MIT), the ones the mockup uses, stroked 1.6 in the text colour
+  (`crates/horizon-theme/icons/glass/`, served as `icons/glass/<name>.svg`).
 
 ## The mark
 

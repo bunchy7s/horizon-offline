@@ -208,6 +208,7 @@ mod native_explosions;
 mod native_falling;
 mod native_hooks;
 mod native_inventories;
+mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
@@ -7328,6 +7329,7 @@ impl Game<'_> {
             // What the blocks spawned (a dispensed minecart, a lit TNT, a
             // placed boat) joins before the entities tick.
             self.native_joins_flush(false, 0);
+            self.lan_mark_synced();
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7342,7 +7344,9 @@ impl Game<'_> {
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
             self.tick_vehicle_watch();
+            let from = self.lan_synced_from();
             horizon_client::spans::time("tick_thunder", || self.tick_thunder());
+            self.lan_synced_since(from);
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
             self.tick_lodestone_compasses();
@@ -7437,6 +7441,9 @@ impl Game<'_> {
         {
             self.use_with_hand()?;
             self.use_delay = 4;
+        }
+        if running {
+            horizon_client::spans::time("lan_note_joined", || self.lan_note_joined());
         }
         Ok(())
     }
@@ -9021,6 +9028,10 @@ impl Game<'_> {
         self.last_inv_click = None;
     }
     pub(super) fn close_container(&mut self) {
+        // `Gui.setScreen` clears the old screen's focus before it goes: the
+        // key that closed the container (Tab bound to the inventory) has
+        // already moved the focus, and it must not outlive the screen.
+        self.pad_clear_focus();
         self.mod_browser_closed();
         self.reset_inventory_clicks();
         self.close_station();
@@ -15828,6 +15839,7 @@ impl Game<'_> {
                     self.capture(false);
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     self.carried = None;
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -15940,6 +15952,7 @@ impl Game<'_> {
                     }
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
@@ -17367,6 +17380,25 @@ impl Game<'_> {
                     }
                     self.title_action(event_loop, action)?;
                     self.reopen_data_packs(event_loop)?;
+                }
+                // AbstractSelectionList.mouseClicked: the world list takes a
+                // click of any button, so the middle one selects its row
+                // without joining (only the left click's play icon or its
+                // click on the selected row does that).
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Middle,
+                    ..
+                } if self.title.is_some() && self.screen != Screen::Options => {
+                    let size = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| [r.config.width, r.config.height])
+                        .unwrap_or([1, 1]);
+                    let b = HudBatch::new(size);
+                    if let Some(title) = self.title.as_mut() {
+                        title.select_world_at(self.cursor.0, self.cursor.1, (b.width, b.height));
+                    }
                 }
                 WindowEvent::MouseInput { .. } if self.title.is_some() => {}
                 WindowEvent::MouseInput { state, button, .. } if self.book.is_some() => {

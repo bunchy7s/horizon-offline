@@ -873,6 +873,8 @@ impl Game<'_> {
     pub(super) fn tick_creatures(&mut self) -> Result<()> {
         self.attack_ticks = self.attack_ticks.saturating_add(1);
         self.tick_leads();
+        // Vanilla's spawning and raids run before ChunkMap.tick.
+        let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
         if self.ui.rules.bool("spawn_mobs") {
@@ -882,6 +884,7 @@ impl Game<'_> {
             self.tick_village_siege();
         }
         self.tick_raids();
+        self.lan_synced_since(from);
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();
