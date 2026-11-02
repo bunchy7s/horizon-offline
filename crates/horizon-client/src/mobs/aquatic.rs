@@ -421,6 +421,7 @@ fn sting_touching_mobs(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
             target,
             amount: 1.0 + m.extra.size as f32,
             source: Damage::mob(m.id, from),
+            poison_ticks: 60 * m.extra.size,
         });
     }
 }
@@ -1182,8 +1183,14 @@ mod pufferfish_sting_tests {
                         target,
                         amount,
                         source,
+                        poison_ticks,
                     } => {
                         assert_eq!(source.attacker, Some(Who::Mob(1)));
+                        assert_eq!(
+                            *poison_ticks,
+                            60 * puff,
+                            "Pufferfish.touch's POISON lasts 60 * getPuffState()"
+                        );
                         Some((*target, *amount))
                     }
                     _ => None,
