@@ -6098,6 +6098,19 @@ impl Game<'_> {
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let scale = self.view_scale();
         self.rendered_mobs.set(0);
+        // Mob models posed on the GPU (mobs::skin), when the renderer takes them this frame.
+        let skinning = self
+            .renderer
+            .as_ref()
+            .filter(|r| r.skins_entities())
+            .and_then(|r| r.skinned_models());
+        match skinning {
+            Some(stored) => self
+                .skin_models
+                .borrow_mut()
+                .begin(&mut self.skin_frame.borrow_mut(), stored),
+            None => self.skin_frame.borrow_mut().clear_draws(),
+        }
         // What custom entity model animations read of the frame.
         horizon_client::mobs::cem_anim::set_frame(horizon_client::mobs::cem_anim::Frame {
             time: self.world.game_time as f64 + alpha,
@@ -6240,21 +6253,55 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            let render = if layers_only {
-                horizon_client::mobs::render::render_layers
+            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
+            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            let posable = skinning.is_some()
+                && !is_player
+                && !layers_only
+                && outline.is_none()
+                && armor.is_empty()
+                && !matches!(
+                    mob.species(),
+                    Species::Blaze | Species::MagmaCube | Species::GlowSquid | Species::SulfurCube
+                );
+            let mut skinned = None;
+            if posable {
+                let mut models = self.skin_models.borrow_mut();
+                let mut frame = self.skin_frame.borrow_mut();
+                let mark = frame.mark();
+                let mut skin = horizon_client::mobs::skin::Skin {
+                    models: &mut models,
+                    frame: &mut frame,
+                    bounds: None,
+                };
+                horizon_client::mobs::render::render_skinned(
+                    mob,
+                    alpha as f32,
+                    camera,
+                    &lookup,
+                    packed,
+                    self.res.mob_data(),
+                    out,
+                    &mut skin,
+                );
+                skinned = Some((mark, skin.bounds));
             } else {
-                horizon_client::mobs::render::render_with
-            };
-            render(
-                mob,
-                alpha as f32,
-                camera,
-                &lookup,
-                packed,
-                self.res.mob_data(),
-                &armor,
-                out,
-            );
+                let render = if layers_only {
+                    horizon_client::mobs::render::render_layers
+                } else {
+                    horizon_client::mobs::render::render_with
+                };
+                render(
+                    mob,
+                    alpha as f32,
+                    camera,
+                    &lookup,
+                    packed,
+                    self.res.mob_data(),
+                    &armor,
+                    out,
+                );
+            }
             // HDR output: mobs that are light shine by their kind, as blocks do (entity.wgsl
             // fs_hdr_mark); a tier's window lifts only their bright texels.
             if let Some(tier) = match mob.species() {
@@ -6302,7 +6349,23 @@ impl Game<'_> {
             if outline.is_none()
                 && horizon_client::mobs::guardian::beam(mob, alpha as f32).is_none()
             {
+                // What the GPU draws of the mob counts by its bounds' corners.
+                let corners = skinned.and_then(|(_, bounds)| bounds);
+                if let Some((lo, hi)) = corners {
+                    out.extend([lo, hi].map(|pos| Vertex {
+                        pos: pos.to_array(),
+                        ..bytemuck::Zeroable::zeroed()
+                    }));
+                }
+                let len = out.len();
                 self.cull_entity_vertices(out, entity_start);
+                if out.len() < len {
+                    if let Some((mark, _)) = skinned {
+                        self.skin_frame.borrow_mut().truncate(mark);
+                    }
+                } else if corners.is_some() {
+                    out.truncate(len - 2);
+                }
             }
             // GuardianRenderer: the laser to the locked target.
             if let Some((time, scale)) = horizon_client::mobs::guardian::beam(mob, alpha as f32)
