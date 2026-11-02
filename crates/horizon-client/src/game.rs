@@ -13085,8 +13085,9 @@ impl Game<'_> {
             let pos = BlockPos::new(target[0], target[1], target[2]);
             let [x, y, z] = hit.beside();
             let beside = Some(BlockPos::new(x, y, z));
-            // `Player.isShiftKeyDown`: under Shift only air takes the fluid;
-            // anything else passes it to the block beside.
+            // `Player.isShiftKeyDown`: a block that refuses the fluid (any
+            // non-air block under Shift) passes it to the block beside, where
+            // Shift no longer counts.
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             let creative = self.creative;
             let emptied = self.with_level(|b, level, ticks| {
