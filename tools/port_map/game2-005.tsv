@@ -87,7 +87,7 @@ Inventory.removeFromSelected	port	crates/horizon-world/src/player_inventory.rs::
 Player.defineSynchedData	skip:java		synched data definitions; Horizon keeps the fields in game and player state
 Player.turtleHelmetTick	port	crates/horizon-client/src/game/potions.rs::Game::turtle_helmet_tick	
 Player.isEquipped	inline	crates/horizon-client/src/game/potions.rs::Game::turtle_helmet_tick	the head-slot check for the turtle helmet
-Player.canPlayerFitWithinBlocksAndEntitiesWhen	missing		unsure: the pose fit check (no collision in the new pose box) was not found in Horizon
+Player.canPlayerFitWithinBlocksAndEntitiesWhen	port	crates/horizon-client/src/pose.rs::MotionWorld::can_fit_pose	the box of the pose's dimensions at the player's position, deflated by 1e-7, tested against the player's collision; `update_player_pose` asks it for the swimming, the desired and the crouching pose in that order, as `updatePlayerPose` does
 Player.increaseScore	skip:other		the score is experience.total in Horizon (death screen); there is no separate score counter
 Player.getWeaponItem	missing		unsure: the riptide spin-attack item (autoSpinAttackItemStack) was not found; Horizon keeps spin_attack parts only
 Player.destroyVanishingCursedItems	port	crates/horizon-client/src/game.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
