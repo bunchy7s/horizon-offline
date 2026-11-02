@@ -7153,7 +7153,7 @@ impl Game<'_> {
         }
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
-        let entity = self.entity_targeted();
+        let entity = self.remote_use_targets_entity();
         horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
     }
 
@@ -8191,7 +8191,7 @@ impl Game<'_> {
             }
             return;
         }
-        let off_target = if self.entity_targeted() {
+        let off_target = if self.remote_use_targets_entity() {
             self.remote_use_entity(Hand::Off)
         } else {
             self.remote_use_block(Hand::Off)
