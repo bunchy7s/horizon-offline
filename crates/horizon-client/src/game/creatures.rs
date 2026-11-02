@@ -1798,6 +1798,19 @@ impl Game<'_> {
                         self.lan_level_particles(None, &options, at, spread, speed, count, None);
                     }
                 }
+                // The LAN packet has no item for a particle yet: the host's window only.
+                MobEvent::ItemParticles {
+                    item,
+                    at,
+                    spread,
+                    speed,
+                    count,
+                } => {
+                    let options =
+                        self.item_particle(&horizon_client::items::ItemStack::new(item, 1));
+                    self.particles
+                        .send_particles(&options, at, spread, speed, count);
+                }
                 MobEvent::Sound(name, at, volume, pitch)
                 | MobEvent::LocalSound(name, at, volume, pitch) => {
                     self.audio
@@ -6484,7 +6497,9 @@ impl Game<'_> {
                     v.layer |= u32::from(tier) << 16;
                 }
             }
-            if is_player {
+            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+            let layers = horizon_client::mobs::render::layers_shown(mob);
+            if is_player && layers {
                 // PlayerRenderer's CapeLayer, WingsLayer, ParrotOnShoulderLayer
                 // and SpinAttackEffectLayer. Only the cape hides with the body;
                 // the others have no `isInvisible` check.
@@ -6505,9 +6520,11 @@ impl Game<'_> {
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
-            self.mob_block_geometry(mob, camera, alpha, packed, out);
-            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            if layers {
+                self.mob_block_geometry(mob, camera, alpha, packed, out);
+                // `native_mob_layer`: a native mod's layer, over the vanilla ones.
+                self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if mob.invisible {

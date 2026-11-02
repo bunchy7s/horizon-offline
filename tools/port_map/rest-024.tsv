@@ -62,7 +62,7 @@ UnquotedStringParseRule.parse	port	crates/horizon-command/src/snbt.rs::grammar	c
 net/minecraft/util/random/Weighted#codec	skip:java		codec; WeightedList::decode_inner reads data and weight per entry
 WeightedList.map	port	crates/horizon-assets/src/blockstate/choice.rs::Choice::map	keeps weights and maps values; used for variant model lists
 WeightedList.entryToNonEmptyListCodec	port	crates/horizon-world/src/worldgen/weighted.rs::WeightedList::build	rejects a list whose total weight is zero
-WeightedList.contains	missing		minor: unsure: canSpawnMobAt checks a pack's mob type is still in the mobs list at the new position; Horizon's group loop (spawn_selection.rs ~1079-1156) carries the entry and no membership test was found
+WeightedList.contains	inline	crates/horizon-client/src/mobs/spawn_selection.rs::valid_position_for_type	a group's entry must still be in the mobs list at a new position: the list is looked up there and scanned for the same spawner (canSpawnMobAt)
 WeightedList.equals	skip:java		equality of a Java collection
 WeightedList.hashCode	skip:java		hash of a Java collection
 WeightedList.Builder.add	skip:java		builder; WeightedList::new takes (value, weight) pairs
@@ -137,7 +137,7 @@ WorldUpgrader.verifyChunkPosAndEraseCache	port	crates/horizon-world/src/datafix/
 WorldUpgrader.verifyChunkPos	skip:other		only logs a warning for a chunk with a wrong stored position
 WorldUpgrader.work	port	crates/horizon-world/src/datafix/files.rs::upgrade_world	gap: minor: no Optimize World pass and no progress; upgrade_world runs the file fixes then the data upgrade
 WorldUpgrader.upgradeLevels	inline	crates/horizon-world/src/datafix/files.rs::upgrade_world	per-dimension loop folded into upgrade_world
-LongJumpUtil.isClearTransition	missing		minor: unsure: only the frog and goat long jumps (LongJumpToRandomPos) call it; Horizon has no such jump (frog.rs has only Croak and ShootTongue)
+LongJumpUtil.isClearTransition	port	crates/horizon-client/src/mobs/breeze.rs::clear_transition	boxed steps of nine tenths the smaller side from one point to the next must all be clear, for the breeze's long jump
 Cushion.isAnchorBuried	inline	crates/horizon-client/src/cushion.rs::can_place	the resting-slab test; can_place returns false when the slab is covered
 FishingHook.calculateOpenWater	port	crates/horizon-client/src/game/fishing.rs::Game::calculate_open_water	
 AbstractContainerMenu.getRedstoneSignalFromBlockEntity	port	crates/horizon-client/src/game/machines.rs::container_signal	block entity containers for the comparator; 0 when there is none
