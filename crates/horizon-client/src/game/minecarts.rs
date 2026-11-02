@@ -4,7 +4,8 @@
 //! `MinecartItem` placement, `VehicleEntity` breaking, the chest, hopper,
 //! furnace and TNT variants, saving, and `AbstractMinecartRenderer`'s old
 //! rail-following render with the display block.
-use super::{Game, Hit, InteractTarget, Keys};
+use super::{Game, Hit, InteractTarget, Keys, entity::Entity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     blocks::Fluid,
     collisions::SceneCollisions,
@@ -1154,13 +1155,11 @@ impl Game<'_> {
     /// `applyEffectsFromBlocks` for a cart: a bubble column lifts or drags it,
     /// and `onInsideBubbleColumn` resets the fall distance.
     fn cart_block_effects(&self, c: &mut Minecart) {
-        if horizon_client::motion::bubble_column_push(
+        if c.push_by_bubble_column(
             &self.world,
             self.pack.assets.registry,
             self.res.facts(),
             self.collision,
-            c.bounds(),
-            &mut c.velocity,
         ) {
             c.fall_distance = 0.0;
         }
@@ -1197,9 +1196,7 @@ impl Game<'_> {
             }
         }
         // applyGravity
-        if !c.no_gravity {
-            c.velocity.y -= if c.in_water { 0.005 } else { 0.04 };
-        }
+        c.velocity.y -= c.get_gravity();
         let pos = self.rail_block(c.position);
         if self.minecart_improvements() {
             self.move_along_track_new(c, intent);
@@ -1237,15 +1234,7 @@ impl Game<'_> {
         // uses this fallback until its per-move pickup/push retry is ported.
         self.push_from_ticked_cart(c);
         // AbstractMinecart.tick: updateFluidInteraction, a stream pushes the cart.
-        c.in_water = horizon_client::entities::update_entity_fluids(
-            c.bounds(),
-            c.position,
-            c.bounds().max_position().y,
-            &mut c.velocity,
-            &self.world,
-            &self.res.motion().fluids,
-        )
-        .0 > 0.0;
+        c.in_water = c.push_by_fluid(&self.world, &self.res.motion().fluids).0 > 0.0;
         // updateFluidInteraction: being in water resets the fall distance.
         if c.in_water {
             c.fall_distance = 0.0;
