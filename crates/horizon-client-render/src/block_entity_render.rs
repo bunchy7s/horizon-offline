@@ -859,7 +859,8 @@ pub struct StaticSectionRevision {
     pub block_entities: u64,
 }
 impl CacheOptions {
-    fn any_model_cache(self) -> bool {
+    /// Whether any per-section model cache is on (the sign-text cache is not one).
+    pub fn any_model_cache(self) -> bool {
         self.shulker_boxes
             || self.decorated_pots
             || self.bells

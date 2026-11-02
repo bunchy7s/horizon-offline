@@ -11159,6 +11159,20 @@ impl Game<'_> {
                         |_, state, start| self.mark_block_entity(start, state),
                         |_, _, _, _| {},
                     );
+            } else if (self.entity_culler.is_some() || self.async_entity_culler.is_some())
+                && !block_entity_cache.any_model_cache()
+            {
+                // Entity Culling on and no model cache: a block entity hidden
+                // behind a wall stays culled, as it was before the caches.
+                for block in visible {
+                    let start = out.len();
+                    self.res
+                        .block_entity_render()
+                        .render(&scene, std::iter::once(block), &mut out);
+                    if !off_screen(block.1) {
+                        self.cull_entity_vertices(&mut out, start);
+                    }
+                }
             } else {
                 let cache_candidates = r
                     .visible_block_entities_in_frustum(
