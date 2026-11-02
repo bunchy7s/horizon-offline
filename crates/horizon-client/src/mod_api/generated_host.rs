@@ -664,6 +664,17 @@ pub trait Host {
         item: Option<&str>,
         max: u32,
     ) -> u32;
+    /// Hides that player (a vanish) from the players below permission
+    /// `level`, or shows them again (None): from the next tick those players
+    /// lose them from the Tab list and the world (their client stops
+    /// tracking the player, as it does a spectator), and don't read their
+    /// joining or leaving; players of `level` or more still see them, and
+    /// a player made an operator meanwhile sees them again. By UUID: kept
+    /// for a player who is off (who joins hidden), until a mod sets it again
+    /// or the server stops. Works anywhere on a server, inside a player's
+    /// hook too; false on a client and in a world nobody else can join.
+    /// API @API:hide_player@.
+    fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool;
     /// Draw a stack and its slot decorations, except the count, at `at`,
     /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool;
