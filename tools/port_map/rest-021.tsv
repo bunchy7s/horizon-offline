@@ -117,7 +117,7 @@ FastBufferedInputStream.skip	skip:java		buffered stream helper; Rust readers do 
 FastBufferedInputStream.fill	skip:java		buffered stream helper; Rust readers do their own buffering
 FileSystemUtil.safeGetPath	skip:other		opens a jar or zip filesystem for a URI; Horizon reads archives with the zip crate
 FileUtil.sanitizeName	port	crates/horizon-client/src/title.rs::Title::target_folder	gap: minor: replaces every non-alphanumeric character with _; vanilla only replaces illegal file characters, dots, slashes and quotes
-FileUtil.isPathPortable	skip:other		portable path check; no caller in the 26.3 source
+FileUtil.isPathPortable	port	crates/horizon-client/src/game/structure_blocks.rs::portable_path	the structure path's check: no empty, `.` or `..` segment; vanilla also tests the part's characters (isPathPartPortable)
 FileUtil.decomposePath	skip:data		resource path handling; Horizon reads its data from tables and files
 FileUtil.resolvePath	skip:data		resource path handling; Horizon reads its data from tables and files
 FileUtil.isValidPathSegment	skip:data		resource path handling; Horizon reads its data from tables and files
@@ -128,7 +128,7 @@ FileZipper.add	skip:debug		profiling report archive (Minecraft.archiveProfilingR
 FileZipper.close	skip:debug		profiling report archive (Minecraft.archiveProfilingReport, PerfCommand); Horizon writes no zip report
 FormattedCharSequence.forward	port	crates/horizon-client-core/src/text.rs::Text::styled	styled text object; the per-character walk is Text::chars
 FormattedCharSequence.backward	skip:other		two-argument reverse walk; no caller in the 26.3 source (SubStringSource uses the three-argument form)
-FormattedCharSequence.decorateOutput	missing		minor: char-code modifier for reversed text, used only for right-to-left languages; Horizon has no right-to-left layout
+FormattedCharSequence.decorateOutput	inline	crates/horizon-client-render/src/bidi.rs::reorder	the mirror a right-to-left character is drawn as; vanilla's sink mirrors every code point when the language reads right to left, here only the code points in a right-to-left run
 FormattedCharSequence.composite	port	crates/horizon-client-core/src/text.rs::Text::empty	zero parts give the empty sequence
 FormattedCharSequence.fromPair	port	crates/horizon-client-core/src/text.rs::Text::append	concatenation of two sequences
 FutureChain.append	skip:other		ordering helper for the async chat-signature checks in ServerGamePacketListenerImpl; a scheduling wrapper, no game behaviour of its own
