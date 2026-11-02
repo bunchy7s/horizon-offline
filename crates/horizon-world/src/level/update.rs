@@ -344,6 +344,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             // PistonMovingBlockEntity.preRemoveSideEffects -> finalTick; the
             // block is already replaced, so only the entity goes away.
             self.remove_moving_piston(pos);
+            // MovingPistonBlock.destroy: the extended base the head belonged to
+            // goes with it, so a broken moving piston leaves no extended piston.
+            self.destroy_moving_piston_base(pos, old);
         } else if block_changed
             && (self.b.has_flag(old, super::data::state_flags::BLOCK_ENTITY)
                 || self.level.has_mod_block_entity(pos))
@@ -385,6 +388,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         (tags.copper_chests.contains(new) && tags.copper_chests.contains(old))
             || (tags.copper_golem_statues.contains(new) && tags.copper_golem_statues.contains(old))
     }
+    /// `MovingPistonBlock.destroy`: a `moving_piston` that goes away takes the
+    /// piston base behind it with it when that base is extended (a head that was
+    /// still moving over a base that finished extending). An unextended base, or
+    /// no piston base at all, stays.
+    fn destroy_moving_piston_base(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let Some(facing) = b.table.dir(state, b.props.facing) else {
+            return;
+        };
+        let base = rel(pos, facing.opposite());
+        let base_state = self.state(base);
+        if b.data(base_state).is(Class::PistonBase) && b.table.bool(base_state, b.props.extended) {
+            self.remove_block(base, false);
+        }
+    }
+
     /// `Level.removeBlock`.
     pub fn remove_block(&mut self, pos: BlockPos, moved_by_piston: bool) -> bool {
         let fluid = self.fluid_at(pos);
