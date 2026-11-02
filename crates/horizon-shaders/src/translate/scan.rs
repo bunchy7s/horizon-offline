@@ -729,6 +729,11 @@ impl<'p> Stage<'p> {
         let mut binding = None;
         for (k, &i) in words.iter().enumerate() {
             match self.tokens[i] {
+                // An extension adds real buffer syntax even in a GLSL 1.x stage.
+                // It must not take the legacy identifier rename for `buffer`.
+                "buffer" => {
+                    self.replaced.insert(i, "buffer".into());
+                }
                 "binding" => {
                     binding = words
                         .get(k + 2)

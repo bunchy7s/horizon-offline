@@ -12,6 +12,8 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `wait-ready [SECONDS]` | `wait_ready` | Wait until the player has spawned and no chunks are pending | `seconds` (number): how long to wait (default 120) |
 | `logs [--lines N] [--crash]` | `logs` | The end of the game's log, or its newest crash report | `--lines` (integer): how many lines of latest.log (default 100)<br>`--crash` (boolean): the newest crash report instead |
 | `status` | `status` | Game, renderer and streaming state (the scripting socket's original summary) | none |
+| `hello` | `hello` | The control protocol's version, the game's release and the command groups it serves | none |
+| `memory` | `memory` | What holds the game's memory: resident set, allocator, client and server columns by part, renderer, GPU memory by resource | none |
 | `worlds` | `worlds` | The saved worlds, newest first: folder, name, mode, last played, version | none |
 | `world-rename FOLDER NAME` | `world_rename` | Rename a world, as Edit World does (its folder stays) | `folder` (string, required): world folder from worlds<br>`name` (text, required): the new name |
 | `world-backup FOLDER` | `world_backup` | Zip a world into backups/, as Edit World's Make Backup does | `folder` (string, required): world folder from worlds |
@@ -26,6 +28,7 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | Command | MCP tool | What it does | Arguments |
 | --- | --- | --- | --- |
 | `events [--since SEQ]` | `events` | What happened since SEQ, oldest first: screens, chat, deaths, respawns, items gained or lost, dimensions, worlds | `--since` (integer): only events after this seq |
+| `input-log [--since SEQ] [--limit N] [--origin user\|agent\|game]` | `input_log` | Recent input and who caused it: a person, an agent or the game | `--since` (integer): only events after this seq<br>`--limit` (integer): newest N events<br>`--origin` (user, agent, game): user, agent or game |
 | `state` | `state` | Player, world, screen and crosshair target in one reply | none |
 | `looking-at` | `looking_at` | The block or entity under the crosshair | none |
 | `entities [RADIUS] [TYPE]` | `entities` | Mobs, dropped items and experience orbs near the player, nearest first | `radius` (number): search radius in blocks (default 32)<br>`type` (string): entity type filter |
@@ -137,6 +140,12 @@ Every command `horizon-ctl` takes, its MCP tool in `horizon-ctl mcp` (the launch
 | `sleep SECONDS` | CLI only | Wait (in scripts) | none |
 | `mcp` | CLI only | Serve the Model Context Protocol on stdin/stdout, one tool per command | none |
 | `bench SECONDS` | `bench` | Reset frame stats, wait, reply with the summary | `seconds` (number, required): how long to measure |
-| `stats [reset]` | `stats` | Frame-time summary since the last reset | `reset` (boolean): start counting again |
+| `stats [reset] [raw]` | `stats` | Frame-time summary since the last reset | `reset` (boolean): start counting again<br>`raw` (boolean): every frame time too (frame_ms, cpu_ms, gpu_ms) |
 | `gpu-passes [on\|off]` | CLI only | Time Horizon's own render passes on the GPU, shown in F3 and in stats and bench | `mode` (on, off): on or off; without it, only reports |
 | `fly X1 Y1 Z1 X2 Y2 Z2 SECONDS [PITCH [raw]]` | CLI only | Fly the camera along a line, then reply with the frame summary | none |
+| `record-start [NAME] [--no-world]` | `record_start` | Record input, state and the world for a bug repro | `name` (string): folder name after the timestamp (default session)<br>`--no-world` (boolean): do not copy the world (a server session) |
+| `record-stop [--export]` | `record_stop` | Stop the recording (and write the repro zip) | `--export` (boolean): write the repro bundle too |
+| `record-status` | `record_status` | The running recording and replay, if any | none |
+| `record-list` | `record_list` | The recordings and repro bundles on disk | none |
+| `record-replay NAME [--stop] [--in-place] [--keep-world] [--timeout S]` | `record_replay` | Replay a recording, best effort | `name` (string): recording from record-list<br>`--stop` (boolean): stop the running replay<br>`--in-place` (boolean): feed the open world instead of opening the copy<br>`--keep-world` (boolean): leave the copied world in saves/<br>`--timeout` (integer): give up after this many seconds (default 300) |
+| `repro-export [NAME] [PATH] [--no-world]` | `repro_export` | Zip a recording with the logs, crash report and status | `name` (string): recording from record-list (default the newest)<br>`path` (string): where to write the zip<br>`--no-world` (boolean): leave the world out |

@@ -426,6 +426,35 @@ impl Game<'_> {
             );
         }
         self.falling = falling;
+        // Firework rockets (0.25 wide, eyes at 0.85 of it), tridents in flight
+        // (0.5 wide, eyes at 0.13; like any arrow not pushed in the ground)
+        // take `Entity.pushFromExplosion` alike.
+        let mut rockets = std::mem::take(&mut self.rockets);
+        for r in &mut rockets {
+            let p = r.position;
+            push_box(
+                self,
+                p,
+                [p.x - 0.125, p.y, p.z - 0.125],
+                [p.x + 0.125, p.y + 0.25, p.z + 0.125],
+                0.2125,
+                &mut r.velocity,
+            );
+        }
+        self.rockets = rockets;
+        let mut tridents = std::mem::take(&mut self.tridents);
+        for t in tridents.iter_mut().filter(|t| !t.in_ground) {
+            let p = t.position;
+            push_box(
+                self,
+                p,
+                [p.x - 0.25, p.y, p.z - 0.25],
+                [p.x + 0.25, p.y + 0.5, p.z + 0.25],
+                f64::from(0.13_f32),
+                &mut t.velocity,
+            );
+        }
+        self.tridents = tridents;
         // VehicleEntity.ignoreExplosion: a mob's burst (a breeze's) leaves
         // boats and minecarts alone with mob griefing off.
         if !(breeze && !self.ui.rules.bool("mob_griefing")) {
@@ -694,12 +723,9 @@ impl Game<'_> {
         partial: f32,
         out: &mut Vec<horizon_client::mesher::Vertex>,
     ) {
-        static MODEL: std::sync::OnceLock<Option<horizon_client::mobs::Part>> =
-            std::sync::OnceLock::new();
-        let model = MODEL.get_or_init(|| {
-            horizon_client::mobs::load_model(&self.options.resources, "minecraft:wind_charge#main")
-        });
-        let Some(model) = model else { return };
+        let Some(model) = self.entity_models.wind_charge.as_ref() else {
+            return;
+        };
         let Some(r) = self
             .gui
             .atlas

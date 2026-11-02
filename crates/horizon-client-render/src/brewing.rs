@@ -9,7 +9,7 @@ use crate::{
 };
 use horizon_world::loot::PackOverlay;
 use serde_json::Value;
-use std::{collections::HashSet, fs, path::Path};
+use std::{collections::HashSet, path::Path};
 
 pub use horizon_client_core::potions::{
     BASE_POTION_COLOR, Category, EFFECTS, EffectDef, POTIONS, PotionDef, all_effects,
@@ -158,6 +158,28 @@ pub struct Brewing {
     /// Items accepted in the bottle slots (`PotionIngredient.isPotionInput`).
     pub inputs: HashSet<String>,
 }
+/// The files right in `recipe/brewing/`, parsed, by id: taken from the whole
+/// recipe folder's read when another table holds it (the start loads them
+/// together), else read alone. A file that doesn't parse is left out.
+fn brewing_sources(root: &Path) -> Vec<(String, Value)> {
+    let recipe = root.join("data/minecraft/recipe");
+    let (folder, prefix) = match crate::json_folder::held(&recipe) {
+        Some(folder) => (folder, "brewing/"),
+        None => match crate::json_folder::read(&recipe.join("brewing")) {
+            Ok(folder) => (folder, ""),
+            Err(_) => return Vec::new(),
+        },
+    };
+    folder
+        .files
+        .iter()
+        .filter_map(|f| {
+            let name = f.name.strip_prefix(prefix).filter(|n| !n.contains('/'))?;
+            let v = serde_json::from_slice::<Value>(f.bytes().ok()?).ok()?;
+            Some((format!("minecraft:brewing/{name}"), v))
+        })
+        .collect()
+}
 impl Brewing {
     pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Self {
         // NeoForge's load conditions: a file whose don't hold is silently
@@ -172,23 +194,7 @@ impl Brewing {
         let conditions_hold = |v: &Value| {
             horizon_world::conditions::conditions_hold(v, &|id: &str| mods.iter().any(|m| m == id))
         };
-        let mut sources: Vec<(String, Value)> =
-            fs::read_dir(root.join("data/minecraft/recipe/brewing"))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .filter_map(|e| {
-                    let bytes = fs::read(e.path()).ok()?;
-                    let v = serde_json::from_slice::<Value>(&bytes).ok()?;
-                    Some((
-                        format!(
-                            "minecraft:brewing/{}",
-                            e.file_name().to_string_lossy().strip_suffix(".json")?
-                        ),
-                        v,
-                    ))
-                })
-                .collect();
+        let mut sources: Vec<(String, Value)> = brewing_sources(root);
         // The world's packs' brewing recipes over the game's own: the top
         // pack's file for each id replaces it (`SimpleJsonResourceReloadListener`).
         for (id, files) in overlay.kind("recipe") {

@@ -46,6 +46,30 @@ pub fn time<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
     SPANS.with(|s| s.borrow_mut().push(Span { name, ms, cpu_ms }));
     out
 }
+/// Consecutive steps of one function timed as spans: each [`Laps::lap`] records the time since
+/// the previous one (or since [`laps`]) under its name. Nothing is read while spans are off.
+pub struct Laps(Option<(Instant, Option<Duration>)>);
+/// Start timing the steps of a function (see [`Laps`]).
+#[inline]
+pub fn laps() -> Laps {
+    Laps(enabled().then(|| (Instant::now(), thread_cpu())))
+}
+impl Laps {
+    /// Record the step that just ended under `name`, and start the next.
+    #[inline]
+    pub fn lap(&mut self, name: &'static str) {
+        let Some((started, cpu)) = &mut self.0 else {
+            return;
+        };
+        let (now, now_cpu) = (Instant::now(), thread_cpu());
+        let ms = (now - *started).as_secs_f32() * 1000.0;
+        let cpu_ms = now_cpu
+            .zip(*cpu)
+            .map_or(ms, |(end, start)| (end - start).as_secs_f32() * 1000.0);
+        SPANS.with(|s| s.borrow_mut().push(Span { name, ms, cpu_ms }));
+        (*started, *cpu) = (now, now_cpu);
+    }
+}
 /// The CPU time this thread has used, where the platform tells it: a tick
 /// with more wall time than CPU time waited (for a lock, or for a core on a
 /// busy machine).
@@ -291,6 +315,25 @@ mod tests {
         assert_eq!((spans[1].name, spans[1].ms), ("tick", 5.0));
         assert_eq!(super::describe(&spans), "submit 30.0/0.2, tick 5.0");
         assert!(super::take().is_empty());
+    }
+
+    /// Laps record the steps between them while spans are on, and nothing while off.
+    #[test]
+    fn laps_time_consecutive_steps() {
+        let _ = super::take();
+        let mut off = super::laps();
+        off.lap("unseen");
+        super::enable(true);
+        let mut laps = super::laps();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        laps.lap("first");
+        laps.lap("second");
+        super::enable(false);
+        off.lap("still unseen");
+        let spans = super::take();
+        let names: Vec<_> = spans.iter().map(|s| s.name).collect();
+        assert_eq!(names, ["first", "second"]);
+        assert!(spans[0].ms >= 2.0);
     }
 
     /// The thread's CPU clock moves with work done on it, not with time

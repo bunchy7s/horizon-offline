@@ -1,6 +1,6 @@
 OptionInstance.SliderableEnum.toSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::kind	slider position of the graphics preset (index / 3)
-OptionInstance.SliderableEnum.next	missing		minor: unsure: no next-value step for the graphics preset slider; Opt::cycle has no Preset arm
-OptionInstance.SliderableEnum.previous	missing		minor: unsure: no previous-value step for the graphics preset slider; Opt::cycle has no Preset arm
+OptionInstance.SliderableEnum.next	inline	crates/horizon-client-render/src/options_ui.rs	Opt::Preset is a 0..3 slider (unit/step at options_ui.rs:335, 417, 844), so stepping happens through the slider rather than a cycle arm
+OptionInstance.SliderableEnum.previous	inline	crates/horizon-client-render/src/options_ui.rs	same slider
 OptionInstance.SliderableEnum.fromSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: rounds v*3 where vanilla floors v*4
 OptionInstance.SliderableEnum.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	named spec accepts the four preset indexes
 OptionInstance.SliderableOrCyclableValueSet.createButton	port	crates/horizon-client-render/src/options_ui.rs::option_widget	cycle or slider button by option kind
@@ -8,14 +8,14 @@ OptionInstance.SliderableValueSet.createButton	port	crates/horizon-client-render
 OptionInstance.UnitDouble.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	unit range 0..1
 OptionInstance.UnitDouble.codec	port	crates/horizon-client-render/src/options_file.rs::codec_double	
 Options.updateResourcePacks	port	crates/horizon-client/src/game/options.rs::Game::handle_option_events	gap: minor: saves and reloads on every packs event; vanilla only when the list changed
-Options.maxAnisotropyValue	missing		player: no anisotropic filtering setting; textures are sampled without anisotropy
+Options.maxAnisotropyValue	port	crates/horizon-client/src/game/options.rs + horizon-client-render::gfx::set_texture_filtering	the options.txt maxAnisotropyBit (and textureFiltering) reach the sampler
 Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no now-playing toast when master or music changes
 Options.setGraphicsPresetToCustom	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
 Options.processOptions	inline	crates/horizon-client-render/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
 Options.dataFix	port	crates/horizon-client-render/src/options_fixes.rs::update	
-Options.getFullscreenVideoModeString	missing		player: the window's fullscreen mode is never saved to options.txt (fullscreen_resolution is only read back)
+Options.getFullscreenVideoModeString	inline	crates/horizon-client-render/src/options_file.rs	options.txt keeps fullscreen_resolution as the monitor index the option was picked from instead of a 'WxH@Hz' string; the window is restored from that index
 Options.buildPlayerInformation	port	crates/horizon-client/src/net.rs::run	gap: player: only view distance and chat visibility are sent; language, skin parts, main hand, particles and text filtering stay at defaults
-Options.setModelPart	missing		player: skin layer toggles (hat, jacket, sleeves, pants legs, cape) do not change the drawn skin or the info sent to the server
+Options.setModelPart	port	crates/horizon-client-render/src/options_file.rs::MODEL_PARTS + options_ui model part keys	the seven modelPart_* options are read back and sent as the PlayerModelPart set
 Options.loadSelectedResourcePacks	port	crates/horizon-client-render/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
 Options.readListOfStrings	port	crates/horizon-client-render/src/options_file.rs::read_list	
 Options.dumpOptionsForReport	skip:debug		options dump for the debug report
@@ -65,8 +65,8 @@ KeyframeAnimation.bake	inline	crates/horizon-client/src/mobs/keyframes.rs::Anima
 KeyframeAnimation.getElapsedSeconds	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	seconds modulo the length when looping
 KeyframeAnimations.degreeVec	missing		minor: unsure: no degree-to-radian conversion found in mobs/keyframes.rs or horizon-assets; check where keyframe rotations are converted
 KeyframeAnimations.scaleVec	missing		minor: unsure: no scale-offset conversion found; see degreeVec
-ColorLerper.getLerpedColor	missing		player: a sheep named jeb_ keeps one colour; no colour cycling exists in Horizon
-ColorLerper.getModifiedColor	missing		minor: only builds ColorLerper's colour tables
+ColorLerper.getLerpedColor	port	crates/horizon-client/src/mobs/render.rs::jeb_wool_rgb	a sheep whose custom name is exactly jeb_ cycles through the dye colours by age, as MobRenderer.checkMagicName does
+ColorLerper.getModifiedColor	inline	crates/horizon-client/src/mobs/render.rs::jeb_wool_rgb	the same table walk, inlined for the jeb_ name
 BlockColors.getTintSource	port	crates/horizon-client-render/src/mesher.rs::Mesher::tint	
 BlockColors.register	skip:data		tint sources come from block data in Horizon
 BlockColors.getColoringProperties	skip:other		only ModelGroupCollector uses it to group block states; Horizon bakes each state
@@ -87,14 +87,14 @@ ClientMannequin.tick	missing		minor: unsure: the mannequin avatar state (walk bo
 AbstractSelectionList.getRowLeft	port	crates/horizon-client-render/src/pack_screen.rs::List::row_left	
 CycleButton.setValue	skip:ui		widgets read the settings each frame; no separate value setter
 CreateFlatWorldScreen.DetailsList.LayerEntry.getNarration	skip:ui		screen-reader text
-InputQuirks.isQuitShortcutDown	missing		player: the quitShortcuts option is stored but never read; with it off vanilla ignores the quit shortcut
+InputQuirks.isQuitShortcutDown	port	crates/horizon-client/src/game.rs	the close path reads settings.quit_shortcuts and input::is_quit_shortcut_down, so with the option off the shortcut no longer closes the window
 InputWithModifiers.isSelection	missing		minor: unsure: Space and Enter do not activate focused buttons on the screens checked
 InputWithModifiers.isConfirmation	missing		minor: unsure: Enter checks are per screen (options_ui.rs key, chat.rs); no shared predicate
 InputWithModifiers.isCopy	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isPaste	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isCut	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
-PreeditEvent.fromSdlTextEditing	missing		player: IME composition text (Japanese or Chinese input) is not shown while composing; no IME events are handled
-PreeditEvent.toFormattedText	missing		player: same as fromSdlTextEditing
+PreeditEvent.fromSdlTextEditing	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the composition text to the focused field
+PreeditEvent.toFormattedText	inline	crates/horizon-client/src/game.rs::ime_preedit	the composing text is drawn as the field's preedit, not as formatted chat
 GameConfig.FolderData.getExternalAssetSource	skip:data		Horizon reads assets from the prepared resources folder
 net/minecraft/client/main/Main#getQuickPlayVariant	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: only the quick play flags of the launch parser; realms branch not checked
 net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::read	

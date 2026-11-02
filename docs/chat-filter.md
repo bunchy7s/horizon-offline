@@ -18,7 +18,20 @@ tunes it. LAN worlds and single player don't filter.
   muted doesn't count towards the window, so the hit after a mute still counts as the next. Anvil names
   never count (the client renames at every key typed): they are only refused.
 - Mutes are kept in `chat-filter-mutes.json` beside `server.properties`, and survive a restart.
-  Operators of level 3 lift one with `/unmute <player>`; the console takes `unmute <player>`.
+
+## Muting by hand
+
+Operators of level 3 (`/ban`'s level) mute players themselves; the console takes the same words without the
+slash. These are Horizon extras, and exist only on servers that filter chat.
+
+- `/mute <player> [reason]`: muted until `/unmute`.
+- `/tempmute <player> <duration> [reason]`: muted for a duration such as `30s`, `10m`, `2h`, `1d` or `1w`.
+- `/mutelist`: every mute in force, the filter's and the operators', with who muted, until when and why.
+- `/unmute <player>`: lifts either kind.
+
+A player muted by hand is told at once, then gets the same refusal as the filter's mutes in chat and message
+commands, with the operator's reason. The player may be offline if the server has seen them. A filter mute
+never shortens a longer mute an operator gave.
 
 ## Settings
 
@@ -51,4 +64,4 @@ in an entry must be doubled in the text, so Niger and Nigeria pass, and so do "s
 Keep the list to slurs: insults that aren't slurs are the moderators' to handle.
 
 Code: `crates/horizon-chat-filter` (settings, matcher, escalation, mutes), `lan/hub/chat_filter.rs` (the
-check before the server relays a text), `game/chat_filter.rs` (log, events, bans, `/unmute`).
+check before the server relays a text), `game/chat_filter.rs` (log, events, bans, the mute commands).

@@ -20,6 +20,10 @@ type WindowId = i32;
 struct ActiveEventLoop;
 struct Window;
 impl Window { fn id(&self) -> i32 { 7 } }
+mod input_trace {
+    #[derive(Clone, Copy)]
+    pub enum InputOrigin { User, Agent, Game }
+}
 #[derive(Clone, Debug, PartialEq)]
 struct KeyEvent { physical_key: i32, logical_key: &'static str, location: i32,
                   text: &'static str, pressed: bool, repeat: bool }
@@ -28,7 +32,8 @@ fn glfw_modifiers(bits: u32) -> u32 { bits }
 struct Game { window: Option<Window>, modifiers: u32, early: bool,
               calls: Vec<&'static str>, observed: Vec<(KeyEvent, u32)> }
 impl Game {
-    fn handle_window_event(&mut self, _: &ActiveEventLoop, _: WindowId, mut event: WindowEvent) {
+    fn handle_window_event(&mut self, _: &ActiveEventLoop, _: WindowId, mut event: WindowEvent,
+                           _: input_trace::InputOrigin) {
         self.calls.push("handle"); self.modifiers = 0;
         if let WindowEvent::KeyboardInput { event, .. } = &mut event { event.physical_key = 99; event.text = ""; }
         if self.early { return; }

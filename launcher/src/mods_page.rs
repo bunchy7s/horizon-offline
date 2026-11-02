@@ -320,11 +320,21 @@ impl Launcher {
                         Ok(found) => {
                             m.more = found.len() == PAGE;
                             m.results.truncate(offset);
+                            if offset == 0 {
+                                m.results_list.reset();
+                            }
                             m.results.extend(found.iter().cloned());
                             m.error = None;
                             to_check.extend(found);
                         }
-                        Err(e) => m.error = Some(e),
+                        Err(e) => {
+                            if offset == 0 {
+                                m.results.clear();
+                                m.more = false;
+                                m.results_list.reset();
+                            }
+                            m.error = Some(e);
+                        }
                     }
                 }
                 Event::Found(..) => {}
@@ -394,13 +404,21 @@ impl Launcher {
     }
 
     pub(super) fn mods_search(&mut self, offset: usize) {
+        self.mods_search_keeping(offset, false);
+    }
+
+    /// Searches; with `keep`, the rows already listed stay on screen until the new ones arrive,
+    /// so the page doesn't shrink (and the scroll doesn't jump to the top) while it waits.
+    pub(super) fn mods_search_keeping(&mut self, offset: usize, keep: bool) {
         let m = &mut self.mods;
         m.search += 1;
         m.searching = true;
         if offset == 0 {
-            m.results.clear();
-            m.more = false;
-            m.results_list.reset();
+            if !keep {
+                m.results.clear();
+                m.more = false;
+                m.results_list.reset();
+            }
             m.installed_list.reset();
         }
         let query = match m.java_for(m.kind) {
@@ -934,9 +952,12 @@ impl Launcher {
         let java = self.mods.java_for(self.mods.kind).is_some();
         let source_note = (source_for(self.mods.kind) == SourceId::Modrinth && !java)
             .then(|| div().flex().child(self.mods_source_switch(cx)));
-        // The registry lists only what was made for Horizon: no "everything", no Modrinth filters.
+        // The registry lists only what was made for Horizon: no "everything", no Modrinth filters,
+        // only its sort.
         let registry = self.mods.source == SourceId::Horizon && !java;
         let filters = (!registry).then(|| self.mods_filters(cx));
+        // The registry's sort sits below the GitHub row, above the list it orders.
+        let registry_sort = registry.then(|| self.mods_sort_bar(cx));
         let controls = div()
             .flex()
             .flex_col()
@@ -979,6 +1000,7 @@ impl Launcher {
         if self.mods.kind == PackKind::Mod && self.mods.java.is_none() {
             body = body.child(self.github_panel(cx));
         }
+        body = body.children(registry_sort);
         if let Some(list) = self.mods_installed_list(cx) {
             body = body.child(list);
         }
@@ -1509,22 +1531,45 @@ impl Launcher {
                 }),
             ));
         }
+        let profile = native_mods::Profile::chosen(&self.settings);
+        let picker = segments(
+            "native-profile",
+            &[
+                (native_mods::Profile::Performance, "Performance build"),
+                (native_mods::Profile::Dev, "Dev build"),
+                (native_mods::Profile::Release, "Release build"),
+            ],
+            profile,
+            &t,
+            {
+                let this = cx.entity().downgrade();
+                move |choice, _, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.settings.native_profile = Some(choice);
+                        this.settings.native_release = false;
+                        this.native_done = None;
+                        this.settings.save();
+                        cx.notify();
+                    });
+                }
+            },
+        );
+        let said = match profile {
+            native_mods::Profile::Performance => tr("The everyday build for playing with mods"),
+            native_mods::Profile::Dev => {
+                tr("For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow")
+            }
+            native_mods::Profile::Release => {
+                tr("Release build: slower to build, slightly faster game")
+            }
+        };
         detail = detail.child(
             div()
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .child(
-                    switch("native-release", self.settings.native_release, &t).on_click(
-                        cx.listener(|this, _: &ClickEvent, _, cx| {
-                            this.settings.native_release = !this.settings.native_release;
-                            this.native_done = None;
-                            this.settings.save();
-                            cx.notify();
-                        }),
-                    ),
-                )
-                .child(tr("Release build: slower to build, slightly faster game").to_string()),
+                .child(picker)
+                .child(said),
         );
         if let Some(list) = mismatch {
             detail = detail.child(self.native_mismatch_panel(list, cx));
