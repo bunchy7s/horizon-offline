@@ -874,5 +874,12 @@
   "No servers saved in this instance.": "Bu kurulumda kayıtlı sunucu yok.",
   "1 server in {name}": "{name} içinde 1 sunucu",
   "{count} servers in {name}": "{name} içinde {count} sunucu",
-  "Click again to remove": "Kaldırmak için tekrar tıklayın"
+  "Click again to remove": "Kaldırmak için tekrar tıklayın",
+  "Resource pack · on": "Kaynak paketi · açık",
+  "Resource pack · off": "Kaynak paketi · kapalı",
+  "Shader pack · on": "Gölgelendirici paketi · açık",
+  "Shader pack · off": "Gölgelendirici paketi · kapalı",
+  "1 pack in {name}": "{name} içinde 1 paket",
+  "{count} packs in {name}": "{name} içinde {count} paket",
+  "No resource packs. Find them on the Mods page under Modrinth.": "Kaynak paketi yok. Modlar sayfasında Modrinth altında bulabilirsiniz."
 }

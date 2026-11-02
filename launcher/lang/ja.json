@@ -874,5 +874,12 @@
   "No servers saved in this instance.": "このインスタンスに保存されたサーバーはありません。",
   "1 server in {name}": "{name} のサーバー 1 件",
   "{count} servers in {name}": "{name} のサーバー {count} 件",
-  "Click again to remove": "もう一度クリックして削除"
+  "Click again to remove": "もう一度クリックして削除",
+  "Resource pack · on": "リソースパック · オン",
+  "Resource pack · off": "リソースパック · オフ",
+  "Shader pack · on": "シェーダーパック · オン",
+  "Shader pack · off": "シェーダーパック · オフ",
+  "1 pack in {name}": "{name} のパック 1 件",
+  "{count} packs in {name}": "{name} のパック {count} 件",
+  "No resource packs. Find them on the Mods page under Modrinth.": "リソースパックがありません。Mods ページの Modrinth で探せます。"
 }
