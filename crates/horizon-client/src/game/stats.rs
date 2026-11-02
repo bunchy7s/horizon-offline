@@ -430,7 +430,8 @@ impl Game<'_> {
         {
             return;
         }
-        let group = 1 + self.world.random.next_int_bound(3).unwrap_or(0);
+        let difficulty_id = self.difficulty_id();
+        let group = phantom_group_size(&mut self.world.random, difficulty_id);
         for _ in 0..group {
             let _ = self.spawn_mob(
                 "minecraft:phantom",
@@ -451,9 +452,30 @@ impl Game<'_> {
     }
 }
 
+/// `1 + random.nextInt(difficulty.getId() + 1)` of `PhantomSpawner.tick`: Peaceful still draws.
+fn phantom_group_size(random: &mut impl RandomSource, difficulty_id: i32) -> i32 {
+    1 + random.next_int_bound(difficulty_id + 1).unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phantom_group_size_follows_difficulty() {
+        // Expected from java.util.Random(12345): 1 + nextInt(id + 1), six draws each.
+        let expected: [(i32, [i32; 6]); 4] = [
+            (0, [1, 1, 1, 1, 1, 1]),
+            (1, [1, 2, 2, 2, 2, 1]),
+            (2, [2, 2, 1, 1, 2, 2]),
+            (3, [2, 3, 4, 4, 4, 1]),
+        ];
+        for (id, sizes) in expected {
+            let mut r = horizon_core::random::LegacyRandom::new(12345);
+            let got: Vec<i32> = (0..6).map(|_| phantom_group_size(&mut r, id)).collect();
+            assert_eq!(got, sizes, "difficulty {id}");
+        }
+    }
 
     #[test]
     fn counters_events_and_dirty_entries() {
