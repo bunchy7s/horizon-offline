@@ -86,7 +86,7 @@ DataComponentMap.Builder.setUnchecked	skip:java		builder
 DataComponentMap.Builder.addAll	skip:java		builder
 DataComponentMap.Builder.buildFromMapTrusted	skip:java		builder
 DataComponentPatch.getFromPatchAndPrototype	skip:java		patch-or-default read; typed StackData fields plus the item table cover it
-DataComponentPatch.forget	missing		a block entity's implicit components are not stripped on placement: `block_entity_item.rs` merges the explicit ones over the implicit
+DataComponentPatch.forget	missing		a block entity's implicit components are not stripped on placement: block_entity_item.rs::place merges the explicit ones over the implicit
 DataComponentPatch.split	skip:java		added and removed parts kept as separate fields (protocol Stack.removed, StackData)
 DataComponentPatch.equals	skip:java		equality
 DataComponentPatch.toString	skip:debug		debug string
@@ -109,20 +109,20 @@ PatchedDataComponentMap.asPatch	skip:java		generic component map; Horizon sets t
 PatchedDataComponentMap.copy	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 PatchedDataComponentMap.equals	skip:java		generic component map; Horizon sets typed StackData fields and ItemStack::tidy drops default-equal data
 TypedDataComponent.encodeValue	skip:java		codec
-AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly
-AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested
-BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle
-ContainerPredicate.matches	missing		ignored by `advancements.rs::item`, so a container contents criterion matches too broadly
+AttributeModifiersPredicate.matches	missing		`advancements.rs::item` reads `items`, `count`, the `potion_contents` and `damage` components and the `enchantments` and `damage` predicates; a `minecraft:attribute_modifiers` predicate is ignored, so the criterion matches too broadly; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+AttributeModifiersPredicate.EntryPredicate.test	missing		same as `matches`: no entry of an `attribute_modifiers` predicate is tested; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+BundlePredicate.matches	missing		ignored by `advancements.rs::item`, so a bundle contents criterion matches any bundle; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+ContainerPredicate.matches	missing		ignored by `advancements.rs::item`, so a container contents criterion matches too broadly; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
 net/minecraft/core/component/predicates/DamagePredicate#matches	inline	crates/horizon-client/src/advancements.rs::item	gap: minor: only the damage range; the durability range (max damage minus damage) is not checked
 DataComponentPredicate.Single.wrapCodec	skip:java		codec
 DataComponentPredicate.Type.unpackType	skip:java		codec helper
 EnchantmentsPredicate.matches	inline	crates/horizon-client/src/advancements.rs::item	the enchantments predicate inside item()
-FireworkExplosionPredicate.FireworkPredicate.test	missing		ignored by `advancements.rs::item`
-FireworksPredicate.matches	missing		ignored by `advancements.rs::item`, so a fireworks criterion matches any firework
-JukeboxPlayablePredicate.matches	missing		ignored by `advancements.rs::item`
+FireworkExplosionPredicate.FireworkPredicate.test	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+FireworksPredicate.matches	missing		ignored by `advancements.rs::item`, so a fireworks criterion matches any firework; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+JukeboxPlayablePredicate.matches	missing		ignored by `advancements.rs::item`; the one item predicate shipped data does use besides enchantments and map_id, in adventure/play_jukebox_in_meadows, where it is the only test of that match_tool
 PotionsPredicate.matches	port	crates/horizon-client/src/advancements.rs::potions	
-WritableBookPredicate.matches	missing		ignored by `advancements.rs::item`
-WrittenBookPredicate.matches	missing		ignored by `advancements.rs::item`
+WritableBookPredicate.matches	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
+WrittenBookPredicate.matches	missing		ignored by `advancements.rs::item`; no shipped data uses one — only minecraft:enchantments, map_id and jukebox_playable appear as item predicates in the 1866 advancements and the 1447 loot tables
 BoatDispenseItemBehavior.execute	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_boat	
 DefaultDispenseItemBehavior.dispense	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_default	the click and dispense events of dispense_default
 DefaultDispenseItemBehavior.addToInventoryOrDispense	port	crates/horizon-client/src/game/dispenser.rs::Game::consume_with_remainder	
