@@ -44,7 +44,7 @@ BundleContents.Mutable.toggleSelectedItem	port	crates/horizon-items/src/bundle.r
 BundleContents.Mutable.indexIsOutsideAllowedBounds	inline	crates/horizon-items/src/bundle.rs::toggle_selected	the bounds test is the inside check
 BundleContents.Mutable.getStackedWeight	port	crates/horizon-items/src/bundle.rs::Weight::times	weight times a count
 BundleContents.Mutable.setItem	missing		minor: a slot write into a bundle (container setItem, reached by /item replace) skips the weight limit and merge; Horizon's /item command has no bundle handling
-BundleContents.Mutable.addSlotWithItem	missing		minor: adding a new bundle slot (container path, /item) skips the weight check; Horizon's /item command has no bundle handling
+BundleContents.Mutable.addSlotWithItem	inline	crates/horizon-items/src/bundle.rs::try_insert	the append with its weight check and merge lives in try_insert; the /item command's container write still does not go through it
 BundleContents.Mutable.getWeightWithAddedItems	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	the weight after adding must stay at or below one, computed from room_for
 BundleContents.Mutable.mergeIdenticalStacks	inline	crates/horizon-items/src/bundle.rs::Contents::try_insert	gap: minor: merges on insert only; no flatten pass for container writes
 BundleContents.Mutable.toImmutable	port	crates/horizon-items/src/bundle.rs::Contents::store	writes the contents and selection back into the component
@@ -125,14 +125,14 @@ TransmuteRecipe.resultDisplay	port	crates/horizon-client/src/recipe_book.rs::Rec
 TransmuteRecipe.createPlacementInfo	port	crates/horizon-client/src/crafting.rs::Recipes::placement	the placement of the input and the materials
 RecipeDisplay.isEnabled	missing		minor: no feature flag check, so a display for a disabled feature still shows
 SlotDisplay.applyDemoTransformation	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	gap: minor: only the trim demo draws (up to 256 tries); the dyed demo is not modelled
-SlotDisplay.AnyFuel.resolve	missing		unsure: no any-fuel display list found in Horizon's recipe book
+SlotDisplay.AnyFuel.resolve	port	crates/horizon-client/src/recipe_book.rs::ghost	every item with a cooking fuel component, grouped by component value in registry order
 SlotDisplay.Composite.resolve	missing		unsure: no composite display list found in Horizon's recipe book
-SlotDisplay.DyedSlotDemo.resolve	missing		unsure: no dyed demo display found in Horizon's recipe book
+SlotDisplay.DyedSlotDemo.resolve	port	crates/horizon-client/src/crafting.rs::book_displays	the targets cycle fastest and the list stops at 16 stacks
 SlotDisplay.ItemSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	the item of a single-item slot
 SlotDisplay.ItemStackSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	gap: minor: keeps item ids only; the stack's components are not carried into the display
 SlotDisplay.OnlyWithComponent.resolve	missing		unsure: no display that filters by an item component found in Horizon's recipe book
 SlotDisplay.SmithingTrimDemoSlotDisplay.resolve	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	a random base trimmed by a random material
-SlotDisplay.WithAnyPotion.resolve	missing		unsure: no any-potion display list found in Horizon's recipe book
+SlotDisplay.WithAnyPotion.resolve	port	crates/horizon-client/src/crafting.rs::book_displays	every potion resolved onto the source item
 SlotDisplay.WithRemainder.resolve	missing		unsure: no remainder display found in Horizon's recipe book; remainders exist in Recipes::remainders for play
 SlotDisplay.WithRemainder.isEnabled	missing		minor: no feature flag check for the remainder display
 BlockPlaceContext.at	port	crates/horizon-world/src/level/place.rs::Sim::placement_at	the placement position and face from the clicked block

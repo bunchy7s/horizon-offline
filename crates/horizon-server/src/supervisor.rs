@@ -498,7 +498,11 @@ fn pump(shared: &Arc<Shared>, from: impl Read + Send + 'static, to_stderr: bool)
                         };
                         if up {
                             shared.emit("phase", serde_json::json!({ "phase": "running" }));
+                            crate::management::started(&shared);
                         }
+                    } else if line.contains("/INFO]: Stopping server") {
+                        // The game's own `stop` (a command in the game, not the supervisor's).
+                        crate::management::stopping(&shared);
                     }
                 }
                 shared.log_line(line);
@@ -648,6 +652,7 @@ fn supervise(
             if command == "stop" && stopping.is_none() {
                 stopping = Some(Instant::now());
                 shared.set_phase(Phase::Stopping);
+                crate::management::stopping(shared);
             }
             if let Some(input) = stdin.as_mut()
                 && writeln!(input, "{line}")
@@ -665,6 +670,7 @@ fn supervise(
             note(shared, "INFO", "Restarting the server");
             stopping = Some(Instant::now());
             shared.set_phase(Phase::Restarting);
+            crate::management::stopping(shared);
             send_stop(&mut stdin);
         }
         if asked {
@@ -673,6 +679,7 @@ fn supervise(
                 note(shared, "INFO", "Stopping the server");
                 stopping = Some(Instant::now());
                 shared.set_phase(Phase::Stopping);
+                crate::management::stopping(shared);
                 send_stop(&mut stdin);
             } else {
                 note(shared, "WARN", "Stopping the game at once, without saving");

@@ -61,17 +61,9 @@ impl Game<'_> {
         t.push(objective.display_text());
         Some(t)
     }
-    /// The other players' models and names: the guests on a LAN host, the
-    /// players a server sends on a client.
+    /// The other players' models and names: the players a server sends.
     fn other_players(&self) -> Vec<(&Mob, String)> {
         let mut out = Vec::new();
-        if let Some(host) = &self.lan {
-            for (conn, m) in &host.models {
-                if let Some(g) = host.hub.guest(*conn) {
-                    out.push((m, g.name.clone()));
-                }
-            }
-        }
         for (id, name) in self.remote_player_names() {
             if let Some(m) = self.mobs.iter().find(|m| m.id == id) {
                 out.push((m, name));

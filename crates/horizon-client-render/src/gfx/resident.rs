@@ -5,7 +5,10 @@
 #[cfg(test)]
 use super::Frustum;
 use super::{Cull, SectionKey};
-use crate::{fast_hash::FxHashMap, streaming::in_view_distance};
+use crate::{
+    fast_hash::{FxHashMap, FxHashSet},
+    streaming::in_view_distance,
+};
 use glam::{DVec3, Vec3};
 
 /// One chunk column's resident sections.
@@ -140,6 +143,24 @@ impl<T> Resident<T> {
         column.sections.push((key.1, slot));
         column.low = column.low.min(key.1);
         column.high = column.high.max(key.1);
+    }
+    /// Removes every section of the `gone` columns, the others keeping their order: one
+    /// pass over the store, where `remove` moves a slot and looks its column up for each.
+    pub fn remove_columns(&mut self, gone: &FxHashSet<(i32, i32)>) -> Vec<T> {
+        let items = std::mem::take(&mut self.items);
+        let bounds = std::mem::take(&mut self.bounds);
+        self.slots.clear();
+        self.columns.clear();
+        self.column_index.clear();
+        let mut removed = Vec::new();
+        for ((key, value), bounds) in items.into_iter().zip(bounds) {
+            if gone.contains(&(key.0, key.2)) {
+                removed.push(value);
+            } else {
+                self.insert_with_bounds(key, value, bounds);
+            }
+        }
+        removed
     }
     pub fn remove(&mut self, key: SectionKey) -> Option<T> {
         let slot = self.slots.remove(&key)?;
@@ -512,7 +533,19 @@ mod tests {
                 ((seed >> 4) % 6) as i32 - 1,
                 ((seed >> 8) % 5) as i32 - 2,
             );
-            if (seed >> 12).is_multiple_of(3) {
+            if (seed >> 12).is_multiple_of(97) {
+                // Whole columns at once: the column of `key` and the next one along x.
+                let gone: FxHashSet<(i32, i32)> =
+                    [(key.0, key.2), (key.0 + 1, key.2)].into_iter().collect();
+                let mut removed = r.remove_columns(&gone);
+                let mut expected: Vec<u32> = model
+                    .extract_if(|k: &SectionKey, _| gone.contains(&(k.0, k.2)))
+                    .map(|(_, v)| v)
+                    .collect();
+                removed.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(removed, expected);
+            } else if (seed >> 12).is_multiple_of(3) {
                 assert_eq!(r.remove(key), model.remove(&key));
             } else {
                 r.insert(key, step);

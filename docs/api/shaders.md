@@ -154,6 +154,8 @@ stages.
 
 ## Changelog
 
+- 2026-11-02: API 0.1 (additions): with dynamic lights on, held and dropped items light
+  `MaterialInput.colored_light` in their block's `[[lights]]` colour.
 - 2026-11-02: API 0.1 (additions): `[[particle_lights]]` and `MaterialInput.colored_light`.
 - 2026-11-01: API 0.1 (additions): `[[materials]]` and `MaterialInput.material`, an id by sprite,
   and `[shadow] solid_materials`.

@@ -47,7 +47,7 @@ line are in the output) and the Rust fn before changing anything.
   That one line is what makes the next agent find it.
 - Fix the path players run: single player is a client of the integrated server, so server logic lives in
   `game/lan*.rs` and `src/lan/`, and what only the client's copy shows (particles, local sounds, hand
-  animation) must be reached from `game/remote*.rs`. A fix on the old in-frame path alone fixes nothing.
+  animation) must be reached from `game/remote*.rs`.
 - Look at the neighbours the ledger lists for the same class: a `client` or `seam` gap next to your fix is
   usually the same bug on the other path.
 

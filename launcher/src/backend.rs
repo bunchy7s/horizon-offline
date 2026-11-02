@@ -829,8 +829,7 @@ pub(crate) fn install_as(
     fs::rename(&top, &target).map_err(|e| e.to_string())?;
     fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
-    reuse_prepared(&root, tag);
-    complete_assets(tag);
+    reuse_prepared_for(tag);
     progress(1.0);
     Ok(())
 }
@@ -1175,6 +1174,13 @@ fn reuse_prepared(versions: &Path, tag: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// What an install does once its folder is in place (an imported build's too, `build_import`):
+/// another installed version's resources if it has none, and whatever its resources lack.
+pub(crate) fn reuse_prepared_for(tag: &str) {
+    reuse_prepared(&versions_dir(), tag);
+    complete_assets(tag);
 }
 
 /// `reuse_prepared` for every installed version that is not prepared, oldest first, so a
@@ -2623,11 +2629,13 @@ pub fn check_updates() -> Result<Updates, String> {
 /// Whether a version installed as an update becomes the selected one: when the player had none,
 /// was on a Nightly, or on the newest installed release (so a player of the release channel moves
 /// to the Nightly at the first check, docs/release-flow.md). An older release picked by hand
-/// stays; an instance pinned to a version keeps it either way.
+/// stays, and so does an imported build (`build_import`); an instance pinned to a version keeps it
+/// either way.
 pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) -> bool {
     match selected {
         None => true,
         Some(s) if crate::nightly::date_of(s).is_some() => true,
+        Some(s) if crate::build_import::is_imported(s) => false,
         Some(s) => installed_before
             .iter()
             .find(|t| is_game_tag(t))
@@ -2954,6 +2962,9 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
             exe_path().display()
         )
     })?;
+    // An installed launcher's Uninstall entry names the new version (installer.rs).
+    #[cfg(windows)]
+    crate::installer::after_update(launcher_version(&release.tag).unwrap_or(VERSION));
     let _ = fs::remove_dir_all(&work);
     progress(1.0);
     Ok(())
@@ -3115,6 +3126,8 @@ pub enum Msg {
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
+    /// An imported game build is installed (`build_import::import`): its version, or why not.
+    Imported(Result<String, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.
@@ -4349,6 +4362,10 @@ pub fn {f}("
         assert!(select_after_update(Some("v2026.10.12"), &installed));
         assert!(!select_after_update(Some("v2026.10.1"), &installed));
         assert!(select_after_update(None, &installed));
+        assert!(!select_after_update(
+            Some("imported-2026-11-01-abcdef0"),
+            &["imported-2026-11-01-abcdef0".to_string()]
+        ));
     }
 
     /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the

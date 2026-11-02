@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand};
 use horizon_launcher::account::{self, Accounts};
 use horizon_launcher::backend::{self, Release};
+use horizon_launcher::build_import;
 use horizon_launcher::github_mods;
 use horizon_launcher::i18n::{tr, trf};
 use horizon_launcher::instances;
@@ -708,6 +709,20 @@ enum Cmd {
     Install { tag: String },
     /// Remove an installed version
     Remove { tag: String },
+    /// Install a game program you have, such as a horizon-client built on your fork's Actions,
+    /// as its own version on an installed release or Nightly's game files, and select it.
+    /// Nothing signed it: it runs with your rights, and updates never replace it
+    ImportBuild {
+        /// The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
+        path: PathBuf,
+        /// The installed release or Nightly whose game files it plays with (default: the
+        /// selected one, else the newest)
+        #[arg(long)]
+        version: Option<String>,
+        /// You picked this build yourself and trust it with full access to this computer
+        #[arg(long)]
+        trust_unsigned: bool,
+    },
     /// Prepare a version's resources from your own Minecraft install, or from Mojang
     Prepare {
         /// The game folder of the official launcher, Prism Launcher, MultiMC, the Modrinth App,
@@ -1336,6 +1351,24 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::Remove { tag } => {
             backend::remove_version(&tag)?;
             println!("Removed {tag}.");
+        }
+        Cmd::ImportBuild {
+            path,
+            version,
+            trust_unsigned,
+        } => {
+            if !trust_unsigned {
+                return Err("An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.".into());
+            }
+            let tag = build_import::import(&path, version.as_deref())?;
+            let prepared = backend::is_prepared(&tag);
+            if as_json {
+                json(serde_json::json!({ "imported": tag, "prepared": prepared }));
+            } else if prepared {
+                println!("Imported {tag} and selected it. It is prepared already, from another installed version.");
+            } else {
+                println!("Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}");
+            }
         }
         Cmd::Prepare {
             minecraft,

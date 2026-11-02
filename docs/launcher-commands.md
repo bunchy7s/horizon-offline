@@ -44,6 +44,17 @@ Remove an installed version.
 
 MCP: `remove`, needs `confirm: true`.
 
+## `horizon-launcher import-build`
+
+Install a game program you have, such as a horizon-client built on your fork's Actions, as its own version on an installed release or Nightly's game files, and select it. Nothing signed it: it runs with your rights, and updates never replace it.
+
+    horizon-launcher import-build <PATH>
+
+- `PATH`: The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
+- `--trust-unsigned`: You picked this build yourself and trust it with full access to this computer
+
+MCP: none: the player's switch.
+
 ## `horizon-launcher prepare`
 
 Prepare a version's resources from your own Minecraft install, or from Mojang.

@@ -23,6 +23,10 @@ use crate::{GbuffersInputs, Macros, Pack, Preprocessed, Program, Properties, Tar
 /// Which group of 2.1 a program belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Group {
+    /// Compute initialization at load and after target resize.
+    Setup,
+    /// Composite-style work before shadow rendering.
+    Begin,
     Prepare,
     Deferred,
     Composite,
@@ -191,7 +195,9 @@ pub const CELESTIAL_BLEND: Blend = [
     Factor::OneMinusSrcAlpha,
 ];
 
-const GROUPS: [(Group, &str); 4] = [
+const GROUPS: [(Group, &str); 6] = [
+    (Group::Setup, "setup"),
+    (Group::Begin, "begin"),
     (Group::Prepare, "prepare"),
     (Group::Deferred, "deferred"),
     (Group::Composite, "composite"),
@@ -861,7 +867,7 @@ impl Loader<'_> {
             f => format!("{f}/{name}.{ext}"),
         };
         let (vsh, fsh) = (path("vsh"), path("fsh"));
-        if !self.pack.exists(&fsh) || !self.pack.exists(&vsh) {
+        if group == Group::Setup || !self.pack.exists(&fsh) || !self.pack.exists(&vsh) {
             let on = enabled(
                 self.properties,
                 self.folder,
@@ -872,9 +878,14 @@ impl Loader<'_> {
             // A program of compute stages only (`.csh` without `.vsh` and `.fsh`).
             let composite = matches!(
                 group,
-                Group::Prepare | Group::Deferred | Group::Composite | Group::ShadowComp
+                Group::Setup
+                    | Group::Begin
+                    | Group::Prepare
+                    | Group::Deferred
+                    | Group::Composite
+                    | Group::ShadowComp
             );
-            if !on || !composite || !self.pack.exists(&path("csh")) {
+            if !on || !composite {
                 return None;
             }
             let compute = self.compute(&name);
@@ -957,7 +968,9 @@ impl Loader<'_> {
             }
         };
         let compute = match group {
-            Group::Prepare
+            Group::Setup
+            | Group::Begin
+            | Group::Prepare
             | Group::Deferred
             | Group::Composite
             | Group::Final
@@ -1677,6 +1690,36 @@ mod tests {
         assert_eq!(
             post.config.buffers[2].format,
             crate::Format::parse("RGBA16F").unwrap()
+        );
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn setup_and_begin_compute_load_before_prepare_even_with_only_a_suffix() {
+        let compute = "#version 430\nlayout(local_size_x=1) in; void main(){}";
+        let zip = crate::pack::tests::zip(&[
+            ("shaders/setup.csh", compute),
+            ("shaders/begin_a.csh", compute),
+            ("shaders/prepare.csh", compute),
+        ]);
+        let pack = Pack::from_zip_bytes("lifecycle.zip", zip).unwrap();
+        let post = load_post(
+            &pack,
+            "",
+            &Properties::default(),
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(
+            post.programs
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
+            ["setup", "begin", "prepare"]
         );
     }
 }
