@@ -1630,6 +1630,7 @@ pub enum MobEvent {
         params: conversion::Params,
     },
     DropItem {
+        mob: u32,
         item: Arc<str>,
         count: u32,
         at: [f64; 3],

@@ -964,6 +964,8 @@ API 153 adds a player starting or stopping flight: `native_player_toggle_flight(
 
 API @API:physical_window_size@ adds `native_physical_window_size()`, the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists. Bundles that use it need `"hooks": @API:physical_window_size@`.
 
+API @API:mod_image@ adds `Game::native_mod_image(width, height, rgba)`: a mod's own RGBA image, uploaded into the HUD atlas slot `horizon/modimage` (1024 by 1024) and drawn with `native_sprite`, whose source rectangle crops and stretches it, so a map or a schematic view needs no texture of its own. The slot is reserved only while a native mod is loaded, so a game without mods pays none of its 4 MiB. False for an image that is not `width * height` pixels of four bytes, is larger than the slot, or when there is no slot. Each upload is a texture patch of the image, so send one when the image changed, not every frame.
+
 ## What the launcher does
 
 **Developing a mod?** Run `horizon-launcher settings native-profile dev` once, or pick "Dev build" in the Mods page's
@@ -1393,6 +1395,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   to travel through a Nether portal, End portal or End gateway; `cause` is `nether_portal`, `end_portal` or
   `end_gateway`. Set `cancel` to leave the player where they are. The player's state is not swapped in, so helpers that
   look them up through `self.lan` may find nothing while a guest tick is handled.
+- **`native_block_damage_abort(player, name, pos)`**: a server player stopped digging `pos` before it broke. It is
+  heard after the server clears the dig and sends the block state back to the client. The player's state is not
+  swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled.
 - **`native_player_pick_item(player, name, from_entity, pos, entity_id, cancel)`**: a server player's middle-click
   pick resolved a block or entity's pick stack and is about to put it in the hotbar. For a block, `pos` is its
   position and `entity_id` is zero; for an entity, `from_entity` is true, `pos` is `[0, 0, 0]` and `entity_id`
@@ -1405,6 +1410,16 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   what the sign gets (the chat filter does not look at it again), or set `cancel` and it keeps its old text. The
   player's state is swapped in, so `native_tell` reaches them. Not told: the host's own editing on a LAN or
   single-player world, and changes that are no text edit (dye, glow ink, wax, `/data`, `/setblock`).
+- **`native_player_client_loaded_world(player, name)`**: the server heard that a guest's client finished loading
+  the level around them after joining, respawning or changing dimension. The player's state is not swapped in, so
+  helpers that look them up through `self.lan` may find nothing while the guest packet is handled.
+- **`native_player_stop_using_item(player, name)`**: a server player released the use-item key before the item
+  finished being used. The player's state is not swapped in, so helpers that look them up through `self.lan` may
+  find nothing during packet handling.
+- **`native_player_recipe_book_settings_change(player, name, book, open, filtering)`**: a server player's recipe
+  book open or filter setting changed; `book` is the book type's protocol id. The player's state is not swapped in.
+- **`native_player_advancement_criterion_grant(player, name, advancement, criterion)`**: a server player earned
+  one advancement criterion, after its progress was recorded.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat
@@ -1632,6 +1647,36 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_tab_complete(player, name, command, range, suggestions)`**: a guest's server completion request was evaluated; mods may add or filter suggestions. `range` is the replaced byte range. Guest state is not swapped in, and helpers that look through `self.lan` may find nothing while the guest packet is handled.
 - **`native_broadcast_message(line, cancel)`**: a system broadcast line is about to be logged and sent to every player. A mod may change `line` or set `cancel` to drop the broadcast.
 - **`native_whitelist_state_update(enabled)`**: the dedicated server's player whitelist was enabled or disabled.
+- **`native_player_bundle_item_select(player, name, slot, index)`**: a server player selected an item in a bundle;
+  `slot` is the packet's menu slot and `index` is the chosen item index.
+- **`native_player_ready_arrow(player, name, arrow)`**: a server player released a drawn bow, with `arrow` naming
+  the selected projectile item. The guest's state is not swapped in while the packet is handled.
+- **`native_prepare_hopper_transfer(pos)`**: a hopper at `pos` begins a transfer attempt, after its cooldown and enabled checks and before pushing or pulling items.
+- **`native_inventory_move_item(source, destination, item, cancel)`**: a hopper is about to move one item between containers (a composter's bone meal too). Set `cancel` to leave it in the source slot. A chest boat or minecart is reported at the block it is in.
+- **`native_hopper_inventory_search(hopper, container, entity)`**: a hopper selects a block container or container entity while searching for items.
+- **`native_vault_loot(pos, item)`**: a vault is about to eject a loot item, before the item entity spawns.
+- **`native_world_border_bounds_change_finish()`**: a timed world border size change finished on the server, after the border reached its final size.
+- **`native_player_launch_projectile(player, name, item)`**: a server player launched a snowball, egg, ender pearl,
+  potion or trident. It fires after the projectile is created and only for guest players in a LAN world.
+- **`native_entity_unleash(entity, kind)`**: a mob's leash was removed, before any lead drop is handled.
+- **`native_entity_drop_item(entity, item, count, pos)`**: a mob is about to drop `count` of `item` at `pos`.
+- **`native_item_despawn(entity, item, count, pos)`**: a dropped item entity reached its 6000-tick lifetime and is
+  about to be removed.
+- **`native_explosion_prime(center, radius)`**: a server explosion is about to begin at `center` with `radius`.
+  It is listen-only, so the explosion proceeds as usual; it also fires on the single-player server.
+- **`native_vehicle_damage(kind, damage, cancel)`**: a player is about to damage a boat or minecart. Change `damage`
+  or set `cancel` to leave its damage and wobble unchanged; the attack still completes. `kind` is `boat` or the
+  minecart type. Server-side.
+- **`native_vehicle_destroy(kind, pos)`**: a boat or minecart is about to be destroyed at `pos`. TNT minecarts that
+  prime instead of breaking are not heard. Server-side.
+- **`native_vehicle_create(kind, pos)`**: a boat or minecart joined the level at `pos`, after being placed by a
+  player or dispenser. Server-side.
+- **`native_player_toggle_sneak(player, name, sneaking)`**: a guest's player input changed sneaking, after the hub applied the state. The guest's state is swapped in; only actual changes are reported.
+- **`native_player_input(player, name, flags)`**: a loaded guest sent a `PlayerInput` packet, after its flags were applied to the hub. `flags` is the packet's bit field, and the guest's state is swapped in.
+- **`native_player_arm_swing(player, name, hand)`**: a guest's arm swing was handled and their attack strength reset. The packet currently swings `mainhand`; the guest's state is swapped in.
+- **`native_player_jump(player, name)`**: accepted guest movement made the server player jump from the ground, after movement simulation finishes. The guest's state is swapped in.
+- **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
+- **`native_player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
