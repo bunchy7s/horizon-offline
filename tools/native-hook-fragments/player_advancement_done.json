@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "player_advancement_done",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
+      "side": "server",
+      "neoforge": "AdvancementEvent.AdvancementEarnEvent",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A player completed an advancement (`native_player_advancement_done`).",
+  "doc_summary": "A server player completed an advancement after progress was recorded; `advancement` is its identifier, such as `minecraft:story/mine_stone`. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need \"hooks\": @API:player_advancement_done@."
+}

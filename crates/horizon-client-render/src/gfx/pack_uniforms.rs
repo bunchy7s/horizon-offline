@@ -969,6 +969,7 @@ mod initial_history_tests {
             emissive_layers: &[],
             shadow_only: &[],
             entity_spans: &[],
+            skin: None,
             glowing: &[],
             dynamic_lights: &[],
             clouds: None,

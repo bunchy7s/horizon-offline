@@ -331,6 +331,9 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                // The AI Agent page's repro buttons (game/repro.rs).
+                Event::ToggleRecording => self.toggle_recording_key(),
+                Event::ExportRepro => self.export_repro_key(),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
