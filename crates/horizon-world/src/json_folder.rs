@@ -50,15 +50,18 @@ pub fn read(dir: &Path) -> io::Result<Arc<Folder>> {
     if let Some(folder) = held(dir) {
         return Ok(folder);
     }
-    let files = list(dir)?
-        .into_iter()
-        .map(|(name, path)| {
-            let bytes = fs::read(&path)
-                .map(Vec::into_boxed_slice)
-                .map_err(|e| (e.kind(), e.to_string()));
-            File { name, path, bytes }
-        })
-        .collect();
+    let files = match prepared(dir) {
+        Some(files) => files,
+        None => list(dir)?
+            .into_iter()
+            .map(|(name, path)| {
+                let bytes = fs::read(&path)
+                    .map(Vec::into_boxed_slice)
+                    .map_err(|e| (e.kind(), e.to_string()));
+                File { name, path, bytes }
+            })
+            .collect(),
+    };
     let folder = Arc::new(Folder { files });
     let mut open = OPEN.lock().unwrap_or_else(|e| e.into_inner());
     // Another reader may have read it meanwhile: share one copy.
@@ -68,6 +71,31 @@ pub fn read(dir: &Path) -> io::Result<Arc<Folder>> {
     open.retain(|(_, f)| f.strong_count() > 0);
     open.push((dir.to_owned(), Arc::downgrade(&folder)));
     Ok(folder)
+}
+
+/// `dir`'s `.json` files from its prepared root's `horizon-data.bin`, when
+/// that holds them: one open handle instead of a file opened for each.
+fn prepared(dir: &Path) -> Option<Vec<File>> {
+    let (data, rel) = horizon_core::prepared_files::find(dir)?;
+    let prefix = format!("{rel}/");
+    let mut files: Vec<File> = data
+        .list(&rel)?
+        .into_iter()
+        .filter_map(|full| {
+            let name = full.strip_prefix(&prefix)?.strip_suffix(".json")?;
+            let bytes = data.read(full)?;
+            Some(File {
+                name: name.to_owned(),
+                path: dir.join(format!("{name}.json")),
+                bytes: bytes
+                    .map(Vec::into_boxed_slice)
+                    .map_err(|e| (e.kind(), e.to_string())),
+            })
+        })
+        .collect();
+    // In `list`'s order: by id, not by file name.
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    Some(files)
 }
 
 /// The `.json` files under `dir` and its subfolders, in name order: each
@@ -143,6 +171,38 @@ mod tests {
         // Let go: the next reader reads the folder again.
         assert_eq!(read(&dir).unwrap().files[1].bytes().unwrap(), b"{\"a\":2}");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Under a prepared root with a `horizon-data.bin`, the folder is read
+    /// from it: the same files, names and order as the folder's.
+    #[test]
+    fn a_prepared_root_reads_the_folder_from_its_data_file() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-json-folder-root-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let recipes = root.join("data/minecraft/recipe");
+        fs::create_dir_all(recipes.join("crushing")).unwrap();
+        fs::write(root.join("horizon-resources.json"), b"{}").unwrap();
+        fs::write(recipes.join("crushing.json"), b"{\"c\":0}").unwrap();
+        fs::write(recipes.join("crushing/iron.json"), b"{\"c\":1}").unwrap();
+        fs::write(recipes.join("stick.json"), b"{\"a\":1}").unwrap();
+        fs::write(recipes.join("notes.txt"), b"not json").unwrap();
+        let from_folder: Vec<_> = list(&recipes)
+            .unwrap()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        horizon_core::prepared_files::write(&root).unwrap();
+        // Only the data file still has the stick's first bytes.
+        fs::write(recipes.join("stick.json"), b"{\"a\":2}").unwrap();
+        let folder = read(&recipes).unwrap();
+        let names: Vec<_> = folder.files.iter().map(|f| f.name.clone()).collect();
+        assert_eq!(names, from_folder);
+        assert_eq!(names, ["crushing", "crushing/iron", "stick"]);
+        assert_eq!(folder.files[2].bytes().unwrap(), b"{\"a\":1}");
+        assert_eq!(folder.files[2].path, recipes.join("stick.json"));
+        drop(folder);
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]

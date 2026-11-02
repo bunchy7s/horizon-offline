@@ -130,12 +130,12 @@ FlyTowardsPositionParticle.extract	port	crates/horizon-client-render/src/particl
 FlyTowardsPositionParticle.EnchantProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Enchant arm
 FlyTowardsPositionParticle.NautilusProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Nautilus arm
 FlyTowardsPositionParticle.VaultConnectionProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	VaultConnection arm: block light, lifetime alpha, scale 1.5
-GeyserBaseParticle.Provider.createParticle	missing		player: sulfur geysers do not erupt here: no water column, base puff or eruption sound (only the potent sulfur block state exists), and the geyser particle types are not in ParticleType
-GeyserEruptionParticle.tick	missing		player: the water column of a geyser eruption is not drawn; no geyser particle types exist here
-GeyserEruptionParticle.Provider.createParticle	missing		player: no geyser eruption particle is made
-GeyserPlumeParticle.<init>	missing		player: no water plume is made when a sulfur geyser erupts
-GeyserPlumeParticle.tick	missing		player: the plume does not rise, spray or fall back
-GeyserPlumeParticle.Provider.createParticle	missing		player: no water plume is made when a sulfur geyser erupts
+GeyserBaseParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	GeyserBase and GeyserPoof arms: burst impulse from the water count, random spot half a block around, white, always rising, friction 0.725, lifetime 25 * (0.8 + 0.2 random)
+GeyserEruptionParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	GeyserEruption arm: two base puffs every second tick, water + 2 plumes a tick, 20 poofs every tenth tick
+GeyserEruptionParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Geyser arm: lives 20 ticks, draws nothing itself, carries the water count and the spawn velocity
+GeyserPlumeParticle.<init>	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	GeyserPlume arm: height 5 per water block, lifetime 5 * height, no initial rise, friction 1.0, propulsion from the height, size range
+GeyserPlumeParticle.tick	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::tick_particle	GeyserPlume arm: turns back at the top, on a block or once falling, then shortens its life; gravity and size follow the cubed height progress, x and z the spray
+GeyserPlumeParticle.Provider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	GeyserPlume arm: the provider's random spot, a fifth of a block around and up to a block above
 GlowParticle.getLightCoords	port	crates/horizon-client-render/src/particles.rs::Particle::light_coords	AgeEmission light (glow, wax, electric spark)
 GlowParticle.ElectricSparkProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	ElectricSpark arm
 GlowParticle.GlowSquidProvider.createParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::make	Glow arm

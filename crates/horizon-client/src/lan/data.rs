@@ -91,21 +91,16 @@ fn qualified(id: &str) -> String {
     }
 }
 
-/// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted.
-fn walk(dir: &Path, prefix: &str, out: &mut BTreeMap<String, Value>) {
-    let Ok(read) = std::fs::read_dir(dir) else {
+/// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted;
+/// a file that can't be read or doesn't parse is left out. Through `json_folder`: from the
+/// prepared data file, and read once for the tables a load builds from the same folder.
+fn walk(dir: &Path, out: &mut BTreeMap<String, Value>) {
+    let Ok(folder) = horizon_world::json_folder::read(dir) else {
         return;
     };
-    for entry in read.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if path.is_dir() {
-            walk(&path, &format!("{prefix}{name}/"), out);
-        } else if let Some(stem) = name.strip_suffix(".json")
-            && let Ok(text) = std::fs::read_to_string(&path)
-            && let Ok(value) = serde_json::from_str::<Value>(&text)
-        {
-            out.insert(format!("{prefix}{stem}"), value);
+    for file in &folder.files {
+        if let Ok(value) = serde_json::from_slice::<Value>(file.bytes().unwrap_or_default()) {
+            out.insert(file.name.clone(), value);
         }
     }
 }
@@ -183,8 +178,7 @@ pub fn component_nbt(v: &Value) -> Tag {
 
 impl SyncData {
     /// No registries, tags or recipes: enough for tests of the login phase.
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             builtin: Builtin::default(),
             dynamic: Dynamic::default(),
@@ -227,7 +221,7 @@ impl SyncData {
         for key in SYNCHRONIZED {
             let path = key.trim_start_matches("minecraft:");
             let mut found = BTreeMap::new();
-            walk(&root.join(path), "", &mut found);
+            walk(&root.join(path), &mut found);
             let mut entries: Vec<_> = found
                 .into_iter()
                 .map(|(p, v)| (("minecraft".to_owned(), p), v, false))
@@ -390,7 +384,7 @@ impl SyncData {
         };
         let mut files: BTreeMap<String, Vec<Value>> = BTreeMap::new();
         let mut own = BTreeMap::new();
-        walk(&root.join("tags/dialog"), "", &mut own);
+        walk(&root.join("tags/dialog"), &mut own);
         for (name, value) in own {
             Self::add_tag_values(files.entry(qualified(&name)).or_default(), &value);
         }
@@ -498,7 +492,7 @@ impl SyncData {
                 continue;
             }
             let mut files = BTreeMap::new();
-            walk(&dir, "", &mut files);
+            walk(&dir, &mut files);
             if files.is_empty() {
                 continue;
             }

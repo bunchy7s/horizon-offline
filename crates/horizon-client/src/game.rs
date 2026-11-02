@@ -2610,6 +2610,9 @@ struct Game<'a> {
     saving_indicator: horizon_client::hud_overlays::SavingIndicator,
     /// This game's world is autosaving this tick (`MinecraftServer.isSaving`).
     autosaving: bool,
+    /// `MinecraftServer.ticksUntilAutosave`: the ticks left before the next
+    /// autosave, counted down a tick at a time.
+    ticks_until_autosave: i64,
     applied_modifiers: Vec<(String, String)>,
     experience: Experience,
     orbs: Vec<ExperienceOrb>,
@@ -7298,12 +7301,19 @@ impl Game<'_> {
             self.world.weather.tick_levels();
             self.tick_weather_effects();
         }
-        self.autosaving = self.ticks.is_multiple_of(6000);
+        // MinecraftServer.tickServer's countdown, then autoSave: three
+        // hundred seconds of ticks at the rate the server runs at now.
+        self.ticks_until_autosave -= 1;
+        self.autosaving = self.ticks_until_autosave <= 0;
         if let Some(serving) = &self.serving {
             serving.set_saving(self.autosaving);
         }
         if self.autosaving {
             self.save_game_with(false)?;
+            self.ticks_until_autosave = self.next_autosave_interval();
+            if let Some(serving) = &self.serving {
+                serving.set_saving(false);
+            }
         }
         if running {
             self.advance_clock();
@@ -7766,7 +7776,10 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.restore_root_vehicle();
         if running {
+            let mobs_before = self.mob_ids();
             horizon_client::spans::time("tick_mobs", || self.tick_mobs())?;
+            // Dead, despawned or gone into a hive.
+            self.native_mobs_left_since(&mobs_before);
             horizon_client::spans::time("recheck_golem_openers", || self.recheck_golem_openers());
             self.tick_mod_container_viewers();
             let before = self.orb_ids();
@@ -15328,6 +15341,25 @@ impl Game<'_> {
     fn save_game(&mut self) -> Result<()> {
         self.save_game_with(true)
     }
+    /// `MinecraftServer.computeNextAutosaveInterval`: three hundred seconds
+    /// of ticks at the rate the server runs at now - its measured rate while
+    /// a `/tick sprint` runs - never fewer than a hundred.
+    fn next_autosave_interval(&self) -> i64 {
+        let rate = if self.clock.sprinting() {
+            1.0e9 / (self.clock.average_nanos() + 1) as f32
+        } else {
+            self.clock.rate()
+        };
+        autosave_interval(rate)
+    }
+    /// `MinecraftServer.onTickRateChanged`: a rate that asks for a shorter
+    /// wait than the one already running shortens it.
+    pub(super) fn on_tick_rate_changed(&mut self) {
+        let interval = self.next_autosave_interval();
+        if interval < self.ticks_until_autosave {
+            self.ticks_until_autosave = interval;
+        }
+    }
     /// The autosave doesn't `wait` for the chunks to be on disk: every
     /// generated chunk is saved, hundreds at a time, encoded and written on
     /// the region writer meanwhile.
@@ -16705,7 +16737,35 @@ impl Game<'_> {
                     map
                 });
                 self.lod_blue_map = blue_map.clone();
-                terrain::ServerTerrain::new(dir, blue_map) as _
+                // And the player's Bobby cache of the level, only read.
+                let bobby = terrain::bobby_level_dir(
+                    &terrain::minecraft_dir().join(".bobby"),
+                    address,
+                    remote.hashed_seed,
+                    &remote.level,
+                )
+                .map(|bobby| {
+                    log::info!(
+                        "Horizon: far terrain also reads Bobby's chunks of {}",
+                        remote.level
+                    );
+                    let registry = self.pack.assets.registry;
+                    let biomes = self.res.biomes().clone();
+                    let dimension = &remote.dimension;
+                    let layout = horizon_client::chunk::ColumnLayout::of_level(
+                        dimension.min_y,
+                        dimension.height,
+                    );
+                    let sky_light = dimension.has_skylight;
+                    let decode: terrain::DecodeChunk =
+                        Box::new(move |root: &horizon_world::nbt::NamedTag| {
+                            horizon_client::save::decode_lit(
+                                root, registry, &biomes, layout, sky_light,
+                            )
+                        });
+                    terrain::Bobby::new(bobby, decode, self.res.facts())
+                });
+                terrain::ServerTerrain::with_bobby(dir, blue_map, bobby) as _
             }),
             _ => Some(self.streaming.lod_source()),
         };
@@ -16933,10 +16993,17 @@ impl Game<'_> {
                             .collect()
                     })
                 });
+                // Far terrain's finest tiles stand where full-detail terrain
+                // ends: on a server, where it stops sending chunks, often well
+                // inside the render distance. Thousands of chunk-sized tiles
+                // between the two filled in long after the coarser ones.
+                let detail = self.remote.as_ref().map_or(self.streaming.radius, |r| {
+                    self.streaming.radius.min(r.sent_radius())
+                });
                 let meshes = horizon_client::spans::time("lod_update", || {
                     lod.update(
                         [player.position.x, player.position.y, player.position.z],
-                        self.streaming.radius,
+                        detail,
                         lod_distance,
                         covered,
                     )
@@ -16950,6 +17017,10 @@ impl Game<'_> {
             }
         }
     }
+}
+/// `computeNextAutosaveInterval`'s arithmetic: `Math.max(100, (int)(rate * 300.0F))`.
+fn autosave_interval(rate: f32) -> i64 {
+    i64::from((rate * 300.0) as i32).max(100)
 }
 impl ApplicationHandler for Game<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
@@ -18885,6 +18956,8 @@ impl<'a> Game<'a> {
             tool_highlight: Default::default(),
             saving_indicator: Default::default(),
             autosaving: false,
+            // `computeNextAutosaveInterval` at the clock's 20 ticks a second.
+            ticks_until_autosave: 6000,
             applied_modifiers: Vec::new(),
             experience: Experience::default(),
             orbs: Vec::new(),
@@ -20058,6 +20131,7 @@ fn load_resources(
     let rest_loader = if menu {
         let resources = resources.clone();
         let root = root.clone();
+        let vanilla_root = vanilla_root.to_owned();
         let rest_progress = progress.clone();
         let progress = progress.clone();
         let handle = std::thread::Builder::new()
@@ -20086,6 +20160,7 @@ fn load_resources(
                     "Horizon: rest-ready after {} ms",
                     started.elapsed().as_millis()
                 );
+                write_prepared_files(vanilla_root);
                 Ok(())
             })?;
         Some(WorldRestLoader {
@@ -20151,6 +20226,37 @@ fn load_resources(
         pack,
         gui: loaded_gui,
     })
+}
+
+/// Write the prepared folder's `horizon-data.bin` when it has none the game
+/// can use: on a thread of its own, at idle priority, once the start is done.
+/// This start has just read the folder's files (they are in the disk cache);
+/// the next starts read them from one file (#1961).
+fn write_prepared_files(root: PathBuf) {
+    use horizon_core::prepared_files;
+    if prepared_files::open(&root).is_some() || !root.join("horizon-resources.json").is_file() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("Prepared data file".into())
+        .spawn(move || {
+            horizon_threads::idle_current();
+            let started = Instant::now();
+            match prepared_files::write(&root) {
+                Ok(()) => log::info!(
+                    "Horizon: wrote {} in {} ms",
+                    prepared_files::FILE_NAME,
+                    started.elapsed().as_millis()
+                ),
+                Err(e) => log::info!("Horizon: {} not written: {e}", prepared_files::FILE_NAME),
+            }
+        });
+    if let Err(e) = spawned {
+        log::info!(
+            "Horizon: {} not written: {e}",
+            horizon_core::prepared_files::FILE_NAME
+        );
+    }
 }
 
 fn load_world_rest(
@@ -21648,6 +21754,22 @@ fn debug_crosshair_drawn(
 mod tests {
     use super::*;
     use horizon_client::container_screen::{Button, Clicks, Release, Target};
+
+    /// `MinecraftServer.computeNextAutosaveInterval`: three hundred seconds of
+    /// ticks at the rate the server runs at, never fewer than a hundred.
+    #[test]
+    fn the_autosave_waits_for_three_hundred_seconds_of_ticks() {
+        // 20 ticks a second is the six thousand ticks a world autosaved on
+        // before the rate could be changed (`/tick rate`).
+        assert_eq!(autosave_interval(20.0), 6000);
+        assert_eq!(autosave_interval(10.0), 3000);
+        assert_eq!(autosave_interval(40.0), 12000);
+        assert_eq!(autosave_interval(1000.0), 300_000);
+        // `Math.max(100, ...)`: a very low rate still autosaves every hundred
+        // ticks, and a frozen clock (0) does too.
+        assert_eq!(autosave_interval(0.5), 150);
+        assert_eq!(autosave_interval(0.0), 100);
+    }
 
     /// `NativeScreenView.id` (the `screen_render_post` hook) is a mod's
     /// contract: every `Screen` has its own id, and it does not change.
