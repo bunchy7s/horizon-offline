@@ -5181,6 +5181,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
+            sync: false,
         };
         let mut map = Attachments::default();
         map.set(&key, 7).unwrap();
@@ -5210,6 +5211,7 @@ mod tests {
                 },
             }),
             copy_on_death: false,
+            sync: false,
         };
         let mut chunk = Chunk::empty(2, 3);
         let mut extras = ChunkExtras::default();
