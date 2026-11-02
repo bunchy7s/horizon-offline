@@ -37,9 +37,9 @@ DedicatedServer.parseBugReportLink	port	crates/horizon-client/src/game/server_li
 DedicatedServerProperties.getDatapackConfig	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	splits initial-enabled-packs and initial-disabled-packs
 DedicatedServerProperties.deserializePermission	port	crates/horizon-server-files/src/properties.rs::Reader::permission	gap: minor: numbers clamp to 0 to 4; PermissionLevel.byId is not compared
 DedicatedServerProperties.WorldDimensionData.create	port	crates/horizon-client/src/game/dedicated.rs::Game::write_world_gen	gap: minor: only the preset pick by level-type is mapped; the flat-settings replacement is not compared
-ServerWatchdog.run	missing		minor: max-tick-time is read (properties.rs) but no watchdog runs; a stuck tick is never reported or stopped
-ServerWatchdog.createWatchdogCrashReport	missing		minor: builds the thread-dump crash report for the watchdog only; Horizon has no watchdog
-ServerWatchdog.exit	missing		minor: halts the process 10 s after a stuck tick (watchdog only)
+ServerWatchdog.run	port	crates/horizon-client/src/game/dedicated.rs::Watchdog::run	the thread DedicatedServer starts from max-tick-time; a tick max-tick-time past its due time logs, writes the report and exits
+ServerWatchdog.createWatchdogCrashReport	port	crates/horizon-client-render/src/crash.rs::report_watchdog	the report of a hung tick, written by that thread; gap: minor: no thread dump, since the stuck thread's stack is not available to Rust
+ServerWatchdog.exit	inline	crates/horizon-client/src/game/dedicated.rs::Watchdog::run	the process exits with 1 straight after the report; gap: minor: vanilla sleeps 10 s and dumps the stuck thread first
 Settings.dispatchNumberOrString	inline	crates/horizon-server-files/src/properties.rs::ServerProperties::new	the difficulty parse in ServerProperties::new does this job inline
 Settings.getLegacy	port	crates/horizon-server-files/src/properties.rs::Reader::legacy	returns the raw value and removes the key; the caller parses it
 Settings.get	port	crates/horizon-server-files/src/properties.rs::Reader::get	reads with a default and writes the value back to the properties map
