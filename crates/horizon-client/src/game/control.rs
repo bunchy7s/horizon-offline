@@ -233,6 +233,11 @@ impl Game<'_> {
             self.sign_input(None, Some(text));
             return Ok(());
         }
+        // The title's screens: the world name, the seed, a server's address.
+        if let Some(title) = &mut self.title {
+            title.type_text(text);
+            return Ok(());
+        }
         match self.screen {
             Screen::Chat => self.chat_type(text),
             Screen::CommandBlock => self.command_block_type(text),

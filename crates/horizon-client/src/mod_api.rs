@@ -110,7 +110,10 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`.
+    /// `slots`. The title's own screens report theirs (API 154): `title`,
+    /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
+    /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
+    /// and no slots.
     pub id: &'static str,
     /// The type id of the menu the server opened for this screen
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id; a mount's

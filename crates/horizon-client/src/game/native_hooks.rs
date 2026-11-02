@@ -6,6 +6,12 @@
 //! Horizon's own HUD extras do, and keep a mod's settings where the
 //! WebAssembly mod of the same id kept them.
 //!
+//! API 154 adds the title's own screens to the screen hooks: `native_screen_render_post` and the
+//! mouse, wheel, key and drag `_pre` hooks fire on Title, Select World, Create New World, the
+//! multiplayer screens and the rest, with their ids (`title`, `world_select`, `world_create`,
+//! `multiplayer`…), so a mod draws and takes clicks there; and the instance folder
+//! (`native_instance_dir`), beside which `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are.
+//!
 //! API 153 adds a player starting or stopping flight, cancellable (`native_player_toggle_flight`).
 //!
 //! API 152 adds a player opening and closing a menu (`native_player_container_open`, `native_player_container_close`).
@@ -525,7 +531,7 @@ pub(super) use horizon_world::level::flags;
 /// The hook points' API version. The launcher reads this line from the
 /// source it builds; keep its form.
 #[allow(dead_code)]
-pub(crate) const NATIVE_HOOKS_API: u32 = 153;
+pub(crate) const NATIVE_HOOKS_API: u32 = 154;
 
 impl GameLevel<'_> {
     /// A hopper at `pos` is about to pick up `count` of `item`. Set `cancel` to leave the dropped stack in the world. Server-side. @API:hopper_pickup_item@.
@@ -2417,13 +2423,15 @@ impl Game<'_> {
     /// `&self`, so it reads and draws only. The Win and Options screens call
     /// it on their own path, after their drawing.
     ///
-    /// It does not fire on the title screen, which returns before its point,
-    /// nor for the screens drawn over gameplay after it (a server dialog, the
-    /// server pack, link and code-of-conduct prompts, a book, a sign editor):
-    /// those keep `Screen::Playing`, which it skips (the server pack prompt
-    /// hides an open screen too, and that screen does not fire under it),
-    /// and draw over what it drew, while vanilla's `ScreenEvent.Render.Post`
-    /// fires for them.
+    /// It does not fire for the screens drawn over gameplay after it (a
+    /// server dialog, the server pack, link and code-of-conduct prompts, a
+    /// book, a sign editor): those keep `Screen::Playing`, which it skips (the
+    /// server pack prompt hides an open screen too, and that screen does not
+    /// fire under it), and draw over what it drew, while vanilla's
+    /// `ScreenEvent.Render.Post` fires for them. The title's own screens
+    /// (`title`, `world_select`, `world_create`, `multiplayer`…) fire it too,
+    /// their `screen.id` from the title state machine and the whole window
+    /// their `rect` (API 154), and no dialog or prompt over them.
     /// API 78.
     pub(super) fn native_screen_render_post(
         &self,
@@ -2443,10 +2451,11 @@ impl Game<'_> {
     /// no screen button, no drag, no hotbar key, no sort or header button.
     ///
     /// It fires before anything the screen does with the press, on the window
-    /// only, and only while a screen of the game's is open (Options and the
-    /// pack list opened from the title screen count, with no player and no
-    /// `menu`). It does not fire on the title screen itself, the connect and
-    /// loading screens, nor for a server
+    /// only, and while a screen of the game's or the title's is open (Options
+    /// and the pack list opened from the title screen count, with no player
+    /// and no `menu`; the title's own screens since API 154, their
+    /// `screen.id` from the title state machine). It does not fire on the
+    /// connect and loading screens, nor for a server
     /// dialog, the server pack, link and code-of-conduct prompts, a book or a
     /// sign editor drawn over gameplay, nor while a world loads or saves: the
     /// click there stays the game's own. A gamepad click or a click the
@@ -2533,9 +2542,10 @@ impl Game<'_> {
     ///
     /// It fires before the screen scrolls anything, for the window's wheel
     /// (horizon-ctl's `scroll-at` sends it through the window too), and
-    /// only while a screen of the game's is open (Options and the pack list
-    /// opened from the title screen count, with no player and no `menu`). It
-    /// does not fire on the title screen itself, the connect and loading
+    /// while a screen of the game's or the title's is open (Options and the
+    /// pack list opened from the title screen count, with no player and no
+    /// `menu`; the title's own since API 154). It
+    /// does not fire on the connect and loading
     /// screens, nor for a server dialog, the server pack, link and
     /// code-of-conduct prompts, a book or a sign editor drawn over gameplay,
     /// nor while a world loads or saves: the scroll there stays the game's
@@ -2571,10 +2581,10 @@ impl Game<'_> {
     /// It fires for the window's presses and their repeats, and for the
     /// control socket's `key` (a release fires nothing), after the window's
     /// own shortcuts have run — the fullscreen and screenshot keys, the debug
-    /// keys and the narrator — and only while a screen of the game's is open
-    /// (Options and the pack list opened from the title screen count, with no
-    /// player and no `menu`). It does not fire on the title screen itself, the
-    /// connect and loading screens, nor for a server dialog, the server pack,
+    /// keys and the narrator — and while a screen of the game's or the title's
+    /// is open (Options and the pack list opened from the title screen count,
+    /// with no player and no `menu`; the title's own since API 154). It does
+    /// not fire on the connect and loading screens, nor for a server dialog, the server pack,
     /// link and code-of-conduct prompts, a book or a sign editor drawn over
     /// gameplay, nor while a world loads or saves: the key there stays the
     /// game's own. A cancelled press's release still runs, so a `native_key`
@@ -2673,6 +2683,23 @@ impl Game<'_> {
             partial_tick: self.clock.fraction() as f32,
         }
     }
+    /// The title's own screen as a native mod sees it (`NativeScreenView`):
+    /// its id from the title state machine (`title`, `world_select`,
+    /// `world_create`, `multiplayer`, `add_server`…), no menu and no menu
+    /// title, the whole window as its rectangle and no slots (no menu is
+    /// open). None while no title screen is up. API 154.
+    pub(super) fn title_screen_view(&self, batch: &HudBatch) -> Option<NativeScreenView<'_>> {
+        let title = self.title.as_ref()?;
+        Some(NativeScreenView {
+            id: title.mode.id(),
+            menu: None,
+            title: None,
+            rect: [0.0, 0.0, batch.width, batch.height],
+            slots: 0,
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        })
+    }
     /// The open screen's container panel in GUI pixels (`screen`'s, the one
     /// this frame draws), or the whole window for a screen with none
     /// (`NativeScreenView.rect`).
@@ -2719,15 +2746,16 @@ impl Game<'_> {
         canceled
     }
     /// A screen the native mods' input hooks are for is open: the window has a
-    /// renderer, `Screen::Playing` is behind it (so not the title screen, nor a
-    /// book, a sign editor, a server dialog or a prompt drawn over gameplay)
-    /// and no connect or world load is in progress. The one gate they all ask
-    /// before they fire.
+    /// renderer, either the title's own (`title`, `world_select`,
+    /// `world_create`, `multiplayer`…) or a screen over the world
+    /// (`Screen::Playing` behind it, so not a book, a sign editor, a server
+    /// dialog or a prompt drawn over gameplay), and no connect or world load
+    /// is in progress. The one gate they all ask before they fire.
     pub(super) fn screen_hooks_open(&self) -> bool {
         self.renderer.is_some()
-            && self.screen != Screen::Playing
             && !self.screen_over_playing()
             && !self.remote_loading()
+            && (self.screen != Screen::Playing || self.title.is_some())
     }
     /// The open screen as an input hook sees it (`NativeScreenView`), or None
     /// when `screen_hooks_open` says no screen is. `screen.mouse` is the
@@ -2741,7 +2769,10 @@ impl Game<'_> {
         }
         let renderer = self.renderer.as_ref()?;
         let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
-        Some(self.screen_view(&batch, self.screen))
+        if self.screen != Screen::Playing {
+            return Some(self.screen_view(&batch, self.screen));
+        }
+        self.title_screen_view(&batch)
     }
     /// Whether the key press `key` over the open screen went no further
     /// (`native_screen_key_pressed_pre`): what `handle_window_event` and the
@@ -7253,6 +7284,15 @@ impl Game<'_> {
         self.ui
             .chat
             .add(atlas, line, None, ChatSource::Client, self.ticks, focused);
+    }
+    /// The instance (game) folder, which its players share: `saves/`,
+    /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
+    /// title's screens create worlds and read packs there. A world's own
+    /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
+    /// The folder the game runs in (`--player-dir` moves a player's options
+    /// and servers only, not the instance). Nothing is created. API 154.
+    pub(super) fn native_instance_dir(&self) -> PathBuf {
+        Self::game_dir()
     }
     /// A native mod's own folder: `horizon-mods/.horizon-mod-data/<id>/`,
     /// where the WebAssembly mod of the same id kept its storage, so a
