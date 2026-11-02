@@ -1230,6 +1230,25 @@ const SHAKE_MAX_OFFSET: f32 = 0.5;
 
 /// `shake` scaled by `scale` (Distortion Effects) and bounded on each axis;
 /// a value that isn't finite counts as none.
+pub(super) fn hand_pose_matrix(values: [f32; 7]) -> glam::Mat4 {
+    let valid = |value: f32, min: f32, max: f32, default: f32| {
+        if value.is_finite() && (min..=max).contains(&value) {
+            value
+        } else {
+            default
+        }
+    };
+    let [x, y, z, pitch, yaw, roll, scale] = values;
+    glam::Mat4::from_translation(glam::Vec3::new(
+        valid(x, -16.0, 16.0, 0.0),
+        valid(y, -16.0, 16.0, 0.0),
+        valid(z, -16.0, 16.0, 0.0),
+    )) * glam::Mat4::from_rotation_x(valid(pitch, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_rotation_y(valid(yaw, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_rotation_z(valid(roll, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_scale(glam::Vec3::splat(valid(scale, 0.01, 100.0, 1.0)))
+}
+
 fn bounded_shake(shake: NativeShake, scale: f32) -> NativeShake {
     let scale = if scale.is_finite() {
         scale.clamp(0.0, 1.0)
@@ -1955,6 +1974,42 @@ impl Game<'_> {
             swing,
             equip,
             canceled,
+        );
+    }
+
+    /// Additional first-person hand and item pose, including empty arms and maps.
+    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
+    /// API @API:render_hand_pose@.
+    pub(super) fn native_render_hand_pose(
+        &self,
+        hand: horizon_client::first_person::Hand,
+        stack: Option<&ItemStack>,
+        partial: f32,
+        swing: f32,
+        equip: f32,
+        x: &mut f32,
+        y: &mut f32,
+        z: &mut f32,
+        pitch: &mut f32,
+        yaw: &mut f32,
+        roll: &mut f32,
+        scale: &mut f32,
+    ) {
+        mod_api::dispatch_render_hand_pose(
+            self,
+            mod_api::mods(),
+            hand,
+            stack,
+            partial,
+            swing,
+            equip,
+            x,
+            y,
+            z,
+            pitch,
+            yaw,
+            roll,
+            scale,
         );
     }
 
@@ -8900,6 +8955,26 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hand_pose_rejects_invalid_components() {
+        let identity = super::hand_pose_matrix([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(identity, glam::Mat4::IDENTITY);
+        assert_eq!(
+            super::hand_pose_matrix([
+                f32::NAN,
+                17.0,
+                f32::INFINITY,
+                3601.0,
+                -3601.0,
+                f32::NAN,
+                0.0
+            ]),
+            identity
+        );
+        let point = super::hand_pose_matrix([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.0])
+            .transform_point3(glam::Vec3::X);
+        assert_eq!(point, glam::Vec3::new(3.0, 2.0, 3.0));
+    }
     #[test]
     fn vanished_mobs_are_reported_by_kind() {
         use std::collections::HashSet;
