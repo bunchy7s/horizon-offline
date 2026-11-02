@@ -802,7 +802,7 @@ mod tests {
             assert!(data[..first].iter().all(|b| *b == 0xab), "prefix {i}");
             assert_eq!(
                 &data[first..last],
-                bytemuck::cast_slice(expected),
+                bytemuck::cast_slice::<_, u8>(expected),
                 "output {i}"
             );
             assert!(data[last..].iter().all(|b| *b == 0xab), "suffix {i}");
