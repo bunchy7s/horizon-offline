@@ -4669,16 +4669,22 @@ mod tests {
         };
         let registry = BlockRegistry::from_nbt(&Tag::compound([
             ("DataVersion", Tag::Int(DATA_VERSION)),
-            ("states", Tag::List(vec![])),
-            ("defaults", Tag::compound([] as [(&str, Tag); 0])),
+            (
+                "states",
+                Tag::List(vec![Tag::String("minecraft:air".into())]),
+            ),
+            ("defaults", Tag::compound([("minecraft:air", Tag::Int(0))])),
         ]))
         .unwrap();
         let cached = CachedCollisionRegistry::from_nbt(
             &Tag::compound([
                 ("DataVersion", Tag::Int(DATA_VERSION)),
-                ("states", Tag::List(vec![])),
+                (
+                    "states",
+                    Tag::List(vec![Tag::String("minecraft:air".into())]),
+                ),
                 ("shapes", Tag::List(vec![])),
-                ("cached_shapes", Tag::IntArray(vec![])),
+                ("cached_shapes", Tag::IntArray(vec![-1])),
             ]),
             &registry,
         )
