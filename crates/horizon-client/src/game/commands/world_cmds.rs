@@ -1,6 +1,6 @@
 //! `/recipe`, `/damage`, `/rotate`, `/swing`, `/playsound`, `/stopsound`,
 //! `/particle`, `/attribute`, `/ride` and `/spreadplayers`.
-use super::{Arg, Context, Game, R, Target, err};
+use super::{Arg, Context, Game, R, Target, err, wrap_degrees};
 use horizon_client::{
     mobs::{Damage, DamageKind, Who},
     scoreboard_cmd::{Holder, Tracker},
@@ -1612,11 +1612,38 @@ fn text_error(key: &str, args: &[Text]) -> horizon_client::command::CommandError
     horizon_client::command::CommandError::new(Text::translate(key, args))
 }
 
-/// `Entity.lookAt`: yaw and pitch from `from` towards `to`.
-fn look_at(from: [f64; 3], to: [f64; 3]) -> [f32; 2] {
+/// `Entity.lookAt`: yaw and pitch from `from` towards `to`, the yaw wrapped
+/// to -180..180 as `Mth.wrapDegrees` does.
+pub(super) fn look_at(from: [f64; 3], to: [f64; 3]) -> [f32; 2] {
     let (dx, dy, dz) = (to[0] - from[0], to[1] - from[1], to[2] - from[2]);
     let horizontal = (dx * dx + dz * dz).sqrt();
-    let pitch = (-(dy.atan2(horizontal).to_degrees())) as f32;
-    let yaw = (dz.atan2(dx).to_degrees() - 90.0) as f32;
-    [yaw.rem_euclid(360.0), pitch]
+    // `Entity.lookAt` turns radians to degrees with the float constant
+    // `57.2957763671875`, not `Math.toDegrees`.
+    let pitch = wrap_degrees((-(dy.atan2(horizontal) * 57.295_776_367_187_5)) as f32);
+    let yaw = (dz.atan2(dx) * 57.295_776_367_187_5) as f32 - 90.0;
+    [wrap_degrees(yaw), pitch]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::look_at;
+
+    fn assert_angle(got: f32, want: f32) {
+        assert!((got - want).abs() < 1.0e-4, "{got} is not {want}");
+    }
+
+    /// `Entity.lookAt` wraps the yaw with `Mth.wrapDegrees`, so a target to
+    /// the north-west turns the entity to 135 degrees, not to -225, and a
+    /// target due north leaves -180 rather than 180.
+    #[test]
+    fn a_facing_target_wraps_the_yaw_to_180() {
+        let at = [0.0, 64.0, 0.0];
+        assert_angle(look_at(at, [-1.0, 64.0, -1.0])[0], 135.0);
+        assert_angle(look_at(at, [0.0, 64.0, -1.0])[0], -180.0);
+        assert_angle(look_at(at, [1.0, 64.0, 0.0])[0], -90.0);
+        assert_angle(look_at(at, [0.0, 64.0, 1.0])[0], 0.0);
+        assert_angle(look_at(at, [-1.0, 64.0, 0.0])[0], 90.0);
+        // The pitch is the elevation, unchanged; its own wrap is a no-op.
+        assert_angle(look_at(at, [0.0, 65.0, 1.0])[1], -45.0);
+    }
 }

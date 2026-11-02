@@ -1,16 +1,16 @@
-UseBonemeal.checkExtraStartConditions	missing		minor: the B::UseBonemeal arm only checks for bone meal in the inventory and then always returns false, so a farmer carrying bone meal never grows a crop with it
-UseBonemeal.canStillUse	missing		minor: no bone meal session is ever started
-UseBonemeal.pickNextTarget	missing		minor: no random pick of a growing crop in the 3x3x3 around the villager
-UseBonemeal.validPos	missing		minor: no crop-not-fully-grown test
-UseBonemeal.start	missing		minor: villager never holds bone meal or walks to a crop
-UseBonemeal.setCurrentCropAsTarget	missing		minor: no look and walk target on a crop
-UseBonemeal.tick	missing		minor: never uses a bone meal item on a crop (no growCrop, no bonemeal effect)
+UseBonemeal.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	every 10 ticks and not within 160 of the last session, with bone meal in the inventory and a growing crop in the 3x3x3
+UseBonemeal.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	under 80 work cycles, with a crop set and before the behaviour's 60-tick timeout
+UseBonemeal.pickNextTarget	port	crates/horizon-client/src/mobs/villager_brain.rs::pick_bonemeal_crop	reservoir pick of one growing crop in the 3x3x3 around the villager, each equally likely
+UseBonemeal.validPos	port	crates/horizon-client/src/mobs/villager_brain.rs::bonemeal_valid	a CropBlock below its maximum age
+UseBonemeal.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the crop as look and walk target, bone meal in the main hand, the work cycle time, a zeroed worked count
+UseBonemeal.setCurrentCropAsTarget	port	crates/horizon-client/src/mobs/villager_brain.rs::bonemeal_target	look at the crop and walk to it at 0.5 speed, one block away
+UseBonemeal.tick	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	in reach past the work cycle: a meal leaves the inventory and grows the crop, level event 1505, the next crop is picked, the next cycle is 40 ticks
 ValidateNearbyPoi.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	ValidatePoi arm: within 16 blocks the memory is erased when the POI is gone or the bed is occupied by someone else
 ValidateNearbyPoi.bedIsOccupiedByVillager	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	no ticket to release: POI tickets are counted from the villagers' memories (tickets), so erasing the memory frees the bed
 VillageBoundRandomStroll.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	VillageBoundStroll arm: land pos inside a village, else a pos towards the section closest to a village
 VillagerGoalPackages.getCorePackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	gap: minor: GoToWantedItem (priority 5) never starts (arm returns false), so villagers do not walk to dropped items within 4 blocks; they only pick up what lands at their feet
 VillagerGoalPackages.validateBedPoi	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	AcquirePoi home arm keeps only beds that are not occupied, after the 5-candidate cap like vanilla
-VillagerGoalPackages.getWorkPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	gap: minor: the UseBonemeal entry never starts (see UseBonemeal)
+VillagerGoalPackages.getWorkPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	work run-one: WorkAtComposter for a farmer else WorkAtPoi, the strolls, HarvestFarmland and UseBonemeal at vanilla's priorities (a farmer 2 and 4, others 5 and 7)
 VillagerGoalPackages.getPlayPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	baby villagers: look, tag, run-one of interact, stroll, jump on bed, do nothing
 VillagerGoalPackages.getRestPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	walk home, validate home, sleep, homeless run-one, minimal look
 VillagerGoalPackages.getMeetPackage	inline	crates/horizon-client/src/mobs/villager_brain.rs::packages	bell gate, trades, gift, validate meeting point, trade gate, full look

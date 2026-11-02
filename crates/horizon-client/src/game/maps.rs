@@ -40,7 +40,6 @@ pub(super) struct Decoration {
 }
 /// A map as a native mod sees it when `native_map_decorations` is asked.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct NativeMapInfo<'a> {
     /// The map's id (`map_<id>`).
@@ -1130,6 +1129,9 @@ impl Game<'_> {
         } else {
             self.consume_held();
             self.give_or_drop_stack(filled);
+        }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_map_filled(player, &name, id);
         }
         let at = [p.x, p.y, p.z];
         self.audio.play(

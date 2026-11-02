@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "block_burn",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_burn",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockBurnEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "Fire about to burn a block away (`native_block_burn`).",
+  "doc_summary": "Fire about to burn a block: `native_block_burn(dimension, pos, cancel)` is heard when fire's burnout check is about to remove the block at `pos`. Set `cancel` to keep it. Bundles need \"hooks\": @API:block_burn@."
+}

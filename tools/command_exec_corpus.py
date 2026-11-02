@@ -1002,6 +1002,19 @@ def progression():
         cmd('/advancement revoke @s everything'),
         cmd('/advancement revoke @s everything'),
         cmd('/advancement grant @s only minecraft:nonexistent'),
+        # The advancement subtree a `from` grants, one criterion of an
+        # advancement that needs hundreds (`adventuring_time` wants every
+        # biome), and a `through` that keeps what is below the named one.
+        cmd('/advancement revoke @s everything'),
+        cmd('/advancement grant @s from minecraft:story/mine_stone'),
+        cmd('/advancement grant @s only minecraft:adventure/adventuring_time minecraft:plains'),
+        cmd('/advancement grant @s only minecraft:adventure/adventuring_time'),
+        cmd('/advancement revoke @s only minecraft:adventure/adventuring_time minecraft:plains'),
+        cmd('/advancement grant @s through minecraft:story/upgrade_tools'),
+        cmd('/advancement grant @s until minecraft:story/mine_stone'),
+        cmd('/advancement revoke @s everything'),
+        cmd('/advancement grant @e[type=!minecraft:player] everything'),
+        cmd('/experience query @s levels'),
         cmd('/recipe give @s minecraft:oak_planks'),
         cmd('/recipe give @s minecraft:oak_planks'),
         cmd('/recipe take @s minecraft:oak_planks'),
@@ -1565,6 +1578,78 @@ def experience_orb_stuck():
     ]
 
 
+def summoned_potions():
+    """`ThrowableItemProjectile.getItem`/`readAdditionalSaveData` and
+    `AbstractThrownPotion.getDefaultGravity`: a summoned splash or lingering
+    potion is the projectile its type is, not an entity nothing ticks. It
+    flies with the gravity 0.05 of its type (a bare one as a splash potion
+    with no effects), `Motion` is in its compound, and what it splashes on
+    landing are the effects of its `Item`'s `potion_contents` (#6642)."""
+    ops = [*setup('/kill @e[type=minecraft:splash_potion]',
+                  '/kill @e[type=minecraft:lingering_potion]',
+                  '/fill 0 196 0 20 200 20 minecraft:stone')]
+    # A bare summon flies as the default splash potion: no effects, and the
+    # tick's gravity and drag move it off where it was placed.
+    ops += [
+        cmd('/summon minecraft:splash_potion 4.5 206 4.5'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Item'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Motion'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Pos'),
+        {'op': 'tick', 'n': 3},
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Pos'),
+        cmd('/data get entity @e[type=minecraft:splash_potion,limit=1] Motion'),
+        {'op': 'tick', 'n': 30},
+        cmd('/execute if entity @e[type=minecraft:splash_potion]'),
+    ]
+    # A harming potion landing on a pig hurts it for the potion's 6, and the
+    # potion is gone: ThrownSplashPotion.onHitAsPotion over the stack. The pig
+    # stands on the stone at y 201 (a summon at y 200 is inside it).
+    ops += [
+        *setup('/kill @e[type=!player]'),
+        {'op': 'tick', 'n': 25},
+        *setup('/summon minecraft:pig 4.5 201 4.5 {NoAI:1b,Silent:1b,PersistenceRequired:1b}'),
+        {'op': 'tick', 'n': 5},
+        cmd('/data get entity @e[type=minecraft:pig,limit=1] Health'),
+        *setup('/summon minecraft:splash_potion 4.5 206 4.5 '
+               '{Item:{id:"minecraft:splash_potion",count:1,components:'
+               '{"minecraft:potion_contents":{potion:"minecraft:harming"}}}}'),
+        {'op': 'tick', 'n': 40},
+        cmd('/data get entity @e[type=minecraft:pig,limit=1] Health'),
+        cmd('/execute if entity @e[type=minecraft:splash_potion]'),
+    ]
+    # A lingering potion leaves its cloud where it lands, and the cloud puts
+    # the potion's poison on the pig standing in it
+    # (ThrownLingeringPotion.onHitAsPotion). The duration is left out of the
+    # check: how the cloud's age and the mob's effect tick interleave is not
+    # what this covers.
+    ops += [
+        *setup('/kill @e[type=!player]'),
+        {'op': 'tick', 'n': 25},
+        *setup('/summon minecraft:pig 8.5 201 8.5 '
+               '{Tags:["poisoned"],NoAI:1b,Silent:1b,PersistenceRequired:1b}',
+               '/summon minecraft:lingering_potion 8.5 206 8.5 '
+               '{Item:{id:"minecraft:lingering_potion",count:1,components:'
+               '{"minecraft:potion_contents":{potion:"minecraft:poison"}}}}'),
+        cmd('/data get entity @e[type=minecraft:lingering_potion,limit=1] Motion'),
+        {'op': 'tick', 'n': 40},
+        cmd('/execute if entity @e[type=minecraft:lingering_potion]'),
+        cmd('/execute if entity @e[tag=poisoned,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+        # A bare lingering potion has empty contents, so its cloud, ten blocks
+        # from the poison one, puts nothing on its own pig.
+        *setup('/summon minecraft:pig 18.5 201 18.5 '
+               '{Tags:["bare"],NoAI:1b,Silent:1b,PersistenceRequired:1b}',
+               '/summon minecraft:lingering_potion 18.5 206 18.5'),
+        {'op': 'tick', 'n': 40},
+        cmd('/execute if entity @e[tag=poisoned,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+        cmd('/execute if entity @e[tag=bare,limit=1,nbt='
+            '{active_effects:[{id:"minecraft:poison"}]}]'),
+    ]
+    ops += [*setup('/kill @e[type=!player]'), {'op': 'tick', 'n': 25}]
+    return ops
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1599,4 +1684,5 @@ def groups():
         ('experience orb fall', experience_orb_fall()),
         ('piglin pickups', piglin_pickups()),
         ('experience orb stuck', experience_orb_stuck()),
+        ('summoned potions', summoned_potions()),
     ]
