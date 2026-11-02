@@ -234,6 +234,9 @@ impl SpawnLevel for GameLevel<'_, '_> {
     }
 }
 impl NaturalLevel for GameLevel<'_, '_> {
+    fn spawn_hooks(&self) -> bool {
+        !horizon_client::mod_api::mods().is_empty()
+    }
     fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
         let mut canceled = false;
         self.game.native_potential_spawns(
@@ -464,7 +467,10 @@ impl<'a> Game<'a> {
     /// `level_players` one at a time, without collecting them.
     fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
         let local = self.player_view().map(|p| LevelPlayer {
-            uuid: self.level.player_uuid,
+            uuid: self
+                .level
+                .player_uuid
+                .map_or(0, horizon_client::lan::playerdata::ints_uuid),
             position: p.position,
             bounds: p.bounds,
             alive: p.alive,

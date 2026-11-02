@@ -452,7 +452,6 @@
 //! Bodies have no `cfg` and no macros: horizon-mixins refuses a target with
 //! either (`tests::hook_points_stay_hookable`).
 use super::native_data_maps::NativeDataMapType;
-use horizon_client::biome::SpawnEntry;
 use super::native_item_energy::ItemEnergyBuffer;
 use super::{
     Game, GameLevel, LevelDimension, Screen,
@@ -473,7 +472,7 @@ pub(crate) use horizon_client::mod_api::{
 };
 use horizon_client::{
     atlas_sources::qualified,
-    biome::BiomeColors,
+    biome::{BiomeColors, SpawnEntry},
     block_entities::Pos,
     chat::ChatSource,
     containers::{

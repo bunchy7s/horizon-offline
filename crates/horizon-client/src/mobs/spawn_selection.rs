@@ -21,7 +21,7 @@ use horizon_core::{
     random::RandomSource,
 };
 use serde_json::Value;
-use std::{collections::HashMap, fs, path::Path};
+use std::{borrow::Cow, collections::HashMap, fs, path::Path};
 
 pub use crate::biome::{SpawnCost, parse_costs, parse_entries};
 
@@ -301,8 +301,19 @@ fn spawns_far_from_player(s: Species, category: Category) -> bool {
 pub type MobType = (Species, f32, f32, Category);
 
 pub trait NaturalLevel: SpawnLevel {
-    /// Let server mods change the possible spawns at a position.
-    fn potential_spawns(&self, _category: Category, _pos: [i32; 3], _entries: &mut Vec<SpawnEntry>) {}
+    /// Whether server mods hear `potential_spawns`.
+    fn spawn_hooks(&self) -> bool {
+        false
+    }
+    /// `LevelEvent.PotentialSpawns`: server mods change the possible spawns
+    /// at a position.
+    fn potential_spawns(
+        &self,
+        _category: Category,
+        _pos: [i32; 3],
+        _entries: &mut Vec<SpawnEntry>,
+    ) {
+    }
     fn min_y(&self) -> i32;
     /// `getMaxY()`: the highest buildable block.
     fn max_y(&self) -> i32;
@@ -667,18 +678,23 @@ pub fn fortress_enemies() -> &'static [SpawnEntry] {
 
 /// `NaturalSpawner.mobsAt`: the fortress bounds on nether bricks, then
 /// `ChunkGenerator.getMobsAt` (the first referenced structure whose override
-/// for the category holds the position), else the biome's list. A spawn
-/// attempt looks it up up to twice, allowing mods to change each result.
+/// for the category holds the position), else the biome's list, as mods
+/// change it. Borrowed from the level when no mod hears it: a spawn attempt
+/// looks it up up to twice.
 pub fn mobs_at<L: NaturalLevel>(
     l: &L,
     category: Category,
     x: i32,
     y: i32,
     z: i32,
-) -> Vec<SpawnEntry> {
-    let mut entries = vanilla_mobs_at(l, category, x, y, z).to_vec();
+) -> Cow<'_, [SpawnEntry]> {
+    let entries = vanilla_mobs_at(l, category, x, y, z);
+    if !l.spawn_hooks() {
+        return Cow::Borrowed(entries);
+    }
+    let mut entries = entries.to_vec();
     l.potential_spawns(category, [x, y, z], &mut entries);
-    entries
+    Cow::Owned(entries)
 }
 
 fn vanilla_mobs_at<L: NaturalLevel>(
@@ -1047,8 +1063,8 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
     let mut nearest = Nearest::new(start);
     for _ in 0..3 {
         let (mut x, mut z) = (x0, z0);
-        // The group's entry and its type.
-        let mut current: Option<(SpawnEntry, Option<MobType>)> = None;
+        // The group's entry, its type and where it was picked.
+        let mut current: Option<(SpawnEntry, Option<MobType>, [i32; 3])> = None;
         let mut group_index = 0u32;
         let mut max = (random.next_float() * 4.0).ceil() as i32;
         let mut ll = 0;
@@ -1078,15 +1094,18 @@ pub fn spawn_category_for_position<L: NaturalLevel, R: RandomSource>(
                 };
                 max = sample_count(&entry, random) as i32;
                 let kind = l.mob_type(&entry.entity);
-                current = Some((entry, kind));
+                current = Some((entry, kind, [x, y, z]));
             }
-            let (entry, kind) = current.as_ref().unwrap_or_else(|| unreachable!());
+            let (entry, kind, picked_at) = current.as_ref().unwrap_or_else(|| unreachable!());
+            // The list the entry was picked from holds it where it was picked.
+            let listed = *picked_at == [x, y, z];
             let valid = valid_position_for_type(
                 l,
                 random,
                 category,
                 entry,
                 *kind,
+                listed,
                 [x, y, z],
                 distance,
             );
@@ -1205,12 +1224,15 @@ fn right_distance<L: NaturalLevel>(l: &L, chunk: (i32, i32), pos: [i32; 3], dist
     (cx, cz) == chunk || l.can_spawn_in_chunk(cx, cz)
 }
 /// `isValidSpawnPostitionForType`, for the entry's type (`mob_type`).
+/// `listed`: the position is where the entry was picked from `mobsAt`.
+#[allow(clippy::too_many_arguments)]
 fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
     l: &L,
     random: &mut R,
     category: Category,
     entry: &SpawnEntry,
     kind: Option<MobType>,
+    listed: bool,
     pos: [i32; 3],
     distance: f64,
 ) -> bool {
@@ -1225,13 +1247,24 @@ fn valid_position_for_type<L: NaturalLevel, R: RandomSource>(
         return false;
     }
     let [x, y, z] = pos;
-    if !mobs_at(l, category, x, y, z)
-        .iter()
-        .any(|e| same_spawner(e, entry))
-    {
+    let hooked = l.spawn_hooks();
+    let in_list = || {
+        mobs_at(l, category, x, y, z)
+            .iter()
+            .any(|e| same_spawner(e, entry))
+    };
+    // `canSpawnMobAt` comes first in vanilla, and mods hear each of its
+    // lookups. Without them it and `isSpawnPositionOk` only read the level,
+    // so their order cannot change the answer: the few block reads of the
+    // placement turn most positions away before the spawn list (structures,
+    // biome) is looked up again.
+    if hooked && !in_list() {
         return false;
     }
     if !spawn_rules::is_spawn_position_ok(species, l, x, y, z) {
+        return false;
+    }
+    if !hooked && !listed && !in_list() {
         return false;
     }
     if !spawn_rules::check_spawn_rules(species, l, Reason::Natural, random, x, y, z) {
