@@ -211,6 +211,36 @@ impl SceneCollisions<'_, '_> {
     ) -> Result<Vec3> {
         self.resolve_with_context(bounds, movement, max_step, on_ground, self.context(bounds))
     }
+    /// [`Self::resolve`], also stopped by the world border's walls when one is
+    /// given with the moving entity's x and z: `Entity.collectColliders` adds
+    /// `WorldBorder.getCollisionShape` for any entity inside and close to it.
+    pub fn resolve_in_border(
+        self,
+        bounds: Aabb,
+        movement: Vec3,
+        max_step: f32,
+        on_ground: bool,
+        border: Option<(&BorderGeometry, [f64; 2])>,
+    ) -> Result<Vec3> {
+        let context = self.context(bounds);
+        let mut scene = EntityCollisions {
+            blocks: self,
+            entities: &[],
+            border,
+        };
+        Ok(resolve_world_movement(
+            &mut scene,
+            MovementRequest {
+                entity: EntityIdentity(0),
+                context,
+                bounds,
+                movement,
+                max_step,
+                on_ground,
+                candidate_budget: 1_000_000,
+            },
+        )?)
+    }
     /// Resolve movement with the entity's captured collision context. Most
     /// callers only need the position context; entities such as falling blocks
     /// also affect contextual block shapes (for example powder snow).
