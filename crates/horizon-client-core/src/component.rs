@@ -688,4 +688,15 @@ mod tests {
         let (v, _) = parse_snbt("{n:1.5}").unwrap();
         assert_eq!(v["n"], Value::from(1.5));
     }
+
+    #[test]
+    fn name_text_preserves_legacy_and_decodes_components() {
+        let legacy = Tag::String("§6Golden Name".into());
+        let text = name_text(&legacy);
+        assert_eq!(text.plain(), "Golden Name");
+
+        let comp = Tag::compound([("text", Tag::String("Custom Name".into()))]);
+        let text = name_text(&comp);
+        assert_eq!(text.plain(), "Custom Name");
+    }
 }
