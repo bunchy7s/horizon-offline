@@ -928,8 +928,16 @@ impl Game<'_> {
                     } else {
                         finalize::value(m, Attr::MaxHealth)
                     }),
-                    "movement_speed" => Some(m.attrs.speed),
-                    "attack_damage" => Some(f64::from(m.attrs.attack_damage)),
+                    "movement_speed" => Some(if id == "attribute.base.get" {
+                        finalize::base_value(m, Attr::MovementSpeed)
+                    } else {
+                        m.attrs.speed
+                    }),
+                    "attack_damage" => Some(if id == "attribute.base.get" {
+                        finalize::base_value(m, Attr::AttackDamage)
+                    } else {
+                        f64::from(m.attrs.attack_damage)
+                    }),
                     _ => None,
                 };
                 let Some(current) = slot else {
@@ -955,8 +963,10 @@ impl Game<'_> {
                                 // the effective value, and does not change Health.
                                 finalize::set_base(m, Attr::MaxHealth, value_arg);
                             }
-                            "movement_speed" => m.attrs.speed = value_arg,
-                            _ => m.attrs.attack_damage = value_arg as f32,
+                            "movement_speed" => {
+                                finalize::set_base(m, Attr::MovementSpeed, value_arg)
+                            }
+                            _ => finalize::set_base(m, Attr::AttackDamage, value_arg),
                         }
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.set.success",
@@ -970,13 +980,19 @@ impl Game<'_> {
                                 let default = f64::from(m.kind.max_health);
                                 finalize::set_base(m, Attr::MaxHealth, default);
                             }
-                            "movement_speed" => m.attrs.speed = m.kind.speed,
-                            _ => m.attrs.attack_damage = m.kind.attack_damage,
+                            "movement_speed" => {
+                                let default = m.kind.speed;
+                                finalize::set_base(m, Attr::MovementSpeed, default);
+                            }
+                            _ => {
+                                let default = f64::from(m.kind.attack_damage);
+                                finalize::set_base(m, Attr::AttackDamage, default);
+                            }
                         }
                         let v = match short.as_str() {
                             "max_health" => finalize::base_value(m, Attr::MaxHealth),
-                            "movement_speed" => m.attrs.speed,
-                            _ => f64::from(m.attrs.attack_damage),
+                            "movement_speed" => finalize::base_value(m, Attr::MovementSpeed),
+                            _ => finalize::base_value(m, Attr::AttackDamage),
                         };
                         self.feedback(Text::translate(
                             "commands.attribute.base_value.reset.success",
