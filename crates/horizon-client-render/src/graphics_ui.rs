@@ -28,9 +28,18 @@ pub enum H {
     Preset,
     LodDistance,
     FarDetail,
+    BlueMapAutoDetect,
+    BlueMapRadius,
     CaveCulling,
     EntityCulling,
     LeafCulling,
+    CacheShulkerBoxes,
+    CacheSigns,
+    CacheDecoratedPots,
+    CacheBells,
+    CacheChests,
+    CacheBanners,
+    CacheCopperGolemStatues,
     ChunkUpdates,
     UploadBudget,
     Sky,
@@ -183,6 +192,16 @@ pub fn rows(level: Level) -> Vec<Row> {
             render,
             lod,
             far,
+            h(
+                H::BlueMapAutoDetect,
+                None,
+                "On servers, finds their BlueMap web map for far terrain. Next join.",
+            ),
+            h(
+                H::BlueMapRadius,
+                None,
+                "How far around you BlueMap tiles are downloaded. Next join.",
+            ),
             v(
                 Opt::SimulationDistance,
                 Medium,
@@ -207,12 +226,48 @@ pub fn rows(level: Level) -> Vec<Row> {
             h(
                 H::EntityCulling,
                 None,
-                "Hides models behind opaque blocks. Async checks off-thread; entities tick.",
+                "Hides entities behind opaque blocks.",
             ),
             h(
                 H::LeafCulling,
                 Saves,
                 "Draws or drops leaf faces inside canopies. Off keeps vanilla's fancy leaves.",
+            ),
+            Row::Header("Block Entities"),
+            h(
+                H::CacheShulkerBoxes,
+                Saves,
+                "Reuses settled boxes; lid movement stays animated.",
+            ),
+            h(
+                H::CacheSigns,
+                Saves,
+                "Reuses sign text until text, light, or font changes.",
+            ),
+            h(
+                H::CacheDecoratedPots,
+                Saves,
+                "Reuses still pots; break wobble and sherd changes redraw.",
+            ),
+            h(
+                H::CacheBells,
+                Saves,
+                "Reuses still bells; ringing stays animated.",
+            ),
+            h(
+                H::CacheChests,
+                Saves,
+                "Reuses closed chests; moving lids stay animated.",
+            ),
+            h(
+                H::CacheBanners,
+                Saves,
+                "Reuses poles; flags and pattern layers still update.",
+            ),
+            h(
+                H::CacheCopperGolemStatues,
+                Saves,
+                "Reuses statue geometry until its block state changes.",
             ),
             Row::Header("Quality"),
             v(
@@ -387,6 +442,8 @@ pub fn rows(level: Level) -> Vec<Row> {
     rows
 }
 
+/// BlueMap download radii, in chunks.
+const BLUE_MAP_RADII: [u32; 5] = [16, 32, 64, 128, 256];
 const UPLOAD_STEPS: [u32; 8] = [0, 256, 512, 1024, 2048, 4096, 8192, 16384];
 /// What the LOD Distance slider stops at, in chunks: off, then each doubling
 /// up to the whole world.
@@ -470,6 +527,11 @@ fn description(item: Item, s: &Settings, text: &'static str) -> &'static str {
         (Item::Horizon(H::HdrPeak | H::HdrPaperWhite), Setup::Automatic | Setup::Changed) => {
             "Set up for your display. Leave on Auto unless it looks wrong."
         }
+        (Item::Horizon(H::EntityCulling), _) => match s.horizon.entity_culling {
+            EntityCullingMode::Off => "No entity occlusion culling.",
+            EntityCullingMode::Synchronous => "CPU occlusion test runs this frame.",
+            EntityCullingMode::Asynchronous => "Occlusion checks run on a worker thread.",
+        },
         (Item::Horizon(H::LeafCulling), _) => match s.horizon.leaf_culling {
             LeafCullingMode::Off => "Every leaf face. Vanilla's fancy leaves.",
             LeafCullingMode::Solid => {
@@ -548,9 +610,23 @@ impl H {
                 n => labelled("LOD Distance", lang::tr("%s chunks", &[&n])),
             },
             H::FarDetail => labelled("Far Detail", g.far_detail.label()),
+            H::BlueMapAutoDetect => labelled("Find BlueMap", on_off(g.blue_map.auto_detect)),
+            H::BlueMapRadius => labelled(
+                "BlueMap Radius",
+                lang::tr("%s chunks", &[&g.blue_map.radius_chunks()]),
+            ),
             H::CaveCulling => labelled("Cave Culling", on_off(g.cave_culling)),
             H::EntityCulling => labelled("Entity Culling", g.entity_culling.label()),
             H::LeafCulling => labelled("Leaf Culling", g.leaf_culling.label()),
+            H::CacheShulkerBoxes => labelled("Shulker Boxes", on_off(g.cache_shulker_boxes)),
+            H::CacheSigns => labelled("Signs", on_off(g.cache_signs)),
+            H::CacheDecoratedPots => labelled("Decorated Pots", on_off(g.cache_decorated_pots)),
+            H::CacheBells => labelled("Bells", on_off(g.cache_bells)),
+            H::CacheChests => labelled("Chests", on_off(g.cache_chests)),
+            H::CacheBanners => labelled("Banners", on_off(g.cache_banners)),
+            H::CacheCopperGolemStatues => {
+                labelled("Copper Golem Statues", on_off(g.cache_copper_golem_statues))
+            }
             H::ChunkUpdates => match g.chunk_updates {
                 0 => labelled("Chunk Updates", "Unlimited"),
                 n => labelled("Chunk Updates", lang::tr("%s per frame", &[&n])),
@@ -686,12 +762,25 @@ impl H {
             H::FarDetail => {
                 g.far_detail = step(&[FarDetail::Full, FarDetail::Reduced], g.far_detail, back)
             }
+            H::BlueMapAutoDetect => g.blue_map.auto_detect = !g.blue_map.auto_detect,
+            H::BlueMapRadius => {
+                g.blue_map.radius = step(&BLUE_MAP_RADII, g.blue_map.radius_chunks(), back)
+            }
             H::CaveCulling => g.cave_culling = !g.cave_culling,
             H::EntityCulling => {
                 g.entity_culling = step(&EntityCullingMode::ALL, g.entity_culling, back)
             }
             H::LeafCulling => {
                 g.leaf_culling = step(&LeafCullingMode::ALL, g.leaf_culling, back);
+            }
+            H::CacheShulkerBoxes => g.cache_shulker_boxes = !g.cache_shulker_boxes,
+            H::CacheSigns => g.cache_signs = !g.cache_signs,
+            H::CacheDecoratedPots => g.cache_decorated_pots = !g.cache_decorated_pots,
+            H::CacheBells => g.cache_bells = !g.cache_bells,
+            H::CacheChests => g.cache_chests = !g.cache_chests,
+            H::CacheBanners => g.cache_banners = !g.cache_banners,
+            H::CacheCopperGolemStatues => {
+                g.cache_copper_golem_statues = !g.cache_copper_golem_statues
             }
             H::Sky => g.sky = !g.sky,
             H::Fog => g.fog = !g.fog,
@@ -789,7 +878,15 @@ impl Item {
     pub fn switch(self, s: &Settings) -> Option<bool> {
         let g = &s.horizon;
         Some(match self {
+            Item::Horizon(H::BlueMapAutoDetect) => g.blue_map.auto_detect,
             Item::Horizon(H::CaveCulling) => g.cave_culling,
+            Item::Horizon(H::CacheShulkerBoxes) => g.cache_shulker_boxes,
+            Item::Horizon(H::CacheSigns) => g.cache_signs,
+            Item::Horizon(H::CacheDecoratedPots) => g.cache_decorated_pots,
+            Item::Horizon(H::CacheBells) => g.cache_bells,
+            Item::Horizon(H::CacheChests) => g.cache_chests,
+            Item::Horizon(H::CacheBanners) => g.cache_banners,
+            Item::Horizon(H::CacheCopperGolemStatues) => g.cache_copper_golem_statues,
             Item::Horizon(H::Sky) => g.sky,
             Item::Horizon(H::Fog) => g.fog,
             Item::Horizon(H::Weather) => g.weather,
@@ -853,6 +950,8 @@ impl Item {
             self,
             Item::Horizon(
                 H::Preset
+                    | H::BlueMapAutoDetect
+                    | H::BlueMapRadius
                     | H::Overlay
                     | H::ScreenshotQuality
                     | H::Pacing
@@ -1290,6 +1389,11 @@ impl GraphicsUi {
         framebuffer: [i32; 2],
         amount: f32,
     ) -> Vec<Action> {
+        // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
+        if !s.extras.wheel_cycles_settings {
+            self.scroll(level, s, h, amount);
+            return Vec::new();
+        }
         // Horizon improvement: focused slider/cycle intercepts wheel first.
         if amount != 0.0
             && self.can_change_value
@@ -1819,6 +1923,31 @@ mod tests {
     }
 
     #[test]
+    fn blue_map_settings_are_advanced_rendering_options() {
+        let mut s = Settings::default();
+        let find = Item::Horizon(H::BlueMapAutoDetect);
+        let radius = Item::Horizon(H::BlueMapRadius);
+        let advanced: Vec<_> = rows(Level::Advanced)
+            .into_iter()
+            .filter_map(|row| match row {
+                Row::Setting(setting) => Some(setting.item),
+                Row::Header(_) => None,
+            })
+            .collect();
+        assert!(advanced.contains(&find) && advanced.contains(&radius));
+        assert_eq!(find.switch(&s), Some(false), "off by default");
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 64 chunks");
+        find.cycle(&mut s, false, [854, 480]);
+        assert!(s.horizon.blue_map.auto_detect);
+        radius.cycle(&mut s, false, [854, 480]);
+        assert_eq!(s.horizon.blue_map.radius, 128);
+        radius.cycle(&mut s, true, [854, 480]);
+        radius.cycle(&mut s, true, [854, 480]);
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 32 chunks");
+        assert_eq!(s.horizon.preset, Preset::Custom);
+    }
+
+    #[test]
     fn presets_set_vanilla_and_horizon_options() {
         let mut s = Settings::default();
         Item::Horizon(H::Preset).cycle(&mut s, false, [854, 480]);
@@ -1907,8 +2036,8 @@ mod tests {
         item.cycle(&mut s, true, [854, 480]);
         assert_eq!(s.horizon.leaf_culling, LeafCullingMode::Hollow);
 
-        // The three culling settings share one group, below Rendering's chunk
-        // updates and above Quality.
+        // The culling group is followed by the separate block-entity cache
+        // group, then Quality.
         let rows = rows(Level::Advanced);
         let culling = rows
             .iter()
@@ -1928,6 +2057,27 @@ mod tests {
         ));
         assert!(matches!(
             rows.get(culling + 4),
+            Some(Row::Header("Block Entities"))
+        ));
+        for (offset, cache) in [
+            H::CacheShulkerBoxes,
+            H::CacheSigns,
+            H::CacheDecoratedPots,
+            H::CacheBells,
+            H::CacheChests,
+            H::CacheBanners,
+            H::CacheCopperGolemStatues,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(matches!(
+                rows.get(culling + 5 + offset),
+                Some(Row::Setting(setting)) if setting.item == Item::Horizon(cache)
+            ));
+        }
+        assert!(matches!(
+            rows.get(culling + 12),
             Some(Row::Header("Quality"))
         ));
 
@@ -2159,6 +2309,15 @@ mod tests {
         let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, 1.0);
         assert_eq!(actions, vec![Action::ButtonClick, Action::Changed]);
         assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        // With the "Scroll wheel changes settings" extra off, it scrolls instead.
+        s.extras.wheel_cycles_settings = false;
+        let scroll_before = ui.scroll.amount;
+        let actions = ui.wheel(Level::Advanced, &mut s, cursor, size, fb, -1.0);
+        assert!(actions.is_empty());
+        assert_eq!(s.horizon.far_detail, FarDetail::Reduced);
+        assert!(ui.scroll.amount > scroll_before);
+        s.extras.wheel_cycles_settings = true;
+        ui.scroll.amount = scroll_before;
 
         // 2. Wheel over a slider: Chunk Updates scrolls the page, doesn't change slider value
         s.horizon.chunk_updates = 16;

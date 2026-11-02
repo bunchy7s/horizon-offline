@@ -1,7 +1,7 @@
 //! The window's own ambient effects of entities, which a client makes for
 //! itself (`level().isClientSide()` branches): endermen's and endermites'
 //! portal particles, blazes' smoke and burn, eyes of ender's trail. They run
-//! on the game that has the window, in-frame or following a server, never on
+//! on the game that has the window, following a server, never on
 //! a server: nothing of them goes over the network.
 use super::Game;
 use horizon_client::blocks::RenderShape;
@@ -78,8 +78,7 @@ impl Game<'_> {
                 runners.push((m.position, movement, None, f64::from(m.width())));
             }
         }
-        let guests = self.lan.iter().flat_map(|host| host.models.values());
-        for m in self.mobs.iter().chain(guests) {
+        for m in self.mobs.iter() {
             // Another player's fluids aren't known here: none where they stand.
             let feet = [
                 m.position.x.floor() as i32,
@@ -175,8 +174,7 @@ impl Game<'_> {
                 invisible,
             );
         }
-        let guests = self.lan.iter().flat_map(|host| host.models.values());
-        for m in self.mobs.iter().chain(guests) {
+        for m in self.mobs.iter() {
             if !m.alive() {
                 continue;
             }

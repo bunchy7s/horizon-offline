@@ -2,7 +2,7 @@
 //! `ServerGamePacketListenerImpl.handlePickItemFromEntity`): the client aims,
 //! the server answers with `Entity.getPickResult`.
 use super::Game;
-use horizon_client::{items::ItemStack, lan::playerdata::uuid_ints, save::uuid_text};
+use horizon_client::{items::ItemStack, save::uuid_text};
 
 impl Game<'_> {
     /// The entity the crosshair hits before any block, as `Entity.getId`; an
@@ -22,9 +22,6 @@ impl Game<'_> {
         }
         if let Some((i, d)) = self.mob_hit() {
             offer(d, Some(self.mobs[i].id as i32));
-        }
-        if let Some((_, d)) = self.guest_hit() {
-            offer(d, None);
         }
         if let Some((_, d)) = self.redirectable_hit() {
             offer(d, None);
@@ -53,10 +50,6 @@ impl Game<'_> {
         }
         if let Some((i, d)) = self.mob_hit() {
             offer(d, uuid_of(self.mobs[i].id));
-        }
-        if let Some((conn, d)) = self.guest_hit() {
-            let guest = self.lan.as_ref().and_then(|h| h.hub.guest(conn));
-            offer(d, guest.map(|g| uuid_ints(g.uuid)));
         }
         if let Some((i, d)) = self.redirectable_hit() {
             offer(d, uuid_of(self.creatures.projectiles[i].id));

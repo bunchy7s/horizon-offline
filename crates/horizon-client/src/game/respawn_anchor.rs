@@ -11,13 +11,11 @@ use horizon_client::{
     collisions::{SceneCollisions, no_collision_empty},
     items::ItemStack,
     mobs::Who,
-    motion::PlayerMotion,
     text::Text,
 };
 use horizon_core::{
     geometry::{Aabb, Axis, Vec3, VoxelShape},
     position::BlockPos,
-    random::RandomSource,
 };
 use horizon_world::{collision_context::CollisionContext, registry::BlockStateId};
 
@@ -490,7 +488,7 @@ impl Game<'_> {
         let f = self.res.facts().get(state);
         let name = &*f.name;
         name.ends_with("_banner")
-            || name.ends_with("_sign")
+            || f.sign_form().is_some()
             || name.ends_with("_pressure_plate")
             || !(f.legacy_solid || matches!(name, "minecraft:water" | "minecraft:lava"))
     }
@@ -640,93 +638,6 @@ impl Game<'_> {
             self.level_set(c.pos, next)?;
         }
         Ok(stand.map(|p| (p, look_at_yaw(p, c.pos))))
-    }
-    /// The death screen's respawn with an anchor as the respawn point: travel
-    /// to its dimension and wait for its chunks (`travelling`), then resolve
-    /// it in [`Game::place_respawned`].
-    pub(super) fn begin_anchor_respawn(&mut self) -> Result<bool> {
-        let Some(config) = self.respawn_config else {
-            return Ok(false);
-        };
-        if self.player.is_none() {
-            return Ok(false);
-        }
-        if self.dim != config.dim {
-            self.end_portal_travel = false;
-            self.enter_dimension(config.dim)?;
-        } else {
-            let player = self.player.take().ok_or("player")?;
-            self.travelling = Some((player, Vec3::ZERO));
-        }
-        let target = Vec3::new(
-            f64::from(config.pos[0]) + 0.5,
-            f64::from(config.pos[1]),
-            f64::from(config.pos[2]) + 0.5,
-        );
-        if let Some((_, t)) = self.travelling.as_mut() {
-            *t = target;
-        }
-        self.end_travel = false;
-        self.respawn_travel = Some(config);
-        Ok(true)
-    }
-    /// `PlayerList.respawn` at an anchor once its dimension is loaded around
-    /// it: a fresh player at the stand-up position facing the anchor and the
-    /// deplete sound, or, with no anchor left, the world spawn and
-    /// `block.minecraft.spawn.not_valid`.
-    pub(super) fn place_respawned(&mut self, config: RespawnConfig) -> Result<()> {
-        match self.find_respawn_and_use(config, true)? {
-            Some((position, yaw)) => {
-                let mut player = PlayerMotion::new(self.motion, position)?;
-                player.yaw = yaw;
-                player.head_yaw = yaw;
-                self.yaw = yaw;
-                self.pitch = 0.0;
-                player.pitch = 0.0;
-                self.eye = 1.62;
-                self.previous_eye = 1.62;
-                self.clock.reset();
-                self.previous_position = position;
-                self.player = Some(player);
-                self.sway = Default::default();
-                self.apply_equipment();
-                // ClientboundSoundPacket at the block's corner, seeded from the level random.
-                let state = self
-                    .world
-                    .block(config.pos[0], config.pos[1], config.pos[2]);
-                if self.is_anchor(state) {
-                    let _seed = self.world.random.next_long();
-                    let at = [
-                        f64::from(config.pos[0]),
-                        f64::from(config.pos[1]),
-                        f64::from(config.pos[2]),
-                    ];
-                    self.audio
-                        .play("minecraft:block.respawn_anchor.deplete", Some(at), 1.0, 1.0);
-                }
-                Ok(())
-            }
-            None => {
-                // TeleportTransition.missingRespawnBlock: the world spawn, and
-                // the point is forgotten.
-                self.respawn_config = None;
-                self.system_message(Text::translate("block.minecraft.spawn.not_valid", &[]));
-                let dead = PlayerMotion::new(self.motion, Vec3::ZERO)?;
-                if self.dim != Dim::Overworld {
-                    // A dead stand-in travels; the arrival makes a fresh player.
-                    let mut dead = dead;
-                    dead.set_health(0.0, false)?;
-                    self.player = Some(dead);
-                    self.end_portal_travel = true;
-                    let result = self.enter_dimension(Dim::Overworld);
-                    self.end_portal_travel = false;
-                    self.end_travel = true;
-                    return result;
-                }
-                self.player = None;
-                self.spawn_player()
-            }
-        }
     }
 }
 

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """LAN multiplayer end to end: a host opens its world to LAN and a guest joins, both real games.
 
-The host uses its integrated server thread. --in-frame is DEPRECATED (never use it, it will be removed
-soon); --server-thread remains accepted. Two Horizon clients run under horizon-ctl in scratch folders. The host
+The host's world runs on its integrated server thread. Two Horizon clients run under horizon-ctl in scratch folders. The host
 creates a survival world and opens it to LAN with commands allowed; the guest connects to it by
 address. The script then checks, from both sides, what a guest's game used to get wrong (#366):
 
@@ -16,6 +15,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
              dimension change, a death and respawn); the inventory opens as its own menu, items kept;
 - crafting:  the guest crafts planks in the inventory's 2x2 grid and opens a crafting table, which
              leaves the host's screen and mouse look alone;
+- datapack-recipe: (--server-thread) a crafting recipe from the world's data pack shows its result in the
+             table of the host's window and of a guest, and taking it crafts (#6733);
 - spawned:   the host and a guest new to the world join on different spots (PlayerSpawnFinder), and the
              guest opens a crafting table, a chest, a furnace and a stonecutter where it joined;
 - sign:      a sign the guest places doesn't open a sign editor on the host;
@@ -79,12 +80,12 @@ address. The script then checks, from both sides, what a guest's game used to ge
              events; each player's /give tells them of the Diamonds! advancement before the give's
              own message, and never echoes their command back to them as `[Name: ...]`;
 - effects:   a beacon's power reaches every player in range, the host and the guest;
-- distance:  (--server-thread) the server follows the host's render distance, past vanilla's 32 too
+- distance:  the server follows the host's render distance, past vanilla's 32 too
              (IntegratedServer.tickServer), and the guest's chunks follow the server's (#804)
-- portals:   (--server-thread) the server holds a level per dimension: the guest goes to the Nether
+- portals:   the server holds a level per dimension: the guest goes to the Nether
              through a portal while the host stays, then the host goes to the End while the guest is in
              the Nether, and both come back.
-- levels:    (--server-thread) the host and the guest each in a level of their own: `execute in`
+- levels:    the host and the guest each in a level of their own: `execute in`
              teleports into another level, and `execute in` and `at` change and test blocks there;
              mobs fall in two levels at once, with ids unique across them; the guest rejoins in the
              Nether, dies there and respawns in the Overworld, then in the Nether at a `spawnpoint`
@@ -123,7 +124,7 @@ address. The script then checks, from both sides, what a guest's game used to ge
              gets up with Escape, and once the host sleeps too the night ends and both wake.
 - bed-occupied: the bed the host sleeps in is occupied and the guest cannot lie down in it; it is
              free again after Escape, death, the bed broken and the sleeper leaving the game.
-- sleep-reload: (--server-thread) a villager asleep in its bed is still asleep there, its bed
+- sleep-reload: a villager asleep in its bed is still asleep there, its bed
              occupied, after the host saves, quits and reopens; the guest's bed is saved free.
 - predict:   with the host frozen, the oak door the guest opens opens on the guest's screen at once (its
              prediction) and creaks there at once, stays open once the server answers, and each side hears
@@ -220,7 +221,7 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - riding:    the host and the guest each saddle and ride a horse (walk, jump), a pig and a strider
              (with their sticks), a camel and a donkey, sit on a llama and fly a happy ghast, and
              get off by sneaking; the other side sees the animal move.
-- portal_rider: (--server-thread) a survival guest rides a horse into a Nether portal: the horse goes
+- portal_rider: a survival guest rides a horse into a Nether portal: the horse goes
              through at once and carries it, so it arrives in the Nether still riding the same horse.
 - riding_teleport: the host and the guest each /tp through chat while riding a horse; after 60
              ticks each stays dismounted at the destination and both sides see the horse left
@@ -247,7 +248,7 @@ address. The script then checks, from both sides, what a guest's game used to ge
              server's golden hearts, 8 then 5 (#1306).
 - breath:    the host and the guest each stay underwater for 15 s in a Respiration III helmet: their
              own bubbles follow the server's air, which the enchantment makes last (#1304).
-- lava:      (--server-thread) the host and the guest each stand in a Nether lava current with Fire
+- lava:      the host and the guest each stand in a Nether lava current with Fire
              Resistance, which pushes them at the Nether's strength (#1309).
 - flight:    a player in creative double-taps jump and flies, stays up, and stops flying in survival:
              the guest, and on the server thread the host's window too, take what may fly from the
@@ -343,7 +344,7 @@ both sides go to --out (host-*.png, guest-*.png).
     python3 tools/lan_e2e.py                          # build with the fast profile, run every check
     python3 tools/lan_e2e.py --bin-dir target/fast    # prebuilt binaries
     python3 tools/lan_e2e.py --check chest --check tab
-    python3 tools/lan_e2e.py --server-thread --check portals   # the host's world on its server thread
+    python3 tools/lan_e2e.py --check portals
 
 Needs the prepared resources in .local/horizon-client. On Linux the games run on vscreen (the
 desktop), or headless (offscreen, no pause) where there is none; on macOS both games render offscreen. Games started here have no audio (HORIZON_NO_AUDIO=1).
@@ -370,8 +371,6 @@ from integration_env import game_environment, require_server_reports  # noqa: E4
 
 ROOT = Path(__file__).resolve().parents[1]
 GUEST_NAME = 'Guest'
-# Match normal single player; --in-frame is deprecated.
-SERVER_THREAD = True
 CHECKS = ['tab', 'self', 'armour', 'nametags', 'walls', 'chest', 'menu-transfer', 'crafting', 'spawned', 'sign', 'damage', 'mobs', 'hazards', 'pvp', 'deaths',
           'flow-push', 'bubble-column', 'arrows', 'kills', 'looting', 'leave', 'hurt', 'looks', 'leads', 'respawn', 'containers', 'names', 'feedback', 'titles', 'chat', 'styles',
           'commands', 'recipes', 'machines', 'brewing', 'loom', 'stonecutter', 'grindstone', 'anvil', 'smithing',
@@ -521,15 +520,10 @@ def check_armour(host, guest, out):
     face_each_other(host, guest)
     host.shot(out, 'armour')
     guest.shot(out, 'armour')
-    if SERVER_THREAD:
-        # The host's window is a client of its server thread: what it draws is what it was sent.
-        seen = [e for e in remote(host).get('player_equipment', [])]
-        assert all(any(item in json.dumps(e) for e in seen) for item in
-                   ('diamond_chestplate', 'diamond_leggings')), f'the host draws the guest in {seen}'
-    else:
-        seen = lan_guest(host).get('model_armor')
-        assert seen == [None, 'minecraft:diamond_chestplate', 'minecraft:diamond_leggings', None], \
-            f'the host draws the guest in {seen}'
+    # The host's window is a client of its server thread: what it draws is what it was sent.
+    seen = [e for e in remote(host).get('player_equipment', [])]
+    assert all(any(item in json.dumps(e) for e in seen) for item in
+               ('diamond_chestplate', 'diamond_leggings')), f'the host draws the guest in {seen}'
     host_gear = [e for e in remote(guest).get('player_equipment', [])]
     assert any('golden_chestplate' in json.dumps(e) for e in host_gear), f'the guest sees the host in {host_gear}'
     return 'each in their own'
@@ -780,15 +774,13 @@ def nether_portal(game, x, y, z):
 
 
 def lan_guest(host):
-    """The guest's entry in the host's `lan status` (on the server thread the owner is listed too)."""
+    """The guest's entry in the host's `lan status` (the owner is listed too)."""
     guests = host.raw('lan', 'status')['guests']
     return next(g for g in guests if g['name'] == GUEST_NAME)
 
 def check_distance(host, guest, out):
     """IntegratedServer.tickServer: the server takes the host's render distance as its view distance
     (past 32, which Horizon's options allow) and sends it to every player (SetChunkCacheRadius)."""
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     seen = {}
     try:
         for distance in (48, 6):
@@ -807,8 +799,6 @@ def check_distance(host, guest, out):
 
 
 def check_portals(host, guest, out):
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     x, y, z = (int(v // 1) for v in pos_of(guest))
     hx, hy, hz = (int(v // 1) for v in pos_of(host))
     try:
@@ -886,10 +876,8 @@ NETHER, END, OVERWORLD = 'minecraft:the_nether', 'minecraft:the_end', 'minecraft
 
 
 def check_levels(host, guest, out):
-    """(--server-thread) Each player in its own level (MinecraftServer.levels), the host and the guest
+    """Each player in its own level (MinecraftServer.levels), the host and the guest
     apart: the steps run in order, each reported, and the check fails if any did."""
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     start = {g.name: pos_of(g) for g in (host, guest)}
     steps, failed = {}, []
     guest('command', command='gamemode creative')
@@ -1626,7 +1614,7 @@ def check_respawn(host, guest, out):
     for g in (host, guest):
         back_to_game(g)
     results = {}
-    sides = [('host', host, guest)] + ([('guest', guest, host)] if SERVER_THREAD else [])
+    sides = [('host', host, guest), ('guest', guest, host)]
     for name, dying, watching in sides:
         face_each_other(host, guest)
         dying('command', command='kill @s')
@@ -1670,9 +1658,7 @@ def check_hurt(host, guest, out):
         attacker.wait(20)
     host('command', command='kill @e[type=minecraft:pig]')
     # A hurt player flashes red for the other one too (#2827).
-    # An in-frame host draws its guests as models of its own, not entities: only the screenshot.
-    watched = ((('host hurt', host, guest),) if not SERVER_THREAD else
-               (('host hurt', host, guest), ('guest hurt', guest, host)))
+    watched = (('host hurt', host, guest), ('guest hurt', guest, host))
     for name, hurt, watcher in watched:
         hurt.wait(30)
         # Instant damage hurts on the next effect tick.
@@ -1684,11 +1670,6 @@ def check_hurt(host, guest, out):
             watcher.wait(1)
         seen[name] = {'watcher': other['hurt_time']}
         watcher.shot(out, 'hurt-' + name.replace(' ', '-') + '-seen')
-    if not SERVER_THREAD:
-        guest.wait(30)
-        guest('command', command='effect give @s minecraft:instant_damage 1 0')
-        guest.wait(2)
-        host.shot(out, 'hurt-guest-hurt-seen')
     # LivingEntity.hurtTime: 10 when hurt, one less each tick; the reads come a few ticks later.
     for name, sides in seen.items():
         assert all(t > 0 for t in sides.values()), f'{name}: the hurt flash {seen}'
@@ -2112,7 +2093,7 @@ def check_grindstone(host, guest, out):
 
 def check_anvil(host, guest, out):
     # AnvilMenu.onTake emits one level event to everyone, including the user.
-    # Exercise both the in-frame host and a remote user (both remote with --server-thread).
+    # Exercise both the host and a remote user (both are clients of the server).
     return {actor.name: check_anvil_user(actor, (host, guest), out) for actor in (guest, host)}
 
 
@@ -3084,7 +3065,7 @@ def check_recipes(host, guest, out):
         guest.wait(5)
     assert any('oak_log' in str(item) for item in grid.values()), f'nothing placed in the grid: {grid}'
     # #2019: the alternatives popup belongs to one screen. Check both the
-    # in-frame host (or --server-thread host) and the remote guest, with both
+    # host and the remote guest, with both
     # inventory-close keys and a different recipe-book type on reopening.
     for game in (host, guest):
         game('command', command='recipe give @s minecraft:oak_planks')
@@ -3155,7 +3136,7 @@ def check_chat(host, guest, out):
     line = f'chat check {int(time.time())}'
     host.raw('chat', line)
     seen = {g.name: g.raw('wait-for', 'chat', line, '--timeout', 10, '--since', 0).get('ok')
-            for g in ((guest, host) if SERVER_THREAD else (guest,))}
+            for g in (guest, host)}
     guest.shot(out, 'chat')
     return seen
 
@@ -3655,10 +3636,10 @@ def check_sleep(host, guest, out):
     asleep = {'guest': guest('state').get('sleeping'), 'host': host('state').get('sleeping'),
               'server': lan_guest(host).get('sleeping')}
     guest.shot(out, 'sleep-guest')
-    # The host draws the guest lying in its bed (#1045): in frame its model, on the server thread its
-    # client's (SLEEPING_POS), and a client pairing with the sleeper later too.
+    # The host draws the guest lying in its bed (#1045): its client's (SLEEPING_POS), and a client
+    # pairing with the sleeper later too.
     host.wait(5)
-    lying = {'host': lan_guest(host).get('model_lying') if not SERVER_THREAD else bool(remote(host)['lying_players'])}
+    lying = {'host': bool(remote(host)['lying_players'])}
     host.shot(out, 'sleep-host-sees-guest')
     # Alone in bed: still night 120 ticks later (everyone must sleep).
     guest.wait(120)
@@ -3835,8 +3816,6 @@ def check_sleep_reload(host, guest, out):
     """LivingEntity's sleeping_pos is saved: a villager asleep in its bed when the host saves and quits
     is still asleep in it, its bed still occupied, when the world opens again; the bed the guest slept
     in is saved free (ServerPlayer.disconnect gets every player up before the last save)."""
-    if not SERVER_THREAD:
-        return {'skipped': 'the reopen is the server thread\'s'}
     guest('command', command='gamemode survival')
     host('command', command='time set midnight')
     gx, gy, gz = (int(v // 1) for v in pos_of(guest))
@@ -4135,9 +4114,7 @@ def check_swings(host, guest, out):
     host('command', command=f'setblock {hx} {hy} {hz + 1} minecraft:stone')
     host.wait(10)
     def swinging(game):
-        # On its server thread the host's window is a client of its server too.
-        if game is host and not SERVER_THREAD:
-            return lan_guest(host).get('model_swinging')
+        # The host's window is a client of its server too.
         return any(e.get('swinging') for e in remote(game).get('player_equipment', []))
     # Most samples: a swing restarts only past its first half (SwingState.startIfAble), so a sample can
     # fall between two.
@@ -4253,9 +4230,7 @@ def check_eating(host, guest, out):
     face_each_other(host, guest)
 
     def using(game):
-        # On its server thread the host's window is a client of its server too.
-        if game is host and not SERVER_THREAD:
-            return lan_guest(host).get('model_using') or 0
+        # The host's window is a client of its server too.
         return max((e.get('using') or 0 for e in remote(game).get('player_equipment', [])), default=0)
     seen = {}
     for name, eater, watcher in (('host eats', host, guest), ('guest eats', guest, host)):
@@ -4526,7 +4501,7 @@ def check_tag_query(host, guest, out):
 def check_fireworks(host, guest, out):
     """Event 17 must arrive before removal, with the item's colored, trailing explosion (#1478).
 
-    FireworkRocketEntity.explode / handleEntityEvent; run with and without --server-thread.
+    FireworkRocketEntity.explode / handleEntityEvent.
     The flash proves a configured explosion reached both clients; red pixels in later screenshots
     check that its sparks keep rendering after the tracked rocket disappears.
     """
@@ -4947,9 +4922,6 @@ def check_particles(host, guest, out):
         host('command', command='gamemode survival')
         guest('command', command='gamemode survival')
         host('command', command=f'fill {x - 3} {y - 1} {z - 3} {x + 16} {y - 1} {z + 8} minecraft:stone')
-    # Without the server thread a guest's command reaches no host player (as `@a` doesn't).
-    if not SERVER_THREAD:
-        result['guest all'].pop('other dust')
     wrong = {k: v for k, v in result.items() if not k.endswith('@s') and not all(n > 0 for n in v.values())}
     wrong.update({k: v for k, v in result.items() if k.endswith('@s') and not (v['own'] >= 30 and v['other'] == 0)})
     assert not wrong, f'particles: {wrong}\n{result}'
@@ -5094,7 +5066,7 @@ def check_flight(host, guest, out):
             game.wait(1)
         game.wait(10)
 
-    players = [('guest', guest)] + ([('host', host)] if SERVER_THREAD else [])
+    players = [('guest', guest), ('host', host)]
     seen = {}
     # The rule is seven simulation ticks, independent of wall time. A slow
     # server clock leaves enough time to deliver the key events even on busy CI.
@@ -5258,10 +5230,7 @@ def check_contacts(host, guest, out):
 
 
 def server_player(host, game):
-    """The player's entry on the server: the guest's in the host's `lan status`, on the server
-    thread the host's too; the host's own world otherwise."""
-    if game is host and not SERVER_THREAD:
-        return own(host)
+    """The player's entry on the server: the host's `lan status` lists the guest and the host."""
     name = GUEST_NAME if game is not host else host.player
     return next(g for g in host.raw('lan', 'status')['guests'] if g['name'] == name)
 
@@ -5513,10 +5482,8 @@ def check_breath(host, guest, out):
 
 
 def check_lava(host, guest, out):
-    """(--server-thread) Standing in a settled Nether lava current with Fire Resistance: the
+    """Standing in a settled Nether lava current with Fire Resistance: the
     Nether's FAST_LAVA pushes each player about three times as hard as the Overworld's (#1309)."""
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     seen = {}
     back = {g.name: pos_of(g) for g in (host, guest)}
     try:
@@ -6417,9 +6384,7 @@ def check_light(host, guest, out):
     assert '.' in row, 'the guest has every chunk 24 chunks east'
     untracked = (gx + row.index('.')) >> 4
     near = untracked * 16 + 1
-    # On its server thread the host's own game is a client too, sent the same light updates.
-    if not SERVER_THREAD:
-        assert host.raw('light', near, y, gz, near, y, gz)['sky'] != '.', 'the host lacks the chunk past the guest'
+    # The host's own game is a client too, sent the same light updates.
     host('command', command=f'setblock {near} {y} {gz} minecraft:glowstone')
     try:
         lo, hi = (untracked * 16 - 16, y - 3, gz - 8), (untracked * 16 - 1, y + 3, gz + 8)
@@ -6518,7 +6483,7 @@ def check_deflect(host, guest, out):
         host('command', command='tick rate 20')
         host.wait(60)
         ghast = [m for m in host.raw('mobs', 60).get('near', []) if m['kind'].endswith('ghast') and m['health'] > 0]
-        hurt = [h for pl in host.raw('hurtlog')['players'] if pl['name'] == (host.player if SERVER_THREAD else 'host') for h in pl['hurts']
+        hurt = [h for pl in host.raw('hurtlog')['players'] if pl['name'] == host.player for h in pl['hurts']
                 if 'fireball' in h['source'] or 'explosion' in h['source']]
     finally:
         host('command', command='tick unfreeze')
@@ -6649,35 +6614,24 @@ def check_worn(host, guest, out):
             guest('command', command='effect give @s minecraft:instant_health 1 5')
             guest.wait(30)
             before = remote(guest)['health']
-            if not SERVER_THREAD:
-                host.raw('hurtlog')
             # A mob's blow (no attacker: no difficulty scaling); armour counts against it.
             guest('command', command='damage @s 10 minecraft:mob_attack')
-            if SERVER_THREAD:
-                # The server's hurt log isn't on a control socket here: the health the guest is
-                # sent, read as soon as it drops (natural regeneration heals it again after).
-                health = before
-                for _ in range(40):
-                    guest.wait(1)
-                    health = remote(guest)['health']
-                    if health < before:
-                        break
-                taken['worn' if worn else 'bare'] = [round(before - health, 2)]
-                continue
-            guest.wait(10)
-            log = [h for p in host.raw('hurtlog')['players'] if p['name'] == GUEST_NAME for h in p['hurts']]
-            taken['worn' if worn else 'bare'] = [(h['amount'], h['armor'], round(h['taken'], 2)) for h in log]
+            # The server's hurt log isn't on a control socket here: the health the guest is
+            # sent, read as soon as it drops (natural regeneration heals it again after).
+            health = before
+            for _ in range(40):
+                guest.wait(1)
+                health = remote(guest)['health']
+                if health < before:
+                    break
+            taken['worn' if worn else 'bare'] = [round(before - health, 2)]
     finally:
         guest('command', command='clear @s')
         guest('command', command='effect give @s minecraft:instant_health 1 5')
-    if SERVER_THREAD:
-        # Natural regeneration may heal up to a point before the health arrives.
-        assert len(taken['bare']) == 1 and 9.0 <= taken['bare'][0] <= 10.0, f'10 damage on no armour: {taken}'
-        assert len(taken['worn']) == 1 and 5.0 <= taken['worn'][0] <= 6.0, \
-            f'10 damage through iron armour (15) should take 6: {taken}'
-        return taken
-    assert taken['bare'] == [(10.0, 0.0, 10.0)], f'10 damage on no armour: {taken}'
-    assert taken['worn'] == [(10.0, 15.0, 6.0)], f'10 damage through iron armour (15) should take 6: {taken}'
+    # Natural regeneration may heal up to a point before the health arrives.
+    assert len(taken['bare']) == 1 and 9.0 <= taken['bare'][0] <= 10.0, f'10 damage on no armour: {taken}'
+    assert len(taken['worn']) == 1 and 5.0 <= taken['worn'][0] <= 6.0, \
+        f'10 damage through iron armour (15) should take 6: {taken}'
     return taken
 
 
@@ -6730,8 +6684,6 @@ CHECK_FNS = {'tab': check_tab, 'self': check_self, 'armour': check_armour,
 
 def run(ctl, out, resources, checks):
     host, guest = Game('host', ctl, resources), Game('guest', ctl, resources)
-    # Either way explicitly: the game's default is the server thread.
-    host.d.env['HORIZON_SERVER_THREAD'] = '1' if SERVER_THREAD else '0'
     # A headless run (HORIZON_E2E_HEADLESS, or a Linux without vscreen) has no focused window to draw
     # in: the games render offscreen and never pause on the focus loss, or the world would stand still
     # (a host paused before its world loads waits at "Connecting to the server..." for ever).
@@ -6803,16 +6755,9 @@ def main():
     parser.add_argument('--bin-dir', help='prebuilt horizon-client and horizon-ctl (default: build with the fast profile)')
     parser.add_argument('--check', action='append', choices=CHECKS, help='run only these checks (repeatable)')
     parser.add_argument('--out', default=str(ROOT / '.local/lan-e2e'), help='screenshots and game logs go here')
-    mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--server-thread', dest='server_thread', action='store_true', default=True,
-                      help='host on its server thread (default; retained for existing callers)')
-    mode.add_argument('--in-frame', dest='server_thread', action='store_false',
-                      help='DEPRECATED, never use: hosts the world in the window; unsupported, will be removed soon')
+    # The host's world always runs on its server thread; the flag stays for existing callers.
+    parser.add_argument('--server-thread', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    global SERVER_THREAD
-    SERVER_THREAD = args.server_thread
-    if not SERVER_THREAD:
-        print('DEPRECATED: --in-frame is unsupported and will be removed soon. Do not use it.', file=sys.stderr)
     if args.bin_dir:
         bins = Path(args.bin_dir).resolve()
     else:
@@ -6831,10 +6776,8 @@ def main():
         sys.exit(str(error))
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    print(f'LAN host mode: {"server-thread" if SERVER_THREAD else "in-frame"}')
     results = run(bins / 'horizon-ctl', out, resources, args.check or CHECKS)
-    (out / 'results.json').write_text(json.dumps({'mode': 'server-thread' if SERVER_THREAD else 'in-frame',
-                                               'checks': results}, indent=2) + '\n')
+    (out / 'results.json').write_text(json.dumps({'checks': results}, indent=2) + '\n')
     print(json.dumps(results, indent=1))
     sys.exit(0 if results and all(r['pass'] for r in results.values()) else 1)
 
@@ -7117,8 +7060,6 @@ CHECK_FNS.update(elytra=check_elytra)
 
 def server_using(host, game):
     """The item the server has the player using ({slot, ticks}), or None."""
-    if game is host and not SERVER_THREAD:
-        return host('state').get('using')
     return server_player(host, game).get('using')
 
 
@@ -7502,9 +7443,7 @@ def check_fishing(host, guest, out):
     for name, s in seen.items():
         other = guest if name == 'host' else host
         assert s['own'] == [0], f'{name}: {seen}'
-        # The in-frame host draws only its own hook.
-        if other is guest or SERVER_THREAD:
-            assert len(s['other']) == 1 and s['other'][0] != 0, f'{name}: {seen}'
+        assert len(s['other']) == 1 and s['other'][0] != 0, f'{name}: {seen}'
         # FishingHook.retrieve costs 2 on the ground, but a resting hook's onGround
         # alternates every tick on the server (Entity.move with no vertical motion
         # clears it, the next tick's gravity sets it again): 2 or nothing.
@@ -7829,7 +7768,7 @@ CHECK_FNS.update(digging=check_digging)
 def check_instant_digging(host, guest, out):
     """#1908: an instant survival START has no STOP. ServerPlayerGameMode.tick
     forgets a dig once its block is air; it must neither hit air nor break a replacement.
-    Exercise the in-frame host and network guest (both are clients with --server-thread).
+    Exercise the host and the network guest (both are clients of the server).
     """
     result = {}
     for label, player in (('host', host), ('guest', guest)):
@@ -8718,7 +8657,7 @@ CHECK_FNS.update({'cure-discount': check_cure_discount})
 
 def check_spectator_travel(host, guest, out):
     """Player.tick's spectator noPhysics survives a replacement body after dimension travel (#1299)."""
-    players = (host, guest) if SERVER_THREAD else (host,)
+    players = (host, guest)
     seen = {}
     for game in players:
         home = pos_of(game)
@@ -8925,13 +8864,11 @@ CHECK_FNS.update(riding_teleport=check_riding_teleport)
 
 
 def check_portal_rider(host, guest, out):
-    """#1486 (--server-thread): a survival guest rides a horse into a Nether portal. The horse goes
+    """#1486: a survival guest rides a horse into a Nether portal. The horse goes
     through at once (NetherPortalBlock.getPortalTransitionTime is 0 for an entity that isn't a
     player; a passenger has no portal process of its own, Entity.canUsePortal) and carries its rider
     (Entity.teleportCrossDimension): the guest leaves well before a player's own 80 ticks and
     arrives in the Nether still on the same horse."""
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     x, y, z = apart(host, guest)['guest']
     horse_at = (x + 1.0, y, z + 2.5)
     # The portal's plane crosses the horse's box (z + 1.8 to z + 3.2), the rider's too.
@@ -9244,9 +9181,7 @@ CHECK_FNS.update(reopen_player=check_reopen_player)
 def check_recipe_targets(host, guest, out):
     """RecipeCommand gives and takes the recipes of each target's own ServerRecipeBook: a
     `/recipe give|take <other player>` changes that player's book and reaches their client,
-    not the book of the player who typed it. An in-frame host isn't one of the players a guest's
-    command can name (`command_players` lists the guests), so the guest gives the host a recipe
-    only when the host is a client of its server thread."""
+    not the book of the player who typed it: the guest gives the host a recipe too."""
     host_name = host.raw('lan', 'status').get('host', 'Player')
     books = {}
     for game in (host, guest):
@@ -9273,18 +9208,16 @@ def check_recipe_targets(host, guest, out):
         host('command', command=f'recipe give {GUEST_NAME} minecraft:stick')
         host.wait(20)
         books['host gives guest'] = known()
-        if SERVER_THREAD:
-            guest('command', command=f'recipe give {host_name} minecraft:stick')
-            guest.wait(20)
+        guest('command', command=f'recipe give {host_name} minecraft:stick')
+        guest.wait(20)
         books['guest gives host'] = known()
         host('command', command=f'recipe take {GUEST_NAME} minecraft:stick')
         host.wait(20)
         books['host takes from guest'] = known()
         host.shot(out, 'recipe-targets-host')
         guest.shot(out, 'recipe-targets-guest')
-        by_guest = int(SERVER_THREAD)
-        expected = {'empty': (0, 0), 'host gives guest': (0, 2), 'guest gives host': (by_guest, 2),
-                    'host takes from guest': (by_guest, 1)}
+        expected = {'empty': (0, 0), 'host gives guest': (0, 2), 'guest gives host': (1, 2),
+                    'host takes from guest': (1, 1)}
         for step, (in_host, in_guest) in expected.items():
             assert books[step] == {host.name: in_host, guest.name: in_guest}, (step, books)
     finally:
@@ -10100,7 +10033,6 @@ def check_guardian_beams(host, guest, out):
 
     Guardian.defineSynchedData/onSyncedDataUpdated/aiStep and
     GuardianRenderer.extractRenderState: charge, hit, then target loss.
-    Run with both --server-thread and the in-frame host.
     """
     x, y, z = map(math.floor, pos_of(host))
     host('command', command='difficulty normal')
@@ -10132,8 +10064,8 @@ def check_guardian_beams(host, guest, out):
 
                 states = charging()
                 assert states[0]['target'] == 'Player', states
-                # The host reads the level that ticks the guardian (its own in-frame, the
-                # server's on the server thread), where a targeted player is `Player`.
+                # The host reads the level that ticks the guardian (the server's), where a
+                # targeted player is `Player`.
                 if observer is host:
                     assert states[1]['target'] == 'Player', states
                 else:
@@ -10263,7 +10195,6 @@ CHECK_FNS.update(fangs=check_fangs)
 def check_sonic(host, guest, out):
     """A real warden's ray reaches connected clients once, with normal damage.
 
-    Run with and without --server-thread to cover the window's local renderer too.
     The creative observer sees the same ray nearby and none outside sendParticles' range.
     """
     x, y, z = (int(v // 1) for v in pos_of(host))
@@ -10562,8 +10493,6 @@ def check_forced_levels(host, guest, out):
     Also keep a resident, unforced furnace outside the forced ticket's neighbour ring: scheduling
     a playerless integrated-server level must not enable the fixtures' tick-everywhere fallback.
     """
-    if not SERVER_THREAD:
-        return 'skipped (needs --server-thread)'
     start = pos_of(guest)
     results = {}
     guest('command', command='gamemode creative')
@@ -11102,8 +11031,7 @@ def check_trident_pickup(host, guest, out):
         face_each_other(host, guest)
     for name, case in seen.items():
         assert case['tridents'] == 1, f'{name} did not pick the trident up: {seen}'
-        if SERVER_THREAD:
-            assert all(n == 1 for n in case['flown'].values()), f"{name}'s trident did not fly to them: {seen}"
+        assert all(n == 1 for n in case['flown'].values()), f"{name}'s trident did not fly to them: {seen}"
     return seen
 
 
@@ -11136,7 +11064,7 @@ def check_mount_other_level(host, guest, out):
     of the Overworld's mobs; the inventory of a tamed horse, camel, llama, trader llama, nautilus,
     donkey and mule, opened with shift + right click or with the inventory key while riding, and
     again by shift + right click after getting off, must stay open through those ticks instead of
-    closing at once. The other way round too (in_nether, --server-thread): the player and the mount
+    closing at once. The other way round too (in_nether): the player and the mount
     in the Nether while the other player keeps the Overworld ticking. Each case is reported on its
     own (LAN_E2E_MOUNTS=camel,llama picks mounts, LAN_E2E_LEVELS=the_end,in_nether cases).
 
@@ -11246,8 +11174,6 @@ def check_mount_other_level(host, guest, out):
     # same check.
     if picked and 'in_nether' not in picked:
         pass
-    elif not SERVER_THREAD:
-        result['in_nether'] = 'skipped (needs --server-thread)'
     else:
         result['in_nether'] = {}
         for label, player, spot in (('host', host, (0, 100, 0)), ('guest', guest, (12, 100, 0))):
@@ -11895,6 +11821,77 @@ def check_scale_body(host, guest, out):
 
 CHECKS += ['scale-body']
 CHECK_FNS['scale-body'] = check_scale_body
+
+
+def check_datapack_recipe(host, guest, out):
+    """A crafting recipe from the world's data pack shows its result in the crafting table of the
+    host's window and of a guest (#6733). Vanilla's CraftingMenu.slotChangedCraftingGrid sets the
+    result on the server and ClientboundContainerSetSlotPacket sends slot 0: the window shows the
+    server's, not a result of its own recipes. The world reopens to load the pack."""
+    if not SERVER_THREAD:
+        return {'skipped': "the reopen is the server thread's"}
+    pack = host.work / 'saves' / 'Lan' / 'datapacks' / 'repro'
+    (pack / 'data/repro/recipe').mkdir(parents=True, exist_ok=True)
+    (pack / 'pack.mcmeta').write_text('{"pack":{"description":"repro","min_format":[121,0],"max_format":[121,0]}}')
+    (pack / 'data/repro/recipe/dirt_to_diamond.json').write_text(
+        '{"type":"minecraft:crafting_shapeless","ingredients":["minecraft:dirt"],"result":{"id":"minecraft:diamond"}}')
+    seen = {}
+    try:
+        host.raw('disconnect')
+        for attempt in range(60):
+            time.sleep(1)
+            try:
+                host.raw('open', 'Lan')
+                break
+            except Failed:
+                if attempt == 59:
+                    raise
+        host('wait_ready', seconds=400)
+        port = host.raw('lan', 'open', 0, 'commands')['port']
+        back_to_game(guest)
+        guest.raw('connect', f'127.0.0.1:{port}', GUEST_NAME)
+        guest.raw('wait-for', 'loaded', '--timeout', 300)
+        guest.wait(20)
+        for game in (host, guest):
+            game('command', command='gamemode survival')
+            game('command', command='clear @s')
+            game('command', command='give @s minecraft:dirt 4')
+            x, y, z = (int(v // 1) for v in pos_of(game))
+            table = (x, y, z + 2)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:crafting_table')
+            game.wait(10)
+            grab(game)
+            game.raw('interact', *table)
+            game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+            game.wait(5)
+            slot = next(s['slot'] for s in game('inventory')['hotbar'] if s and s.get('item') == 'minecraft:dirt')
+            game.raw('click-slot', slot)
+            game.raw('click-slot', 100, 'right')
+            game.raw('click-slot', slot)
+            game.wait(10)
+            case = {'result': result_of(game)}
+            game.shot(out, f'datapack-recipe-{game.name}')
+            game.raw('click-slot', 200)
+            game.wait(10)
+            case['carried'] = held(game)
+            case['emptied'] = result_of(game)
+            game.raw('key', 'esc', 'tap')
+            game.wait(5)
+            game('command', command=f'setblock {table[0]} {table[1]} {table[2]} minecraft:air')
+            seen[game.name] = case
+    finally:
+        back_to_game(host)
+        back_to_game(guest)
+        shutil.rmtree(pack, ignore_errors=True)
+    for name, case in seen.items():
+        assert case['result'] == ('minecraft:diamond', 1), f'{name}: the pack recipe shows {case}'
+        assert case['carried'] == ('minecraft:diamond', 1), f'{name}: taking the result gave {case}'
+        assert case['emptied'] == (None, None), f'{name}: the result stays after the grid is used up: {case}'
+    return seen
+
+
+CHECKS += ['datapack-recipe']
+CHECK_FNS['datapack-recipe'] = check_datapack_recipe
 
 
 if __name__ == '__main__':

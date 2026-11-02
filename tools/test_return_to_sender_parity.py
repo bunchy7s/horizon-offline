@@ -13,7 +13,7 @@ a `#is_projectile` damage whose direct entity is a `minecraft:fireball`.
 The ghast died, but the advancement never came on the default single player
 (the host on its server thread plays as a guest there): the fireball's hit did
 not record which player hurt the ghast, as an arrow's does, so the kill went to
-nobody (#4212). Both single-player paths: the server thread and in-frame.
+nobody (#4212).
 
   test_return_to_sender_parity.py [--bin-dir DIR] [--keep]
 """
@@ -33,7 +33,7 @@ from test_world_reopen_parity import game_env  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 RESOURCES = ROOT / '.local' / 'horizon-client' / '26.3'
 RUN = ROOT / '.local' / 'return-to-sender'
-MODES = {'server thread': [], 'in-frame': ['--in-frame']}
+MODES = {'server thread': []}
 TITLE = 'advancements.nether.return_to_sender.title'
 
 

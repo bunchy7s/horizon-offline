@@ -126,7 +126,6 @@ impl Opt {
                 | Opt::HideMatchedNames
                 | Opt::OnlySecureChat
                 | Opt::SaveChatDrafts
-                | Opt::RotateWithMinecarts
                 // Saved, but no Horizon system reads them yet: no Realms, no
                 // friends list, no directional audio, no now-playing toast.
                 | Opt::RealmsNotifications
@@ -937,6 +936,7 @@ impl Opt {
             | Opt::RealmsNotifications
             | Opt::InGameNotification
             | Opt::DirectionalAudio
+            | Opt::RotateWithMinecarts
             | Opt::NarratorHotkey => {
                 let key = self.file_key().unwrap();
                 s.file
@@ -1308,6 +1308,10 @@ enum Act {
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
+    /// AI Agent: start or stop the repro recording.
+    ToggleRecording,
+    /// AI Agent: write the repro bundle now.
+    ExportRepro,
 }
 enum WKind {
     Button {
@@ -1435,6 +1439,10 @@ pub enum Event {
     Credits,
     /// Copy how an agent connects (the AI Agent page).
     CopyAgentDetails,
+    /// The AI Agent page's recording button: start or stop.
+    ToggleRecording,
+    /// The AI Agent page's export button.
+    ExportRepro,
     /// The narrator option changed (after its `Changed`): the option's
     /// `onValueUpdate`, `GameNarrator.updateNarratorStatus`.
     Narrator,
@@ -1504,6 +1512,8 @@ pub struct OptionsUi {
     /// (`update_pack_infos`) differs from the settings'.
     pack_reselected: bool,
     pub in_world: bool,
+    /// AccessibilityOptionsScreen: the loaded world's experimental feature.
+    pub minecart_improvements: bool,
     /// Scroll the selected language into the middle on the next layout.
     center_language: bool,
     pub graphics: crate::graphics_ui::GraphicsUi,
@@ -1515,6 +1525,8 @@ pub struct OptionsUi {
     pub split_setup: crate::split_ui::SplitUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
+    /// A repro recording is running: the AI Agent page's button says stop.
+    pub agent_recording: bool,
     /// Keyboard focus: the interactive target currently focused.
     focus: Option<FocusId>,
     /// The focus came from keyboard or pad navigation, so the mouse wheel steps it
@@ -1566,6 +1578,7 @@ impl Default for OptionsUi {
             pack_focus: Instant::now(),
             pack_reselected: false,
             in_world: false,
+            minecart_improvements: false,
             center_language: false,
             graphics: Default::default(),
             split_profiles: Default::default(),
@@ -1573,6 +1586,7 @@ impl Default for OptionsUi {
             calibration_fullscreen: None,
             split_setup: Default::default(),
             agent_status: Vec::new(),
+            agent_recording: false,
             focus: None,
             focus_from_keyboard: false,
             can_change_value: false,
@@ -2378,6 +2392,30 @@ impl OptionsUi {
                         Act::CopyAgentDetails,
                     )),
                 )];
+                rows.push(Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr(if self.agent_recording {
+                            "horizon.agent.record_stop"
+                        } else {
+                            "horizon.agent.record_session"
+                        }),
+                        Act::ToggleRecording,
+                    ),
+                    Some(button(
+                        0.0,
+                        0.0,
+                        150.0,
+                        tr("horizon.agent.export_repro"),
+                        Act::ExportRepro,
+                    )),
+                ));
+                rows.push(Row::Buttons(
+                    self.extra_button(s, crate::extras::Item::ReproKeys),
+                    None,
+                ));
                 rows.extend(self.agent_status.iter().cloned().map(Row::Note));
                 rows
             }
@@ -3201,6 +3239,14 @@ impl OptionsUi {
             if widget.list {
                 widget.y += previous_scroll - self.scroll;
             }
+            if let WKind::Button {
+                act: Act::Cycle(Opt::RotateWithMinecarts),
+                active,
+                ..
+            } = &mut widget.kind
+            {
+                *active = self.in_world && self.minecart_improvements;
+            }
         }
         self.row_bands = rows
             .bands
@@ -3350,6 +3396,8 @@ impl OptionsUi {
         }
         if self.page() == Page::SplitSetup {
             self.split_setup.on = s.extras.splitscreen;
+            // The controller picks a tile up between presses: the screen's size from the draw.
+            self.split_setup.size = (batch.width, batch.height);
             self.split_setup.draw(batch, atlas, cursor, self.in_world);
             return;
         }
@@ -3388,6 +3436,9 @@ impl OptionsUi {
             self.narrate_list(&widgets, list_key, (top, bottom), w, cursor);
         }
         let mut tooltip = None;
+        // The widget a keyboard-focused tooltip belongs to: `MenuTooltipPositioner`
+        // keeps it against that widget, not at the pointer.
+        let mut tooltip_rect: Option<[f32; 4]> = None;
         for (wd_idx, wd) in widgets.iter().enumerate() {
             if !visible(wd) {
                 continue;
@@ -3397,9 +3448,9 @@ impl OptionsUi {
                 .as_ref()
                 .is_some_and(|fid| matches_focus(fid, wd_idx, wd));
             let start = batch.vertices.len();
-            let hover = (ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
-                && (!wd.list || cursor.1 >= top && cursor.1 < bottom))
-                || is_focused;
+            let pointer_over = ui::hovered(cursor, wd.x, wd.y, wd.w, wd.h)
+                && (!wd.list || cursor.1 >= top && cursor.1 < bottom);
+            let hover = pointer_over || is_focused;
             // A pack's option: its label within the widget (the name shortened), and on hover
             // the whole label when it was, then what the pack says of it.
             let shader = s.shader_options.as_ref();
@@ -3443,6 +3494,7 @@ impl OptionsUi {
                     .collect();
                 if !lines.is_empty() {
                     tooltip = Some(lines);
+                    tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
                 }
             }
             if hover && let Some(tip) = tooltip_text(s, wd) {
@@ -3457,6 +3509,7 @@ impl OptionsUi {
                         .collect::<Vec<_>>(),
                     _ => atlas.font.split(&tip, 170.0),
                 });
+                tooltip_rect = (!pointer_over).then_some([wd.x, wd.y, wd.w, wd.h]);
             }
             match &wd.kind {
                 WKind::Button { label, active, .. } => {
@@ -3628,7 +3681,10 @@ impl OptionsUi {
             self.settings_search = search;
         }
         if let Some(lines) = tooltip {
-            ui::tooltip(batch, atlas, &lines, cursor);
+            match tooltip_rect {
+                Some(rect) => ui::tooltip_menu(batch, atlas, &lines, cursor, rect),
+                None => ui::tooltip(batch, atlas, &lines, cursor),
+            }
         }
     }
     /// Mouse press/drag. Returns events for the game.
@@ -4026,6 +4082,8 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::ToggleRecording => events.push(Event::ToggleRecording),
+                        Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
                 }
@@ -4188,7 +4246,8 @@ impl OptionsUi {
         }
         let plain = self.resource_error.is_none()
             && !(self.pack_screen.is_some() && self.stack.last() == Some(&Page::Packs));
-        if !plain {
+        // The "Scroll wheel changes settings" extra off: the wheel only scrolls.
+        if !plain || !s.extras.wheel_cycles_settings {
             self.scroll_at(s, size, cursor, amount);
             return Vec::new();
         }
@@ -4970,6 +5029,8 @@ impl OptionsUi {
                         }
                         Act::Credits => events.push(Event::Credits),
                         Act::CopyAgentDetails => events.push(Event::CopyAgentDetails),
+                        Act::ToggleRecording => events.push(Event::ToggleRecording),
+                        Act::ExportRepro => events.push(Event::ExportRepro),
                         Act::None => {}
                     }
                     return events;
@@ -7271,6 +7332,55 @@ mod tests {
         let events = ui.wheel(&mut s, size, cursor, framebuffer, -1.0);
         assert_ne!(s.view_bobbing, before, "a keyboard-focused option cycles");
         assert!(events.contains(&Event::ButtonClick));
+        assert!(events.contains(&Event::Changed));
+    }
+
+    #[test]
+    fn the_wheel_only_scrolls_with_the_extra_off() {
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Video);
+        let framebuffer = [854, 480];
+        let size = (427.0, 240.0);
+        let (widgets, top, bottom, content) = ui.layout(&s, size.0, size.1);
+        assert!(
+            content > bottom - top,
+            "the video page scrolls at this size"
+        );
+        let (opt, over) = widgets
+            .iter()
+            .find_map(|wd| match wd.kind {
+                WKind::Button {
+                    act: Act::Cycle(opt),
+                    ..
+                } if !wd.list || (wd.y >= top && wd.y + wd.h <= bottom) => {
+                    Some((opt, (wd.x + 5.0, wd.y + 5.0)))
+                }
+                _ => None,
+            })
+            .expect("a visible cycle button");
+
+        s.extras.wheel_cycles_settings = false;
+        let before = format!("{s:?}");
+        let start = ui.scroll;
+        let events = ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_eq!(format!("{s:?}"), before, "the hovered option stays put");
+        assert!(!events.contains(&Event::Changed));
+        assert!(
+            ui.scroll > start,
+            "the list scrolls under the cursor instead"
+        );
+        // Keyboard focus doesn't take the wheel either.
+        ui.focus = Some(FocusId::Cycle(opt));
+        ui.focus_from_keyboard = true;
+        ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_eq!(format!("{s:?}"), before);
+
+        // On (the default), vanilla's CycleButton.mouseScrolled again.
+        s.extras.wheel_cycles_settings = true;
+        let before = format!("{s:?}");
+        let events = ui.wheel(&mut s, size, over, framebuffer, -1.0);
+        assert_ne!(format!("{s:?}"), before, "{opt:?} cycles");
         assert!(events.contains(&Event::Changed));
     }
 

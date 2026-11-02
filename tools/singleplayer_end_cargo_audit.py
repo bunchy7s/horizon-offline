@@ -3,8 +3,7 @@
 
 Build horizon-client and horizon-ctl with the fast profile first, then run:
   python3 tools/singleplayer_end_cargo_audit.py --case gateway
-Runs the in-frame singleplayer (and the server-thread one with --mode server):
-a cow and a seven-diamond stack stand in a gateway in the End, and both are
+Runs singleplayer on its server thread: a cow and a seven-diamond stack stand in a gateway in the End, and both are
 expected to leave it and land at the gateway's exit, the stack with its seven
 diamonds.
 """
@@ -47,7 +46,7 @@ def numbers(text):
     return [float(v) for v in re.findall(r'-?\d+(?:\.\d+)?', text.split(':', 1)[-1])]
 
 
-def run(bin_dir, resources, in_frame):
+def run(bin_dir, resources):
     with tempfile.TemporaryDirectory(prefix='hz-end-gateway-') as scratch:
         work = Path(scratch)
         env = lab.game_env({k: v for k, v in os.environ.items() if k not in (
@@ -58,8 +57,6 @@ def run(bin_dir, resources, in_frame):
         args = [str(bin_dir / 'horizon-client'), '--resources', str(resources),
                 '--world', 'cargo', '--creative', '--seed', '4242', '--offscreen',
                 '--render-distance', '4', '--control', '--control-socket', str(socket)]
-        if in_frame:
-            args.append('--in-frame')
         with (work / 'game.log').open('w') as log:
             process = subprocess.Popen(args, cwd=home, env=env, stdout=log, stderr=log)
             try:
@@ -129,8 +126,7 @@ def run(bin_dir, resources, in_frame):
                 if process.poll() is None:
                     process.terminate()
                     process.wait(timeout=30)
-        print(f'PASS end gateway: {"in-frame" if in_frame else "server-thread"}, '
-              f'the cow and the stack left the gateway with their data')
+        print('PASS end gateway: the cow and the stack left the gateway with their data')
 
 
 def main():
@@ -138,11 +134,8 @@ def main():
     parser.add_argument('--case', choices=['gateway'], default='gateway')
     parser.add_argument('--bin-dir', type=Path, default=lab.cargo_target() / 'fast')
     parser.add_argument('--resources', type=Path, default=lab.RESOURCES)
-    parser.add_argument('--mode', choices=['server', 'in-frame', 'both'], default='in-frame')
     args = parser.parse_args()
-    modes = {'server': (False,), 'in-frame': (True,), 'both': (False, True)}
-    for in_frame in modes[args.mode]:
-        run(args.bin_dir.resolve(), args.resources.resolve(), in_frame)
+    run(args.bin_dir.resolve(), args.resources.resolve())
 
 
 if __name__ == '__main__':

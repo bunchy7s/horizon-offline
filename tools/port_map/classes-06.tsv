@@ -149,7 +149,7 @@ StraightTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk
 UpwardsBranchingTrunkPlacer.placeBranch	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::upwards_branch	
 UpwardsBranchingTrunkPlacer.placeTrunk	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::place_trunk	UpwardsBranching arm
 UpwardsBranchingTrunkPlacer.validTreePos	port	crates/horizon-world/src/worldgen/tree/trunk.rs::TrunkPlacer::valid_tree_pos	
-FlatLayerInfo.heightLimited	missing		minor: no per-layer clamp to the max height; flat settings only cap the total at the build height
+FlatLayerInfo.heightLimited	inline	crates/horizon-client/src/title/flat.rs::FlatSettings::from_tag	each layer is read with its height clamped to 0..Y_SIZE (DimensionType.Y_SIZE, the most a flat generator takes), and FlatSettings::parse caps it again at the height left below Y_SIZE
 FlatLayerInfo.toString	skip:debug		debug text
 FlatLevelGeneratorPresets.Bootstrap	skip:data		registry bootstrap of the preset list
 BiasedToBottomHeight.sample	port	crates/horizon-world/src/worldgen/height_provider.rs::HeightProvider::sample	BiasedToBottom arm

@@ -317,6 +317,20 @@ def blocked_case(rng, states, case):
                         'sneaking': False, 'food': 20}
 
 
+def jukebox_case(rng, states, case):
+    """A jukebox placed from a Creative pick that carries a record: the block entity takes the disc
+    and `JukeboxBlock.setPlacedBy` sets `has_record`, so the model shows it and a right click pops it
+    out. Without the state the box is empty while it holds one."""
+    case['cells'] = [[0, 0, 0, states.get(rng.choice(['stone', 'dirt', 'grass_block']))]]
+    data = ''
+    if rng.random() < 0.75:
+        record = rng.choice(['music_disc_cat', 'music_disc_13', 'music_disc_pigstep'])
+        data = ',components:{"minecraft:block_entity_data":{id:"minecraft:jukebox",' \
+               'RecordItem:{id:"minecraft:%s",count:1}}}' % record
+    case['use_item'] = {'item': '{id:"minecraft:jukebox",count:1%s}' % data,
+                        'creative': True, 'sneaking': False, 'food': 20}
+
+
 def cases(facts, count, seed):
     rng = random.Random(seed)
     states = d.States(facts)
@@ -368,6 +382,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             crop_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
+            jukebox_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case

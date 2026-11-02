@@ -3,6 +3,9 @@
 //! like a player (walk, look, break, place, use, click buttons). Actions that
 //! take time run as a task advanced every frame and reply when they finish or
 //! time out, so `horizon-ctl break 10 64 3` returns what the block dropped.
+#[path = "agent_navigation.rs"]
+mod navigation;
+
 use super::event_loop::EventLoopCtl;
 use super::{Game, Screen};
 use horizon_client::{
@@ -17,6 +20,7 @@ use horizon_client::{
 };
 use horizon_core::geometry::Vec3;
 use horizon_world::registry::BlockStateId;
+use navigation::{Cell, Node, Plan, Progress};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -206,9 +210,6 @@ fn delta(before: &BTreeMap<String, i64>, after: &BTreeMap<String, i64>) -> BTree
     out
 }
 
-/// A feet position the A* path walks through.
-type Node = [i32; 3];
-
 enum TaskKind {
     /// Hold keys until a deadline.
     Move {
@@ -251,9 +252,11 @@ struct Goto {
     target: [f64; 3],
     near: f64,
     sprint: bool,
-    path: Vec<Node>,
+    path: Plan,
+    blocked: Vec<(Node, Node)>,
+    progress: Progress,
     next: usize,
-    /// Tick of the last waypoint reached, and how many replans so far.
+    /// Tick of the last waypoint progress, and stuck recoveries so far.
     progress_tick: u64,
     replans: u32,
     jump_until: u64,
@@ -466,7 +469,7 @@ impl Game<'_> {
         json!({ "kind": kind, "block": block, "entity": entity })
     }
 
-    fn state_value(&self) -> Value {
+    pub(super) fn state_value(&self) -> Value {
         let player = self.player.as_ref().map(|p| {
             json!({
                 "position": [p.position.x, p.position.y, p.position.z],
@@ -497,7 +500,7 @@ impl Game<'_> {
                 "effects": self.potions.effects.list.iter().map(|e| json!({ "id": e.id, "duration_ticks": e.duration, "amplifier": e.amplifier })).collect::<Vec<_>>(),
             })
         });
-        json!({
+        let mut state = json!({
             "dialog": self.dialog_status(),
             "screen": self.screen_label(),
             "menu": (self.title.is_some() || self.split_profiles_open() || self.split_setup_open()).then(|| self.title_value()),
@@ -527,7 +530,13 @@ impl Game<'_> {
             "looking_at": self.looking_at(),
             "busy": self.agent.task.as_ref().map(|t| t.name),
             "ticks": self.ticks,
-        })
+        });
+        // Who caused the input, and whether a repro recording runs.
+        let mut input = self.input_trace.summary();
+        self.repro
+            .fill_summary(&mut input, self.input_trace.events());
+        state["input"] = input;
+        state
     }
 
     /// Splitscreen's profile page, a joining player's (`split_profiles`).
@@ -664,7 +673,7 @@ impl Game<'_> {
         }
     }
 
-    fn entities_value(&self, radius: f64, kind: Option<&str>) -> Value {
+    pub(super) fn entities_value(&self, radius: f64, kind: Option<&str>) -> Value {
         let Some(p) = &self.player else {
             return json!({ "entities": [] });
         };
@@ -718,7 +727,7 @@ impl Game<'_> {
         json!({ "entities": list.into_iter().map(|(_, v)| v).collect::<Vec<_>>() })
     }
 
-    fn inventory_value(&self) -> Value {
+    pub(super) fn inventory_value(&self) -> Value {
         let armor = ["head", "chest", "legs", "feet"];
         json!({
             "selected": self.selected + 1,
@@ -811,105 +820,24 @@ impl Game<'_> {
         })
     }
 
-    /// Whether a block stops movement, for the path finder.
-    fn blocks_motion(&self, pos: [i32; 3]) -> bool {
-        let f = self
-            .res
-            .facts()
-            .get(self.world.block(pos[0], pos[1], pos[2]));
-        f.full_collision || f.legacy_solid
-    }
-    fn walkable(&self, n: Node) -> bool {
-        let below = self.world.block(n[0], n[1] - 1, n[2]);
-        let lava = |p: [i32; 3]| {
-            &*self
-                .res
-                .facts()
-                .get(self.world.block(p[0], p[1], p[2]))
-                .name
-                == "minecraft:lava"
-        };
-        self.world.chunks.contains_key(&(n[0] >> 4, n[2] >> 4))
-            && (self.blocks_motion([n[0], n[1] - 1, n[2]])
-                || self.res.facts().get(below).fluid != horizon_client::blocks::Fluid::None)
-            && !self.blocks_motion(n)
-            && !self.blocks_motion([n[0], n[1] + 1, n[2]])
-            && !lava(n)
-            && !lava([n[0], n[1] - 1, n[2]])
-    }
-    /// A* over standable feet positions: steps up one block, drops up to three.
-    fn find_path(&self, from: Node, goal: [f64; 3], near: f64) -> Option<Vec<Node>> {
-        use std::{cmp::Reverse, collections::BinaryHeap};
-        let reached = |n: Node| {
-            let c = [
-                f64::from(n[0]) + 0.5,
-                f64::from(n[1]),
-                f64::from(n[2]) + 0.5,
-            ];
-            ((c[0] - goal[0]).powi(2) + (c[2] - goal[2]).powi(2)).sqrt() <= near.max(0.5)
-                && (c[1] - goal[1]).abs() <= near.max(1.0) + 0.5
-        };
-        let h = |n: Node| {
-            ((f64::from(n[0]) + 0.5 - goal[0]).abs()
-                + (f64::from(n[1]) - goal[1]).abs()
-                + (f64::from(n[2]) + 0.5 - goal[2]).abs())
-                * 10.0
-        };
-        let mut open = BinaryHeap::new();
-        let mut cost: HashMap<Node, u32> = HashMap::new();
-        let mut came: HashMap<Node, Node> = HashMap::new();
-        cost.insert(from, 0);
-        open.push(Reverse((h(from) as u32, from)));
-        let mut expanded = 0;
-        while let Some(Reverse((_, n))) = open.pop() {
-            if reached(n) {
-                let mut path = vec![n];
-                let mut at = n;
-                while let Some(&p) = came.get(&at) {
-                    path.push(p);
-                    at = p;
-                }
-                path.reverse();
-                return Some(path);
-            }
-            expanded += 1;
-            if expanded > 30_000 {
+    fn find_path(
+        &self,
+        from: Node,
+        goal: [f64; 3],
+        near: f64,
+        blocked: &[(Node, Node)],
+    ) -> Option<Plan> {
+        navigation::find_path(from, goal, near, blocked, |n| {
+            if !self.world.chunks.contains_key(&(n[0] >> 4, n[2] >> 4)) {
                 return None;
             }
-            let base = cost[&n];
-            for d in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
-                for dy in [0, 1, -1, -2, -3] {
-                    let m = [n[0] + d[0], n[1] + dy, n[2] + d[1]];
-                    // A step up needs head room above the start; a drop needs
-                    // the column in front clear down to the landing.
-                    let clear = match dy {
-                        1 => !self.blocks_motion([n[0], n[1] + 2, n[2]]),
-                        d if d < 0 => {
-                            (m[1]..=n[1] + 1).all(|y| !self.blocks_motion([m[0], y, m[2]]))
-                        }
-                        _ => true,
-                    };
-                    if !clear || !self.walkable(m) {
-                        continue;
-                    }
-                    let water = self
-                        .res
-                        .facts()
-                        .get(self.world.block(m[0], m[1], m[2]))
-                        .fluid
-                        != horizon_client::blocks::Fluid::None;
-                    let step = 10 + if dy != 0 { 5 } else { 0 } + if water { 30 } else { 0 };
-                    let c = base + step;
-                    if cost.get(&m).is_none_or(|&old| c < old) {
-                        cost.insert(m, c);
-                        came.insert(m, n);
-                        open.push(Reverse((c + h(m) as u32, m)));
-                    }
-                    break;
-                }
-            }
-        }
-        None
+            let f = self.res.facts().get(self.world.block(n[0], n[1], n[2]));
+            Some(Cell {
+                solid: f.full_collision || f.legacy_solid,
+                fluid: f.fluid != horizon_client::blocks::Fluid::None,
+                lava: &*f.name == "minecraft:lava",
+            })
+        })
     }
 
     /// Point the view at `at` from the eye.
@@ -1009,6 +937,7 @@ impl Game<'_> {
                     device_id,
                     position,
                 },
+                super::input_trace::InputOrigin::Agent,
             );
             if i == 0 {
                 self.handle_window_event(
@@ -1019,6 +948,7 @@ impl Game<'_> {
                         state: ElementState::Pressed,
                         button,
                     },
+                    super::input_trace::InputOrigin::Agent,
                 );
             }
         }
@@ -1030,6 +960,7 @@ impl Game<'_> {
                 state: ElementState::Released,
                 button,
             },
+            super::input_trace::InputOrigin::Agent,
         );
         Ok(())
     }
@@ -1048,6 +979,11 @@ impl Game<'_> {
             name,
         });
         Ok(Handled::Deferred)
+    }
+
+    /// A deferred agent action (goto, break, wait...) is still running.
+    pub(super) fn agent_busy(&self) -> bool {
+        self.agent.task.is_some()
     }
 
     /// Agent commands; `Handled::No` when `words[0]` is not one of them.
@@ -1245,10 +1181,13 @@ impl Game<'_> {
                 let timeout = a.num("timeout", 60.0)?;
                 let p = self.player.as_ref().ok_or("no player")?.position;
                 let from = [p.x.floor() as i32, p.y.round() as i32, p.z.floor() as i32];
-                let (path, warning) = match self.find_path(from, target, near) {
+                let (path, warning) = match self.find_path(from, target, near, &[]) {
                     Some(path) => (path, None),
                     None if a.has("direct") => (
-                        Vec::new(),
+                        Plan {
+                            nodes: Vec::new(),
+                            complete: true,
+                        },
                         Some("no path found through loaded terrain; walking straight".to_owned()),
                     ),
                     None => {
@@ -1258,12 +1197,17 @@ impl Game<'_> {
                         .into());
                     }
                 };
+                let position = [p.x, p.y, p.z];
+                let mut next = 1;
+                let aim = path.aim(position, &mut next, target).unwrap_or(target);
                 let goto = Goto {
                     target,
                     near,
                     sprint: a.has("sprint"),
                     path,
-                    next: 1,
+                    blocked: Vec::new(),
+                    progress: Progress::new(position, aim),
+                    next,
                     progress_tick: self.ticks,
                     replans: 0,
                     jump_until: 0,
@@ -1589,6 +1533,7 @@ impl Game<'_> {
                         device_id,
                         position,
                     },
+                    super::input_trace::InputOrigin::Agent,
                 );
                 for _ in 0..steps.abs() as u32 {
                     self.handle_window_event(
@@ -1599,6 +1544,7 @@ impl Game<'_> {
                             delta: MouseScrollDelta::LineDelta(0.0, steps.signum()),
                             phase: TouchPhase::Moved,
                         },
+                        super::input_trace::InputOrigin::Agent,
                     );
                 }
                 ok(json!({ "ok": true, "screen": self.screen_label() }))
@@ -2061,9 +2007,7 @@ impl Game<'_> {
         let on_ground = self.player.as_ref().is_some_and(|p| p.ground.on_ground);
         let horizontal =
             |a: [f64; 3], b: [f64; 3]| ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
-        let arrived = horizontal(p, g.target) <= g.near
-            && (p[1] - g.target[1]).abs() <= g.near.max(1.0) + 1.0;
-        if arrived {
+        if navigation::arrived(p, g.target, g.near) {
             return Some(
                 json!({ "ok": true, "arrived": true, "position": p, "target": g.target,
                                 "distance": dist(p, g.target), "warning": g.warning }),
@@ -2075,48 +2019,60 @@ impl Game<'_> {
                                 "target": g.target, "distance": dist(p, g.target), "warning": g.warning }),
             );
         }
-        // The next waypoint: path nodes, then the target itself.
-        let mut aim = g.target;
-        while g.next < g.path.len() {
-            let n = g.path[g.next];
-            let c = [
-                f64::from(n[0]) + 0.5,
-                f64::from(n[1]),
-                f64::from(n[2]) + 0.5,
-            ];
-            let last = g.next + 1 == g.path.len();
-            if horizontal(p, c) < if last { 0.3 } else { 0.45 } && (p[1] - c[1]).abs() < 1.1 {
-                g.next += 1;
+        let previous_next = g.next;
+        let mut aim = g.path.aim(p, &mut g.next, g.target);
+        if let Some(aim) = aim {
+            if g.next != previous_next {
+                g.progress = Progress::new(p, aim);
                 g.progress_tick = self.ticks;
-                continue;
+            } else if g.progress.advance(p, aim) {
+                g.progress_tick = self.ticks;
             }
-            aim = c;
-            break;
         }
-        // Stuck: jump, then replan from here.
         let stalled = self.ticks.saturating_sub(g.progress_tick);
         if stalled > 60 && on_ground {
             g.jump_until = self.ticks + 4;
         }
-        if stalled > 120 {
-            g.replans += 1;
-            if g.replans > 3 {
-                return Some(
-                    json!({ "error": "stuck: cannot make progress", "arrived": false, "position": p,
-                                    "target": g.target, "distance": dist(p, g.target) }),
-                );
+        if aim.is_none() || stalled > 120 {
+            if stalled > 120 {
+                g.replans += 1;
+                if g.replans > 3 {
+                    return Some(
+                        json!({ "error": "stuck: cannot make progress", "arrived": false,
+                        "position": p, "target": g.target, "distance": dist(p, g.target) }),
+                    );
+                }
+                if g.next > 0 && g.next < g.path.nodes.len() {
+                    let edge = (g.path.nodes[g.next - 1], g.path.nodes[g.next]);
+                    if edge.0 != edge.1 && !g.blocked.contains(&edge) {
+                        g.blocked.push(edge);
+                    }
+                }
             }
             let from = [
                 p[0].floor() as i32,
                 p[1].round() as i32,
                 p[2].floor() as i32,
             ];
-            if let Some(path) = self.find_path(from, g.target, g.near) {
-                g.path = path;
-                g.next = 1;
-            }
+            let Some(path) = self.find_path(from, g.target, g.near, &g.blocked) else {
+                return Some(
+                    json!({ "error": "no further walking progress through loaded terrain",
+                    "arrived": false, "position": p, "target": g.target,
+                    "distance": dist(p, g.target), "warning": g.warning }),
+                );
+            };
+            g.path = path;
+            g.next = 1;
             g.progress_tick = self.ticks;
+            aim = g.path.aim(p, &mut g.next, g.target);
+            g.progress = Progress::new(p, aim.unwrap_or(g.target));
         }
+        let Some(aim) = aim else {
+            return Some(
+                json!({ "error": "path did not provide a new walking waypoint",
+                "arrived": false, "position": p, "target": g.target }),
+            );
+        };
         let d = [aim[0] - p[0], aim[2] - p[2]];
         if d[0].abs() + d[1].abs() > 1e-3 {
             self.yaw = (-d[0]).atan2(d[1]).to_degrees() as f32;
