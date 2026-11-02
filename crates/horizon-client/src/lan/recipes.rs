@@ -138,7 +138,11 @@ fn flat(ing: &Value, items: &horizon_client::items::Items) -> Option<Value> {
             .and_then(|v| horizon_client::crafting::Ingredient::parse(v, items))
     })?;
     Some(Value::Array(
-        parsed.1.iter().map(|i| Value::String(i.clone())).collect(),
+        parsed
+            .order
+            .iter()
+            .map(|i| Value::String(i.clone()))
+            .collect(),
     ))
 }
 

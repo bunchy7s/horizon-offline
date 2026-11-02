@@ -1,5 +1,5 @@
-//! Dropped-item and armor-stand immersion and currents through the shared vanilla fluid helpers.
-use super::{ArmorStand, ItemEntity};
+//! Dropped-item, experience-orb and armor-stand immersion and currents through the shared vanilla fluid helpers.
+use super::{ArmorStand, ExperienceOrb, ItemEntity};
 use crate::{
     motion::{FluidResources, FluidTags, LAVA, WATER},
     world::World,
@@ -29,7 +29,7 @@ struct EntityFluidWorld<'a> {
 /// `Entity.baseTick`'s fluid step for an entity that is pushed by fluid: its
 /// immersion heights, then the current of each fluid it sits in, added to
 /// `velocity` with vanilla's scales (water 0.014, lava 0.007 fast or
-/// 0.0023333 slow). Items and armour stands call it for themselves; a boat
+/// 0.0023333 slow). Items, experience orbs and armour stands call it for themselves; a boat
 /// calls it from its own tick, before `floatBoat` scales the velocity.
 pub fn update_entity_fluids(
     bounds: Aabb,
@@ -71,6 +71,20 @@ impl ItemEntity {
             self.bounds(),
             self.position,
             self.position.y + f64::from(0.2125f32),
+            &mut self.velocity,
+            world,
+            fluids,
+        )
+    }
+}
+impl ExperienceOrb {
+    /// `Entity.updateFluidInteraction`: refreshes fluid immersion over the
+    /// orb's box and pushes its velocity by any water or lava current.
+    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> (f64, f64) {
+        update_entity_fluids(
+            self.bounds(),
+            self.position,
+            self.position.y + f64::from(0.425f32),
             &mut self.velocity,
             world,
             fluids,
@@ -292,6 +306,92 @@ mod tests {
                 &fluids,
                 &[],
                 None,
+            );
+        }
+        assert!(carried.position.x > at.x + 0.5);
+    }
+
+    /// `Entity.baseTick` pushes an experience orb by the current it sits in: an
+    /// orb in flowing water gains velocity along the flow and moves, while an orb
+    /// in still source water does not gain horizontal velocity (#7442).
+    #[test]
+    fn experience_orbs_follow_flowing_water_but_still_water_has_no_horizontal_push() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = FluidResources::new(&assets, &facts).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        let water = assets.registry.default_state("minecraft:water").unwrap();
+        let mut state = assets.registry.state(water).unwrap().clone();
+        state.properties.insert("level".into(), "1".into());
+        let flowing = assets.registry.resolve(&state).unwrap();
+        for x in 19..=21 {
+            for z in 19..=21 {
+                world.set(x, 3, z, stone).unwrap();
+                world.set(x, 4, z, water).unwrap();
+            }
+        }
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        let orb = ExperienceOrb {
+            no_gravity: false,
+            id: 1,
+            position: at,
+            previous: at,
+            velocity: Vec3::ZERO,
+            value: 1,
+            age: 0,
+            on_ground: false,
+            count: 1,
+            ticks: 0,
+            health: 5,
+        };
+        let mut still = orb.clone();
+        assert!(still.tick(
+            &world,
+            &facts,
+            &collision,
+            None,
+            true,
+            &mut || 0.0,
+            None,
+            &fluids,
+        ));
+        assert_eq!(still.position.x, at.x);
+        assert_eq!(still.velocity.x, 0.0);
+        world.set(21, 4, 20, flowing).unwrap();
+        let mut carried = orb;
+        assert!(carried.tick(
+            &world,
+            &facts,
+            &collision,
+            None,
+            true,
+            &mut || 0.0,
+            None,
+            &fluids,
+        ));
+        // Current pushes the orb, underwater drag damps before motion, then air
+        // drag: `ExperienceOrb.tick`'s `0.98F`, a float widened to double.
+        assert!((carried.position.x - at.x - 0.014 * 0.99).abs() < 1e-12);
+        assert!((carried.velocity.x - 0.014 * 0.99 * f64::from(0.98_f32)).abs() < 1e-12);
+        for _ in 0..20 {
+            carried.tick(
+                &world,
+                &facts,
+                &collision,
+                None,
+                true,
+                &mut || 0.0,
+                None,
+                &fluids,
             );
         }
         assert!(carried.position.x > at.x + 0.5);

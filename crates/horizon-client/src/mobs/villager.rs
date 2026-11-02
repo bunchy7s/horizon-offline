@@ -877,7 +877,7 @@ mod tests {
 
     fn villager() -> Mob {
         use crate::mobs::{Anim, Brain, Flags, MobType, Part, Species};
-        use std::{collections::HashMap, sync::Arc};
+        use std::sync::Arc;
         let kind = Arc::new(MobType {
             id: "minecraft:villager".into(),
             species: Species::Villager,
@@ -910,7 +910,7 @@ mod tests {
             ambient_interval: 80,
             flags: Flags::default(),
             model: Arc::new(Part::parse("root", &serde_json::json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Villager,

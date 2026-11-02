@@ -52,11 +52,11 @@ BlockEntityRenderDispatcher.tryExtractRenderState	port	crates/horizon-client-ren
 BlockEntityRenderDispatcher.submit	port	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	draws each kind; no crash report wrapper
 BlockEntityRenderDispatcher.onResourceManagerReload	missing		minor: block entity models load once in BlockEntityRenderer::load; no reload path found
 BlockEntityRenderers.createEntityRenderers	skip:data		renderer registration table; Horizon's classify table replaces it
-BlockEntityWithBoundingBoxRenderer.extractRenderState	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
-BlockEntityWithBoundingBoxRenderer.extract	missing		player: game-master players (creative or op) see no structure box, invisible-block or structure-void markers
+BlockEntityWithBoundingBoxRenderer.extractRenderState	port	crates/horizon-client/src/game/structure_blocks.rs::Game::bounding_box_gizmos	for a game-master or spectator: each structure block's box and, with Show Invisible Blocks on, its invisible-block markers, all within getViewDistance (96)
+BlockEntityWithBoundingBoxRenderer.extract	port	crates/horizon-client/src/game/structure_blocks.rs::Game::bounding_box_gizmos	the renderable box comes from the block's own render mode and offset/size, and a box past the view distance or in RenderMode::None is skipped
 BlockEntityWithBoundingBoxRenderer.submit	port	crates/horizon-client/src/gizmos.rs::Gizmos::bounding_box	the box on top and the invisible-block markers, indexed by position
 BlockEntityWithBoundingBoxRenderer.renderInvisibleBlocks	inline	crates/horizon-client/src/gizmos.rs::Gizmos::bounding_box	barrier, light, air and structure void markers with their own colours
-BlockEntityWithBoundingBoxRenderer.renderStructureVoids	missing		player: game-master players (creative or op) see no structure void markers
+BlockEntityWithBoundingBoxRenderer.renderStructureVoids	inline	crates/horizon-client/src/game/structure_blocks.rs::Game::bounding_box_gizmos	a StructureVoid marker for every structure void cell of the box, at gizmos.rs::InvisibleBlock::StructureVoid's colour
 BrightnessCombiner.acceptDouble	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	brighter of the two chest halves per channel, in the chest branch
 BrushableBlockRenderer.extractRenderState	inline	crates/horizon-client/src/game/brush.rs::Game::brushable_geometry	the item and hit direction are read from the block entity
 BrushableBlockRenderer.submit	port	crates/horizon-client/src/game/brush.rs::Game::brushable_geometry	the item drawn on the brushed face, sliding out with the dust stage
@@ -100,7 +100,7 @@ SpawnerRenderer.extractRenderState	port	crates/horizon-client/src/mobs/spawner.r
 SpawnerRenderer.submit	port	crates/horizon-client/src/game/spawner.rs::Game::spawner_geometry	display mob at the spawner's centre with spin, tilt and scale
 StandingSignRenderer.extractRenderState	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	gap: minor: the text filtering option is not read
 StandingSignRenderer.createTransformations	inline	crates/horizon-client-render/src/block_entity_render.rs::BlockEntityRenderer::render_one	front and back text transforms per attachment
-TestInstanceRenderer.extractRenderState	missing		player: creative players placing a test instance block see no beacon beam, box or error markers
+TestInstanceRenderer.extractRenderState	port	crates/horizon-client/src/game/structure_blocks.rs::Game::bounding_box_gizmos	the block's box as a game-master gizmo (TestInstanceBlockEntity.renderMode is BOX); the beacon beam is beacon.rs::test_instance_beam and the error marker text test_instances.rs::test_instance_marker_geometry
 TestInstanceRenderer.submit	port	crates/horizon-client/src/game/test_instances.rs::Game::test_instance_marker_geometry	the per-block loop drawing the error markers and their billboards; the beam sections come from Game::test_instance_beam and the box from Game::bounding_box_gizmos, both drawn per frame
 TestInstanceRenderer.submitErrorMarker	port	crates/horizon-client/src/gizmos.rs::error_marker_shape	the red box and its text, drawn by Game::test_instance_marker_geometry
 TestInstanceRenderer.shouldRenderOffScreen	missing		minor: culling policy of a renderer Horizon lacks
