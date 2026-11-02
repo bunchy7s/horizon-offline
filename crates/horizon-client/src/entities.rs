@@ -1293,6 +1293,20 @@ pub struct ArmorStand {
     pub support: horizon_world::ground_support::GroundState,
 }
 impl ArmorStand {
+    /// `NameTagItem.interactLivingEntity`: a custom name handles the use;
+    /// only a living target changes. Stack consumption belongs to the caller.
+    pub fn name_with_tag(&mut self, stack: &ItemStack) -> bool {
+        if &*stack.item != "minecraft:name_tag" {
+            return false;
+        }
+        let Some(name) = stack.data().and_then(|data| data.custom_name.as_ref()) else {
+            return false;
+        };
+        if self.health > 0.0 {
+            self.custom_name = Some(crate::component::name_text(name));
+        }
+        true
+    }
     pub const SLOTS: [&'static str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
     /// The `Pose` compound's keys.
     pub const POSE_KEYS: [&'static str; 6] =
@@ -2693,6 +2707,30 @@ mod entity_collision_tests {
 #[cfg(test)]
 mod armor_stand_motion_tests {
     use super::*;
+
+    #[test]
+    fn a_name_tag_names_a_live_stand_and_unnamed_tags_pass() {
+        let mut stand = ArmorStand::new(1, Vec3::ZERO, 0.0);
+        let mut tag = ItemStack::new("minecraft:name_tag", 4);
+        assert!(!stand.name_with_tag(&tag));
+        assert!(stand.custom_name.is_none());
+        let name = horizon_world::nbt::Tag::compound([
+            ("text", horizon_world::nbt::Tag::String("Bob".into())),
+            ("color", horizon_world::nbt::Tag::String("gold".into())),
+        ]);
+        tag.data_mut().custom_name = Some(name.clone());
+        assert!(stand.name_with_tag(&tag));
+        assert_eq!(stand.custom_name, Some(crate::component::name_text(&name)));
+        assert_eq!(stand.health, 20.0);
+        assert!(!stand.name_with_tag(&ItemStack::new("minecraft:name_tag", 3)));
+        stand.health = 0.0;
+        tag.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Other".into()));
+        assert!(
+            stand.name_with_tag(&tag),
+            "a dead target still handles the named tag"
+        );
+        assert_eq!(stand.custom_name, Some(crate::component::name_text(&name)));
+    }
 
     #[test]
     fn a_new_stand_starts_with_matching_previous() {
