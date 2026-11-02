@@ -591,3 +591,38 @@ pub fn field(focused: bool, invalid: bool) -> Div {
         .font_family(horizon_theme::glass::FONT)
         .text_size(px(14.))
 }
+
+/// A switch (`Toggle`): 40×24, round; the accent with an `on_accent` knob on the right while on,
+/// white at 14 % with a white knob at 70 % on the left while off.
+pub fn toggle(
+    id: impl Into<SharedString>,
+    on: bool,
+    accent: u32,
+    on_accent: u32,
+    t: &Theme,
+) -> Stateful<Div> {
+    let knob = div()
+        .absolute()
+        .top(px(4.))
+        .left(px(if on { 20. } else { 4. }))
+        .size(px(16.))
+        .rounded_full()
+        .bg(if on { color(on_accent) } else { white(0.7) });
+    keyboard(
+        div()
+            .id(id.into())
+            .relative()
+            .flex_none()
+            .w(px(40.))
+            .h(px(24.))
+            .rounded_full()
+            .bg(if on {
+                color(accent)
+            } else {
+                white(fill::BUTTON_HOVER)
+            })
+            .cursor_pointer()
+            .child(knob),
+        t,
+    )
+}

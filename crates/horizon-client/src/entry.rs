@@ -149,6 +149,15 @@ pub fn main_with(mods: crate::mod_api::Mods) {
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
         },
+        ingredient_test: |kind, data, stack, accept| {
+            crate::mod_api::dispatch_ingredient_test(
+                crate::mod_api::mods(),
+                kind,
+                data,
+                stack,
+                accept,
+            );
+        },
     })
     .is_err()
     {

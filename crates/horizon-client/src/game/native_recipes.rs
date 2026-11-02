@@ -54,7 +54,8 @@ impl Index {
         self.stack(&s.item, s.count, components(s))
     }
     fn any(&self, i: &Ingredient) -> Vec<RecipeStack> {
-        i.1.iter()
+        i.order
+            .iter()
             .filter_map(|id| self.stack(id, 1, String::new()))
             .collect()
     }
