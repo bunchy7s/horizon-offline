@@ -562,7 +562,7 @@ impl Game<'_> {
             _ => "",
         };
         if !stat.is_empty() {
-            self.stats.custom(stat, 1);
+            self.award_custom_stat(stat, 1);
         }
         true
     }
@@ -1051,7 +1051,7 @@ impl Game<'_> {
             }
         }
         let pitch = self.world.random.next_float() * 0.1 + 0.9;
-        self.stats.custom("enchant_item", 1);
+        self.award_custom_stat("enchant_item", 1);
         self.trigger_enchanted_item(&enchanted_item, lapis_needed as i32);
         self.play_at("minecraft:block.enchantment_table.use", pos, 1.0, pitch);
         self.station_changed();

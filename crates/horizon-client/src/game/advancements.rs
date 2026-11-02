@@ -701,7 +701,7 @@ impl Game<'_> {
         match result {
             Ok(unlocked) => {
                 self.recipe_unlocked(&unlocked);
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
             }

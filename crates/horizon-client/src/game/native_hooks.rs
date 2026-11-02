@@ -3446,6 +3446,23 @@ impl Game<'_> {
     ) {
         let _ = (player, name, advancement, criterion, granted);
     }
+    /// A statistic is about to be awarded to a server player, before its count
+    /// and scoreboard criteria change. `stat_type` and `stat` are ids such as
+    /// `minecraft:mined` and `minecraft:stone`, and `value` the amount. Set
+    /// `cancel` to award nothing. Helpers looking up the guest through
+    /// `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_stat_award@.
+    pub(super) fn native_player_stat_award(
+        &mut self,
+        player: u128,
+        name: &str,
+        stat_type: &str,
+        stat: &str,
+        value: i32,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, stat_type, stat, value, cancel);
+    }
     /// A server player's experience points are about to increase from an orb pickup,
     /// after mending has taken its share. Change `amount` to change the points
     /// added. The player's state is not swapped in, so helpers that look them up

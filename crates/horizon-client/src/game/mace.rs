@@ -241,7 +241,7 @@ impl Game<'_> {
             self.mace_hurt_enemy(index);
         }
         if weapon.is_some() {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack(index);
         // MaceItem.postHurtEnemy
@@ -324,7 +324,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:player");
         // MaceItem.postHurtEnemy
@@ -353,7 +353,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:armor_stand");
         // MaceItem.postHurtEnemy
