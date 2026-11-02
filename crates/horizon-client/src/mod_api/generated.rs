@@ -32,8 +32,7 @@ pub trait Hooks: Send + Sync {
         let _ = event;
     }
     /// The world's phases, read-only; `error_text` carries the engine's
-    /// own open-failure text, empty otherwise. Server-side; the deprecated
-    /// in-frame path delivers no lifecycle events. A server loop or final
+    /// own open-failure text, empty otherwise. Server-side. A server loop or final
     /// save failure fires `WorldCloseFailed` with the error text.
     fn world_lifecycle(&self, host: &mut dyn Host, event: &mut WorldLifecycleEvent<'_>) {
         let _ = host;
@@ -734,8 +733,7 @@ pub trait Hooks: Send + Sync {
     /// as on a refused hit, except that a canceled hit on the ender dragon
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
-    /// on the thread that ticks the world (the server thread; the window's
-    /// in-frame): state shared with render thread hooks needs synchronising.
+    /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
     /// No `self`: the game is in the middle of the hit. API 50.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
@@ -1369,12 +1367,10 @@ pub trait Hooks: Send + Sync {
     /// 0 runs it out on its first tick, as `native_living_entity_use_item_tick`
     /// running it out, unless the item's own is 0 already), or set
     /// `canceled` and the use doesn't start. Both sides, as
-    /// vanilla's: wherever the world runs (the server, single player
-    /// in-frame, a LAN host) for every player of the world, and on a
+    /// vanilla's: on the server for every player of the world, and on a
     /// server's client for the uses it predicts. Answer the same on both,
-    /// and change the world only where this `Game` runs the world, not on a
-    /// server's client: no helper tells the two apart yet (`native_window`
-    /// is also true in-frame and on an in-frame LAN host). API 90.
+    /// and change the world only on the server (`native_window` is false
+    /// there), not on a server's client. API 90.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn living_entity_use_item_start(
@@ -1796,7 +1792,7 @@ pub trait Hooks: Send + Sync {
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
     /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
-    /// on the thread that ticks the world (the server thread; the window's in-frame): state
+    /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
     ///
@@ -1869,9 +1865,8 @@ pub trait Hooks: Send + Sync {
     /// the code. On a server's client a run-out use stays in use, frozen,
     /// so letting go still tells the server. Both sides, as vanilla's
     /// `updatingUsingItem`: answer the same on both, and change the world
-    /// only where this `Game` runs the world, not on a server's client (no
-    /// helper tells the two apart yet; `native_window` is also true
-    /// in-frame and on an in-frame LAN host). Runs every tick of every use:
+    /// only on the server (`native_window` is false there), not on a
+    /// server's client. Runs every tick of every use:
     /// check the item first. API 131.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.

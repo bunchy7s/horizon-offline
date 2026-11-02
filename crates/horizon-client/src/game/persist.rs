@@ -771,7 +771,7 @@ impl Game<'_> {
     }
     /// The mobs riding entity `id` under `tag`'s `Passengers`, after the
     /// passengers it kept from loading.
-    fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
+    pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
         let riders: Vec<usize> = (0..self.mobs.len())
             .filter(|&j| self.mobs[j].extra.mount == Some(id) && self.mobs[j].alive())
             .collect();

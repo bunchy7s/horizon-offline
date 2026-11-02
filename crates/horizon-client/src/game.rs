@@ -7309,6 +7309,11 @@ impl Game<'_> {
             horizon_client::spans::time("tick_item_frames", || self.tick_item_frames());
             horizon_client::spans::time("tick_armor_stands", || self.tick_armor_stands())?;
             horizon_client::spans::time("tick_cushions", || self.tick_cushions());
+            // ServerLevel.tick: the arrivals of this server tick are in the level
+            // (`addDuringTeleport`), and each vehicle handles its portal as its
+            // own tick opens.
+            self.land_portal_arrivals();
+            self.handle_vehicle_portals();
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
             self.tick_vehicle_watch();
