@@ -635,7 +635,6 @@ impl Game<'_> {
         // over the 40 a vehicle takes) destroys them. Lightning is no fire
         // source, so a TNT cart does not prime. `ExperienceOrb.hurtServer`:
         // 5 damage off 5 health. Last first, since each removes its entry.
-        let orbs_before = self.orb_ids();
         let mut left = self.thunder_count(strike, ThunderHit::Vehicle)
             + self.thunder_count(strike, ThunderHit::Orb);
         for h in self.entity_handles_rev() {
@@ -659,7 +658,7 @@ impl Game<'_> {
                 _ => {}
             }
         }
-        self.native_orbs_left_since(&orbs_before);
+        self.native_leaves_flush();
         // Every player in the box, the server's players too (0.6 x 1.8).
         let strike_players = move |g: &mut Self| {
             if let Some(p) = g.player.as_ref().map(|p| p.position)
@@ -679,7 +678,6 @@ impl Game<'_> {
         strike_players(self);
         self.each_guest_hit(strike_players);
         // Dropped items burn up (ItemEntity health 5), save fire-resistant ones.
-        let before = self.dropped_ids();
         let mut left = self.thunder_count(strike, ThunderHit::Item);
         for h in self.entity_handles_rev() {
             if left == 0 {
@@ -696,7 +694,7 @@ impl Game<'_> {
                 self.dropped.remove(i);
             }
         }
-        self.native_items_left_since(&before);
+        self.native_leaves_flush();
         struck
     }
     /// `LightningBolt.shouldRenderAtSqrDistance`: a bolt is drawn within 64
