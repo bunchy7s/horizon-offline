@@ -1,0 +1,13 @@
+[package]
+name = "horizon-mcp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.88"
+description = "The Model Context Protocol, one implementation for Horizon's three servers (horizon-ctl mcp, horizon-server mcp, horizon-launcher mcp)"
+
+[dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

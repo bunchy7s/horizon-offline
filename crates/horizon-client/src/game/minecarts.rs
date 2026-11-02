@@ -108,6 +108,10 @@ pub(super) struct Minecart {
     /// velocity), so a cart that ran into a block still counts as moving.
     collision_speed: f64,
     fall_distance: f64,
+    /// The squared speed `MinecartTNT.causeFallDamage` blows up with, set by
+    /// a landing of three blocks or more and taken by the cart's next tick
+    /// step (vanilla explodes inside the move itself).
+    fall_blast: Option<f64>,
     pub hurt_time: i32,
     pub hurt_dir: i32,
     pub damage: f32,
@@ -156,6 +160,19 @@ fn display_offset(kind: CartKind) -> f64 {
 /// `MinecartFurnace.calculateNewPushAlong`: the push turned onto the
 /// movement's direction, at the push's own length (3D, so it holds from tick
 /// to tick while the movement has a vertical part).
+/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`: the
+/// push the cart at `cart` loses (the entity gets a quarter of it back).
+fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
+    let (xa, za) = (feet.x - cart.x, feet.z - cart.z);
+    let dd = xa * xa + za * za;
+    if dd < f64::from(1.0e-4f32) {
+        return None;
+    }
+    let d = dd.sqrt();
+    let pow = (1.0 / d).min(1.0);
+    let k = f64::from(0.1f32) * 0.5;
+    Some((xa / d * pow * k, za / d * pow * k))
+}
 fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
     if push.horizontal_distance_squared() > 1.0e-4 && movement.horizontal_distance_squared() > 0.001
     {
@@ -265,6 +282,7 @@ impl Minecart {
             horizontal_collision: false,
             collision_speed: 0.0,
             fall_distance: 0.0,
+            fall_blast: None,
             hurt_time: 0,
             hurt_dir: 1,
             damage: 0.0,
@@ -506,10 +524,20 @@ impl Game<'_> {
             if (moved.y - delta.y).abs() > 1.0e-7 {
                 c.velocity.y = 0.0;
             }
-            if c.on_ground || moved.y >= 0.0 {
+            // Entity.checkFallDamage: the move's drop counts (not in water),
+            // and a landing hands the whole fall to causeFallDamage, which
+            // sets a TNT minecart off at (fall / 10) squared.
+            if moved.y < 0.0 && !self.cart_in_water(c) {
+                c.fall_distance -= f64::from(moved.y as f32);
+            }
+            if c.on_ground {
+                if c.kind == CartKind::Tnt && c.fall_distance >= 3.0 {
+                    let power = c.fall_distance / 10.0;
+                    c.fall_blast = Some(power * power);
+                }
                 c.fall_distance = 0.0;
-            } else {
-                c.fall_distance -= moved.y;
+            } else if moved.y >= 0.0 {
+                c.fall_distance = 0.0;
             }
         }
     }
@@ -912,7 +940,6 @@ impl Game<'_> {
             c.velocity = Vec3::new(c.velocity.x * 0.5, c.velocity.y * 0.5, c.velocity.z * 0.5);
         }
         let v = c.velocity;
-        let fall = c.fall_distance;
         self.move_cart(c, v);
         // `comeOffTrack` moves the cart and keeps the delta the move resolved
         // (then scales it by the air drag), so a cart an obstacle stopped here
@@ -925,10 +952,6 @@ impl Game<'_> {
                 c.velocity.y * 0.95,
                 c.velocity.z * 0.95,
             );
-        } else if c.kind == CartKind::Tnt && fall >= 3.0 {
-            // MinecartTNT.causeFallDamage
-            c.fuse = 0;
-            c.velocity = Vec3::new(c.velocity.x, fall / 10.0, c.velocity.z);
         }
     }
     /// `AbstractMinecart.tick` for one cart; returns false once it is gone.
@@ -989,6 +1012,11 @@ impl Game<'_> {
                 }
             }
             CartKind::Tnt => {
+                // MinecartTNT.causeFallDamage ran inside the move.
+                if let Some(speed_sqr) = c.fall_blast.take() {
+                    self.explode_cart(c, speed_sqr);
+                    return false;
+                }
                 // MinecartTNT.tick: the fuse and the collision check are separate.
                 if c.fuse > 0 {
                     c.fuse -= 1;
@@ -1130,6 +1158,47 @@ impl Game<'_> {
                 za = za / d * pow * f64::from(0.1f32) * 0.5;
                 c.velocity.x -= xa;
                 c.velocity.z -= za;
+            }
+        }
+        self.push_carts_from_mobs();
+    }
+    /// `AbstractMinecart.push(mob)` from each mob walking into a cart
+    /// (`LivingEntity.pushEntities` -> `doPush`): the cart gets the push and
+    /// the mob a quarter of it back (`Entity.push`, which needs the mob to be
+    /// pushable and to carry no one). Bats push nothing (`Bat.pushEntities`).
+    fn push_carts_from_mobs(&mut self) {
+        let teams = self.mob_teams();
+        // (mob index, feet, box)
+        let pushers: Vec<(usize, Vec3, Aabb)> = self
+            .mobs
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| {
+                !m.removed
+                    && m.alive()
+                    && m.species() != Species::Bat
+                    && pushable_by(teams.of(Who::Mob(m.id)), None, true)
+            })
+            .map(|(j, m)| (j, m.position, m.bounds()))
+            .collect();
+        drop(teams);
+        for (j, feet, bb) in pushers {
+            for c in &mut self.carts {
+                // hasPassenger(mob): a mob in this cart never pushes it.
+                if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
+                    continue;
+                }
+                let Some((xa, za)) = cart_push_from(feet, c.position) else {
+                    continue;
+                };
+                c.velocity.x -= xa;
+                c.velocity.z -= za;
+                let m = &mut self.mobs[j];
+                if m.pushable() && m.rider.is_none() && m.extra.rider.is_none() {
+                    m.velocity.x += xa / 4.0;
+                    m.velocity.z += za / 4.0;
+                    m.needs_sync = true;
+                }
             }
         }
     }
@@ -2283,6 +2352,14 @@ fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn mob_walking_into_a_cart_pushes_it_by_a_twentieth() {
+        // Issue #6776: a villager at x=0.13 next to a cart at x=0.5 east-west.
+        let (xa, za) =
+            super::cart_push_from(Vec3::new(0.13, 0.0, 0.0), Vec3::new(0.5, 0.0, 0.0)).unwrap();
+        assert!((xa + 0.05).abs() < 1e-6 && za == 0.0, "{xa} {za}");
+        assert!(super::cart_push_from(Vec3::ZERO, Vec3::ZERO).is_none());
+    }
     /// The collision detonation of a TNT minecart needs both the collision and
     /// a cart that was still moving: a nudge below a tenth of a block a tick
     /// does not set it off, and a fast cart on an open track does not either.

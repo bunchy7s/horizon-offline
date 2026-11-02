@@ -712,6 +712,17 @@ mod tests {
         assert_eq!(range, 48.0);
     }
 
+    /// `Entity.shouldRenderAtSqrDistance` for a dropped item (`ItemEntity`
+    /// keeps the default and its box is 0.25 on each side): 24 blocks at
+    /// render distance 12, 32 at 16, 40 from 20 on; never 64.
+    #[test]
+    fn a_dropped_item_is_drawn_sixteen_blocks_times_the_view_scale() {
+        let item = glam::DVec3::splat(0.25);
+        assert_eq!(default_range(item, entity_view_scale(12, 1.0)), 24.0);
+        assert_eq!(default_range(item, entity_view_scale(16, 1.0)), 32.0);
+        assert_eq!(default_range(item, entity_view_scale(32, 1.0)), 40.0);
+    }
+
     /// `Entity.shouldRenderAtSqrDistance` on a broken box: the size falls
     /// back to one block.
     #[test]
