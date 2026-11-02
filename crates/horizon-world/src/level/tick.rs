@@ -108,8 +108,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     if let Some((previous, count)) = self.level.recheck_container_openers(pos) {
                         self.block_event(pos, block, 1, count);
                         if previous != count && b.data(state).is(Class::TrappedChest) {
-                            self.update_neighbors_at(pos, block);
-                            self.update_neighbors_at(below(pos), block);
+                            self.trapped_chest_update_neighbors(pos, state);
                         }
                         if count > 0 {
                             self.schedule_tick(pos, block, 5);
@@ -179,12 +178,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 // LecternBlock.tick: the page-turn pulse ends.
                 Class::Lectern => {
                     self.set_block_and_update(pos, b.table.set_bool(state, p.powered, false));
-                    self.update_neighbors_at(below(pos), block);
+                    self.lectern_update_below(pos, state);
                 }
                 Class::LightningRod => {
                     self.set_block_and_update(pos, b.table.set_bool(state, p.powered, false));
-                    let facing = b.facing(state);
-                    self.update_neighbors_at(rel(pos, facing.opposite()), block);
+                    self.lightning_rod_update_neighbors(pos, state);
                 }
                 Class::Liquid => {
                     if self.should_bubble_column_occupy(state) {
