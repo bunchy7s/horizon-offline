@@ -8,6 +8,7 @@
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
 use super::commands::Target;
+use super::persist::ChunkKey;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
@@ -18,8 +19,10 @@ use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
+use horizon_world::nbt::Tag;
 use horizon_world::{level::data::PushReaction, piston_push};
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
 /// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
@@ -61,6 +64,14 @@ pub(super) trait Entity: EntityRules {
     fn selector_target(&self) -> Option<Target>;
     /// The entity type id a native mod's join hook names (`minecraft:oak_boat`).
     fn native_type(&self) -> Cow<'static, str>;
+    /// Saves entity `index` of this kind into its chunk's entity list: the
+    /// chunk and the NBT when it lies in `keys` and is saved with its chunk.
+    /// Required, so a new kind states how it saves.
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)>;
 
     fn on_ground(&self) -> bool {
         false
@@ -419,9 +430,49 @@ macro_rules! with_entity_mut {
 }
 pub(super) use with_entity_mut;
 
+macro_rules! save_lists {
+    (($game:expr, $keys:expr, $out:expr)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for i in 0..$game$(.$list)+.len() {
+            if let Some((key, tag)) = <$ty as $crate::game::entity::Entity>::save_nbt($game, i, $keys) {
+                $out.entry(key).or_default().push(tag);
+            }
+        })*
+    };
+}
+pub(crate) use save_lists;
+
+/// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
+/// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
+/// nothing allocated beyond the tags. A kind added to the lists cannot be left
+/// out, since `save_nbt` has no default.
+macro_rules! save_entities_of_every_kind {
+    ($game:expr, $keys:expr, $out:expr) => {
+        $crate::game::entity::entity_lists!(save_lists, $game, $keys, $out)
+    };
+}
+
+impl Game<'_> {
+    /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
+    pub(super) fn save_every_entity(
+        &mut self,
+        keys: &HashSet<ChunkKey>,
+        out: &mut HashMap<ChunkKey, Vec<Tag>>,
+    ) {
+        save_entities_of_every_kind!(self, keys, out);
+    }
+}
+
 impl Entity for Mob {
     fn native_type(&self) -> Cow<'static, str> {
         super::native_hooks::mob_kind(self).into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_mob(index, keys)
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -501,6 +552,13 @@ impl Entity for ItemEntity {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:item".into()
     }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_item(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.25, 0.25))
@@ -539,6 +597,13 @@ impl Entity for ExperienceOrb {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:experience_orb".into()
     }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_orb(index, keys)
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
@@ -573,6 +638,13 @@ impl Entity for ExperienceOrb {
 impl Entity for Boat {
     fn native_type(&self) -> Cow<'static, str> {
         self.entity_type().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_boat(index, keys)
     }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
@@ -612,6 +684,13 @@ impl Entity for Boat {
 impl Entity for Minecart {
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_cart(index, keys)
     }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
@@ -661,6 +740,13 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 impl Entity for ArmorStand {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:armor_stand".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_armor_stand(index, keys)
     }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
@@ -730,6 +816,13 @@ impl Entity for PrimedTnt {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:tnt".into()
     }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_tnt(index, keys)
+    }
     stored_motion!();
     /// `PrimedTnt` eye height: `0.98 * 0.85`.
     fn fluid_eye_y(&self) -> f64 {
@@ -767,6 +860,13 @@ impl Entity for FallingBlock {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:falling_block".into()
     }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_falling(index, keys)
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Falling(self.id))
@@ -779,6 +879,13 @@ impl Entity for FallingBlock {
 impl Entity for Projectile {
     fn native_type(&self) -> Cow<'static, str> {
         self.kind.id().into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_projectile(index, keys)
     }
     stored_motion!();
     /// Arrows and the thrown items and fireballs a chunk saves.
@@ -836,6 +943,13 @@ impl Entity for Rocket {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:firework_rocket".into()
     }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_rocket(index, keys)
+    }
     stored_motion!();
     /// A rocket that carries its owner stays.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -863,6 +977,13 @@ impl Entity for Rocket {
 impl Entity for ThrownTrident {
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:trident".into()
+    }
+    fn save_nbt(
+        game: &mut Game<'_>,
+        index: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        game.save_trident(index, keys)
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
