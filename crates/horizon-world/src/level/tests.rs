@@ -1972,7 +1972,7 @@ fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
             id: 0,
         },
     ));
-    assert_eq!(w.use_block(orphan), InteractionResult::Success);
+    assert_eq!(w.use_block(orphan), InteractionResult::Consume);
     assert_eq!(w.get(orphan), air, "the orphan moving piston is removed");
     assert_eq!(w.use_block(in_flight), InteractionResult::Pass);
     assert_eq!(

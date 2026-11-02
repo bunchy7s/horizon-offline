@@ -443,7 +443,8 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 Class::MovingPiston => {
                     if !self.level.is_client_side() && self.moving_piston(pos).is_none() {
                         self.remove_block(pos, false);
-                        Success
+                        // CONSUME: the action is used, the arm does not swing.
+                        Consume
                     } else {
                         Pass
                     }
