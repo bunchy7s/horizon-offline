@@ -734,6 +734,16 @@ impl Game<'_> {
                     ids.push((o.id, true));
                 }
             }
+            for t in &self.tridents {
+                if tracked.contains_key(&t.id) {
+                    ids.push((t.id, true));
+                }
+            }
+            for r in &self.rockets {
+                if tracked.contains_key(&r.id) && r.attached_to.is_none() && !r.attached {
+                    ids.push((r.id, true));
+                }
+            }
         }
         let present: std::collections::HashSet<u32> = ids.iter().map(|(id, _)| *id).collect();
         self.portals.entities.retain(|id, _| present.contains(id));
@@ -921,6 +931,30 @@ impl Game<'_> {
                 inside.push((p.id, pos));
             }
         }
+        // A trident (0.5 across) or rocket (0.25) in flight, or one that moved
+        // this tick; a rocket that carries its owner stays.
+        let mut flyers: Vec<(u32, Vec3, Vec3, f32)> = Vec::new();
+        for t in self
+            .tridents
+            .iter_mut()
+            .filter(|t| !t.in_ground || t.previous != t.position)
+        {
+            let id = super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+            flyers.push((id, t.previous, t.position, 0.5));
+        }
+        for r in self
+            .rockets
+            .iter_mut()
+            .filter(|r| r.attached_to.is_none() && !r.attached)
+        {
+            let id = super::lan_entities::assign_entity_id(&mut self.next_entity, &mut r.id);
+            flyers.push((id, r.previous, r.position, 0.25));
+        }
+        for (id, from, to, size) in flyers {
+            if let Some(pos) = self.swept_portal(from, to, size, size, &mut portal_sections) {
+                inside.push((id, pos));
+            }
+        }
         self.portals.sections = portal_sections;
         for (id, pos) in inside {
             self.portals
@@ -1055,6 +1089,28 @@ impl Game<'_> {
                 self.persist_raw(id),
             );
             self.tnts.remove(i);
+            self.forget_entity(id);
+            self.portals.arrivals.push(Arrival { plan, tag });
+            self.portals.dirty = true;
+        } else if let Some(i) = self.tridents.iter().position(|t| t.id == id) {
+            let plan = self.entity_plan(entry, self.tridents[i].position, 0.5, 0.5, false);
+            if !self.may_enter(plan.dim) {
+                return;
+            }
+            let uuid = self.uuid_for(id);
+            let tag = self.tridents[i].to_nbt(uuid, self.persist_raw(id));
+            self.tridents.remove(i);
+            self.forget_entity(id);
+            self.portals.arrivals.push(Arrival { plan, tag });
+            self.portals.dirty = true;
+        } else if let Some(i) = self.rockets.iter().position(|r| r.id == id) {
+            let plan = self.entity_plan(entry, self.rockets[i].position, 0.25, 0.25, false);
+            if !self.may_enter(plan.dim) {
+                return;
+            }
+            let uuid = self.uuid_for(id);
+            let tag = self.rockets[i].to_nbt(uuid, self.level.player_uuid, self.persist_raw(id));
+            self.rockets.remove(i);
             self.forget_entity(id);
             self.portals.arrivals.push(Arrival { plan, tag });
             self.portals.dirty = true;

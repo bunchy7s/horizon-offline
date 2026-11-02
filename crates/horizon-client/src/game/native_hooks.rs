@@ -1288,6 +1288,21 @@ impl Game<'_> {
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
     }
+    /// The frame rate this window is about to be held to: Max Framerate after the
+    /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
+    /// window has focus, `minimized` whether it is minimised and `in_world` whether a world
+    /// is open. A mod may lower `limit`, as Dynamic FPS does for a window in the background:
+    /// Horizon keeps the lower of its own limit and the mod's, and ignores values below 1.
+    /// API @API:framerate_limit@.
+    pub(super) fn native_framerate_limit(
+        &self,
+        focused: bool,
+        minimized: bool,
+        in_world: bool,
+        limit: &mut i32,
+    ) {
+        let _ = (focused, minimized, in_world, limit);
+    }
     /// Render-thread notification after a resource-pack reload has applied successfully.
     /// Atlas, models, renderer and client caches already refer to the new resources.
     /// Selection/F3+T and server-pack reloads share this point; initial startup does not.
@@ -6472,6 +6487,23 @@ mod tests {
     }
 
     #[test]
+    fn native_ingredient_stays_hookable() {
+        let source = include_str!("../crafting.rs");
+        let at = source.find("pub fn native_ingredient(").unwrap();
+        let start = source[..at].rfind("///").unwrap();
+        let body = &source[start..start + source[start..].find("\n}\n").unwrap()];
+        for line in body.lines() {
+            assert!(
+                !line.contains("cfg"),
+                "a cfg in the ingredient hook: {line}"
+            );
+            for mac in ["!(", "![", "! {", "!{"] {
+                assert!(!line.contains(mac), "a macro: {line}");
+            }
+        }
+    }
+
+    #[test]
     fn loot_table_load_stays_hookable() {
         let source = include_str!("../../../horizon-world/src/loot.rs").replace("\r\n", "\n");
         // From its doc comment's last line, so an attribute above it counts.
@@ -6573,6 +6605,8 @@ mod tests {
         let menu_hooks = free_hooks(include_str!("../menu.rs"));
         // The air supply's (`horizon_client::breathing`).
         let breath_hooks = free_hooks(include_str!("../breathing.rs"));
+        // The crafting loaders' (`horizon_client_lib::crafting`).
+        let crafting_hooks = free_hooks(include_str!("../crafting.rs"));
         let declared: BTreeSet<_> = section
             .lines()
             .chain(level_section.lines())
@@ -6587,6 +6621,7 @@ mod tests {
             .chain(loot_hooks.iter().copied())
             .chain(menu_hooks.iter().copied())
             .chain(breath_hooks.iter().copied())
+            .chain(crafting_hooks.iter().copied())
             .collect();
         let mut names = BTreeSet::new();
         let mut contracts = BTreeSet::new();
@@ -6604,6 +6639,10 @@ mod tests {
                 format!("horizon_world::item_defaults::native_{name}")
             } else if loot_hooks.contains(name) {
                 format!("horizon_world::loot::native_{name}")
+            } else if crafting_hooks.contains(name) {
+                // crafting.rs compiles into horizon-client-lib (#5446's
+                // split): horizon-mixins resolves the crate by its package.
+                format!("horizon_client_lib::crafting::native_{name}")
             } else if menu_hooks.contains(name) {
                 format!("horizon_client::menu::native_{name}")
             } else if breath_hooks.contains(name) {

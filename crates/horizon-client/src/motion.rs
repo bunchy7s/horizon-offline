@@ -344,6 +344,10 @@ pub struct PlayerMotion {
     pub local_crouching: bool,
     pub pose: crate::pose::Pose,
     pub dimensions: crate::pose::Dimensions,
+    /// The `minecraft:scale` the dimensions were last built with
+    /// (`Entity.refreshDimensions`), for the poses the body takes before it
+    /// next refreshes.
+    pub scale: f32,
     pub speed: f32,
     /// `LocalPlayer.itemUseSpeedMultiplier` while using an item (not riding).
     pub item_use_speed: Option<f32>,
@@ -428,6 +432,16 @@ fn attribute_error(error: impl std::fmt::Debug) -> io::Error {
     io::Error::other(format!("movement attribute: {error:?}"))
 }
 impl PlayerMotion {
+    /// `ServerGamePacketListenerImpl.handleMovePlayer`: the movement the client
+    /// sent is the server copy's own delta movement. A glide's wall hit reads it
+    /// as the speed the glide had (`LivingEntity.handleFallFlyingCollisions`'s
+    /// moveHorLength); a copy whose travels start from its own last velocity
+    /// otherwise keeps a few hundredths there, and no hit reaches the damage.
+    pub fn carry_client_movement(&mut self, movement: Vec3) {
+        if self.fall_flying {
+            self.velocity = movement;
+        }
+    }
     /// `Player.isSweepAttack`, using the resident player's known horizontal velocity.
     pub fn is_sweep_attack(&self, strength: f32, critical: bool, sword: bool) -> bool {
         let movement = self.velocity;
@@ -559,6 +573,7 @@ impl PlayerMotion {
             local_crouching: false,
             pose: crate::pose::Pose::Standing,
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
+            scale: 1.0,
             swimming: false,
             is_passenger: false,
             fire_ticks: -20,
@@ -717,6 +732,18 @@ impl PlayerMotion {
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
     pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+        self.packed_attributes(true)
+    }
+    /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
+    /// over from the old one. A body that comes back from a death takes the
+    /// base values only (`assignBaseValues`); the same player in another
+    /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
+    /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
+    /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+        self.packed_attributes(restore_all)
+    }
+    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
         use horizon_client_core::nbt_value::string;
         use horizon_world::nbt::Tag;
         let list = self
@@ -729,7 +756,7 @@ impl PlayerMotion {
                     ("base", Tag::Double(packed.base.to_bits())),
                 ];
                 // `modifiers` is an optional field whose default is the empty list.
-                if !packed.modifiers.is_empty() {
+                if modifiers && !packed.modifiers.is_empty() {
                     let modifiers = packed
                         .modifiers
                         .iter()
@@ -1035,9 +1062,9 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.spectator {
             self.player.flying = true;
             self.player.ground.on_ground = false;
-        } else if !self.player.may_fly {
-            self.player.flying = false;
-        } else if !was_jumping && jumping && !self.player.was_auto_jump {
+        } else if self.player.may_fly && !was_jumping && jumping && !self.player.was_auto_jump {
+            // `LocalPlayer.aiStep`: mayfly gates the flight toggle, not the
+            // flying state independently supplied by the server's abilities.
             if self.player.jump_trigger_time == 0 {
                 self.player.jump_trigger_time = 7;
             } else if !self.player.swimming {
@@ -3430,6 +3457,60 @@ mod tests {
         assert!(player.events.is_empty());
     }
 
+    /// `LivingEntity.handleFallFlyingCollisions`: a glide that meets a wall loses
+    /// the horizontal speed it had, and the server's copy hurts by that loss,
+    /// `(moveHorLength - newMoveHorLength) * 10 - 3`, as `minecraft:fly_into_wall`.
+    /// The speed it starts the tick with is the client's own movement
+    /// (`handleMovePlayer` gives the server copy its delta movement), so the
+    /// loss is the speed the glide actually flew at.
+    #[test]
+    fn a_glide_into_a_wall_hurts_by_the_speed_it_lost() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        // A wall in the way of a glide along +x, at feet height.
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        for y in 4..=5 {
+            for z in 19..=21 {
+                scene.set(23, y, z, stone).unwrap();
+            }
+        }
+        let mut player = PlayerMotion::new(&resources, Vec3::new(22.0, 4.0, 20.5)).unwrap();
+        player.fall_flying = true;
+        // Looking along +x (the `getLookAngle` of a flat -90 yaw) keeps the
+        // glide on its course through `updateFallFlyingMovement`'s pull.
+        player.yaw = -90.0;
+        player.pitch = 0.0;
+        player.carry_client_movement(Vec3::new(1.2, 0.0, 0.0));
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .server_travel()
+        .unwrap();
+        assert!(
+            player
+                .hurt_log
+                .last()
+                .is_some_and(|hurt| hurt.source == "minecraft:fly_into_wall"),
+            "{:?}",
+            player.hurt_log
+        );
+        assert!(player.health.health() < 20.0, "{}", player.health.health());
+    }
+
     #[test]
     fn spectator_scroll_speed_controls_horizontal_and_vertical_flight() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -5164,6 +5245,60 @@ mod tests {
         w.player.mobility_restricted = false;
         w.controlled_simulation_tick(sprint_key).unwrap();
         assert!(w.player.sprinting);
+    }
+
+    #[test]
+    fn server_forced_flight_survives_without_permission_to_toggle_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            eprintln!("skipped forced flight: prepared resources unavailable");
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 3).unwrap();
+        let start = Vec3::new(20.5, 20.0, 20.5);
+        let mut player = PlayerMotion::new(&resources, start).unwrap();
+        player.may_fly = false;
+        player.flying = true;
+        player.flying_speed = 0.0;
+        let mut w = MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        };
+        // Idle, movement in all directions, and repeated jump presses must
+        // neither cancel server-forced flight nor move a zero-speed flyer.
+        for tick in 0..60 {
+            w.controlled_simulation_tick(crate::sprint::Keys {
+                forward: tick % 4 == 0,
+                backward: tick % 4 == 1,
+                left: tick % 4 == 2,
+                right: tick % 4 == 3,
+                jump: tick % 2 == 0,
+                shift: tick % 3 == 0,
+                ..Default::default()
+            })
+            .unwrap();
+            assert!(w.player.flying, "server-forced flight ended on tick {tick}");
+            assert_eq!(w.player.position, start);
+            assert_eq!(w.player.velocity, Vec3::ZERO);
+        }
+        // A later abilities update from the server can still end flight.
+        w.player.flying = false;
+        for _ in 0..3 {
+            w.controlled_simulation_tick(crate::sprint::Keys::default())
+                .unwrap();
+        }
+        assert!(!w.player.flying);
+        assert!(w.player.position.y < start.y);
     }
 
     /// Vanilla `Player.getFlyingSpeed`: a flying player moves at the ability

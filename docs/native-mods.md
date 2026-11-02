@@ -11,6 +11,16 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled.
+
 ## Pinned to a Nightly
 
 A native mod builds on one exact Horizon commit: `[compatibility] horizon_revision` in its `horizon-mixin.toml`,
@@ -440,6 +450,15 @@ position), `block_entity` (the broken block's entity as it was before the break,
 `Items`) and `level` (the dimension, the game time, the time of day, the rain and the thunder, for conditions like
 vanilla's `time_check` and `weather_check`). The game sets it for a block a player or an explosion breaks and for a
 mob's death loot; on other rolls `place` is `None`.
+
+### A mod's own ingredient kinds
+
+A recipe's ingredient that names a type in a namespace outside `minecraft:` reaches
+`native_ingredient(kind, data, items)` at load time. Fill `items` with the item ids the
+ingredient matches (item ids only: components are not checked; a match-time hook follows
+separately). Duplicates are removed keeping first-seen order. The hook may be called more
+than once per recipe; the answer must be the same. An unclaimed kind leaves the list empty
+and the recipe fails, as an unknown kind does.
 
 ### Data files
 

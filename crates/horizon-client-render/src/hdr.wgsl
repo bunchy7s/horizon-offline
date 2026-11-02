@@ -20,6 +20,8 @@ struct Params {
     black: f32,
     // The HUD and menus' brightness as a share of paper white.
     ui: f32,
+    // HDR lighting: what the strongest light multiplies a surface by, 1 for none.
+    scene: f32,
     // Per tier, low to very bright (hdr.rs `Tier`): the share of the headroom
     // its fully lifted pixels get.
     share: vec4<f32>,
@@ -53,7 +55,7 @@ fn shows_world(c: vec3<f32>, w: vec3<f32>) -> bool {
         return true;
     }
     let f = (c.r + c.g + c.b) / max(w.r + w.g + w.b, 1.0 / 255.0);
-    return f <= 1.01 && f > 0.5 && all(abs(c - f * w) <= 0.03 * w + 1.0 / 255.0);
+    return f <= 1.01 && f > 0.02 && all(abs(c - f * w) <= 0.03 * w + 1.0 / 255.0);
 }
 
 // Linear BT.709 to BT.2020 (ITU-R BT.2087), columns first.
@@ -168,8 +170,23 @@ fn calibration_nits(p: vec2<f32>, size: vec2<f32>) -> f32 {
     // lower the brighter, and where in the band how much (hdr_mark). The hand
     // writes its own alpha there (Hdr::hand_light_view): 1, or a light source it holds.
     var lifted = false;
-    if params.world > 0.5 && params.peak > 1.0 && w.a < 0.75
-        && (hand || (!covered && shows_world(c, w.rgb))) {
+    let shows = params.world > 0.5 && params.peak > 1.0
+        && (hand || (!covered && shows_world(c, w.rgb)));
+    // HDR lighting: alpha between 0.76 and 1 is how much of it the surface gets. Vanilla's
+    // light is albedo times lightmap, so this is the lightmap going past 1. It eases into the
+    // peak from 60% of it, so bright textures keep their detail.
+    if shows && w.a >= 0.75 {
+        let top = max(light.r, max(light.g, light.b));
+        let gain = 1.0 + (params.scene - 1.0) * (1.0 - w.a) / 0.24;
+        let v = top * gain;
+        let knee = max(0.6 * params.peak, 1.0);
+        var out = v;
+        if v > knee && params.peak > knee {
+            out = knee + (params.peak - knee) * (1.0 - exp(-(v - knee) / (params.peak - knee)));
+        }
+        light *= select(gain, out / max(top, 1e-4), v > knee);
+    }
+    if shows && w.a < 0.75 {
         let band = u32(clamp(floor((w.a + 0.005) / 0.175), 0.0, 3.0));
         let tier = 3u - band;
         let lift = 1.0 - clamp((w.a - 0.175 * f32(band)) / 0.165, 0.0, 1.0);

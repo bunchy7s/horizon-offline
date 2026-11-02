@@ -1144,7 +1144,8 @@ pub trait Hooks: Send + Sync {
     /// the clicked position, whether the clicked block is being replaced, the
     /// item in hand) and `fluid` the fluid in the position the block would go
     /// in, which a waterlogged block reads. Build the state from `state` with
-    /// `native_state_with_property`. It is asked for every placer that goes
+    /// `native_state_with_property`, and know whether `state` is yours with
+    /// `native_state_block`. It is asked for every placer that goes
     /// through vanilla's placement (a player's `BlockItem.place`, a
     /// dispenser's `DirectionalPlaceContext`), and the answer still takes its
     /// survival and entity obstruction checks. A trait mod returns

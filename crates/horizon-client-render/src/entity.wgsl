@@ -31,6 +31,9 @@ struct Globals {
     // HDR output's tier windows (hdr.rs `Hdr::windows`): x..w low to very bright,
     // [0] where the lift starts, [1] where it is full.
     hdr_windows: array<vec4<f32>, 2>,
+    // HDR lighting: x how strongly the sky lights the world now (`Sky::sky_light_factor`),
+    // y what the sky and fog get: the same, but none under water.
+    hdr_light: vec4<f32>,
 }
 @group(0) @binding(0) var<uniform> globals: Globals;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
@@ -69,6 +72,8 @@ struct Out {
     // HDR tier of a light-giving particle (mesher::hdr_tier), from the overlay's
     // high bits (particles.rs): fs_hdr_mark marks the frame with it.
     @location(13) @interpolate(flat) tier: u32,
+    // HDR lighting (`hdr_scene`), 0 for what isn't lit.
+    @location(14) scene: f32,
 }
 // Shipped light.glsl; normals are already transformed and RGBA8_SNORM packed.
 fn entity_light(normal: vec3<f32>, nether: bool) -> f32 {
@@ -107,6 +112,16 @@ fn native_colored_light(pos: vec3<f32>) -> vec3<f32> {
     }
     return min(rgb, vec3(1.0));
 }
+// HDR lighting: how far an entity's light carries it above paper white, 0 to 1, as terrain's.
+fn hdr_scene(block: f32, sky: f32) -> f32 {
+    let b = smoothstep(11.0, 15.0, block);
+    let s = smoothstep(11.0, 15.0, sky) * globals.hdr_light.x;
+    return max(b, s);
+}
+// The frame's alpha for it, between 1 (none) and the light sources' marks below 0.75.
+fn hdr_scene_alpha(scene: f32) -> f32 {
+    return 1.0 - 0.24 * scene;
+}
 fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     overlay: u32, color: vec4<f32>, light: vec4<u32>, normal: vec4<f32>) -> Out {
     var out: Out;
@@ -120,6 +135,7 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     let unlit = overlay == 2u || overlay == 4u || overlay == 6u || overlay == 9u || overlay == 10u
         || overlay == 11u || overlay == 12u;
     out.light_color = select(lm, vec4(1.0), unlit);
+    out.scene = select(hdr_scene(l.x / 16.0, l.y / 16.0), 0.0, unlit);
     if globals.colored_count.x > 0u && !unlit {
         out.light_color = vec4(min(out.light_color.rgb + native_colored_light(position), vec3(1.0)), out.light_color.a);
     }
@@ -328,8 +344,14 @@ fn shadow_color(in: Out) -> vec4<f32> {
     var uv = in.uv;
     if in.overlay == 6u { uv.y = in.wrap.x + fract(in.uv.y) * in.wrap.y; }
     let texel = textureSample(atlas, atlas_sampler, uv);
-    if in.tier == 0u || texel.a < 0.1 { discard; }
-    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, brightness(texel.rgb * in.color.rgb)));
+    if texel.a < 0.1 { discard; }
+    // Fog hides a light source and the light on a surface as it hides everything else.
+    let fogged = max(linear_fog(in.spherical, globals.fog.x, globals.fog.y),
+        linear_fog(in.cylindrical, globals.fog.z, globals.fog.w)) * globals.fog_color.a;
+    if in.tier == 0u {
+        return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(mix(in.scene, globals.hdr_light.y, fogged)));
+    }
+    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, brightness(texel.rgb * in.color.rgb) * (1.0 - fogged)));
 }
 fn brightness(c: vec3<f32>) -> f32 {
     let l = pow(max(c, vec3(0.0)), vec3(2.2));
@@ -348,7 +370,7 @@ fn hdr_mark(tier: u32, y: f32) -> f32 {
 // no longer shines; fs_hdr_mark then marks the light sources it holds.
 @fragment fn fs_hdr_hand_unmark(in: Out) -> @location(0) vec4<f32> {
     if textureSample(atlas, atlas_sampler, in.uv).a < 0.1 { discard; }
-    return vec4(0.0, 0.0, 0.0, 1.0);
+    return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(in.scene));
 }
 
 fn celestial_color(in: Out) -> vec4<f32> {
@@ -375,8 +397,12 @@ fn celestial_color(in: Out) -> vec4<f32> {
     let added = color.rgb * color.a;
     // The sun at the brightest tier, the moon at its own (in.tier); geometry that sets
     // none (the End sky, the End flash) stays brightest.
-    let keep = 1.0 - hdr_mark(select(in.tier, 4u, in.tier == 0u), brightness(added));
-    return vec4(added, keep * smoothstep(0.1, 0.3, max(added.r, max(added.g, added.b))));
+    let tier = select(in.tier, 4u, in.tier == 0u);
+    let y = brightness(added);
+    // Only what's past the tier's window takes the mark: a soft edge keeps the sky's light,
+    // or it would come out darker than the sky around it.
+    if y < globals.hdr_windows[1][clamp(tier, 1u, 4u) - 1u] { return vec4(added, 0.0); }
+    return vec4(added, 1.0 - hdr_mark(tier, y));
 }
 
 // RenderPipelines.ENERGY_SWIRL (entity.fsh with EMISSIVE and NO_OVERLAY): the sprite, scrolled by

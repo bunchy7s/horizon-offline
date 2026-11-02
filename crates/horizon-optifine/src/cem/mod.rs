@@ -5,5 +5,6 @@
 
 mod curves;
 pub mod expr;
+pub mod files;
 pub mod json;
 pub mod model;

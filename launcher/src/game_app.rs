@@ -40,9 +40,15 @@ const INFO_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 	<string>public.app-category.games</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>__MIC_DESCRIPTION__</string>
 </dict>
 </plist>
 "#;
+
+/// Where `ensure` fills in the localized `NSMicrophoneUsageDescription` (native mods can open the
+/// microphone for voice chat; without the key macOS would kill the game instead of asking).
+const MIC_DESCRIPTION: &str = "__MIC_DESCRIPTION__";
 
 /// Brings `version`'s Horizon.app up to date and returns the game's program inside it. A program
 /// replaced in the version folder (a reinstall, a build copied over) is linked again.
@@ -51,7 +57,16 @@ pub fn ensure(version: &Path) -> io::Result<PathBuf> {
     let programs = contents.join("MacOS");
     fs::create_dir_all(&programs)?;
     fs::create_dir_all(contents.join("Resources"))?;
-    write_if_changed(&contents.join("Info.plist"), INFO_PLIST.as_bytes())?;
+    // Filled here so the prompt follows the launcher's language: the game reads the bundle as
+    // it starts, and the plist is not a place the game can localize.
+    let plist = INFO_PLIST.replacen(
+        MIC_DESCRIPTION,
+        &crate::shortcut::xml(crate::i18n::tr(
+            "Native mods can use your microphone for voice chat when you enable it.",
+        )),
+        1,
+    );
+    write_if_changed(&contents.join("Info.plist"), plist.as_bytes())?;
     write_if_changed(&contents.join("Resources/horizon.icns"), ICON)?;
     for (i, name) in PROGRAMS.into_iter().enumerate() {
         let (from, to) = (version.join(name), programs.join(name));
@@ -105,6 +120,20 @@ mod tests {
         ));
         let plist = fs::read_to_string(version.join("Horizon.app/Contents/Info.plist")).unwrap();
         assert!(plist.contains("<string>Horizon</string>"));
+        // The mic prompt macOS needs before a native mod may open the microphone: a key with a
+        // nonempty localized value, not the placeholder the template ships with.
+        let (_, rest) = plist
+            .split_once("<key>NSMicrophoneUsageDescription</key>")
+            .expect("Info.plist has NSMicrophoneUsageDescription");
+        let value = rest
+            .split_once("</string>")
+            .expect("the key has a string value")
+            .0
+            .split_once("<string>")
+            .expect("an opening tag")
+            .1;
+        assert!(!value.is_empty());
+        assert!(!plist.contains("__MIC_DESCRIPTION__"));
         assert_eq!(
             fs::read(version.join("Horizon.app/Contents/Resources/horizon.icns")).unwrap(),
             ICON
@@ -142,5 +171,13 @@ mod tests {
         fs::create_dir_all(&version).unwrap();
         assert!(ensure(&version).is_err());
         fs::remove_dir_all(&version).unwrap();
+    }
+
+    #[test]
+    fn xml_escapes_the_characters_plist_strings_must_not_carry() {
+        assert_eq!(
+            crate::shortcut::xml(r#"a & b < c > "d""#),
+            r#"a &amp; b &lt; c &gt; &quot;d&quot;"#
+        );
     }
 }

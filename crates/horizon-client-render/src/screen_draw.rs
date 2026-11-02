@@ -133,6 +133,21 @@ pub fn text(out: &mut Vec<Draw>, text: Text, x: i32, y: i32, color: i32, shadow:
         });
     }
 }
+/// `graphics.text` on text the caller already styled, drawn as it is: a `§`
+/// in it stays a character, as `FormattedCharSequence.forward`
+/// (`StringDecomposer.iterate`, not `iterateFormatted`) draws it. An edit box
+/// builds its own sequence that way, so a `§` in its value shows.
+pub fn text_as_typed(out: &mut Vec<Draw>, text: Text, x: i32, y: i32, color: i32, shadow: bool) {
+    if (color as u32) >> 24 != 0 {
+        out.push(Draw::Text {
+            text,
+            x,
+            y,
+            color,
+            shadow,
+        });
+    }
+}
 
 /// `StringDecomposer.iterateFormatted`: the drawn characters of `contents`,
 /// with their index in it and their style; legacy `§` codes restyle what
@@ -185,6 +200,11 @@ impl Measure<'_> {
     /// `Font.width`.
     pub fn width(&self, t: &Text) -> i32 {
         self.0.width_text(&t.resolve_legacy()) as i32
+    }
+    /// `Font.width(FormattedCharSequence)` of a sequence drawn as it is: a
+    /// `§` in the text counts as the glyph it is drawn as.
+    pub fn width_drawn(&self, t: &Text) -> i32 {
+        self.0.width_drawn(t) as i32
     }
     pub fn width_str(&self, s: &str) -> i32 {
         self.0.width(s) as i32
@@ -864,8 +884,8 @@ impl TextField {
                 displayed.clone()
             };
             let t = styled(half, self.display);
-            let w = m.width(&t);
-            text(out, t, draw_x, ty, color, self.text_shadow);
+            let w = m.width_drawn(&t);
+            text_as_typed(out, t, draw_x, ty, color, self.text_shadow);
             draw_x += w + 1;
         }
         let insert = self.cursor < len || len >= self.max_length;
@@ -878,7 +898,7 @@ impl TextField {
         }
         if !displayed.is_empty() && on_screen && (rel_cursor as usize) < shown_len {
             let t = styled(sub(&displayed, rel_cursor as usize, shown_len), self.cursor);
-            text(out, t, draw_x, ty, color, self.text_shadow);
+            text_as_typed(out, t, draw_x, ty, color, self.text_shadow);
         }
         if let Some(hint) = &self.hint
             && displayed.is_empty()

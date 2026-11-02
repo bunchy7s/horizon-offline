@@ -214,6 +214,11 @@ pub struct Guest {
     /// What the player's file says of the body (`Entity.load`: the fire
     /// and air ticks and the fall distance), for the first body it gets.
     pub loaded_body: Option<SavedBody>,
+    /// The attribute list the player's last body hands to its next one
+    /// (`ServerPlayer.restoreFrom`, `PlayerMotion::carried_attributes`),
+    /// until that body exists: the scale a player has set stays through a
+    /// respawn and a change of level (#3684).
+    pub carried_attributes: Option<horizon_world::nbt::Tag>,
     /// The vehicle the player's file names (`ServerPlayer.saveParentVehicle`'s
     /// "RootVehicle"), for the ride to come back on the next login.
     pub saved_vehicle: Option<[i32; 4]>,
@@ -410,6 +415,7 @@ impl Guest {
             tracker: Tracker::default(),
             motion: None,
             loaded_body: None,
+            carried_attributes: None,
             saved_vehicle: None,
             logs_kept: None,
             inventory: vec![None; 36],
@@ -600,13 +606,38 @@ impl Guest {
             Pose::Standing
         }
     }
-    /// `Avatar.POSES` for the guest's pose, with its scale attribute.
+    /// `Avatar.POSES` for the guest's pose, with its scale attribute: also for
+    /// a pose the client has announced (gliding) before the body's own tick
+    /// has taken it.
     pub fn dimensions(&self) -> Dimensions {
         let pose = self.pose();
         match &self.motion {
             Some(m) if m.pose == pose => m.dimensions,
-            _ => pose.dimensions(1.0),
+            Some(m) => pose.dimensions(m.scale),
+            None => pose.dimensions(1.0),
         }
+    }
+    /// The player's body is replaced (`ServerPlayer.restoreFrom`): the next
+    /// one starts from the old one's attributes, all of them when it is the
+    /// same player in another level (`restore_all`), only their base values
+    /// after a death. The old body, for what else it hands over.
+    pub fn new_body(&mut self, restore_all: bool) -> Option<Box<PlayerMotion>> {
+        let m = self.motion.take()?;
+        self.carried_attributes = Some(m.carried_attributes(restore_all));
+        Some(m)
+    }
+    /// `ServerPlayer.restoreFrom(old, false)`'s `setHealth(getMaxHealth())`:
+    /// the health a player comes back from a death with, the max health of
+    /// the base values their next body takes over, before its equipment
+    /// modifies it (40 after `/attribute @s minecraft:max_health base set
+    /// 40`, not 20).
+    pub fn respawn_health(&self, resources: &crate::motion::MotionResources) -> f32 {
+        let Ok(mut body) = PlayerMotion::new(resources, Vec3::ZERO) else {
+            return 20.0;
+        };
+        let _ = body.apply_saved_attributes(self.carried_attributes.as_ref());
+        body.attribute("minecraft:max_health")
+            .map_or(20.0, |max| max as f32)
     }
     /// `Entity.getBoundingBox`.
     pub fn bounds(&self) -> Aabb {
@@ -1383,5 +1414,103 @@ mod tests {
             template.component(component::CUSTOM_NAME),
             Some(Component::Text(_))
         ));
+    }
+
+    /// The prepared game data a body needs, or `None` without it.
+    fn resources() -> Option<(crate::assets::Assets, crate::motion::MotionResources)> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            eprintln!("skipped: prepared resources unavailable");
+            return None;
+        }
+        let assets = crate::assets::Assets::load(&root).ok()?;
+        let resources = crate::motion::MotionResources::load(&root, &assets).ok()?;
+        Some((assets, resources))
+    }
+
+    /// `/attribute @s <attribute> base set`, as `AttributeCommand` runs it,
+    /// and the next tick's `refreshDirtyAttributes` (the box of a new scale).
+    fn set_base(m: &mut PlayerMotion, attribute: &str, value: f64) {
+        let key = m.attributes.key(attribute).unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        m.attributes
+            .edit(&handle, |attribute, observer| {
+                attribute.set_base_value(value, observer)
+            })
+            .unwrap();
+        m.refresh_attributes().unwrap();
+    }
+
+    fn assert_dims(got: Dimensions, want: (f32, f32, f32), what: &str) {
+        let close = |a: f32, b: f32| (a - b).abs() <= 1e-5 * b.abs().max(1.0);
+        assert!(
+            close(got.width, want.0) && close(got.height, want.1) && close(got.eye_height, want.2),
+            "{what}: {got:?}, want {want:?}"
+        );
+    }
+
+    /// `ServerPlayer.restoreFrom(old, false)` takes the base values
+    /// (`assignBaseValues`), then `setHealth(getMaxHealth())`: a player whose
+    /// max health base was set comes back with that much, not 20, and a
+    /// permanent modifier (`/attribute ... modifier add`) does not count, as
+    /// it stays with the dead body. The attribute's range is 1..1024.
+    #[test]
+    fn a_respawned_player_has_the_max_health_of_their_base_values() {
+        use horizon_world::attributes::{Modifier, Operation};
+        let Some((_assets, resources)) = resources() else {
+            return;
+        };
+        for (base, bonus, want) in [
+            (40.0, 0.0, 40.0),
+            (10.0, 0.0, 10.0),
+            (20.0, 20.0, 20.0),
+            (0.0, 0.0, 1.0),
+            (2048.0, 0.0, 1024.0),
+        ] {
+            let mut g = guest_at([0.5, 64.0, 0.5]);
+            let mut m = PlayerMotion::new(&resources, Vec3::new(0.5, 64.0, 0.5)).unwrap();
+            set_base(&mut m, "minecraft:max_health", base);
+            let key = m.attributes.key("minecraft:max_health").unwrap();
+            let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+            let bonus = Modifier::new("test:bonus", bonus, Operation::AddValue).unwrap();
+            m.attributes
+                .edit(&handle, |a, o| a.add_permanent(bonus, o))
+                .unwrap();
+            g.motion = Some(Box::new(m));
+            assert!(g.new_body(false).is_some());
+            assert_eq!(g.respawn_health(&resources), want, "base {base}");
+        }
+        // No body to take anything from: the default.
+        let g = guest_at([0.5, 64.0, 0.5]);
+        assert_eq!(g.respawn_health(&resources), 20.0);
+    }
+
+    /// #3684: a glide the client announced (`START_FALL_FLYING`) is the
+    /// player's pose before its body's own tick has taken it: the box in
+    /// between is the gliding one at the player's scale, not at scale 1 (a
+    /// 0.6 box on a player 0.1 or 2 times as big sent them back from a wall).
+    #[test]
+    fn a_glide_announced_before_the_body_ticks_has_the_scaled_box() {
+        let Some((_assets, resources)) = resources() else {
+            return;
+        };
+        for (scale, side) in [(0.1_f64, 0.06_f32), (2.0, 1.2)] {
+            let mut g = guest_at([0.5, 64.0, 0.5]);
+            let mut m = PlayerMotion::new(&resources, Vec3::new(0.5, 64.0, 0.5)).unwrap();
+            set_base(&mut m, "minecraft:scale", scale);
+            m.set_pose(Pose::Standing).unwrap();
+            g.motion = Some(Box::new(m));
+            g.fall_flying = true;
+            assert_eq!(g.pose(), Pose::FallFlying);
+            assert_ne!(g.motion.as_ref().unwrap().pose, Pose::FallFlying);
+            let d = g.dimensions();
+            assert_dims(
+                d,
+                (side, side, side * (0.4 / 0.6)),
+                &format!("scale {scale}"),
+            );
+        }
     }
 }

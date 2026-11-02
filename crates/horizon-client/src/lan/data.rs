@@ -271,8 +271,7 @@ impl SyncData {
                 super::advancements::ServerAdvancements::load(resources, overlay, recipes, groups)
             },
         };
-        sync.recipes =
-            super::recipes::update_recipes(&sync.advancements.recipes, resources, &sync, overlay);
+        sync.recipes = super::recipes::update_recipes(&sync.advancements.recipes, &sync);
         Ok(sync)
     }
 

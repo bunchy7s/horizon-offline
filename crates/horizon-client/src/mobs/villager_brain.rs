@@ -775,7 +775,7 @@ fn sense_babies(m: &mut Mob, w: &MobWorld) {
     }
     mem(m).visible_villager_babies.set_list(babies);
 }
-/// `SecondaryPoiSensor`: a farmer's farmland within four blocks.
+/// `SecondaryPoiSensor.doTick`: a farmer's farmland within four blocks.
 fn sense_secondary(m: &mut Mob, w: &MobWorld) {
     let mut sites = Vec::new();
     if super::villager::is_farmer(m) {
@@ -784,7 +784,7 @@ fn sense_secondary(m: &mut Mob, w: &MobWorld) {
             for y in -2..=2 {
                 for z in -4..=4 {
                     let p = [c[0] + x, c[1] + y, c[2] + z];
-                    if w.block_name(p[0], p[1], p[2]) == "minecraft:farmland" {
+                    if farmland(w, p) {
                         sites.push(p);
                     }
                 }
@@ -3494,6 +3494,10 @@ fn restock_if_due(m: &mut Mob, w: &MobWorld) {
         t.restock(w.game_time);
     }
 }
+#[cfg(test)]
+#[path = "villager_farming_tests.rs"]
+mod farming_tests;
+
 /// `HarvestFarmland.validFarmlandAroundVillager`: ripe crops and bare
 /// farmland around the villager.
 fn farmland_around(m: &Mob, w: &MobWorld) -> Vec<[i32; 3]> {
@@ -3514,10 +3518,16 @@ fn farmland_around(m: &Mob, w: &MobWorld) -> Vec<[i32; 3]> {
     }
     valid
 }
+/// Farmland subclasses include mod templates.
+fn farmland(w: &MobWorld, p: [i32; 3]) -> bool {
+    w.facts
+        .get(w.world.block(p[0], p[1], p[2]))
+        .has_class("FarmlandBlock")
+}
+/// `HarvestFarmland.validPos`: a ripe CropBlock or air above farmland.
 fn farmland_valid(w: &MobWorld, p: [i32; 3]) -> bool {
     super::villager::ripe_crop(w, p)
-        || w.facts.is_air(w.world.block(p[0], p[1], p[2]))
-            && w.block_name(p[0], p[1] - 1, p[2]) == "minecraft:farmland"
+        || w.facts.is_air(w.world.block(p[0], p[1], p[2])) && farmland(w, [p[0], p[1] - 1, p[2]])
 }
 /// `HarvestFarmland.getValidFarmland`: one picked by the level random.
 fn pick_farmland(valid: &[[i32; 3]], cx: &mut Bx) -> Option<[i32; 3]> {
@@ -3527,17 +3537,13 @@ fn pick_farmland(valid: &[[i32; 3]], cx: &mut Bx) -> Option<[i32; 3]> {
     let i = cx.lr.next_int_bound(valid.len() as i32).unwrap_or(0) as usize;
     Some(valid[i])
 }
-/// The seeds a villager plants (`VILLAGER_PLANTABLE_SEEDS`) and their crops.
-fn seed_crop(item: &str) -> Option<&'static str> {
-    Some(match item {
-        "minecraft:wheat_seeds" => "minecraft:wheat",
-        "minecraft:potato" => "minecraft:potatoes",
-        "minecraft:carrot" => "minecraft:carrots",
-        "minecraft:beetroot_seeds" => "minecraft:beetroots",
-        "minecraft:torchflower_seeds" => "minecraft:torchflower_crop",
-        "minecraft:pitcher_pod" => "minecraft:pitcher_crop",
-        _ => return None,
-    })
+/// A tagged BlockItem plants its block's default state.
+fn seed_crop(w: &MobWorld, item: &str) -> Option<horizon_world::registry::BlockStateId> {
+    let items = w.items?;
+    if !items.item_in_tag("minecraft:villager_plantable_seeds", item) {
+        return None;
+    }
+    items.get(item)?.block
 }
 /// `HarvestFarmland.tick` at the farmland: harvest a ripe crop, sow bare
 /// farmland, and move on from a growing crop.
@@ -3559,23 +3565,22 @@ fn harvest_tick(
     if ripe {
         cx.events.push(MobEvent::BreakBlock { pos: p, drop: true });
     }
-    if air && w.block_name(p[0], p[1] - 1, p[2]) == "minecraft:farmland" {
+    if air && farmland(w, [p[0], p[1] - 1, p[2]]) {
         let e = super::villager::ext_mut(m);
-        if let Some(slot) = e
+        if let Some((slot, crop)) = e
             .inventory
             .iter()
-            .position(|s| s.count > 0 && seed_crop(&s.item).is_some())
+            .enumerate()
+            .filter(|(_, s)| s.count > 0)
+            .find_map(|(i, s)| seed_crop(w, &s.item).map(|crop| (i, crop)))
         {
-            let crop = seed_crop(&e.inventory[slot].item).unwrap_or("minecraft:wheat");
             e.inventory[slot].count -= 1;
             if e.inventory[slot].count == 0 {
                 e.inventory.remove(slot);
             }
-            cx.events.push(MobEvent::SetBlockName {
+            cx.events.push(MobEvent::SetBlock {
                 pos: p,
-                name: crop,
-                effect: false,
-                flags: horizon_world::level::flags::UPDATE_ALL,
+                state: crop,
             });
             cx.events.push(MobEvent::Sound(
                 "item.crop.plant",
