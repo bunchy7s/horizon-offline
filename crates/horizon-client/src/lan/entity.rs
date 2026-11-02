@@ -1158,7 +1158,10 @@ impl Entities {
             // tracking it, those just paired with it included.
             let synced = s.added
                 && e.kind != "minecraft:player"
-                && self.synced.iter().any(|&(after, through)| e.id > after && e.id <= through);
+                && self
+                    .synced
+                    .iter()
+                    .any(|&(after, through)| e.id > after && e.id <= through);
             if !s.added || synced {
                 s.send_changes(e, riding, &mut self.packets);
             }
@@ -1840,12 +1843,14 @@ mod tests {
         let entities = vec![&later];
         assert!(level.joined_states(&entities, vec![joined]).is_empty());
         c.tick(&mut level, &entities);
-        let moved = body(play::Clientbound::MoveEntityPos(MoveEntityPos(MoveEntity {
-            id: 7,
-            delta: Some(VecDelta::Linear([4096, 0, 0])),
-            rotation: None,
-            on_ground: true,
-        })));
+        let moved = body(play::Clientbound::MoveEntityPos(MoveEntityPos(
+            MoveEntity {
+                id: 7,
+                delta: Some(VecDelta::Linear([4096, 0, 0])),
+                rotation: None,
+                on_ground: true,
+            },
+        )));
         assert!(c.out[0].contains(&moved), "{:?}", c.out[0]);
     }
 
@@ -1861,12 +1866,14 @@ mod tests {
         let mut sand = state(0.5);
         sand.kind = "minecraft:falling_block".into();
         let move_by = |dy: i16| {
-            body(play::Clientbound::MoveEntityPos(MoveEntityPos(MoveEntity {
-                id: 7,
-                delta: Some(VecDelta::Linear([0, dy, 0])),
-                rotation: None,
-                on_ground: true,
-            })))
+            body(play::Clientbound::MoveEntityPos(MoveEntityPos(
+                MoveEntity {
+                    id: 7,
+                    delta: Some(VecDelta::Linear([0, dy, 0])),
+                    rotation: None,
+                    on_ground: true,
+                },
+            )))
         };
         let passes = |synced: Vec<(i32, i32)>| {
             let mut level = Entities {
