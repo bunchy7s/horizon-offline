@@ -467,6 +467,124 @@ fn upgrade_condition(c: &mut Value) {
     {
         *c = json!(named);
     }
+    match c["type"].as_str() {
+        Some("minecraft:entity_properties") => {
+            if let Some(p) = c.get_mut("predicate") {
+                upgrade_entity_predicate(p);
+            }
+        }
+        Some("minecraft:damage_source_properties") => {
+            for key in ["direct_entity", "source_entity"] {
+                if let Some(p) = c["predicate"].get_mut(key) {
+                    upgrade_entity_predicate(p);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The fields of a 1.21 entity predicate that are, in 26.3, sub-predicates
+/// keyed by their registry name (`minecraft:<field>`), as 26.3's own data
+/// writes them (`"minecraft:flags": {"is_on_fire": true}`).
+const ENTITY_FIELDS: [&str; 15] = [
+    "distance",
+    "movement",
+    "location",
+    "stepping_on",
+    "movement_affected_by",
+    "effects",
+    "nbt",
+    "flags",
+    "equipment",
+    "periodic_tick",
+    "team",
+    "slots",
+    "components",
+    "predicates",
+    "type_specific",
+];
+
+/// Entity predicates nested in an entity predicate (1.21 field names).
+const ENTITY_NESTED: [&str; 3] = ["vehicle", "passenger", "targeted_entity"];
+
+/// Kinds of 1.21's `type_specific` whose `variant` 26.3 matches as a component
+/// (`"minecraft:components": {"minecraft:cat/variant": ...}`).
+const VARIANT_KINDS: [&str; 14] = [
+    "axolotl",
+    "cat",
+    "chicken",
+    "cow",
+    "fox",
+    "frog",
+    "horse",
+    "llama",
+    "mooshroom",
+    "painting",
+    "parrot",
+    "pig",
+    "rabbit",
+    "wolf",
+];
+
+/// A 1.21 entity predicate in 26.3's shape, in place: `type` is
+/// `minecraft:entity_type`, every other field `minecraft:<field>`, `vehicle`,
+/// `passenger` and `targeted_entity` recursively; `type_specific {"type": k,
+/// ...}` is `minecraft:type_specific/<k>` (`slime` is `cube_mob`), a variant
+/// kind's `variant` and a sheep's `color` go to `minecraft:components`. The
+/// game's loot code reads only these keys, so an old-shaped predicate never
+/// matched. A predicate already in 26.3's shape stays as it is.
+pub(crate) fn upgrade_entity_predicate(p: &mut Value) {
+    let Some(o) = p.as_object_mut() else {
+        return;
+    };
+    let key = |f: &str| format!("minecraft:{f}");
+    if let Some(t) = o.remove("type") {
+        o.insert(key("entity_type"), t);
+    }
+    for f in ENTITY_NESTED {
+        if let Some(mut inner) = o.remove(f) {
+            upgrade_entity_predicate(&mut inner);
+            o.insert(key(f), inner);
+        }
+    }
+    for f in ENTITY_FIELDS {
+        if let Some(v) = o.remove(f) {
+            o.insert(key(f), v);
+        }
+    }
+    let Some(Value::Object(mut ts)) = o.remove("minecraft:type_specific") else {
+        return;
+    };
+    let kind = ts.remove("type");
+    let kind = kind.as_ref().and_then(Value::as_str).unwrap_or("any");
+    let kind = match kind.trim_start_matches("minecraft:") {
+        "slime" => "cube_mob",
+        k => k,
+    };
+    let component = match kind {
+        k if VARIANT_KINDS.contains(&k) => {
+            ts.remove("variant").map(|v| (format!("{k}/variant"), v))
+        }
+        "sheep" => ts.remove("color").map(|v| ("sheep/color".to_owned(), v)),
+        _ => None,
+    };
+    if let Some((name, v)) = component {
+        let components = o.entry(key("components")).or_insert_with(|| json!({}));
+        if let Some(c) = components.as_object_mut() {
+            c.insert(key(&name), v);
+        }
+    }
+    // A player's `looking_at`, a lightning bolt's `entity_struck`.
+    for f in ["looking_at", "entity_struck"] {
+        if let Some(v) = ts.get_mut(f) {
+            upgrade_entity_predicate(v);
+        }
+    }
+    // A variant kind with nothing else to match is the component alone.
+    if !ts.is_empty() || !(kind == "any" || VARIANT_KINDS.contains(&kind)) {
+        o.insert(key(&format!("type_specific/{kind}")), Value::Object(ts));
+    }
 }
 
 /// 26.3's named tool conditions for the 1.21.1 predicates they replace.
@@ -1422,6 +1540,59 @@ mod tests {
         let mut new = glass.clone();
         upgrade_loot(&mut new);
         assert_eq!(new, glass);
+    }
+
+    /// Entity predicates in 26.3's keys, as its own tables write them; the
+    /// 1.21 shape never matched in the game's loot code.
+    #[test]
+    fn entity_predicates_get_26_3_keys() {
+        let mut t = json!({"pools": [{"rolls": 1, "entries": [{"type": "minecraft:item", "name": "m:hide",
+        "functions": [{"function": "minecraft:furnace_smelt", "conditions": [{
+            "condition": "minecraft:entity_properties", "entity": "this",
+            "predicate": {"flags": {"is_on_fire": true}}}]}],
+        "conditions": [
+            {"condition": "minecraft:entity_properties", "entity": "this",
+                "predicate": {"type": "minecraft:cow", "vehicle": {"type": "#minecraft:boats"},
+                    "type_specific": {"type": "minecraft:frog", "variant": "minecraft:warm"}}},
+            {"condition": "minecraft:damage_source_properties", "predicate": {
+                "source_entity": {"type": "minecraft:player", "equipment": {"mainhand": {"items": "minecraft:shears"}}},
+                "is_direct": true}},
+            {"condition": "minecraft:entity_properties", "entity": "attacker",
+                "predicate": {"type_specific": {"type": "minecraft:slime", "size": {"min": 2}}}},
+            {"condition": "minecraft:entity_properties", "entity": "this",
+                "predicate": {"type_specific": {"type": "sheep", "sheared": false, "color": "black"}}}
+        ]}]}]});
+        upgrade_loot(&mut t);
+        let e = &t["pools"][0]["entries"][0];
+        assert_eq!(
+            e["modifier"][0]["condition"]["predicate"],
+            json!({"minecraft:flags": {"is_on_fire": true}})
+        );
+        let c = &e["condition"]["terms"];
+        assert_eq!(
+            c[0]["predicate"],
+            json!({"minecraft:entity_type": "minecraft:cow",
+                "minecraft:vehicle": {"minecraft:entity_type": "#minecraft:boats"},
+                "minecraft:components": {"minecraft:frog/variant": "minecraft:warm"}})
+        );
+        assert_eq!(
+            c[1]["predicate"],
+            json!({"source_entity": {"minecraft:entity_type": "minecraft:player",
+                "minecraft:equipment": {"mainhand": {"items": "minecraft:shears"}}}, "is_direct": true})
+        );
+        assert_eq!(
+            c[2]["predicate"],
+            json!({"minecraft:type_specific/cube_mob": {"size": {"min": 2}}})
+        );
+        assert_eq!(
+            c[3]["predicate"],
+            json!({"minecraft:type_specific/sheep": {"sheared": false},
+                "minecraft:components": {"minecraft:sheep/color": "black"}})
+        );
+        // Already 26.3's shape: unchanged.
+        let again = t.clone();
+        upgrade_loot(&mut t);
+        assert_eq!(t, again);
     }
 
     #[test]

@@ -1686,6 +1686,38 @@ def summoned_potions():
     return ops
 
 
+def trial_spawner_passengers():
+    """Configured passengers must exist as entities with a vehicle (#7254)."""
+    ops = [*setup('/fill 1 219 1 13 219 8 stone',
+                  '/fill 1 220 1 13 224 8 air', '/gamerule spawn_mobs true')]
+    # Exercise namespace and position independently, plus the explicit control.
+    for i, (kind, pos) in enumerate([
+        ('chicken', ''), ('minecraft:chicken', ''),
+        ('chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+        ('minecraft:chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+    ]):
+        parent, rider = f'trial_parent_{i}', f'trial_rider_{i}'
+        ops += setup(
+            '/setblock 4 220 4 trial_spawner[trial_spawner_state=active]'
+            '{normal_config:{spawn_range:3,total_mobs:1.0f,simultaneous_mobs:1.0f,'
+            'total_mobs_added_per_player:0.0f,simultaneous_mobs_added_per_player:0.0f,'
+            'ticks_between_spawn:1000},spawn_data:{entity:{id:"zombie",'
+            f'Tags:["{parent}"],Pos:[4.5d,220.0d,6.5d],NoAI:1b,'
+            f'Passengers:[{{id:"{kind}",NoAI:1b,Tags:["{rider}"]{pos}}}]'
+            '}},next_mob_spawns_at:0L}',
+            '/data modify block 4 220 4 registered_players append from entity @s UUID')
+        ops += [
+            {'op': 'tick', 'n': 5},
+            cmd(f'/execute if entity @e[tag={parent}]'),
+            cmd(f'/execute if entity @e[tag={rider}]'),
+            cmd(f'/execute as @e[tag={rider}] on vehicle if entity @s[tag={parent}]'),
+            cmd(f'/data get entity @e[tag={parent},limit=1] Passengers[0].Tags'),
+            *setup(f'/kill @e[tag={parent}]', f'/kill @e[tag={rider}]',
+                   '/setblock 4 220 4 air'),
+        ]
+    return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1698,6 +1730,7 @@ def groups():
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
+        ('trial spawner passengers', trial_spawner_passengers()),
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
         ('execute', execute()),
