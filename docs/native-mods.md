@@ -1346,6 +1346,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
   `native_action_bar(uuid, text)`, a line over a player's hotbar, which also reaches the acting player inside their
   hook.
+- **`native_food_level_changed(player, name, from, to, cancel)`**: the food level of a player is about to change, on a
+  server (eating, hunger and saturation effects, exhaustion, starving), before the new level reaches them. Change `to`
+  (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
+  player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
+  player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - **`native_right_click_block(pos, face, canceled)`** (API 21): a player's right click on a block, before the block's
   own use and the item's (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both,
   without a swing; the player's client is sent the block back. With `native_destroy_block` it keeps players out of

@@ -663,6 +663,28 @@ impl Game<'_> {
         }
         // A totem that saved the guest this turn (its hurt set it off).
         let totem = self.apply_totem();
+        // The mods hear the food level the turn changed (eating, hunger,
+        // starving...), once for the change it made as a whole, with the
+        // guest's state still swapped in; they may change or undo it before it
+        // reaches the guest.
+        if let Some(now) = self.player.as_ref().map(|p| p.health.food.food)
+            && let Some(g) = host.hub.guests.get(swap.i)
+            && g.food != now
+        {
+            let (uuid, name, from, saturation) = (g.uuid, g.name.clone(), g.food, g.saturation);
+            let (mut to, mut cancel) = (now, false);
+            self.native_food_level_changed(uuid, &name, from, &mut to, &mut cancel);
+            if let Some(p) = self.player.as_mut() {
+                if cancel {
+                    p.health.food.food = from;
+                    p.health.food.saturation = saturation;
+                } else if to != now {
+                    p.health.food.food = to.clamp(0, 20);
+                    p.health.food.saturation =
+                        p.health.food.saturation.min(p.health.food.food as f32);
+                }
+            }
+        }
         let GuestSwap {
             conn,
             i,
