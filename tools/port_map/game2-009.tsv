@@ -68,7 +68,7 @@ ItemContainerContents.itemCopies	skip:other		no callers in the vanilla source
 ItemContainerContents.asMutable	skip:other		no callers in the vanilla source
 ItemContainerContents.equals	skip:java		value equality; Horizon compares the item data directly
 KineticWeapon.makeLocalHitSound	port	crates/horizon-client/src/game/spear.rs::Game::kinetic_hit_feedback	the local hit sound, at most once per ten ticks per entity
-KineticWeapon.computeDamageUseDuration	missing		unsure: the use duration (delay plus the damage window) is not computed in Horizon's use_spear or spear_tick; the windows are checked one by one
+KineticWeapon.computeDamageUseDuration	port	crates/horizon-client/src/spear.rs::Kinetic::damage_use_duration	the delay plus the damage window's duration, which `SpearUseGoal` and `SpearAttack` read as the spear's use duration
 KineticWeapon.Condition.test	port	crates/horizon-client/src/spear.rs::Condition::test	tick, attacker speed and relative speed against the scaled minimums
 PiercingWeapon.makeHitSound	port	crates/horizon-client/src/game/spear.rs::Game::jab	gap: minor: the hit sound plays at this player's feet only; vanilla plays it for everyone nearby
 ResolvableProfile.createUnresolved	port	crates/horizon-client-render/src/skins.rs::parse_profile	keeps a name or id as the unresolved key, resolved later
@@ -97,7 +97,7 @@ Ingredient.testOptionalIngredient	port	crates/horizon-client/src/crafting.rs::In
 Ingredient.equals	skip:java		value equality
 Ingredient.of	port	crates/horizon-client/src/crafting.rs::Ingredient::of	ingredient from item ids
 Ingredient.displayForSingleItem	skip:other		no callers in the vanilla source
-Ingredient.getSingleItem	missing		unsure: returns the one item of a single-item ingredient; no Horizon function found in this pass
+Ingredient.getSingleItem	skip:data		only `BrewingRecipeBuilder.defaultId` (datagen) asks for it; the brewing recipes Horizon reads come from the JSON tables
 PlacementInfo.create	port	crates/horizon-client/src/crafting.rs::Placement::of	placement for one ingredient, none when it is empty
 PotionIngredient.test	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::test	item id and the potion filter
 PotionIngredient.of	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::parse	built from the recipe JSON, with the potion filter
