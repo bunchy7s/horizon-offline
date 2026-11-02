@@ -33,8 +33,8 @@ ClientboundBossEventPacket.createUpdateStylePacket	inline	crates/horizon-client/
 ClientboundBossEventPacket.createUpdatePropertiesPacket	inline	crates/horizon-client/src/game/bossbars.rs::Game::diff_boss_events	UpdateProperties when darken, boss music or fog differ
 ClientboundBossEventPacket.encodeProperties	port	crates/horizon-protocol/src/packets/play.rs::boss_flags	the three flag bits (darken, music, fog)
 ClientboundBossEventPacket.AddOperation.dispatch	port	crates/horizon-client/src/boss_overlay.rs::BossOverlay::apply	
-ClientboundChunksBiomesPacket.ChunkBiomeData.calculateChunkSize	missing		minor: biome-only chunk updates are never sent; no ChunksBiomes packet in ids.rs
-ClientboundChunksBiomesPacket.ChunkBiomeData.extractChunkData	missing		minor: biome-only chunk updates are never sent; no ChunksBiomes packet in ids.rs
+ClientboundChunksBiomesPacket.ChunkBiomeData.calculateChunkSize	inline	crates/horizon-protocol/src/packets/play.rs::ChunkBiomeData::from_biomes	the buffer grows as each section's container is written, so no size is computed or prefixed on the wire
+ClientboundChunksBiomesPacket.ChunkBiomeData.extractChunkData	port	crates/horizon-protocol/src/packets/play.rs::ChunkBiomeData::from_biomes	the column's sections' biome containers written one after another into the buffer
 ClientboundCommandSuggestionsPacket.toSuggestions	port	crates/horizon-client/src/game/remote.rs::Game::handle_command_suggestions	start, length and tooltip become the suggestion range
 ClientboundCommandsPacket.validateEntries	missing		minor: an impossible command tree is not rejected; from_packet skips bad child indexes
 ClientboundCommandsPacket.enumerateNodes	port	crates/horizon-client/src/lan/commands.rs::CommandTree::packet_with	breadth-first node ids on the LAN host
