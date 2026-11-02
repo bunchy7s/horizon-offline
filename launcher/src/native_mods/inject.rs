@@ -1,4 +1,4 @@
-//! Trait-backed HEAD injections, generated in the incoming copy and staged game.
+//! Trait-backed injections, generated in the incoming copy and staged game.
 use super::{api, Bundle, MANIFEST};
 use quote::{format_ident, quote};
 use std::{
@@ -14,7 +14,18 @@ pub(super) struct Injection {
     /// The bindings' struct, as each catalog hook's (`InjectExampleTickEvent`).
     event: syn::Ident,
     parameters: Vec<(syn::Ident, syn::Type)>,
-    cancellable: bool,
+    contract: Contract,
+}
+
+/// What a trait method may do with its event.
+enum Contract {
+    /// HEAD: observe and change `&mut` bindings.
+    Listen,
+    /// Cancellable HEAD on a unit target, where `Flow::Cancel` returns early.
+    Cancel,
+    /// RETURN, MODIFY_ARG or MODIFY_EXPRESSION_VALUE: the ident names the `$value` binding,
+    /// which is moved into the event and returned after the call.
+    Value(syn::Ident),
 }
 
 /// Turns a binding's type into its event field's: a `&mut` primitive scalar becomes the value,
@@ -136,12 +147,6 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                 if target_crate != "horizon_client" {
                     return Err(format!("trait injection target {target:?} is in crate {target_crate:?}; only horizon-client targets are supported"));
                 }
-                if table.get("kind").and_then(toml::Value::as_str) != Some("HEAD") {
-                    return Err(format!(
-                        "{}: trait_method supports only HEAD injections",
-                        path.display()
-                    ));
-                }
                 if table.contains_key("helper") {
                     return Err(format!(
                         "{}: trait_method cannot also specify helper",
@@ -165,6 +170,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                 };
                 let mut parameters = Vec::new();
                 let mut seen = HashSet::new();
+                let mut value = None;
                 if let Some(bindings) = table.get("bindings") {
                     for binding in bindings.as_array().ok_or("bindings must be an array")? {
                         let binding = binding.as_table().ok_or("binding must be a table")?;
@@ -183,9 +189,40 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                             .ok_or("binding needs a type")?;
                         let ty: syn::Type =
                             syn::parse_str(ty).map_err(|e| format!("invalid binding type: {e}"))?;
+                        if binding.get("value").and_then(toml::Value::as_str) == Some("$value") {
+                            value = Some(ident.clone());
+                        }
                         parameters.push((ident, ty));
                     }
                 }
+                let kind = table
+                    .get("kind")
+                    .and_then(toml::Value::as_str)
+                    .unwrap_or_default();
+                let contract = match (kind, cancellable) {
+                    ("HEAD", false) => Contract::Listen,
+                    ("HEAD", true) => Contract::Cancel,
+                    ("RETURN" | "MODIFY_ARG" | "MODIFY_EXPRESSION_VALUE", false) => {
+                        Contract::Value(value.ok_or_else(|| {
+                            format!(
+                                "{}: a {kind} trait_method needs a `$value` binding",
+                                path.display()
+                            )
+                        })?)
+                    }
+                    (_, true) => {
+                        return Err(format!(
+                            "{}: cancellable trait_method needs HEAD",
+                            path.display()
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "{}: trait_method supports HEAD, RETURN, MODIFY_ARG and MODIFY_EXPRESSION_VALUE",
+                            path.display()
+                        ));
+                    }
+                };
                 let event = format_ident!(
                     "{}Event",
                     name.split('_')
@@ -201,7 +238,7 @@ pub(super) fn prepare(mods: &[Bundle], source: &Path) -> Result<Vec<Injection>, 
                     name: ident,
                     event,
                     parameters,
-                    cancellable,
+                    contract,
                 };
                 let helper_path = format!("horizon-trait-injection-{index}.rs");
                 let helper_file = bundle.dir.join(&helper_path);
@@ -251,27 +288,34 @@ impl Injection {
             .zip(&scalars)
             .filter(|(_, scalar)| **scalar)
             .map(|((n, _), _)| quote!(*#n = event.#n;));
-        let call = quote! {{
+        let call = quote! {
             let mut event = crate::mod_api::#event { #(#inits),* };
-            let result = owner.#name(&mut event);
+            let _flow = owner.#name(&mut event);
             #(#write_back)*
-            result
-        }};
+        };
         // Before the mods are installed (an injection into code `main_with` runs first), or
-        // with fewer mods than the build had, the injection does nothing.
-        let (output, result, absent) = if self.cancellable {
-            (
+        // with fewer mods than the build had, the injection does nothing or passes the value on.
+        let (output, result, absent) = match &self.contract {
+            Contract::Listen => (quote!(), call, quote!()),
+            Contract::Cancel => (
                 quote!(-> core::ops::ControlFlow<()>),
                 quote! {
-                    if #call == crate::mod_api::Flow::Cancel {
+                    #call
+                    if _flow == crate::mod_api::Flow::Cancel {
                         return core::ops::ControlFlow::Break(());
                     }
                     core::ops::ControlFlow::Continue(())
                 },
                 quote!(core::ops::ControlFlow::Continue(())),
-            )
-        } else {
-            (quote!(), quote!(#call;), quote!())
+            ),
+            Contract::Value(value) => {
+                let ty = self
+                    .parameters
+                    .iter()
+                    .find(|(n, _)| n == value)
+                    .map(|(_, t)| t);
+                (quote!(-> #ty), quote!(#call event.#value), quote!(#value))
+            }
         };
         quote! {
             fn horizon_trait_dispatch(#(#params),*) #output {
@@ -287,10 +331,9 @@ impl Injection {
     fn declaration(&self) -> String {
         let name = &self.name;
         let event = &self.event;
-        let (output, default) = if self.cancellable {
-            (quote!(-> Flow), quote!(Flow::Continue))
-        } else {
-            (quote!(), quote!())
+        let (output, default) = match self.contract {
+            Contract::Cancel => (quote!(-> Flow), quote!(Flow::Continue)),
+            Contract::Listen | Contract::Value(_) => (quote!(), quote!()),
         };
         let elided = match self.lifetimes().0 {
             (_, true) => quote!(<'_, '_>),
@@ -306,7 +349,14 @@ impl Injection {
         let (types, scalars) = self
             .parameters
             .iter()
-            .map(|(_, ty)| lifetimes.field(ty))
+            .map(|(name, ty)| match &self.contract {
+                Contract::Value(value) if name == value => {
+                    let mut field = ty.clone();
+                    lifetimes.visit_type_mut(&mut field);
+                    (field, false)
+                }
+                _ => lifetimes.field(ty),
+            })
             .unzip();
         ((lifetimes.a, lifetimes.b), types, scalars)
     }
