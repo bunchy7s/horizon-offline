@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "player_save_to_file",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_save_to_file",
+      "neoforge": "PlayerEvent.SaveToFile (not cancellable)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a player saved to the world's store (`native_player_save_to_file`).",
+  "doc_summary": "a player saved to the world's store: `native_player_save_to_file(player, name, directory)` is heard once for each save of a placed player (when they leave or the world closes, when the dedicated server saves everyone, and for an integrated server's owner when the world saves them; LAN guests are not heard on integrated autosaves) after their data is written (NeoForge's `PlayerEvent.SaveToFile`, `PlayerList.save`). `directory` is the world's player directory (`players/data`); write your own file there, named `<uuid>.<suffix>`, never the player's `.dat`. The player may be leaving, so no player's state is swapped in. It cannot change or stop anything. Bundles that use it need `\"hooks\": @API:native_player_save_to_file@`."
+}

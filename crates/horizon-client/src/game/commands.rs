@@ -2202,13 +2202,7 @@ impl Game<'_> {
                         health: 5,
                     });
                     // tryAddFreshEntityWithPassengers refused: ERROR_DUPLICATE_UUID.
-                    if !self.native_entity_joins(
-                        self.next_entity,
-                        "minecraft:experience_orb",
-                        pos,
-                        false,
-                    ) {
-                        self.orbs.pop();
+                    if !self.native_joins_flush(false, self.next_entity) {
                         return Err(err("commands.summon.failed.uuid", &[]));
                     }
                     name = Text::translate("entity.minecraft.experience_orb", &[]);

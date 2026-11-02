@@ -72,6 +72,21 @@ pub fn started(shared: &Shared) {
     notify(shared, "notification/server/started", None);
 }
 
+/// The notification a typed event of the game is, if vanilla sends one for it: a player who joined or left
+/// (`playerJoined`, `playerLeft`, with the player as a `PlayerDto`), and a world save that began or ended
+/// (`serverSaveStarted`, `serverSaveCompleted`).
+pub fn game_event(shared: &Shared, kind: &str, event: &Value) {
+    let player = || Some(json!({ "id": event["uuid"], "name": event["name"] }));
+    let (method, params) = match kind {
+        "join" => ("notification/players/joined", player()),
+        "leave" => ("notification/players/left", player()),
+        "saving" => ("notification/server/saving", None),
+        "saved" => ("notification/server/saved", None),
+        _ => return,
+    };
+    notify(shared, method, params);
+}
+
 /// `NotificationService.serverShuttingDown`, which `DedicatedServer.stopServer` sends first of all.
 pub fn stopping(shared: &Shared) {
     if !shared.management.stopping_told.swap(true, Ordering::SeqCst) {
@@ -765,12 +780,20 @@ mod tests {
         stream
     }
 
-    /// The text of the next frame the server sends (unmasked, short enough for a 7-bit length).
+    /// The text of the next frame the server sends (unmasked, shorter than 65536 bytes).
     fn next_text(stream: &mut TcpStream) -> String {
         let mut head = [0u8; 2];
         stream.read_exact(&mut head).unwrap();
         assert_eq!(head[0], 0x81);
-        let mut payload = vec![0u8; usize::from(head[1])];
+        let length = match head[1] {
+            126 => {
+                let mut b = [0u8; 2];
+                stream.read_exact(&mut b).unwrap();
+                usize::from(u16::from_be_bytes(b))
+            }
+            n => usize::from(n),
+        };
+        let mut payload = vec![0u8; length];
         stream.read_exact(&mut payload).unwrap();
         String::from_utf8(payload).unwrap()
     }
@@ -830,6 +853,47 @@ mod tests {
     }
 
     #[test]
+    fn the_games_events_become_the_notifications_vanilla_sends() {
+        let shared = shared();
+        let address = listen_on(shared.clone(), settings());
+        let mut client = upgrade(address);
+        registered(&shared, 1);
+        let id = "0123abcd-0000-4000-8000-00000000000a";
+        let joined = json!({ "type": "join", "name": "Kim0", "uuid": id });
+        game_event(&shared, "join", &joined);
+        game_event(
+            &shared,
+            "chat",
+            &json!({ "name": "Kim0", "uuid": id, "message": "hi" }),
+        );
+        game_event(&shared, "saving", &json!({ "type": "saving" }));
+        game_event(&shared, "saved", &json!({ "type": "saved" }));
+        game_event(&shared, "leave", &json!({ "name": "Kim0", "uuid": id }));
+        // The chat is not a notification; the rest come in order, the player as a `PlayerDto`.
+        let player = format!(r#"[{{"id":"{id}","name":"Kim0"}}]"#);
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/players/joined","params":{player}}}"#
+            )
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/saving"}"#
+        );
+        assert_eq!(
+            next_text(&mut client),
+            r#"{"jsonrpc":"2.0","method":"minecraft:notification/server/saved"}"#
+        );
+        assert_eq!(
+            next_text(&mut client),
+            format!(
+                r#"{{"jsonrpc":"2.0","method":"minecraft:notification/players/left","params":{player}}}"#
+            )
+        );
+    }
+
+    #[test]
     fn every_notification_sent_is_one_discover_lists() {
         let listed = schema::discover();
         let names: Vec<&str> = listed["methods"]
@@ -841,6 +905,10 @@ mod tests {
         for sent in [
             "notification/server/started",
             "notification/server/stopping",
+            "notification/server/saving",
+            "notification/server/saved",
+            "notification/players/joined",
+            "notification/players/left",
         ] {
             assert!(
                 names.contains(&format!("minecraft:{sent}").as_str()),

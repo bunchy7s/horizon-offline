@@ -17,7 +17,7 @@ AbstractHorse.fedFood	port	crates/horizon-client/src/game/mounts.rs::Game::feed_
 AbstractHorse.doPlayerRide	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	clears eating and standing, turns the player to the mount and mounts; the block at the end of interact_mount
 AbstractHorse.isImmobile	port	crates/horizon-client/src/mobs/equine.rs::immobile	
 AbstractHorse.dropEquipment	inline	crates/horizon-client/src/mobs/drops.rs::die	the equine branch drops the inventory items and a donkey's or mule's chest
-AbstractHorse.followMommy	missing		minor: no Bred flag, so a bred foal is not pulled to its mother from 16 blocks; the FollowParent goal covers 8
+AbstractHorse.followMommy	inline	crates/horizon-client/src/mobs/equine.rs::ai_step	follow_mommy: a bred foal that is not eating keeps a path to the nearest bred AbstractHorse within 16 blocks and more than 2 away (createPath(entity, 0), which leaves the speed modifier alone); Bred is NBT-only in 26.3, so only a save or a summon gives it
 AbstractHorse.openMouth	inline	crates/horizon-client/src/game/mounts.rs::Game::feed_mount	gap: minor: sets the mouth animation to 1 once, it closes after 3 ticks; the mouth flag is not synced to a remote client
 AbstractHorse.setStanding	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	the 20 tick rear; RandomStand::start and the jump in tick_mount_riding set the same counter
 AbstractHorse.standIfPossible	inline	crates/horizon-client/src/mobs/equine.rs::make_mad	rears only species that can; the hurt caller is missing (see hurtServer)
@@ -129,7 +129,7 @@ AbstractSchoolingFish.addFollowers	inline	crates/horizon-client/src/mobs/aquatic
 AbstractSchoolingFish.finalizeSpawn	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	the group shares a leader id and variant, and FollowFlockLeader (crates/horizon-client/src/mobs/aquatic.rs) paths a follower to the leader every 10 ticks
 Pufferfish.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	`getIntOr("PuffState", 0)` at most 2; mob_to_nbt writes it, and a reload test covers it
 Pufferfish.registerGoals	port	crates/horizon-client/src/mobs/aquatic.rs::register	the puff goal at priority 1
-Pufferfish.touch	missing		minor: only the player is stung (inside ai_step); other mobs touching a puffed fish are not hurt or poisoned
+Pufferfish.touch	inline	crates/horizon-client/src/mobs/aquatic.rs::ai_step	sting_touching_mobs: alive mobs outside #not_scary_for_pufferfish whose box meets the fish's inflated by 0.3, when teams allow damage, take a mobAttack hit for puff state + 1, then, once it lands, POISON for 60 * puff state and the sting sound (game/creatures.rs PufferfishSting)
 Salmon.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	size entry, small 0 to large 2
 Salmon.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	the type tag, medium by default
 Salmon.get	inline	crates/horizon-client/src/entity_nbt.rs::bucket_components	the size component goes onto the bucket

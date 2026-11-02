@@ -143,7 +143,7 @@ impl Game<'_> {
         if !self.creative {
             self.consume_held();
         }
-        self.stats.custom("play_record", 1);
+        self.award_custom_stat("play_record", 1);
         self.world.block_entities.insert(
             (pos[0], pos[1], pos[2]),
             BlockEntity::Jukebox(Jukebox {

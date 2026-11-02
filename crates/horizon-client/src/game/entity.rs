@@ -21,6 +21,7 @@ use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::nbt::Tag;
 use horizon_world::{level::data::PushReaction, piston_push};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 /// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
@@ -61,6 +62,8 @@ pub(super) trait Entity: EntityRules {
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
     /// name yet. Required, so a new kind states which.
     fn selector_target(&self) -> Option<Target>;
+    /// The entity type id a native mod's join hook names (`minecraft:oak_boat`).
+    fn native_type(&self) -> Cow<'static, str>;
     /// Saves entity `index` of this kind into its chunk's entity list: the
     /// chunk and the NBT when it lies in `keys` and is saved with its chunk.
     /// Required, so a new kind states how it saves.
@@ -313,6 +316,15 @@ macro_rules! define_entity_handles {
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
             }
 
+            /// Takes the entity out of its list (`Entity.discard` before it ever ticked).
+            pub(super) fn discard_entity(&mut self, handle: EntityHandle) {
+                match handle {
+                    $(EntityHandle::$kind(i) => {
+                        self$(.$list)+.remove(i);
+                    })*
+                }
+            }
+
             /// [`Self::entity_handles`], last of each list first, so the
             /// caller can remove the entity it is on.
             pub(super) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
@@ -452,6 +464,9 @@ impl Game<'_> {
 }
 
 impl Entity for Mob {
+    fn native_type(&self) -> Cow<'static, str> {
+        super::native_hooks::mob_kind(self).into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -534,6 +549,9 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:item".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -576,6 +594,9 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:experience_orb".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -615,6 +636,9 @@ impl Entity for ExperienceOrb {
 }
 
 impl Entity for Boat {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.entity_type().into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -658,6 +682,9 @@ impl Entity for Boat {
 }
 
 impl Entity for Minecart {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -711,6 +738,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:armor_stand".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -783,6 +813,9 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:tnt".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -824,6 +857,9 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:falling_block".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -841,6 +877,9 @@ impl Entity for FallingBlock {
 }
 
 impl Entity for Projectile {
+    fn native_type(&self) -> Cow<'static, str> {
+        self.kind.id().into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -901,6 +940,9 @@ impl Entity for Projectile {
 }
 
 impl Entity for Rocket {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:firework_rocket".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
@@ -933,6 +975,9 @@ impl Entity for Rocket {
 }
 
 impl Entity for ThrownTrident {
+    fn native_type(&self) -> Cow<'static, str> {
+        "minecraft:trident".into()
+    }
     fn save_nbt(
         game: &mut Game<'_>,
         index: usize,
