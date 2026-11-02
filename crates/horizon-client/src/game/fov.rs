@@ -17,6 +17,14 @@ use horizon_client::{
 /// `Abilities.walkingSpeed`.
 const WALKING_SPEED: f32 = 0.1;
 
+fn valid_fov_modifier(modifier: f32, fallback: f32) -> f32 {
+    if modifier.is_finite() && (0.01..=10.0).contains(&modifier) {
+        modifier
+    } else {
+        fallback
+    }
+}
+
 impl Game<'_> {
     /// `Player.isScoping`: using a spyglass.
     pub(super) fn scoping(&self) -> bool {
@@ -75,9 +83,12 @@ impl Game<'_> {
     pub(super) fn tick_fov(&mut self) {
         let first_person = self.camera_type.first_person();
         let effect = self.fov_effect_scale();
-        let target = self
-            .fov_player()
-            .map_or(1.0, |p| field_of_view_modifier(&p, first_person, effect));
+        let target = self.fov_player().map_or(1.0, |player| {
+            let base = field_of_view_modifier(&player, first_person, effect);
+            let mut modifier = base;
+            self.native_compute_fov_modifier(&player, base, &mut modifier);
+            valid_fov_modifier(modifier, base)
+        });
         let target = self.zoomed_fov_target(target);
         // A server's spectator camera on a mob: its eye height. Its modifier
         // stays 1 (another player's own modifier is not modelled here); the
@@ -217,5 +228,17 @@ impl Game<'_> {
         let draws =
             hud_overlays::spyglass(batch.width as i32, batch.height as i32, self.scope_scale);
         hud_layout::paint(batch, &self.gui.atlas, &draws);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_fov_modifier;
+    #[test]
+    fn modifier_validation() {
+        assert_eq!(valid_fov_modifier(0.5, 1.0), 0.5);
+        for value in [f32::NAN, f32::INFINITY, 0.0, 10.1] {
+            assert_eq!(valid_fov_modifier(value, 1.0), 1.0);
+        }
     }
 }
