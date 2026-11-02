@@ -617,6 +617,25 @@ mod border_movement_tests {
         );
     }
 
+    /// A minecart (0.98 wide, 0.7 tall) rolling east at its top speed of 0.4 a tick, 0.11
+    /// blocks short of the wall: the wall takes all but the 0.11 (`move_cart` hands the
+    /// cart's x and z to `with_border`, as every entity does in `Entity.move`).
+    #[test]
+    fn a_minecart_sized_body_stops_at_the_border_wall() {
+        // Centre x = 4.4, half width 0.49: the cart's east face is at 4.89, the wall at 5.0.
+        let bounds = Aabb::new(Vec3::new(3.91, 0.0, -0.49), Vec3::new(4.89, 0.7, 0.49));
+        let border = border();
+        let mut collisions = EntityCollisions::with_border(EmptyCollisions, &border, [4.4, 0.0]);
+        let moved = collisions
+            .resolve(bounds, Vec3::new(0.4, 0.0, 0.0), 0.0, false)
+            .expect("the movement resolves");
+        assert!(
+            (moved.x - 0.11).abs() < 1.0e-9,
+            "the cart was not stopped by the border: {moved:?}"
+        );
+        assert_eq!(moved.z, 0.0);
+    }
+
     /// Away from the border, the same body moves the whole way.
     #[test]
     fn a_body_away_from_the_border_moves_whole() {
