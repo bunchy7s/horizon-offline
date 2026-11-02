@@ -5092,9 +5092,10 @@ impl Game<'_> {
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
     }
     /// A player was saved to the world's store (NeoForge's
-    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave, on
-    /// every autosave and when the server stops, once for each save of a
-    /// placed player, the owner of an integrated server included. `directory`
+    /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
+    /// world closes, when the dedicated server saves everyone, and for an
+    /// integrated server's owner when the world saves them. LAN guests are
+    /// not heard on integrated autosaves. Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
