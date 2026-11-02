@@ -779,4 +779,26 @@ mod tests {
             assert_eq!(m.max_fall_distance(), 6, "hurt, has a target");
         });
     }
+
+    /// `GroundPathNavigation.canUpdatePath`: `onGround() || isInLiquid() ||
+    /// isPassenger()`. A pig riding a vehicle - a chicken jockey, a husk on a
+    /// camel, a piglin on a hoglin - can still ask for a path and follow it.
+    #[test]
+    fn a_mob_riding_a_vehicle_keeps_its_ground_navigation() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        std::sync::Arc::make_mut(&mut kind).species = crate::mobs::Species::Pig;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        m.on_ground = true;
+        assert!(m.can_update_path(), "standing on the ground");
+        m.on_ground = false;
+        assert!(
+            !m.can_update_path(),
+            "in the air with no vehicle: no path is made or followed"
+        );
+        m.extra.mount = Some(7);
+        assert!(m.can_update_path(), "riding a vehicle: isPassenger()");
+        m.extra.mount = None;
+        m.fluids.in_water = true;
+        assert!(m.can_update_path(), "in a liquid");
+    }
 }
