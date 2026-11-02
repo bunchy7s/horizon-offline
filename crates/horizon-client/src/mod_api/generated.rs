@@ -2953,6 +2953,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
+    /// NeoForge's `ItemExpireEvent`). Every mod may set or add to `extra_life`,
+    /// in ticks, which starts at zero; a positive total keeps the item that much
+    /// longer, zero or less lets it expire. Extensions are capped at 32766
+    /// ticks. @API:item_expire@.
+    ///
+    /// Every mod gets `event.extra_life` in order and may add, change or remove extra_life.
+    fn item_expire(&self, host: &mut dyn Host, event: &mut ItemExpireEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A dropped item entity was successfully added to the server level.
     /// @API:native_item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
@@ -9772,6 +9783,30 @@ pub fn dispatch_item_crafted(
     for mod_hook in mods {
         mod_hook.item_crafted(host, &mut event);
     }
+}
+/// What [`Hooks::item_expire`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemExpireEvent<'a> {
+    pub entity: u32,
+    pub stack: &'a ItemStack,
+    pub extra_life: i32,
+}
+pub fn dispatch_item_expire(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    stack: &ItemStack,
+    extra_life: &mut i32,
+) {
+    let mut event = ItemExpireEvent {
+        entity,
+        stack,
+        extra_life: *extra_life,
+    };
+    for mod_hook in mods {
+        mod_hook.item_expire(host, &mut event);
+    }
+    *extra_life = event.extra_life;
 }
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

@@ -5565,7 +5565,7 @@ impl Game<'_> {
         stack: &ItemStack,
         extra_life: &mut i32,
     ) {
-        let _ = (entity, stack, extra_life);
+        mod_api::dispatch_item_expire(self, mod_api::mods(), entity, stack, extra_life);
     }
     /// A player took a crafting grid's result (`ResultSlot.onTake`, NeoForge's
     /// `PlayerEvent.ItemCraftedEvent`): `player` is the player's uuid, `recipe`
