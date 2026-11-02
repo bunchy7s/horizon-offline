@@ -358,6 +358,8 @@ impl Game<'_> {
                         | "minecraft:snowball"
                         | "minecraft:egg"
                         | "minecraft:ender_pearl"
+                        | "minecraft:splash_potion"
+                        | "minecraft:lingering_potion"
                         | "minecraft:falling_block"
                         | "minecraft:firework_rocket"
                         | "minecraft:trident"
