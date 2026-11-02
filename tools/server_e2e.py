@@ -19,10 +19,14 @@ Checks:
              the menu with an available pointer.
 - titles: a chest named with styles (`CustomName`, as a plugin's menu is): its screen's title keeps
           the colours and bold (it used to be flattened to plain grey).
+- dialog_close: a local frame proxy injects ContainerClose after a multi-action custom click,
+          reproducing Paper's closeInventory without a plugin. Covers the waiting screen,
+          parent screens, warning, lectern, replacement dialogs, key release and death;
+          clear_dialog and after_action close must retain their distinct parent semantics.
 - dialog_text: custom click events inherited by message text and inline sprites send their id and
                optional payload, with the dialog's none/close/wait_for_response screen behaviour.
 
-The game runs with fresh HORIZON_HOME, launcher and XDG folders and without audio. Screenshots and both
+The game runs offscreen with fresh HORIZON_HOME, launcher and XDG folders and without audio. Screenshots and both
 logs go to --out.
 """
 import argparse
@@ -81,8 +85,8 @@ def snbt(value):
     return str(value)
 
 
-class BookPacketProxy:
-    """Forward whole frames; inject the pinned protocol's OpenBook packet.
+class PacketProxy:
+    """Forward whole frames; inject the pinned protocol's OpenBook and ContainerClose packets.
 
     Offline vanilla uses compression threshold 256. The injected packet is
     below that threshold (uncompressed length 0). Forwarded frames stay opaque.
@@ -143,6 +147,10 @@ class BookPacketProxy:
         # ClientboundOpenBookPacket: protocol 777, play packet 0x3b.
         self.send_packet(0x3b, lab.varint(hand))
 
+    def close_container(self, container=0):
+        # ClientboundContainerClosePacket: protocol 777, play packet 0x11 (Paper's closeInventory).
+        self.send_packet(0x11, lab.varint(container))
+
     def send_packet(self, packet, data):
         assert self.ready.wait(10), 'client did not connect through the proxy'
         body = b'\0' + lab.varint(packet) + data
@@ -157,6 +165,117 @@ class BookPacketProxy:
                 except OSError:
                     pass
                 sock.close()
+
+
+def check_dialog_close(server, game, out, proxy):
+    """Paper closeInventory's packet must close a waiting dialog and its parent."""
+    dialog = {
+        'type': 'minecraft:multi_action', 'title': 'Container close regression',
+        'can_close_with_escape': False, 'pause': False, 'columns': 1,
+        'after_action': 'wait_for_response',
+        'actions': [{'label': 'Close', 'width': 20,
+                     'action': {'type': 'minecraft:custom', 'id': 'horizon:close_dialog'}}],
+    }
+
+    def show(data=dialog):
+        server.console(f'dialog show {PLAYER} {snbt(data)}')
+        game.raw('wait-for', 'screen', 'dialog', '--timeout', 30)
+        game.until(lambda: game('state')['dialog'],
+                   lambda state: state['screen'] is None and state['open'] is not None
+                   and state['open']['title'] == data['title'])
+
+    def close():
+        proxy.close_container()
+        game.raw('wait-for', 'screen', 'playing', '--timeout', 10)
+        state = game('state')
+        assert state['dialog']['screen'] is None, state['dialog']
+        assert state['dialog']['open'] is None, state['dialog']
+
+    # WAIT_FOR_RESPONSE must survive clear_dialog, but not container_close.
+    show()
+    game.raw('click', 'close')
+    server.wait_for(r'Received custom click action horizon:close_dialog', timeout=30)
+    assert game('state')['dialog']['screen'] == 'waiting_for_response'
+    server.console(f'dialog clear {PLAYER}')
+    game.wait(10)
+    assert game('state')['dialog']['screen'] == 'waiting_for_response'
+    close()
+
+    # A normal server clear returns to the parent inventory. CLOSE does too.
+    game.raw('key', 'e', 'tap')
+    game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+    show(dict(dialog, after_action='none'))
+    server.console(f'dialog clear {PLAYER}')
+    game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+    show(dict(dialog, after_action='close'))
+    game.raw('click', 'close')
+    game.raw('wait-for', 'screen', 'inventory', '--timeout', 10)
+
+    # ContainerClose discards the waiting dialog AND that parent screen.
+    show()
+    game.raw('click', 'close')
+    assert game('state')['dialog']['screen'] == 'waiting_for_response'
+    close()
+    # An active dialog and its warning overlay must also close without Escape.
+    show(dict(dialog, after_action='none'))
+    close()
+    show()
+    game.raw('click', 'warning')
+    assert game('state')['dialog']['screen'] == 'warning'
+    close()
+
+    # A server response may replace the waiting screen with another dialog.
+    show()
+    game.raw('click', 'close')
+    show(dict(dialog, title='Replacement dialog', after_action='none'))
+    assert game('state')['dialog']['open']['title'] == 'Replacement dialog'
+    close()
+
+    # Closing a dialog over chat must not reveal the old chat input.
+    game.raw('key', 't', 'tap')
+    game.raw('wait-for', 'screen', 'chat', '--timeout', 10)
+    show(dict(dialog, after_action='none'))
+    close()
+
+    # Keep the existing lectern close path working, including a dialog over it.
+    x, y, z = (int(v // 1) for v in game('state')['player']['position'])
+    at = (x + 2, y, z)
+    book = ('{id:"minecraft:written_book",count:1,components:{"minecraft:written_book_content":'
+            '{title:"Dialog",author:"Test",pages:["one","two"]}}}')
+    server.console(f'setblock {at[0]} {at[1]} {at[2]} minecraft:lectern[has_book=true]{{Book:{book}}}')
+    game.wait(10)
+    for overlay in (False, True):
+        game.raw('interact', *at)
+        game.raw('wait-for', 'screen', 'book', '--timeout', 10)
+        if overlay:
+            show(dict(dialog, after_action='none'))
+        close()
+    server.console(f'setblock {at[0]} {at[1]} {at[2]} minecraft:air')
+    game.wait(10)
+
+    # Preserve releaseAll on dialog open: W must not remain held afterwards.
+    game.raw('key', 'w', 'down')
+    show()
+    game.raw('key', 'w', 'up')
+    close()
+    game.wait(10)
+    before = game('state')['player']['position']
+    game.wait(10)
+    after = game('state')['player']['position']
+    assert sum((after[i] - before[i]) ** 2 for i in (0, 2)) < .0001, (before, after)
+
+    # Preserve the prior fix closing server dialogs on player death.
+    show()
+    server.console(f'kill {PLAYER}')
+    game.raw('wait-for', 'screen', 'dead', '--timeout', 30)
+    assert game('state')['dialog'] == {'open': None, 'screen': None}
+    game.raw('respawn')
+    game.raw('wait-for', 'screen', 'playing', '--timeout', 30)
+    game.shot(out, 'dialog-closed')
+    return {'waiting_closed': True, 'parent_closed': True, 'warning_closed': True,
+            'clear_keeps_waiting': True, 'clear_and_close_restore_parent': True,
+            'replacement_dialog': True, 'chat_parent_closed': True,
+            'lectern_closes': True, 'held_keys_released': True, 'death_closes_dialog': True}
 
 
 def check_dialog(server, game, out):
@@ -332,6 +451,7 @@ CHECKS = {
     'dialog_text': check_dialog_text,
     'titles': check_titles,
     'book_menu': check_book_menu,
+    'dialog_close': check_dialog_close,
 }
 
 
@@ -342,7 +462,7 @@ def run(bins, out, checks):
     directory = work / 'server'
     directory.mkdir()
     props = dict(PROPERTIES, **{'server-port': str(port)})
-    if 'book_menu' in checks:
+    if 'book_menu' in checks or 'dialog_close' in checks:
         props['network-compression-threshold'] = '256'
     (directory / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
     (directory / 'eula.txt').write_text('eula=true\n')
@@ -350,7 +470,7 @@ def run(bins, out, checks):
     classpath = os.pathsep.join(map(str, [jars['server'], *libraries]))
     server = Server(['java', '-Xmx2g', f'-Dlog4j.configurationFile={work / "log4j2.xml"}', '-cp', classpath,
                      'net.minecraft.server.Main', 'nogui'], directory, 'vanilla')
-    proxy = BookPacketProxy(port) if 'book_menu' in checks else None
+    proxy = PacketProxy(port) if 'book_menu' in checks or 'dialog_close' in checks else None
     game = Game('client', bins / 'horizon-ctl', lab.RESOURCES.resolve())
     for key in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'HORIZON_LAUNCHER_HOME'):
         game.d.env[key] = str(game.work / key.lower())
@@ -367,7 +487,7 @@ def run(bins, out, checks):
         game.wait(20)
         for name in checks:
             try:
-                detail = CHECKS[name](server, game, out, proxy) if name == 'book_menu' else CHECKS[name](server, game, out)
+                detail = CHECKS[name](server, game, out, proxy) if name in ('book_menu', 'dialog_close') else CHECKS[name](server, game, out)
                 results[name] = {'pass': True, 'detail': detail}
             except (Failed, AssertionError, StopIteration, KeyError) as e:
                 results[name] = {'pass': False, 'detail': repr(e)}

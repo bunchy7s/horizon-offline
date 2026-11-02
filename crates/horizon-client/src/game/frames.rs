@@ -593,6 +593,13 @@ impl Game<'_> {
                 }
             }
             self.cull_entity_vertices(out, entity_start);
+            if let Some(stack) = &f.item {
+                let mut canceled = false;
+                self.native_render_item_in_frame(f.id, f.pos, stack, &mut canceled);
+                if canceled {
+                    continue;
+                }
+            }
             if let Some(id) = map {
                 // ItemFrameRenderer: the map fills the face, in 90-degree steps.
                 let depth = if f.invisible { 0.5 } else { 0.4375 };
