@@ -52,10 +52,10 @@ def stamp(check):
     names = {hook["name"] for hook in catalog["hooks"]}
     helper_names = {helper["name"] for helper in catalog.get("helpers", [])}
     extra = {}
-    for path in ordered:
+    # The catalog takes new entries in file name order, the order `cargo run -p xtask -- mod-api`
+    # reads pending fragments in, so stamping leaves the generated mod API as it was.
+    for path in sorted(ordered):
         fragment = json.loads(path.read_text())
-        version += 1
-        marker = f"@API:{path.stem}@"
         for hook in fragment["hooks"]:
             if hook["name"] in names:
                 raise ValueError(f"duplicate hook: {hook['name']}")
@@ -69,6 +69,10 @@ def stamp(check):
                 raise ValueError(f"duplicate helper: {helper['name']}")
             helper_names.add(helper["name"])
             catalog.setdefault("helpers", []).append(helper)
+    for path in ordered:
+        fragment = json.loads(path.read_text())
+        version += 1
+        marker = f"@API:{path.stem}@"
         rust_summary = fragment["rust_summary"].replace(marker, str(version))
         doc_summary = fragment["doc_summary"].replace(marker, str(version))
         if not rust_summary or not doc_summary:

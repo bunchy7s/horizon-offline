@@ -72,7 +72,7 @@ class StampTests(unittest.TestCase):
         self.assertIn("API 9 adds a; requires 9.", docs)
         self.assertIn("NATIVE_HOOKS_API: u32 = 9;", source)
         hooks = json.loads((self.root / stamp.CATALOG).read_text())["hooks"]
-        self.assertEqual([(h["name"], h["version"]) for h in hooks], [("z", 1), ("a", 1)])
+        self.assertEqual([(h["name"], h["version"]) for h in hooks], [("a", 1), ("z", 1)])
         self.assertFalse(stamp.stamp(False))
 
     def test_helper_only_gets_a_number(self):
