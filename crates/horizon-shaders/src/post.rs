@@ -1445,6 +1445,29 @@ mod tests {
     }
 
     #[test]
+    fn dimension_mapping_paths_and_unknown_legacy_ids() {
+        let mapped = |rules: &str| {
+            Pack::from_zip_bytes(
+                "t",
+                crate::pack::tests::zip(&[("shaders/dimension.properties", rules)]),
+            )
+            .unwrap()
+        };
+        let pack =
+            mapped("dimension.over = minecraft:overworld\ndimension.nested/./fallback = *\n");
+        assert_eq!(dimension_folder(&pack, 0), "over");
+        assert_eq!(dimension_folder(&pack, 2), "nested/fallback");
+        assert_eq!(
+            dimension_folder_named(&pack, "mod:moon", 2),
+            "nested/fallback"
+        );
+        let pack = mapped("dimension.over = overworld\ndimension.../escape = *\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+        let pack = mapped("dimension.over = overworld\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+    }
+
+    #[test]
     fn image_dimensions_expand_default_and_chosen_options() {
         let bytes =
             crate::pack::tests::zip(&[("shaders/options.glsl", "#define SIZE 16 // [8 16]\n")]);
