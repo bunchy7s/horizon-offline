@@ -37,13 +37,13 @@ ServerSelectionList.updateOnlineServers	inline	crates/horizon-client/src/multipl
 ServerSelectionList.updateNetworkServers	inline	crates/horizon-client/src/multiplayer.rs::rows	LAN games are read each frame in rows; one found since the last call narrates multiplayer.lan.server_found with its getServerNarration (Screen::lan_found_narrations)
 ServerSelectionList.LANHeader.extractContent	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	scanning label and loading dots drawn in the list
 ServerSelectionList.NetworkServerEntry.extractContent	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	gap: minor: the address is always shown, Hide Server Address (hideServerAddress) is not read; LAN World title, MOTD and address
-ServerSelectionList.NetworkServerEntry.keyPressed	missing		minor: no keyboard join on the server list (Enter)
+ServerSelectionList.NetworkServerEntry.keyPressed	port	crates/horizon-client/src/multiplayer.rs::Screen::confirm	Enter joins the selected LAN game: the index past the saved servers picks it out of the scanner and connects to its address
 ServerSelectionList.NetworkServerEntry.join	port	crates/horizon-client/src/multiplayer.rs::Screen::click	LAN game joined by a click on its row (Row::Lan) or a second click on the selected row
 ServerSelectionList.NetworkServerEntry.matches	skip:java		selection is kept by index, so no entry identity match is needed
 ServerSelectionList.OnlineServerEntry.extractContent	port	crates/horizon-client/src/multiplayer.rs::Screen::draw	player: name, MOTD, ping bars, player count, hover join and move sprites; a server on another protocol shows its version in red in place of the player count and the count carries the playerList tooltip
 ServerSelectionList.OnlineServerEntry.refreshStatus	port	crates/horizon-client/src/multiplayer.rs::ping_tooltip	ping tooltip: ms, no connection or pinging; the player count's playerList tooltip is player_list_tooltip; the bar choice is in Screen::draw
 ServerSelectionList.OnlineServerEntry.extractIcon	port	crates/horizon-client/src/multiplayer.rs::draw_server_icon	server icon at 32x32
-ServerSelectionList.OnlineServerEntry.keyPressed	missing		minor: no keyboard path: Enter does not join and Shift+Up/Down does not move a server
+ServerSelectionList.OnlineServerEntry.keyPressed	port	crates/horizon-client/src/multiplayer.rs::Screen::confirm	Enter joins the selected server as a click on it does; Shift+Up/Down swaps it with its neighbour and saves the list in Screen::arrow
 ServerSelectionList.OnlineServerEntry.swap	port	crates/horizon-client/src/multiplayer.rs::Screen::click	icon arrow click swaps the server up or down and saves
 ServerSelectionList.OnlineServerEntry.getNarration	port	crates/horizon-client/src/multiplayer.rs::Screen::server_narration	the entry's name then its status, joined for the screen narrator
 ServerSelectionList.OnlineServerEntry.matches	skip:java		selection is kept by index, so no entry identity match is needed
