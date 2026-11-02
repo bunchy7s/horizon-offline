@@ -80,7 +80,8 @@ addition; a change to one starts `/api/v2`, served beside `/api/v1`.
 - **Mods on a dedicated server**: list, turn on and off, and their settings, once native mods can be built for the
   server ([mods.md](../mods.md), [native-mods.md](../native-mods.md#multiplayer)).
 - **Vanilla's management protocol**: `serversettings/*`, `gamerules`, the notifications other than
-  `server/started` and `server/stopping`, and the status heartbeat. The methods answer an internal error saying
+  `server/started`, `server/stopping`, `server/saving`, `server/saved`, `players/joined` and `players/left`,
+  and the status heartbeat. The methods answer an internal error saying
   so; a kick's translatable message is sent as its key.
 - **Compatibility tests**: golden replies per endpoint, and a `server.toml` from each release line.
 

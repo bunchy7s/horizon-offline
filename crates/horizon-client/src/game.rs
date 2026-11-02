@@ -14814,10 +14814,19 @@ impl Game<'_> {
         if self.remote.is_some() {
             return Ok(());
         }
+        // `DedicatedServer.saveAllChunks` tells the management protocol's clients when a save starts and when
+        // it ends without failing, for every save: the command, the autosave, the pause.
+        let dedicated = self.options.dedicated.is_some();
+        if dedicated {
+            dedicated::events::record_server("saving");
+        }
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
         self.native_world_saved(wait);
+        if dedicated {
+            dedicated::events::record_server("saved");
+        }
         Ok(())
     }
     fn save_game_metadata(&mut self) -> Result<()> {
