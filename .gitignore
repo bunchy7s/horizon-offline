@@ -32,6 +32,7 @@
 /.horizon-cache/
 /crash-reports/
 /debug/
+/resourcepacks/
 
 # Release-only compiled original exporter bundle.
 /exporters/
