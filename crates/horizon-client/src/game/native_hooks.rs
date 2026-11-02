@@ -3015,6 +3015,48 @@ impl Game<'_> {
     pub(super) fn native_resource_pack_status(&mut self, player: u128, name: &str, status: i32) {
         mod_api::dispatch_resource_pack_status(self, mod_api::mods(), player, name, status);
     }
+    /// A server player places a hanging entity: an item frame
+    /// (`minecraft:item_frame`, `minecraft:glow_item_frame`), a painting
+    /// (`minecraft:painting`) or a leash knot (`minecraft:leash_knot`, when a
+    /// lead is tied to a fence that has none yet), `kind` its entity type and
+    /// `pos` the block it takes (the fence's for a knot). Where
+    /// `HangingEntityItem.useOn` and `LeadItem.useOn` create it, once it is
+    /// known to fit and before anything is placed or used up. Set `cancel`
+    /// and nothing is placed: the item stays in the player's hand. The
+    /// player's state is swapped in, so `native_tell` answers them. Only for
+    /// guests of a server; `/summon`, a dispenser and the game's own player
+    /// are not heard, nor is a lead tied to a mob or a boat.
+    /// @API:native_hanging_place@.
+    pub(super) fn native_hanging_place(
+        &mut self,
+        player: u128,
+        name: &str,
+        kind: &str,
+        pos: [i32; 3],
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, kind, pos, cancel);
+    }
+    /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
+    /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
+    /// empties `minecraft:water`): where `BucketItem.use` has found the block
+    /// the fluid goes into and the player may build there, right before it is
+    /// placed. Set `cancel` and nothing is poured and the bucket stays full.
+    /// The player's state is swapped in, so `native_tell` answers them. Only
+    /// for guests of a server. `native_fill_bucket` hears this click too (and
+    /// the filling one) without the player and the fluid. Not heard: a
+    /// dispenser, a cauldron, and a fluid a block places itself.
+    /// @API:native_bucket_empty@.
+    pub(super) fn native_bucket_empty(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        fluid: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, pos, fluid, cancel);
+    }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the

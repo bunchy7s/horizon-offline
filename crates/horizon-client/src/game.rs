@@ -6441,6 +6441,22 @@ impl Game<'_> {
         }
         Ok(true)
     }
+    /// Asks the mods whether the acting guest may empty `stack` at `pos`
+    /// (`native_bucket_empty`): true when one cancelled it. A game's own
+    /// player is not asked.
+    fn bucket_empty_cancelled(&mut self, stack: &ItemStack, pos: [i32; 3]) -> bool {
+        let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) else {
+            return false;
+        };
+        let fluid = match &*stack.item {
+            "minecraft:lava_bucket" => "minecraft:lava",
+            "minecraft:powder_snow_bucket" => "minecraft:powder_snow",
+            _ => "minecraft:water",
+        };
+        let mut cancel = false;
+        self.native_bucket_empty(uuid, &name, pos, fluid, &mut cancel);
+        cancel
+    }
     /// The player as a block's `useItemOn` / `useWithoutItem` sees them.
     fn use_context(&self) -> PlayerContext {
         PlayerContext {
@@ -13089,7 +13105,7 @@ impl Game<'_> {
             let target = self.bucket_target(content, &hit);
             let mut canceled = false;
             self.native_fill_bucket(stack, target, &mut canceled);
-            if canceled {
+            if canceled || self.bucket_empty_cancelled(stack, target) {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);

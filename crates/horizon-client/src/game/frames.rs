@@ -125,6 +125,17 @@ impl Game<'_> {
                 .iter()
                 .any(|o| o.id != f.id && o.facing == f.facing && overlaps(o.bounds()))
     }
+    /// Asks the mods whether the acting guest may place a hanging entity
+    /// of type `kind` at `pos` (`native_hanging_place`): true when one
+    /// cancelled it. A game's own player is not asked.
+    pub(super) fn hanging_place_cancelled(&mut self, kind: &str, pos: [i32; 3]) -> bool {
+        let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) else {
+            return false;
+        };
+        let mut cancel = false;
+        self.native_hanging_place(uuid, &name, kind, pos, &mut cancel);
+        cancel
+    }
     /// `ItemFrameItem.useOn`.
     pub(super) fn place_item_frame(&mut self, hit: &Hit, stack: &ItemStack) -> bool {
         let glow = match &*stack.item {
@@ -161,6 +172,14 @@ impl Game<'_> {
         };
         if !self.frame_survives(&frame) {
             return false;
+        }
+        let kind = if glow {
+            "minecraft:glow_item_frame"
+        } else {
+            "minecraft:item_frame"
+        };
+        if self.hanging_place_cancelled(kind, pos) {
+            return true;
         }
         self.next_entity += 1;
         self.audio
