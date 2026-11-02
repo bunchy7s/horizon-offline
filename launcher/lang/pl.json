@@ -864,5 +864,10 @@
   "You haven't played this one yet. Press Play to start.": "Jeszcze w to nie grałeś. Naciśnij Graj, aby zacząć.",
   "You've played for {time}! Last played {when}.": "Grałeś {time}! Ostatnio: {when}.",
   "Rust Edition": "Rust Edition",
-  "Java Edition": "Java Edition"
+  "Java Edition": "Java Edition",
+  "All notes": "Wszystkie informacje",
+  "No notes yet": "Brak informacji",
+  "No screenshots yet. Press F2 in the game.": "Brak zrzutów ekranu. Naciśnij F2 w grze.",
+  "Patch log": "Dziennik zmian",
+  "See all": "Zobacz wszystkie"
 }
