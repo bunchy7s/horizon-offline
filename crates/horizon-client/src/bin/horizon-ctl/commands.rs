@@ -221,7 +221,7 @@ pub const COMMANDS: &[Cmd] = &[
         "Replies protocol (MAJOR.MINOR.PATCH of the control protocol, docs/api/stability.md), release (the game's version, the string MCP serverInfo carries too) and features (the command groups the game answers, so a script can test for one before calling it).",
         ["horizon-ctl hello"], &[], mcp: true, local: false),
     cmd!("memory", Session, "memory", "what holds the game's memory: resident set, allocator, client and server columns by part, renderer, GPU memory by resource",
-        "Columns count blocks, biomes, light, heightmaps and records, each shared section once; server_columns are the single-player server thread's own levels. GPU memory by label needs Vulkan or DirectX 12. What the census doesn't reach is the resident set less its parts.", ["horizon-ctl memory"], &[], mcp: true, local: false),
+        "Columns count blocks, biomes, light, heightmaps and records, each shared section once; server_columns are the single-player server thread's own levels. GPU memory by label needs Vulkan or DirectX 12. What the census doesn't reach is the resident set less its parts. A build with the alloc-census feature adds heap_by_tag_mb: the live heap by startup step, timed span, chunk job and thread.", ["horizon-ctl memory"], &[], mcp: true, local: false),
     cmd!("worlds", Session, "worlds", "the saved worlds, newest first: folder, name, mode, last played, version",
         "folder is what open, world-rename, world-backup and world-delete take.", ["horizon-ctl worlds"], &[], mcp: true, local: false),
     cmd!("world-rename", Session, "world-rename FOLDER NAME", "rename a world, as Edit World does (its folder stays)",

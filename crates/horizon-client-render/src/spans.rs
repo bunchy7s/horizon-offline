@@ -61,6 +61,7 @@ fn cpu_if_enabled() -> Option<Duration> {
 /// Run `f`, recording its duration under `name` when spans are enabled.
 #[inline]
 pub fn time<T>(name: &'static str, f: impl FnOnce() -> T) -> T {
+    let _heap = horizon_threads::heap_tag(name);
     if !recording_here() {
         return f();
     }
@@ -291,9 +292,15 @@ pub mod startup {
     pub struct Step {
         name: &'static str,
         started: Instant,
+        traced: bool,
+        /// A heap-census build's tag for the step's allocations.
+        _heap: Option<horizon_threads::heap_census::Tag>,
     }
     impl Drop for Step {
         fn drop(&mut self) {
+            if !self.traced {
+                return;
+            }
             let end = Instant::now();
             write(format_args!(
                 r#""ph":"X","name":"{}","ts":{},"dur":{}"#,
@@ -307,9 +314,12 @@ pub mod startup {
     /// Starts a step named `name` (a literal: no quotes or backslashes).
     #[inline]
     pub fn step(name: &'static str) -> Option<Step> {
-        on().then(|| Step {
+        let traced = on();
+        (traced || horizon_threads::HEAP_CENSUS).then(|| Step {
             name,
             started: Instant::now(),
+            traced,
+            _heap: horizon_threads::heap_tag(name),
         })
     }
 
