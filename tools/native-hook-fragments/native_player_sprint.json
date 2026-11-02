@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "player_sprint",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_sprint",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a server player's sprint starting or stopping (`native_player_sprint`).",
+  "doc_summary": "a server player's sprint: `native_player_sprint(player, name, sprinting)` is heard once each time a player's client starts or stops sprinting (the sprint key, a double tap forward, letting go) and the server's player has taken it, with their state swapped in. It only hears what the client asks: a sprint that ends by itself (knockback, hunger, a wall) is not reported. Bundles that use it need `\"hooks\": @API:native_player_sprint@`."
+}

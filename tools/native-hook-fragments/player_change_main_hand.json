@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_change_main_hand",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_main_hand",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player's client option for their dominant hand changed (`native_player_change_main_hand`).",
+  "doc_summary": "A server player's client option changed their dominant hand; `native_player_change_main_hand(player, name, left)` reports whether the left hand is dominant. Bundles need \"hooks\": @API:player_change_main_hand@."
+}

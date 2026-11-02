@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "block_lock_check",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_lock_check",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "locked"
+      }
+    }
+  ],
+  "rust_summary": "A guest checks a block container lock (`native_block_lock_check`).",
+  "doc_summary": "`native_block_lock_check(player, name, pos, locked)` runs when a guest checks the container at `pos`; `locked` starts with vanilla's result and may be changed. The guest's state is not swapped in. Bundles need \"hooks\": @API:block_lock_check@."
+}

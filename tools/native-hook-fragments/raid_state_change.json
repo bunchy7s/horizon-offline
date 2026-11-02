@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "raid_state_change",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_raid_state_change",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A raid is triggered or reaches a terminal state (`native_raid_state_change`).",
+  "doc_summary": "A raid is triggered or reaches `victory`, `loss` or `stopped`: `native_raid_state_change(raid, pos, state)` reports its id, center and new state. Bundles need \"hooks\": @API:raid_state_change@."
+}

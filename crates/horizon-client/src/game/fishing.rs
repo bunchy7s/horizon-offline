@@ -210,6 +210,8 @@ impl Game<'_> {
             } else if let Some(item) = self.dropped.iter_mut().find(|i| i.id == id) {
                 item.velocity = pulled(item.velocity);
                 hooked_item = true;
+            } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id != 0 && t.id == id) {
+                t.velocity = pulled(t.velocity);
             } else if self.creatures.hook_targets.iter().any(|t| t.id == id) {
                 // A player: the hub moves them when the tick ends.
                 self.creatures
@@ -607,6 +609,13 @@ impl Game<'_> {
                             .iter()
                             .find(|i| touches(i.bounds()))
                             .map(|i| i.id)
+                    })
+                    // A lit TNT is pickable too (`PrimedTnt.isPickable`).
+                    .or_else(|| {
+                        self.tnts
+                            .iter()
+                            .find(|t| t.id != 0 && touches(t.bounds()))
+                            .map(|t| t.id)
                     });
                 if let Some(id) = hit {
                     // Projectile.onHit on an entity: PROJECTILE_LAND.
@@ -674,6 +683,12 @@ impl Game<'_> {
                             .iter()
                             .find(|i| i.id == id)
                             .map(|i| (i.position, horizon_client::entities::ItemEntity::WIDTH))
+                    })
+                    .or_else(|| {
+                        self.tnts
+                            .iter()
+                            .find(|t| t.id != 0 && t.id == id)
+                            .map(|t| (t.position, super::tnt::PrimedTnt::SIZE))
                     });
                 match hooked {
                     Some((at, height)) => h.position = Vec3::new(at.x, at.y + height * 0.8, at.z),

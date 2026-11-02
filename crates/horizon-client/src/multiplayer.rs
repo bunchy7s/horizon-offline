@@ -1375,7 +1375,9 @@ impl Screen {
         }
     }
     /// `DirectJoinServerScreen.keyPressed`: Enter joins the typed address
-    /// while the Join Server button is active.
+    /// while the Join Server button is active. On the server list it is
+    /// `ServerSelectionList.OnlineServerEntry.keyPressed`: Enter joins the
+    /// selected server or LAN game, as a click on it does.
     pub fn confirm(&self) -> Outcome {
         match self {
             Self::Direct { address } if servers::parse_address(address).is_some() => {
@@ -1384,6 +1386,15 @@ impl Screen {
                     lan: false,
                 }
             }
+            Self::List {
+                servers,
+                selected,
+                lan,
+                ..
+            } => match selected.and_then(|i| entry_address(servers, lan, i)) {
+                Some((address, lan)) => Outcome::Connect { address, lan },
+                None => Outcome::None,
+            },
             _ => Outcome::None,
         }
     }
@@ -2358,6 +2369,41 @@ mod tests {
         screen.arrow(true, true, size, &saves);
         assert_eq!(state(&screen).1, Some(0));
         assert_eq!(state(&screen).0[0], "c");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn enter_joins_the_selected_server() {
+        let dir = std::env::temp_dir().join(format!("horizon-mp-enter-{}", std::process::id()));
+        let saves = dir.join("saves");
+        std::fs::create_dir_all(&saves).unwrap();
+        let file = servers_file(&saves);
+        let list = vec![
+            ServerEntry::new("a", "127.0.0.1:2"),
+            ServerEntry::new("b", "127.0.0.1:3"),
+        ];
+        servers::save(&file, &list).unwrap();
+        let mut screen = Screen::list(&saves);
+        // Nothing selected: Enter joins nothing.
+        assert!(matches!(screen.confirm(), Outcome::None));
+        let size = (427.0, 240.0);
+        assert!(screen.arrow(false, false, size, &saves));
+        match screen.confirm() {
+            Outcome::Connect { address, lan } => {
+                assert_eq!(address, "127.0.0.1:2");
+                assert!(!lan);
+            }
+            _ => panic!("Enter did not join the selected server"),
+        }
+        // Down picks the next server, and Enter joins that one.
+        assert!(screen.arrow(false, false, size, &saves));
+        match screen.confirm() {
+            Outcome::Connect { address, lan } => {
+                assert_eq!(address, "127.0.0.1:3");
+                assert!(!lan);
+            }
+            _ => panic!("Enter did not join the second server"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

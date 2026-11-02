@@ -110,6 +110,7 @@ mod arena;
 pub mod compositor;
 mod cull;
 mod end_sky;
+pub mod entity_skin;
 mod flat;
 mod frame_gen;
 mod hdr;
@@ -627,6 +628,9 @@ pub struct Frame<'a> {
     pub glowing: &'a [Vertex],
     /// Runs of `entities` by entity, while a shader pack draws them (`pack_draw::EntitySpan`).
     pub entity_spans: &'a [pack_draw::EntitySpan],
+    /// Ordinary entity models posed on the GPU (`entity_skin`), drawn before `entities`'
+    /// ordinary ones; only when `Renderer::skins_entities` said so.
+    pub skin: Option<&'a entity_skin::SkinFrame>,
     pub weather: &'a [crate::weather::Vertex],
     pub weather_time: crate::weather::Time,
     /// Horizon Extras' dynamic lights, nearest first (`dynamic_light::select`); empty when off.
@@ -773,6 +777,7 @@ pub struct Renderer {
     solid_opaque: wgpu::RenderPipeline,
     solid_cutout: wgpu::RenderPipeline,
     translucent: wgpu::RenderPipeline,
+    translucent_mark: wgpu::RenderPipeline,
     /// Flat section draws (`flat`), where multi-draw is emulated.
     flat: Option<flat::Flat>,
     /// `flat` draws this frame's sections (off: the per-section draws).
@@ -856,6 +861,8 @@ pub struct Renderer {
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
     entity_batch: EntityBatch,
+    /// Ordinary entity models posed on the GPU; `None` without compute shaders.
+    entity_skin: Option<entity_skin::EntitySkin>,
     group: wgpu::BindGroup,
     globals: wgpu::Buffer,
     /// The resource packs' LabPBR maps (normals, specular), for native shader packs.
@@ -1017,6 +1024,8 @@ pub struct Renderer {
     pack_atlas: Option<pack_atlas::PackAtlas>,
     /// The pack's terrain program reads flat draws' vertices (`pack_terrain_inputs`).
     pack_terrain_flat: bool,
+    /// OptiFine/Iris separate ambient occlusion: pass vertex alpha to hz_Color.a.
+    pub separate_ao: bool,
     pub hud: HudRenderer,
     /// Vanilla's menu background blur, made on first use.
     menu_blur: Option<crate::menu_blur::MenuBlur>,
@@ -1835,6 +1844,53 @@ impl Renderer {
         let arenas = self.arena.bytes() + translucent.map_or(0, arena::Arena::bytes);
         [arenas, vertices * stride]
     }
+    /// Device memory the backend's allocator holds, by the label of what holds
+    /// it, largest first, with its allocated and reserved totals (Vulkan and
+    /// DirectX 12; none on Metal and OpenGL) (`horizon-ctl memory`).
+    pub fn gpu_memory_by_label(&self) -> Option<(u64, u64, Vec<(String, u64)>)> {
+        let report = self.device.generate_allocator_report()?;
+        let mut by_label: HashMap<String, u64> = HashMap::new();
+        for a in report.allocations {
+            *by_label.entry(a.name).or_default() += a.size;
+        }
+        let mut labels: Vec<_> = by_label.into_iter().collect();
+        labels.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Some((
+            report.total_allocated_bytes,
+            report.total_reserved_bytes,
+            labels,
+        ))
+    }
+    /// Heap bytes of the renderer's per-section bookkeeping (`horizon-ctl memory`):
+    /// resident sections, far tiles, block entities and light sources by section.
+    pub fn cpu_census(&self) -> [(&'static str, usize); 4] {
+        use std::mem::size_of;
+        let per_section = |map_len: usize, lists: usize| {
+            map_len * (size_of::<SectionKey>() + size_of::<Vec<([i32; 3], u32)>>() + 1)
+                + lists * size_of::<([i32; 3], u32)>()
+        };
+        let lists = |map: &crate::fast_hash::FxHashMap<SectionKey, Vec<([i32; 3], u32)>>| {
+            per_section(
+                map.capacity(),
+                map.values().map(Vec::capacity).sum::<usize>(),
+            )
+        };
+        let animated: usize = self
+            .sections
+            .values()
+            .map(|s| s.animated_layers.len() * size_of::<u16>())
+            .sum();
+        [
+            ("resident_sections", self.sections.heap_bytes() + animated),
+            (
+                "far_tiles",
+                self.lods.capacity()
+                    * (size_of::<crate::lod::TileKey>() + size_of::<lod::Tile>() + 1),
+            ),
+            ("block_entities", lists(&self.block_entities)),
+            ("light_sources", lists(&self.light_blocks)),
+        ]
+    }
 }
 impl Renderer {
     pub async fn new(
@@ -2226,6 +2282,17 @@ impl Renderer {
             true,
             true,
             Some(alpha_blend),
+        );
+        let translucent_mark = pipeline(
+            "Terrain translucent HDR mark",
+            "vs_terrain",
+            "fs_translucent_mark",
+            &terrain_buffers,
+            tri,
+            Some(wgpu::Face::Back),
+            false,
+            true,
+            Some(flat::ALPHA_ONLY),
         );
         let sky = pipeline(
             "Sky",
@@ -3470,10 +3537,14 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let entity_capacity = 1 << 14;
+        let entity_skin = entity_skin::EntitySkin::new(
+            &device,
+            animate::SpriteAnimator::compute(&adapter, &device),
+        );
         let entity_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Entity vertices"),
             size: entity_capacity * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            usage: entity_skin::EntitySkin::usage(entity_skin.is_some()),
             mapped_at_creation: false,
         });
         let flat_wanted = flat::wanted(&adapter, &device);
@@ -3637,6 +3708,7 @@ impl Renderer {
             solid_opaque,
             solid_cutout,
             translucent,
+            translucent_mark,
             flat_on: flat.is_some(),
             cull_on: cull.is_some(),
             sides_on: true,
@@ -3699,6 +3771,7 @@ impl Renderer {
             entity_buffer,
             entity_capacity,
             entity_batch: EntityBatch::default(),
+            entity_skin,
             group,
             globals,
             pbr_maps,
@@ -3786,6 +3859,7 @@ impl Renderer {
             pack_weather: None,
             pack_atlas: None,
             pack_terrain_flat: false,
+            separate_ao: false,
             hud,
             menu_blur: None,
             post_effects: None,
@@ -3823,6 +3897,31 @@ impl Renderer {
             pass.set_pipeline(&self.hdr_mark_pipeline);
             pass.draw_indexed(0..quads * 6, (first * 4) as i32, 0..1);
         }
+    }
+    /// HDR lighting on translucent terrain, over the draws that just blended it.
+    fn mark_translucent_terrain(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        flat: Option<&flat::Flat>,
+        solid_draws: u32,
+        translucent_draws: u32,
+    ) {
+        if self.hdr.as_ref().is_none_or(|h| !h.lighting) {
+            return;
+        }
+        match flat {
+            Some(flat) => {
+                pass.set_pipeline(&flat.translucent_mark);
+                flat.draw(pass, flat.translucent_calls(), |p| self.arena.buffer(p));
+                pass.set_bind_group(0, &self.group, &[]);
+            }
+            None => {
+                pass.set_pipeline(&self.translucent_mark);
+                pass.set_vertex_buffer(1, self.instances.slice(..));
+                self.draw_sections(pass, &self.indirect, 0, solid_draws, translucent_draws);
+            }
+        }
+        pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
     }
     /// LevelRenderer.submitBlockOutline: the buffer holds `edges` per stroke, the black
     /// secondary stroke first when high contrast is on.
@@ -4868,6 +4967,23 @@ impl Renderer {
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
+    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`): not
+    /// while a shader pack or a native pack draws entities from their vertices, nor while
+    /// frame generation follows them.
+    /// The posed models' store size (`SkinFrame::base`), with entity skinning.
+    pub fn skinned_models(&self) -> Option<u32> {
+        self.entity_skin
+            .as_ref()
+            .map(entity_skin::EntitySkin::stored)
+    }
+
+    pub fn skins_entities(&self) -> bool {
+        self.entity_skin.is_some()
+            && !self.frame_gen.on
+            && self.pack_post.is_none()
+            && self.native.is_none()
+    }
+
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
@@ -4962,6 +5078,16 @@ impl Renderer {
         self.pack_post = None;
         self.native = None;
         self.pack_atlas = None;
+        self.separate_ao = false;
+    }
+    /// Sets whether shader pack terrain inputs pass vertex alpha to `hz_Color.a` (`separateAo=true`).
+    pub fn set_separate_ao(&mut self, separate_ao: bool) {
+        if self.separate_ao != separate_ao {
+            self.separate_ao = separate_ao;
+            if let Some(atlas) = &mut self.pack_atlas {
+                atlas.separate_ao = separate_ao;
+            }
+        }
     }
     /// Runs the sky, material and post stages of one of Horizon's own shader packs from now
     /// on (`None`: no pack), with its options' values; replaces a `shaders/` pack. Returns the
@@ -5044,7 +5170,7 @@ impl Renderer {
                 .iter()
                 .map(|t| t.depth_or_array_layers())
                 .sum();
-            self.pack_atlas = pack_atlas::PackAtlas::new(
+            let mut atlas = pack_atlas::PackAtlas::new(
                 &self.device,
                 &mut encoder,
                 &self.sprite_textures,
@@ -5052,6 +5178,10 @@ impl Renderer {
                 layers,
                 self.sprite_textures[0].width(),
             );
+            if let Some(atlas) = &mut atlas {
+                atlas.separate_ao = self.separate_ao;
+            }
+            self.pack_atlas = atlas;
             self.queue.submit([encoder.finish()]);
         }
         // Flat draws whenever the device has them (`render` keeps them on with a pack).
@@ -6439,6 +6569,13 @@ impl Renderer {
             oit_on,
         );
         self.entity_batch.append_shadow_only(frame.shadow_only);
+        // The posed models' vertices come first: the ordinary entities' draw takes them in.
+        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
+            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
+            None => false,
+        });
+        let posed = skin.map_or(0, |s| s.vertices);
+        let entity_quads = entity_quads + posed / 4;
         let weather_quads = frame.weather.len() as u32 / 4;
         let world_quads = entity_quads
             + text_quads
@@ -6494,7 +6631,7 @@ impl Renderer {
             camera,
         );
         // Frame generation's made frame draws its own hand, halfway, after the others.
-        let made_hand_vertex = self.entity_batch.combined.len() as i32;
+        let made_hand_vertex = (posed as usize + self.entity_batch.combined.len()) as i32;
         if fg {
             self.frame_gen
                 .halfway_hand(frame.hand, hand_view, &mut self.entity_batch.combined);
@@ -6511,22 +6648,32 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        let entity_vertices = all_entities.len() as u64;
+        let entity_vertices = u64::from(posed) + all_entities.len() as u64;
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Entity vertices"),
                 size: self.entity_capacity * std::mem::size_of::<Vertex>() as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: entity_skin::EntitySkin::usage(self.entity_skin.is_some()),
                 mapped_at_creation: false,
             });
         }
-        if entity_vertices > 0 {
+        if !all_entities.is_empty() {
             self.uploads.buffer(
                 &mut encoder,
                 &self.entity_buffer,
-                0,
+                u64::from(posed) * std::mem::size_of::<Vertex>() as u64,
                 bytemuck::cast_slice(all_entities),
+            );
+        }
+        if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
+            skinner.dispatch(
+                &self.device,
+                &mut self.uploads,
+                &mut encoder,
+                skin,
+                &self.entity_buffer,
+                0,
             );
         }
         self.entity_outline.prepare(
@@ -7792,6 +7939,7 @@ impl Renderer {
                         }
                         pass.set_bind_group(0, &self.group, &[]);
                     }
+                    self.mark_translucent_terrain(&mut pass, flat, solid_draws, translucent_draws);
                 }
                 Some(flat) => {
                     pass.set_pipeline(pack_flat.map_or(&flat.translucent, |p| &p.1));
@@ -7800,6 +7948,12 @@ impl Renderer {
                     });
                     pass.set_bind_group(0, &self.group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    self.mark_translucent_terrain(
+                        &mut pass,
+                        Some(flat),
+                        solid_draws,
+                        translucent_draws,
+                    );
                 }
                 None => {
                     pass.set_pipeline(translucent_pipeline);
@@ -7812,6 +7966,7 @@ impl Renderer {
                         solid_draws,
                         translucent_draws,
                     );
+                    self.mark_translucent_terrain(&mut pass, None, solid_draws, translucent_draws);
                 }
             }
             // LevelRenderer.executeTranslucentAfterTerrain: vanilla's
