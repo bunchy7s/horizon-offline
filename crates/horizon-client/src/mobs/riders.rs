@@ -415,7 +415,8 @@ mod tests {
     /// spider's 0.21875 — and a wider one the type's default.
     #[test]
     fn a_spider_sits_by_its_own_rule_on_a_narrow_vehicle() {
-        let ran = crate::mobs::world::with_test_world(&[], |_, types| {
+        // World-gated: without the extracted data the body never runs.
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
             let new = |kind: &str| {
                 Mob::new(
                     1,
@@ -440,8 +441,5 @@ mod tests {
             big.extra.model_scale = 2.0;
             assert!(close(vehicle_attachment(&big, chicken), 0.4375));
         });
-        if !ran {
-            return;
-        }
     }
 }
