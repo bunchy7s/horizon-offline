@@ -834,12 +834,12 @@ impl Game<'_> {
         let length = delta.length();
         if length > f64::from(1.0e-5_f32) {
             if delta.horizontal_distance_squared() > f64::from(1.0e-5_f32) {
-                let yaw = 180.0 - delta.z.atan2(delta.x).to_degrees() as f32
+                let yaw = 180.0 - java_degrees(delta.z, delta.x) as f32
                     + if c.flipped { 180.0 } else { 0.0 };
                 let pitch = if c.on_ground && !c.on_rails {
                     0.0
                 } else {
-                    (90.0 - delta.horizontal_distance().atan2(delta.y).to_degrees() as f32)
+                    (90.0 - java_degrees(delta.horizontal_distance(), delta.y) as f32)
                         * if c.flipped { -1.0 } else { 1.0 }
                 };
                 Self::set_cart_rotation(c, yaw, pitch);
@@ -875,13 +875,13 @@ impl Game<'_> {
         {
             std::mem::swap(&mut out, &mut into);
         }
-        let mut yaw = 180.0 - out.z.atan2(out.x).to_degrees() as f32;
+        let mut yaw = 180.0 - java_degrees(out.z, out.x) as f32;
         if exit0.x != exit1.x && exit0.z != exit1.z {
             let along = exit1.subtract(exit0);
             let from = c.position.subtract(center).subtract(exit0);
             let projected = along.scale(along.dot(from) / along.dot(along));
             c.position = center.add_vector(exit0).add_vector(projected);
-            yaw = 180.0 - projected.z.atan2(projected.x).to_degrees() as f32;
+            yaw = 180.0 - java_degrees(projected.z, projected.x) as f32;
         } else {
             if exit0.z != exit1.z {
                 c.position.x = center.x;
@@ -2627,6 +2627,12 @@ impl Minecart {
 /// of a block a tick or more when a block stops it blows up.
 fn tnt_ignites_by_collision(horizontal_collision: bool, speed_sqr: f64) -> bool {
     horizontal_collision && speed_sqr >= 0.009_999_999_776_482_582
+}
+
+/// NewMinecartBehavior's `(float) (Math.atan2(y, x) * 180.0 / Math.PI)` before
+/// the cast: HotSpot's atan2, multiplied then divided in Java's order.
+fn java_degrees(y: f64, x: f64) -> f64 {
+    horizon_core::jmath::atan2(y, x) * 180.0 / std::f64::consts::PI
 }
 
 #[cfg(test)]
