@@ -4198,8 +4198,16 @@ impl Game<'_> {
                     .is_some_and(|p| p.fluids.was_touching_water || p.is_in_lava())
             })
             .unwrap_or(true);
+        let mut changed = None;
         if let Some(g) = host.hub.guest_mut(conn) {
-            g.fall_flying = start && !in_liquid;
+            let gliding = start && !in_liquid;
+            if g.fall_flying != gliding {
+                g.fall_flying = gliding;
+                changed = Some((g.uuid, g.name.clone(), gliding));
+            }
+        }
+        if let Some((uuid, name, gliding)) = changed {
+            self.native_entity_toggle_glide(uuid, &name, gliding);
         }
     }
 
