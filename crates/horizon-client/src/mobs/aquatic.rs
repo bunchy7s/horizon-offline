@@ -233,6 +233,14 @@ pub fn tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
     }
 }
 /// Pufferfish.getScale by puff state (the dimensions scale with it).
+/// `Salmon.Variant.boundingBoxScale`: SMALL 0.5, MEDIUM 1.0, LARGE 1.5.
+pub fn salmon_scale(variant: u8) -> f32 {
+    match variant {
+        0 => 0.5,
+        2 => 1.5,
+        _ => 1.0,
+    }
+}
 pub fn puff_scale(state: i32) -> f64 {
     match state {
         0 => 0.5,

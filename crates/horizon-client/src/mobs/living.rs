@@ -484,6 +484,12 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // Salmon.getDefaultDimensions: the variant's bounding box scale (small
+        // 0.5, medium 1.0, large 1.5) over the whole fish box.
+        if k.species == super::Species::Salmon {
+            let s = super::aquatic::salmon_scale(self.extra.variant);
+            (w, h, e) = (w * s, h * s, e * s);
+        }
         (f64::from(w), f64::from(h), f64::from(e))
     }
     pub fn eye_height(&self) -> f64 {
