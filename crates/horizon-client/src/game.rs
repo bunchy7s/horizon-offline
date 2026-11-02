@@ -4161,8 +4161,9 @@ impl Game<'_> {
             let item = &mut items[i];
             let mut alive = alive || (item.age < 6000 && item.position.y > -128.0);
             if merging && !removed[i] && item.age >= 6000 && item.position.y > -128.0 {
-                let mut extra_life = 0;
+                let mut extra_life = None;
                 self.native_item_expire(item.id, &item.stack, &mut extra_life);
+                let extra_life = extra_life.unwrap_or(0);
                 if extra_life > 0 {
                     item.age = item.age.saturating_sub(extra_life as u32);
                     alive = true;

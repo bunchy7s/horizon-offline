@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "A dropped item reaching its lifetime (`native_item_expire`).",
-  "doc_summary": "A server item reaches its lifetime: `native_item_expire(entity, stack, extra_life)` lets mods extend it. Extensions are capped at the current unsigned age. Bundles need \"hooks\": @API:item_expire@."
+  "doc_summary": "A server item reaches its lifetime: `native_item_expire(entity, stack, extra_life)` lets the first responding mod extend it. Extensions are capped at the current unsigned age. Bundles need \"hooks\": @API:item_expire@."
 }
