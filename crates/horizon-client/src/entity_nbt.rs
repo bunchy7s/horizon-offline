@@ -519,8 +519,10 @@ pub fn mob_to_nbt(
         }
     }
     let species = m.species();
-    // MushroomCow saves its variant under `Type` (below), not `variant`.
-    if species != crate::mobs::Species::Mooshroom
+    // `VariantUtils.writeVariant`: only the species that store the name. A
+    // mooshroom saves `Type` (below), a fox `Type`, a horse and a llama a
+    // packed `Variant` int, so those report the component but save no name.
+    if crate::mobs::finalize::saves_variant_name(species)
         && let Some((_, variant)) =
             crate::mobs::finalize::species_variant_component(species, m.extra.variant)
     {
@@ -1643,7 +1645,7 @@ pub fn mob_from_nbt(
             m.extra.vector[0] = 0.7;
         }
     }
-    if crate::mobs::finalize::species_variant_component(m.species(), 0).is_some()
+    if crate::mobs::finalize::saves_variant_name(m.species())
         && let Some(v) = text(tag.get("variant"))
     {
         m.extra.variant = crate::mobs::finalize::variant_index(m.species(), &v);
@@ -3858,6 +3860,14 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
         // alone, so a spawn egg carrying one hatches that variant.
         crate::mobs::Species::Fox => (Some("minecraft:fox/variant"), None),
         crate::mobs::Species::Frog => (Some("minecraft:frog/variant"), None),
+        // Horse.applyImplicitComponent: `setVariant` sets the coat colour and
+        // keeps the markings the spawn picked (`getTypeVariant() & -256`),
+        // which Horizon keeps in `extra.variant2` and leaves alone here.
+        crate::mobs::Species::Horse => (Some("minecraft:horse/variant"), None),
+        // Llama.applyImplicitComponent, which a trader llama inherits.
+        crate::mobs::Species::Llama | crate::mobs::Species::TraderLlama => {
+            (Some("minecraft:llama/variant"), None)
+        }
         _ => (None, None),
     };
     if let Some(name) = variant.and_then(|id| text(components.other(id))) {

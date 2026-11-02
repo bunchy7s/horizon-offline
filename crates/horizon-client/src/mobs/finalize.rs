@@ -2171,6 +2171,12 @@ pub fn variant_index(s: Species, name: &str) -> u8 {
         // Fox.Variant, read from a `minecraft:fox/variant` component; the save
         // keeps the same two names under `Type`.
         Species::Fox => ["red", "snow"].iter().position(|v| *v == name),
+        // Horse.Variant and Llama.Variant, the coat colours their
+        // `.../variant` components carry; a trader llama inherits the llama's.
+        Species::Horse => super::equine::VARIANT_NAMES.iter().position(|v| *v == name),
+        Species::Llama | Species::TraderLlama => {
+            super::llama::VARIANTS.iter().position(|v| *v == name)
+        }
         _ => ["temperate", "warm", "cold"]
             .iter()
             .position(|v| *v == name),
@@ -2193,9 +2199,28 @@ pub fn species_variant_component(s: Species, variant: u8) -> Option<(&'static st
         Species::Mooshroom => "minecraft:mooshroom/variant",
         Species::Chicken => "minecraft:chicken/variant",
         Species::ZombieNautilus => "minecraft:zombie_nautilus/variant",
+        Species::Horse => "minecraft:horse/variant",
+        Species::Llama | Species::TraderLlama => "minecraft:llama/variant",
         _ => return None,
     };
     Some((component, format!("minecraft:{}", variant_name(s, variant))))
+}
+/// Whether the mob's save keeps its variant under `variant` — the registry
+/// id `VariantUtils.writeVariant` stores — rather than under its own key (a
+/// fox's and a mooshroom's `Type`) or a packed int (a horse's and a llama's
+/// `Variant`). Only these seven classes call `writeVariant`, so reporting the
+/// component does not mean the save carries the name.
+pub fn saves_variant_name(s: Species) -> bool {
+    matches!(
+        s,
+        Species::Wolf
+            | Species::Cat
+            | Species::Frog
+            | Species::Pig
+            | Species::Cow
+            | Species::Chicken
+            | Species::ZombieNautilus
+    )
 }
 /// The `*_sound_variant` registry of a species, in registry order.
 pub fn sound_variants(s: Species) -> &'static [&'static str] {
@@ -2259,6 +2284,13 @@ pub fn variant_name(s: Species, index: u8) -> &'static str {
             .copied()
             .unwrap_or("temperate"),
         Species::Mooshroom => ["red", "brown"].get(i).copied().unwrap_or("red"),
+        Species::Horse => super::equine::VARIANT_NAMES
+            .get(i)
+            .copied()
+            .unwrap_or("white"),
+        Species::Llama | Species::TraderLlama => {
+            super::llama::VARIANTS.get(i).copied().unwrap_or("creamy")
+        }
         _ => ["temperate", "warm", "cold"]
             .get(i)
             .copied()
