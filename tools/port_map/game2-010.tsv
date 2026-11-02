@@ -118,7 +118,7 @@ CollisionGetter.noBorderCollision	port	crates/horizon-client-render/src/collisio
 CollisionGetter.getPreMoveCollisions	inline	crates/horizon-client-render/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: entity and block shapes are not returned as a list; the resolver takes them together
 CollisionGetter.getBlockAndLiquidCollisions	port	crates/horizon-client-render/src/collisions.rs::no_collision_or_liquid	gap: minor: a yes or no test, not the shape list
 CollisionGetter.getBlockCollisionsFromContext	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::collision_block	gap: minor: per-block shape; the box walk is not here
-CollisionGetter.clipIncludingBorder	missing		unsure: no world-border clamp of a ray found in clip_ray
+CollisionGetter.clipIncludingBorder	port	crates/horizon-client/src/projectiles.rs::clip_including_border	a ray that starts inside the world border and ends outside it stops on the border at WorldBorder.clampVec3ToBound of that point, facing the nearest direction of travel; the projectile clip in creatures.rs calls it around its block clip
 CollisionGetter.collidesWithSuffocatingBlock	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::is_suffocating	
 EntityGetter.getEntitiesOfClass	skip:other		class filter repeated at each caller over the entity lists; no shared lookup
 EntityGetter.getPlayerByUUID	skip:other		uuid find repeated at each caller (e.g. allays.rs)
