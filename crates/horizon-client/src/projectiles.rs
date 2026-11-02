@@ -94,9 +94,10 @@ pub enum ProjectileKind {
     /// flight that bursts on whatever it meets.
     WindCharge,
     BreezeWindCharge,
-    /// `ShulkerBullet`: homing on `target` in axis-aligned steps.
+    /// `ShulkerBullet`: homing on `target` in axis-aligned steps; one with
+    /// no target (a summoned one) falls like any projectile.
     ShulkerBullet {
-        target: Who,
+        target: Option<Who>,
         /// The current step direction (3D data value), if any.
         dir: Option<u8>,
         steps: i32,
@@ -116,6 +117,8 @@ pub enum ProjectileKind {
     /// type is the entity's own and `/summon` can pair either with any `Item`,
     /// so it is kept next to the stack (a thrown potion's follows its item).
     Potion(Box<crate::items::ItemStack>, bool),
+    /// `ThrownExperienceBottle`: its own entity type, gravity 0.07.
+    ExperienceBottle,
     /// a content mod's type.
     Thrown(&'static ThrownType),
 }
@@ -148,6 +151,7 @@ impl ProjectileKind {
             | Self::EnderPearl
             | Self::LlamaSpit
             | Self::Potion(..)
+            | Self::ExperienceBottle
             | Self::Thrown(_) => 0.25,
             Self::SmallFireball
             | Self::WindCharge
@@ -175,6 +179,7 @@ impl ProjectileKind {
             // `ThrownSplashPotion`/`ThrownLingeringPotion`: the item names it.
             Self::Potion(_, true) => "minecraft:lingering_potion",
             Self::Potion(_, false) => "minecraft:splash_potion",
+            Self::ExperienceBottle => "minecraft:experience_bottle",
             Self::Thrown(t) => t.id,
         }
     }
@@ -314,13 +319,16 @@ impl crate::entity_rules::EntityRules for Projectile {
     }
     /// Each projectile class's `getDefaultGravity`.
     fn get_default_gravity(&self) -> f64 {
-        match self.kind {
+        match &self.kind {
             ProjectileKind::Arrow { .. } | ProjectileKind::Trident => 0.05,
             ProjectileKind::SmallFireball
             | ProjectileKind::LargeFireball { .. }
             | ProjectileKind::WitherSkull { .. } => 0.0,
             ProjectileKind::LlamaSpit => 0.06,
+            // `ThrownExperienceBottle.getDefaultGravity` is 0.07.
+            ProjectileKind::ExperienceBottle => 0.07,
             ProjectileKind::Potion { .. } => 0.05,
+            ProjectileKind::ShulkerBullet { .. } => 0.04,
             _ => 0.03,
         }
     }
@@ -465,7 +473,7 @@ impl Projectile {
             || self
                 .arrow
                 .as_ref()
-                .is_some_and(|a| &*a.pickup_item.item == "minecraft:spectral_arrow")
+                .is_some_and(|a| a.spectral || &*a.pickup_item.item == "minecraft:spectral_arrow")
     }
     /// `Arrow.ID_EFFECT_COLOR` (`updateColor`): the opaque colour of the
     /// potion the arrow carries, from its tipped pickup item or the effect a
@@ -598,7 +606,7 @@ impl Projectile {
         );
         let mut p = Self::new(
             ProjectileKind::ShulkerBullet {
-                target,
+                target: Some(target),
                 dir: Some(1),
                 steps: 0,
                 delta: [0.0; 3],
@@ -629,7 +637,11 @@ impl Projectile {
         ]
     }
     fn target_box(&self, w: &impl ProjectileWorld) -> Option<Aabb> {
-        let ProjectileKind::ShulkerBullet { target, .. } = self.kind else {
+        let ProjectileKind::ShulkerBullet {
+            target: Some(target),
+            ..
+        } = self.kind
+        else {
             return None;
         };
         w.targets()
@@ -743,7 +755,8 @@ impl Projectile {
                 v.z + (dl[2] - v.z) * 0.2,
             );
         } else {
-            self.velocity.y -= 0.04;
+            // `Entity.applyGravity`: `getGravity` is 0 under NoGravity.
+            self.velocity.y -= crate::entity_rules::EntityRules::get_gravity(self);
         }
         let from = self.position;
         let to = from.add_vector(self.velocity);
@@ -1004,6 +1017,10 @@ impl Projectile {
     pub fn drawn_item(&self) -> Option<crate::items::ItemStack> {
         match &self.kind {
             ProjectileKind::Potion(stack, _) => Some((**stack).clone()),
+            ProjectileKind::ExperienceBottle => Some(crate::items::ItemStack::new(
+                "minecraft:experience_bottle",
+                1,
+            )),
             ProjectileKind::Thrown(t) => Some(crate::items::ItemStack::new(t.item, 1)),
             _ => None,
         }
@@ -1018,6 +1035,7 @@ impl Projectile {
                 "item/fire_charge"
             }
             ProjectileKind::Potion(stack, _) => potion_sprite(&stack.item),
+            ProjectileKind::ExperienceBottle => "item/experience_bottle",
             ProjectileKind::LlamaSpit => "entity/llama/llama_spit",
             // Drawn as `WindChargeModel` and `ShulkerBulletModel` by the game.
             ProjectileKind::WindCharge
@@ -1298,6 +1316,38 @@ mod tests {
         assert_eq!(settings("ruby:late"), (5, 3, true));
     }
 
+    /// `ShulkerBullet.tick` with no target: `applyGravity` (0.04, none under
+    /// NoGravity), then the move, no drag. 20 ticks from y 110 fall 8.4.
+    #[test]
+    fn a_shulker_bullet_without_a_target_falls_unless_no_gravity() {
+        let bullet = || {
+            Projectile::new(
+                ProjectileKind::ShulkerBullet {
+                    target: None,
+                    dir: None,
+                    steps: 0,
+                    delta: [0.0; 3],
+                    seed: 0,
+                },
+                Vec3::new(0.5, 110.0, 0.5),
+                None,
+            )
+        };
+        let w = Empty(vec![]);
+        let mut falling = bullet();
+        let mut held = bullet();
+        held.no_gravity = true;
+        for _ in 0..20 {
+            falling.tick(&w);
+            held.tick(&w);
+        }
+        assert!(
+            (falling.position.y - 101.6).abs() < 1e-6,
+            "{}",
+            falling.position.y
+        );
+        assert_eq!(held.position, Vec3::new(0.5, 110.0, 0.5));
+    }
     #[test]
     fn llama_spit_moves_first_then_drags_and_falls() {
         let mut p = Projectile::new(ProjectileKind::LlamaSpit, Vec3::new(0.0, 100.0, 0.0), None);

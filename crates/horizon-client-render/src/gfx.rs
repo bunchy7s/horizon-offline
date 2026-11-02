@@ -7011,7 +7011,11 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        let entity_vertices = u64::from(posed) + all_entities.len() as u64;
+        // Glowing entities' silhouettes posed on the GPU go last, past every
+        // material (the outline pass draws them from there).
+        let outline_base = posed + all_entities.len() as u32;
+        let outlined = skin.map_or(0, |s| s.outline_vertices);
+        let entity_vertices = u64::from(outline_base) + u64::from(outlined);
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -7037,6 +7041,7 @@ impl Renderer {
                 skin,
                 &self.entity_buffer,
                 0,
+                outline_base,
             );
         }
         let static_sections = frame.static_block_entities;
@@ -7163,6 +7168,7 @@ impl Renderer {
             &mut self.uploads,
             &mut encoder,
             frame.glowing,
+            (outline_base, outlined / 4),
             [self.config.width, self.config.height],
         );
         if let Some((rotation, brightness)) = frame.stars {
@@ -7194,7 +7200,8 @@ impl Renderer {
                     lightning::QUADS
                 })
                 .max(weather_quads)
-                .max(frame.glowing.len() as u32 / 4);
+                .max(frame.glowing.len() as u32 / 4)
+                .max(outlined / 4);
         if max_quads > self.index_quads {
             self.index_quads = max_quads.next_power_of_two();
             self.indices = Self::quad_indices(&self.device, self.index_quads);
@@ -9083,6 +9090,7 @@ impl Renderer {
             view_target,
             &self.entity_group,
             &self.indices,
+            &self.entity_buffer,
             timing.as_mut(),
         );
         // The world icon grabs here: after the level and the hand, before
