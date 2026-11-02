@@ -9022,6 +9022,10 @@ impl Game<'_> {
         self.last_inv_click = None;
     }
     pub(super) fn close_container(&mut self) {
+        // `Gui.setScreen` clears the old screen's focus before it goes: the
+        // key that closed the container (Tab bound to the inventory) has
+        // already moved the focus, and it must not outlive the screen.
+        self.pad_clear_focus();
         self.mod_browser_closed();
         self.reset_inventory_clicks();
         self.close_station();
@@ -15829,6 +15833,7 @@ impl Game<'_> {
                     self.capture(false);
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     self.carried = None;
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -15941,6 +15946,7 @@ impl Game<'_> {
                     }
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
