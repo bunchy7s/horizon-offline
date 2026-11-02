@@ -2268,17 +2268,19 @@ fn count(game: &mut crate::game::Game<'_>) {
 }
 ```
 
-`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in the bundle's `[[module]]`
-and named by its full path (`crate::game::<module>::COUNTER`). `Game` is not an `AttachmentHost` itself, so the `dyn Host`
-coercion is the step that matters; any `Host` helper works on `host` too.
+`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in a `[[module]]` of the
+bundle (horizon-mixins' README): one with `file = "crates/horizon-client/src/game.rs"` and `name = "example"` is
+`crate::game::example`. `Game` is not an `AttachmentHost` itself, so the `dyn Host` coercion is the step that matters;
+any `Host` helper works on `host` too.
 
 On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
 `native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
 for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
 hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
-A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate is separate from
-horizon-client and a `[[module]]` is `pub(crate)`, so it keeps its own attachment static:
+A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate depends on
+horizon-client's library, not on the game executable that helpers and modules are compiled into, so it declares its
+own `AttachmentType<i32>` with the same `namespace` and `name`: the pair is the key, so both statics read one value.
 
 ```toml
 [[injection]]
