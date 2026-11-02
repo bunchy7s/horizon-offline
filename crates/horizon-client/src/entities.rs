@@ -290,7 +290,9 @@ impl ItemEntity {
             // tick, as vanilla's fields do, for the tracker that sends the
             // position at the type's update interval.
             self.vertical_collision = moved.y != wanted.y;
-            self.horizontal_collision = moved.x != wanted.x || moved.z != wanted.z;
+            // `Mth.equal` on x and z (1e-5 as a float), exact on y.
+            let differs = |a: f64, b: f64| (b - a).abs() >= 9.999_999_747_378_752e-6;
+            self.horizontal_collision = differs(moved.x, wanted.x) || differs(moved.z, wanted.z);
             if moved.x != wanted.x {
                 self.velocity.x = 0.0;
             }
