@@ -6915,7 +6915,7 @@ impl Game<'_> {
         let canceled = !hand_changed && !self.use_item_stopped(stack, ticks);
         let (release, spyglass) = item_use::release_parts(canceled, hand_changed);
         match &*stack.item {
-            "minecraft:bow" if release => self.release_bow(self.ticks_held(stack, ticks)),
+            "minecraft:bow" if release => self.release_bow(stack, self.ticks_held(stack, ticks)),
             "minecraft:trident" if release => self.release_trident(self.ticks_held(stack, ticks)),
             "minecraft:spyglass" if spyglass => self.stop_spyglass(),
             _ => {}
@@ -12133,6 +12133,16 @@ impl Game<'_> {
                 }
             }
         }
+        // IntegratedServer.initServer's line, which other launchers read in `latest.log` to
+        // offer the world again; single player starts here with or without a server thread.
+        horizon_client::logging::write_as(
+            "Server thread",
+            log::Level::Info,
+            &format!(
+                "Starting integrated minecraft server version {}",
+                horizon_core::VANILLA_VERSION
+            ),
+        );
         if self
             .options
             .execution_role
@@ -13895,16 +13905,15 @@ impl Game<'_> {
         }
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
-    fn release_bow(&mut self, ticks: u32) {
-        let f = ticks as f32 / 20.0;
-        let power = ((f * f + f * 2.0) / 3.0).min(1.0);
-        if power < 0.1 {
-            return;
-        }
+    fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {
         let arrow_slot = self.projectile_slot("minecraft:bow");
-        if arrow_slot.is_none() && !self.creative {
+        let has_ammo = arrow_slot.is_some() || self.creative;
+        let mut charge = i32::try_from(ticks).unwrap_or(i32::MAX);
+        let mut canceled = false;
+        self.native_arrow_loose(stack, has_ammo, &mut charge, &mut canceled);
+        let Some(power) = item_use::bow_release_power(has_ammo, charge, canceled) else {
             return;
-        }
+        };
         let Some(eye) = self.eye_position() else {
             return;
         };
