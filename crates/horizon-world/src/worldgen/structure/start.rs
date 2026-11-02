@@ -1529,6 +1529,68 @@ mod tests {
     }
 
     #[test]
+    fn dimension_origin_places_the_generators_origin_chunk_alone() {
+        let mut r = registry(
+            &[("t:s", json!({"type": "minecraft:igloo", "biomes": []}))],
+            &[(
+                "t:origin",
+                json!({"structures": [{"structure": "t:s", "weight": 1}],
+                    "placement": {"type": "minecraft:dimension_origin"}}),
+            )],
+        );
+        let set = |r: &StructureRegistry, name: &str| {
+            r.sets.iter().position(|set| set.name == name).unwrap()
+        };
+        let at = |r: &StructureRegistry, x: i32, z: i32| {
+            r.is_structure_chunk(&r.sets[set(r, "t:origin")], 0, x, z, &Rings::new())
+        };
+        // ChunkGenerator.getOrigin is chunk 0 0 until a generator says otherwise.
+        assert_eq!(r.dimension_origin(), ChunkPos::new(0, 0));
+        assert!(at(&r, 0, 0), "the origin chunk holds the start");
+        assert!(!at(&r, 1, 0));
+        assert!(!at(&r, 0, -1));
+        assert!(r.needs_dimension_origin());
+        r.set_dimension_origin(ChunkPos::new(-37, 12));
+        assert!(at(&r, -37, 12));
+        assert!(!at(&r, 0, 0), "the origin moved with the generator's");
+        assert!(!at(&r, -36, 12));
+        assert!(!at(&r, -37, 13));
+    }
+
+    #[test]
+    fn dimension_origin_ignores_a_frequency_and_an_exclusion_zone() {
+        // DimensionOriginStructurePlacement is no
+        // AbstractSpreadingStructurePlacement: the generator's origin chunk
+        // decides alone, with no frequency reduction and no exclusion zone.
+        let mut r = registry(
+            &[("t:s", json!({"type": "minecraft:igloo", "biomes": []}))],
+            &[
+                (
+                    "t:origin",
+                    json!({"structures": [{"structure": "t:s", "weight": 1}],
+                        "placement": {"type": "minecraft:dimension_origin",
+                            "frequency": 0.0,
+                            "exclusion_zone": {"other_set": "t:other", "chunk_count": 8}}}),
+                ),
+                (
+                    "t:other",
+                    json!({"structures": [{"structure": "t:s", "weight": 1}],
+                        "placement": {"type": "minecraft:random_spread", "spacing": 1,
+                            "separation": 0, "salt": 1}}),
+                ),
+            ],
+        );
+        let set = |r: &StructureRegistry, name: &str| {
+            r.sets.iter().position(|set| set.name == name).unwrap()
+        };
+        r.set_dimension_origin(ChunkPos::new(2, 2));
+        // The other set spreads over every chunk, so its zone covers the origin.
+        assert!(r.is_structure_chunk(&r.sets[set(&r, "t:other")], 0, 2, 2, &Rings::new()));
+        assert!(r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 2, 2, &Rings::new()));
+        assert!(!r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 3, 2, &Rings::new()));
+    }
+
+    #[test]
     fn exclusion_zones_may_skip_the_other_sets_own() {
         let set = |avoid: Value| {
             json!({"structures": [{"structure": "t:s", "weight": 1}],
