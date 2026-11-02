@@ -126,7 +126,7 @@ net/minecraft/commands/arguments/selector/EntitySelector#sortAndLimit	inline	cra
 EntitySelectorParser.allowSelectors	inline	crates/horizon-command/src/args.rs::ArgType::parse	reg.permission >= 2 at each selector call site
 EntitySelectorParser.createAabb	inline	crates/horizon-client/src/game/commands.rs::Game::select_in_level	dx, dy, dz box from the origin
 EntitySelectorParser.finalizePredicates	port	crates/horizon-client/src/game/commands.rs::Game::select_in_level	player: x_rotation and y_rotation are parsed but never filter the selection; the level filter is here
-EntitySelectorParser.createRotationPredicate	missing		player: x_rotation and y_rotation ranges are parsed but never applied, so @e[y_rotation=...] selects regardless of facing
+EntitySelectorParser.createRotationPredicate	inline	crates/horizon-client/src/game/commands.rs::rotation_in	x_rotation is the pitch and y_rotation the yaw, wrapped and compared with the wrapped range that runs through 180 when its minimum is above its maximum
 EntitySelectorParser.shouldInvertValue	port	crates/horizon-command/src/selector.rs::SelectorParser::should_invert	
 EntitySelectorParser.fillSelectorSuggestions	port	crates/horizon-command/src/selector.rs::SelectorParser::fill_selectors	
 EntitySelectorParser.suggestNameOrSelector	inline	crates/horizon-command/src/selector.rs::SelectorParser::fill_suggestions	
