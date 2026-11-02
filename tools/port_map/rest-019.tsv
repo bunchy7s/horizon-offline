@@ -91,6 +91,7 @@ PermissionSetUnion.hasPermission	skip:other		no unions; a sender has one level
 PermissionSetUnion.union	skip:other		no unions; a sender has one level
 PermissionSetUnion.ensureNoUnionsWithinUnions	skip:java		constructor guard against nested unions
 PermissionTypes.bootstrap	skip:data		registry bootstrap of the permission codecs
+BanListEntry.<init>	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::new	both vanilla constructors land here: a missing source becomes (Unknown); gap: minor: created is stamped with now instead of being passed, and a file's stored created date is kept by fields() through from_json
 BanListEntry.equals	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::eq	same source, expiry, reason and user
 BanListEntry.hashCode	skip:java		hash for map keys; bans are keyed by uuid or ip string
 CachedUserNameToIdResolver.lookupGameProfile	port	crates/horizon-server-files/src/user_cache.rs::UserCache::get_by_name	cache first, then the profile lookup, then offline if allowed
