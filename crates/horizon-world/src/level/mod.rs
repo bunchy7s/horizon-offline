@@ -317,10 +317,57 @@ pub enum Spread {
 
 /// The world as seen by block behaviour. Implemented by the game and tests.
 pub trait LevelAccess {
+    /// Whether a hopper may pick up this dropped item stack. The default allows.
+    fn allow_hopper_pickup_item(&self, _pos: BlockPos, _item: &str, _count: u32) -> bool {
+        true
+    }
     /// Whether `kind` may spread from `from` to `to`: a native mod may refuse
     /// (land claims), and the block at `to` stays as it is. Fire asks after
     /// its random draws, which a refusal doesn't change. The default allows.
     fn allow_spread(&self, _kind: Spread, _from: BlockPos, _to: BlockPos) -> bool {
+        true
+    }
+    fn allow_fluid_level_change(
+        &self,
+        _pos: BlockPos,
+        _fluid: &'static str,
+        _from: i32,
+        _to: i32,
+    ) -> bool {
+        true
+    }
+    fn allow_block_ignite(&self, _pos: BlockPos, _cause: &'static str) -> bool {
+        true
+    }
+    fn allow_block_burn(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_leaves_decay(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_moisture_change(&self, _pos: BlockPos, _from: i32, _to: i32) -> bool {
+        true
+    }
+    fn observe_sponge_absorb(&self, _pos: BlockPos) {}
+    fn allow_block_fade(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
+        true
+    }
+    fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
+        true
+    }
+    fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
+        true
+    }
+    fn allow_bell_ring(&self, _pos: BlockPos) -> bool {
+        true
+    }
+    fn allow_cauldron_level_change(
+        &self,
+        _pos: BlockPos,
+        _from: i32,
+        _to: i32,
+        _reason: &'static str,
+    ) -> bool {
         true
     }
     /// Whether the piston at `piston` may push the blocks `push` one step

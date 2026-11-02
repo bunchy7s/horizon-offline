@@ -2226,4 +2226,112 @@ mod tests {
             }
         }
     }
+    /// Horizon's graphics captions are English sentences that the language table keys by
+    /// themselves, so a caption, description or value that is not in `en_us.json` shows in
+    /// English in every language. Every text the three pages show, with each setting cycled
+    /// through its values (#1927).
+    #[test]
+    fn every_graphics_text_is_in_the_language_table() {
+        let (_, missed) = lang::scoped(lang::Language::load(&[], "de_de"), || {
+            for hdr in [false, true] {
+                let mut s = Settings::default();
+                s.horizon.hdr = hdr;
+                s.horizon.taa = true;
+                for level in [Level::Simple, Level::Advanced, Level::Hdr] {
+                    for _ in 0..8 {
+                        for row in extra_rows(level, &s) {
+                            match row {
+                                Row::Header(name) => {
+                                    lang::get(name);
+                                }
+                                Row::Setting(row) => {
+                                    row.item.label(&s);
+                                    let text = description(row.item, &s, row.text);
+                                    lang::get(text);
+                                    lang::get(row.cost.label());
+                                    if let Some(why) = row.item.blocked(&s) {
+                                        lang::get(why);
+                                    }
+                                }
+                            }
+                        }
+                        for row in extra_rows(level, &s) {
+                            if let Row::Setting(Setting {
+                                item: Item::Horizon(h),
+                                ..
+                            }) = row
+                            {
+                                h.cycle(&mut s, false);
+                            }
+                        }
+                    }
+                }
+            }
+            for button in ["Advanced...", "Simple...", "Done"] {
+                lang::get(button);
+            }
+        });
+        // `labelled` also looks up values that are already words in the language ("An") or
+        // numbers with a unit ("12 chunks", "Auto (8)"); those are not keys, and "FSR 3.1" is
+        // a name.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|m| !m.starts_with(|c: char| c.is_ascii_digit()) && !m.starts_with("Auto ("))
+            .filter(|m| !["An", "Aus", "FSR 3.1", "key.keyboard.unknown"].contains(&m.as_str()))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+    }
+    /// Leaf Culling, Frame Generation and Shadow Cache came with English captions only (#1927).
+    #[test]
+    fn newer_graphics_settings_are_translated() {
+        let mut s = Settings::default();
+        s.horizon.leaf_culling = LeafCullingMode::Hollow;
+        s.horizon.entity_culling = EntityCullingMode::Asynchronous;
+        for (code, leaf, entity, leaf_text) in [
+            (
+                "de_de",
+                "Laub-Culling: Hohl",
+                "Objekt-Culling: Asynchron",
+                "Lässt Flächen zwischen Blättern weg: schneller, aber Lücken sind durchsichtig.",
+            ),
+            (
+                "pl_pl",
+                "Pomijanie liści: Puste",
+                "Pomijanie bytów: Asynchroniczne",
+                "Pomija ściany między liśćmi: szybciej, ale luki są przezroczyste.",
+            ),
+            (
+                "uk_ua",
+                "Відсікання листя: Порожнє",
+                "Відсік. сутностей: Асинхронно",
+                "Прибирає грані між листям: швидше, але прогалини прозорі.",
+            ),
+            (
+                "zh_cn",
+                "树叶剔除: 镂空",
+                "实体剔除: 异步",
+                "省略树叶之间的面：更快，但缝隙会透视。",
+            ),
+            (
+                "fr_fr",
+                "Occlusion feuillage: Creux",
+                "Occlusion des entités: Asynchrone",
+                "Supprime les faces entre feuilles : plus rapide, mais on voit à travers les trous.",
+            ),
+        ] {
+            let (shown, _) = lang::scoped(lang::Language::load(&[], code), || {
+                let item = |h| Item::Horizon(h);
+                (
+                    item(H::LeafCulling).label(&s).plain(),
+                    item(H::EntityCulling).label(&s).plain(),
+                    lang::get(description(item(H::LeafCulling), &s, "")),
+                )
+            });
+            assert_eq!(
+                shown,
+                (leaf.into(), entity.into(), leaf_text.into()),
+                "{code}"
+            );
+        }
+    }
 }

@@ -95,6 +95,14 @@ class Game:
             raise RuntimeError(f'P{n} {" ".join(words)}: {reply["error"]}')
         return reply
 
+    def press(self, n, label):
+        """Click a button once it's drawn and enabled: `ui` lists the last drawn frame's
+        widgets, which lag a page change (by most of a second on GNOME Wayland)."""
+        def ready():
+            return any(w['label'] == label and w['enabled'] for w in self.ctl(n, 'ui')['widgets'])
+        self.wait(ready, f'P{n} button {label!r}')
+        self.ctl(n, 'click-button', label)
+
     def alive(self, n):
         try:
             self.ctl(n, 'status')
@@ -357,6 +365,139 @@ def scenario_toggle():
         g.quit()
 
 
+def scenario_setup():
+    print('setup: preview, Revert, Apply, Done, and solo return while the page stays open')
+    g = Game(2, saved_split=True)
+    def labels():
+        return [w['label'] for w in g.ctl(1, 'ui')['widgets']]
+    def enabled(label):
+        return next(w['enabled'] for w in g.ctl(1, 'ui')['widgets'] if w['label'] == label)
+    def page():
+        g.ctl(1, 'options', 'horizon')
+        g.press(1, 'Splitscreen...')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'active', 'Setup active')
+    try:
+        g.wait(lambda: g.ctl(2, 'state').get('player') is not None, 'P2 playing')
+        half = g.size(1)
+        whole = (2 * half[0], half[1])
+        g.ctl(1, 'key', 'esc', 'tap')
+        g.wait(lambda: 'Splitscreen Settings' in labels(), 'P1 pause shortcut')
+        g.press(1, 'Splitscreen Settings')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'active', 'Setup active')
+        g.press(1, 'P2')
+        g.press(1, 'New window')
+        check('preview leaves the real views alone', g.sizes([1, 2]), [half, half])
+        check('draft enables Apply', enabled('Apply'), True)
+        g.press(1, 'Revert')
+        check('Revert clears the draft', enabled('Apply'), False)
+        g.press(1, 'P2')
+        g.press(1, 'New window')
+        g.press(1, 'Apply')
+        check('Apply gives P1 its whole window', g.settle([1], [whole]), [whole])
+        own = g.size(2)
+        check('P2 gets a separate window', own != half, True)
+        g.wait(lambda: not enabled('Apply'), 'the applied draft is current')
+        g.press(1, 'P2')
+        g.press(1, 'Window 1')
+        g.press(1, 'Done')
+        check('Done discards unapplied placement', g.sizes([1, 2]), [whole, own])
+        page()
+        g.press(1, 'P2')
+        g.press(1, 'Window 1')
+        g.press(1, 'Apply')
+        check('Apply reunites both views', g.settle([1, 2], [half, half]), [half, half])
+        g.ctl(2, 'disconnect')
+        g.wait(lambda: not g.alive(2), 'P2 gone')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'idle', 'Setup idle')
+        check('idle map has no stale player tiles', 'P2' in labels(), False)
+        check('idle P1 has the full window', g.settle([1], [whole]), [whole])
+        for _ in range(3):
+            g.press(1, 'Done')
+            g.ctl(1, 'options', 'horizon')
+            g.press(1, 'Splitscreen...')
+            g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'idle', 'reopened idle')
+        g.press(1, 'Splitscreen: On')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'off', 'Setup off')
+        g.press(1, 'Splitscreen: Off')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'idle', 'Setup idle again')
+    finally:
+        g.quit()
+
+
+def scenario_setup_leave():
+    print('setup_leave: a middle player leaving invalidates the draft instead of moving the wrong seat')
+    g = Game(3, saved_split=True)
+    try:
+        g.wait(lambda: g.ctl(3, 'state').get('player') is not None, 'P3 playing')
+        g.ctl(1, 'options', 'horizon')
+        g.press(1, 'Splitscreen...')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'active', 'Setup active')
+        g.press(1, 'P3')
+        g.press(1, 'New window')
+        g.ctl(2, 'disconnect')
+        g.wait(lambda: not g.alive(2), 'P2 gone')
+        def reset():
+            widgets = g.ctl(1, 'ui')['widgets']
+            return any(w['label'] == 'Apply' and not w['enabled'] for w in widgets)
+        g.wait(reset, 'stale draft discarded')
+        labels = [w['label'] for w in g.ctl(1, 'ui')['widgets']]
+        check('remaining seat stays on the map', 'P3' in labels and 'P2' not in labels, True)
+        check('P3 shares the original window', g.size(3), g.size(1))
+    finally:
+        g.quit()
+
+
+def scenario_controls():
+    print('controls: the 2-sharing layout square, dragging a player between windows, Names, Identify')
+    g = Game(2, saved_split=True)
+    def widgets():
+        return g.ctl(1, 'ui')['widgets']
+    def labels():
+        return [w['label'] for w in widgets()]
+    def enabled(label):
+        return next(w['enabled'] for w in widgets() if w['label'] == label)
+    def centre(label):
+        x, y, w, h = next(w['bounds'] for w in widgets() if w['label'] == label)
+        return x + w / 2, y + h / 2
+    try:
+        g.wait(lambda: g.ctl(2, 'state').get('player') is not None, 'P2 playing')
+        half = g.size(1)
+        whole = (2 * half[0], half[1])
+        g.ctl(1, 'options', 'horizon')
+        g.press(1, 'Splitscreen...')
+        g.wait(lambda: (g.ctl(1, 'state').get('menu') or {}).get('status') == 'active', 'Setup active')
+        # Two sharing a window: Auto (side by side here), Side by side, Top and bottom.
+        g.press(1, '2 sharing: Auto')
+        g.press(1, '2 sharing: Side by side')
+        g.press(1, 'Apply')
+        stacked = (whole[0], half[1] // 2)
+        check('top and bottom', g.settle([1, 2], [stacked, stacked]), [stacked, stacked])
+        g.press(1, '2 sharing: Top and bottom')
+        g.press(1, 'Apply')
+        check('auto: side by side again', g.settle([1, 2], [half, half]), [half, half])
+        # Drag P2 into a window of its own, then onto P1's tile: back in Window 1.
+        g.press(1, 'P2')
+        g.press(1, 'New window')
+        g.press(1, 'Apply')
+        check('P2 in its own window', g.settle([1], [whole]), [whole])
+        g.wait(lambda: 'P2' in labels() and not enabled('Apply'), 'the applied map')
+        (x2, y2), (x1, y1) = centre('P2'), centre('P1')
+        g.ctl(1, 'drag-at', str(x2), str(y2), str((x1 + x2) / 2), str((y1 + y2) / 2), str(x1), str(y1))
+        g.wait(lambda: enabled('Apply'), 'the drop makes a draft')
+        g.press(1, 'Apply')
+        check('dragged onto P1: both in Window 1', g.settle([1, 2], [half, half]), [half, half])
+        # Names on and off (saved), Identify.
+        g.press(1, 'Names: On')
+        g.wait(lambda: 'Names: Off' in labels(), 'Names: Off')
+        check('Names turns off', 'Names: Off' in labels(), True)
+        g.press(1, 'Names: Off')
+        g.wait(lambda: 'Names: On' in labels(), 'Names: On')
+        g.press(1, 'Identify')
+        g.press(1, 'Done')
+    finally:
+        g.quit()
+
+
 SCENARIOS = {
     'alone': scenario_alone,
     'join': scenario_join,
@@ -367,6 +508,9 @@ SCENARIOS = {
     'switch': scenario_switch,
     'bumpers': scenario_bumpers,
     'toggle': scenario_toggle,
+    'setup': scenario_setup,
+    'setup_leave': scenario_setup_leave,
+    'controls': scenario_controls,
 }
 
 

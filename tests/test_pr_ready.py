@@ -1,6 +1,9 @@
 import argparse
 import datetime
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -106,6 +109,38 @@ class PrReadyTests(unittest.TestCase):
                 step = {step.name: step for step in steps}["mod API up to date"]
                 self.assertEqual(step.command, "cargo test --locked -p xtask mod_api")
                 self.assertEqual(step.skip, "native hooks untouched" if path == "README.md" else None)
+
+    def test_the_launcher_fallback_asks_for_a_feature_the_launcher_has(self):
+        """The macOS fallback must name gpui_platform/runtime_shaders: gpui_platform is launcher/Cargo.toml's
+        rename of gpui-fast-platform, whose runtime_shaders reaches gpui_macos; the gpui rename (gpui-fast)
+        has no such feature, and neither has Linux any fallback."""
+        with mock.patch.object(pr_ready, "affected_here", return_value=[]):
+            steps = pr_ready.plan(args(quick=True), "origin/main", {"launcher/src/main.rs"},
+                                  PACKAGES, LIBRARIES, DEPENDENCIES)
+        command = {step.name: step for step in steps}["launcher clippy"].command
+        for uname, metal, features in (("Darwin", False, ["--features", "gpui_platform/runtime_shaders"]),
+                                        ("Darwin", True, []), ("Linux", False, [])):
+            with self.subTest(uname=uname, metal=metal):
+                self.assertEqual(self.launcher_step_arguments(command, uname, metal),
+                                 ["clippy", "--all-targets", "--locked", *features, "--", "-D", "warnings"])
+
+    def launcher_step_arguments(self, command, uname, metal):
+        """Run a launcher step's shell snippet with fake uname, xcrun, pkg-config and cargo; what the fake
+        cargo receives is the snippet's observable behaviour."""
+        with tempfile.TemporaryDirectory() as fake_bin:
+            scripts = {"uname": f"#!/bin/sh\necho {uname}\n",
+                       "xcrun": f"#!/bin/sh\nexit {0 if metal else 1}\n",
+                       # xkbcommon found: Linux never looks for nix-shell (a NixOS host would have it).
+                       "pkg-config": "#!/bin/sh\nexit 0\n",
+                       "cargo": "#!/bin/sh\nprintf '%s\\n' \"$@\"\n"}
+            for name, script in scripts.items():
+                path = os.path.join(fake_bin, name)
+                with open(path, "w") as file:
+                    file.write(script)
+                os.chmod(path, 0o755)
+            env = dict(os.environ, PATH=fake_bin + os.pathsep + os.environ["PATH"])
+            return subprocess.run(["bash", "-c", command], capture_output=True, text=True,
+                                  cwd=pr_ready.ROOT, env=env, check=True).stdout.splitlines()
 
     def test_python_tests_always_run(self):
         with mock.patch.object(pr_ready, "affected_here", return_value=[]):

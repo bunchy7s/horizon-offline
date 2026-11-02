@@ -20,6 +20,20 @@ def single(value): return struct.pack('>f', value).hex()
 def vec(values): return list(map(bits, values))
 def op(mode, value=None, **extra): return dict(mode=mode, value=value, **extra)
 
+def flight_corpus():
+    # A server may force flight while denying the client permission to toggle
+    # it. Zero flying speed must hold the player in midair even with input.
+    for may_fly in (False, True):
+        for speed in (0.0, 0.05):
+            for direction in ((0, 0, 0), (0, 0, .98)):
+                ops = [op('flying', True, may_fly=may_fly, speed=single(speed)),
+                       op('velocity', vec((0, 0, 0)))]
+                ops += [op('simulation_tick', vec(direction), jumping=False) for _ in range(30)]
+                # An explicit server update ending flight must restore falling.
+                ops += [op('flying', False, may_fly=False)]
+                ops += [op('simulation_tick', vec((0, 0, 0)), jumping=False) for _ in range(10)]
+                yield dict(position=vec((25.5, 20, 25.5)), ops=ops)
+
 def attribute_corpus(controlled):
     def tick(keys=0):
         return op('controlled_tick',keys) if controlled else op('simulation_tick',vec((0,0,.98 if keys&1 else 0)),jumping=bool(keys&16))
@@ -467,6 +481,7 @@ def swim_corpus():
         yield dict(position=vec((25.5,5,25.5)),ops=ops)
 
 def corpus():
+    yield from flight_corpus()
     yield from attribute_corpus(False)
     yield from portal_corpus()
     yield from pose_corpus(False)
@@ -772,13 +787,18 @@ def sprint_corpus():
                     yield dict(position=vec((8.5,4,8.5)),ops=ops)
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--sprint-input',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser(description=__doc__)
+    selection=parser.add_mutually_exclusive_group()
+    selection.add_argument('--sprint-input',action='store_true')
+    selection.add_argument('--flight-only',action='store_true')
+    parser.add_argument('--no-default-features',action='store_true',help='build the probe without audio/controllers')
+    args=parser.parse_args()
     lock,jars,libraries=base.verify_artifacts()
     if args.sprint_input:
         try:from . import test_model_baking_parity as baking
         except ImportError:import test_model_baking_parity as baking
         libraries=baking.client_libraries();jars={'client':jars['client']}
-    build=lab.LOCAL/('rust-native-sprint-scene' if args.sprint_input else 'rust-native-scene-motion');build.mkdir(exist_ok=True)
+    build=lab.LOCAL/('rust-native-flight-scene' if args.flight_only else 'rust-native-sprint-scene' if args.sprint_input else 'rust-native-scene-motion');build.mkdir(exist_ok=True)
     report=build/'report.json';report.unlink(missing_ok=True)
     resources=lab.LOCAL/'horizon-client'/lock['minecraft']['version']
     resource_hash=client.resource_fingerprint(resources)
@@ -801,13 +821,14 @@ def main():
     dependencies=os.pathsep.join(map(str,libraries))
     run(['javac','--release',lock['minecraft']['java_major'],'-proc:none','-cp',str(jars.get('server',jars['client']))+os.pathsep+dependencies,
          '-d',classes,oracle,*helpers],'compile-java')
-    fixtures=list(sprint_corpus() if args.sprint_input else corpus());operations=sum(len(f['ops']) for f in fixtures);expected_lines=8*operations+len(fixtures)
+    fixtures=list(flight_corpus() if args.flight_only else sprint_corpus() if args.sprint_input else corpus());operations=sum(len(f['ops']) for f in fixtures);expected_lines=8*operations+len(fixtures)
     (build/'inputs.txt').write_text(''.join(json.dumps(f,separators=(',',':'))+'\n' for f in fixtures))
     input_hash=lab.digest(build/'inputs.txt','sha256')
     damage_dir=build/'damage';damage_dir.mkdir(exist_ok=True)
     for target, source in [('types.json','damage-types.json'),('tags.json','damage-tags.json')]:
         (damage_dir/target).write_bytes((resources/source).read_bytes())
-    run(['cargo','build','--locked','-p','horizon-client-lib','--example','client_probe'],'compile-rust')
+    run(['cargo','build','--locked','-p','horizon-client-lib','--example','client_probe',
+         *(['--no-default-features'] if args.no_default_features else [])],'compile-rust')
     metadata=json.loads(subprocess.check_output(['cargo','metadata','--locked','--no-deps','--format-version','1'],cwd=lab.ROOT))
     binary=Path(metadata['target_directory'])/'debug/examples'/('client_probe.exe' if os.name=='nt' else 'client_probe')
     run([binary,'scene_motion_probe',resources,build,'--describe'],'describe')
@@ -825,6 +846,17 @@ def main():
     base.ensure_sources_unchanged(sources,tested)
     if resource_hash!=client.resource_fingerprint(resources) or input_hash!=lab.digest(build/'inputs.txt','sha256'):
         raise AssertionError('Motion inputs changed during verification')
+    if args.flight_only:
+        lab.write_json(report,dict(schema=2,minecraft=lock['minecraft']['version'],
+            fixtures=len(fixtures),operations=operations,references=references,
+            sources_sha256=tested,resources=resource_hash,input_sha256=input_hash,
+            scope='Actual Player.aiStep/travel in the resident scene, with independently set '
+                  'flying/mayfly abilities, zero/default flight speed, idle/forward input and '
+                  'an explicit update ending flight. Compares movement and stored state against '
+                  'both pinned jars. LocalPlayer double-tap handling and network packet ordering '
+                  'are outside this scene comparison.'))
+        print(f'Scoped forced flight parity passed: {report}',flush=True)
+        return
     lab.write_json(report,{'schema':2,'minecraft':lock['minecraft']['version'],'manifest_sha1':lock['minecraft']['manifest_sha1'],
         'platform':platform.platform(),'rustc':subprocess.check_output(['rustc','--version'],text=True).strip(),
         'java':subprocess.check_output(['java','--version'],text=True).splitlines()[0],'fixtures':len(fixtures),
