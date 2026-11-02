@@ -48,6 +48,8 @@ pub enum Event {
     ModNet,
     /// The server samples far terrain for this client (`lod_net`).
     FarTerrain(crate::lod_net::Offer),
+    /// ClientConfigurationPacketListenerImpl.handleEnabledFeatures.
+    Features(Vec<String>),
     /// Configuration finished: the play state begins with these registries.
     Joined {
         registries: Arc<Dynamic>,
@@ -897,6 +899,9 @@ fn configure(
                 reply(cfg::Serverbound::SelectKnownPacks(cfg::SelectKnownPacks {
                     packs: vec![],
                 }))?
+            }
+            cfg::Clientbound::UpdateEnabledFeatures(p) => {
+                let _ = send.send(Event::Features(p.features));
             }
             cfg::Clientbound::RegistryData(r) => registries.add(r),
             cfg::Clientbound::UpdateTags(t) => registries.add_tags(&t),

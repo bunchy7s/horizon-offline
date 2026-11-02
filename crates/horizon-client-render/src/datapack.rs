@@ -121,7 +121,11 @@ impl DataPack {
 }
 /// The packs in `<world>/datapacks`, sorted by name.
 pub fn discover(world: &Path) -> Vec<DataPack> {
-    let Ok(entries) = std::fs::read_dir(world.join("datapacks")) else {
+    discover_folder(&world.join("datapacks"))
+}
+/// Packs in Create World's temporary pack folder, before a world exists.
+pub fn discover_folder(dir: &Path) -> Vec<DataPack> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
     let mut packs = Vec::new();

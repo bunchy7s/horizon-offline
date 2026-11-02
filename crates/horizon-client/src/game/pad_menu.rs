@@ -413,6 +413,26 @@ impl Game<'_> {
             }
             return self.handle_option_events(vec![Event::Changed]);
         }
+        // Splitscreen Setup: A picks up the focused player's tile, then left/right (or LB/RB)
+        // cycle where it goes, A drops it, B puts it back (`split_ui`).
+        if self.screen == Screen::Options && self.ui.options.page() == Page::SplitSetup {
+            let setup = &mut self.ui.options.split_setup;
+            if setup.pad_button(button) {
+                // Dropped or put back: the focus follows the player to its tile.
+                if let Some(rect) = setup.take_refocus() {
+                    let kind = Kind::Button;
+                    self.pad_focus_on(event_loop, Target { rect, kind });
+                }
+                return Ok(());
+            }
+            if button == Button::South
+                && self.pad_focusing()
+                && let Some(focus) = self.pad.menu.focus
+                && self.ui.options.split_setup.pad_pick_up(focus.center())
+            {
+                return Ok(());
+            }
+        }
         // The on-screen keyboard takes every button while it is open.
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
             if let Some(out) = keyboard.button(button) {
@@ -521,6 +541,14 @@ impl Game<'_> {
     fn pad_step(&mut self, event_loop: &dyn EventLoopCtl, button: Button) {
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
             keyboard.step(button);
+            return;
+        }
+        // Splitscreen Setup with a player held: the stick cycles it as the D-pad does.
+        if self.screen == Screen::Options
+            && self.ui.options.page() == Page::SplitSetup
+            && self.ui.options.split_setup.holding()
+        {
+            self.ui.options.split_setup.pad_button(button);
             return;
         }
         if self.pad_focus_mode() {

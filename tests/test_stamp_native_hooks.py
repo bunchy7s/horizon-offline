@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -70,7 +72,7 @@ class StampTests(unittest.TestCase):
         self.assertIn("API 9 adds a; requires 9.", docs)
         self.assertIn("NATIVE_HOOKS_API: u32 = 9;", source)
         hooks = json.loads((self.root / stamp.CATALOG).read_text())["hooks"]
-        self.assertEqual([(h["name"], h["version"]) for h in hooks], [("z", 1), ("a", 1)])
+        self.assertEqual([(h["name"], h["version"]) for h in hooks], [("a", 1), ("z", 1)])
         self.assertFalse(stamp.stamp(False))
 
     def test_helper_only_gets_a_number(self):
@@ -120,6 +122,24 @@ class StampTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             stamp.stamp(False)
         self.assertEqual((self.root / stamp.SOURCE).read_text(), before)
+
+    def test_the_repository_stamps_every_marker(self):
+        # A copy of this checkout's pending fragments and the files they stamp: stamping must
+        # succeed and leave no marker, or the stamp workflow fails or ships unnumbered docs.
+        repo = self.original
+        fragments = [p.relative_to(repo) for p in (repo / stamp.FRAGMENTS).glob("*.json")]
+        comments = {Path(c) for p in fragments for c in json.loads((repo / p).read_text()).get("comments", [])}
+        stamped = [stamp.SOURCE, stamp.DOCS, *stamp.MOD_API, *comments]
+        for path in [stamp.CATALOG, *stamped, *fragments]:
+            if (repo / path).exists():
+                (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(repo / path, self.root / path)
+        self.git("add", ".")
+        self.git("commit", "-qm", "base")
+        self.assertFalse(stamp.stamp(False))
+        left = {str(p): re.findall(r"@API:\w+@", (self.root / p).read_text())
+                for p in stamped if (self.root / p).exists()}
+        self.assertEqual({p: m for p, m in left.items() if m}, {})
 
 
 if __name__ == "__main__":
