@@ -1316,8 +1316,8 @@ impl Game<'_> {
         view: &horizon_client::advancements::EntityView,
         blow: Option<(DamageKind, bool)>,
     ) {
-        self.stats.add("killed", "minecraft:ender_dragon", 1);
-        self.stats.custom("mob_kills", 1);
+        self.award_stat("killed", "minecraft:ender_dragon", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(id));
         // KilledTrigger: the damage source `die` was given.
         let blow = blow.map(|(kind, by_player)| {

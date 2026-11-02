@@ -623,6 +623,9 @@ impl Game<'_> {
             items.push((stack, f.id, m.as_mat4(), item_light));
         }
         // `extractRenderState`: FIXED, seeded by the frame entity.
+        let skinning = self.skinning();
+        let lights =
+            horizon_client::block_entity_render::diffuse_lights(self.dim == super::Dim::Nether);
         for (stack, id, m, light) in items {
             let entity_start = out.len();
             let owner = super::item_draw::owner_at([0.0; 3], 0.0, "minecraft:item_frame");
@@ -632,13 +635,15 @@ impl Game<'_> {
                 Some(&owner),
                 id as i32,
             );
-            self.submit_item_world(
-                &state,
-                m,
-                horizon_client::block_entity_render::vertex_light(light),
-                out,
-            );
-            self.cull_entity_vertices(out, entity_start);
+            let light = horizon_client::block_entity_render::vertex_light(light);
+            // Posed on the GPU when every layer can be.
+            let skinned = skinning
+                .then(|| self.submit_item_skinned(&state, &[m], light, lights))
+                .flatten();
+            if skinned.is_none() {
+                self.submit_item_world(&state, m, light, out);
+            }
+            self.cull_skinned(out, entity_start, skinned);
         }
         for (id, m, light) in maps {
             let entity_start = out.len();

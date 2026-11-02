@@ -1583,6 +1583,7 @@ name = "horizon-optifine"
 version = "0.1.0"
 dependencies = [
  "horizon-bench",
+ "horizon-core",
  "log",
  "regex",
 ]

@@ -50,17 +50,20 @@ impl PrimedTnt {
         assets: &horizon_client::assets::Assets,
         facts: &horizon_client::blocks::BlockFacts,
         fluids: &horizon_client::motion::FluidResources,
+        border: Option<&horizon_core::geometry::border::BorderGeometry>,
     ) -> Result<Vec<BlockPos>> {
         self.previous = self.position;
         self.velocity.y -= self.get_gravity();
-        let mut scene = SceneCollisions {
+        let scene = SceneCollisions {
             world,
             binding: collision,
             subject: None,
         };
         let wanted = self.velocity;
+        // Entity.collide: the world border's walls stop it too.
+        let border = border.map(|b| (b, [self.position.x, self.position.z]));
         let moved = scene
-            .resolve(self.bounds(), wanted, 0.0, self.on_ground)
+            .resolve_in_border(self.bounds(), wanted, 0.0, self.on_ground, border)
             .unwrap_or(Vec3::ZERO);
         if horizon_client::entities::move_applies(wanted, moved) {
             self.position = Vec3::new(
@@ -246,6 +249,7 @@ impl Game<'_> {
                 &self.pack.assets,
                 self.res.facts(),
                 &self.res.motion().fluids,
+                Some(self.border.geometry()),
             )?;
             for pos in tops {
                 self.bubble_column_particles(pos);
@@ -541,6 +545,55 @@ mod tests {
         assert!(!tnt.on_ground);
     }
 
+    /// `Entity.collectColliders` (#7080): the world border's wall stops primed
+    /// TNT. A border of size 10 around (20, 20) has its east wall at x = 25;
+    /// the TNT starts at x = 24 on the test scene's flat ground, 1.5 east.
+    #[test]
+    fn the_world_border_stops_primed_tnt() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = horizon_client::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
+        let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
+        let world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
+        let border =
+            horizon_core::geometry::border::BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984)
+                .unwrap();
+        for bordered in [false, true] {
+            let at = Vec3::new(24.0, 4.0, 20.5);
+            let mut tnt = PrimedTnt {
+                no_gravity: false,
+                id: 0,
+                position: at,
+                previous: at,
+                velocity: Vec3::new(1.5, 0.0, 0.0),
+                fuse: 80,
+                on_ground: true,
+                owner: None,
+                guest: None,
+                power: 4.0,
+            };
+            let border = bordered.then_some(&border);
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, border)
+                .unwrap();
+            let east = tnt.bounds().max_position().x;
+            if bordered {
+                assert!(
+                    (east - 25.0).abs() < 1.0e-7,
+                    "stops on the wall, got {east}"
+                );
+            } else {
+                assert!(east > 25.0, "no border: goes on, got {east}");
+            }
+        }
+    }
+
     #[test]
     fn primed_tnt_follows_water_currents_after_moving() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -580,7 +633,7 @@ mod tests {
             guest: None,
             power: 4.0,
         };
-        tnt.tick(&world, &collision, &assets, &facts, &fluids)
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
             .unwrap();
         assert_eq!(
             tnt.position.x, at.x,
@@ -592,14 +645,14 @@ mod tests {
             tnt.velocity
         );
         assert_eq!(tnt.fuse, 79);
-        tnt.tick(&world, &collision, &assets, &facts, &fluids)
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
             .unwrap();
         assert!((tnt.position.x - at.x - 0.014).abs() < 1e-12);
         assert!(tnt.on_ground);
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 1;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids)
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
             .unwrap();
         assert_eq!(tnt.fuse, 0);
         assert_eq!(
@@ -610,7 +663,7 @@ mod tests {
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 80;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids)
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
             .unwrap();
         assert_eq!(
             tnt.velocity.x, 0.0,
@@ -626,7 +679,7 @@ mod tests {
             .unwrap();
         tnt.on_ground = false;
         tnt.velocity = Vec3::ZERO;
-        tnt.tick(&world, &collision, &assets, &facts, &fluids)
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
             .unwrap();
         assert!(
             tnt.position.y < at.y && tnt.velocity.y < 0.0,
@@ -683,7 +736,7 @@ mod tests {
             power: 4.0,
         };
         for _ in 0..10 {
-            tnt.tick(&world, &collision, &assets, &facts, &fluids)
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
                 .unwrap();
         }
         assert!(
@@ -704,7 +757,7 @@ mod tests {
         tnt.velocity = Vec3::ZERO;
         tnt.on_ground = false;
         for _ in 0..4 {
-            tnt.tick(&world, &collision, &assets, &facts, &fluids)
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
                 .unwrap();
         }
         assert!(
@@ -764,7 +817,7 @@ mod tests {
         let mut tnt = primed();
         for _ in 0..30 {
             tops.extend(
-                tnt.tick(&world, &collision, &assets, &facts, &fluids)
+                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
                     .unwrap(),
             );
         }
@@ -778,7 +831,7 @@ mod tests {
         let mut tnt = primed();
         for _ in 0..10 {
             assert!(
-                tnt.tick(&world, &collision, &assets, &facts, &fluids)
+                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
                     .unwrap()
                     .is_empty()
             );

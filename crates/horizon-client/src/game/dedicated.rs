@@ -15,8 +15,8 @@ use horizon_client::{
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
         user_cache::UserCache,
         user_lists::{
-            BanEntry, BanList, IpBanList, NameAndId, OpEntry, OpList, WhiteEntry, WhiteList,
-            format_date,
+            BanEntry, BanList, Change, IpBanList, NameAndId, OpEntry, OpList, WhiteEntry,
+            WhiteList, format_date,
         },
     },
     text::Text,
@@ -408,6 +408,19 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
     Ok(true)
 }
 
+/// The event a change of a list is (`operators_added`, `bans_removed`...), and the entry it is about.
+fn listed<E>(list: &str, change: Change<E>) -> (String, E) {
+    match change {
+        Change::Added(e) => (format!("{list}_added"), e),
+        Change::Removed(e) => (format!("{list}_removed"), e),
+    }
+}
+
+/// What a ban says besides who it is for: the reason and the source, and when it ends (milliseconds, or none).
+fn ban_fields<T>(ban: &BanEntry<T>) -> serde_json::Value {
+    serde_json::json!({ "reason": ban.reason, "source": ban.source, "expires": ban.expires })
+}
+
 /// The operator, whitelist and ban lists (DedicatedPlayerList), shared with
 /// the connection threads that check logins.
 pub(super) struct Lists {
@@ -431,6 +444,30 @@ impl Lists {
             enforce_whitelist: false,
             op_level: 4,
         };
+        // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
+        l.ops.watch(|change| {
+            let (kind, e) = listed("operators", change);
+            events::record(
+                &kind,
+                &e.user.name,
+                e.user.id,
+                serde_json::json!({ "level": e.level, "bypassesPlayerLimit": e.bypasses_player_limit }),
+            );
+        });
+        l.white.watch(|change| {
+            let (kind, e) = listed("allowlist", change);
+            events::record(&kind, &e.user.name, e.user.id, serde_json::json!({}));
+        });
+        l.bans.watch(|change| {
+            let (kind, e) = listed("bans", change);
+            events::record(&kind, &e.user.name, e.user.id, ban_fields(&e));
+        });
+        l.ip_bans.watch(|change| {
+            let (kind, e) = listed("ip_bans", change);
+            let mut fields = ban_fields(&e);
+            fields["ip"] = e.user.clone().into();
+            events::record_server(&kind, fields);
+        });
         // DedicatedPlayerList's constructor order and its LOGGER.warn lines.
         let warn = |what: &str, r: std::result::Result<(), String>| {
             if let Err(e) = r {
@@ -639,6 +676,18 @@ struct ServerState {
     game_mode: i32,
     /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
     force_game_mode: bool,
+}
+
+/// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
+fn auto_save(state: &ServerState) -> bool {
+    state.autosave
+}
+
+/// `MinecraftServer.setAutoSave`: enable or disable periodic saves and report whether it changed.
+fn set_auto_save(state: &mut ServerState, enabled: bool) -> bool {
+    let changed = state.autosave != enabled;
+    state.autosave = enabled;
+    changed
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -1063,8 +1112,12 @@ impl Game<'_> {
                 self.save_game()?;
             }
             if !paused && !state.autosave {
-                // `save-off`: the periodic save inside the tick is skipped.
-                self.ticks = self.ticks.max(1);
+                // `MinecraftServer.autoSave` keeps its schedule while every level's
+                // `noSave` flag is set, but writes nothing. The tick below counts down
+                // once, so reset one tick early when this save would have been due.
+                if self.ticks_until_autosave <= 1 {
+                    self.ticks_until_autosave = self.next_autosave_interval() + 1;
+                }
             }
             // MinecraftServer.tickServer: while paused only the connections run.
             // `MinecraftServer.runServer` catches what the tick throws, writes the crash
@@ -1372,19 +1425,17 @@ impl Game<'_> {
                 }
             }
             "save-off" => {
-                if state.autosave {
-                    state.autosave = false;
+                if set_auto_save(state, false) {
                     self.console_reply(Text::translate("commands.save.disabled", &[]));
                 } else {
                     self.console_reply(Text::translate("commands.save.alreadyOff", &[]));
                 }
             }
             "save-on" => {
-                if state.autosave {
-                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
-                } else {
-                    state.autosave = true;
+                if set_auto_save(state, true) {
                     self.console_reply(Text::translate("commands.save.enabled", &[]));
+                } else {
+                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
                 }
             }
             "list" => {
@@ -1778,6 +1829,23 @@ impl Game<'_> {
         if changed {
             self.native_whitelist_state_update(on);
         }
+    }
+
+    /// `DedicatedServer.setMaxPlayers`: the live login limit, and `max-players` in
+    /// server.properties.
+    fn set_max_players(&mut self, state: &mut ServerState, max_players: usize) {
+        state.max_players = max_players;
+        if let Some(lan) = &self.lan {
+            lan.hub.lan.shared.set_max_players(max_players);
+        }
+        self.store_property("max-players", max_players.to_string());
+    }
+
+    /// `DedicatedServer.setEnforceWhitelist`: the flag, and `enforce-whitelist` in
+    /// server.properties.
+    pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
+        lists.lock().unwrap().enforce_whitelist = on;
+        self.store_property("enforce-whitelist", on.to_string());
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.

@@ -167,7 +167,7 @@ impl Game<'_> {
         };
         if taken > 0 {
             // awardStat(ITEM_USED), then stackToInsert.consume(count, player).
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             for _ in 0..taken {
                 self.consume_held();
             }
@@ -190,6 +190,7 @@ impl Game<'_> {
                 }
                 // Vec3.atBottomCenterOf(pos).relative(UP, 1.2), lowered by spawnItem.
                 VaultEvent::Eject(stack, v) => {
+                    self.native_vault_loot(pos, &stack.item);
                     self.spawn_item(stack, [center[0], center[1] + 0.7 - 0.125, center[2]], v, 0)
                 }
             }

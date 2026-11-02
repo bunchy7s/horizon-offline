@@ -87,9 +87,13 @@ pub fn poll_game(shared: Arc<Shared>) {
                 continue;
             };
             // A new game numbers its events from 1 again.
+            let mut history = false;
             if control.as_ref().is_none_or(|(p, _)| *p != pid) {
                 control = engine::Control::connect(&shared.dir).ok().map(|c| (pid, c));
                 since = 0;
+                // What the game recorded before this first fetch (its saves while it started) happened before
+                // the management protocol's clients could hear of it.
+                history = true;
             }
             let Some((_, game)) = control.as_mut() else {
                 continue;
@@ -104,6 +108,9 @@ pub fn poll_game(shared: Arc<Shared>) {
                 let kind = event["type"].as_str().unwrap_or("game").to_owned();
                 if let Some(fields) = event.as_object_mut() {
                     fields.remove("seq");
+                }
+                if !(history && matches!(kind.as_str(), "saving" | "saved")) {
+                    crate::management::game_event(&shared, &kind, &event);
                 }
                 shared.emit(&kind, event);
             }

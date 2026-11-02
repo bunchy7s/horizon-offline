@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "player_advancement_progress",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_progress",
+      "side": "server",
+      "neoforge": "AdvancementEvent.AdvancementProgressEvent",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A criterion of a server player's advancement was granted or revoked (`native_player_advancement_progress`).",
+  "doc_summary": "A criterion of a server player's advancement was granted or revoked after its progress changed and before any completion rewards, except the `minecraft:tick` criteria granted on a network player's first tick or a reload, which are heard after that tick's rewards and packets; `advancement` is its identifier, such as `minecraft:story/mine_stone`, `criterion` the criterion name and `granted` is false for a revoke. A grant or revoke that changes nothing is not heard. Helpers looking up the guest through `self.lan` may find nothing during packet handling. Bundles need \"hooks\": @API:player_advancement_progress@."
+}
