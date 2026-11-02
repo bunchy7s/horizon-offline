@@ -3818,6 +3818,18 @@ impl Game<'_> {
         let _ = (dimension, raining, thundering, cancel);
     }
 
+    /// The server changed its thunder state through `/weather`. Set `cancel`
+    /// to keep the previous thunder state and timer. Server-side.
+    /// @API:native_thunder_change@.
+    pub(super) fn native_thunder_change(
+        &mut self,
+        dimension: &str,
+        thundering: bool,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, thundering, cancel);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
