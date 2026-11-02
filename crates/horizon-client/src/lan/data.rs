@@ -82,14 +82,7 @@ pub struct SyncData {
     pub advancements: super::advancements::ServerAdvancements,
 }
 
-/// A resource id with its default namespace filled in.
-fn qualified(id: &str) -> String {
-    if id.contains(':') {
-        id.to_owned()
-    } else {
-        format!("minecraft:{id}")
-    }
-}
+use crate::crafting::qualified;
 
 /// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted;
 /// a file that can't be read or doesn't parse is left out. Through `json_folder`: from the
