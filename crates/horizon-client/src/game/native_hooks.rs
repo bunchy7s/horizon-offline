@@ -7503,6 +7503,16 @@ impl Game<'_> {
     /// `EntityBlock.newBlockEntity` of block `name`: Horizon's own, else a
     /// native mod's.
     pub(super) fn new_block_entity(&mut self, name: &str) -> Option<BlockEntity> {
+        // `SignBlock.newBlockEntity`: a mod's sign is one by its template's class.
+        if !name.starts_with("minecraft:")
+            && let Some(state) = self.pack.assets.registry.default_state(name)
+            && let Some(form) = self.res.facts().get(state).sign_form()
+        {
+            return Some(BlockEntity::Sign(horizon_client::signs::SignData {
+                hanging: form.hanging,
+                ..Default::default()
+            }));
+        }
         if let Some(entity) = BlockEntity::for_block(name) {
             return Some(entity);
         }
@@ -8282,6 +8292,109 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+
+    /// Exercise the gameplay constructor, where name-based entities compete
+    /// with a mod block's sign template.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn mod_sign_constructor_prioritizes_templates_over_suffixes() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        use horizon_client::mod_content::{ContentMod, build};
+        use horizon_mods::content::{Block, Content};
+
+        let base = std::path::PathBuf::from(
+            std::env::var_os("HORIZON_TEST_RESOURCES")
+                .expect("set HORIZON_TEST_RESOURCES to prepared resources"),
+        );
+        let root = std::env::temp_dir().join(format!(
+            "horizon-sign-constructor-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let cases = [
+            ("ruby:notice_banner", "minecraft:oak_sign", false),
+            ("ruby:board_shelf", "minecraft:oak_wall_sign", false),
+            ("ruby:lantern_head", "minecraft:oak_hanging_sign", true),
+            (
+                "ruby:bracket_skull",
+                "minecraft:oak_wall_hanging_sign",
+                true,
+            ),
+        ];
+        let mut content = Content::declared("ruby");
+        let blocks: Vec<_> = cases
+            .iter()
+            .map(|&(id, template, _)| (id, template))
+            .chain([("ruby:road_sign", "minecraft:stone")])
+            .map(|(id, template)| Block {
+                id: id.into(),
+                template: template.into(),
+                item: false,
+                ..Default::default()
+            })
+            .collect();
+        content.declare(&blocks, &[]).unwrap();
+        build(
+            &base,
+            &[ContentMod {
+                id: "ruby".into(),
+                content,
+            }],
+            &root,
+        )
+        .unwrap();
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = super::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+
+        for (name, hanging) in cases
+            .map(|(name, _, hanging)| (name, hanging))
+            .into_iter()
+            .chain([
+                ("minecraft:oak_sign", false),
+                ("minecraft:oak_hanging_sign", true),
+            ])
+        {
+            match game.new_block_entity(name) {
+                Some(super::BlockEntity::Sign(sign)) => {
+                    assert_eq!(sign.hanging, hanging, "{name}")
+                }
+                entity => panic!("{name}: expected a sign, got {entity:?}"),
+            }
+        }
+        assert!(game.new_block_entity("ruby:road_sign").is_none());
+        assert!(matches!(
+            game.new_block_entity("minecraft:white_banner"),
+            Some(super::BlockEntity::Banner(_))
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A mod's own screen opens only over the world, never over another
     /// screen, an overlay (the title screen, a book, loading, no window) or
