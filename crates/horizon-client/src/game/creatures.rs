@@ -1473,7 +1473,7 @@ impl Game<'_> {
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
         let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            drops::die(m, &death, &mut self.rand_sequences)
+            drops::die(m, &death, &mut self.rand_sequences, &mut self.world.random)
         });
         if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
             // Creeper.droppedSkulls: one head per charged explosion.
