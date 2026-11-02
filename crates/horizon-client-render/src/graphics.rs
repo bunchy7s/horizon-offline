@@ -19,20 +19,28 @@ pub const HDR_MARKER: &str = "horizon-hdr-pending";
 pub struct Reported {
     pub paper_white: u32,
     pub peak: u32,
+    /// The display's darkest black, in hundredths of a nit.
+    pub black: u32,
 }
 
-static REPORTED: [AtomicU32; 2] = [AtomicU32::new(0), AtomicU32::new(0)];
+static REPORTED: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 
 /// Sets what the system reports (the renderer, when it opens its surface).
 pub fn report(reported: Option<Reported>) {
-    let (paper_white, peak) = reported.map_or((0, 0), |r| (r.paper_white, r.peak));
+    let (paper_white, peak, black) =
+        reported.map_or((0, 0, 0), |r| (r.paper_white, r.peak, r.black));
     REPORTED[0].store(paper_white, Ordering::Relaxed);
     REPORTED[1].store(peak, Ordering::Relaxed);
+    REPORTED[2].store(black, Ordering::Relaxed);
 }
 /// What the system reports, if it does.
 pub fn reported() -> Option<Reported> {
-    let [paper_white, peak] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
-    (peak > 0).then_some(Reported { paper_white, peak })
+    let [paper_white, peak, black] = REPORTED.each_ref().map(|n| n.load(Ordering::Relaxed));
+    (peak > 0).then_some(Reported {
+        paper_white,
+        peak,
+        black,
+    })
 }
 
 /// Simple-level presets. `Custom` leaves every option as the player set it.
@@ -582,8 +590,9 @@ pub struct Graphics {
     /// HDR peak brightness the world's highlights reach, in nits; 0 is Auto:
     /// what the system reports for the display ([`Graphics::peak_nits`]).
     pub hdr_peak: u32,
-    /// HDR black level: the display's darkest black, in hundredths of a nit (0 for
-    /// an OLED's true black). Shadows are lifted onto it, and the HDR metadata says it.
+    /// HDR black level: the display's darkest black, in hundredths of a nit; 0 is Auto:
+    /// what the system reports, else true black. Shadows are lifted onto it, and the HDR
+    /// metadata says it.
     pub hdr_black_level: u32,
     /// HDR brightness of the HUD and menus, in percent of paper white (25..=100); the
     /// first-person hand stays at the world's.
@@ -829,6 +838,14 @@ impl Graphics {
             0 => reported().map_or(1000, |r| r.peak),
             n => n,
         }
+    }
+    /// The black level, in nits: the player's, or on Auto what the system reports, else 0.
+    pub fn black_level_nits(&self) -> f32 {
+        let hundredths = match self.hdr_black_level {
+            0 => reported().map_or(0, |r| r.black),
+            n => n,
+        };
+        hundredths as f32 / 100.0
     }
     /// Worker threads for chunk generation and meshing.
     pub fn worker_threads(&self) -> usize {

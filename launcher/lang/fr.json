@@ -239,6 +239,7 @@
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.",
   "The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.": "La compilation construit le jeu : 20 à 30 minutes et quelques Go de disque la première fois (elle télécharge Rust), quelques minutes ensuite.",
   "Applying the mixins": "Application des mixins",
+  "Reusing patched game source": "Réutilisation de la source du jeu modifiée",
   "Empty": "Vide",
   "Loader": "Chargeur",
   "Categories": "Catégories",
@@ -788,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Exportez le serveur en dehors des dossiers gérés par le launcher.",
   "{path} is not a folder to build into.": "{path} n'est pas un dossier dans lequel compiler.",
   "Could not copy the build: {error}": "Impossible de copier la compilation : {error}",
-  "Could not move the build to {path}: {error}": "Impossible de déplacer la compilation vers {path} : {error}"
+  "Could not move the build to {path}: {error}": "Impossible de déplacer la compilation vers {path} : {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Les mods natifs peuvent utiliser votre micro pour le chat vocal lorsque vous l'activez."
 }

@@ -108,6 +108,7 @@ The launcher reads the count when it opens and every minute after, and shows "N 
 - `DELETE /v1/installs/<install_id>`: deletes everything sent under that ID.
 - `GET /v1/aggregate`: the anonymous totals the website's results page reads. Its `breakdowns` split the play sessions of the period by hardware class (below), each class with its installs, sessions, hours and mean p50 and p99 frame times.
 - `GET /v1/benchmarks/summary`: players' benchmark uploads grouped by GPU, CPU, render distance and game for playhorizon.dev/benchmarks. A group shows only with at least 3 different installs, and only its medians and counts: no install ID, day, OS version, driver, exact memory or screen. Uploads are never published one by one. Each group's `breakdowns` count its installs per hardware class.
+- `GET /v1/export/benchmarks` and `GET /v1/export/hardware`: for the maintainers' performance work only, behind a bearer token the public cannot use (404 while the server has none). The raw benchmark reports and the play sessions per machine description, including CPU threads and physical cores, with no minimum group size. Nothing identifying: no install ID, and only what a player already agreed to send (this page's lists).
 - `POST /v1/live` and `GET /v1/live`: the "I'm playing" ping and the live count.
 - `GET /v1/live/history?range=24h|7d|30d|all&series=players|official`: the live count, or the official server's, over time (above).
 

@@ -128,9 +128,22 @@ pub(super) fn acts_on_player(e: &MobEvent) -> bool {
     )
 }
 
+/// A guest's `player_view`, taken with their state swapped in, as the mobs see
+/// them. Their last attacker and last victim stay: a tamed wolf defends and
+/// helps whoever owns it (`OwnerHurtByTargetGoal`, `OwnerHurtTargetGoal`), and
+/// the window's own player is a guest of its server thread.
+fn guest_view(mut v: PlayerView, uuid: u128, moved: [f64; 3]) -> PlayerView {
+    v.hero = false;
+    v.velocity = Vec3::new(moved[0], moved[1], moved[2]);
+    v.uuid = horizon_client::lan::playerdata::uuid_ints(uuid);
+    v.allies = Default::default();
+    v.remote = true;
+    v
+}
+
 impl Game<'_> {
     /// How mobs see each guest in play (`player_view` with the guest swapped
-    /// in; what the host alone tracks, such as its last attacker, stays out).
+    /// in).
     pub(super) fn lan_guest_views(&mut self) -> GuestViews {
         let Some(mut host) = self.lan.take() else {
             return Vec::new();
@@ -147,15 +160,8 @@ impl Game<'_> {
             .collect();
         let mut views = Vec::new();
         for (conn, uuid, moved) in conns {
-            if let Some(Some(mut v)) = self.as_guest(&mut host, conn, |g| g.player_view()) {
-                v.hurt_by = None;
-                v.last_hurt = None;
-                v.hero = false;
-                v.velocity = Vec3::new(moved[0], moved[1], moved[2]);
-                v.uuid = horizon_client::lan::playerdata::uuid_ints(uuid);
-                v.allies = Default::default();
-                v.remote = true;
-                views.push((conn, v));
+            if let Some(Some(v)) = self.as_guest(&mut host, conn, |g| g.player_view()) {
+                views.push((conn, guest_view(v, uuid, moved)));
             }
         }
         self.lan = Some(host);
@@ -424,6 +430,18 @@ pub(super) fn guest_bounds(g: &horizon_client::lan::guest::Guest) -> Aabb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_guests_view_keeps_who_hurt_them_and_who_they_hurt() {
+        let mut v = view(0.0, false);
+        v.hurt_by = Some((Who::Mob(7), 90));
+        v.last_hurt = Some((Who::Mob(8), 95));
+        let seen = guest_view(v, 5, [1.0, 0.0, 0.0]);
+        assert_eq!(seen.hurt_by, Some((Who::Mob(7), 90)));
+        assert_eq!(seen.last_hurt, Some((Who::Mob(8), 95)));
+        assert!(seen.remote);
+        assert_eq!(seen.velocity, Vec3::new(1.0, 0.0, 0.0));
+    }
 
     fn view(x: f64, creative: bool) -> PlayerView {
         PlayerView {

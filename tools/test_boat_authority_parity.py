@@ -29,6 +29,19 @@ def cases():
             for owned in ([False], [True], [True, False], [True, False, True],
                           [False, True, True], [True, True, False, False, True]):
                 out.append(dict(name=f'authority-{len(out)}', spin=spin, velocity=velocity, owned=owned))
+    # A rider who leaves while the boat is moving, sits out long enough for the
+    # empty boat to stop, and boards again (#6589): the re-boarded boat must
+    # keep the velocity it had while empty, not the one the rider left with.
+    for spin in (0.0, 0.125, -17.0):
+        for velocity in ([1.0, 0.25, -0.5], [-0.125, 0.0, 0.0625]):
+            for empty in (5, 25, 60):
+                for back in (1, 5, 12):
+                    owned = [True] * 8 + [False] + [False] * empty + [True] * back
+                    out.append(dict(name=f'reboard-{len(out)}', spin=spin, velocity=velocity, owned=owned))
+            # Empty from the first tick, then boarded: the boat has only ever
+            # moved while nobody rode it.
+            out.append(dict(name=f'reboard-{len(out)}', spin=spin, velocity=velocity,
+                            owned=[False] * 40 + [True] * 8))
     return out
 
 

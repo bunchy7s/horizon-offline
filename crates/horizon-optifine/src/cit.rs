@@ -57,6 +57,187 @@ impl Damage {
     }
 }
 
+/// An OpenGL blend factor (`GL_ONE`, `GL_SRC_ALPHA`...), as `glBlendFuncSeparate` takes them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Factor {
+    Zero,
+    One,
+    SrcColor,
+    OneMinusSrcColor,
+    SrcAlpha,
+    OneMinusSrcAlpha,
+    DstAlpha,
+    OneMinusDstAlpha,
+    DstColor,
+    OneMinusDstColor,
+    SrcAlphaSaturate,
+}
+
+impl Factor {
+    /// A GL constant's name (`GL_DST_COLOR`) or its value, decimal or `0x` hex.
+    fn parse(s: &str) -> Option<Self> {
+        let code = match s.strip_prefix("0x") {
+            Some(hex) => u32::from_str_radix(hex, 16).ok(),
+            None => s.parse().ok(),
+        };
+        let code = code.or_else(|| {
+            let names = [
+                "GL_ZERO",
+                "GL_ONE",
+                "GL_SRC_COLOR",
+                "GL_ONE_MINUS_SRC_COLOR",
+                "GL_SRC_ALPHA",
+                "GL_ONE_MINUS_SRC_ALPHA",
+                "GL_DST_ALPHA",
+                "GL_ONE_MINUS_DST_ALPHA",
+                "GL_DST_COLOR",
+                "GL_ONE_MINUS_DST_COLOR",
+                "GL_SRC_ALPHA_SATURATE",
+            ];
+            let i = names.iter().position(|n| *n == s)? as u32;
+            Some(if i < 2 { i } else { 0x300 + i - 2 })
+        })?;
+        use Factor::*;
+        Some(match code {
+            0 => Zero,
+            1 => One,
+            0x300 => SrcColor,
+            0x301 => OneMinusSrcColor,
+            0x302 => SrcAlpha,
+            0x303 => OneMinusSrcAlpha,
+            0x304 => DstAlpha,
+            0x305 => OneMinusDstAlpha,
+            0x306 => DstColor,
+            0x307 => OneMinusDstColor,
+            0x308 => SrcAlphaSaturate,
+            _ => return None,
+        })
+    }
+}
+
+/// `blend`: the factors for colour and alpha; `None` (`replace`) draws without blending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Blend {
+    pub src: Factor,
+    pub dst: Factor,
+    pub src_alpha: Factor,
+    pub dst_alpha: Factor,
+}
+
+/// `blend=` as CIT Resewn reads it: a named method, or 2 or 4 GL factors (alpha defaulting to
+/// `GL_ZERO GL_ONE`). `Some(None)` is `replace`.
+pub fn parse_blend(value: &str) -> Option<Option<Blend>> {
+    use Factor::*;
+    let pair = |src, dst| {
+        Some(Some(Blend {
+            src,
+            dst,
+            src_alpha: Zero,
+            dst_alpha: One,
+        }))
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "replace" => return Some(None),
+        "glint" => return pair(SrcColor, One),
+        "alpha" => return pair(SrcAlpha, OneMinusSrcAlpha),
+        "add" => return pair(SrcAlpha, One),
+        "subtract" => return pair(OneMinusDstColor, Zero),
+        "multiply" => return pair(DstColor, OneMinusSrcAlpha),
+        "dodge" => return pair(One, One),
+        "burn" => return pair(Zero, OneMinusSrcColor),
+        "screen" => return pair(One, OneMinusSrcColor),
+        "overlay" => return pair(DstColor, SrcColor),
+        _ => {}
+    }
+    let factors: Option<Vec<Factor>> = value.split_whitespace().map(Factor::parse).collect();
+    match factors?[..] {
+        [src, dst] => pair(src, dst),
+        [src, dst, src_alpha, dst_alpha] => Some(Some(Blend {
+            src,
+            dst,
+            src_alpha,
+            dst_alpha,
+        })),
+        _ => None,
+    }
+}
+
+/// A `type=enchantment` rule's glint layer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Glint {
+    pub layer: i32,
+    pub blend: Option<Blend>,
+    /// Scroll speed: the texture runs through vanilla's glint periods at `speed` times the
+    /// clock in milliseconds (vanilla's own glint at 4 by default).
+    pub speed: f32,
+    /// Degrees the texture turns by (as in CIT Resewn, its scroll keeps vanilla's direction).
+    pub rotation: f32,
+    /// Seconds on this layer when `method=cycle` (1 by default, as OptiFine's doc has it).
+    pub duration: f32,
+    /// `r`, `g`, `b`, `a`: multipliers of the texture's colour, never negative.
+    pub rgba: [f32; 4],
+    /// Whether the default glint still draws under this layer.
+    pub use_glint: bool,
+    /// Linear filtering, else nearest.
+    pub blur: bool,
+}
+
+/// OptiFine's defaults (`blur`, which it does not document, is CIT Resewn's): still, unturned,
+/// a second per cycle, added on top.
+impl Default for Glint {
+    fn default() -> Self {
+        Self {
+            layer: 0,
+            blend: parse_blend("add").flatten(),
+            speed: 0.0,
+            rotation: 0.0,
+            duration: 1.0,
+            rgba: [1.0; 4],
+            use_glint: false,
+            blur: true,
+        }
+    }
+}
+
+impl Glint {
+    /// A `type=enchantment` rule's glint keys; `None` (dropping the rule) when one is
+    /// malformed. CIT Resewn clamps `duration` and the colour at 0.
+    fn parse(props: &Properties) -> Option<Self> {
+        let d = Self::default();
+        let float =
+            |key: &str, default: f32| optional(props, &[key], finite).map(|v| v.unwrap_or(default));
+        let flag = |key: &str, default: bool| {
+            props
+                .get(key)
+                .map_or(default, |v| v.trim().eq_ignore_ascii_case("true"))
+        };
+        let blend = match props.get("blend") {
+            Some(v) => parse_blend(v)?,
+            None => d.blend,
+        };
+        Some(Self {
+            layer: optional(props, &["layer"], |v| v.parse::<i32>().ok())?.unwrap_or(d.layer),
+            blend,
+            speed: float("speed", d.speed)?,
+            rotation: float("rotation", d.rotation)?,
+            duration: float("duration", d.duration)?.max(0.0),
+            rgba: [
+                float("r", 1.0)?.max(0.0),
+                float("g", 1.0)?.max(0.0),
+                float("b", 1.0)?.max(0.0),
+                float("a", 1.0)?.max(0.0),
+            ],
+            use_glint: flag("useGlint", d.use_glint),
+            blur: flag("blur", d.blur),
+        })
+    }
+}
+
+/// A number, where NaN and the infinities (`nan`, `inf`, `Infinity` in any case) are malformed.
+fn finite(v: &str) -> Option<f32> {
+    v.trim().parse::<f32>().ok().filter(|f| f.is_finite())
+}
+
 /// Where a component test reads its value.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Source {
@@ -310,6 +491,8 @@ pub struct Rule {
     pub model: Option<String>,
     /// `model.<name>`.
     pub models: Vec<(String, String)>,
+    /// What an Enchantment rule draws; the defaults for other kinds.
+    pub glint: Glint,
 }
 
 impl Rule {
@@ -398,6 +581,18 @@ impl Rule {
         if texture.is_none() && model.is_none() && textures.is_empty() && models.is_empty() {
             return None;
         }
+        // A glint is a texture: CIT Resewn drops an enchantment rule without one ("No texture
+        // specified"), whatever models it names.
+        if kind == Kind::Enchantment && texture.is_none() {
+            return None;
+        }
+        // Only an enchantment rule reads the glint keys: an item rule's `blend=` is no reason to
+        // drop it.
+        let glint = if kind == Kind::Enchantment {
+            Glint::parse(props)?
+        } else {
+            Glint::default()
+        };
         Some(Self {
             path: path.to_owned(),
             kind,
@@ -427,6 +622,7 @@ impl Rule {
             textures,
             model,
             models,
+            glint,
         })
     }
 
@@ -434,6 +630,71 @@ impl Rule {
     /// then the path that sorts first.
     pub fn priority(&self, other: &Self) -> std::cmp::Ordering {
         (other.weight, &self.path).cmp(&(self.weight, &other.path))
+    }
+}
+
+/// `method` of `cit.properties`: how several enchantment layers on one item share it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Method {
+    /// Every layer at full strength, together (CIT Resewn's `none`).
+    None,
+    /// Each layer's intensity is its enchantment's level over the sum of levels.
+    Average,
+    /// Over the highest level.
+    Layered,
+    /// One layer at a time, each for its `duration`.
+    Cycle,
+}
+
+/// The pack's `cit.properties`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Global {
+    pub method: Method,
+    /// At most this many enchantment layers per item (the topmost win).
+    pub cap: Option<u32>,
+    /// Seconds a cycle takes to fade from one layer to the next.
+    pub fade: f32,
+    /// Whether the default glint draws on items no enchantment rule matches.
+    pub use_glint: bool,
+}
+
+impl Default for Global {
+    fn default() -> Self {
+        Self {
+            method: Method::Average,
+            cap: None,
+            fade: 0.5,
+            use_glint: true,
+        }
+    }
+}
+
+impl Global {
+    /// Where the global file may be, the first that exists winning, as both docs say (CIT
+    /// Resewn's code merges the files' keys instead): CIT Resewn's and the OptiFine doc's folders.
+    pub const PATHS: [&str; 4] = [
+        "assets/minecraft/citresewn/cit.properties",
+        "assets/minecraft/optifine/cit.properties",
+        "assets/minecraft/optifine/cit/cit.properties",
+        "assets/minecraft/mcpatcher/cit.properties",
+    ];
+
+    /// Unknown or malformed values keep their defaults.
+    pub fn parse(props: &Properties) -> Self {
+        let mut out = Self::default();
+        let lower = |key| props.get(key).map(|v| v.trim().to_ascii_lowercase());
+        match lower("method").as_deref() {
+            Some("layered") => out.method = Method::Layered,
+            Some("cycle") => out.method = Method::Cycle,
+            Some("none") => out.method = Method::None,
+            _ => {}
+        }
+        out.cap = props.get("cap").and_then(|v| v.trim().parse().ok());
+        if let Some(fade) = props.get("fade").and_then(finite) {
+            out.fade = fade.max(0.0);
+        }
+        out.use_glint = lower("useGlint").as_deref() != Some("false");
+        out
     }
 }
 
@@ -762,6 +1023,25 @@ mod tests {
     }
 
     #[test]
+    fn an_enchantment_rule_needs_a_texture() {
+        let dir = "assets/minecraft/optifine/cit/glint";
+        let files = [
+            format!("{dir}/shine.json"),
+            format!("{dir}/shine.png"),
+            format!("{dir}/other.png"),
+        ];
+        let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+        let path = format!("{dir}/shine.properties");
+        // The model is there: an item rule takes it.
+        assert!(rule(&path, "items=stick\nmodel=shine", &refs).is_some());
+        assert!(rule(&path, "type=enchantment\nmodel=shine", &refs).is_none());
+        assert!(rule(&path, "type=enchantment\ntexture.a=other", &refs).is_none());
+        // The texture beside the file still counts.
+        let beside = rule(&path, "type=enchantment", &refs).unwrap();
+        assert_eq!(beside.texture.as_deref(), Some(&*files[1]));
+    }
+
+    #[test]
     fn legacy_nbt_paths_land_on_components() {
         let source = |key: &str| {
             let t = ComponentTest::parse(true, key, "x").unwrap();
@@ -953,5 +1233,130 @@ mod tests {
             .map(|r| r.path.rsplit('/').next().unwrap())
             .collect();
         assert_eq!(order, ["c.properties", "a.properties", "b.properties"]);
+    }
+
+    #[test]
+    fn enchantment_layers() {
+        let files = ["assets/minecraft/optifine/cit/swords/flame.png"];
+        let r = rule(
+            SWORD,
+            "type=enchantment\ntexture=flame\nlayer=2\nblend=GL_DST_COLOR GL_ONE_MINUS_SRC_ALPHA\n\
+             speed=0.5\nrotation=45\nduration=2\nr=0.5\ng=-1\n",
+            &files,
+        )
+        .unwrap();
+        assert_eq!(r.glint.layer, 2);
+        assert_eq!(r.glint.blend, parse_blend("multiply").unwrap());
+        assert_eq!(
+            (r.glint.speed, r.glint.rotation, r.glint.duration),
+            (0.5, 45.0, 2.0)
+        );
+        assert_eq!(
+            r.glint.rgba,
+            [0.5, 0.0, 1.0, 1.0],
+            "colours never go below 0"
+        );
+        assert_eq!(parse_blend("replace"), Some(None));
+        let custom = parse_blend("0x306 771 0 1").unwrap().unwrap();
+        assert_eq!(Some(Some(custom)), parse_blend("multiply"));
+        assert_eq!(parse_blend("GL_NOPE GL_ONE"), None);
+        // OptiFine's defaults: still, unturned, a second per cycle, added on top.
+        let plain = rule(SWORD, "type=enchantment\ntexture=flame", &files).unwrap();
+        assert_eq!(
+            (plain.glint.layer, plain.glint.speed, plain.glint.rotation),
+            (0, 0.0, 0.0)
+        );
+        assert_eq!(plain.glint.duration, 1.0);
+        assert_eq!(
+            plain.glint.blend,
+            parse_blend("GL_SRC_ALPHA GL_ONE").unwrap()
+        );
+        assert!(!plain.glint.use_glint && plain.glint.blur);
+        assert!(rule(SWORD, "type=enchantment\ntexture=flame\nspeed=fast", &files).is_none());
+        assert!(rule(SWORD, "type=enchantment\ntexture=flame\nblend=mix", &files).is_none());
+        // NaN and the infinities are malformed too.
+        for bad in ["speed=NaN", "r=inf", "duration=-Infinity", "a=nan"] {
+            let text = format!("type=enchantment\ntexture=flame\n{bad}");
+            assert!(rule(SWORD, &text, &files).is_none(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn glint_keys_are_only_an_enchantment_rules() {
+        let files = ["assets/minecraft/optifine/cit/swords/flame.png"];
+        let r = rule(
+            SWORD,
+            "items=diamond_sword\ntexture=flame\nblend=nonsense\nspeed=fast\nr=nan",
+            &files,
+        )
+        .expect("an item rule ignores the glint keys");
+        assert_eq!(r.glint, Glint::default());
+    }
+
+    #[test]
+    fn named_blends() {
+        use Factor::*;
+        let pair = |src, dst| Blend {
+            src,
+            dst,
+            src_alpha: Zero,
+            dst_alpha: One,
+        };
+        // CIT Resewn's doc's table.
+        let table = [
+            ("glint", pair(SrcColor, One)),
+            ("alpha", pair(SrcAlpha, OneMinusSrcAlpha)),
+            ("add", pair(SrcAlpha, One)),
+            ("subtract", pair(OneMinusDstColor, Zero)),
+            ("multiply", pair(DstColor, OneMinusSrcAlpha)),
+            ("dodge", pair(One, One)),
+            ("burn", pair(Zero, OneMinusSrcColor)),
+            ("screen", pair(One, OneMinusSrcColor)),
+            ("overlay", pair(DstColor, SrcColor)),
+        ];
+        for (name, blend) in table {
+            assert_eq!(parse_blend(name), Some(Some(blend)), "{name}");
+        }
+        assert_eq!(parse_blend("replace"), Some(None));
+        // Names are case-blind (CIT Resewn upper-cases them); GL constants are not (it looks
+        // them up as GL11's field names).
+        assert_eq!(parse_blend("Multiply"), parse_blend("multiply"));
+        assert_eq!(parse_blend("gl_one GL_ONE"), None);
+    }
+
+    #[test]
+    fn global_properties() {
+        let g = Global::parse(&Properties::parse(
+            "method=cycle\ncap=2\nfade=1.5\nuseGlint=false",
+        ));
+        assert_eq!(
+            g,
+            Global {
+                method: Method::Cycle,
+                cap: Some(2),
+                fade: 1.5,
+                use_glint: false
+            }
+        );
+        assert_eq!(
+            Global::parse(&Properties::parse("method=odd\ncap=x\nfade=-1")),
+            Global {
+                fade: 0.0,
+                ..Global::default()
+            }
+        );
+        assert_eq!(
+            Global::parse(&Properties::parse("method=Layered\nuseGlint=FALSE")).method,
+            Method::Layered
+        );
+        assert!(!Global::parse(&Properties::parse("useGlint=FALSE")).use_glint);
+        assert_eq!(
+            Global::parse(&Properties::parse("method=NONE")).method,
+            Method::None
+        );
+        for fade in ["nan", "INF", "-infinity"] {
+            let g = Global::parse(&Properties::parse(&format!("fade={fade}")));
+            assert_eq!(g.fade, 0.5, "{fade}");
+        }
     }
 }

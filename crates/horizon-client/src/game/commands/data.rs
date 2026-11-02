@@ -68,7 +68,12 @@ impl Game<'_> {
             .flatten()
     }
     fn entity_nbt_in_level(&mut self, t: Target) -> Option<Tag> {
-        let player_uuid = self.level.player_uuid;
+        // The acting player's own UUID: a guest's turn (the window's player on
+        // the server thread) keeps the world owner's in `level`.
+        let player_uuid = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid);
         Some(match t {
             Target::Guest(_) => {
                 return self
@@ -211,6 +216,11 @@ impl Game<'_> {
                     uuid,
                 );
                 crate::game::persist::with_raw(tag, raw)
+            }
+            Target::Rocket(id) => {
+                let uuid = self.uuid_for(id);
+                let r = self.rockets.iter().find(|r| r.id == id)?;
+                r.to_nbt(uuid, player_uuid, self.persist.raw.get(&id))
             }
             Target::Spawner(id) => {
                 let s = self.ominous_spawners.iter().find(|s| s.id == id)?;
@@ -842,6 +852,8 @@ impl Game<'_> {
             Some(Target::Tnt(id))
         } else if self.falling.iter().any(|f| f.id == id) {
             Some(Target::Falling(id))
+        } else if self.rockets.iter().any(|r| r.id == id) {
+            Some(Target::Rocket(id))
         } else if self.ominous_spawners.iter().any(|s| s.id == id) {
             Some(Target::Spawner(id))
         } else {

@@ -1104,12 +1104,19 @@ fn files_under(dir: &Path, relative: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_dir_except(from, to, None)
+}
+
+/// Copy a folder, leaving out one directory when given.
+pub(crate) fn copy_dir_except(from: &Path, to: &Path, skip: Option<&Path>) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
+            if Some(entry.path().as_path()) != skip {
+                copy_dir_except(&entry.path(), &target, skip)?;
+            }
         } else {
             horizon_prepare::clone_or_copy(&entry.path(), &target)?;
         }

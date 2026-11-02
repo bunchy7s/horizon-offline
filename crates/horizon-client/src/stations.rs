@@ -503,18 +503,16 @@ impl StationRecipes {
         };
         for namespace in namespaces {
             let dir = root.join(format!("data/{namespace}/recipe"));
-            let more = crate::crafting::recipe_files(&dir).unwrap_or_default();
-            files.extend(
-                more.into_iter()
-                    .map(|(name, p)| (namespace.clone(), name, p)),
-            );
+            if let Ok(folder) = crate::json_folder::read(&dir) {
+                files.push((namespace, folder));
+            }
         }
         let mut sources: Vec<(String, Value)> = files
             .iter()
-            .filter_map(|(namespace, name, p)| {
-                let bytes = fs::read(p).ok()?;
-                let v = serde_json::from_slice::<Value>(&bytes).ok()?;
-                Some((format!("{namespace}:{name}"), v))
+            .flat_map(|(namespace, folder)| folder.files.iter().map(move |f| (namespace, f)))
+            .filter_map(|(namespace, file)| {
+                let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
+                Some((format!("{namespace}:{}", file.name), v))
             })
             .collect();
         // The world's packs' recipes over the game's own: the top pack's

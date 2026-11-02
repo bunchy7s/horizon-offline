@@ -257,6 +257,16 @@ fn forwarding_secret(online: bool) -> Result<Option<Vec<u8>>> {
     Ok(Some(secret))
 }
 
+/// `MinecraftServer.runServer`'s overload warning for a server `behind` its
+/// schedule, in milliseconds and in ticks of `tick`.
+fn overload_warning(behind: Duration, tick: Duration) -> String {
+    format!(
+        "Can't keep up! Is the server overloaded? Running {}ms or {} ticks behind",
+        behind.as_millis(),
+        behind.as_nanos() / tick.as_nanos().max(1)
+    )
+}
+
 /// Log4j's console pattern: `[HH:mm:ss] [thread/LEVEL]: message`.
 pub(super) fn log(level: &str, message: &str) {
     log_from("Server thread", level, message);
@@ -502,6 +512,13 @@ const LEGACY_PRESET_NAMES: [(&str, horizon_client::save::WorldPreset); 2] = [
 
 /// server.properties' line for `server.toml`'s `max_view_distance` (horizon-server writes it).
 const FAR_PROPERTY: &str = "horizon-max-view-distance";
+/// A dedicated server logs a tick slower than this, in milliseconds, with
+/// its spans, unless `HORIZON_SPIKES` names another threshold: five ticks'
+/// worth, a stall players feel as rubber-banding.
+pub(super) const SLOW_TICK_MS: f32 = 250.0;
+/// `MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS` plus 100 ticks: the
+/// "Can't keep up!" warning comes at most this often.
+const OVERLOAD_WARNING_INTERVAL: Duration = Duration::from_secs(15);
 /// server.properties' line for `server.toml`'s `admin_feedback_to_ops` (horizon-server writes it).
 const ADMIN_FEEDBACK_PROPERTY: &str = "horizon-admin-feedback-to-ops";
 
@@ -618,6 +635,8 @@ struct ServerState {
     /// View and simulation distance, and the player limit, for the report.
     view: (u32, u32),
     max_players: usize,
+    /// The mutable `gamemode` server property (`DedicatedServer.gameMode`).
+    game_mode: i32,
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -985,6 +1004,7 @@ impl Game<'_> {
             broadcast_console: props.broadcast_console_to_ops,
             broadcast_rcon: props.broadcast_rcon_to_ops,
             op_level: props.op_permission_level,
+            game_mode: props.game_mode,
             report: None,
             view: (
                 props.view_distance.clamp(2, 32) as u32,
@@ -1000,6 +1020,7 @@ impl Game<'_> {
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
         let watchdog = Watchdog::start(props.max_tick_time);
         let mut braked = Instant::now();
+        let mut overload_warned: Option<Instant> = None;
         while !state.stop {
             let tick_start = Instant::now();
             if let Some(watchdog) = &watchdog {
@@ -1089,7 +1110,17 @@ impl Game<'_> {
                 far.brake(mspt, host.hub.config.view_distance);
             }
             state.ticked(Instant::now());
-            self.wait_for_next_server_tick(&mut next, paused);
+            // MinecraftServer.runServer: a server more than a second's ticks
+            // behind skips them and says so, at most every 15 seconds.
+            if let Some(behind) = self.wait_for_next_server_tick(&mut next, paused)
+                && overload_warned.is_none_or(|at| at.elapsed() >= OVERLOAD_WARNING_INTERVAL)
+            {
+                overload_warned = Some(Instant::now());
+                log(
+                    "WARN",
+                    &overload_warning(behind, self.clock.tick_duration()),
+                );
+            }
         }
         if let Some(watchdog) = &watchdog {
             watchdog.running.store(false, Ordering::Relaxed);
@@ -1975,13 +2006,23 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_log, log, log_from, panic_message};
+    use super::{capture_log, log, log_from, overload_warning, panic_message};
     use std::{
         fs,
         io::{self, BufRead, BufReader, Read, Write},
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
+    #[test]
+    fn the_overload_warning_reads_as_vanilla_s() {
+        let tick = std::time::Duration::from_millis(50);
+        assert_eq!(
+            overload_warning(std::time::Duration::from_millis(13_027), tick),
+            "Can't keep up! Is the server overloaded? Running 13027ms or 260 ticks behind"
+        );
+    }
 
     /// A `panic!("literal")` carries a `&str`, a formatted one a `String`; anything else is
     /// named as unknown, so the crash line is never empty.

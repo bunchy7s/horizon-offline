@@ -587,7 +587,7 @@ pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootT
 /// 75.
 #[inline(never)]
 pub fn native_loot_table_load(id: &str, table: &mut Value) {
-    let _ = (id, table);
+    crate::native_load_hooks::loot_table_load(id, table);
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {

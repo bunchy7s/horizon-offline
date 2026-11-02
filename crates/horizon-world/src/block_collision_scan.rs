@@ -79,6 +79,48 @@ pub struct BlockCollisionHit {
     pub shape: VoxelShape,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum CellError {
+    InvalidBounds,
+    TooLarge,
+}
+
+/// The cursor a scan of `bounds` walks: its padded start, the box's extents in
+/// cells and the cell count. `new` and [`scan_cells`] share it, so a caller
+/// that sizes a budget from a box counts exactly what the scan will visit.
+fn cells(bounds: Aabb) -> Result<(BlockPos, [i32; 3], usize), CellError> {
+    let min = bounds.min_position();
+    let max = bounds.max_position();
+    if !min.is_finite() || !max.is_finite() {
+        return Err(CellError::InvalidBounds);
+    }
+    let start = BlockPos::containing(Vec3::new(min.x - 1.0e-7, min.y - 1.0e-7, min.z - 1.0e-7))
+        .offset(-1, -1, -1);
+    let end = BlockPos::containing(Vec3::new(max.x + 1.0e-7, max.y + 1.0e-7, max.z + 1.0e-7))
+        .offset(1, 1, 1);
+    let sizes = [
+        end.x.wrapping_sub(start.x).wrapping_add(1),
+        end.y.wrapping_sub(start.y).wrapping_add(1),
+        end.z.wrapping_sub(start.z).wrapping_add(1),
+    ];
+    if sizes.iter().any(|size| *size <= 0) {
+        return Err(CellError::TooLarge);
+    }
+    let count = sizes
+        .into_iter()
+        .try_fold(1u64, |n, size| {
+            n.checked_mul(size as u64).filter(|n| *n <= i32::MAX as u64)
+        })
+        .ok_or(CellError::TooLarge)? as usize;
+    Ok((start, sizes, count))
+}
+
+/// The cells a scan of `bounds` visits, or `None` for a box `new` refuses
+/// (`InvalidBounds`, `TooLarge`): the most a budget can usefully be.
+pub fn scan_cells(bounds: Aabb) -> Option<usize> {
+    cells(bounds).ok().map(|(_, _, count)| count)
+}
+
 pub struct BlockCollisionScan<'w, 'c, W: BlockCollisionWorld> {
     world: &'w mut W,
     context: CollisionContext<'c>,
@@ -110,29 +152,10 @@ impl<'w, 'c, W: BlockCollisionWorld> BlockCollisionScan<'w, 'c, W> {
         only_suffocating: bool,
         candidate_budget: usize,
     ) -> Result<Self, CollisionScanError<W::Error>> {
-        let min = bounds.min_position();
-        let max = bounds.max_position();
-        if !min.is_finite() || !max.is_finite() {
-            return Err(CollisionScanError::InvalidBounds);
-        }
-        let start = BlockPos::containing(Vec3::new(min.x - 1.0e-7, min.y - 1.0e-7, min.z - 1.0e-7))
-            .offset(-1, -1, -1);
-        let end = BlockPos::containing(Vec3::new(max.x + 1.0e-7, max.y + 1.0e-7, max.z + 1.0e-7))
-            .offset(1, 1, 1);
-        let sizes = [
-            end.x.wrapping_sub(start.x).wrapping_add(1),
-            end.y.wrapping_sub(start.y).wrapping_add(1),
-            end.z.wrapping_sub(start.z).wrapping_add(1),
-        ];
-        if sizes.iter().any(|size| *size <= 0) {
-            return Err(CollisionScanError::TooLarge);
-        }
-        let count = sizes
-            .into_iter()
-            .try_fold(1u64, |n, size| {
-                n.checked_mul(size as u64).filter(|n| *n <= i32::MAX as u64)
-            })
-            .ok_or(CollisionScanError::TooLarge)? as usize;
+        let (start, sizes, count) = cells(bounds).map_err(|error| match error {
+            CellError::InvalidBounds => CollisionScanError::InvalidBounds,
+            CellError::TooLarge => CollisionScanError::TooLarge,
+        })?;
         Ok(Self {
             world,
             context,

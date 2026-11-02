@@ -61,7 +61,7 @@ impl Game<'_> {
     pub(super) fn bounding_box_gizmos(&self, camera: [f64; 3], g: &mut Gizmos) {
         let game_master = self.can_use_game_master_blocks() || self.spectator();
         let facts = self.res.facts();
-        for (pos, entity) in &self.world.block_entities {
+        for (pos, entity) in self.world.block_entities.boxes() {
             let centre = [pos.0, pos.1, pos.2].map(|v| f64::from(v) + 0.5);
             let dist: f64 = (0..3).map(|i| (centre[i] - camera[i]).powi(2)).sum();
             let block = [pos.0, pos.1, pos.2];

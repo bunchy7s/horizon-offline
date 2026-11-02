@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "difficulty_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_difficulty_changed",
+      "neoforge": "DifficultyChangeEvent",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "the server's difficulty changing (`native_difficulty_changed`).",
+  "doc_summary": "the server's difficulty changed, from one of `peaceful`, `easy`, `normal`, `hard` to another, through `native_difficulty_changed` (NeoForge's `DifficultyChangeEvent`). It is vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a dedicated server's management and a test environment's difficulty all go through, and it is told only when the difficulty is another one. It only hears: the change has already happened. Bundles that use it need \"hooks\": @API:difficulty_changed@.",
+  "comments": []
+}

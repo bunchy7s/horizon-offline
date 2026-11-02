@@ -205,6 +205,94 @@ impl Game<'_> {
         self.attack_ticks = 0;
         self.hand_strength.reset();
     }
+    /// `Minecraft.tick`'s `pick`, then `handleKeybinds`' number keys: the
+    /// tick's clicks act on what the item held before the keys picked (a
+    /// spear's 4.5 blocks), with the item the keys select (attribute
+    /// swapping a spear's reach onto a mace).
+    pub(super) fn pick_tick_targets(&mut self) {
+        self.tick_hit = Some(self.pick());
+        self.tick_mob = None;
+        let mob = match self.active_attack_range() {
+            Some(range) => self.attack_range_pick(&range),
+            None => None,
+        };
+        self.tick_mob = Some(mob.unwrap_or_else(|| self.mob_hit()));
+        self.select_queued_hotbar();
+    }
+    /// `handleKeybinds`' number keys (`keyHotbarSlots[i].consumeClick`).
+    pub(super) fn select_queued_hotbar(&mut self) {
+        for slot in std::mem::take(&mut self.hotbar_presses) {
+            self.selected = slot;
+        }
+    }
+    /// The tick's clicks are done: later picks follow the crosshair again.
+    pub(super) fn release_tick_targets(&mut self) {
+        self.tick_hit = None;
+        self.tick_mob = None;
+    }
+    /// `Minecraft.startAttack` on an entity: a main-hand item with an
+    /// `attack_range` attacks only a hit inside it.
+    pub(super) fn held_range_allows(&self, distance: f64) -> bool {
+        let range = self.held().and_then(|stack| {
+            self.pack
+                .item_renderer
+                .models
+                .components(&horizon_client::item_render::stack_view(stack))
+                .get("minecraft:attack_range")
+                .cloned()
+        });
+        range.is_none_or(|r| attack_range_contains(&r, distance, self.creative))
+    }
+    /// `LocalPlayer.raycastHitResult`'s item (`getActiveItem`: the one in
+    /// use, else the main hand's) `attack_range` component.
+    fn active_attack_range(&self) -> Option<serde_json::Value> {
+        let active = self
+            .using
+            .and_then(|(slot, _)| self.inventory.get(slot).and_then(Option::as_ref))
+            .or_else(|| self.held())?;
+        self.pack
+            .item_renderer
+            .models
+            .components(&horizon_client::item_render::stack_view(active))
+            .get("minecraft:attack_range")
+            .cloned()
+    }
+    /// `AttackRange.getClosesetHit` against the mobs `mob_hit` can pick
+    /// (`EntitySelector.CAN_BE_PICKED`), as `raycastHitResult` reads it: the
+    /// nearest mob hit within the item's reach; no mob when the clip met a
+    /// block within the block reach (`getHitEntitiesAlong`'s block result,
+    /// kept by `filterHitResult`); `None` on a miss, where the plain pick
+    /// decides.
+    fn attack_range_pick(&self, range: &serde_json::Value) -> Option<Option<(usize, f64)>> {
+        let eye = v3(self.eye_position()?);
+        let look = v3(super::view_vector(self.yaw, self.pitch));
+        let reach = attack_reach(range, self.creative);
+        let camera = self.remote_camera_id();
+        let boxes: Vec<(usize, Aabb)> = (self.mobs.iter().enumerate())
+            .filter(|(_, m)| !m.removed && Some(m.id) != self.riding && Some(m.id) != camera)
+            .map(|(i, m)| (i, m.bounds()))
+            .collect();
+        let clip = |from: Vec3, to: Vec3| {
+            let length = from.distance_squared(to).sqrt();
+            let d = to.subtract(from).scale(1.0 / length);
+            (length > 0.0)
+                .then(|| self.clip_ray([from.x, from.y, from.z], [d.x, d.y, d.z], length))
+                .flatten()
+                .map(|hit| Vec3::new(hit.point[0], hit.point[1], hit.point[2]))
+        };
+        let movement = self.known_player_movement();
+        let nearest = super::spear::hits_in_reach(&boxes, eye, look, movement, reach, clip)
+            .into_iter()
+            .map(|(i, at)| (i, eye.distance_squared(at).sqrt()))
+            .reduce(|a, b| if b.1 < a.1 { b } else { a });
+        if nearest.is_some() {
+            return Some(nearest);
+        }
+        let to = eye.add_vector(look.scale(f64::from(reach.1) + movement.dot(look).max(0.0)));
+        clip(eye, to)
+            .is_some_and(|block| eye.distance_squared(block) <= self.block_reach.powi(2))
+            .then_some(None)
+    }
     /// The attack and use part of `Minecraft.tick` for the local player:
     /// attack clicks since the last tick and the held attack button.
     pub(super) fn tick_local_hand(&mut self) -> Result<()> {
@@ -216,11 +304,10 @@ impl Game<'_> {
             // (scripts under --control hold buttons without grabbing it).
             let down = self.left;
             let ticks = self.clicks.destroying.ticks;
-            // Minecraft.hitResult is picked once per frame: a creative break
-            // does not move the use that follows it past the broken block.
-            if use_clicks > 0 && attack_clicks > 0 {
-                self.tick_hit = Some(self.pick());
-            }
+            // Minecraft.hitResult is picked once per tick, before the number
+            // keys: a creative break does not move the use that follows it
+            // past the broken block.
+            self.pick_tick_targets();
             let mut world = GameHands {
                 game: self,
                 error: None,
@@ -229,7 +316,7 @@ impl Game<'_> {
             let error = world.error.take();
             self.clicks = clicks;
             if let Some(e) = error {
-                self.tick_hit = None;
+                self.release_tick_targets();
                 return Err(e);
             }
             // Use clicks follow the attack clicks within the tick, against
@@ -245,7 +332,7 @@ impl Game<'_> {
                     break;
                 }
             }
-            self.tick_hit = None;
+            self.release_tick_targets();
             used?;
             // A tick of breaking: the hit sound every fourth tick and the
             // cracking particles.
@@ -267,8 +354,10 @@ impl Game<'_> {
                 }
             }
         } else {
-            // Minecraft.tick: a screen keeps the attack from starting.
+            // Minecraft.tick: a screen keeps the attack from starting, and
+            // opening it released the keys (`KeyMapping.releaseAll`).
             self.clicks.miss_time = 10000;
+            self.hotbar_presses.clear();
         }
         let d = &self.clicks.destroying;
         self.mining = d.active.then_some(Mining {
@@ -385,7 +474,7 @@ impl Game<'_> {
     pub(super) fn tick_hand(&mut self) {
         // LocalPlayer.applyInput (the camera is the player's own).
         if self.player.is_some() {
-            self.sway.tick(self.pitch, self.yaw);
+            self.sway.tick_wrapped(self.pitch, self.yaw);
         }
         self.swing.tick();
         let main = self.inventory[self.selected].clone();

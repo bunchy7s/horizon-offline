@@ -7,6 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
+    mod_api::NativeLootDrops,
 };
 use horizon_world::nbt::Tag;
 
@@ -163,7 +164,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = super::native_hooks::NativeLootDrops {
+        let context = NativeLootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,
@@ -598,12 +599,9 @@ impl Game<'_> {
             }
         }
         // The knots: a 6 by 8 by 6 pixel block on the fence post.
-        static KNOT: std::sync::OnceLock<Option<horizon_client::mobs::Part>> =
-            std::sync::OnceLock::new();
-        let model = KNOT.get_or_init(|| {
-            horizon_client::mobs::load_model(&self.options.resources, "minecraft:leash_knot#main")
-        });
-        let Some(model) = model else { return };
+        let Some(model) = self.entity_models.leash_knot.as_ref() else {
+            return;
+        };
         let Some(r) = atlas.sprites.get("entity/lead_knot/lead_knot").copied() else {
             return;
         };

@@ -475,7 +475,8 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   `RconThread.create` does: no password or a port outside 1 to 65535 leaves it off with vanilla's warning. The
   packets are `RconClient`'s: login (3), command (2), the output in packets of 4096 characters, `-1` for a refused
   login, `Unknown request <hex>` for another type, `Error executing: <command> (<reason>)` for a command that failed.
-  A command goes to the game as `horizon-server cmd` sends it (`console <line>` on the control endpoint), so the
+  A command goes to the game as an `rcon <line>` request on the control endpoint (`horizon-server cmd` sends
+  `console <line>`, the same console under the `Server` source), so the
   output is what the console prints, its messages joined as `RconConsoleSource` joins them. Differences, each one
   named in `rcon.rs`: the packets are read from the stream, the password is compared in constant time, a
   connection that hasn't logged in within 30 seconds is closed and at most 16 are open. A command runs as

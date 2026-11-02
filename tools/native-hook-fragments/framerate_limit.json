@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "framerate_limit",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_framerate_limit",
+      "neoforge": "none (vanilla FramerateLimitTracker.getFramerateLimit fires no event)",
+      "side": "client",
+      "cancellable": false
+    }
+  ],
+  "rust_summary": "lowering the frame rate limit, as Dynamic FPS does (`native_framerate_limit`).",
+  "doc_summary": "lowering the frame rate limit: `native_framerate_limit(focused, minimized, in_world, limit)` is asked each frame with the limit Horizon is about to use (Max Framerate after the inactivity throttle and Battery Mode, 260 for unlimited), whether the window has focus, whether it is minimised and whether a world is open. A mod may lower `limit`, for example to throttle a window in the background as Dynamic FPS does; Horizon keeps the lower of its own limit and the mod's and ignores values below 1. Bundles that use it need `\"hooks\": @API:framerate_limit@`."
+}

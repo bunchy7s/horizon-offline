@@ -417,7 +417,11 @@ impl Game<'_> {
                 // its own host too (`lan.rs:165`), so this one path covers
                 // both single player and a LAN guest.
                 let mut carried = g.carried.clone();
-                self.mod_menu_button(pos, id, &mut carried);
+                // As that player: `native_acting_player`, `native_acting_id`
+                // and `native_give_stack` answer for the one who pressed.
+                self.as_guest(host, conn, |game| {
+                    game.mod_menu_button(pos, id, &mut carried)
+                });
                 if host.hub.guest(conn).is_some_and(|g| g.carried != carried) {
                     let net = host.hub.stack(&carried);
                     if let Some(g) = host.hub.guest_mut(conn) {

@@ -130,6 +130,26 @@ impl ModelLibrary {
     pub fn resolve(&self, name: &str) -> Result<ResolvedCuboidModel> {
         self.resolve_chain(name, None)
     }
+    /// Whether `name` and every parent it reaches are models of this library,
+    /// with no cycle: `resolve` puts the missing model in for any other.
+    pub fn resolves(&self, name: &str) -> bool {
+        let Ok(mut name) = identifier(name) else {
+            return false;
+        };
+        let mut visited = BTreeSet::new();
+        loop {
+            let Some(model) = self.models.get(&name) else {
+                return false;
+            };
+            if !visited.insert(name.clone()) {
+                return false;
+            }
+            match &model.parent {
+                Some(parent) => name = parent.clone(),
+                None => return true,
+            }
+        }
+    }
     /// `name`'s resolved model with a virtual child in front of it that has
     /// only `textures`: the child's slots win, and `#references` anywhere in
     /// the chain re-bind through them (so `builtin/generated`'s
@@ -528,5 +548,24 @@ mod tests {
             absent.material("particle").unwrap().unwrap().sprite,
             "minecraft:missingno"
         );
+    }
+    #[test]
+    fn a_model_resolves_only_with_its_whole_parent_chain() {
+        let library = library(&[
+            ("item/generated", GENERATED),
+            (
+                "item/stick",
+                r#"{"parent":"item/generated","textures":{"layer0":"item/stick"}}"#,
+            ),
+            ("item/orphan", r#"{"parent":"item/gone"}"#),
+            ("item/a", r#"{"parent":"item/b"}"#),
+            ("item/b", r#"{"parent":"item/a"}"#),
+        ]);
+        assert!(library.resolves("item/stick"));
+        assert!(library.resolves("minecraft:item/stick"));
+        assert!(!library.resolves("item/absent"));
+        assert!(!library.resolves("item/orphan"));
+        assert!(!library.resolves("item/a"));
+        assert!(!library.resolves("Item/Stick"));
     }
 }

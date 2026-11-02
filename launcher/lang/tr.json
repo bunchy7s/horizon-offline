@@ -476,6 +476,7 @@
   "Building horizon-mixins (once)": "horizon-mixins derleniyor (bir kez)",
   "Downloading Horizon's source at {revision}": "Horizon kaynak kodu {revision} indiriliyor",
   "Applying the mixins": "Mixin'ler uygulanıyor",
+  "Reusing patched game source": "Değiştirilmiş oyun kaynak kodu yeniden kullanılıyor",
   "Checking the mods' crates against Horizon's Cargo.lock": "Modların crate'leri Horizon'un Cargo.lock dosyasıyla karşılaştırılıyor",
   "Building {name}'s post-build step": "{name} derleme sonrası adımı derleniyor",
   "Running {name}'s post-build step": "{name} derleme sonrası adımı çalıştırılıyor",
@@ -788,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Sunucuyu launcher tarafından yönetilen klasörlerin dışına aktarın.",
   "{path} is not a folder to build into.": "{path} derleme yapılacak klasör değil.",
   "Could not copy the build: {error}": "Build kopyalanamadı: {error}",
-  "Could not move the build to {path}: {error}": "Build {path} konumuna taşınamadı: {error}"
+  "Could not move the build to {path}: {error}": "Build {path} konumuna taşınamadı: {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Yerel modlar, bunu etkinleştirdiğinizde sesli sohbet için mikrofonunuzu kullanabilir."
 }

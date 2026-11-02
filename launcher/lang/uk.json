@@ -239,6 +239,7 @@
   ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.": ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. Horizon ports what it can on this computer, from your own downloads, and plays the pack as its own profile. Nothing is uploaded or shared.",
   "The build compiles the game: 20 to 30 minutes and a few GB of disk the first time (it downloads Rust), a few minutes after that.": "Збирання компілює гру: уперше це 20–30 хвилин і кілька ГБ на диску (воно завантажує Rust), далі — кілька хвилин.",
   "Applying the mixins": "Застосування міксинів",
+  "Reusing patched game source": "Повторне використання зміненого вихідного коду гри",
   "Empty": "Порожня",
   "Loader": "Завантажувач",
   "Categories": "Категорії",
@@ -788,5 +789,6 @@
   "Export the server outside the launcher's managed folders.": "Експортуйте сервер позаду папок, которыmi керує лаунчер.",
   "{path} is not a folder to build into.": "{path} не є папкою для збірки.",
   "Could not copy the build: {error}": "Не вдалося скопіювати збірку: {error}",
-  "Could not move the build to {path}: {error}": "Не вдалося перемістити збірку у {path}: {error}"
+  "Could not move the build to {path}: {error}": "Не вдалося перемістити збірку у {path}: {error}",
+  "Native mods can use your microphone for voice chat when you enable it.": "Нативні моди можуть використовувати ваш мікрофон для голосового чату, коли ви це увімкнете."
 }

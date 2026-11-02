@@ -383,6 +383,15 @@ impl Game<'_> {
                 let _ =
                     m.apply_saved_attributes(g.saved.as_ref().and_then(|t| t.get("attributes")));
             }
+            // ServerPlayer.restoreFrom: a body that follows another takes its
+            // attributes (a scale of 0.1 stays 0.1 after a respawn or a trip
+            // to another level).
+            let g = &mut host.hub.guests[i];
+            if let Some(carried) = g.carried_attributes.take()
+                && let Some(m) = g.motion.as_mut()
+            {
+                let _ = m.apply_saved_attributes(Some(&carried));
+            }
             // The saved golden hearts go on the first body of a player who
             // has been here before.
             let saved = host.hub.guests[i].saved_absorption.take();
@@ -412,6 +421,10 @@ impl Game<'_> {
             host.play.insert(conn, play);
             return None;
         };
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         self.sculk.swap_player(&mut play.sculk);
         // The guest's own CombatTracker: damage to them is not the host's.
         // A new body starts with no record of the last one.
@@ -834,6 +847,10 @@ impl Game<'_> {
                 host.hub.seat_order
             });
         let g = &mut host.hub.guests[i];
+        std::mem::swap(
+            &mut self.player_attachments,
+            self.guest_attachments.entry(g.uuid).or_default(),
+        );
         let left_vehicle = g.vehicle.filter(|_| guest_vehicle.is_none());
         if guest_vehicle.is_none() {
             g.vehicle_good = None;
@@ -2508,8 +2525,9 @@ impl Game<'_> {
         }
         let g = &mut host.hub.guests[gi];
         (g.yaw, g.pitch) = (yaw, pitch);
-        // A new body there: no fall distance or motion carried over.
-        g.motion = None;
+        // A new body there: no fall distance or motion carried over, but the
+        // player's attributes (ServerPlayer.teleport keeps the entity).
+        g.new_body(true);
         host.hub.teleport(gi, Some(at));
     }
     fn guest_tick_death(&mut self, host: &mut LanHost, gi: usize) {
@@ -3176,6 +3194,13 @@ impl Game<'_> {
         if !host.hub.guests[i].dead {
             return;
         }
+        // PlayerList.respawn replaces the player, retaining only opted-in data.
+        let uuid = host.hub.guests[i].uuid;
+        if let Some(attachments) = self.guest_attachments.get_mut(&uuid)
+            && let Ok(copy) = attachments.copy_on_death()
+        {
+            *attachments = copy;
+        }
         // PlayerList.respawn removes the dead player (Player.remove).
         self.guest_drop_carried(host, i);
         // AbstractContainerScreen.tick / ServerPlayer.closeContainer: the dead
@@ -3233,14 +3258,16 @@ impl Game<'_> {
         g.load_timeout = horizon_client::lan::guest::CLIENT_LOADED_TIMEOUT;
         g.loading = true;
         g.death_time = 0;
-        g.health = 20.0;
         g.food = 20;
         g.saturation = 5.0;
         g.sent_health = None;
-        if let Some(m) = g.motion.take() {
+        // ServerPlayer.restoreFrom(old, false): the base values come back,
+        // and the new player has the max health they give.
+        if let Some(m) = g.new_body(false) {
             let m = *m;
             g.logs_kept = Some((m.hurt_log, m.attack_log));
         }
+        g.health = g.respawn_health(self.motion);
         let mut xp = Experience {
             level: g.xp_level,
             progress: g.xp_progress,
@@ -3832,6 +3859,12 @@ impl Game<'_> {
                 w.player.fall_distance = 0.0;
             }
             let travelled: Vec<[f64; 3]> = moves.iter().map(|m| m.0).collect();
+            // The tick's whole movement, for the delta movement a glide's wall
+            // hit reads (`handleMovePlayer` gives the server copy the client's
+            // own movement).
+            let tick_movement = travelled.iter().fold(Vec3::ZERO, |sum, d| {
+                sum.add_vector(Vec3::new(d[0], d[1], d[2]))
+            });
             // Entity.move's movementThisTick: each move, from where the
             // tick's first one started.
             let end = w.player.position;
@@ -3942,6 +3975,7 @@ impl Game<'_> {
             let _ = player.peaceful_regeneration(rules);
             let _ = player.food_tick(health, rules);
             events.append(&mut player.events);
+            player.carry_client_movement(tick_movement);
             let _ = MotionWorld {
                 entities: &[],
                 player,

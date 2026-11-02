@@ -1,0 +1,5 @@
+{
+  "hooks": [],
+  "rust_summary": "the window's physical pixel size (`native_physical_window_size`).",
+  "doc_summary": "the helper `native_physical_window_size()`, which returns the window's width and height in physical pixels, independent of GUI scale. It returns no size on a server or when no window exists. Bundles that use it need `\"hooks\": @API:physical_window_size@`."
+}

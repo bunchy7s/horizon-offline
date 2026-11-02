@@ -1,0 +1,12 @@
+{
+  "hooks": [
+    {
+      "name": "player_fish",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_fish",
+      "neoforge": "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "a player's fishing rod: cast, bite, catch, reel-in, cancellable (`native_player_fish`).",
+  "doc_summary": "a player's fishing rod: `native_player_fish(player, name, state, cancel)` is heard for the cast (`state` 0), a fish biting (1), the reel-in with a catch (2), the reel-in with nothing on the line (3) and the reel-in of a bobber hooked to an entity or item (4), for a player of a server (Bukkit's `PlayerFishEvent`; NeoForge's `ItemFishedEvent` fires later, once the loot is rolled). A mod sets `cancel` to stop a cast, make the fish get away, or leave the bobber out on a reel-in. The player's state is swapped in. Bundles that use it need `\"hooks\": @API:native_player_fish@`."
+}

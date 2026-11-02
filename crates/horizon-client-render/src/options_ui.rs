@@ -5345,6 +5345,61 @@ mod tests {
         assert!(ui.resource_error.is_none());
     }
 
+    /// The texts of an options page, as laid out in `code`'s language, and the keys it lacked.
+    fn page_texts(code: &str, pages: &[Page]) -> (Vec<String>, Vec<String>) {
+        let s = Settings::default();
+        lang::scoped(lang::Language::load(&[], code), || {
+            let mut texts = Vec::new();
+            for page in pages {
+                let mut ui = OptionsUi::default();
+                ui.show(*page);
+                for w in ui.layout(&s, 480.0, 4000.0).0 {
+                    match w.kind {
+                        WKind::Button { label: t, .. }
+                        | WKind::Slider { label: t, .. }
+                        | WKind::Text { text: t, .. } => texts.push(t.plain()),
+                        _ => {}
+                    }
+                }
+            }
+            texts
+        })
+    }
+
+    /// Horizon's own options pages said "Splitscreen...", "Hide block-break particles" and
+    /// "Hotbar: Previous Slot" in every language (#1927).
+    #[test]
+    fn horizon_option_pages_follow_the_language() {
+        let (texts, missed) = page_texts("de_de", &[Page::Horizon, Page::Extras, Page::PadBinds]);
+        for want in [
+            "Splitscreen …",
+            "Partikel",
+            "Blockpartikel weg: Aus",
+            "Weicher Chat: Aus",
+            "Nachrichtenmarkierung: An",
+            "Kanäle für UI-Töne: Aus",
+            "Schnellzugriffsleiste: Vorheriger Platz",
+            "Schnellzugriffsleiste: Nächster Platz",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want:?} not in {texts:?}");
+        }
+        // Every key these pages ask for is in the table; vanilla's own keys (`options.*`,
+        // `key.*`: dotted ids without spaces) come from the prepared resources, which this
+        // language does not have.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|k| k.starts_with("horizon.") || k.contains(' ') || !k.contains('.'))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+        let (texts, _) = page_texts("pl_pl", &[Page::Extras, Page::PadBinds]);
+        for want in [
+            "Ukryj cząstki bloków: Wył.",
+            "Pasek szybkiego wyboru: poprzednie pole",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want:?} not in {texts:?}");
+        }
+    }
+
     #[test]
     fn classic_mods_page_toggles_mods_and_keeps_dev_and_invalid_entries_inactive() {
         let atlas = atlas();

@@ -169,6 +169,20 @@ def corpus(wants):
                 kv.append(f'lastrestock={rng.randrange(0, 10**6)}')
                 kv.append(f'restocks={rng.randrange(3)}')
         cases.append(f'nbt n{k} ' + ' '.join(kv))
+    # The restock gaps exactly: the second restock of a day needs more than
+    # 2400 ticks since the last one and a third never happens, while a new day
+    # needs more than 12000; and the cheapest offers under a major-positive
+    # reputation with Hero of the Village, where the discount cannot take a
+    # price below one item.
+    cases.append('restock b0 seed=3 v=farmer:plains:1 lastrestock=100 restocks=0 '
+                 'steps=use:0:4,check:2400:0,check:2401:0,use:0:1,check:2500:0,use:0:1,check:2520:0')
+    cases.append('restock b1 seed=3 v=farmer:plains:1 lastrestock=100 restocks=2 '
+                 'steps=use:0:4,check:3000:0,use:0:1,check:12100:0,check:12101:0')
+    cases.append('restock b2 seed=3 v=librarian:plains:3 lastrestock=0 restocks=2 '
+                 'steps=use:1:6,check:12000:1,check:12001:1,use:1:1,check:12600:1,check:24001:2')
+    cases.append('price b3 seed=5 v=fisherman:plains:1 gossip=major_positive:100 hero=4')
+    cases.append('price b4 seed=5 v=shepherd:plains:1 gossip=major_positive:100 gossip=major_positive:100 '
+                 'hero=1 uses=0:3 uses=1:3')
     return cases
 
 

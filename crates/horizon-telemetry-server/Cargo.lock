@@ -253,6 +253,7 @@ name = "horizon-telemetry-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "flate2",
  "horizon-telemetry",
  "http-body-util",
  "rusqlite",

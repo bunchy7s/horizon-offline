@@ -1,0 +1,13 @@
+{
+  "hooks": [
+    {
+      "name": "item_crafted",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_crafted",
+      "neoforge": "PlayerEvent.ItemCraftedEvent",
+      "side": "server"
+    }
+  ],
+  "rust_summary": "a player taking a crafting grid's result (`native_item_crafted`).",
+  "doc_summary": "a player took a crafting grid's result, through `native_item_crafted` (NeoForge's `PlayerEvent.ItemCraftedEvent`): the player's uuid, the recipe the grid matched (`minecraft:oak_planks`) and the result stack it took, with its components. It only hears; the take has already happened. It fires for the crafting grid of an inventory or a crafting table, on the integrated server and on a dedicated server, guests included, and not for a stonecutter's, a smithing table's or a furnace's result. Bundles that use it need \"hooks\": @API:item_crafted@.",
+  "comments": []
+}
