@@ -2196,6 +2196,12 @@ another mod's hook object is not exposed.
 
 Trait dispatch follows dependency order, with ties kept in bundle order. Mixin injection order remains
 horizon-mixins' priority, mod ID, then injection ID; dependency order does not change injection order.
+
+A panic in a trait mod's hook adds `in native mod <id>, hook <hook>` to the panic's message, in the crash report
+and in the server thread's log line, with the bundle's `[mod] id` (the generated executable passes the ids to
+`mod_api::name_mods`; a build that doesn't gives the mod's place in dispatch order, `#0` first). The game still
+stops as before. Render hooks and trait injections are not named yet.
+
 A bundle with an `[api]` package may declare its own injection in the trait:
 
 ```toml
