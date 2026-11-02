@@ -1049,6 +1049,20 @@ trusting native code is the player's decision, never an agent's.
    it is, and their clean-up never removes a native build. An instance built before this (the **Native mods**
    instance the default home's mods used to go to) keeps its worlds and its build.
 
+### Build log
+
+The full log of a build is `native/build.log`, beside the build's own folders under the launcher's data
+folder (`native_mods::log_path`). Each new attempt replaces it. Compiler output and the final result
+stay in the log, including failures before compilation or while selecting or exporting the built game.
+
+The launcher has a **Build log** action at the top right. It is there whenever a log exists, also right
+after the launcher starts, and it always opens the latest build's log: the next build replaces it. The
+panel shows a bounded preview of the end of the log and says when it truncated; **Copy log** copies the
+whole file, **Open full log** opens it outside the launcher, **Show in folder** reveals it, and
+**Refresh** reads it again (also after a build finishes). The panel is a snapshot read on open and
+refresh, not a live stream: a running build's later output appears only on the next refresh. Nothing is
+uploaded; the log stays on the player's computer.
+
 ## Rebuilds stay on the instance's Horizon
 
 A build starts from the version the instance plays (`native_mods::base_for`). When that is a native build, the
@@ -1543,6 +1557,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
 - **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
   sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
+- **`native_sleep_finished_time(dimension, current, new_time)`**: enough players slept through the night and the
+  `advance_time` rule is on (NeoForge's `SleepFinishedTimeEvent`). `new_time` comes in as the next morning's day time;
+  set another to wake everyone then. A time before `current` is refused and the morning stays; the check runs once after
+  every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
+  to the time chosen here and may still cancel it; the players wake either way. Bundles need
+  `"hooks": @API:sleep_finished_time@`.
 - **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
 - **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
 - **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
@@ -1997,6 +2017,29 @@ only for a server's players (single player's server thread, LAN guests, a dedica
 (`--in-frame`), and vanilla's menus never ask it. As in vanilla (`AbstractContainerMenu.moveItemStackTo`), a
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
 slot from filling that way, lower `max_stack`.
+
+### Shift-click in a mod container
+
+`native_menu_quick_move(pos, entity, container_slots, slot, stack, handled)` is a mod container's
+`AbstractContainerMenu.quickMoveStack`, the method a Java menu overrides to say where a shift-clicked stack goes. It is
+asked on the server before the game's own routing, for the mod block entity at `pos` whose menu a player shift-clicked
+with the left or right button, on a vanilla menu type (`minecraft:generic_9x1`...) or on the mod's own menu type. `slot`
+is the menu's index: below `container_slots` the block's own slot (`entity.items[slot]`), from there the player's
+inventory, its 27 main slots, then the hotbar. `stack` is a copy of what that slot holds. Take what you move out of
+`stack` (into `entity.items`, or into another block with `native_insert_item`) and set `handled`: the slot holds what
+is left of `stack` (whatever you wrote to that slot of `entity.items`), the game's routing is skipped, and the player's
+client gets the whole menu again. Unhandled, `entity.items` goes back to what it held and the game moves the stack as
+for any container; a later mod sees what an earlier one did to `stack`. If the mod removes its own block, the menu
+closes and the player's inventory is sent again. This is how a storage terminal
+whose items live in other blocks, or a screen that hides the container's slots, takes a shift-click from the
+inventory, and how a machine sends fuel to its fuel slot and ores to its input.
+
+Not asked for an empty slot, a slot the mod's screen hides, another click type, a spectator or a dead player, a menu
+no longer valid, or a shift-click during a drag (it only ends the drag, as in vanilla). It is asked once per click, where vanilla asks `quickMoveStack` again while the same item keeps moving: move
+all you want in one call. The clicking player's state is swapped in (`native_acting_player` names them), and `entity`
+is out of the world during the call, as in `native_menu_button`. Only a server's players (single player's server
+thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
+clicks already.
 
 ### Items' default components
 

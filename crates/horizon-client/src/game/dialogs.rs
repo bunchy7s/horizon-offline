@@ -516,6 +516,22 @@ impl Game<'_> {
             match part {
                 Part::Line(text, x, y) => {
                     batch.text_styled(atlas, &text, x, y, u32::MAX, true);
+                    // AbstractStringWidget: only the styled glyph under the
+                    // pointer requests a hand, not the whole message widget.
+                    if (!clipped || in_area(cursor.1))
+                        && let Some(style) = horizon_client::dialog_screen::line_style_at(
+                            &atlas.font,
+                            &text,
+                            x,
+                            y,
+                            cursor,
+                        )
+                    {
+                        widgets::widget_cursor(style.click.is_some(), true);
+                        if let Some(hover) = style.hover {
+                            tooltip = Some(*hover);
+                        }
+                    }
                 }
                 Part::Field { input, rect } => {
                     let focused = open.focus == Some(input);
@@ -824,20 +840,15 @@ impl Game<'_> {
                 }
                 // AbstractStringWidget.setComponentClickHandler: the click event
                 // of the styled text under a centred message line.
-                Part::Line(line, x, y)
-                    if text_click.is_none()
-                        && cursor.0 >= x
-                        && (0.0..9.0).contains(&(cursor.1 - y)) =>
-                {
-                    let content = line.resolve_legacy();
-                    let mut left = cursor.0 - x;
-                    for (c, style) in content.chars() {
-                        left -= self.gui.atlas.font.advance(c, style);
-                        if left < 0.0 {
-                            text_click = style.click.clone();
-                            break;
-                        }
-                    }
+                Part::Line(line, x, y) if text_click.is_none() => {
+                    text_click = horizon_client::dialog_screen::line_style_at(
+                        &self.gui.atlas.font,
+                        &line,
+                        x,
+                        y,
+                        cursor,
+                    )
+                    .and_then(|style| style.click);
                 }
                 _ => {}
             }
@@ -851,6 +862,7 @@ impl Game<'_> {
                 Some(ClickEvent::RunCommand(command)) => Click::RunCommand(command),
                 Some(ClickEvent::CopyToClipboard(value)) => Click::CopyToClipboard(value),
                 Some(ClickEvent::ShowDialog(dialog)) => Click::ShowDialog(dialog),
+                Some(ClickEvent::Custom { id, payload }) => Click::Custom { id, payload },
                 Some(ClickEvent::OpenFile(_)) | None => return Ok(()),
             };
             let after = open.dialog.after_action;
