@@ -14209,6 +14209,13 @@ impl Game<'_> {
                 true,
             );
         }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            let mut cancel = false;
+            self.native_player_bed_enter(player, &name, head, &mut cancel);
+            if cancel {
+                return;
+            }
+        }
         self.stop_mining();
         self.left = false;
         self.right = false;
