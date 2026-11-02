@@ -658,6 +658,8 @@ struct ServerState {
     stop: bool,
     autosave: bool,
     empty_ticks: i32,
+    /// The mutable `DedicatedServer.playerIdleTimeout` setting, in minutes.
+    player_idle_timeout: i32,
     /// When the last passes of the loop ended, for the tick rate horizon-server shows.
     ticks: std::collections::VecDeque<Instant>,
     paused: bool,
@@ -1052,6 +1054,7 @@ impl Game<'_> {
             stop: false,
             autosave: true,
             empty_ticks: 0,
+            player_idle_timeout: props.player_idle_timeout,
             ticks: Default::default(),
             paused: false,
             broadcast_console: props.broadcast_console_to_ops,
@@ -1067,7 +1070,6 @@ impl Game<'_> {
             max_players: props.max_players.max(0) as usize,
         };
         let pause_after = props.pause_when_empty_seconds * 20;
-        let idle_timeout = props.player_idle_timeout;
         let mut next = Instant::now();
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
@@ -1153,8 +1155,8 @@ impl Game<'_> {
             {
                 host.hub.send_low_disk_space_warning();
             }
-            if idle_timeout > 0 {
-                self.kick_idle(idle_timeout);
+            if state.player_idle_timeout > 0 {
+                self.kick_idle(state.player_idle_timeout);
             }
             // MinecraftServer.tickServer records each tick's time, for /tick query (and the status).
             self.clock.record(tick_start.elapsed());
@@ -1840,6 +1842,12 @@ impl Game<'_> {
         if changed {
             self.native_whitelist_state_update(on);
         }
+    }
+
+    /// `DedicatedServer.setPlayerIdleTimeout`: update the live idle sweep and persist its minutes.
+    fn set_player_idle_timeout(&mut self, state: &mut ServerState, minutes: i32) {
+        state.player_idle_timeout = minutes;
+        self.store_property("player-idle-timeout", minutes.to_string());
     }
 
     /// `DedicatedServer.setMaxPlayers`: the live login limit, and `max-players` in

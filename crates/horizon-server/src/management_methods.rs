@@ -79,6 +79,10 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
+        "serversettings/player_idle_timeout" => game.player_idle_timeout(client, None),
+        "serversettings/player_idle_timeout/set" => {
+            game.player_idle_timeout(client, Some(management_int(argument)?))
+        }
         "serversettings/max_players" => game.max_players(client, None),
         "serversettings/max_players/set" => game.max_players(
             client,
@@ -336,6 +340,24 @@ fn component(message: &Value) -> Option<Value> {
         .map(|text| json!({ "text": text }))
 }
 
+/// Vanilla's `Codec.INT`: numeric input narrows through `Number.intValue`, including fractions and overflow.
+fn management_int(value: &Value) -> Result<i32, Failure> {
+    let parsed = if let Some(number) = value.as_i64() {
+        Some(number as i32)
+    } else if let Some(number) = value.as_u64() {
+        Some(number as i32)
+    } else {
+        value
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .map(|number| {
+                // Gson's LazilyParsedNumber falls back to BigDecimal.intValue: truncate, then keep 32 bits.
+                number.trunc().rem_euclid(4_294_967_296.0) as u32 as i32
+            })
+    };
+    parsed.ok_or_else(|| invalid_params(format!("Not a number: {value}")))
+}
+
 /// The running game, through its control endpoint.
 struct Game<'a> {
     shared: &'a Shared,
@@ -427,6 +449,29 @@ impl Game<'_> {
                 "properties",
                 "force-gamemode",
                 toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.getPlayerIdleTimeout` and `setPlayerIdleTimeout`.
+    fn player_idle_timeout(&self, client: u32, value: Option<i32>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/player_idle_timeout" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/player_idle_timeout/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                "player-idle-timeout",
+                toml::Value::Integer(i64::from(value)),
             )
             .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
         }
