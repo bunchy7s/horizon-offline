@@ -296,7 +296,8 @@ impl Game<'_> {
     /// drawn by no vanilla renderer) whose block entity is a mod's, closer than
     /// `BlockEntityRenderer.getViewDistance` to the camera (`shouldRender`)
     /// and with its bounds (`native_block_entity_render_bounding_box`) in the
-    /// frustum.
+    /// frustum. Entity occlusion culling is for ordinary entities; block
+    /// entities use these renderer-provided bounds instead.
     pub(super) fn mod_block_entity_geometry<'a>(
         &self,
         blocks: impl Iterator<Item = &'a ([i32; 3], u32)>,
@@ -343,7 +344,6 @@ impl Game<'_> {
                         pos: (Vec3::from_array(v.pos) + origin).to_array(),
                         ..*v
                     }));
-                    self.cull_entity_vertices(&mut draw.vertices, start);
                 }
                 continue;
             }
@@ -379,7 +379,6 @@ impl Game<'_> {
             for v in &mut draw.vertices[start..] {
                 v.pos = (Vec3::from_array(v.pos) + origin).to_array();
             }
-            self.cull_entity_vertices(&mut draw.vertices, start);
         }
         *out = draw.vertices;
     }

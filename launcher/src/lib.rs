@@ -16,6 +16,8 @@ pub mod github_mods;
 pub mod heads;
 pub mod i18n;
 pub mod import;
+#[cfg(windows)]
+pub mod installer;
 pub mod instances;
 pub mod java;
 pub mod java_launch;
