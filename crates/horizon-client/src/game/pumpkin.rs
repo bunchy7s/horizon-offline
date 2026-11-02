@@ -87,7 +87,7 @@ impl Game<'_> {
         }
         self.damage_held(1);
         self.post_block_game_event("minecraft:shear", pos, self.sculk_actor(), None);
-        self.stats.add("used", "minecraft:shears", 1);
+        self.award_stat("used", "minecraft:shears", 1);
         // ServerPlayerGameMode.useItemOn: the action was consumed.
         self.trigger_block("minecraft:item_used_on_block", pos, shears);
         Ok(true)

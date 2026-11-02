@@ -1,11 +1,10 @@
-//! Players hitting players in an open world (`Player.attack` on a player):
-//! the host hits a guest, a guest hits the host or another guest. The hit
+//! Players hitting players on a server (`Player.attack` on a player). The hit
 //! is worked out as the attacker (weapon, attack strength, critical hit,
 //! enchantments, a mace's smash) and lands on the victim like any player
 //! attack (blocking, armour, knockback), when the `pvp` game rule allows it
 //! (`ServerPlayer.canHarmPlayer`, `isPvpAllowed`). A player's arrow on
 //! another player lands the same way.
-use super::{Game, lan::LanHost, lan_mobs::guest_bounds, mace::Spared, ray_box};
+use super::{Game, lan::LanHost, lan_mobs::guest_bounds, mace::Spared};
 
 use horizon_client::{
     Result,
@@ -30,19 +29,16 @@ pub(super) fn meets_players(kind: &ProjectileKind) -> bool {
     )
 }
 
-/// Who a player's attack lands on.
+/// Who a player's attack lands on: a player by connection.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Victim {
-    Host,
     Guest(u32),
 }
 
 impl Victim {
     fn conn(self) -> Option<u32> {
-        match self {
-            Victim::Host => None,
-            Victim::Guest(conn) => Some(conn),
-        }
+        let Victim::Guest(conn) = self;
+        Some(conn)
     }
 }
 
@@ -106,53 +102,9 @@ impl Strike {
 }
 
 impl Game<'_> {
-    /// The guest on the host's crosshair and how far, within reach.
-    pub(super) fn guest_hit(&self) -> Option<(u32, f64)> {
-        let host = self.lan.as_ref()?;
-        let (eye, dir) = self.aim()?;
-        let reach = self.entity_reach;
-        host.hub
-            .guests
-            .iter()
-            .filter(|g| host.hub.here(g) && g.loaded && !g.dead && !g.spectator())
-            .filter_map(|g| Some((g.conn, ray_box(eye, dir, reach, guest_bounds(g))?)))
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-    }
-
-    /// The host's attack on the guest under the crosshair, when no mob or
-    /// block is nearer.
-    pub(super) fn attack_guest(&mut self) -> bool {
-        let Some((conn, d)) = self.guest_hit() else {
-            return false;
-        };
-        if self.mob_hit().is_some_and(|(_, m)| m < d) || !self.before_block(d) {
-            return false;
-        }
-        let Some(mut host) = self.lan.take() else {
-            return false;
-        };
-        if let Some(strike) = self.pvp_strike()
-            && self.pvp_land(&mut host, Victim::Guest(conn), &strike)
-        {
-            self.weapon_hit_player(Self::pvp_victim_on_ground(&host, Victim::Guest(conn), None));
-            self.pvp_exhaustion();
-            if strike.stops_sprint() {
-                self.stop_sprint_after_extra_knockback();
-            }
-        }
-        self.lan = Some(host);
-        true
-    }
-
-    /// Whether the player a hit landed on stands on the ground (the host's
-    /// `ground` is passed in as `host_on_ground` when the host is the victim).
-    pub(super) fn pvp_victim_on_ground(
-        host: &LanHost,
-        victim: Victim,
-        host_on_ground: Option<bool>,
-    ) -> bool {
+    /// Whether the player a hit landed on stands on the ground.
+    pub(super) fn pvp_victim_on_ground(host: &LanHost, victim: Victim) -> bool {
         match victim {
-            Victim::Host => host_on_ground.unwrap_or(true),
             Victim::Guest(conn) => host
                 .hub
                 .guest(conn)
@@ -163,9 +115,6 @@ impl Game<'_> {
 
     /// The player `id` that guest `conn` attacks, if it is one.
     pub(super) fn pvp_victim(host: &LanHost, conn: u32, id: i32) -> Option<Victim> {
-        if id == host.host_entity {
-            return Some(Victim::Host);
-        }
         host.hub
             .guests
             .iter()
@@ -229,8 +178,7 @@ impl Game<'_> {
         })
     }
 
-    /// The player a player's projectile hit, when it hit one: the host for a
-    /// guest's shot, or a guest.
+    /// The player a player's projectile hit, when it hit one.
     pub(super) fn projectile_pvp_victim(&self, p: &Projectile, hit: Hit) -> Option<Victim> {
         if p.owner != Some(Who::Player) || !meets_players(&p.kind) {
             return None;
@@ -239,7 +187,7 @@ impl Game<'_> {
             return None;
         };
         match who {
-            Who::Player => p.guest.map(|_| Victim::Host),
+            Who::Player => None,
             Who::Mob(id) => self
                 .lan
                 .as_ref()?
@@ -273,7 +221,6 @@ impl Game<'_> {
             None => self.player_team().cloned(),
         };
         let target = match victim {
-            Victim::Host => self.player_team().cloned(),
             Victim::Guest(conn) => host.hub.guest(conn).and_then(|g| team_of(self, &g.name)),
         };
         let refused = !(self.ui.rules.bool("pvp")
@@ -284,16 +231,6 @@ impl Game<'_> {
         };
         let shooter = self.player_attacker(&host, p.guest);
         let result = match victim {
-            Victim::Host => {
-                self.lan = Some(host);
-                self.combat.refuse_player_hit = refused;
-                self.combat.projectile_attacker = shooter;
-                let r = self.projectile_hit(p, on_player);
-                self.combat.refuse_player_hit = false;
-                // A refused or creative hit returns before hurt_player_from takes it.
-                self.combat.projectile_attacker = None;
-                return r;
-            }
             Victim::Guest(conn) => self.guest_hit_by(&mut host, conn, |g| {
                 g.combat.refuse_player_hit = refused;
                 g.combat.projectile_attacker = shooter;
@@ -313,10 +250,7 @@ impl Game<'_> {
                 let g = host.hub.guest(conn)?;
                 Some((g.entity_id as u32, self.player_text(&g.name, g.uuid)))
             }
-            None => self.player.is_some().then(|| {
-                let name = self.player_text(&host.host_name, host.host_uuid);
-                (host.host_entity as u32, name)
-            }),
+            None => None,
         }
     }
 
@@ -326,7 +260,6 @@ impl Game<'_> {
         // ServerPlayer.canHarmPlayer: the pvp game rule, then the victim's
         // team (Player.canHarmPlayer: allies only with friendly fire on).
         let team = match victim {
-            Victim::Host => self.player_team(),
             Victim::Guest(conn) => host
                 .hub
                 .guest(conn)
@@ -346,16 +279,11 @@ impl Game<'_> {
         // CombatTracker: the attacking player is the death message's killer.
         // Without it the message is built with one argument and a template
         // that names a killer ("%1$s was slain by %2$s") shows as written.
-        let attacker_note = match s.attacker {
-            Some(conn) => host
-                .hub
+        let attacker_note = s.attacker.and_then(|conn| {
+            host.hub
                 .guest(conn)
-                .map(|a| (a.entity_id, self.player_text(&a.name, a.uuid))),
-            None => Some((
-                host.host_entity,
-                self.player_text(&host.host_name, host.host_uuid),
-            )),
-        };
+                .map(|a| (a.entity_id, self.player_text(&a.name, a.uuid)))
+        });
         let land = |g: &mut Self| {
             g.combat.player_attacker = Some((s.from, s.disable_blocking));
             if let Some((id, name)) = attacker_note.clone() {
@@ -373,7 +301,6 @@ impl Game<'_> {
         };
         let (hurt, thorns) = if self.ui.rules.bool("pvp") && harm {
             match victim {
-                Victim::Host => land(self),
                 Victim::Guest(conn) => self.guest_struck_by(host, conn, land).unwrap_or_default(),
             }
         } else {
@@ -384,10 +311,6 @@ impl Game<'_> {
             let died = match victim {
                 // A totem that fired is applied on the next tick_totem, so the
                 // victim is still at zero health but is not dying.
-                Victim::Host => self
-                    .player
-                    .as_ref()
-                    .is_some_and(|p| p.health.dead_or_dying() && !p.health.totem_used),
                 Victim::Guest(conn) => host
                     .hub
                     .guest(conn)
@@ -397,15 +320,14 @@ impl Game<'_> {
             if died {
                 match s.attacker {
                     Some(conn) => {
-                        self.as_guest(host, conn, |g| g.stats.custom("player_kills", 1));
+                        self.as_guest(host, conn, |g| g.award_custom_stat("player_kills", 1));
                     }
-                    None => self.stats.custom("player_kills", 1),
+                    None => self.award_custom_stat("player_kills", 1),
                 }
             }
         }
         if hurt && (s.crit || s.magic) {
             let target = match victim {
-                Victim::Host => self.player.as_ref().map(|p| (host.host_entity, p)),
                 Victim::Guest(conn) => host
                     .hub
                     .guest(conn)
@@ -454,7 +376,6 @@ impl Game<'_> {
         if let Some(at) = s.sweep.filter(|_| hurt) {
             // The sweep around the player that was hit, as its attacker.
             let (area, id) = match victim {
-                Victim::Host => (self.player.as_ref().map(|p| p.bounds()), host.host_entity),
                 Victim::Guest(conn) => {
                     let g = host.hub.guest(conn);
                     (g.map(guest_bounds), g.map_or(-1, |g| g.entity_id))
@@ -531,16 +452,6 @@ impl Game<'_> {
     pub(super) fn sweep_players(&mut self, host: &mut LanHost, sweep: &Sweep) {
         let from = Vec3::new(sweep.from[0], sweep.from[1], sweep.from[2]);
         let mut victims = Vec::new();
-        if sweep.attacker.is_some()
-            && self.options.dedicated.is_none()
-            && !self.spectator()
-            && let Some(p) = self.player.as_ref()
-            && !p.health.dead_or_dying()
-            && p.bounds().intersects(sweep.hit_box)
-            && p.position.distance_squared(from) < 9.0
-        {
-            victims.push((Victim::Host, host.host_entity, self.player_team().cloned()));
-        }
         for g in &host.hub.guests {
             if host.hub.here(g)
                 && g.loaded
@@ -572,12 +483,8 @@ impl Game<'_> {
             {
                 continue;
             }
-            match victim {
-                Victim::Host => land(self),
-                Victim::Guest(conn) => {
-                    self.guest_struck_by(host, conn, land);
-                }
-            }
+            let Victim::Guest(conn) = victim;
+            self.guest_struck_by(host, conn, land);
         }
     }
 }

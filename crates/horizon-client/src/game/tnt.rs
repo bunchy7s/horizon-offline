@@ -1,7 +1,8 @@
 //! Primed TNT (`PrimedTnt`): 80-tick fuse, gravity and drag, explosion of
 //! power 4, `TntRenderer` swell and white flash, and `TntBlock.useItemOn`
 //! (flint and steel / fire charge).
-use super::Game;
+use super::{Game, entity::Entity};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     Result, collisions::SceneCollisions, items::ItemStack, mesher::Vertex, mobs::Who, text::Text,
 };
@@ -48,19 +49,21 @@ impl PrimedTnt {
         collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
         assets: &horizon_client::assets::Assets,
         facts: &horizon_client::blocks::BlockFacts,
+        fluids: &horizon_client::motion::FluidResources,
+        border: Option<&horizon_core::geometry::border::BorderGeometry>,
     ) -> Result<Vec<BlockPos>> {
         self.previous = self.position;
-        if !self.no_gravity {
-            self.velocity.y -= 0.04;
-        }
-        let mut scene = SceneCollisions {
+        self.velocity.y -= self.get_gravity();
+        let scene = SceneCollisions {
             world,
             binding: collision,
             subject: None,
         };
         let wanted = self.velocity;
+        // Entity.collide: the world border's walls stop it too.
+        let border = border.map(|b| (b, [self.position.x, self.position.z]));
         let moved = scene
-            .resolve(self.bounds(), wanted, 0.0, self.on_ground)
+            .resolve_in_border(self.bounds(), wanted, 0.0, self.on_ground, border)
             .unwrap_or(Vec3::ZERO);
         if horizon_client::entities::move_applies(wanted, moved) {
             self.position = Vec3::new(
@@ -132,27 +135,7 @@ impl PrimedTnt {
         self.fuse -= 1;
         if self.fuse > 0 {
             // PrimedTnt updates immersion after moving and decrementing its fuse.
-            let mut fluids =
-                horizon_world::entity_fluid::EntityFluidInteraction::new([WATER, LAVA]);
-            let mut fluid_world = TntFluidWorld {
-                tnt: self,
-                world,
-                assets,
-                facts,
-            };
-            fluids
-                .update(&mut fluid_world, false, 4096)
-                .map_err(|e| std::io::Error::other(e.to_string()))?;
-            fluids.apply_current(&mut fluid_world, WATER, 0.014)?;
-            fluids.apply_current(
-                &mut fluid_world,
-                LAVA,
-                if world.fast_lava {
-                    0.007
-                } else {
-                    0.0023333333333333335
-                },
-            )?;
+            self.push_by_fluid(world, fluids);
         }
         Ok(tops)
     }
@@ -265,6 +248,8 @@ impl Game<'_> {
                 self.collision,
                 &self.pack.assets,
                 self.res.facts(),
+                &self.res.motion().fluids,
+                Some(self.border.geometry()),
             )?;
             for pos in tops {
                 self.bubble_column_particles(pos);
@@ -469,148 +454,6 @@ impl Game<'_> {
     }
 }
 
-use horizon_world::{
-    entity_fluid::{
-        CurrentTarget, FluidInteractionWorld, FluidMembership, FluidSections, FluidTagId,
-    },
-    fluid::{FluidHeightWorld, FluidKind, FluidState},
-    fluid_flow::{FluidFlowWorld, flow_at},
-};
-const WATER: FluidTagId = FluidTagId(0);
-const LAVA: FluidTagId = FluidTagId(1);
-struct TntFluidWorld<'a> {
-    tnt: &'a mut PrimedTnt,
-    world: &'a horizon_client::world::World,
-    assets: &'a horizon_client::assets::Assets,
-    facts: &'a horizon_client::blocks::BlockFacts,
-}
-impl TntFluidWorld<'_> {
-    fn state(&self, p: BlockPos) -> horizon_world::registry::BlockStateId {
-        self.world.block(p.x, p.y, p.z)
-    }
-    fn fluid_at(&self, p: BlockPos) -> std::io::Result<FluidState> {
-        FluidState::from_block(
-            self.assets
-                .registry
-                .state(self.state(p))
-                .ok_or_else(|| std::io::Error::other("missing TNT fluid state"))?,
-        )
-    }
-}
-impl FluidMembership for TntFluidWorld<'_> {
-    fn fluid_in_tag(&self, kind: FluidKind, tag: FluidTagId) -> bool {
-        match tag {
-            WATER => matches!(kind, FluidKind::Water | FluidKind::FlowingWater),
-            LAVA => matches!(kind, FluidKind::Lava | FluidKind::FlowingLava),
-            _ => false,
-        }
-    }
-}
-impl CurrentTarget for TntFluidWorld<'_> {
-    type Error = std::io::Error;
-    fn is_player_class(&self) -> bool {
-        false
-    }
-    fn velocity(&mut self) -> std::io::Result<Vec3> {
-        Ok(self.tnt.velocity)
-    }
-    fn add_delta_movement(&mut self, v: Vec3) -> std::io::Result<()> {
-        self.tnt.velocity = Vec3::new(
-            self.tnt.velocity.x + v.x,
-            self.tnt.velocity.y + v.y,
-            self.tnt.velocity.z + v.z,
-        );
-        Ok(())
-    }
-}
-impl FluidInteractionWorld for TntFluidWorld<'_> {
-    type Error = std::io::Error;
-    type Chunk = (i32, i32);
-    fn interaction_box(&mut self) -> std::io::Result<Option<Aabb>> {
-        Ok(Some(
-            self.tnt.bounds().deflate(Vec3::new(0.001, 0.001, 0.001)),
-        ))
-    }
-    fn loaded_chunk(&mut self, x: i32, z: i32) -> std::io::Result<Option<Self::Chunk>> {
-        Ok(self.world.chunks.contains_key(&(x, z)).then_some((x, z)))
-    }
-    fn chunk_sections(&mut self, _: Self::Chunk) -> std::io::Result<FluidSections<'_>> {
-        let layout = self.world.layout();
-        Ok(FluidSections {
-            minimum_section_y: layout.min_y() / 16,
-            has_fluid: horizon_client::chunk::every_section(layout),
-        })
-    }
-    fn bounding_box_min_y(&self) -> f64 {
-        self.tnt.position.y
-    }
-    fn block_x(&self) -> i32 {
-        self.tnt.position.x.floor() as i32
-    }
-    fn block_z(&self) -> i32 {
-        self.tnt.position.z.floor() as i32
-    }
-    fn eye_y(&mut self) -> std::io::Result<f64> {
-        Ok(self.tnt.position.y + f64::from(0.98f32 * 0.85f32))
-    }
-    fn fluid_state(&mut self, p: BlockPos) -> std::io::Result<FluidState> {
-        self.fluid_at(p)
-    }
-    fn fluid_height(&mut self, s: FluidState, p: BlockPos) -> std::io::Result<f32> {
-        s.height_at(self, [p.x, p.y, p.z])
-    }
-    fn camera_height(&mut self, s: FluidState, p: BlockPos) -> std::io::Result<f32> {
-        s.camera_height_at(self, [p.x, p.y, p.z])
-    }
-    fn flow(&mut self, s: FluidState, p: BlockPos) -> std::io::Result<Vec3> {
-        flow_at(self, s, p)
-    }
-}
-impl FluidHeightWorld for TntFluidWorld<'_> {
-    type Error = std::io::Error;
-    fn fluid(&mut self, p: [i32; 3]) -> std::io::Result<FluidState> {
-        self.fluid_at(BlockPos::new(p[0], p[1], p[2]))
-    }
-    fn sturdy_down(&mut self, p: [i32; 3]) -> std::io::Result<bool> {
-        Ok(self
-            .facts
-            .get(self.state(BlockPos::new(p[0], p[1], p[2])))
-            .sturdy_full
-            & 1
-            != 0)
-    }
-}
-impl FluidFlowWorld for TntFluidWorld<'_> {
-    type Error = std::io::Error;
-    type Block = horizon_world::registry::BlockStateId;
-    fn fluid(&mut self, p: BlockPos) -> std::io::Result<FluidState> {
-        self.fluid_at(p)
-    }
-    fn block(&mut self, p: BlockPos) -> std::io::Result<Self::Block> {
-        Ok(self.state(p))
-    }
-    fn blocks_fluid_flow(&self, s: Self::Block) -> bool {
-        self.assets
-            .blocks_fluid_flow
-            .contains(&self.assets.registry.state(s).unwrap().name)
-    }
-    fn is_ice_class(&self, s: Self::Block) -> bool {
-        self.facts
-            .get(s)
-            .classes
-            .iter()
-            .any(|c| c.as_ref() == "IceBlock")
-    }
-    fn is_face_sturdy(
-        &mut self,
-        s: Self::Block,
-        _: BlockPos,
-        d: horizon_core::geometry::Direction,
-    ) -> std::io::Result<bool> {
-        Ok(self.facts.get(s).sturdy_full & (1 << d as u8) != 0)
-    }
-}
-
 impl Game<'_> {
     /// `positionRider` for the mobs riding primed TNT: the passenger attachment
     /// (the top of its 0.98 box), less the rider's own vehicle attachment.
@@ -702,6 +545,55 @@ mod tests {
         assert!(!tnt.on_ground);
     }
 
+    /// `Entity.collectColliders` (#7080): the world border's wall stops primed
+    /// TNT. A border of size 10 around (20, 20) has its east wall at x = 25;
+    /// the TNT starts at x = 24 on the test scene's flat ground, 1.5 east.
+    #[test]
+    fn the_world_border_stops_primed_tnt() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = horizon_client::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
+        let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
+        let world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
+        let border =
+            horizon_core::geometry::border::BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984)
+                .unwrap();
+        for bordered in [false, true] {
+            let at = Vec3::new(24.0, 4.0, 20.5);
+            let mut tnt = PrimedTnt {
+                no_gravity: false,
+                id: 0,
+                position: at,
+                previous: at,
+                velocity: Vec3::new(1.5, 0.0, 0.0),
+                fuse: 80,
+                on_ground: true,
+                owner: None,
+                guest: None,
+                power: 4.0,
+            };
+            let border = bordered.then_some(&border);
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, border)
+                .unwrap();
+            let east = tnt.bounds().max_position().x;
+            if bordered {
+                assert!(
+                    (east - 25.0).abs() < 1.0e-7,
+                    "stops on the wall, got {east}"
+                );
+            } else {
+                assert!(east > 25.0, "no border: goes on, got {east}");
+            }
+        }
+    }
+
     #[test]
     fn primed_tnt_follows_water_currents_after_moving() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -713,6 +605,7 @@ mod tests {
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
         let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
@@ -740,7 +633,8 @@ mod tests {
             guest: None,
             power: 4.0,
         };
-        tnt.tick(&world, &collision, &assets, &facts).unwrap();
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+            .unwrap();
         assert_eq!(
             tnt.position.x, at.x,
             "current is applied after motion, not before"
@@ -751,13 +645,15 @@ mod tests {
             tnt.velocity
         );
         assert_eq!(tnt.fuse, 79);
-        tnt.tick(&world, &collision, &assets, &facts).unwrap();
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+            .unwrap();
         assert!((tnt.position.x - at.x - 0.014).abs() < 1e-12);
         assert!(tnt.on_ground);
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 1;
-        tnt.tick(&world, &collision, &assets, &facts).unwrap();
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+            .unwrap();
         assert_eq!(tnt.fuse, 0);
         assert_eq!(
             tnt.velocity.x, 0.0,
@@ -767,7 +663,8 @@ mod tests {
         tnt.position = at;
         tnt.velocity = Vec3::ZERO;
         tnt.fuse = 80;
-        tnt.tick(&world, &collision, &assets, &facts).unwrap();
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+            .unwrap();
         assert_eq!(
             tnt.velocity.x, 0.0,
             "still water must not add horizontal motion"
@@ -782,7 +679,8 @@ mod tests {
             .unwrap();
         tnt.on_ground = false;
         tnt.velocity = Vec3::ZERO;
-        tnt.tick(&world, &collision, &assets, &facts).unwrap();
+        tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+            .unwrap();
         assert!(
             tnt.position.y < at.y && tnt.velocity.y < 0.0,
             "TNT sinks; water does not add buoyancy"
@@ -800,6 +698,7 @@ mod tests {
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
         let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
         let water = assets.registry.default_state("minecraft:water").unwrap();
@@ -837,7 +736,8 @@ mod tests {
             power: 4.0,
         };
         for _ in 0..10 {
-            tnt.tick(&world, &collision, &assets, &facts).unwrap();
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+                .unwrap();
         }
         assert!(
             tnt.velocity.y > 0.0,
@@ -857,7 +757,8 @@ mod tests {
         tnt.velocity = Vec3::ZERO;
         tnt.on_ground = false;
         for _ in 0..4 {
-            tnt.tick(&world, &collision, &assets, &facts).unwrap();
+            tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+                .unwrap();
         }
         assert!(
             tnt.position.y < at.y,
@@ -880,6 +781,7 @@ mod tests {
         let assets = horizon_client::assets::Assets::load(&root).unwrap();
         let render = assets.reload(&root).unwrap();
         let facts = horizon_client::blocks::BlockFacts::load(&root, assets.registry).unwrap();
+        let fluids = horizon_client::motion::FluidResources::new(&assets, &facts).unwrap();
         let collision = horizon_client::collisions::load(&root, assets.registry).unwrap();
         let mut world = horizon_client::world::World::test_scene(&assets, &render, 3).unwrap();
         let water = assets.registry.default_state("minecraft:water").unwrap();
@@ -914,7 +816,10 @@ mod tests {
         let mut tops = Vec::new();
         let mut tnt = primed();
         for _ in 0..30 {
-            tops.extend(tnt.tick(&world, &collision, &assets, &facts).unwrap());
+            tops.extend(
+                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
+                    .unwrap(),
+            );
         }
         assert!(!tops.is_empty(), "it reaches the top of the column");
         assert!(
@@ -926,7 +831,7 @@ mod tests {
         let mut tnt = primed();
         for _ in 0..10 {
             assert!(
-                tnt.tick(&world, &collision, &assets, &facts)
+                tnt.tick(&world, &collision, &assets, &facts, &fluids, None)
                     .unwrap()
                     .is_empty()
             );

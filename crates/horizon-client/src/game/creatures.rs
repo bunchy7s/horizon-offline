@@ -23,7 +23,7 @@ use horizon_client::{
     },
     mod_api::NativeLootDrops,
     particles::{ParticleOptions, ParticleType},
-    projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld},
+    projectiles::{Hit, Projectile, ProjectileKind, ProjectileWorld, clip_including_border},
     text::Text,
 };
 use horizon_core::{
@@ -95,6 +95,9 @@ pub(super) struct Creatures {
 pub(super) struct ProjWorld<'a, 'w> {
     pub w: &'a MobWorld<'w>,
     pub targets: Vec<(Who, Aabb)>,
+    /// The world border's [minX, minZ, maxX, maxZ], which stops the ray as a
+    /// block would (`clipIncludingBorder`); None: no border.
+    pub border: Option<[f64; 4]>,
 }
 impl ProjectileWorld for ProjWorld<'_, '_> {
     fn block_contacts(&self, entity: i32, kind: &str, from: Vec3, to: Vec3, bounds: Aabb) {
@@ -121,12 +124,17 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
                 .ok()?;
             shape.clip(from, to, p)
         });
-        let hit = r.ok().flatten()?;
-        Some((
-            hit.location,
-            [hit.block.x, hit.block.y, hit.block.z],
-            hit.direction.normal(),
-        ))
+        let hit = r.ok().flatten().map(|hit| {
+            (
+                hit.location,
+                [hit.block.x, hit.block.y, hit.block.z],
+                hit.direction.normal(),
+            )
+        });
+        match self.border {
+            Some(bounds) => clip_including_border(hit, from, to, bounds),
+            None => hit,
+        }
     }
     /// Entity.updateFluidInteraction over the projectile's box, not the
     /// block at its feet (#3072).
@@ -753,6 +761,7 @@ impl Game<'_> {
             nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
             player,
             others,
+            dragon: self.dragon_target(),
             leash_boats: &self.leash_boats,
             others_grid: None,
             others_index: None,
@@ -783,6 +792,7 @@ impl Game<'_> {
             } else {
                 None
             },
+            border: Some(self.border.geometry()),
             // The first player in the level: a server has no player of its own.
             difficulty: self.local_difficulty(
                 self.level_players()
@@ -1105,7 +1115,6 @@ impl Game<'_> {
         self.tick_apparition();
         self.guardian_bubbles();
         self.villager_reputation_tick();
-        self.merchant_tick();
         self.villager_item_sense();
         self.villager_pickups();
         for m in dead {
@@ -1281,9 +1290,9 @@ impl Game<'_> {
         // entity, so a kill by a mob (a tame wolf credited to its owner)
         // leaves it out; ServerPlayer.awardKillScore counts the rest.
         if !killed_by_mob(m) {
-            self.stats.add("killed", &m.kind.id, 1);
+            self.award_stat("killed", &m.kind.id, 1);
         }
-        self.stats.custom("mob_kills", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
         let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
@@ -1710,6 +1719,16 @@ impl Game<'_> {
         self.creatures.projectiles.push(p);
         self.native_projectile_launch(player, &name, id, kind);
     }
+    /// `MushroomCow.shear`'s `sendParticles(EXPLOSION, x, getY(0.5), z, 1, 0, 0, 0, 0)`:
+    /// one puff over a sheared mooshroom, half its `height` up, shown here and to
+    /// the players within range.
+    pub(super) fn mooshroom_shear_puff(&mut self, at: [f64; 3], height: f64) {
+        let at = [at[0], at[1] + 0.5 * height, at[2]];
+        let options = ParticleOptions::simple(ParticleType::Explosion);
+        self.particles
+            .send_particles(&options, at, [0.0; 3], 0.0, 1);
+        self.lan_level_particles(None, &options, at, [0.0; 3], 0.0, 1, None);
+    }
     /// `Entity.sendBubbleColumnParticles` at the top of the column block `pos`: two
     /// splashes and two bubbles over it, which the level random places, shown here
     /// and to the players within range.
@@ -1729,11 +1748,19 @@ impl Game<'_> {
             let splash_options = ParticleOptions::simple(ParticleType::Splash);
             self.particles
                 .send_particles(&splash_options, splash, [0.0; 3], 1.0, 1);
-            self.lan_level_particles(&splash_options, splash, [0.0; 3], 1.0, 1, None);
+            self.lan_level_particles(None, &splash_options, splash, [0.0; 3], 1.0, 1, None);
             let bubble_options = ParticleOptions::simple(ParticleType::Bubble);
             self.particles
                 .send_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1);
-            self.lan_level_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1, None);
+            self.lan_level_particles(
+                None,
+                &bubble_options,
+                bubble,
+                [0.0, 0.01, 0.0],
+                0.2,
+                1,
+                None,
+            );
         }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
@@ -1742,6 +1769,13 @@ impl Game<'_> {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
+                MobEvent::LandingDust { state, at, count } => self.landing_dust(
+                    None,
+                    state,
+                    Vec3::new(at[0], at[1], at[2]),
+                    count,
+                    f64::from(0.15_f32),
+                ),
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
                 MobEvent::Drown { mob, at } => {
@@ -1769,8 +1803,21 @@ impl Game<'_> {
                         let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
-                        self.lan_level_particles(&options, at, spread, speed, count, None);
+                        self.lan_level_particles(None, &options, at, spread, speed, count, None);
                     }
+                }
+                // The LAN packet has no item for a particle yet: the host's window only.
+                MobEvent::ItemParticles {
+                    item,
+                    at,
+                    spread,
+                    speed,
+                    count,
+                } => {
+                    let options =
+                        self.item_particle(&horizon_client::items::ItemStack::new(item, 1));
+                    self.particles
+                        .send_particles(&options, at, spread, speed, count);
                 }
                 MobEvent::Sound(name, at, volume, pitch)
                 | MobEvent::LocalSound(name, at, volume, pitch) => {
@@ -2052,6 +2099,34 @@ impl Game<'_> {
                                 at,
                                 1.0,
                                 pitch,
+                            )])?;
+                        }
+                    }
+                }
+                MobEvent::PufferfishSting {
+                    mob,
+                    target,
+                    amount,
+                    source,
+                    poison_ticks,
+                } => {
+                    // Pufferfish.touch: the poison and
+                    // `playSound(PUFFER_FISH_STING, 1, 1)` sit inside the
+                    // `hurtServer` branch, so only a hit that landed poisons
+                    // and stings, at the fish's own position as
+                    // `Entity.playSound` puts it, and not when it is silent.
+                    let landed = self.mob_hits_mob(target, amount, source);
+                    if landed && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+                        t.add_effect("minecraft:poison", poison_ticks, 0);
+                    }
+                    if landed && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        let at = [m.position.x, m.position.y, m.position.z];
+                        if !m.silent {
+                            self.handle_mob_events(vec![MobEvent::Sound(
+                                "entity.puffer_fish.sting",
+                                at,
+                                1.0,
+                                1.0,
                             )])?;
                         }
                     }
@@ -2899,7 +2974,7 @@ impl Game<'_> {
                 super::commands::Target::Guest,
             );
             self.for_player(who, |g| {
-                g.stats.custom("animals_bred", 1);
+                g.award_custom_stat("animals_bred", 1);
                 g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
             });
         }
@@ -3536,10 +3611,16 @@ impl Game<'_> {
             arrow_targets_guests.extend(guests.iter().copied());
             let mut targets_guests = targets.clone();
             targets_guests.extend(guests);
-            let pw = ProjWorld { w: &w, targets };
+            let border = Some(self.border.bounds());
+            let pw = ProjWorld {
+                w: &w,
+                targets,
+                border,
+            };
             let pw_guests = ProjWorld {
                 w: &w,
                 targets: targets_guests,
+                border,
             };
             let guest_entities = self.lan_guest_entities();
             // ThrownEnderpearl.tick: a dead player's pearl is discarded in
@@ -3614,6 +3695,7 @@ impl Game<'_> {
                         p.tick(&ProjWorld {
                             w: if pvp_shot { pw_guests.w } else { pw.w },
                             targets,
+                            border,
                         })
                     }
                 };
@@ -3829,7 +3911,7 @@ impl Game<'_> {
         if rang {
             let _ = self.process_level_events();
             if p.owner == Some(Who::Player) {
-                self.stats.custom("bell_ring", 1);
+                self.award_custom_stat("bell_ring", 1);
             }
         }
     }
@@ -4047,7 +4129,7 @@ impl Game<'_> {
             let _ = self.process_level_events();
             self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
-                self.stats.custom("target_hit", 1);
+                self.award_custom_stat("target_hit", 1);
                 let kind = if p
                     .arrow
                     .as_ref()
@@ -4680,7 +4762,7 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack), hit) => {
+            (ProjectileKind::Potion(stack, _), hit) => {
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -5136,6 +5218,8 @@ impl Game<'_> {
         // `Some(true)` for the four spell particles, `Some(false)` for the two
         // smoke puffs of a cow that already holds effects.
         let mut stew_particles: Option<bool> = None;
+        // `MushroomCow.shear`: where, and how tall, the mooshroom that was sheared stood.
+        let mut shear_puff: Option<([f64; 3], f64)> = None;
         // `Ocelot.mobInteract`: whether the fish won its trust.
         let mut ocelot_trust: Option<bool> = None;
         match species {
@@ -5179,6 +5263,10 @@ impl Game<'_> {
                     "minecraft:red_mushroom"
                 };
                 drops.push((mushroom.into(), 5));
+                shear_puff = Some((
+                    [m.position.x, m.position.y, m.position.z],
+                    f64::from(m.height()),
+                ));
                 m.removed = true;
                 let setup = SpawnSetup {
                     yaw: m.yaw,
@@ -5724,6 +5812,9 @@ impl Game<'_> {
             self.trigger_item_entity("minecraft:player_sheared_equipment", &stack, &target);
             self.spawn_item(stack, [center[0], center[1] + 0.5, center[2]], [0.0; 3], 10);
         }
+        if let Some((at, height)) = shear_puff {
+            self.mooshroom_shear_puff(at, height);
+        }
         let mut drops: Vec<ItemStack> = drops
             .into_iter()
             .map(|(item, count)| ItemStack::new(&item, count))
@@ -6048,7 +6139,7 @@ impl Game<'_> {
         if let Some(done) = self.use_spawn_egg_on_spawner(hit.pos, &spawner_id, data.as_ref()) {
             if done {
                 self.swing_arm();
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.consume_held();
             }
             return Ok(true);
@@ -6079,7 +6170,7 @@ impl Game<'_> {
         }
         self.apply_spawn_egg_entity_data(id, stack);
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()
@@ -6449,7 +6540,9 @@ impl Game<'_> {
                     v.layer |= u32::from(tier) << 16;
                 }
             }
-            if is_player {
+            // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+            let layers = horizon_client::mobs::render::layers_shown(mob);
+            if is_player && layers {
                 // PlayerRenderer's CapeLayer, WingsLayer, ParrotOnShoulderLayer
                 // and SpinAttackEffectLayer. Only the cape hides with the body;
                 // the others have no `isInvisible` check.
@@ -6470,9 +6563,11 @@ impl Game<'_> {
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
-            self.mob_block_geometry(mob, camera, alpha, packed, out);
-            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-            self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            if layers {
+                self.mob_block_geometry(mob, camera, alpha, packed, out);
+                // `native_mob_layer`: a native mod's layer, over the vanilla ones.
+                self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
+            }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
                 if mob.invisible {
@@ -7225,6 +7320,7 @@ mod pearl_tests {
             player: None,
             nearest_player: None,
             others: &[],
+            dragon: None,
             leash_boats: &[],
             others_grid: None,
             others_index: None,
@@ -7249,10 +7345,12 @@ mod pearl_tests {
             items: Some(&items),
             lid_openers: &lid_openers,
             mod_effects: None,
+            border: None,
         };
         let pw = ProjWorld {
             w: &w,
             targets: Vec::new(),
+            border: None,
         };
         let pearl = |x: f64, y: f64, velocity: Vec3| {
             let mut p = Projectile::new(ProjectileKind::EnderPearl, Vec3::new(x, y, 1.5), None);

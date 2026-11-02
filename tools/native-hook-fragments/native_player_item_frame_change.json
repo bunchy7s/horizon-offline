@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "A server player changed an item frame (`native_player_item_frame_change`).",
-  "doc_summary": "A server player changed an item frame: `native_player_item_frame_change(player, name, entity_id, action, item, rotation)` is heard after its contents and comparator output changed. Bundles need \"hooks\": @API:player_item_frame_change@."
+  "doc_summary": "A server player changed an item frame: `native_player_item_frame_change(player, name, entity_id, action, item, rotation)` is heard after its contents and comparator output changed. Bundles need \"hooks\": @API:native_player_item_frame_change@."
 }

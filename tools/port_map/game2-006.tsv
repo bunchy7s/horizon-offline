@@ -4,8 +4,8 @@ FireworkRocketEntity.shouldRender	port	crates/horizon-client/src/game/fireworks.
 FireworkRocketEntity.onHitEntity	port	crates/horizon-client/src/game/fireworks.rs::Game::tick_rockets	a rocket fired from a crossbow or dispenser tests entity hits in flight and bursts on what it strikes
 FireworkRocketEntity.onHitBlock	inline	crates/horizon-client/src/game/fireworks.rs::Game::tick_rockets	a block hit ends the angled rocket early and explodes it; vanilla explodes only when it has explosions and skips the block entityInside effect
 FireworkRocketEntity.dealExplosionDamage	port	crates/horizon-client/src/game/fireworks.rs::Game::explode_rocket	damage 5+2 per explosion; attached target takes the full blast, others within 5 blocks with line of sight
-FireworkRocketEntity.addAdditionalSaveData	missing		minor: rocket life, lifetime and item are not written to a save; Horizon does not save flying rockets
-FireworkRocketEntity.readAdditionalSaveData	missing		minor: rocket life, lifetime and item are not read back; Horizon does not save flying rockets
+FireworkRocketEntity.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::firework_rocket_to_nbt	Life, LifeTime, FireworksItem, ShotAtAngle and HasBeenShot, over `Projectile`'s Owner (only when it is the player) and LeftOwner
+FireworkRocketEntity.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::firework_rocket_from_nbt	Life, LifeTime (0 when absent), FireworksItem and ShotAtAngle, with Owner and LeftOwner
 FireworkRocketEntity.getExplosions	port	crates/horizon-client/src/game/fireworks.rs::fireworks_of	explosion list from the item's fireworks component, empty without one
 FireworkRocketEntity.calculateHorizontalHurtKnockbackDirection	inline	crates/horizon-client/src/game/fireworks.rs::Game::explode_rocket	knockback direction is the blast point to the target, which the mob damage gets as its from point
 FishingHook.<init>	port	crates/horizon-client/src/game/fishing.rs::Game::use_fishing_rod	the player cast: start point, velocity with the 0.0103365 triangle, luck and lure from the rod
@@ -21,9 +21,9 @@ FishingHook.getPlayerOwner	skip:other		owner is implicit: the host's hook is sel
 FishingHook.getAddEntityPacket	port	crates/horizon-client/src/game/fishing.rs::Hook::track	add-entity payload: the owner entity id is the bobber's data field
 LlamaSpit.onHitEntity	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	spit hit: 1.0 damage with the spit source to a player (mob_hits_player) or a mob
 Projectile.applyImplicitComponent	missing		minor: a projectile given a can_break component by its item keeps no break predicate; Horizon applies implicit components only to buckets
-Projectile.addAdditionalSaveData	missing		minor: owner, LeftOwner and HasBeenShot are not written; Horizon does not save flying projectiles
+Projectile.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::put_projectile	Owner and LeftOwner only when set, HasBeenShot once it has ticked (a save before the first tick keeps what it loaded)
 Projectile.ownedBy	inline	crates/horizon-client/src/projectiles.rs::Projectile::tick	the owner is skipped in the target loop until the projectile has left it
-Projectile.readAdditionalSaveData	missing		minor: owner, LeftOwner, HasBeenShot and can_break are not read back; Horizon does not save flying projectiles
+Projectile.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::throwable_from_nbt	no shared reader: every kind's own reader takes Owner, LeftOwner and NoGravity (this one, `fireball_from_nbt`, `arrow_from_nbt`); HasBeenShot is read for arrows only, and no projectile keeps a `can_break` predicate
 Projectile.restoreFrom	missing		minor: the owner is not carried over a dimension change; Horizon has no projectile dimension change
 Projectile.isOutsideOwnerCollisionRange	inline	crates/horizon-client/src/projectiles.rs::Projectile::tick	gap: minor: left_owner tests the owner's box inflated 1.0 at the position only; vanilla sweeps along the motion and checks the owner's passengers too
 Projectile.getMovementToShoot	port	crates/horizon-client/src/projectiles.rs::Projectile::shoot	direction plus triangle spread 0.0172275 times uncertainty, scaled by power
@@ -83,7 +83,7 @@ ThrownTrident.getLoyaltyFromItem	port	crates/horizon-client/src/game/trident.rs:
 ThrownTrident.tickDespawn	inline	crates/horizon-client/src/arrows.rs::Ticker::tick	gap: minor: the 1200-tick life limit applies to every trident; the loyalty exemption is not checked
 AbstractHurtingProjectile.shouldRenderAtSqrDistance	skip:ui		distance culling for the fireball model; Horizon culls with its own range check
 AbstractHurtingProjectile.canHitEntity	missing		minor: no-physics entities are not skipped by the fireball's target search
-WitherSkull.getBlockExplosionResistance	missing		minor: a dangerous skull's blast does not cap block resistance at 0.8; the blast call takes no dangerous flag
+WitherSkull.getBlockExplosionResistance	port	crates/horizon-client/src/game/explosion.rs::blast_resistance	a dangerous skull's blast caps a breakable block's resistance at 0.8; `#wither_immune` blocks keep theirs
 WitherSkull.onHit	port	crates/horizon-client/src/game/wither.rs::Game::wither_skull_hit	skull hit damage, wither effect, then the blast at the impact point
 AbstractWindCharge.makeBoundingBox	port	crates/horizon-client/src/projectiles.rs::ProjectileKind::size	gap: minor: gives the width only; the box sits 0.15 below the position in vanilla
 AbstractWindCharge.canHitEntity	missing		minor: no filter for end crystals or other wind charges found in the target list; unsure whether the caller excludes them
@@ -128,13 +128,13 @@ VariantUtils.readVariant	port	crates/horizon-client/src/entity_nbt.rs::read_vari
 ContainerEntity.addChestVehicleSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::to_nbt	writes the cart's items and any loot table
 ContainerEntity.readChestVehicleSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	reads the cart's items from the save
 ContainerEntity.chestVehicleDestroyed	port	crates/horizon-client/src/game/minecarts.rs::Game::hurt_cart	a destroyed cart drops its items when entity drops are on
-ContainerEntity.unpackChestVehicleLootTable	missing		unsure: Minecart.loot is only read and written with the save and is never set here, so a chest minecart's loot table may never roll into its slots
+ContainerEntity.unpackChestVehicleLootTable	port	crates/horizon-client/src/game/minecarts.rs::Game::unpack_cart_loot	opening a chest minecart rolls the loot table it still holds, firing `player_generates_container_loot`, and the cart keeps its items from then on
 ContainerEntity.isChestVehicleEmpty	inline	crates/horizon-client/src/game/minecarts.rs::Minecart::container_signal	the comparator signal reads the slots' emptiness; gap: minor: no separate empty test
 ContainerEntity.removeChestVehicleItemNoUpdate	skip:other		slot edits happen on the chest block entity under the cart's key; store_cart_items and close_cart_container copy them back
 ContainerEntity.setChestVehicleItem	skip:other		slot edits happen on the chest block entity under the cart's key; store_cart_items and close_cart_container copy them back
 ContainerEntity.getChestVehicleSlot	skip:other		slot access happens on the chest block entity under the cart's key; store_cart_items and close_cart_container copy them back
 DismountHelper.canDismountTo	port	crates/horizon-client/src/game/respawn_anchor.rs::Game::safe_dismount_location	gap: minor: tests the floor and a 1.8 block box for the player, not the passenger's pose box
 DismountHelper.findCeilingFrom	inline	crates/horizon-client/src/game/respawn_anchor.rs::Game::safe_dismount_location	gap: minor: head room comes from the 1.8 box collision, not a ceiling scan
-VehicleEntity.ignoreExplosion	missing		minor: with mobGriefing off a mob's blast still damages carts and boats; the explosion code has no mob-source rule for them
+VehicleEntity.ignoreExplosion	port	crates/horizon-client/src/game/entity.rs::Entity::ignores_explosion	boats and minecarts sit out a mob's blast when mob griefing is off (the breeze's burst too), and are neither hurt nor pushed
 VehicleEntity.destroy	port	crates/horizon-client/src/game/boats.rs::Game::hurt_boat	boats drop their item when entity drops are on; a minecart breaks through hurt_cart
 VehicleEntity.defineSynchedData	skip:java		hurt time, hurt direction and damage fields; Horizon keeps them on the cart and boat structs

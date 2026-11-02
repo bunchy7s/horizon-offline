@@ -43,17 +43,17 @@ NarrationThunk	skip:other		screen-reader narration text; Horizon has no narratio
 ScreenNarrationCollector	skip:other		screen-reader narration collection; Horizon has no narration output
 ScreenNarrationCollector.NarrationEntry	skip:other		screen-reader narration entries; Horizon has no narration output
 ScreenNarrationCollector.Output	skip:other		screen-reader narration output; Horizon has no narration output
-ScreenAxis	missing		minor: keyboard focus moves along the axis (arrow keys, Tab) between widgets; Horizon's menus have no widget focus navigation, Tab only moves between title fields (title.rs tab)
-ScreenDirection	missing		minor: keyboard focus navigation by direction (arrow keys); Horizon's menus have no widget focus navigation
-ScreenPosition	missing		minor: grid position stepping for keyboard focus navigation; not in Horizon's menus
+ScreenAxis	skip:other		an enum for the axis a focus step moves along; Horizon steps with gamepad::Button's direction (gamepad::direction) and Rect bounds
+ScreenDirection	skip:other		the four arrow directions are gamepad::Button's DPad variants, read by gamepad::direction
+ScreenPosition	skip:other		a (column, row) grid position used only by ScreenRectangle.step; Horizon compares rectangles directly
 ScreenRectangle.of	skip:java		builds a rectangle from an axis-ordered index; Horizon uses x and y directly
-ScreenRectangle.step	missing		minor: moves a rectangle one step for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.step	port	crates/horizon-client/src/game/key_focus.rs::edge	the strip one pixel past the focused edge that an arrow starts its search from
 ScreenRectangle.getLength	skip:java		width or height accessor
-ScreenRectangle.getBoundInDirection	missing		minor: edge coordinate for keyboard focus navigation; not in Horizon's menus
-ScreenRectangle.getBorder	missing		minor: border strip used by keyboard focus navigation to find the next widget; not in Horizon's menus
-ScreenRectangle.overlaps	missing		minor: overlap test used by keyboard focus navigation; not in Horizon's menus
-ScreenRectangle.overlapsInAxis	missing		minor: per-axis overlap used by keyboard focus navigation; not in Horizon's menus
-ScreenRectangle.getCenterInAxis	missing		minor: centre along one axis for keyboard focus navigation; not in Horizon's menus
+ScreenRectangle.getBoundInDirection	inline	crates/horizon-client-input/src/gamepad.rs::focus_step_strict	the focused edge, at x + w - 1 on the positive side, as ScreenRectangle's inclusive bounds
+ScreenRectangle.getBorder	port	crates/horizon-client/src/game/key_focus.rs::edge	the border rectangle of the screen behind the arrow, used when nothing is focused
+ScreenRectangle.overlaps	inline	crates/horizon-client-input/src/gamepad.rs::focus_step_strict	a target overlapping the strip on the other axis is the next one
+ScreenRectangle.overlapsInAxis	inline	crates/horizon-client-input/src/gamepad.rs::focus_step_strict	the per-axis half of the overlap test
+ScreenRectangle.getCenterInAxis	inline	crates/horizon-client-input/src/gamepad.rs::focus_step_vague	the second pass picks the nearest facing edge's centre when nothing overlaps
 ScreenRectangle.intersection	missing		minor: a nested GUI clip is not intersected with the outer one; paint (screen_draw.rs) replaces the clip on each Scissor draw
 ScreenRectangle.intersects	skip:other		no caller in the 26.3 client GUI code; pure geometry predicate
 ScreenRectangle.encompasses	skip:other		used by GuiRenderState for element batching bounds; Horizon appends quads to the HUD batch without it
@@ -94,8 +94,8 @@ OversizedItemRenderer.textureIsReadyToBlit	skip:other		cache check for the pictu
 PictureInPictureRenderer.blitTexture	skip:other		picture-in-picture texture blit; Horizon draws each preview into the batch directly (draw_player_preview, draw_banner_result)
 PictureInPictureRenderer.prepareTexturesAndProjection	skip:other		GPU texture allocation for a picture-in-picture
 PictureInPictureRenderer.close	skip:other		GPU texture release
-AccessibilityOnboardingScreen.init	port	crates/horizon-client/src/title/onboarding.rs::Title::onboarding_buttons	gap: minor: the Narrator button stays inactive and reads Not Available (no narrator output)
-AccessibilityOnboardingScreen.setInitialFocus	missing		minor: keyboard focus starts on the narrator button; part of the missing onboarding screen
+AccessibilityOnboardingScreen.init	port	crates/horizon-client/src/title/onboarding.rs::Title::onboarding_buttons	gap: minor: the Narrator button is drawn disabled and labelled Narrator: Not Available where vanilla builds it from Options.narrator's own button and enables it while the narrator can speak, so the narrator cannot be turned on here; handleInitialNarrationDelay's accessibility.onboarding.screen.narrator line is not said
+AccessibilityOnboardingScreen.setInitialFocus	missing		minor: the onboarding screen itself is ported (title/onboarding.rs); the focus starting on the Narrator button is not
 AccessibilityOnboardingScreen.closeAndSetScreen	port	crates/horizon-client/src/title.rs::Title::click_action	
 AccessibilityOnboardingScreen.extractRenderState	port	crates/horizon-client/src/title/onboarding.rs::Title::draw_onboarding	
 AccessibilityOnboardingScreen.handleInitialNarrationDelay	skip:other		screen-reader narration; Horizon has no narration output

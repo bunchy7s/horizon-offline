@@ -176,7 +176,7 @@ impl TrimTexture {
         let Some(palette) = &self.palette else {
             return Some((w, h, pixels));
         };
-        let base = fs::read(path.with_extension("png.mcmeta"))
+        let base = horizon_core::prepared_files::read(&path.with_extension("png.mcmeta"))
             .ok()
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
             .and_then(|m| {
@@ -241,9 +241,10 @@ pub fn slot_size(root: &Path) -> (u32, u32) {
 
 /// The width and height in a PNG's IHDR chunk.
 fn png_size(path: &Path) -> Option<(u32, u32)> {
-    use std::io::Read;
-    let mut head = [0u8; 24];
-    fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    let head: [u8; 24] = horizon_core::prepared_files::read_head(path, 24)
+        .ok()?
+        .try_into()
+        .ok()?;
     let be = |i: usize| u32::from_be_bytes(head[i..i + 4].try_into().unwrap());
     (&head[12..16] == b"IHDR").then(|| (be(16), be(20)))
 }

@@ -16,8 +16,8 @@ use horizon_world::registry::BlockStateId;
 /// An `AreaEffectCloud` a server tracks: what its client tick reads.
 pub(super) struct RemoteCloud {
     id: u32,
-    at: [f64; 3],
-    radius: f32,
+    pub(super) at: [f64; 3],
+    pub(super) radius: f32,
     waiting: bool,
     particle: ParticleOptions,
 }
@@ -611,15 +611,17 @@ impl Game<'_> {
         // fuse down (the swell and flash follow it) between the server's
         // updates (every 10 ticks), and a client discards it when the fuse
         // runs out; only the server explodes it.
-        let (world, collision, assets, facts) = (
+        let (world, collision, assets, facts, fluids, border) = (
             &self.world,
             self.collision,
             &self.pack.assets,
             self.res.facts(),
+            &self.res.motion().fluids,
+            Some(self.border.geometry()),
         );
         self.tnts.retain_mut(|t| {
             // A fluid lookup that fails leaves it where its move put it.
-            let _ = t.tick(world, collision, assets, facts);
+            let _ = t.tick(world, collision, assets, facts, fluids, border);
             t.fuse > 0
         });
         // FallingBlockEntity.tick runs on a client too: the block falls by
@@ -643,6 +645,7 @@ impl Game<'_> {
             let world = super::creatures::ProjWorld {
                 w: &w,
                 targets: Vec::new(),
+                border: Some(self.border.bounds()),
             };
             for p in &mut projectiles {
                 match p.kind {

@@ -23,7 +23,12 @@ use horizon_optifine::fusion::{
 };
 use horizon_world::block_state_properties::BlockProperties;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-use std::{collections::HashMap, fs, num::NonZeroU16, path::Path};
+use std::{
+    collections::HashMap,
+    fs,
+    num::NonZeroU16,
+    path::{Path, PathBuf},
+};
 
 /// A connecting texture as drawn: its layout and its tiles, `None` for an empty one.
 struct Sheet {
@@ -53,7 +58,10 @@ fn namespaced(reference: &str) -> String {
 
 fn read_model(root: &Path, name: &str) -> Option<Json> {
     let (ns, path) = name.split_once(':')?;
-    let text = fs::read_to_string(root.join(format!("assets/{ns}/models/{path}.json"))).ok()?;
+    let text = horizon_core::prepared_files::read_to_string(
+        &root.join(format!("assets/{ns}/models/{path}.json")),
+    )
+    .ok()?;
     Json::parse(&text).ok()
 }
 
@@ -169,44 +177,60 @@ fn connecting_textures(root: &Path) -> HashMap<String, Meta> {
     for ns in namespaces.flatten() {
         let ns_name = ns.file_name().to_string_lossy().into_owned();
         let textures = ns.path().join("textures");
-        let mut dirs = vec![textures.clone()];
-        while let Some(dir) = dirs.pop() {
-            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-                let path = entry.path();
-                // Linked folders too: mods' content links into the packs' tree.
-                let dir = match entry.file_type() {
-                    Ok(t) if t.is_symlink() => path.is_dir(),
-                    Ok(t) => t.is_dir(),
-                    Err(_) => path.is_dir(),
-                };
-                if dir {
-                    dirs.push(path);
-                    continue;
+        for path in mcmeta_files(&textures) {
+            let Some(png) = path.to_str().and_then(|p| p.strip_suffix(".png.mcmeta")) else {
+                continue;
+            };
+            let Ok(text) = horizon_core::prepared_files::read_to_string(&path) else {
+                continue;
+            };
+            if !text.contains("fusion") {
+                continue;
+            }
+            let Some(rel) = Path::new(png)
+                .strip_prefix(&textures)
+                .ok()
+                .and_then(|p| p.to_str())
+            else {
+                continue;
+            };
+            let name = format!("{ns_name}:{}", rel.replace('\\', "/"));
+            match Meta::from_mcmeta(&text) {
+                Ok(Some(meta)) => {
+                    out.insert(name, meta);
                 }
-                let Some(png) = path.to_str().and_then(|p| p.strip_suffix(".png.mcmeta")) else {
-                    continue;
-                };
-                let Ok(text) = fs::read_to_string(&path) else {
-                    continue;
-                };
-                if !text.contains("fusion") {
-                    continue;
-                }
-                let Some(rel) = Path::new(png)
-                    .strip_prefix(&textures)
-                    .ok()
-                    .and_then(|p| p.to_str())
-                else {
-                    continue;
-                };
-                let name = format!("{ns_name}:{}", rel.replace('\\', "/"));
-                match Meta::from_mcmeta(&text) {
-                    Ok(Some(meta)) => {
-                        out.insert(name, meta);
-                    }
-                    Ok(None) => {}
-                    Err(e) => log::warn!("Horizon: Fusion texture {name}: {e}"),
-                }
+                Ok(None) => {}
+                Err(e) => log::warn!("Horizon: Fusion texture {name}: {e}"),
+            }
+        }
+    }
+    out
+}
+
+/// The `.png.mcmeta` files under `textures`: a prepared root's from its data file, others
+/// from the folders (linked folders too: mods' content links into the packs' tree).
+fn mcmeta_files(textures: &Path) -> Vec<PathBuf> {
+    if let Some(files) = horizon_core::prepared_files::files_under(textures) {
+        return files
+            .iter()
+            .filter(|file| file.ends_with(".png.mcmeta"))
+            .map(|file| textures.join(file))
+            .collect();
+    }
+    let mut out = Vec::new();
+    let mut dirs = vec![textures.to_owned()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let dir = match entry.file_type() {
+                Ok(t) if t.is_symlink() => path.is_dir(),
+                Ok(t) => t.is_dir(),
+                Err(_) => path.is_dir(),
+            };
+            if dir {
+                dirs.push(path);
+            } else if path.to_str().is_some_and(|p| p.ends_with(".png.mcmeta")) {
+                out.push(path);
             }
         }
     }

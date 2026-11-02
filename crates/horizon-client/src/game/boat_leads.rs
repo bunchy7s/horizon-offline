@@ -486,23 +486,14 @@ impl Game<'_> {
 
     /// The leads on boats that hang on a player or a mob, for the entity
     /// tracker: the holder's entity id (`ClientboundSetEntityLinkPacket`).
-    pub(super) fn boat_leash_link(
-        &self,
-        b: &Boat,
-        host_entity: Option<i32>,
-        guests: &[(u128, i32)],
-    ) -> Option<i32> {
+    pub(super) fn boat_leash_link(&self, b: &Boat, guests: &[(u128, i32)]) -> Option<i32> {
         match b.leash? {
             Holder::Player => {
                 let uuid = self.boat_leash_player(b);
-                match guests
+                guests
                     .iter()
                     .find(|(u, _)| Some(horizon_client::lan::playerdata::uuid_ints(*u)) == uuid)
-                {
-                    Some(&(_, id)) => Some(id),
-                    None if uuid == self.level.player_uuid => host_entity,
-                    None => None,
-                }
+                    .map(|&(_, id)| id)
             }
             Holder::Mob(id) | Holder::Boat(id) => Some(id as i32),
             Holder::Knot(p) => self.knot_ids.get(&p).map(|&id| id as i32),
