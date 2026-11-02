@@ -478,19 +478,58 @@ impl Game<'_> {
             frame: &mut frame,
             bounds: None,
         };
-        let sink = (
-            item_hdr_light(state, light),
-            (state.hdr_light == 0).then_some(lights),
-            state.hdr_tier,
-        );
         for &pose in poses {
-            let renderer = &self.pack.item_renderer;
-            if !state.submit_skinned(renderer, &self.gui.atlas.sprites, pose, sink, &mut skin) {
+            if !self.skin_item(state, pose, light, lights, &mut skin) {
                 // Decided before any draw, the same for every pose.
                 return None;
             }
         }
         Some((mark, skin.bounds))
+    }
+    /// One pose of [`Self::submit_item_skinned`] into an entity's open
+    /// `skin` (its bounds grow by the item's): false, with nothing drawn,
+    /// when the item cannot take the GPU path.
+    pub(super) fn skin_item(
+        &self,
+        state: &ItemRenderState,
+        pose: glam::Mat4,
+        light: u32,
+        lights: (glam::Vec3, glam::Vec3),
+        skin: &mut horizon_client::mobs::skin::Skin,
+    ) -> bool {
+        let sink = (
+            item_hdr_light(state, light),
+            (state.hdr_light == 0).then_some(lights),
+            state.hdr_tier,
+        );
+        let renderer = &self.pack.item_renderer;
+        state.submit_skinned(renderer, &self.gui.atlas.sprites, pose, sink, skin)
+    }
+    /// [`Self::submit_item_world`] of `state` under `pose` on the GPU path, its draws counted
+    /// with an entity's (`skinned`: its mark and bounds, `cull_skinned`'s); false, with
+    /// nothing drawn, when the state cannot take it.
+    pub(super) fn skin_item_into(
+        &self,
+        state: &ItemRenderState,
+        pose: glam::Mat4,
+        light: u32,
+        skinned: &mut super::creatures::Skinned,
+    ) -> bool {
+        let lights = diffuse_lights(self.dim == Dim::Nether);
+        let Some((mark, bounds)) = self.submit_item_skinned(state, &[pose], light, lights) else {
+            return false;
+        };
+        *skinned = Some(match skinned.take() {
+            Some((first, before)) => (
+                first,
+                match (before, bounds) {
+                    (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+                    (one, other) => one.or(other),
+                },
+            ),
+            None => (mark, bounds),
+        });
+        true
     }
     /// `ItemEntityRenderer.submit` for every dropped item.
     pub(super) fn dropped_item_geometry(
@@ -579,8 +618,8 @@ impl Game<'_> {
                 seed,
             );
             let glowing = self.entity_glowing(item.id);
-            // Posed on the GPU when every layer can be (the outline reads the CPU's vertices).
-            let skinned = (skinning && !glowing)
+            // Posed on the GPU when every layer can be, its silhouette too when it glows.
+            let skinned = skinning
                 .then(|| self.submit_item_skinned(&state, &copies, vertex_light(packed), lights))
                 .flatten();
             if skinned.is_none() {
@@ -591,6 +630,10 @@ impl Game<'_> {
             if glowing {
                 let rgb = super::glowing::team_color(self.mob_team(item.id));
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
             } else {
                 self.cull_skinned(out, entity_start, skinned);
             }

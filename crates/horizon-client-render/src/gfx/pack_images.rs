@@ -269,20 +269,121 @@ pub(super) fn clear(
 /// The most bytes of zeros kept to clear images without `CLEAR_TEXTURE`.
 const ZEROS: u64 = 4 << 20;
 
+/// What an image no `image.*` gives binds. Iris 1.11.7 runs the program, and its loads read
+/// zero, also after it stored into the image (observed with a probe pack). Here it is one texel
+/// of the declared format, cleared before every pass that binds it; loads and stores outside
+/// that texel are out of bounds (with the same probe pack on Vulkan, the loads read zero).
+pub(super) struct StandIn {
+    format: wgpu::TextureFormat,
+    dimension: wgpu::TextureViewDimension,
+    pub(super) view: wgpu::TextureView,
+    zeros: wgpu::Buffer,
+}
+
+impl StandIn {
+    /// Zero again, before a pass that binds it.
+    pub(super) fn clear(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_texture(
+            wgpu::TexelCopyBufferInfo {
+                buffer: &self.zeros,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: None,
+                    rows_per_image: None,
+                },
+            },
+            self.view.texture().as_image_copy(),
+            self.view.texture().size(),
+        );
+    }
+}
+
+/// One stand-in for each format and dimension of `wanted`.
+pub(super) fn stand_ins(
+    device: &wgpu::Device,
+    wanted: Vec<(wgpu::TextureFormat, wgpu::TextureViewDimension)>,
+) -> Vec<StandIn> {
+    wanted
+        .into_iter()
+        .map(|(format, dimension)| {
+            let atomic = device.features().contains(wgpu::Features::TEXTURE_ATOMIC)
+                && matches!(
+                    format,
+                    wgpu::TextureFormat::R32Sint | wgpu::TextureFormat::R32Uint
+                );
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("Shader pack image stand-in"),
+                    size: wgpu::Extent3d {
+                        width: 1,
+                        height: 1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: if dimension == wgpu::TextureViewDimension::D3 {
+                        wgpu::TextureDimension::D3
+                    } else {
+                        wgpu::TextureDimension::D2
+                    },
+                    format,
+                    usage: wgpu::TextureUsages::STORAGE_BINDING
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::COPY_SRC
+                        | if atomic {
+                            wgpu::TextureUsages::STORAGE_ATOMIC
+                        } else {
+                            wgpu::TextureUsages::empty()
+                        },
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            // New buffers start zeroed; one texel is at most 16 bytes.
+            let zeros = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Shader pack image stand-in zeros"),
+                size: 16,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            StandIn {
+                format,
+                dimension,
+                view,
+                zeros,
+            }
+        })
+        .collect()
+}
+
+/// The stand-in of this format and dimension.
+pub(super) fn stand_in(
+    stand_ins: &[StandIn],
+    format: wgpu::TextureFormat,
+    dimension: wgpu::TextureViewDimension,
+) -> Option<&StandIn> {
+    stand_ins
+        .iter()
+        .find(|s| s.format == format && s.dimension == dimension)
+}
+
 /// The pack's storage buffers, bound in set 4.
 pub(super) struct Buffers {
     pub(super) layout: wgpu::BindGroupLayout,
     objects: BTreeMap<u32, BufferObject>,
+    /// The fewest bytes each one's shaders bind it as (`Post::buffer_minimums`).
+    minimums: BTreeMap<u32, u64>,
     pub(super) group: Option<wgpu::BindGroup>,
     buffers: Vec<wgpu::Buffer>,
     made_for: [u32; 2],
 }
 
 impl Buffers {
-    /// The layout of `objects`, bound in `stages`.
+    /// The layout of `objects`, bound in `stages`; each buffer is at least its entry in
+    /// `minimums` long.
     pub(super) fn new(
         device: &wgpu::Device,
         objects: BTreeMap<u32, BufferObject>,
+        minimums: BTreeMap<u32, u64>,
         stages: wgpu::ShaderStages,
     ) -> Self {
         let entries: Vec<_> = objects
@@ -305,6 +406,7 @@ impl Buffers {
         Self {
             layout,
             objects,
+            minimums,
             group: None,
             buffers: Vec::new(),
             made_for: [0; 2],
@@ -330,7 +432,8 @@ impl Buffers {
             .objects
             .iter()
             .map(|(binding, o)| {
-                let wanted = o.size(size).next_multiple_of(4);
+                let least = self.minimums.get(binding).copied().unwrap_or(0);
+                let wanted = buffer_size(*o, size, least);
                 if wanted > largest {
                     log::warn!(
                         "shader pack: bufferObject.{binding} wants {wanted} bytes, this device \
@@ -366,6 +469,13 @@ impl Buffers {
     pub(super) fn has(&self, binding: u32) -> bool {
         self.objects.contains_key(&binding)
     }
+}
+
+/// The bytes a storage buffer is made with for a render size of `render`: what the pack
+/// declares, or more when a shader binds it as a larger block (`least`), which wgpu needs where
+/// OpenGL binds the smaller buffer; a multiple of 4.
+fn buffer_size(object: BufferObject, render: [u32; 2], least: u64) -> u64 {
+    object.size(render).max(least).next_multiple_of(4)
 }
 
 /// A debug readback of one of the pack's images (`HORIZON_SHADER_PACK_DUMP=<name>`): every 60
@@ -456,5 +566,29 @@ impl Dump {
         );
         let dims = [size.width, size.height, size.depth_or_array_layers];
         self.pending = Some((buffer, texel, dims, row));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A buffer the pack declares smaller than a shader's block grows to the block (40 bytes
+    /// bound as a 48-byte block failed wgpu's validation, #7178); a larger one keeps its size.
+    #[test]
+    fn a_buffer_is_at_least_its_shaders_block() {
+        assert_eq!(buffer_size(BufferObject::Bytes(40), [1, 1], 48), 48);
+        assert_eq!(
+            buffer_size(BufferObject::Bytes(40980), [1, 1], 40992),
+            40992
+        );
+        assert_eq!(buffer_size(BufferObject::Bytes(100), [1, 1], 48), 100);
+        assert_eq!(buffer_size(BufferObject::Bytes(41), [1, 1], 0), 44);
+        let per_pixel = BufferObject::PerPixel {
+            bytes: 4,
+            scale: [0.5, 0.5],
+        };
+        assert_eq!(buffer_size(per_pixel, [10, 10], 64), 100);
+        assert_eq!(buffer_size(per_pixel, [4, 4], 64), 64);
     }
 }

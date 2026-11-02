@@ -435,6 +435,22 @@
     {
       "name": "move_items",
       "target": "horizon_client::game::machines::native_items::Game<'_>::native_move_items"
+    },
+    {
+      "name": "hide_player",
+      "target": "horizon_client::game::native_server::Game<'_>::native_hide_player"
+    },
+    {
+      "name": "item_stack",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_stack"
+    },
+    {
+      "name": "mod_image",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_image"
+    },
+    {
+      "name": "instance_dir",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_instance_dir"
     }
   ],
   "hooks": [
@@ -1758,7 +1774,7 @@
     {
       "name": "menu_slot_rules",
       "version": 1,
-      "target": "horizon_client::menu::native_menu_slot_rules",
+      "target": "horizon_client_lib::menu::native_menu_slot_rules",
       "side": "server",
       "cancellable": false,
       "mod_api": {
@@ -1993,7 +2009,7 @@
     {
       "name": "living_breathe",
       "version": 1,
-      "target": "horizon_client::breathing::native_living_breathe",
+      "target": "horizon_client_lib::breathing::native_living_breathe",
       "neoforge": "LivingBreatheEvent",
       "side": "server",
       "cancellable": false,
@@ -2176,6 +2192,2110 @@
       "mod_api": {
         "contract": "cancel",
         "out": "cancel"
+      }
+    },
+    {
+      "name": "anvil_damaged",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_damaged",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "arrow_loose",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_arrow_loose",
+      "neoforge": "ArrowLooseEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    },
+    {
+      "name": "beacon_state_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_beacon_state_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "bell_ring",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_bell_ring",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BellRingEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_break_progress_update",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_break_progress_update",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_burn",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_burn",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockBurnEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_cook",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_cook",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_damage_abort",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_damage_abort",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockDamageAbortEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_dispense_armor",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_dispense_armor",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_exp",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_exp",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_fade",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_fade",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_failed_dispense",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_failed_dispense",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "block_form",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_form",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_ignite",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_block_ignite",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockIgniteEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_lock_check",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_lock_check",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "locked"
+      }
+    },
+    {
+      "name": "block_receive_game",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_receive_game",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "block_shear_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_block_shear_entity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "brewing_complete",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_complete",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "brewing_fuel",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_fuel",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "brewing_start",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_brewing_start",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "broadcast_message",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_broadcast_message",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BroadcastMessageEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "campfire_start",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_campfire_start",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "cauldron_level_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_cauldron_level_changed",
+      "neoforge": "none (NeoForge has no such event; Bukkit's CauldronLevelChangeEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "chorus_fruit_teleport",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_chorus_fruit_teleport",
+      "neoforge": "EntityTeleportEvent.ChorusFruit",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "compost_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_compost_item",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "crafter_craft",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_crafter_craft",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "creeper_ignite",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_creeper_ignite",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "creeper_power",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_creeper_power",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "critical_hit",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_critical_hit",
+      "neoforge": "CriticalHitEvent",
+      "side": "both",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "difficulty_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_difficulty_changed",
+      "neoforge": "DifficultyChangeEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "dragon_egg_form",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_dragon_egg_form",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "enchant_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_enchant_item",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "ender_pearl_teleport",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_ender_pearl_teleport",
+      "neoforge": "EntityTeleportEvent.EnderPearl",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "entities_load",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entities_load",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entities_unload",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entities_unload",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_break_door",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_break_door",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_breed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_breed",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_change_block",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_change_block",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_drop_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_drop_item",
+      "neoforge": "none (NeoForge has no such event; Bukkit's EntityDropItemEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_enter_block",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_enter_block",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_enter_love_mode",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_enter_love_mode",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_portal",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_portal",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_pose_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_pose_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_shoot_bow",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_shoot_bow",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_tame",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_tame",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_teleport",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_teleport",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_toggle_glide",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_toggle_glide",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_transform",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_transform",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "entity_unleash",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_unleash",
+      "neoforge": "none (NeoForge has no such event; Bukkit's EntityUnleashEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "exp_bottle",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_exp_bottle",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "experience_orb_pickup_listened",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup_listened",
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "listened"
+      }
+    },
+    {
+      "name": "experience_orb_pickup",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_pickup",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    },
+    {
+      "name": "mending_repair",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mending_repair",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "explosion_prime",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_prime",
+      "neoforge": "none (NeoForge has no such event; Bukkit's ExplosionPrimeEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "fire_odds",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds",
+      "mod_api": {
+        "contract": "replace",
+        "out": "odds"
+      }
+    },
+    {
+      "name": "smoke_source",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source",
+      "mod_api": {
+        "contract": "replace",
+        "out": "smoke"
+      }
+    },
+    {
+      "name": "firework_explode",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_firework_explode",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "fluid_level_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fluid_level_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "framerate_limit",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_framerate_limit",
+      "neoforge": "none (vanilla FramerateLimitTracker.getFramerateLimit fires no event)",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "furnace_burn",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_burn",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "furnace_extract",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_extract",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "furnace_smelt",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_smelt",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "furnace_start_smelt",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_furnace_start_smelt",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "game_event",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_game_event",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "hopper_inventory_search",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_hopper_inventory_search",
+      "neoforge": "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "hopper_pickup_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_hopper_pickup_item",
+      "neoforge": "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "ingredient",
+      "version": 1,
+      "target": "horizon_client_lib::crafting::native_ingredient",
+      "mod_api": {
+        "contract": "collect",
+        "out": "items"
+      }
+    },
+    {
+      "name": "inventory_block_start",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_block_start",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "inventory_move_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_move_item",
+      "neoforge": "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "item_crafted",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_crafted",
+      "neoforge": "PlayerEvent.ItemCraftedEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "item_despawn",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_despawn",
+      "neoforge": "none (NeoForge has no such event; Bukkit's ItemDespawnEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "item_energy_buffer",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_energy_buffer",
+      "neoforge": "Capabilities.Energy.ITEM",
+      "mod_api": {
+        "contract": "replace",
+        "out": "buffer"
+      }
+    },
+    {
+      "name": "item_expire",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_expire",
+      "neoforge": "ItemExpireEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "item_spawn",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_spawn",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "leaves_decay",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_leaves_decay",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "lightning_strike",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_lightning_strike",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "menu_quick_move",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_menu_quick_move",
+      "neoforge": "none (a Java menu overrides AbstractContainerMenu.quickMoveStack; no event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "handled"
+      }
+    },
+    {
+      "name": "moisture_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_moisture_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "anvil_craft_post",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_craft_post",
+      "neoforge": "AnvilCraftEvent.Post",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "anvil_craft_pre",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_craft_pre",
+      "neoforge": "AnvilCraftEvent.Pre",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "armor_stand_manipulate",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_armor_stand_manipulate",
+      "neoforge": "none (Bukkit's PlayerArmorStandManipulateEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "bucket_empty",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_bucket_empty",
+      "neoforge": "none (vanilla BucketItem.emptyContents; NeoForge has no matching event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "container_opened",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_container_opened",
+      "neoforge": "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "creative_slot",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_creative_slot",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "food_level_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_food_level_changed",
+      "neoforge": "none (vanilla: FoodData; Bukkit's FoodLevelChangeEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "hanging_break",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_hanging_break",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "hanging_place",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_hanging_place",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "item_damaged",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_damaged",
+      "neoforge": "none (vanilla: ItemStack.hurtAndBreak; PlayerDestroyItemEvent is only the break)",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_changed_dimension",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_changed_dimension",
+      "neoforge": "PlayerEvent.PlayerChangedDimensionEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_clone",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_clone",
+      "neoforge": "PlayerEvent.Clone (not cancellable)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_commands_sent",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_commands_sent",
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "names"
+      }
+    },
+    {
+      "name": "player_destroy_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_destroy_item",
+      "neoforge": "none (NeoForge's PlayerDestroyItemEvent carries the original stack and a hand, which armour has not; this hook only listens and names the slot instead. Bukkit's PlayerItemBreakEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_fish",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_fish",
+      "neoforge": "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_flower_pot_manipulate",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_flower_pot_manipulate",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_game_mode_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_game_mode_changed",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_insert_lectern_book",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_insert_lectern_book",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_item_frame_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_frame_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_item_mend",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_mend",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_lectern_page_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_lectern_page_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_load_from_file",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_load_from_file",
+      "neoforge": "PlayerEvent.LoadFromFile (not cancellable)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_login",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_login",
+      "neoforge": "none (Bukkit's PlayerLoginEvent; NeoForge's PlayerNegotiationEvent is not cancellable)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_save_to_file",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_save_to_file",
+      "neoforge": "PlayerEvent.SaveToFile (not cancellable)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_sprint",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_sprint",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_swap_hands",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_swap_hands",
+      "neoforge": "LivingSwapItemsEvent.Hands",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_take_lectern_book",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_take_lectern_book",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_teleported",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_teleported",
+      "neoforge": "none (EntityTeleportEvent.TeleportCommand fires before the move and can cancel it; this hook is told after the move)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_totem",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_totem",
+      "neoforge": "none (NeoForge's LivingUseTotemEvent can cancel the save; this hook only listens. Bukkit's EntityResurrectEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "resource_pack_status",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_resource_pack_status",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "spawn_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_spawn_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "tnt_primed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tnt_primed",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "vehicle_create",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_create",
+      "neoforge": "none (NeoForge has no such event; Bukkit's VehicleCreateEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "vehicle_damage",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_damage",
+      "neoforge": "none (NeoForge has no such event; Bukkit's VehicleDamageEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "vehicle_destroy",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_destroy",
+      "neoforge": "none (NeoForge has no such event; Bukkit's VehicleDestroyEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "vehicle_moved",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vehicle_moved",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "world_border_bounds_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_bounds_changed",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "world_border_center_changed",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_center_changed",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "world_game_rule_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_game_rule_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "note_play",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_play",
+      "neoforge": "none (NeoForge has no such event; Bukkit's NotePlayEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_advancement_criterion_grant",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_criterion_grant",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerAdvancementCriterionGrant)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_advancement_done",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_done",
+      "neoforge": "AdvancementEvent.AdvancementEarnEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_advancement_progress",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_advancement_progress",
+      "neoforge": "AdvancementEvent.AdvancementProgressEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_arm_swing",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_arm_swing",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerAnimationEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_attack_cooldown_reset",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_attack_cooldown_reset",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_bed_enter",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bed_enter",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerBedEnterEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_bed_leave",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bed_leave",
+      "neoforge": "PlayerWakeUpEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_bucket_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bucket_entity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_bundle_item_select",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bundle_item_select",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_change_beacon_effect",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_beacon_effect",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_change_main_hand",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_change_main_hand",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_client_loaded_world",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_client_loaded_world",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerClientLoadedWorld)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_deep_sleep",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_deep_sleep",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_edit_book",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_edit_book",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerEditBookEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_egg_throw",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_egg_throw",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_elytra_boost",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_elytra_boost",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_exp_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_change",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerExpChangeEvent)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_exp_cooldown_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_exp_cooldown_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_input",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_input",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerInputEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_item_cooldown",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_cooldown",
+      "neoforge": "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_item_held",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_held",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerItemHeldEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_jump",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_jump",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerJumpEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_kicked",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_kicked",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerKickEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_launch_projectile",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_launch_projectile",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerLaunchProjectile)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_level_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_level_change",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerLevelChangeEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_locale_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_locale_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_loom_pattern_select",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_loom_pattern_select",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_map_filled",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_map_filled",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_name_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_name_entity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_open_sign",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_open_sign",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_pick_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pick_item",
+      "neoforge": "none (NeoForge has no such event; Paper's PlayerPickItemEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_pickup_arrow",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pickup_arrow",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_portal",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_portal",
+      "neoforge": "EntityTravelToDimensionEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_ready_arrow",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_ready_arrow",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerReadyArrow)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_recipe_book_click",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_book_click",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_recipe_book_settings_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_book_settings_change",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_recipe_discovered",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_discovered",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRecipeDiscoverEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_riptide",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_riptide",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRiptideEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_shear_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_shear_entity",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerShearEntityEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_shield_disable",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_shield_disable",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_spawn_point_set",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_spawn_point_set",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerSpawnChangeEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_stat_award",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stat_award",
+      "neoforge": "StatAwardEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_stonecutter_recipe_select",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stonecutter_recipe_select",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_stop_spectating_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stop_spectating_entity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_stop_using_item",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stop_using_item",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerStopUsingItem)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_swap_with_equipment_slot",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_swap_with_equipment_slot",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_teleport_end_gateway",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_teleport_end_gateway",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "player_toggle_entity_age_lock",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_toggle_entity_age_lock",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_toggle_sneak",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_toggle_sneak",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerToggleSneakEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_trade",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_trade",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_unleash_entity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_unleash_entity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "player_velocity",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_velocity",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "portal_create",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_portal_create",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "potion_splash",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_potion_splash",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "prepare_anvil",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_anvil",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    },
+    {
+      "name": "prepare_grindstone",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_grindstone",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    },
+    {
+      "name": "prepare_hopper_transfer",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_hopper_transfer",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "prepare_item_craft",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_craft",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    },
+    {
+      "name": "prepare_item_enchant",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_item_enchant",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "prepare_smithing",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_smithing",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "replace",
+        "out": "result"
+      }
+    },
+    {
+      "name": "projectile_launch",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_projectile_launch",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "raid_spawn_wave",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_raid_spawn_wave",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "raid_state_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_raid_state_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "sculk_bloom",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_sculk_bloom",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "sleep_finished_time",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_sleep_finished_time",
+      "neoforge": "SleepFinishedTimeEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "sponge_absorb",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_sponge_absorb",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "tab_complete",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_tab_complete",
+      "neoforge": "none (NeoForge has no generic tab completion event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "suggestions"
+      }
+    },
+    {
+      "name": "target_hit",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_target_hit",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "thunder_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_thunder_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "time_skip",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_time_skip",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "trade_select",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_trade_select",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "trade_with_villager",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_trade_with_villager",
+      "neoforge": "TradeWithVillagerEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "vault_change_state",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vault_change_state",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "vault_loot",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_vault_loot",
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockDispenseLoot)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "weather_change",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_weather_change",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "whitelist_state_update",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_whitelist_state_update",
+      "neoforge": "none (NeoForge has no such event; Bukkit's WhitelistToggleEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "world_border_bounds_change_finish",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_bounds_change_finish",
+      "neoforge": "none (NeoForge has no such event; Bukkit's WorldBorderBoundsChangeFinish)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "world_saved",
+      "version": 1,
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_saved",
+      "neoforge": "none (NeoForge has no such event)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    },
+    {
+      "name": "living_drown",
+      "version": 1,
+      "target": "horizon_client_lib::breathing::native_living_drown",
+      "neoforge": "LivingDrownEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_fall",
+      "version": 1,
+      "target": "horizon_client_lib::landing::native_living_fall",
+      "neoforge": "LivingFallEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_heal",
+      "version": 1,
+      "target": "horizon_client_lib::hunger::native_living_heal",
+      "neoforge": "LivingHealEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_jump",
+      "version": 1,
+      "target": "horizon_client_lib::motion::native_living_jump",
+      "neoforge": "LivingEvent.LivingJumpEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "listen"
       }
     }
   ]

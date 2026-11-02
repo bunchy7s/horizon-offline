@@ -439,6 +439,57 @@ pub struct Post {
     pub notes: Vec<String>,
 }
 
+impl Post {
+    /// Every program that loaded: the passes', what draws the game's geometry, the shadow
+    /// pass's and its composites.
+    fn every_program(&self) -> impl Iterator<Item = &PostProgram> {
+        let draws = [
+            &self.terrain,
+            &self.water,
+            &self.sky,
+            &self.sky_textured,
+            &self.entities,
+            &self.block,
+            &self.entities_translucent,
+            &self.particles,
+            &self.damaged_block,
+            &self.clouds,
+            &self.weather,
+            &self.hand,
+            &self.shadow,
+            &self.shadow_water,
+            &self.shadow_entities,
+            &self.shadow_block,
+        ];
+        self.programs
+            .iter()
+            .chain(draws.into_iter().flatten())
+            .chain(&self.shadow_comp)
+    }
+
+    /// The fewest bytes each storage buffer (`bufferObject.<n>`, set 4) needs for every stage
+    /// that binds it: its block's size as the stage lays it out (std430). OpenGL binds a smaller buffer and leaves what lies
+    /// past its end undefined; wgpu refuses to draw or dispatch with one.
+    pub fn buffer_minimums(&self) -> std::collections::BTreeMap<u32, u64> {
+        let mut sizes = std::collections::BTreeMap::new();
+        for p in self.every_program() {
+            let stages = p.program.iter().flat_map(|s| [&s.vertex, &s.fragment]);
+            for module in stages.chain(p.compute.iter().map(|(_, c)| &c.module)) {
+                for (_, var) in module.global_variables.iter() {
+                    if let (naga::AddressSpace::Storage { .. }, Some(b)) = (var.space, &var.binding)
+                        && b.group == 4
+                    {
+                        let size = u64::from(module.types[var.ty].inner.size(module.to_ctx()));
+                        let least = sizes.entry(b.binding).or_insert(0);
+                        *least = size.max(*least);
+                    }
+                }
+            }
+        }
+        sizes
+    }
+}
+
 /// The folder a dimension reads its programs from: `world<id>` when the pack has it, else the
 /// base folder `""` (1.2). `id` is the legacy number: 0 the Overworld, -1 the Nether, 1 the End.
 pub fn dimension_folder(pack: &Pack, id: i32) -> String {
@@ -1139,7 +1190,7 @@ fn diagnostics(pp: &Preprocessed) -> Vec<String> {
     located(pp, &pp.diagnostics)
 }
 
-/// `pp`'s warnings (conditions read as false), located.
+/// `pp`'s warnings (conditions read as false, unbalanced conditionals), located.
 fn warnings(pp: &Preprocessed) -> Vec<String> {
     located(pp, &pp.warnings)
 }
@@ -1338,6 +1389,41 @@ mod tests {
             !CustomImage::parse("plain", "none RGBA RGBA8 BYTE false false 8 8")
                 .unwrap()
                 .is_3d()
+        );
+    }
+
+    /// A storage buffer declared smaller than the block a stage binds it as: the block's size
+    /// as the stage lays it out is what the buffer needs (std430 rounds a block to its
+    /// largest member's alignment), the most of every stage and program that binds it.
+    #[test]
+    fn storage_buffers_need_their_blocks_size() {
+        let compute = "#version 430\nlayout(local_size_x = 1) in;\n\
+                       layout(std430, binding = 0) buffer Sums { vec4 a; vec4 b; float c; } sums;\n\
+                       layout(std430, binding = 1) buffer Cells { uint count; uvec4 cells[3]; } grid;\n\
+                       void main() {\n    sums.c = sums.a.x + float(grid.count + grid.cells[0].x);\n}\n";
+        let fsh = "#version 430\nlayout(std430, binding = 0) buffer Sums { vec4 a; } sums;\n\
+                   uniform sampler2D colortex0;\nvarying vec2 uv;\n\
+                   void main() {\n/* DRAWBUFFERS:3 */\n\
+                   gl_FragData[0] = texture2D(colortex0, uv) + sums.a;\n}\n";
+        let pack = Pack::from_zip_bytes(
+            "t",
+            zip(&[
+                ("shaders/composite.vsh", VSH),
+                ("shaders/composite.fsh", fsh),
+                ("shaders/composite.csh", compute),
+            ]),
+        )
+        .unwrap();
+        let macros = Macros::standard();
+        let properties = Properties::parse("bufferObject.0 = 40\nbufferObject.1 = 4\n", &macros);
+        let post = load_post(&pack, "", &properties, &macros, &GameInputs::default());
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(post.programs[0].compute.len(), 1);
+        // `Sums`: 36 bytes rounded to vec4's 16; `Cells`: a uint padded to the array's 16,
+        // then three elements.
+        assert_eq!(
+            post.buffer_minimums(),
+            std::collections::BTreeMap::from([(0, 48), (1, 64)])
         );
     }
 

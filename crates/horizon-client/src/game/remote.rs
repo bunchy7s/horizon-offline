@@ -42,6 +42,7 @@ use horizon_protocol::{
     text::{Language, plain},
 };
 use horizon_world::{
+    attachments::{Attachments, Holder},
     level::InteractionResult,
     nbt::Tag,
     registry::BlockStateId,
@@ -455,6 +456,8 @@ pub(super) struct Remote {
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
     pub mod_net: bool,
+    /// The synced attachments the server sent, by holder.
+    pub attachments: HashMap<Holder, Attachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -981,6 +984,7 @@ impl Game<'_> {
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
+            attachments: HashMap::new(),
             far_terrain: None,
             builtin,
             status: lang
@@ -1887,6 +1891,7 @@ impl Game<'_> {
                     self.score.board = Default::default();
                     self.clear_waypoints();
                     if let Some(r) = self.remote.as_mut() {
+                        r.attachments.clear();
                         r.players.clear();
                         r.tab_players.clear();
                         r.listed.clear();
@@ -2229,6 +2234,13 @@ impl Game<'_> {
         self.world
             .block_entities
             .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.retain(|holder, _| match *holder {
+                Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
+                Holder::BlockEntity([x, _, z]) => !gone.contains(&(x >> 4, z >> 4)),
+                _ => true,
+            });
+        }
         gone.clear();
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
@@ -2360,7 +2372,9 @@ impl Game<'_> {
         }
     }
     /// Keep the renderable block entities (chests, furnaces) in step with blocks.
-    /// `previous`: the block's state before, when it changed.
+    /// `previous`: the block's state before, when it changed. A column sent again has
+    /// none, and keeps its block entities' synced attachments: the server does not send
+    /// them again (`remote_chunk` drops those of block entities the column lost).
     pub(super) fn sync_block_entity(
         &mut self,
         pos: (i32, i32, i32),
@@ -2378,12 +2392,24 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
+                    if previous.is_some() {
+                        self.forget_block_entity_attachments(pos);
+                    }
                     self.world.block_entities.insert(pos, entity);
                 }
             }
             None => {
+                if previous.is_some() {
+                    self.forget_block_entity_attachments(pos);
+                }
                 self.world.block_entities.remove(&pos);
             }
+        }
+    }
+    /// The server's synced attachments of a block entity that goes with it.
+    fn forget_block_entity_attachments(&mut self, (x, y, z): (i32, i32, i32)) {
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.remove(&Holder::BlockEntity([x, y, z]));
         }
     }
     /// ClientLevel.setServerVerifiedBlockState: a block the client predicted keeps its
@@ -2984,6 +3010,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            // The synced attachments of a holder the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
+                self.remote_attachment_sync(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
@@ -3001,6 +3031,7 @@ impl Game<'_> {
                 // replaces ServerReconfigScreen.
                 if let Some(r) = self.remote.as_mut() {
                     r.reconfiguring = None;
+                    r.attachments.clear();
                 }
                 // handleLogin makes a new MultiPlayerGameMode (carried index 0) and a
                 // new LocalPlayer (slot 0, no effects, riding nothing: the server
@@ -3042,6 +3073,11 @@ impl Game<'_> {
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
+                // The server sends the level, chunks and entities again.
+                if let Some(r) = self.remote.as_mut() {
+                    r.attachments
+                        .retain(|holder, _| matches!(holder, Holder::Player(_)));
+                }
                 self.using = None;
                 self.end_mod_use();
                 // After a death (no KEEP_ENTITY_DATA) the new LocalPlayer
@@ -3283,9 +3319,12 @@ impl Game<'_> {
             C::RemoveEntities(p) => {
                 for id in p.ids {
                     if let Some(r) = self.remote.as_mut() {
-                        r.level_players.remove(&id);
+                        if let Some(uuid) = r.level_players.remove(&id) {
+                            r.attachments.remove(&Holder::Player(uuid));
+                        }
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
+                        r.attachments.remove(&Holder::Entity(id as u32));
                     }
                     self.remove_entity(id);
                 }
@@ -4635,6 +4674,7 @@ impl Game<'_> {
                         r.chat_validators.remove(&u);
                         r.skin_textures.remove(&u);
                         r.listed.remove(&u);
+                        r.attachments.remove(&Holder::Player(u));
                     }
                 }
             }
@@ -5741,6 +5781,20 @@ impl Game<'_> {
         if self.integrated.is_none() && self.server_address().is_some() {
             keys.analog = None;
         }
+        let [mut strafe, mut forward] = keys.direction();
+        let original = [strafe, forward];
+        self.native_movement_input(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
+        if [strafe, forward] != original {
+            if forward != original[1] {
+                keys.forward = forward > 0.0;
+                keys.backward = forward < 0.0;
+            }
+            if strafe != original[0] {
+                keys.left = strafe > 0.0;
+                keys.right = strafe < 0.0;
+            }
+            keys.analog = Some([strafe, forward]);
+        }
         let input = u8::from(keys.forward)
             | u8::from(keys.backward) << 1
             | u8::from(keys.left) << 2
@@ -6468,6 +6522,7 @@ impl Game<'_> {
         // collisions and the pull of the nearest player between the server's
         // updates; the server removes it on pickup.
         let (world, facts, collision) = (&self.world, self.res.facts(), self.collision);
+        let border = Some(self.border.geometry());
         let mut lava_random = None;
         let mut next_float = || {
             lava_random
@@ -6501,7 +6556,15 @@ impl Game<'_> {
                     l.steps -= 1;
                 }
                 let before = o.position;
-                let kept = o.tick(world, facts, collision, target, false, &mut next_float);
+                let kept = o.tick(
+                    world,
+                    facts,
+                    collision,
+                    target,
+                    false,
+                    &mut next_float,
+                    border,
+                );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
                 o.previous = old;
@@ -6519,11 +6582,12 @@ impl Game<'_> {
         // ItemEntity.tick runs on a client too: gravity, collisions and
         // friction move the item between the server's updates (every 20
         // ticks), and only the server removes it.
-        let (world, registry, facts, collision) = (
+        let (world, registry, facts, collision, border) = (
             &self.world,
             self.pack.assets.registry,
             self.res.facts(),
             self.collision,
+            Some(self.border.geometry()),
         );
         for d in self.dropped.iter_mut().filter(|_| running) {
             d.tick(
@@ -6535,6 +6599,7 @@ impl Game<'_> {
                 &self.res.motion().fluids,
                 // The server decides what an item rests on; this copy only moves between updates.
                 &[],
+                border,
             );
         }
         head_lerps.retain(|_, (_, steps)| *steps > 0);
@@ -7357,6 +7422,23 @@ impl Game<'_> {
                 // stand fits, before the server spawns it. This hand swings
                 // and the click ends.
                 self.with_hand(hand, Game::swing_arm);
+                return true;
+            } else if let Some(stack) = held
+                .as_ref()
+                .filter(|s| s.item.ends_with("_spawn_egg"))
+                .filter(|_| {
+                    self.may_build()
+                        || self.with_hand(hand, |g| g.can_place_on_in_adventure(hit.pos))
+                })
+            {
+                // SpawnEggItem.useOn on a client level: FAIL for a mob that
+                // cannot spawn (the click ends, no swing), else SUCCESS (swing).
+                // Either way no UseItem follows, so the server does not spawn
+                // a second mob from the fluid ray (ItemStack.useOn passes in
+                // adventure mode off can_place_on, which the filter above keeps).
+                if self.spawn_egg_allowed(&stack.item) {
+                    self.with_hand(hand, Game::swing_arm);
+                }
                 return true;
             } else if let Some(stack) = held.as_ref()
                 && (self.predict_item_on_block(stack, &hit, hand)

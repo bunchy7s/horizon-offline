@@ -1048,7 +1048,10 @@ impl Entity for Projectile {
         tag: Tag,
     ) -> Result<(), Tag> {
         match kind {
-            "minecraft:arrow" => game.load_arrow(tag, player_uuid),
+            "minecraft:arrow" | "minecraft:spectral_arrow" => game.load_arrow(tag, player_uuid),
+            "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                game.load_spit_or_bullet(tag, player_uuid)
+            }
             "minecraft:fireball"
             | "minecraft:small_fireball"
             | "minecraft:wind_charge"
@@ -1289,6 +1292,9 @@ mod load_claim_tests {
             "minecraft:item",
             "minecraft:experience_orb",
             "minecraft:arrow",
+            "minecraft:spectral_arrow",
+            "minecraft:llama_spit",
+            "minecraft:shulker_bullet",
             "minecraft:fireball",
             "minecraft:small_fireball",
             "minecraft:wind_charge",

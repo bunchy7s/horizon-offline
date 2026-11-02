@@ -58,6 +58,15 @@ pub(super) fn flatten_as(code: &str, inputs: &str) -> Option<String> {
     }
     let mut changed = false;
     for b in blocks {
+        // A redeclared built-in block (GLSL 4.60, 7.5: `out gl_PerVertex { vec4 gl_Position;
+        // };`) only restates built-ins: it goes, and they stay built-ins.
+        if b.name == "gl_PerVertex" {
+            for t in &mut tokens[b.start..=b.end] {
+                blank(t);
+            }
+            changed = true;
+            continue;
+        }
         let inside = |i: usize| (b.start..=b.end).contains(&i);
         let prefix = if b.storage == "in" { inputs } else { "" };
         let renamed = |member: &str| match &b.instance {
@@ -69,7 +78,16 @@ pub(super) fn flatten_as(code: &str, inputs: &str) -> Option<String> {
         let mut reads = Vec::new();
         if let Some((_, instance)) = &b.instance {
             let mut whole = false;
-            for i in (0..tokens.len()).filter(|&i| !inside(i) && tokens[i] == *instance) {
+            // A local variable or parameter of the same name, or a member (`light.v`), is not
+            // the instance.
+            let hidden = hidden(&tokens, instance);
+            let other = |i: usize| {
+                hidden.iter().any(|h| h.contains(&i))
+                    || previous_significant(&tokens, i).is_some_and(|p| tokens[p] == ".")
+            };
+            for i in
+                (0..tokens.len()).filter(|&i| !inside(i) && tokens[i] == *instance && !other(i))
+            {
                 let index = match b.array.is_empty() {
                     true => Some(i),
                     false => next_significant(&tokens, i + 1)
@@ -130,6 +148,88 @@ fn blank(t: &mut String) {
 
 fn next_significant(tokens: &[String], from: usize) -> Option<usize> {
     (from..tokens.len()).find(|&i| significant(&tokens[i]))
+}
+
+fn previous_significant(tokens: &[String], before: usize) -> Option<usize> {
+    (0..before).rev().find(|&i| significant(&tokens[i]))
+}
+
+/// Where a local variable or parameter named `name` hides a global of that name (GLSL 4.60,
+/// 4.2): from its declaration to the end of the block it is declared in, or of its function's
+/// body for a parameter.
+fn hidden(tokens: &[String], name: &str) -> Vec<std::ops::Range<usize>> {
+    let mut out = Vec::new();
+    let mut opens: Vec<usize> = Vec::new();
+    let mut parens = 0usize;
+    for i in 0..tokens.len() {
+        match tokens[i].as_str() {
+            "{" => opens.push(i),
+            "}" => {
+                opens.pop();
+            }
+            "(" => parens += 1,
+            ")" => parens = parens.saturating_sub(1),
+            t if t == name => {
+                // A declaration: a type before the name, and after it what ends a declarator.
+                let typed = previous_significant(tokens, i).is_some_and(|p| {
+                    let w = tokens[p].as_str();
+                    w.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        && !["return", "else", "case"].contains(&w)
+                });
+                let declares = next_significant(tokens, i + 1)
+                    .is_some_and(|n| matches!(tokens[n].as_str(), "," | ")" | ";" | "=" | "["));
+                if !(typed && declares) {
+                    continue;
+                }
+                let end = match opens.last() {
+                    Some(&open) => closing_brace(tokens, open),
+                    // A parameter: its function's body follows its parameter list.
+                    None if parens > 0 => parameter_list_end(tokens, i)
+                        .and_then(|close| next_significant(tokens, close + 1))
+                        .filter(|&body| tokens[body] == "{")
+                        .and_then(|body| closing_brace(tokens, body)),
+                    None => None,
+                };
+                if let Some(end) = end {
+                    out.push(i..end + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The `}` that closes the `{` at `open`.
+fn closing_brace(tokens: &[String], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (j, t) in tokens.iter().enumerate().skip(open) {
+        match t.as_str() {
+            "{" => depth += 1,
+            "}" => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The `)` that closes the parameter list token `i` is in.
+fn parameter_list_end(tokens: &[String], i: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (j, t) in tokens.iter().enumerate().skip(i) {
+        match t.as_str() {
+            "(" => depth += 1,
+            ")" if depth == 0 => return Some(j),
+            ")" => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The `]` that closes the `[` at `open`.
@@ -305,6 +405,39 @@ fn block(tokens: &[String], start: usize, open: usize) -> Option<Block> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A local variable or parameter named like the instance hides it (GLSL 4.60, 4.2), and
+    /// `light.v` is another struct's member: the block is still flattened, those stay.
+    #[test]
+    fn locals_named_like_the_instance_are_not_it() {
+        let code = "out Data { vec2 uv; } v;\nstruct L { float v; };\n\
+                    float luma(vec3 v) { return dot(v, vec3(0.3)); }\n\
+                    void main() { L light; light.v = 1.0; v.uv = vec2(light.v);\n\
+                    { vec2 v = vec2(2.0); v.x += 1.0; } v.uv += vec2(1.0); }\n";
+        let out = flatten(code).expect("flattened");
+        assert!(
+            out.contains("float luma(vec3 v) { return dot(v, vec3(0.3)); }"),
+            "{out}"
+        );
+        assert!(
+            out.contains("light.v = 1.0; hz_Data_uv = vec2(light.v);"),
+            "{out}"
+        );
+        assert!(
+            out.contains("{ vec2 v = vec2(2.0); v.x += 1.0; } hz_Data_uv += vec2(1.0);"),
+            "{out}"
+        );
+    }
+
+    /// A redeclared `gl_PerVertex` (GLSL 4.60, 7.5) goes: its members stay the built-ins.
+    #[test]
+    fn a_redeclared_gl_per_vertex_goes() {
+        let code =
+            "out gl_PerVertex { vec4 gl_Position; };\nvoid main() { gl_Position = vec4(1.0); }\n";
+        let out = flatten(code).expect("changed");
+        assert_eq!(out.lines().next().map(str::trim), Some(""));
+        assert!(out.contains("gl_Position = vec4(1.0);"));
+    }
 
     #[test]
     fn members_become_varyings_on_their_lines() {

@@ -263,6 +263,10 @@ pub(super) fn named_mob_pickable(
     alive && Some(id) != riding && Some(id) != camera
 }
 
+/// What an entity drew on the GPU path: the skin frame's mark before its draws, and their
+/// camera-relative bounds (`cull_skinned`).
+pub(super) type Skinned = Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>;
+
 impl Game<'_> {
     pub(super) fn player_view(&self) -> Option<PlayerView> {
         let p = self.player.as_ref()?;
@@ -427,6 +431,9 @@ impl Game<'_> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        if !self.mobs.iter().any(|m| m.id == id) {
+            return None;
+        }
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
@@ -1046,9 +1053,9 @@ impl Game<'_> {
                         for e in &mut events[from..] {
                             if let MobEvent::Projectile(p) = e
                                 && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                                && *target == Who::Player
+                                && *target == Some(Who::Player)
                             {
-                                *target = Who::Mob(id);
+                                *target = Some(Who::Mob(id));
                             }
                         }
                     }
@@ -1290,9 +1297,9 @@ impl Game<'_> {
         // entity, so a kill by a mob (a tame wolf credited to its owner)
         // leaves it out; ServerPlayer.awardKillScore counts the rest.
         if !killed_by_mob(m) {
-            self.stats.add("killed", &m.kind.id, 1);
+            self.award_stat("killed", &m.kind.id, 1);
         }
-        self.stats.custom("mob_kills", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(m.id));
         let view = self.mob_entity(m);
         let blow = m.last_damage.map(|(d, _)| self.damage_view(d));
@@ -2103,6 +2110,34 @@ impl Game<'_> {
                         }
                     }
                 }
+                MobEvent::PufferfishSting {
+                    mob,
+                    target,
+                    amount,
+                    source,
+                    poison_ticks,
+                } => {
+                    // Pufferfish.touch: the poison and
+                    // `playSound(PUFFER_FISH_STING, 1, 1)` sit inside the
+                    // `hurtServer` branch, so only a hit that landed poisons
+                    // and stings, at the fish's own position as
+                    // `Entity.playSound` puts it, and not when it is silent.
+                    let landed = self.mob_hits_mob(target, amount, source);
+                    if landed && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
+                        t.add_effect("minecraft:poison", poison_ticks, 0);
+                    }
+                    if landed && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob) {
+                        let at = [m.position.x, m.position.y, m.position.z];
+                        if !m.silent {
+                            self.handle_mob_events(vec![MobEvent::Sound(
+                                "entity.puffer_fish.sting",
+                                at,
+                                1.0,
+                                1.0,
+                            )])?;
+                        }
+                    }
+                }
                 MobEvent::SonicBoom {
                     target,
                     attacker,
@@ -2277,21 +2312,29 @@ impl Game<'_> {
                         thrown.thrower = Some(thrower);
                     }
                 }
-                MobEvent::DropItem { item, count, at } => self.spawn_item(
-                    ItemStack {
-                        item,
-                        count,
-                        damage: 0,
-                        extra: None,
-                    },
+                MobEvent::DropItem {
+                    mob,
+                    item,
+                    count,
                     at,
-                    // The ItemEntity constructor's motion, from the entity's
-                    // own random (not the level's), so spawnAtLocation drops
-                    // (a fox's berries, a panda's held food, a goat's horn)
-                    // land apart.
-                    dispenser::new_item_motion(),
-                    10,
-                ),
+                } => {
+                    self.native_entity_drop_item(mob, &item, count as i32, at);
+                    self.spawn_item(
+                        ItemStack {
+                            item,
+                            count,
+                            damage: 0,
+                            extra: None,
+                        },
+                        at,
+                        // The ItemEntity constructor's motion, from the entity's
+                        // own random (not the level's), so spawnAtLocation drops
+                        // (a fox's berries, a panda's held food, a goat's horn)
+                        // land apart.
+                        dispenser::new_item_motion(),
+                        10,
+                    );
+                }
                 MobEvent::DropGoatHorn {
                     mob,
                     screaming,
@@ -2946,7 +2989,7 @@ impl Game<'_> {
                 super::commands::Target::Guest,
             );
             self.for_player(who, |g| {
-                g.stats.custom("animals_bred", 1);
+                g.award_custom_stat("animals_bred", 1);
                 g.trigger_bred(&parent, &partner_view, (!turtle).then_some(&child));
             });
         }
@@ -3883,7 +3926,7 @@ impl Game<'_> {
         if rang {
             let _ = self.process_level_events();
             if p.owner == Some(Who::Player) {
-                self.stats.custom("bell_ring", 1);
+                self.award_custom_stat("bell_ring", 1);
             }
         }
     }
@@ -4101,7 +4144,7 @@ impl Game<'_> {
             let _ = self.process_level_events();
             self.native_target_hit(self.dim.id(), pos, strength);
             if p.owner == Some(Who::Player) && (p.guest.is_none() || p.guest == self.lan_acting) {
-                self.stats.custom("target_hit", 1);
+                self.award_custom_stat("target_hit", 1);
                 let kind = if p
                     .arrow
                     .as_ref()
@@ -4734,7 +4777,16 @@ impl Game<'_> {
             // flies as: the splash happens where the hit was, a lingering
             // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
             // and the potion that lands names the hurt it deals.
-            (ProjectileKind::Potion(stack, _), hit) => {
+            (kind @ (ProjectileKind::Potion(..) | ProjectileKind::ExperienceBottle), hit) => {
+                // A bottle flies as the bottle item (`getDefaultItem`).
+                let bottle;
+                let stack = match kind {
+                    ProjectileKind::Potion(stack, _) => stack,
+                    _ => {
+                        bottle = Box::new(ItemStack::new("minecraft:experience_bottle", 1));
+                        &bottle
+                    }
+                };
                 let block = match hit {
                     Hit::Block { pos, face, .. } => Some((
                         pos,
@@ -5327,7 +5379,7 @@ impl Game<'_> {
                     .map_or(2.0, |f| f.0 as f32 * 2.0);
                 // TamableAnimal.feed(.., 2.0F, 2.0F): heals twice the nutrition,
                 // then playEatingSound, which wolves leave empty.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
             }
             // Wolf.mobInteract: the owner puts wolf armor on a tamed adult.
@@ -5465,7 +5517,7 @@ impl Game<'_> {
                     .and_then(|i| i.food.as_ref())
                     .map_or(1.0, |f| f.0 as f32);
                 // TamableAnimal.feed.
-                m.health = (m.health + heal).min(m.attrs.max_health);
+                m.heal(heal);
                 consume = true;
                 eat = eating_sound(m, &mut self.world.random);
             }
@@ -5521,7 +5573,7 @@ impl Game<'_> {
             Species::IronGolem
                 if item == "minecraft:iron_ingot" && m.health < m.attrs.max_health =>
             {
-                m.health = (m.health + 25.0).min(m.attrs.max_health);
+                m.heal(25.0);
                 consume = true;
                 sound = Some("entity.iron_golem.repair");
             }
@@ -6111,7 +6163,7 @@ impl Game<'_> {
         if let Some(done) = self.use_spawn_egg_on_spawner(hit.pos, &spawner_id, data.as_ref()) {
             if done {
                 self.swing_arm();
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.consume_held();
             }
             return Ok(true);
@@ -6142,7 +6194,7 @@ impl Game<'_> {
         }
         self.apply_spawn_egg_entity_data(id, stack);
         self.post_block_game_event("minecraft:entity_place", p, Some(Who::Player), None);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         if !self.creative
             && let Some(s) = self.held_mut().as_mut()
@@ -6256,16 +6308,13 @@ impl Game<'_> {
     /// poses entities: a new frame of draws, the store restarted when the
     /// renderer's no longer matches. Once per frame, before any entity draws.
     pub(super) fn begin_skinning(&self) {
-        let stored = self
-            .renderer
-            .as_ref()
-            .filter(|r| r.skins_entities())
-            .and_then(|r| r.skinned_models());
-        match stored {
-            Some(stored) => self
-                .skin_models
-                .borrow_mut()
-                .begin(&mut self.skin_frame.borrow_mut(), stored),
+        let renderer = self.renderer.as_ref().filter(|r| r.skins_entities());
+        match renderer.and_then(|r| r.skinned_models()) {
+            Some(stored) => {
+                let mut models = self.skin_models.borrow_mut();
+                models.begin(&mut self.skin_frame.borrow_mut(), stored);
+                models.eyes = renderer.is_some_and(|r| r.skins_eyes());
+            }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
     }
@@ -6284,7 +6333,7 @@ impl Game<'_> {
         &self,
         out: &mut Vec<Vertex>,
         entity_start: usize,
-        skinned: Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)>,
+        skinned: Skinned,
     ) {
         let corners = skinned.and_then(|(_, bounds)| bounds);
         if let Some((lo, hi)) = corners {
@@ -6452,12 +6501,15 @@ impl Game<'_> {
                 Vec::new()
             };
             let body = out.len();
-            // The GPU path: an ordinary mob, no outline, no layers the CPU path changes after
-            // drawing them (a player's, the HDR tiers below, the sulfur cube's shell).
+            // The GPU path: an ordinary mob, no layers the CPU path changes after drawing them
+            // (a player's, the HDR tiers below, the sulfur cube's shell). A glowing mob's
+            // silhouette is posed too (`SkinFrame::outline_since`), unless it is invisible:
+            // then only the outline draws.
+            let silhouette_on_gpu = outline.is_none() || !mob.invisible;
             let posable = skinning
                 && !is_player
                 && !layers_only
-                && outline.is_none()
+                && silhouette_on_gpu
                 && armor.is_empty()
                 && !matches!(
                     mob.species(),
@@ -6536,12 +6588,18 @@ impl Game<'_> {
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
-                self.mob_block_geometry(mob, camera, alpha, packed, out);
+                // Held items join the GPU path's draws, their silhouette too.
+                let skin = (skinning && silhouette_on_gpu).then_some(&mut skinned);
+                self.mob_block_geometry(mob, camera, alpha, packed, skin, out);
                 // `native_mob_layer`: a native mod's layer, over the vanilla ones.
                 self.mod_mob_layer_geometry(mob, who, alpha as f32, camera, packed, out);
             }
             if let Some(rgb) = outline {
                 self.mark_outline(&out[entity_start..], rgb);
+                if let Some(((first, _, _), _)) = skinned {
+                    let color = horizon_client::mobs::render::abgr(rgb);
+                    self.skin_frame.borrow_mut().outline_since(first, color);
+                }
                 if mob.invisible {
                     out.truncate(entity_start);
                     continue;

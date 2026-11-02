@@ -1178,7 +1178,7 @@ impl Game<'_> {
             return true;
         }
         self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }
@@ -1224,7 +1224,7 @@ impl Game<'_> {
             self.consume_held();
             self.give_or_drop_stack(locked);
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }

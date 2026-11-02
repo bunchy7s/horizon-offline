@@ -10,6 +10,7 @@ use super::{
         Tempt, goal_clone,
     },
 };
+use horizon_core::geometry::Vec3;
 use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;
 use std::f32::consts::PI;
@@ -22,6 +23,19 @@ pub const COLORS: [&str; 7] = [
     "black",
     "gray",
     "darkbrown",
+];
+/// `Horse.Variant.getSerializedName` in id order (WHITE 0 to DARK_BROWN 6):
+/// the names a `minecraft:horse/variant` component and the save's `Variant`
+/// byte carry. [`COLORS`] is the same order, but names the texture
+/// (`horse_darkbrown`), which drops the underscore.
+pub const VARIANT_NAMES: [&str; 7] = [
+    "white",
+    "creamy",
+    "chestnut",
+    "brown",
+    "black",
+    "gray",
+    "dark_brown",
 ];
 pub const MARKINGS: [&str; 5] = ["", "white", "whitefield", "whitedots", "blackdots"];
 
@@ -717,6 +731,7 @@ pub fn ridden_step(m: &mut Mob) {
             m.velocity.x += f64::from(-0.4 * s * r.jump);
             m.velocity.z += f64::from(0.4 * c * r.jump);
         }
+        crate::motion::native_living_jump(m.id, &m.kind.id);
         if let Some(rider) = m.rider.as_mut() {
             rider.jump = 0.0;
         }
@@ -740,13 +755,17 @@ pub fn tail_tick(m: &mut Mob) {
 /// eating/standing/mouth animations.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if super::camel::is_camel(m.species()) {
+        // Camel.aiStep runs AbstractHorse.aiStep first, and its followMommy is
+        // the last thing that does.
+        follow_mommy(m, w);
         return super::camel::ai_step(m, events);
     }
     if super::llama::is_llama(m.species()) {
+        follow_mommy(m, w);
         return super::llama::ai_step(m, w);
     }
     if m.alive() && m.random.next_int_bound(900).unwrap_or(1) == 0 && m.death_time == 0 {
-        m.health = (m.health + 1.0).min(m.attrs.max_health);
+        m.heal(1.0);
     }
     // Grazing (canEatGrass: horses and donkeys alike).
     if m.alive() && m.rider.is_none() {
@@ -772,6 +791,46 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     }
     stand_tick(m);
     animate(m);
+    follow_mommy(m, w);
+}
+
+/// `AbstractHorse.aiStep`'s last call, `followMommy`: a bred foal that is not
+/// eating keeps a path to the nearest bred `AbstractHorse` within 16 blocks
+/// while it is more than two blocks away (`MOMMY_TARGETING`, and
+/// `this.distanceToSqr(mommy) > 4.0`). `PathNavigation.createPath(entity, 0)`
+/// installs that path and leaves the navigation's speed modifier alone, so the
+/// foal walks it at whatever speed its goals last asked for.
+pub fn follow_mommy(m: &mut Mob, w: &MobWorld) {
+    if !m.extra.bred || !m.is_baby() || m.extra.flag {
+        return;
+    }
+    let at = m.position;
+    // `MOMMY_TARGETING`'s range is 16 from the foal's position, and the search
+    // box is its own bounding box inflated by the same 16.
+    let area = m.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
+    let mommy = w
+        .others_near(area)
+        .filter(|o| {
+            o.alive
+                && o.bred
+                && is_equine(o.species)
+                && area.intersects(o.bounds)
+                && at.distance_squared(o.position) <= 256.0
+        })
+        .min_by(|a, b| {
+            at.distance_squared(a.position)
+                .total_cmp(&at.distance_squared(b.position))
+        })
+        .map(|o| o.position);
+    let Some(mommy) = mommy else {
+        return;
+    };
+    if at.distance_squared(mommy) <= 4.0 {
+        return;
+    }
+    let speed = m.ai.nav.speed_modifier;
+    let path = m.create_path_to_entity(w, [mommy.x, mommy.y, mommy.z], 0);
+    m.nav_move_to_path(w, path, speed);
 }
 /// `AbstractHorse.tick`: the stand counter runs down to `clearStanding`. It is
 /// in `tick`, not `aiStep`, so a horse with no AI stops rearing too.
@@ -1105,5 +1164,145 @@ mod tests {
         let mut horse = equine(2, Species::Horse, "minecraft:horse");
         horse.on_ground = false;
         assert_eq!(swim_volume(&horse, 0.35), 0.35);
+    }
+}
+
+#[cfg(test)]
+mod follow_mommy_tests {
+    use super::*;
+    use crate::mobs::world::{with_built_test_world, with_test_world};
+    use std::sync::Arc;
+
+    /// The block the foal's navigation path ends on after one `ai_step`, with
+    /// the foal at x = 0.5 on a stone floor and `others` (name, x, bred)
+    /// standing on the same floor.
+    fn target_pos(
+        foal: (bool, bool, bool),
+        others: &[(&str, f64, bool)],
+    ) -> Option<Option<[i32; 3]>> {
+        let (bred, baby, eating) = foal;
+        let mut built = None;
+        with_test_world(&[], |_, types| {
+            let mob = |id: u32, name: &str, at: Vec3| {
+                let mut m = Mob::new(id, Arc::new(types.types[name].clone()), at, 0.0);
+                m.on_ground = true;
+                m
+            };
+            let seen: Vec<_> = others
+                .iter()
+                .enumerate()
+                .map(|(i, (name, x, bred))| {
+                    let mut m = mob(i as u32 + 2, name, Vec3::new(*x, 1.0, 0.5));
+                    m.extra.bred = *bred;
+                    m.seen(None)
+                })
+                .collect();
+            let mut foal = mob(1, "minecraft:horse", Vec3::new(0.5, 1.0, 0.5));
+            foal.extra.bred = bred;
+            foal.extra.age = if baby { -24_000 } else { 0 };
+            foal.extra.flag = eating;
+            built = Some((foal, seen));
+        });
+        let (mut foal, seen) = built?;
+        let mut out = None;
+        with_built_test_world(
+            &seen,
+            |world, registry| {
+                // The chunks the pathfinder looks through, over a stone floor.
+                for (cx, cz) in [
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, -1),
+                    (0, 0),
+                    (0, 1),
+                    (1, -1),
+                    (1, 0),
+                    (1, 1),
+                ] {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                for x in -16..32 {
+                    for z in -16..32 {
+                        world.set(x, 0, z, stone).unwrap();
+                    }
+                }
+            },
+            |w, _| {
+                let mut events = Vec::new();
+                ai_step(&mut foal, w, &mut events);
+                out = Some(foal.ai.nav.target_pos);
+            },
+        );
+        out
+    }
+
+    /// `AbstractHorse.followMommy`: a bred foal that is not eating keeps a path
+    /// to the nearest bred `AbstractHorse` within 16 blocks while it is more
+    /// than two blocks away.
+    #[test]
+    fn a_bred_foal_paths_to_the_nearest_bred_horse() {
+        let Some(_) = target_pos((true, true, false), &[]) else {
+            return;
+        };
+        assert_eq!(
+            target_pos((true, true, false), &[("minecraft:horse", 6.5, true)]).unwrap(),
+            Some([6, 1, 0]),
+            "a bred foal walks to the grown horse"
+        );
+        // The nearest of two, whatever the kind.
+        assert_eq!(
+            target_pos(
+                (true, true, false),
+                &[
+                    ("minecraft:horse", 12.5, true),
+                    ("minecraft:donkey", 6.5, true)
+                ]
+            )
+            .unwrap(),
+            Some([6, 1, 0]),
+            "the nearer of the herd"
+        );
+        // `isBred`, `isBaby` and `!isEating` on the foal itself.
+        assert_eq!(
+            target_pos((false, true, false), &[("minecraft:horse", 6.5, true)]).unwrap(),
+            None,
+            "a foal that is not bred does not follow"
+        );
+        assert_eq!(
+            target_pos((true, false, false), &[("minecraft:horse", 6.5, true)]).unwrap(),
+            None,
+            "an adult does not follow"
+        );
+        assert_eq!(
+            target_pos((true, true, true), &[("minecraft:horse", 6.5, true)]).unwrap(),
+            None,
+            "a foal busy eating does not follow"
+        );
+        // `MOMMY_TARGETING`: an AbstractHorse, and bred.
+        assert_eq!(
+            target_pos((true, true, false), &[("minecraft:horse", 6.5, false)]).unwrap(),
+            None,
+            "the grown horse must be bred too"
+        );
+        assert_eq!(
+            target_pos((true, true, false), &[("minecraft:cow", 6.5, true)]).unwrap(),
+            None,
+            "another kind is no mommy"
+        );
+        // 16 blocks of `MOMMY_TARGETING`, and more than two away.
+        assert_eq!(
+            target_pos((true, true, false), &[("minecraft:horse", 20.5, true)]).unwrap(),
+            None,
+            "out of the 16-block range"
+        );
+        assert_eq!(
+            target_pos((true, true, false), &[("minecraft:horse", 1.5, true)]).unwrap(),
+            None,
+            "already at its side"
+        );
     }
 }
