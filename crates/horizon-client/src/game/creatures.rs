@@ -5589,8 +5589,11 @@ impl Game<'_> {
                         // Animal.setInLove: entity event 18 (a baby that
                         // only grew is not in love).
                         if self.mobs[index].extra.in_love > 0 {
-                            self.love_cause.insert(self.mobs[index].id, self.lan_acting);
-                            self.mob_event_particles(self.mobs[index].id, 18);
+                            let id = self.mobs[index].id;
+                            self.love_cause.insert(id, self.lan_acting);
+                            let kind = self.mobs[index].kind.id.clone();
+                            self.native_entity_enter_love_mode(id, &kind, self.lan_acting_uuid);
+                            self.mob_event_particles(id, 18);
                         }
                     }
                     // Animal.mobInteract still consumes the client click when

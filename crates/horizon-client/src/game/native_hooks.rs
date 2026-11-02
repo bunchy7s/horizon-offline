@@ -3957,6 +3957,17 @@ impl Game<'_> {
         let _ = enabled;
     }
 
+    /// A mob entered love mode after player interaction. `player` is the
+    /// feeder when known. @API:native_entity_enter_love_mode@.
+    pub(super) fn native_entity_enter_love_mode(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        player: Option<u128>,
+    ) {
+        let _ = (entity, kind, player);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
