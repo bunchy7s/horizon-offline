@@ -3301,6 +3301,12 @@ impl Game<'_> {
     pub(super) fn native_player_change_main_hand(&mut self, player: u128, name: &str, left: bool) {
         let _ = (player, name, left);
     }
+    /// A server player threw an egg, after its projectile was launched and
+    /// the use was applied. Helpers looking up the guest through `self.lan`
+    /// may find nothing during its packet. Server-side. @API:player_egg_throw@.
+    pub(super) fn native_player_egg_throw(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

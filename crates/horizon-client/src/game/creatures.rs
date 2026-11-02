@@ -5871,6 +5871,11 @@ impl Game<'_> {
                 *self.held_mut() = None;
             }
         }
+        if kind == ProjectileKind::Egg
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_egg_throw(player, &name);
+        }
         Ok(true)
     }
     /// `Mob.checkAndHandleImportantInteractions` with a spawn egg of mob
