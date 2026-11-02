@@ -1551,6 +1551,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_prepare_hopper_transfer(pos)`**: a hopper at `pos` begins a transfer attempt, after its cooldown and enabled checks and before pushing or pulling items.
 - **`native_inventory_move_item(source, destination, item, cancel)`**: a hopper is about to move one item between containers. Set `cancel` to leave it in the source slot.
 - **`native_hopper_inventory_search(hopper, container, entity)`**: a hopper selects a block container or container entity while searching for items.
+- **`native_vault_loot(pos, item)`**: a vault is about to eject a loot item, before the item entity spawns.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a

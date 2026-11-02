@@ -4697,6 +4697,10 @@ impl Game<'_> {
     ) {
         let _ = (hopper, container, entity);
     }
+    /// A vault at `pos` is about to eject a loot item. @API:native_vault_loot@.
+    pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
+        let _ = (pos, item);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
