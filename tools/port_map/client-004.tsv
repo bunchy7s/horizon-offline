@@ -96,7 +96,7 @@ PaintingRenderer.vertex	inline	crates/horizon-client/src/game/paintings.rs::Game
 PandaRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::panda	sit, lie, sneeze and roll states
 ParrotRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::parrot	pose and flap angle
 PhantomRenderer.extractRenderState	port	crates/horizon-client/src/mobs/phantom.rs::anim	gap: player: phantom size is not read, so phantoms never grow
-PhantomRenderer.scale	missing		player: phantoms are never drawn larger (vanilla scale 1 + 0.15 x size); no phantom size in mobs/render.rs::species_scale
+PhantomRenderer.scale	port	crates/horizon-client/src/mobs/render.rs::species_scale (Species::Phantom)	1 + 0.15 * size, with the model's 1.3125 offset
 PhantomRenderer.setupRotations	port	crates/horizon-client/src/mobs/phantom.rs::anim	gap: minor: body pitch (xRot) is not applied; wings and tail are
 PigRenderer.bakeModels	skip:data		model baking; Horizon loads model data from files
 PigRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	cold or normal model by variant
@@ -122,7 +122,7 @@ SnowGolemRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_an
 SquidRenderer.extractRenderState	port	crates/horizon-client/src/mobs/aquatic.rs::squid_ai_step	tentacle cycle clock
 SquidRenderer.setupRotations	missing		player: a squid does not tilt its body while swimming (xBodyRot, zBodyRot); only the vector rotation for ink exists in mobs/aquatic.rs
 StriderRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/render.rs::body	cold texture when suffocating
-StriderRenderer.getShadowRadius	missing		minor: a baby strider keeps the full shadow (shadows.rs::shadow_params takes the species only)
+StriderRenderer.getShadowRadius	port	crates/horizon-client/src/shadows.rs::mob_shadow_radius	a baby strider's radius is halved twice over: 0.5 for the age and 0.5 for the renderer's own factor
 StriderRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::strider	saddle, suffocating and ridden states
 StriderRenderer.isShaking	port	crates/horizon-client/src/mobs/render.rs::shaking	suffocating strider shakes
 SulfurCubeRenderer.submit	port	crates/horizon-client/src/mobs/sulfur_cube.rs::body	normal or small model
@@ -144,6 +144,6 @@ TropicalFishRenderer.getTextureLocation	port	crates/horizon-client/src/mobs/rend
 TropicalFishRenderer.extractRenderState	port	crates/horizon-client/src/mobs/render.rs::body_color	pattern colours
 TropicalFishRenderer.submit	port	crates/horizon-client/src/mobs/render.rs::body	small or large model
 TropicalFishRenderer.setupRotations	missing		player: a tropical fish does not wiggle its body while swimming or flop on land (see SalmonRenderer.setupRotations); no 4.3 amplitude in mobs/
-TurtleRenderer.getShadowRadius	missing		minor: a baby turtle keeps the full shadow (shadows.rs::shadow_params takes the species only)
+TurtleRenderer.getShadowRadius	inline	crates/horizon-client/src/shadows.rs::mob_shadow_radius	the same path, with the turtle's 0.3 age factor and its 0.83 renderer factor
 TurtleRenderer.extractRenderState	port	crates/horizon-client/src/mobs/body_anim.rs::turtle	on-land, laying and egg states
 VexRenderer.extractRenderState	port	crates/horizon-client/src/mobs/vex.rs::anim	charging pose; held item in mobs/render.rs::hand_base
