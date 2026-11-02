@@ -1504,6 +1504,15 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
         }
+        // IronGolem.doPush: a monster that is not a creeper becomes its target
+        // one time in 20, and the draw is made for those alone, then the push.
+        if m.species() == Species::IronGolem
+            && let Who::Mob(id) = who
+            && w.seen(id).is_some_and(super::golem::golem_prey)
+            && m.random.next_int_bound(20).unwrap_or(1) == 0
+        {
+            m.ai.target = Some(who);
+        }
         // Entity.push: passengers of the same vehicle (a rider and its mount
         // among them) never push each other.
         if same {
@@ -3629,5 +3638,57 @@ mod silverfish_walk_target_tests {
             assert!(dirt < 10.0, "standing on dirt falls through, got {dirt}");
         });
         let _ = ran;
+    }
+}
+
+#[cfg(test)]
+mod iron_golem_push_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, category: &str) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        kind.category = category.into();
+        Mob::new(id, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// `IronGolem.doPush`: a monster that is not a creeper and bumps the golem
+    /// becomes its target one time in 20, and the draw is made for those alone,
+    /// so a creeper or an animal leaves the golem's random alone.
+    #[test]
+    fn an_iron_golem_targets_the_monster_that_bumps_it() {
+        let hits = |victim: Mob| {
+            let seen = victim.seen(None);
+            let mut hits = 0;
+            let ran = with_test_world(&[seen], |w, _| {
+                let mut golem = mob(1, Species::IronGolem, "monster");
+                for _ in 0..400 {
+                    let mut events = Vec::new();
+                    push_entities(&mut golem, w, &mut events);
+                    if golem.ai.target.is_some() {
+                        hits += 1;
+                        golem.ai.target = None;
+                    }
+                }
+            });
+            assert!(ran, "the test world needs the prepared data");
+            hits
+        };
+        assert!(
+            hits(mob(2, Species::Zombie, "monster")) > 0,
+            "a zombie that bumps the golem is taken as its target"
+        );
+        assert_eq!(
+            hits(mob(3, Species::Creeper, "monster")),
+            0,
+            "IronGolem.doPush never targets a creeper"
+        );
+        assert_eq!(
+            hits(mob(4, Species::Cow, "creature")),
+            0,
+            "a pushed animal is not an Enemy"
+        );
     }
 }
