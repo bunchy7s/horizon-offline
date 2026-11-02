@@ -222,6 +222,16 @@ public final class VanillaCommandExecOracle {
                             out.append(gson.toJson(record)).append('\n');
                         }
                     }
+                    case "dragon_contacts" -> {
+                        // Optional fixture: the shared runner still compiles on its own.
+                        try {
+                            Class<?> fixture = Class.forName("dev.horizonlab.parity.VanillaDragonContactsOracle");
+                            var method = fixture.getDeclaredMethod("run", ServerLevel.class);
+                            out.append(gson.toJson(method.invoke(null, level))).append('\n');
+                        } catch (ReflectiveOperationException e) {
+                            throw new IllegalStateException(e);
+                        }
+                    }
                     case "settle" -> settle();
                     case "break" -> {
                         JsonArray pos = op.getAsJsonArray("pos");
