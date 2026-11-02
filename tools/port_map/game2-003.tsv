@@ -22,7 +22,7 @@ Vex.setVexFlag	inline	crates/horizon-client/src/mobs/vex.rs::Charge::start	start
 Vex.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	Vex arm: populate (sword) then enchant
 Vex.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	iron sword in hand with drop chance 0
 Witch.registerGoals	port	crates/horizon-client/src/mobs/witch.rs::register	gap: minor: raiders that hurt a witch are still targeted back (vanilla ignores them)
-Witch.handleEntityEvent	missing		player: a witch shows purple magic puffs about once a minute while idle; not drawn here (the RNG draw is kept in ai_step)
+Witch.handleEntityEvent	port	crates/horizon-client/src/game/remote_mob_particles.rs::Game::witch_magic_particles	event 15: `nextInt(35) + 10` purple puffs half a block over the head, the count drawn again every pass as the Java loop condition does; `game/remote.rs:3949` hands it every witch entity event (the rest of the handler is LivingEntity's)
 Witch.getDamageAfterMagicAbsorb	port	crates/horizon-client/src/mobs.rs::Mob::damage_with	85% less from #witch_resistant_to, nothing from its own hit
 Zoglin.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: look-at-target and move-to-target sinks are not separate; the goal set stands in for them
 Zoglin.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: idle is a stroll only; no look-target sometimes and no do-nothing pauses
@@ -33,7 +33,7 @@ Zoglin.createAttributes	skip:data		attribute defaults come from the data tables 
 Zoglin.doHurtTarget	port	crates/horizon-client/src/mobs/piglin.rs::hoglin_hurt_target	headbutt event, zoglin attack sound, hurt and throw
 Zoglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: HurtByTarget sets the attacker as target with no 4-block check against a much nearer current target
 Zoglin.setAttackTarget	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: target has no 200-tick expiry; Horizon sets the target directly
-Zoglin.updateActivity	missing		player: a zoglin that starts a fight does not play its angry grunt (zoglin.angry)
+Zoglin.updateActivity	port	crates/horizon-client/src/mobs/piglin.rs::zoglin_step	on entering the fight activity it plays `entity.zoglin.angry`; `mobs/ai.rs:1718` runs it for every zoglin after the brain
 Zoglin.customServerAiStep	inline	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: the brain tick is not run; the zoglin goal set runs in the general AI loop
 Zoglin.setBaby	port	crates/horizon-client/src/mobs/finalize.rs::set_baby	Zoglin arm: non-ageable baby age and 0.5 attack damage
 Zoglin.handleEntityEvent	port	crates/horizon-client/src/mobs/piglin.rs::client_event	event 4 starts the headbutt; the attack sound comes from hoglin_hurt_target
@@ -136,12 +136,12 @@ HoglinAi.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::regis
 HoglinAi.initFightActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	MeleeAttack.create(40) for adults and create(15) for babies (`MeleeAttack::intervals(40, 15)`); the brain's own order has no tick parity here (the probe has no hoglin brain)
 HoglinAi.initRetreatActivity	port	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	
 HoglinAi.createIdleMovementBehaviors	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: no look-target walk or do-nothing pauses; a plain stroll only
-HoglinAi.updateActivity	missing		player: no grunt when a hoglin switches activity (angry or retreat); only the ambient roll plays
+HoglinAi.updateActivity	port	crates/horizon-client/src/mobs/piglin.rs::update_activity	takes the first valid activity and voices the one it changed to (`hoglin_sound`: angry in a fight, retreat when avoiding or converting, else ambient); the same fn covers PiglinAi and PiglinBruteAi
 HoglinAi.onHitTarget	inline	crates/horizon-client/src/mobs/piglin.rs::hoglin_hurt_target	gap: player: no retreat when piglins outnumber hoglins; the hit only attacks
-HoglinAi.retreatFromNearestTarget	missing		player: no retreat from the nearest piglin or hoglin target (part of the missing retreat activity)
-HoglinAi.setAvoidTarget	missing		player: no avoid target is set, so a hoglin never backs off after a piglin hit (retreat activity missing)
+HoglinAi.retreatFromNearestTarget	port	crates/horizon-client/src/mobs/piglin.rs::retreat_from_nearest	the nearest of the new target, the avoid target and the attack target retreats `who` (`BehaviorUtils.getNearestTarget`: strictly closer wins), then a hoglin sets an avoid target and a piglin also stops hunting
+HoglinAi.setAvoidTarget	port	crates/horizon-client/src/mobs/piglin.rs::set_avoid_target	forgets the attack target and the walk and avoids `who` for a 5 to 20 second retreat, sampled from the level random
 HoglinAi.isPosNearNearestRepellent	inline	crates/horizon-client/src/mobs/piglin.rs::HoglinAvoidRepellent::can_use	the 8-block repellent distance check
-HoglinAi.piglinsOutnumberHoglins	missing		player: the count of piglins against hoglins that starts a retreat is not kept
+HoglinAi.piglinsOutnumberHoglins	port	crates/horizon-client/src/mobs/piglin.rs::piglins_outnumber_hoglins	an adult hoglin counts itself and sees more adult piglins than hoglins (`piglins > hoglins + 1`)
 HoglinAi.maybeRetaliate	port	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: no check for hoglin attackers or the 4-block nearer-target rule; HurtByTarget alerts others
 HoglinAi.setAttackTarget	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: target has no 200-tick expiry and the breed target is not cleared
 HoglinAi.setAttackTargetIfCloserThanCurrent	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	NearestTarget keeps the closest target and skips pacified hoglins
