@@ -10396,7 +10396,7 @@ pub fn dispatch_anvil_craft_post(
         pos,
         craft,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "anvil_craft_post") {
         mod_hook.anvil_craft_post(host, &mut event);
     }
 }
@@ -10426,7 +10426,7 @@ pub fn dispatch_anvil_craft_pre(
         pos,
         craft,
     };
-    for mod_hook in mods {
+    for mod_hook in super::entered(mods, "anvil_craft_pre") {
         if matches!(mod_hook.anvil_craft_pre(host, &mut event), Flow::Cancel) {
             *cancel = true;
             break;
