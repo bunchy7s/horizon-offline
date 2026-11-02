@@ -139,7 +139,95 @@ pub fn decode(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     decode_bytes(&horizon_core::prepared_files::read(path)?)
 }
 /// A PNG in memory as RGBA pixels.
+/// The image formats [`decode_bytes`] reads, told apart by their own leading
+/// bytes rather than by a file name: what a server sends has no name, and a
+/// name would not be trustworthy anyway.
+///
+/// The game's own resources are PNG throughout; WebP and JPEG are here for
+/// images fetched from the network (Modrinth project icons in the resource
+/// pack browser), which are commonly either.
+enum ImageFormat {
+    Png,
+    /// `RIFF....WEBP`.
+    WebP,
+    /// Starts with the SOI marker `FF D8`.
+    Jpeg,
+}
+
+impl ImageFormat {
+    /// The format `data` begins with, or `None` for anything else.
+    fn sniff(data: &[u8]) -> Option<Self> {
+        const PNG_MAGIC: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        if data.starts_with(&PNG_MAGIC) {
+            return Some(Self::Png);
+        }
+        if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+            return Some(Self::WebP);
+        }
+        if data.starts_with(&[0xFF, 0xD8]) {
+            return Some(Self::Jpeg);
+        }
+        None
+    }
+}
+
+/// A WebP image as RGBA8. Still frames and animations both decode; an
+/// animation gives its first frame, as an animated PNG would.
+fn decode_webp(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    let mut decoder =
+        image_webp::WebPDecoder::new(std::io::Cursor::new(data)).map_err(|e| e.to_string())?;
+    let (width, height) = decoder.dimensions();
+    // Four bytes a pixel whether or not the image carries alpha: the caller
+    // always wants RGBA.
+    let mut rgba = vec![0u8; (width as usize) * (height as usize) * 4];
+    if decoder.has_alpha() {
+        decoder.read_image(&mut rgba).map_err(|e| e.to_string())?;
+    } else {
+        let mut rgb = vec![0u8; (width as usize) * (height as usize) * 3];
+        decoder.read_image(&mut rgb).map_err(|e| e.to_string())?;
+        for (out, pixel) in rgba.chunks_exact_mut(4).zip(rgb.chunks_exact(3)) {
+            out.copy_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+        }
+    }
+    Ok((width, height, rgba))
+}
+
+/// A JPEG image as RGBA8. JPEG has no alpha, so every pixel is opaque.
+fn decode_jpeg(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    let mut decoder = zune_jpeg::JpegDecoder::new(data);
+    let pixels = decoder.decode().map_err(|e| e.to_string())?;
+    let info = decoder.info().ok_or("the JPEG states no size")?;
+    let (width, height) = (u32::from(info.width), u32::from(info.height));
+    let count = (width as usize) * (height as usize);
+    // The decoder gives RGB for a colour image and one byte a pixel for a
+    // greyscale one; both become RGBA here.
+    let channels = pixels.len().checked_div(count).unwrap_or(0);
+    let mut rgba = Vec::with_capacity(count * 4);
+    match channels {
+        3 => {
+            for p in pixels.chunks_exact(3) {
+                rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
+            }
+        }
+        1 => {
+            for p in &pixels {
+                rgba.extend_from_slice(&[*p, *p, *p, 255]);
+            }
+        }
+        _ => return Err("the JPEG decoded to an unexpected channel count".into()),
+    }
+    Ok((width, height, rgba))
+}
+
 pub fn decode_bytes(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
+    // Anything that is not a PNG goes to its own decoder first; unknown bytes
+    // fall through to the PNG reader so its error is the one reported, as
+    // before.
+    match ImageFormat::sniff(data) {
+        Some(ImageFormat::WebP) => return decode_webp(data),
+        Some(ImageFormat::Jpeg) => return decode_jpeg(data),
+        Some(ImageFormat::Png) | None => {}
+    }
     let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -2712,6 +2800,26 @@ mod tests {
         assert!(empty.is_err());
         assert!(!root.join("empty.png").exists());
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn image_formats_are_told_apart_by_their_leading_bytes() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+        assert!(matches!(ImageFormat::sniff(&png), Some(ImageFormat::Png)));
+        // RIFF with a WEBP tag at byte 8; RIFF alone is not enough (WAV is
+        // RIFF too).
+        let mut webp = b"RIFF    WEBPVP8 ".to_vec();
+        assert!(matches!(ImageFormat::sniff(&webp), Some(ImageFormat::WebP)));
+        webp[8..12].copy_from_slice(b"WAVE");
+        assert!(ImageFormat::sniff(&webp).is_none());
+        assert!(matches!(
+            ImageFormat::sniff(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some(ImageFormat::Jpeg)
+        ));
+        // Too short to be any of them, and plainly something else.
+        assert!(ImageFormat::sniff(b"RIFF").is_none());
+        assert!(ImageFormat::sniff(b"").is_none());
+        assert!(ImageFormat::sniff(b"<html>").is_none());
     }
 
     #[test]
