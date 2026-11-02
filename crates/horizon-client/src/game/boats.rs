@@ -677,11 +677,12 @@ impl Game<'_> {
             b.velocity.z += f64::from(r.cos() * acceleration);
             b.paddling = [right && !left || up, left && !right || up];
         }
-        // Entity.move: collisions zero the blocked components.
+        // Entity.move: collisions zero the blocked components, the world border's
+        // among them (`CollisionGetter.borderCollision`).
         let mut scene = EntityCollisions {
             blocks: scene,
             entities: &obstacles,
-            border: None,
+            border: Some((self.border.geometry(), [b.position.x, b.position.z])),
         };
         if let Ok(moved) = scene.resolve(b.bounds(), b.velocity, 0.0, b.on_ground) {
             b.position = Vec3::new(
