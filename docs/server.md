@@ -521,7 +521,13 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     sets one (checked against its type and bounds, logged and set only when the value changes) and
     `notification/gamerules/updated` follows every change, by that method or by `/gamerule`
     (`Game::set_game_rule`);
-  - planned: the rest of `serversettings/*`, the activity and world-upgrade notifications and the heartbeat.
+  - `server/activity`: a login attempt (the game records `login_activity` in its login gate, as
+    `ServerActivityMonitor.reportLoginActivity` is called when a login starts), told at most once in thirty
+    seconds and lost otherwise, as the monitor clears its flag whatever it did; and `server/status`, the
+    heartbeat: every `status-heartbeat-interval` seconds (none at 0, the first after as many) the status
+    `server/status` answers, up or not, to whoever is connected;
+  - planned: the rest of `serversettings/*` and the world-upgrade notifications (after `WorldUpgrader`'s server
+    side).
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
 
