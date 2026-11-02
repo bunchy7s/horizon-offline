@@ -527,10 +527,11 @@ impl Game<'_> {
             if (moved.y - delta.y).abs() > 1.0e-7 {
                 c.velocity.y = 0.0;
             }
-            // Entity.checkFallDamage: the move's drop counts (not in water),
+            // Entity.checkFallDamage: the move's drop counts (not in water, as of
+            // the tick before: `isInWater` is `wasTouchingWater`),
             // and a landing hands the whole fall to causeFallDamage, which
             // sets a TNT minecart off at (fall / 10) squared.
-            if moved.y < 0.0 && !self.cart_in_water(c) {
+            if moved.y < 0.0 && !c.in_water {
                 c.fall_distance -= f64::from(moved.y as f32);
             }
             if c.on_ground {
