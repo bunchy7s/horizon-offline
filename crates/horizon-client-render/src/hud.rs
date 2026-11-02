@@ -115,6 +115,10 @@ pub const MAX_ATLAS_SIZE: u32 = 16384;
 pub const MAP_SLOTS: usize = 256;
 /// The atlas slot the minimap extra draws into.
 pub const MINIMAP_SPRITE: &str = "horizon/minimap";
+/// A mod's own image (`native_mod_image`), drawn with `native_sprite`; big
+/// enough for a world map's 1024 blocks at a block a pixel.
+pub const MOD_IMAGE_SPRITE: &str = "horizon/modimage";
+pub const MOD_IMAGE_SIZE: u32 = 1024;
 /// Atlas slots for downloaded player skins (`skins/<sha1>`), 64x64 each.
 /// Vanilla registers a texture per skin. Here the slots are shared
 /// (`skins::SkinSlots`): skins drawn in the last frame keep theirs, and a
@@ -687,6 +691,13 @@ impl HudAtlas {
             crate::minimap::SIZE as u32,
             crate::minimap::SIZE as u32,
             vec![0; crate::minimap::SIZE * crate::minimap::SIZE * 4],
+        ));
+        // A mod's own image (native `mod_image`).
+        images.push((
+            MOD_IMAGE_SPRITE.into(),
+            MOD_IMAGE_SIZE,
+            MOD_IMAGE_SIZE,
+            vec![0; (MOD_IMAGE_SIZE * MOD_IMAGE_SIZE * 4) as usize],
         ));
         // Downloaded skins (game/scoreboard.rs).
         for i in 0..SKIN_SLOTS {

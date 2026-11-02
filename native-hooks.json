@@ -435,6 +435,10 @@
     {
       "name": "move_items",
       "target": "horizon_client::game::machines::native_items::Game<'_>::native_move_items"
+    },
+    {
+      "name": "mod_image",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_image"
     }
   ],
   "hooks": [

@@ -703,6 +703,14 @@ pub trait Host {
         item: Option<&str>,
         max: u32,
     ) -> u32;
+    /// A mod's own RGBA image, uploaded into the HUD atlas slot
+    /// [`MOD_IMAGE_SPRITE`](crate::hud::MOD_IMAGE_SPRITE) and drawn with
+    /// `native_sprite`: its own source rectangle crops and stretches it. `rgba`
+    /// is `width * height` pixels of four bytes, each side at most
+    /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
+    /// size. The upload costs a texture patch of the image, so send one when the
+    /// image changed, not every frame. API 154.
+    fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool;
     /// Hides that player (a vanish) from the players below permission
     /// `level`, or shows them again (None): from the next tick those players
     /// lose them from the Tab list and the world (their client stops
