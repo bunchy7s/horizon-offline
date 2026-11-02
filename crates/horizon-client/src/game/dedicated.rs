@@ -1457,13 +1457,17 @@ impl Game<'_> {
             }
             "whitelist" => self.console_whitelist(state, &rest),
             // The chat filter's (game/chat_filter.rs), on servers that filter.
-            "unmute"
-                if rest.len() == 1 && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
+            command
+                if super::chat_filter::MUTE_COMMANDS.contains(&command)
+                    && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
             {
                 if let Some(mut host) = self.lan.take() {
-                    let reply = self.unmute(&mut host, rest[0], "Server");
+                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
+                    let replies = self.mute_command(&mut host, &words, "Server");
                     self.lan = Some(host);
-                    self.console_reply(lit(&reply));
+                    for reply in replies {
+                        self.console_reply(lit(&reply));
+                    }
                 }
             }
             "ban" if !rest.is_empty() => {

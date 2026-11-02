@@ -345,6 +345,33 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
+### The build's warnings
+
+Before it builds, the launcher reads the mods' `[[injection]]` lists and says three things in `native/build.log` that
+horizon-mixins only implies by its order. Two mods injecting at one place — the same function, kind, selector and
+ordinal; the places are the manifest's, horizon-mixins is the one that resolves a selector against the source:
+
+```
+warning: mods beta, alpha both inject at hook `frame` HEAD; beta runs first (priority descending, mod id ascending).
+```
+
+Two mods wrapping one function at its head and its return, which run in that order whatever their priorities:
+
+```
+warning: mods alpha (HEAD), beta (RETURN) inject into hook `tick`: HEAD runs on entry, RETURN on return, whatever their priorities.
+```
+
+And a `cancellable = true` `HEAD` on a hook point:
+
+```
+warning: alpha's `stop` can cancel at hook `frame` HEAD: a Break skips the later injections and the function's body.
+```
+
+A raw `target` is not matched against the catalog — whether it names a hook point's function only the source knows —
+so the third warning names a `hook`, and `hook = "frame"` and `target = "…::native_frame"` are not told apart. Only
+`HEAD` is named: the interior kinds may carry `cancellable` too, but what a `Break` skips there is less than the body.
+A mod's `priority` defaults to 0, as horizon-mixins defaults it. Neither warning stops the build.
+
 ### The mod's crate
 
 A `[[crate]]` is a Cargo package of the bundle's, staged as `native-crates/<mod>/<crate>/` and added to the
@@ -721,7 +748,8 @@ API 79 adds `native_modify_default_components(item, components)`, in `horizon-wo
 components in `items.json`'s form, for any item, vanilla's included (NeoForge's `ModifyDefaultComponentsEvent`). Insert
 or replace a component to set it (`"minecraft:max_stack_size": 16`), remove it to take it away. The item table,
 loot, enchanting and item models all read the changed defaults, and stacks are saved and sent against them as
-against vanilla's. Asked for every item each time the game reads the defaults: answer the same each time. Client and
+against vanilla's. A `minecraft:max_stack_size` above vanilla's 99 is kept, up to `i32::MAX`. Asked for every item
+each time the game reads the defaults: answer the same each time. Client and
 server each ask their own mods, so both need the mod. Bundles that use it need `"hooks": 79`.
 
 API 80 adds the open screen hears of a mouse button going down (`native_screen_mouse_button_pressed_pre`) or up (`native_screen_mouse_button_released_pre`) before it acts, as vanilla's `ScreenEvent.MouseButtonPressed.Pre` and `.MouseButtonReleased.Pre`: the screen, the GLFW button (0 left, 1 right, 2 middle, 3 back, 4 forward; a button past those is the platform's own number, which differs between systems) and GLFW's modifier bits (shift 1, control 2, alt 4, super 8), with the pointer in `screen.mouse`. A cancelled press goes no further (no slot, screen button, drag or hotbar key); cancel a release only when its press was cancelled, or a drag it ended stays held. They fire on the window only, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves, and never for a gamepad or keyboard-focus click. Bundles need "hooks": 80.
@@ -1515,6 +1543,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   is about to be created. Set `cancel` to prevent the bolt and its effects; `cause` names the creation path.
 - **`native_time_skip(dimension, from, to, cause, cancel)`**: the server clock is about to jump after enough players
   sleep or through `/time set`, `/time add`, or `/time set <marker>`. Set `cancel` to keep the old time.
+- **`native_sleep_finished_time(dimension, current, new_time)`**: enough players slept through the night and the
+  `advance_time` rule is on (NeoForge's `SleepFinishedTimeEvent`). `new_time` comes in as the next morning's day time;
+  set another to wake everyone then. A time before `current` is refused and the morning stays; the check runs once after
+  every mod, so a later mod sees the value an earlier one set. It runs before `native_time_skip`, which hears the jump
+  to the time chosen here and may still cancel it; the players wake either way. Bundles need
+  `"hooks": @API:sleep_finished_time@`.
 - **`native_world_border_bounds_changed()`**: `/worldborder set` or `/worldborder add` changed the border size or started a timed size change. Bundles need `"hooks": @API:world_border_bounds_changed@`.
 - **`native_world_border_center_changed()`**: `/worldborder center` moved the border center. It hears successful commands only. Bundles need `"hooks": @API:world_border_center_changed@`.
 - **`native_world_game_rule_change(player, name, rule, value)`**: an operator changed a game rule through the server game rules screen; it is heard after the final value is applied. Bundles need `"hooks": @API:world_game_rule_change@`.
@@ -1970,6 +2004,29 @@ only for a server's players (single player's server thread, LAN guests, a dedica
 shift-click tops up a slot (not a `results` one) that already holds the same item without asking `may_place`, only `max_stack`: to keep a
 slot from filling that way, lower `max_stack`.
 
+### Shift-click in a mod container
+
+`native_menu_quick_move(pos, entity, container_slots, slot, stack, handled)` is a mod container's
+`AbstractContainerMenu.quickMoveStack`, the method a Java menu overrides to say where a shift-clicked stack goes. It is
+asked on the server before the game's own routing, for the mod block entity at `pos` whose menu a player shift-clicked
+with the left or right button, on a vanilla menu type (`minecraft:generic_9x1`...) or on the mod's own menu type. `slot`
+is the menu's index: below `container_slots` the block's own slot (`entity.items[slot]`), from there the player's
+inventory, its 27 main slots, then the hotbar. `stack` is a copy of what that slot holds. Take what you move out of
+`stack` (into `entity.items`, or into another block with `native_insert_item`) and set `handled`: the slot holds what
+is left of `stack` (whatever you wrote to that slot of `entity.items`), the game's routing is skipped, and the player's
+client gets the whole menu again. Unhandled, `entity.items` goes back to what it held and the game moves the stack as
+for any container; a later mod sees what an earlier one did to `stack`. If the mod removes its own block, the menu
+closes and the player's inventory is sent again. This is how a storage terminal
+whose items live in other blocks, or a screen that hides the container's slots, takes a shift-click from the
+inventory, and how a machine sends fuel to its fuel slot and ores to its input.
+
+Not asked for an empty slot, a slot the mod's screen hides, another click type, a spectator or a dead player, a menu
+no longer valid, or a shift-click during a drag (it only ends the drag, as in vanilla). It is asked once per click, where vanilla asks `quickMoveStack` again while the same item keeps moving: move
+all you want in one call. The clicking player's state is swapped in (`native_acting_player` names them), and `entity`
+is out of the world during the call, as in `native_menu_button`. Only a server's players (single player's server
+thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
+clicks already.
+
 ### Items' default components
 
 `crates/horizon-world/src/item_defaults.rs`: `native_modify_default_components(item, components)`, a free function a
@@ -1978,8 +2035,10 @@ bundle targets as `horizon_world::item_defaults::native_modify_default_component
 insert or replace a key to set a component (`"minecraft:max_stack_size": 16`), remove it to take the component away.
 Any item can be changed, vanilla's included. Write values as vanilla's codec writes them: nothing decodes them with it.
 Each table reads the fields it understands and takes a default for a field it can't read, but keeps the component, so a
-malformed `minecraft:food` still makes the item edible, with no nutrition. Only the stack size is kept to vanilla's
-1 to 99.
+malformed `minecraft:food` still makes the item edible, with no nutrition. A stack size above vanilla's 99 is kept: the
+data pack's own is held to `ExtraCodecs.intRange(1, 99)`, a mod's to 1 to `i32::MAX` (the count the wire and the save
+carry), and a value that is not a number leaves the data pack's own. Keep a stack above 99 to a server whose clients run
+the mod: a vanilla client decodes the count with vanilla's 1 to 99 and cannot show it.
 
 - Every table that reads items' defaults reads them through it: the item table, loot, enchanting, item models,
   banners, pot sherds, item rarity in chat. Stacks are saved and sent as their difference from the changed defaults, as from vanilla's.

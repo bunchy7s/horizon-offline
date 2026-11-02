@@ -20,6 +20,8 @@ horizon-client-render = { path = "../horizon-client-render" }
 horizon-command = { path = "../horizon-command" }
 horizon-items = { path = "../horizon-items" }
 horizon-core = { path = "../horizon-core" }
+# `horizon-ctl mcp`: the Model Context Protocol, shared with the launcher and the server.
+horizon-mcp = { path = "../horizon-mcp" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-optifine = { path = "../horizon-optifine" }
 horizon-threads = { path = "../horizon-threads" }

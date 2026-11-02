@@ -142,6 +142,7 @@ mod hand;
 mod headless;
 mod ime;
 mod initial_spawn;
+mod input_trace;
 mod integrated;
 mod interactions;
 mod item_draw;
@@ -206,6 +207,7 @@ mod native_explosions;
 mod native_falling;
 mod native_hooks;
 mod native_inventories;
+mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
 mod native_menus;
@@ -217,6 +219,7 @@ mod native_net;
 mod native_panel;
 mod native_panel_recipes;
 mod native_projectiles;
+mod native_quick_move;
 mod native_recipes;
 mod native_server;
 mod native_shaders;
@@ -269,6 +272,7 @@ mod remote_stations;
 mod remote_vehicles;
 mod render_control;
 mod render_tick;
+mod repro;
 mod respawn_anchor;
 mod saves_control;
 mod saving;
@@ -398,6 +402,7 @@ pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeShake};
+pub use native_item_energy::ItemEnergyBuffer;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
@@ -859,6 +864,16 @@ struct Hit {
     pos: [i32; 3],
     face: [i32; 3],
     point: [f64; 3],
+}
+impl Hit {
+    /// The block the clicked face leads to (`pos.relative(direction)`).
+    fn beside(&self) -> [i32; 3] {
+        [
+            self.pos[0] + self.face[0],
+            self.pos[1] + self.face[1],
+            self.pos[2] + self.face[2],
+        ]
+    }
 }
 /// What a falling block's tick did (`FallingBlockEntity.tick`).
 enum FallStep {
@@ -2913,6 +2928,10 @@ struct Game<'a> {
     ui_wait: ui_control::UiWait,
     /// What happened, for `events` and `wait-for` (game/events.rs).
     events: events::Events,
+    /// Who caused each input event: a person, an agent or the game (game/input_trace.rs).
+    input_trace: input_trace::InputTrace,
+    /// A repro recording, export or replay (game/repro.rs).
+    repro: repro::Repro,
     /// The overworld's last `sky_darken` and its inputs (time, rain, thunder).
     sky_darken_memo: std::cell::Cell<Option<((i64, u32, u32), i32)>>,
     /// The last water plane `water_plane` found, kept while none is in reach.
@@ -3878,6 +3897,8 @@ impl Game<'_> {
             previous: p,
             velocity: Vec3::new(velocity[0], velocity[1], velocity[2]),
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay,
             bob_offset: bob,
@@ -6587,6 +6608,7 @@ impl Game<'_> {
                 Some(BlockEntity::StructureBlock(_)) => self.structure_block_placed(key),
                 Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
                 Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),
+                Some(BlockEntity::Jukebox(_)) => self.jukebox_placed(target, &stack),
                 Some(BlockEntity::Sign(sign)) if !sign.waxed => self.open_sign_editor(key, true),
                 _ => {}
             }
@@ -7301,6 +7323,7 @@ impl Game<'_> {
             None => 0.0,
         };
         self.ticks += 1;
+        self.repro_tick();
         // An in-frame LAN host's player has the entity id its guests see it by.
         if !self.serving()
             && let (Some(host), Some(p)) = (&self.lan, self.player.as_mut())
@@ -7755,7 +7778,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
             horizon_client::spans::time("tick_item_frames", || self.tick_item_frames());
-            horizon_client::spans::time("tick_armor_stands", || self.tick_armor_stands());
+            horizon_client::spans::time("tick_armor_stands", || self.tick_armor_stands())?;
             horizon_client::spans::time("tick_cushions", || self.tick_cushions());
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
@@ -9179,6 +9202,10 @@ impl Game<'_> {
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {
+        // A server's result slot is the server's (`CraftingMenu.slotChangedCraftingGrid`).
+        if let Some(r) = &self.remote {
+            return r.craft_result.clone();
+        }
         self.craft_recipe().map(|(_, result)| result)
     }
     /// The recipe id and result of the crafting grid.
@@ -12623,6 +12650,8 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
+        // A repro recording is finished and bundled before the process may go away.
+        self.repro_on_exit();
         if self.title.is_some() || self.saved_for_exit {
             return Ok(());
         }
@@ -12649,6 +12678,9 @@ impl Game<'_> {
         Ok(())
     }
     fn close_world(&mut self) -> Result<()> {
+        // A recording cannot cross into another world, and a replay feeding the
+        // title screen is nonsense.
+        self.repro_world_closed();
         self.clear_waypoints();
         self.post_effects.clear();
         self.spectated_post_effect = None;
@@ -12925,24 +12957,29 @@ impl Game<'_> {
         }
     }
     /// `BucketItem.use`'s place position: a water bucket fills the clicked
-    /// block itself when that block is a liquid container (a waterloggable
-    /// stair, slab, fence, ...); every other bucket empties into the block the
-    /// clicked face leads to. `SolidBucketItem` places like a block item, into
-    /// a replaceable clicked block.
+    /// block itself when that block can hold it (`canBlockContainFluid`: a
+    /// waterloggable stair, slab, fence, ..., but not a double slab, kelp or
+    /// seagrass); every other bucket empties into the block the clicked face
+    /// leads to. `SolidBucketItem` places like a block item, into a
+    /// replaceable clicked block.
     pub(super) fn bucket_target(&self, content: BucketContent, hit: &Hit) -> [i32; 3] {
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let behaviours = self.res.behaviours();
         if content == BucketContent::Powder {
             if self.res.facts().get(clicked).replaceable {
                 return hit.pos;
             }
-        } else if content.is_water() && self.res.behaviours().is_liquid_container(clicked) {
+        } else if content.is_water()
+            && behaviours.is_liquid_container(clicked)
+            && behaviours.can_place_liquid(
+                clicked,
+                horizon_world::fluid::FluidKind::Water,
+                self.creative,
+            )
+        {
             return hit.pos;
         }
-        [
-            hit.pos[0] + hit.face[0],
-            hit.pos[1] + hit.face[1],
-            hit.pos[2] + hit.face[2],
-        ]
+        hit.beside()
     }
     /// The cauldron at `pos`, and whether water is above it
     /// (`CauldronInteractions.isUnderWater`).
@@ -13394,18 +13431,24 @@ impl Game<'_> {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
-            // `Player.isShiftKeyDown`: only air takes a fluid under Shift.
+            let [x, y, z] = hit.beside();
+            let beside = Some(BlockPos::new(x, y, z));
+            // `Player.isShiftKeyDown`: a block that refuses the fluid (any
+            // non-air block under Shift) passes it to the block beside, where
+            // Shift no longer counts.
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             let creative = self.creative;
             let emptied = self.with_level(|b, level, ticks| {
-                b.bucket_empty(level, ticks, pos, content, sound, sneaking, creative)
+                b.bucket_empty(
+                    level, ticks, pos, beside, content, sound, sneaking, creative,
+                )
             });
             self.process_level_events()?;
-            if !emptied {
+            let Some(emptied) = emptied else {
                 return Ok(UseResult::Fail);
-            }
+            };
             if self.dim == Dim::Nether && content.is_water() {
-                self.evaporation_smoke(target);
+                self.evaporation_smoke([emptied.x, emptied.y, emptied.z]);
             }
             // `BucketItem.emptyContents` uses `playSound(player, …)`: the
             // actor's client already played the empty / evaporate sound from
@@ -14748,7 +14791,14 @@ impl Game<'_> {
         if self.enough_slept() {
             if self.ui.rules.bool("advance_time") {
                 let t = self.world.day_time;
-                let target = t + 24000 - t.rem_euclid(24000);
+                let mut target = t + 24000 - t.rem_euclid(24000);
+                // SleepFinishedTimeEvent: the mods may move the wake-up time,
+                // never before now (`setTimeAddition` refuses a lower one).
+                let mut asked = target;
+                self.native_sleep_finished_time(self.dim.id(), t, &mut asked);
+                if asked >= t {
+                    target = asked;
+                }
                 let mut cancel = false;
                 self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
                 if !cancel {
@@ -15691,7 +15741,7 @@ impl Game<'_> {
         lines.extend(g.lines);
         let on_top = g.on_top;
         let colored_lights = if self.title.is_none() {
-            self.native_frame_visuals(camera, &mut lines)
+            self.native_frame_visuals(camera, alpha, &mut lines)
         } else {
             Vec::new()
         };
@@ -16946,7 +16996,7 @@ impl ApplicationHandler for Game<'_> {
         } else {
             None
         };
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
             self.native_input_key(&event, modifiers);
         }
@@ -16963,6 +17013,10 @@ impl ApplicationHandler for Game<'_> {
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
             // MouseHandler.onMove with the pointer grabbed; applied once per frame.
+            self.note_input(
+                input_trace::InputOrigin::User,
+                input_trace::TraceKind::Motion { x, y },
+            );
             self.mouse.on_move(0.0, 0.0, x, y, true, true);
             self.last_input = Instant::now();
         }
@@ -16988,6 +17042,7 @@ impl Game<'_> {
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
         mut event: WindowEvent,
+        origin: input_trace::InputOrigin,
     ) {
         // A headless game has no window: its events (the frame, the control socket's input)
         // carry `WindowId::dummy()`.
@@ -17010,6 +17065,9 @@ impl Game<'_> {
         {
             *button = MouseButton::Right;
         }
+        // Who caused it, before the event is handled: the trace wants the
+        // window's own keys, never the ones the socket made up.
+        self.trace_window_event(origin, &event);
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
         {
@@ -18482,13 +18540,23 @@ impl Game<'_> {
                 // Offscreen frames don't wait for the window to be drawn: an
                 // occluded window (a locked macOS session) gets no redraws.
                 let id = w.id();
-                self.handle_window_event(event_loop, id, WindowEvent::RedrawRequested);
+                self.handle_window_event(
+                    event_loop,
+                    id,
+                    WindowEvent::RedrawRequested,
+                    input_trace::InputOrigin::Game,
+                );
             } else {
                 w.request_redraw();
             }
         } else if self.options.headless {
             // The headless loop paces the frames itself (`run_headless`).
-            self.handle_window_event(event_loop, WindowId::dummy(), WindowEvent::RedrawRequested);
+            self.handle_window_event(
+                event_loop,
+                WindowId::dummy(),
+                WindowEvent::RedrawRequested,
+                input_trace::InputOrigin::Game,
+            );
             return;
         }
         // A window the compositor hides gets no `RedrawRequested` at all, so
@@ -18921,6 +18989,8 @@ impl<'a> Game<'a> {
             flight: None,
             ui_wait: Default::default(),
             events: Default::default(),
+            input_trace: Default::default(),
+            repro: Default::default(),
             agent: agent::Agent::default(),
             view_frustum: None,
             entity_culler: None,

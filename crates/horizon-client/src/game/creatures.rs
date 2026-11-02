@@ -2297,29 +2297,7 @@ impl Game<'_> {
                         self.level_event_at(2001, pos, old.0 as i32);
                     }
                 }
-                MobEvent::CrackTurtleEgg { pos } => {
-                    let state = self.world.block(pos[0], pos[1], pos[2]);
-                    let eggs = self
-                        .pack
-                        .assets
-                        .registry
-                        .state(state)
-                        .filter(|s| s.name == "minecraft:turtle_egg")
-                        .and_then(|s| s.properties.get("eggs"))
-                        .and_then(|e| e.parse::<i32>().ok());
-                    if let Some(eggs) = eggs {
-                        let at = BlockPos::new(pos[0], pos[1], pos[2]);
-                        // decreaseEggs: the break sound and the remaining
-                        // eggs (a stack of one is destroyed after it).
-                        self.with_level(|b, level, ticks| {
-                            b.turtle_egg_destroyed_by_player(level, ticks, at, state);
-                            if eggs <= 1 {
-                                b.destroy_block(level, ticks, at, false);
-                            }
-                        });
-                        self.process_level_events()?;
-                    }
-                }
+                MobEvent::CrackTurtleEgg { pos } => self.crack_turtle_egg(pos)?,
                 MobEvent::BedOccupied { pos, occupied } => self.set_bed_occupied(pos, occupied),
                 MobEvent::SetDoorOpen { pos, open } => {
                     let pos = BlockPos::new(pos[0], pos[1], pos[2]);
@@ -2721,6 +2699,31 @@ impl Game<'_> {
                     self.drop_gift_loot(mob, table, at);
                 }
             }
+        }
+        Ok(())
+    }
+    /// `TurtleEggBlock.decreaseEggs` after an entity's step or landing won its
+    /// roll (`destroyEgg`): the break sound and the remaining eggs (a stack of
+    /// one is destroyed after it).
+    pub(super) fn crack_turtle_egg(&mut self, pos: [i32; 3]) -> Result<()> {
+        let state = self.world.block(pos[0], pos[1], pos[2]);
+        let eggs = self
+            .pack
+            .assets
+            .registry
+            .state(state)
+            .filter(|s| s.name == "minecraft:turtle_egg")
+            .and_then(|s| s.properties.get("eggs"))
+            .and_then(|e| e.parse::<i32>().ok());
+        if let Some(eggs) = eggs {
+            let at = BlockPos::new(pos[0], pos[1], pos[2]);
+            self.with_level(|b, level, ticks| {
+                b.turtle_egg_destroyed_by_player(level, ticks, at, state);
+                if eggs <= 1 {
+                    b.destroy_block(level, ticks, at, false);
+                }
+            });
+            self.process_level_events()?;
         }
         Ok(())
     }
@@ -4638,84 +4641,37 @@ impl Game<'_> {
                 self.combat.explosion_in_water = false;
                 result?;
             }
-            (
-                ProjectileKind::Potion {
-                    effect,
-                    ticks,
-                    amplifier,
-                    ..
-                },
-                _,
-            ) => {
-                // AbstractThrownPotion.applySplash: within 4 blocks, scaled by distance.
-                if let Some(pv) = self.player_view() {
-                    let d2 = (pv.position.x - at.x).powi(2)
-                        + (pv.position.y - at.y).powi(2)
-                        + (pv.position.z - at.z).powi(2);
-                    if d2 < 16.0 && !self.creative {
-                        let scale = 1.0 - d2.sqrt() / 4.0;
-                        let t = (f64::from(*ticks) * scale + 0.5) as i32;
-                        match *effect {
-                            "minecraft:instant_damage" => {
-                                // indirectMagic(potion, owner), built where the
-                                // hurt happens: the thrower, or the potion
-                                // itself when it has none. A status effect
-                                // deals no damage, so it records no source.
-                                let owner = self
-                                    .combat
-                                    .projectile_owner
-                                    .filter(|id| self.mob_display_name(*id).is_some());
-                                match owner {
-                                    Some(owner) => {
-                                        self.note_attacker("minecraft:indirect_magic", owner)
-                                    }
-                                    None => self.note_direct_entity(
-                                        "minecraft:indirect_magic",
-                                        Text::translate("entity.minecraft.splash_potion", &[]),
-                                    ),
-                                }
-                                self.hurt_player_by(
-                                    "minecraft:indirect_magic",
-                                    6.0 * (1 << *amplifier) as f32 * scale as f32,
-                                )
-                            }
-                            e if t > 20 => self.give_player_effect(e, t, *amplifier),
-                            _ => {}
-                        }
-                    }
+            // AbstractThrownPotion.onHit, then onHitAsPotion from the stack it
+            // flies as: the splash happens where the hit was, a lingering
+            // potion's cloud sits at the mob it hit (ThrownLingeringPotion),
+            // and the potion that lands names the hurt it deals.
+            (ProjectileKind::Potion(stack), hit) => {
+                let block = match hit {
+                    Hit::Block { pos, face, .. } => Some((
+                        pos,
+                        Direction::approximate_nearest(Vec3::new(
+                            f64::from(face[0]),
+                            f64::from(face[1]),
+                            f64::from(face[2]),
+                        )),
+                    )),
+                    _ => None,
+                };
+                let mob = match hit {
+                    Hit::Entity {
+                        who: Who::Player, ..
+                    } => self.player.as_ref().map(|pv| pv.position),
+                    Hit::Entity {
+                        who: Who::Mob(id), ..
+                    } => self.mobs.iter().find(|m| m.id == id).map(|m| m.position),
+                    _ => None,
+                };
+                let owner = self.potion_owner(p.owner);
+                self.splash(stack, at, mob, block, p.age, &owner);
+                if stack.item.as_ref() != "minecraft:experience_bottle" {
+                    let item = stack.item.to_string();
+                    self.native_potion_splash(&item, [at.x, at.y, at.z]);
                 }
-                // A witch's healing potions reach the raiders around the splash.
-                if matches!(
-                    *effect,
-                    "minecraft:instant_health" | "minecraft:regeneration"
-                ) {
-                    let center = at;
-                    for m in &mut self.mobs {
-                        let d2 = m.position.distance_squared(center);
-                        if !m.alive()
-                            || d2 >= 16.0
-                            || !horizon_client::mobs::raider::is_raider(m.species())
-                        {
-                            continue;
-                        }
-                        let scale = 1.0 - d2.sqrt() / 4.0;
-                        if *effect == "minecraft:instant_health" {
-                            let heal = (4 << *amplifier) as f64 * scale;
-                            m.health = (m.health + heal as f32).min(m.attrs.max_health);
-                        } else {
-                            let t = (f64::from(*ticks) * scale + 0.5) as i32;
-                            if t > 20 {
-                                m.add_effect(effect, t, *amplifier);
-                            }
-                        }
-                    }
-                }
-                self.audio.play(
-                    "minecraft:entity.splash_potion.break",
-                    Some(atp),
-                    1.0,
-                    self.world.random.next_float() * 0.1 + 0.9,
-                );
             }
             (ProjectileKind::LlamaSpit, Hit::Entity { who, .. }) => match who {
                 Who::Player => {

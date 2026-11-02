@@ -328,7 +328,7 @@ impl Game<'_> {
         event: WindowEvent,
     ) {
         let was = std::mem::replace(&mut self.pad.menu.synthetic, true);
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, super::input_trace::InputOrigin::Game);
         self.pad.menu.synthetic = was;
     }
 

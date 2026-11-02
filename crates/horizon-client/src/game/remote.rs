@@ -487,6 +487,9 @@ pub(super) struct Remote {
     predictions: HashMap<[i32; 3], (i32, i32)>,
     /// Open container: (window id, menu name).
     pub(super) menu: Option<(i32, String)>,
+    /// The crafting result slot of the open menu as the server last set it
+    /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
+    pub(super) craft_result: Option<ItemStack>,
     /// The open menu's title as the server named it, with its styles.
     pub(super) menu_title: Option<horizon_client::text::Text>,
     state_id: i32,
@@ -977,6 +980,7 @@ impl Game<'_> {
             sent_info: info,
             predictions: HashMap::new(),
             menu: None,
+            craft_result: None,
             menu_title: None,
             state_id: 0,
             use_target: None,
@@ -1708,7 +1712,17 @@ impl Game<'_> {
             .backlog_since
             .is_some_and(|since| since.elapsed() >= BACKLOG_LIMIT);
         let mut chunks = Duration::ZERO;
+        // A run of ForgetLevelChunk (thousands when the server's view moves far: a
+        // teleport at 32 chunks) is forgotten at once, before whatever follows it.
+        let mut forgotten = horizon_client::fast_hash::FxHashSet::default();
         while let Some(item) = events.pop_front() {
+            if let Received::Event(Event::Packet(packet)) = &item
+                && let C::ForgetLevelChunk(p) = &**packet
+            {
+                forgotten.insert((p.pos[0], p.pos[1]));
+                continue;
+            }
+            self.forget_remote_columns(&mut forgotten);
             let chunk = matches!(item, Received::Chunk(_));
             if chunk && !overdue && chunks >= CHUNK_PACKETS_PER_FRAME {
                 events.push_front(item);
@@ -1897,6 +1911,9 @@ impl Game<'_> {
             if self.remote.is_none() {
                 break;
             }
+        }
+        if self.remote.is_some() {
+            self.forget_remote_columns(&mut forgotten);
         }
         if let Some(r) = self.remote.as_mut() {
             r.backlog_since = if events.is_empty() {
@@ -2124,28 +2141,37 @@ impl Game<'_> {
     }
     /// The columns a moved or resized storage no longer holds.
     fn drop_remote_chunks_out_of_range(&mut self) {
-        let gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
+        let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
             .world
             .chunks
             .keys()
             .copied()
             .filter(|&(x, z)| !self.remote_chunk_in_range(x, z))
             .collect();
+        self.forget_remote_columns(&mut gone);
+    }
+    /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
+    /// of their own when there are many), their sections in the renderer and their block
+    /// entities, each store once for all of them.
+    fn forget_remote_columns(
+        &mut self,
+        gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    ) {
         if gone.is_empty() {
             return;
         }
         let mut freed = Vec::with_capacity(gone.len());
-        for &(x, z) in &gone {
+        for &(x, z) in gone.iter() {
             freed.extend(self.streaming.forget(&mut self.world, x, z));
         }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_columns(gone.iter().copied());
         }
         horizon_client::chunk::free_columns(freed, gone.len());
-        // One pass for all of them.
         self.world
             .block_entities
             .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+        gone.clear();
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
     /// packet's type, loads the tag (`loadWithComponents`); an empty tag
@@ -2812,7 +2838,14 @@ impl Game<'_> {
             return;
         };
         if internal == 200 {
-            return; // the result slot is recomputed from the grid
+            // ClientboundContainerSetSlotPacket for the open menu's slot 0: the
+            // server's result of its own recipes (a world's data packs' too).
+            if container == self.remote_menu().0
+                && let Some(r) = self.remote.as_mut()
+            {
+                r.craft_result = item;
+            }
+            return;
         }
         let slot = self.slot_mut(internal);
         let changed = !super::hand::matches_for_swap(slot.as_ref(), item.as_ref());
@@ -3012,15 +3045,9 @@ impl Game<'_> {
             C::LevelChunkWithLight(p) => self.remote_chunk(&p, None),
             C::LightUpdate(p) => self.remote_light_update(&p),
             C::ChunksBiomes(p) => self.remote_chunks_biomes(&p),
+            // `poll_remote` forgets a run of them at once.
             C::ForgetLevelChunk(p) => {
-                let [x, z] = p.pos;
-                self.streaming.forget(&mut self.world, x, z);
-                self.world
-                    .block_entities
-                    .retain(|k, _| (k.0 >> 4, k.2 >> 4) != (x, z));
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.remove_columns([(x, z)]);
-                }
+                self.forget_remote_columns(&mut [(p.pos[0], p.pos[1])].into_iter().collect());
             }
             C::ChunkBatchFinished(_) => {
                 // ChunkBatchSizeCalculator's ceiling; meshing runs on workers.
@@ -5204,6 +5231,8 @@ impl Game<'_> {
             previous: at,
             velocity,
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset,
@@ -5488,6 +5517,7 @@ impl Game<'_> {
 
     fn tick_remote_level(&mut self) -> Result<()> {
         self.ticks += 1;
+        self.repro_tick();
         // Hud.tick ends with ChatComponent.tick.
         self.ui.chat.tick(&self.gui.atlas, self.ticks);
         self.tick_sign_editor();
@@ -7651,18 +7681,24 @@ impl Game<'_> {
         };
         let target = self.bucket_target(content, &hit);
         let pos = horizon_core::position::BlockPos::new(target[0], target[1], target[2]);
+        let [x, y, z] = hit.beside();
+        let beside = Some(horizon_core::position::BlockPos::new(x, y, z));
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
         let creative = self.creative;
-        // A water bucket on a liquid container fills it server-side only.
-        let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let client_change =
-            !(content.is_water() && self.res.behaviours().is_liquid_container(clicked));
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
-            let emptied =
-                b.bucket_empty(&mut level, ticks, pos, content, sound, sneaking, creative);
+            let emptied = b.bucket_empty(
+                &mut level, ticks, pos, beside, content, sound, sneaking, creative,
+            );
+            // Water poured into a liquid container (where it went, which may
+            // be the block beside a refusing one) fills it server-side only.
+            let client_change = !(content.is_water()
+                && emptied.is_some_and(|at| {
+                    use horizon_world::level::LevelAccess as _;
+                    b.is_liquid_container(level.block_state(at))
+                }));
             (
-                emptied,
+                emptied.is_some(),
                 client_change.then(|| level.changed.into_iter().collect()),
                 std::mem::take(&mut level.sounds),
             )
@@ -8753,6 +8789,20 @@ impl Game<'_> {
         self.send_clicks(container, sent);
     }
     fn send_clicks(&mut self, container: i32, clicks: Vec<Predicted>) {
+        // A result the engine claims to have changed is the one the server
+        // agrees to (`click_agreed`), so it sends none: keep it. A result the
+        // engine doesn't claim (a recipe it doesn't know) the server sends.
+        if matches!(
+            self.remote_menu().1.as_str(),
+            "inventory" | "minecraft:crafting"
+        ) && let Some(r) = self.remote.as_mut()
+        {
+            for (.., changed, _) in &clicks {
+                if let Some((_, result)) = changed.iter().find(|(slot, _)| *slot == 0) {
+                    r.craft_result = result.clone();
+                }
+            }
+        }
         let state = self.remote.as_ref().map_or(0, |r| r.state_id);
         let hashed = |g: &Self, s: &Option<ItemStack>| g.hashed_stack(s);
         for (slot, button, input, changed, carried) in clicks {
@@ -8861,6 +8911,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu = None;
             r.menu_title = None;
+            r.craft_result = None;
         }
         self.mount_menu_reset();
         // The client's menu has no level access: what it holds is the server's.
