@@ -6932,7 +6932,9 @@ impl Game<'_> {
         true
     }
     /// Draw a stack and its slot decorations, except the count, at `at`,
-    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    /// `size` GUI pixels square. False when nothing was drawn: an unknown item
+    /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
+    /// API @API:item_stack@.
     pub(super) fn native_item_stack(
         &self,
         batch: &mut HudBatch,
@@ -6940,6 +6942,11 @@ impl Game<'_> {
         at: [f32; 2],
         size: f32,
     ) -> bool {
+        // GuiGraphicsExtractor.item and itemDecorations draw nothing for an
+        // empty stack.
+        if &*stack.item == "minecraft:air" || stack.count == 0 {
+            return false;
+        }
         if self.res.items().get(&stack.item).is_none() {
             return false;
         }
