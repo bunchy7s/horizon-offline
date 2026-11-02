@@ -333,10 +333,14 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
         } else {
             move_to(view, stack, 0..n, false, rules)
         }
-    } else if (5..=8).contains(&i) || i == 45 || i < 5 {
+    } else if (5..=8).contains(&i) || i < 5 {
         move_to(view, stack, 9..45, false, rules)
     } else {
-        // Wear it, otherwise swap between the main inventory and the hotbar.
+        // Wear it, otherwise the stack fills the inventory: from the main
+        // slots for the hotbar and the off hand, from the hotbar for the
+        // main ones. The off hand is in this arm too, so armour worn there
+        // is put on like any other (InventoryMenu.quickMoveStack asks for
+        // the item's equipment slot before it looks at the clicked index).
         let armor = rules
             .armor_index(&stack.item)
             .filter(|a| view.get(5 + a).is_none());
@@ -370,8 +374,10 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             })
         } else if hotbar.contains(&i) {
             move_to(view, stack, main, false, rules)
-        } else {
+        } else if main.contains(&i) {
             move_to(view, stack, hotbar, false, rules)
+        } else {
+            move_to(view, stack, 9..45, false, rules)
         }
     };
     view.set(i, rest);
