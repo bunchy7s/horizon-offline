@@ -2472,6 +2472,9 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
+            // PrepareSpawnTask: with no saved rotation the player faces the
+            // world spawn's angle (`/setworldspawn ... <angle>`).
+            playerdata::face_world_spawn(g, self.level.world_spawn_angle);
             g.health = 20.0;
             g.food = 20;
             g.dimension = super::Dim::Overworld.id().to_owned();
