@@ -3952,6 +3952,11 @@ impl Game<'_> {
         let _ = (line, cancel);
     }
 
+    /// The dedicated server's whitelist changed to `enabled`. @API:native_whitelist_state_update@.
+    pub(super) fn native_whitelist_state_update(&mut self, enabled: bool) {
+        let _ = enabled;
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
