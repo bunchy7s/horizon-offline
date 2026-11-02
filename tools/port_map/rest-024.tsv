@@ -133,7 +133,7 @@ UpgradeProgress.FileFixStats.getProgress	skip:ui		progress fraction for the upgr
 UpgradeStatusTranslator.translate	skip:ui		translatable status text for the upgrade screen
 UpgradeStatusTranslator.Messages.forStatus	skip:ui		translatable status text for the upgrade screen
 WorldUpgrader.getDataFixContextTag	port	crates/horizon-world/src/datafix/files.rs::generators	gap: minor: returns (dimension, generator type) pairs, not the context compound
-WorldUpgrader.verifyChunkPosAndEraseCache	missing		minor: Optimize World's cache erase (Heightmaps, isLightOn, BlockLight, SkyLight) is not in Horizon's datafix
+WorldUpgrader.verifyChunkPosAndEraseCache	port	crates/horizon-world/src/datafix/world_upgrader.rs::verify_chunk_pos_and_erase_cache	the chunk's position is checked and its Heightmaps, isLightOn, BlockLight and SkyLight are dropped, in the per-chunk upgrade step
 WorldUpgrader.verifyChunkPos	skip:other		only logs a warning for a chunk with a wrong stored position
 WorldUpgrader.work	port	crates/horizon-world/src/datafix/files.rs::upgrade_world	gap: minor: no Optimize World pass and no progress; upgrade_world runs the file fixes then the data upgrade
 WorldUpgrader.upgradeLevels	inline	crates/horizon-world/src/datafix/files.rs::upgrade_world	per-dimension loop folded into upgrade_world
