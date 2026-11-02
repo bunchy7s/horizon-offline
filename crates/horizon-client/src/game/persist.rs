@@ -336,6 +336,7 @@ impl Game<'_> {
         let loaded = std::mem::take(&mut self.world.loaded_entities);
         let player_uuid = self.level.player_uuid;
         for (key, tags) in loaded {
+            let count = tags.len();
             for mut tag in tags {
                 // PersistentEntitySectionManager.addEntity's `loaded`.
                 let from_disk = !take_fresh(&mut tag);
@@ -667,6 +668,7 @@ impl Game<'_> {
                     _ => self.persist.unknown.entry(key).or_default().push(tag),
                 }
             }
+            self.native_entities_load(self.dim.id(), [key.0, key.1], count);
         }
     }
     /// A saved mob and, under `Passengers`, the mobs riding it.

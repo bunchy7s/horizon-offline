@@ -3911,6 +3911,12 @@ impl Game<'_> {
         let _ = wait;
     }
 
+    /// Entities from `chunk` finished loading into the server world. `count`
+    /// is the number of saved entity records read. @API:native_entities_load@.
+    pub(super) fn native_entities_load(&mut self, dimension: &str, chunk: [i32; 2], count: usize) {
+        let _ = (dimension, chunk, count);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
