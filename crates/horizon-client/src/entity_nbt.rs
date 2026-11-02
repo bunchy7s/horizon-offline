@@ -677,10 +677,10 @@ pub fn mob_to_nbt(
         | "minecraft:trader_llama" => {
             map.insert("Tame".into(), Tag::Byte(i8::from(m.extra.tame)));
             map.insert("Temper".into(), Tag::Int(i32::from(m.extra.variant3)));
-            // AbstractHorse.addAdditionalSaveData; Horizon models neither.
-            for key in ["EatingHaystack", "Bred"] {
-                map.entry(key.into()).or_insert(Tag::Byte(0));
-            }
+            map.insert("Bred".into(), Tag::Byte(i8::from(m.extra.bred)));
+            // AbstractHorse.addAdditionalSaveData; Horizon does not model the
+            // eating haystack yet.
+            map.entry("EatingHaystack".into()).or_insert(Tag::Byte(0));
             if let Some(owner) = m.extra.owner {
                 map.insert("Owner".into(), Tag::IntArray(owner.to_vec()));
             }
@@ -1608,6 +1608,7 @@ pub fn mob_from_nbt(
     if crate::mobs::equine::is_equine(m.species()) {
         m.extra.tame = flag(tag, "Tame");
         m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
+        m.extra.bred = flag(tag, "Bred");
         m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
         let v = number(tag.get("Variant")).unwrap_or(0) as i32;
         m.extra.variant = (v & 0xFF).clamp(0, 6) as u8;
