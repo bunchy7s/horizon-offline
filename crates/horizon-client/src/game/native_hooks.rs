@@ -2824,7 +2824,15 @@ impl Game<'_> {
         to: [f64; 3],
         dimension: &str,
     ) {
-        let _ = (player, name, from, to, dimension);
+        mod_api::dispatch_player_teleported(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            from,
+            to,
+            dimension,
+        );
     }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
