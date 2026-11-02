@@ -258,9 +258,17 @@ fn host_method(
     let original = sig.ident.clone();
     sig.ident = syn::parse_str(name).map_err(|e| format!("invalid helper name {name}: {e}"))?;
     let mut args = Vec::new();
-    if !matches!(sig.inputs.first(), Some(FnArg::Receiver(r)) if r.reference.is_some()) {
-        return Err(format!("{name}: expected a borrowed Game receiver"));
-    }
+    let callee = match sig.inputs.first() {
+        Some(FnArg::Receiver(r)) if r.reference.is_some() => "self.",
+        Some(FnArg::Receiver(_)) => {
+            return Err(format!("{name}: expected a borrowed Game receiver"));
+        }
+        _ => {
+            // A receiverless helper stays callable on `&self` in the trait.
+            sig.inputs.insert(0, syn::parse_quote!(&self));
+            "Self::"
+        }
+    };
     for arg in sig.inputs.iter_mut().skip(1) {
         let FnArg::Typed(arg) = arg else {
             return Err(format!("{name}: unexpected receiver"));
@@ -275,7 +283,7 @@ fn host_method(
     Ok((
         format!("{docs}{};\n", sig.to_token_stream()),
         format!(
-            "{} {{ self.{original}({}) }}\n",
+            "{} {{ {callee}{original}({}) }}\n",
             sig.to_token_stream(),
             args.join(", ")
         ),
@@ -1355,6 +1363,12 @@ mod tests {
         );
         assert!(declaration.contains("& self"));
         assert!(implementation.contains("self.native_read(pos)"));
+        let dir: syn::ItemFn = syn::parse_quote! { fn native_dir() -> PathBuf { todo!() } };
+        let (declaration, implementation) = super::host_method(&dir, "dir", &exports).unwrap();
+        assert!(declaration.contains("& self"));
+        assert!(implementation.contains("Self::native_dir()"));
+        let owned: syn::ItemFn = syn::parse_quote! { fn native_owned(self) {} };
+        assert!(super::host_method(&owned, "owned", &exports).is_err());
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_write(&mut self, value: i32) { }
         };
