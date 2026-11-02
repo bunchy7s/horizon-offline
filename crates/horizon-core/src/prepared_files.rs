@@ -516,7 +516,10 @@ mod tests {
         assert_eq!(read_head(&stick, 4).unwrap(), b"{\"st");
         assert_eq!(read_head(&stick, 100).unwrap(), b"{\"stick\":1}");
         assert_eq!(read_head(&sound, 2).unwrap(), b"Og");
-        assert_eq!(read_head(&added, 2).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            read_head(&added, 2).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }
