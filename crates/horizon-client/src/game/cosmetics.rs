@@ -5,6 +5,7 @@
 
 use super::Game;
 use horizon_client::fast_hash::FxHashMap;
+use horizon_client::mobs::anim::Poses;
 use horizon_client::mobs::{Mob, Part, Polygon};
 use horizon_cosmetics::{Item, Slot};
 use std::cell::{Cell, RefCell};
@@ -28,6 +29,8 @@ pub(super) struct Cosmetics {
     /// Items drawn whose texture isn't in the atlas yet.
     uploads: RefCell<Vec<Arc<Item>>>,
     frame: Cell<u32>,
+    /// Kept between players so a frame of avatars allocates none: the wearer's body, an item.
+    poses: RefCell<(Poses, Poses)>,
     /// Item files from a folder (`HORIZON_COSMETICS_LOCAL`): mannequins wear them too.
     local: bool,
 }
@@ -160,12 +163,16 @@ impl Game<'_> {
         // The avatar's body, posed as it is drawn.
         let (key, _) = render::body(m);
         let body = m.kind.layer(&key).unwrap_or(&m.kind.model);
-        let mut body_poses = anim::Poses::new(body);
+        let mut scratch = self.cosmetics.poses.borrow_mut();
+        let (body_poses, poses) = &mut *scratch;
+        body_poses.reset(body);
         let data = self.res.mob_data();
-        anim::setup(m, &anim::state(m, alpha), &mut body_poses, &data.animations);
+        anim::setup(m, &anim::state(m, alpha), body_poses, &data.animations);
         let ticks = m.age as f32 + alpha;
         let frame = self.cosmetics.frame.get();
         let mut bounds = None;
+        // Items on one bone (a back item and a shoulder pet both ride the body) share its matrix.
+        let mut bones: [Option<(horizon_cosmetics::Bone, glam::Mat4)>; 3] = [None; 3];
         for item in worn.iter() {
             if covered(m, item.slot) {
                 continue;
@@ -186,9 +193,20 @@ impl Game<'_> {
             if b.marked.replace(frame) != frame {
                 self.skin_downloads.borrow_mut().drawn(&b.location);
             }
-            let Some(bone) = render::part_matrix(body, base, &body_poses, item.bone.part(), 0.0)
-            else {
-                continue;
+            let known = bones.iter().flatten().find(|(b, _)| *b == item.bone);
+            let bone = match known {
+                Some(&(_, matrix)) => matrix,
+                None => {
+                    let Some(matrix) =
+                        render::part_matrix(body, base, body_poses, item.bone.part(), 0.0)
+                    else {
+                        continue;
+                    };
+                    if let Some(free) = bones.iter_mut().find(|b| b.is_none()) {
+                        *free = Some((item.bone, matrix));
+                    }
+                    matrix
+                }
             };
             // The texture fills the top-left of its 64×64 slot.
             let (w, h) = (item.texture.width as f32 / 64.0, item.texture.height as f32 / 64.0);
@@ -198,7 +216,7 @@ impl Game<'_> {
                 rect.u0 + (rect.u1 - rect.u0) * w,
                 rect.v0 + (rect.v1 - rect.v0) * h,
             ];
-            let mut poses = anim::Poses::new(&b.model);
+            poses.reset(&b.model);
             item.animate(ticks, |name, pose| *poses.get(name) = pose);
             if gpu {
                 let mut models = self.skin_models.borrow_mut();
@@ -215,7 +233,7 @@ impl Game<'_> {
                     light,
                     overlay: 0,
                 };
-                if skin.draw(&b.model, bone, &poses, paint) {
+                if skin.draw(&b.model, bone, poses, paint) {
                     bounds = skin.bounds;
                     continue;
                 }
