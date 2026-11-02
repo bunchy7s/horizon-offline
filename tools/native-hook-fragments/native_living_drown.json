@@ -2,7 +2,7 @@
   "hooks": [
     {
       "name": "living_drown",
-      "target": "horizon_client::breathing::native_living_drown",
+      "target": "horizon_client_lib::breathing::native_living_drown",
       "neoforge": "LivingDrownEvent",
       "side": "server",
       "mod_api": {
