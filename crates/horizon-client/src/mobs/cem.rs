@@ -18,10 +18,12 @@
 //! new geometry.
 
 use super::{MobType, Part, Polygon};
-use horizon_optifine::cem::model::{Bone, EntityModel, MAX_BYTES, parse_jem};
+use horizon_optifine::cem::{
+    files::{atlas_name, jem_files, load_jem},
+    model::{Bone, EntityModel},
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    fs,
     path::Path,
     sync::Arc,
 };
@@ -130,86 +132,12 @@ impl CemModels {
     }
 }
 
-/// The `.jem` at `path`, its warnings logged; None, with a warning, when it can't be read or
-/// parsed.
-fn load_jem(root: &Path, path: &str) -> Option<EntityModel> {
-    let Some(text) = read_small(&root.join(path)) else {
-        log::warn!("Horizon: custom entity model {path}: unreadable or over {MAX_BYTES} bytes");
-        return None;
-    };
-    let jem = match parse_jem(path, &text, &mut |p: &str| read_small(&root.join(p))) {
-        Ok(jem) => jem,
-        Err(e) => {
-            log::warn!("Horizon: custom entity model {e}");
-            return None;
-        }
-    };
-    for warning in &jem.warnings {
-        log::warn!("Horizon: custom entity model {warning}");
-    }
-    if let Some(texture) = &jem.texture {
-        if atlas_name(texture).is_none() {
-            log::warn!(
-                "Horizon: custom entity model {path}: its texture {texture} is outside \
-                 assets/minecraft/textures/, so not in the atlas: the vanilla one draws"
-            );
-        } else if !root.join(texture).is_file() {
-            log::warn!(
-                "Horizon: custom entity model {path}: its texture {texture} doesn't exist, \
-                 so not in the atlas: the vanilla one draws"
-            );
-        }
-    }
-    Some(jem)
-}
-
 /// Every model layer of `types` by its key.
 fn vanilla_layers(types: &HashMap<String, Arc<MobType>>) -> HashMap<&str, &Arc<Part>> {
     types
         .values()
         .flat_map(|t| t.layers.iter().map(|(k, v)| (k.as_str(), v)))
         .collect()
-}
-
-/// A pack file's text, None when it's missing or larger than a model may read: its size is
-/// checked before anything is read.
-fn read_small(path: &Path) -> Option<String> {
-    let len = fs::metadata(path).ok()?.len();
-    if len > MAX_BYTES as u64 {
-        return None;
-    }
-    fs::read_to_string(path).ok()
-}
-
-/// Every `.jem` of the CEM folders by model name, sorted, each name's files best first:
-/// `emf/cem` before `optifine/cem` whichever form either uses, and within one folder the flat
-/// `<name>.jem` before `<name>/<name>.jem`.
-fn jem_files(root: &Path) -> BTreeMap<String, Vec<String>> {
-    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for base in ["assets/minecraft/emf/cem", "assets/minecraft/optifine/cem"] {
-        let Ok(entries) = fs::read_dir(root.join(base)) else {
-            continue;
-        };
-        let (mut flat, mut nested) = (Vec::new(), Vec::new());
-        for e in entries.flatten() {
-            let name = e.file_name().to_string_lossy().into_owned();
-            if let Some(model) = name.strip_suffix(".jem") {
-                // A directory named `x.jem` isn't a model.
-                if e.path().is_file() {
-                    flat.push((model.to_owned(), format!("{base}/{name}")));
-                }
-            } else {
-                let path = format!("{base}/{name}/{name}.jem");
-                if root.join(&path).is_file() {
-                    nested.push((name, path));
-                }
-            }
-        }
-        for (model, path) in flat.into_iter().chain(nested) {
-            out.entry(model).or_default().push(path);
-        }
-    }
-    out
 }
 
 /// The CEM model names with a layer key of their own; any other name `n` is `n#main`.
@@ -500,13 +428,6 @@ impl CemLayer {
     }
 }
 
-/// The atlas name of a texture resource path: `assets/minecraft/textures/entity/x.png` is
-/// `entity/x`. Textures outside a `textures/` folder are not in the atlas.
-fn atlas_name(path: &str) -> Option<String> {
-    let rest = path.strip_prefix("assets/minecraft/textures/")?;
-    Some(rest.strip_suffix(".png").unwrap_or(rest).to_owned())
-}
-
 /// The first part named `name`, depth first (`ModelPart.getChild` through the tree).
 fn find_mut<'a>(part: &'a mut Part, name: &str) -> Option<&'a mut Part> {
     if part.name == name {
@@ -544,6 +465,7 @@ fn part(bone: &Bone, count: &mut usize, ids: &mut HashMap<String, String>) -> Pa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     fn plane(name: &str, children: Vec<Part>) -> Part {
         Part {
@@ -703,35 +625,6 @@ mod tests {
         let part = get(&models.layer(key)?.model, name);
         assert_eq!(part.children.len(), 1, "{key} {name}: one custom box");
         Some(part.polygons.len() == 1)
-    }
-
-    #[test]
-    fn emf_files_win_and_a_flat_file_beats_its_folder() {
-        let (replace, attach) = (jem("leg1", false), jem("leg1", true));
-        let files = [
-            // EMF's folder form over OptiFine's flat file.
-            ("optifine/cem/cow.jem", attach.as_str()),
-            ("emf/cem/cow/cow.jem", replace.as_str()),
-            // One folder: the flat file over the folder form.
-            ("optifine/cem/pig.jem", replace.as_str()),
-            ("optifine/cem/pig/pig.jem", attach.as_str()),
-            // A directory named `sheep.jem` is no file: the folder form stands.
-            ("optifine/cem/sheep.jem/readme.txt", ""),
-            ("optifine/cem/sheep/sheep.jem", attach.as_str()),
-        ];
-        let tree = plane("root", vec![plane("right_hind_leg", vec![])]);
-        let models = models(
-            "precedence",
-            &files,
-            &["cow#main", "pig#main", "sheep#main"],
-            &tree,
-        );
-        assert_eq!(attached(&models, "cow#main", "right_hind_leg"), Some(false));
-        assert_eq!(attached(&models, "pig#main", "right_hind_leg"), Some(false));
-        assert_eq!(
-            attached(&models, "sheep#main", "right_hind_leg"),
-            Some(true)
-        );
     }
 
     #[test]

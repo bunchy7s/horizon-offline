@@ -9,7 +9,7 @@ EnderDragonRenderer.submit	port	crates/horizon-client/src/game/dragon.rs::Game::
 EnderDragonRenderer.submitRays	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_rays	
 EnderDragonRenderer.submitCrystalBeams	port	crates/horizon-client/src/game/dragon.rs::Game::crystal_beam	
 EnderDragonRenderer.extractRenderState	inline	crates/horizon-client/src/game/dragon.rs::Game::dragon_geometry	flap, death fade, hurt overlay, nearest-crystal beam and egg distance read there
-EndermanRenderer.getRenderOffset	missing		player: an angry enderman does not jitter sideways (vanilla random offset each frame); no such offset in the mob draw path
+EndermanRenderer.getRenderOffset	port	crates/horizon-client/src/mobs/render.rs	EndermanRenderer.getRenderOffset's random side offset for a creepy enderman
 EndermanRenderer.extractRenderState	inline	crates/horizon-client/src/mobs/enderman.rs::anim	gap: minor: carried block is drawn by game/mob_blocks.rs, not from this pose
 EntityRenderDispatcher.getRenderer	skip:other		renderer lookup; Horizon dispatches by mob kind in game.rs::Game::entity_geometry and game/creatures.rs::Game::mob_geometry
 EntityRenderDispatcher.getAvatarRenderer	port	crates/horizon-client/src/mobs/render.rs::body	slim or wide arm model by skin
@@ -132,7 +132,7 @@ ThrownItemRenderer.submit	port	crates/horizon-client/src/game/creatures.rs::Game
 ThrownItemRenderer.extractRenderState	inline	crates/horizon-client/src/game/creatures.rs::Game::mob_geometry	item sprite read there
 ThrownTridentRenderer.submit	port	crates/horizon-client/src/game/trident.rs::Game::trident_geometry	gap: minor: foil glint is not drawn on a thrown trident
 ThrownTridentRenderer.extractRenderState	inline	crates/horizon-client/src/game/trident.rs::Game::trident_geometry	yaw, pitch and foil read there
-TippableArrowRenderer.extractRenderState	missing		player: a tipped arrow looks like a plain arrow; no potion colour on arrows in game/creatures.rs or projectiles.rs
+TippableArrowRenderer.extractRenderState	port	crates/horizon-client/src/projectiles.rs	brewing::potion_color gives a tipped arrow its potion colour
 TntMinecartRenderer.submitMinecartContents	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	TNT block swell and white flash
 TntMinecartRenderer.submitWhiteSolidBlock	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	white overlay built inline
 TntMinecartRenderer.extractRenderState	inline	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	fuse read from the cart

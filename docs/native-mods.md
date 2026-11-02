@@ -11,6 +11,16 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Villager farming
+
+Farmers recognize mod blocks made from farmland and `CropBlock` templates, including declarations from
+`native_blocks`. A crop block's generated item is its seed: add that item to
+`minecraft:villager_plantable_seeds` to let farmers plant its default block state from their inventory.
+Untagged items and tagged items without a block are skipped. Crop maturity follows the template's class:
+beetroots mature at age 3, ordinary crops at 7; torchflower crops never reach their maximum age 2 while
+still crops. Pitcher crops are not `CropBlock`s and are not harvested by this behavior. Farming still
+requires a farmer at work and `mob_griefing` enabled.
+
 ## Pinned to a Nightly
 
 A native mod builds on one exact Horizon commit: `[compatibility] horizon_revision` in its `horizon-mixin.toml`,
@@ -440,6 +450,15 @@ position), `block_entity` (the broken block's entity as it was before the break,
 `Items`) and `level` (the dimension, the game time, the time of day, the rain and the thunder, for conditions like
 vanilla's `time_check` and `weather_check`). The game sets it for a block a player or an explosion breaks and for a
 mob's death loot; on other rolls `place` is `None`.
+
+### A mod's own ingredient kinds
+
+A recipe's ingredient that names a type in a namespace outside `minecraft:` reaches
+`native_ingredient(kind, data, items)` at load time. Fill `items` with the item ids the
+ingredient matches (item ids only: components are not checked; a match-time hook follows
+separately). Duplicates are removed keeping first-seen order. The hook may be called more
+than once per recipe; the answer must be the same. An unclaimed kind leaves the list empty
+and the recipe fails, as an unknown kind does.
 
 ### Data files
 
@@ -1234,6 +1253,26 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `number`, `boolean`, `player`, `item`, `block_pos`. The usages of one command merge into one tree, which every
   player receives after vanilla's (filtered by their level, as vanilla's is), so their chat box completes and colours
   it. A name vanilla has, or a usage that doesn't parse, is left out with a warning in the log.
+- **`native_armor_stand_manipulate(player, name, stand_id, slot, cancel)`**: a player takes an item from an armor stand or
+  puts one on it, heard after the stand's disabled-slot checks and before anything moves. `slot` is `mainhand`,
+  `offhand`, `feet`, `legs`, `chest` or `head`. Set `cancel` and nothing changes (the click is spent). The player's
+  state is swapped in; `player` is their UUID. Not told of a click that changes nothing; breaking or blasting a stand and
+  a dispenser armouring one are other ways its equipment moves and are not covered.
+- **`native_vehicle_moved(player, kind, from, to)`**: a boat or minecart that carries a server player (`player`, its UUID)
+  moved since the last tick, heard once a tick after the move with its positions before and after. The rider's state is
+  swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them. A vehicle a player rode and left is
+  still told of, with no `player` and nobody swapped in, until it has stood still for ten seconds. Mounts (horses...) and
+  vehicles nobody ever rode are not covered. It only hears and costs one position compare a tick for each watched vehicle.
+- **`native_container_opened(player, name, kind, pos, cancel)`**: a player is about to open one of the game's own menus
+  (a chest, furnace, crafting table, villager, anvil, lectern, a horse's inventory...). `kind` is the menu type
+  (`minecraft:generic_9x3`, `minecraft:merchant`...), `pos` the block it belongs to, none for a villager, a mount or a
+  vehicle's chest. Heard after the checks that refuse the menu (a locked chest), before the open menu closes. Set
+  `cancel` and nothing opens. The player's state is swapped in, so `native_acting_player`, `native_tell` and the item
+  helpers reach them. Menus a mod opens (`native_open_menu`) are not heard.
+- **`native_creative_slot(player, name, slot, item, count, cancel)`**: a creative-mode player sets a slot from the creative
+  screen (`slot` is the inventory menu's slot; below 0 is a stack thrown out of the screen), with the `item` (`minecraft:air`
+  for an emptied slot) and `count`. Heard after vanilla's checks, before the slot changes. Set `cancel` and the packet is
+  ignored. The player's state is swapped in. Stacks a creative player gets other ways (pick block, `/give`) are not heard.
 - **`native_player_game_mode_changed(player, name, from, to, cancel)`**: a server player's game mode is about to change
   (0 survival, 1 creative, 2 adventure, 3 spectator, as `NativeServerPlayer.game_mode`): the `/gamemode` command, the
   F3+F4 switcher's packet and a hardcore world's respawn into spectator, once per change to a different mode. The mode a
@@ -1276,6 +1315,55 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `native_player`, `native_give_items` and the other helpers reach them. A respawn at an anchor in another dimension, or
   at the world spawn's free column, may still move them on a later tick, once that level has loaded round them; the
   End-exit respawn (after the credits) does not fire it.
+- **`native_player_login(player, name, cancel, reason)`**: a player the server has accepted (their name, the whitelist,
+  bans and the player limit are checked) and who holds a place, heard before their saved state is loaded and before they
+  are placed in a level (NeoForge's `PlayerNegotiationEvent`). Set `cancel` and they are disconnected with `reason` (a
+  plain "Disconnected" when it stays `None`); no join message and no `native_player_logged_in` follow. It runs after the
+  client's configuration, so the client sees the refusal as an in-game disconnect screen. The player is not placed yet,
+  so no player's state is swapped in and `native_tell` reaches nobody: the refusal text is the answer. Players the
+  server refuses itself (name, whitelist, bans, a full server, the proxy's forwarding) are not heard.
+- **`native_player_teleported(player, name, from, to, dimension)`**: a server player a command (`/tp`, `/teleport`,
+  also what a mod's `run_command` reaches) moved, inside their level or into another; `from` and `to` are their feet
+  before and after and `dimension` the level they are in now. Heard after the move has reached the player's state and
+  their client (into another level: when that level is entered, before it has loaded around them), so it cannot stop it
+  (NeoForge's `EntityTeleportEvent`). The player's state is swapped in, so `native_tell` and the acting-player helpers
+  work. Not heard yet: ender pearls, chorus fruit, a spectator's teleport menu; portals and respawns are not teleports
+  here.
+- **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
+  their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
+  they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor
+  colours it. This hides the command from the client only, a typed one still runs (stop it with
+  `native_player_command`). For a player already on, their state is swapped in and `native_tell` works; a joining
+  player has no world yet, so nothing can be told them. The tree the hub re-sends by itself (after a respawn or a change
+  of level) reuses the last answer.
+- **`native_player_sprint(player, name, sprinting)`**: a server player's client started or stopped sprinting (the sprint
+  key, a double tap forward, letting go), once for each change, after the server's player took it. It only hears. It
+  reports what the client asks, not what the server does: a sprint that ends by itself (a hit's knockback, hunger, a
+  wall) is not heard. The player's state is swapped in, so `native_tell` and the acting-player helpers work.
+- **`native_resource_pack_status(player, name, status)`**: a server player's client answered a resource pack while
+  playing (`ServerboundResourcePackPacket`): `status` is `Action`'s number (0 loaded, 1 declined, 2 failed download,
+  3 accepted, 4 downloaded, 5 invalid URL, 6 failed reload, 7 discarded). It only hears. The pack a dedicated server
+  offers during the configuration is answered before the player has joined and is not heard. The player's state is
+  swapped in, so `native_tell` works.
+- **`native_projectile_hit(owner, kind, hit_entity, pos, cancel)`**: a projectile a server player launched (arrow,
+  snowball, egg, thrown trident, ender pearl, ...) hit an entity (`hit_entity`) or a block at `pos`, heard before any
+  of its effects (NeoForge's `ProjectileImpactEvent`). Set `cancel` and it does nothing: it vanishes, a thrown trident
+  flies on through. The shooter's state is swapped in, so `native_tell` answers them. Mobs' and the host's
+  projectiles are not heard, nor are fishing bobbers and firework rockets.
+- **`native_tnt_primed(player, pos, cancel)`**: TNT at `pos` is about to be lit by a flint and steel or fire charge
+  (`player` is whoever clicked, whose state is swapped in), fire, a redstone signal, an arrow or a dispenser (`player` is
+  None). Set `cancel` and it is not primed: the block stays, or is put back if fire or a signal had already taken it
+  out. TNT set off by a blast, a TNT minecart and a sulfur cube are not asked; `native_explosion_detonate` can spare
+  the blocks of a blast.
+- **`native_hanging_place(player, name, kind, pos, cancel)`**: a server player places an item frame, a glow item
+  frame, a painting or a leash knot (tying a lead to a fence that has none; `pos` is the fence), once it fits and
+  before it is placed or the item used. Set `cancel` and nothing happens; the item stays in the hand. The player's
+  state is swapped in, so `native_tell` answers them. `/summon` and a lead tied to a mob are not heard.
+- **`native_bucket_empty(player, name, pos, fluid, cancel)`**: a server player empties a bucket (`fluid` is
+  `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
+  right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
+  `native_tell` answers them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers
+  and cauldrons are not heard.
 - **`native_player_fish(player, name, state, cancel)`**: a player's fishing rod, on a server: `state` 0 the cast, 1 a fish
   biting, 2 the reel-in of a bite (the catch), 3 the reel-in with nothing on the line, 4 the reel-in of a bobber hooked
   to an entity or item. Set `cancel` and nothing is thrown (0), the fish gets away and the wait starts over (1), or the
@@ -1286,6 +1374,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a
   registered command no mod takes answers as vanilla's unknown command.
+- **`native_player_swap_hands(player, name, cancel)`**: a player pressed the swap-hands key (not a spectator), heard
+  before the main and off hand items swap. Set `cancel` and they stay where they are; the player's client, which swapped
+  them at once, gets its slots back. The player's state is swapped in, so `native_acting_player`, `native_tell` and the item
+  helpers reach them. Not heard: the same swap from an open inventory (hovering a slot and pressing the key) and the host of a LAN world.
 - Helpers: `native_server_players()` (uuid, name, level, dimension, position and game mode of each player on);
   `native_tell(uuid, text)`, a system line to one player, also the acting player inside their hook;
   `native_broadcast(text)`, to every player and the server's
@@ -1316,6 +1408,10 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   and points are 0; no level-up sound). Both return false for a player not here, dead, or swapped out by another
   player's hook, and where the server's player list is busy (some world ticks hold it): give first, and cancel the orb
   only when the give returned true. A merged orb is worth `value` × `count`.
+- **`native_player_totem(player, name)`**: a totem of undying saved a player whose hurt would have killed them, on a server
+  (`checkTotemDeathProtection`), heard just before it is used up. Listen only: the health state machine decides before a
+  mod is asked, so a mod cannot veto it. The player's state is swapped in, so `native_acting_player`, `native_tell` and the
+  item helpers reach them. Not heard: the host of a LAN world.
 - API 21: `native_acting_player()`, the player whose state is swapped in (inside `native_perform_command`,
   `native_right_click_block`, `native_use_item_on`, `native_destroy_block`...; None elsewhere);
   `native_run_command(line)`, a command run as the server's console (level 4, no output), only where no player is
@@ -1323,6 +1419,11 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   70 0`) lands at the next tick's start. `native_server_players()` and the acting player carry `health` (0 once dead).
   `native_action_bar(uuid, text)`, a line over a player's hotbar, which also reaches the acting player inside their
   hook.
+- **`native_food_level_changed(player, name, from, to, cancel)`**: the food level of a player is about to change, on a
+  server (eating, hunger and saturation effects, exhaustion, starving), before the new level reaches them. Change `to`
+  (0 to 20) or set `cancel` to leave it at `from`, saturation included. It is heard once for what one turn of the
+  player changed, not for the full bar a respawn gives, the food a player joins with, or the host of a LAN world. The
+  player's state is swapped in, so `native_acting_player`, `native_tell` and the item helpers reach them.
 - **`native_right_click_block(pos, face, canceled)`** (API 21): a player's right click on a block, before the block's
   own use and the item's (`ServerPlayerGameMode.useItemOn`), once per hand. A mod that sets `canceled` stops both,
   without a swing; the player's client is sent the block back. With `native_destroy_block` it keeps players out of
@@ -1783,7 +1884,7 @@ the same mod: for example, `set_block` fires `block_changed`. Mods keep mutable
 state with interior mutability so these calls can share the instance safely. Data-load
 hooks can run on any loading thread; item default changes must be identical on every side.
 
-The trait has every hook carrying a `mod_api` entry in `native-hooks.json`.
+The trait has every hook in `native-hooks.json` and the pending fragments ([Adding a hook](#adding-a-hook)).
 Level hooks use access-specific hosts rather than `Host`. `LevelHost` provides
 `block_state` through `LevelAccess::block_state`, client-side detection and
 `state_with_property`. `LevelRandomHost` provides vanilla's `Level.random` so
@@ -1797,6 +1898,21 @@ renderer list is installed once alongside the mod list. `render_needs` collects 
 `world_drawn` observes the world pass and can encode drawing before the hand and HUD. Both
 run on the render thread while the frame is built, before any deferred GPU submission.
 The renderer module re-exports the game's wgpu types.
+
+### Adding a hook
+
+A new hook needs its fragment in `tools/native-hook-fragments/` with its `mod_api` entry (for example
+`{"contract": "cancel", "out": "cancel"}`), its `native_*` function with the placeholder body
+`let _ = (every, parameter);` (all its parameters, in order), and a run of `cargo run -p xtask -- mod-api`.
+The generator adds the hook's trait method and replaces the placeholder with the `dispatch_<hook>` call.
+Every hook needs a `mod_api` entry: the check fails naming any hook without one. A body that is neither the
+placeholder nor already calls the dispatch is an error, and the generator never changes it. Hooks that are
+free functions outside `Game` are wired by hand: those crates can't see the mod list, so each calls a callback
+the executable installs once, such as `NativeLoadHooks` in `horizon-world` and `NativeClientHooks` in the
+client library (`menu_slot_rules`, `living_breathe`, `ingredient`). `cargo run -p xtask -- mod-api --check`
+and the `generated_output_is_current` test report a placeholder still to fill instead of filling it. Mixin
+injections go at the head of the body, before the dispatch, so they still run first.
+
 ### Server attachments
 
 A mod can declare an `AttachmentType<T>` once and call its `get`, `set` and `remove`

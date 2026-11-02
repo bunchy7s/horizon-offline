@@ -795,7 +795,10 @@ impl Game<'_> {
             out.push(json!({"id": c.id, "kind": "minecraft:end_crystal", "position": at(c.position), "show_bottom": c.show_bottom}));
         }
         for t in &self.tridents {
-            out.push(json!({"id": t.id, "kind": "minecraft:trident", "position": at(t.position)}));
+            out.push(json!({"id": t.id, "kind": "minecraft:trident", "position": at(t.position), "velocity": at(t.velocity)}));
+        }
+        for r in &self.rockets {
+            out.push(json!({"id": r.id, "kind": "minecraft:firework_rocket", "position": at(r.position), "velocity": at(r.velocity)}));
         }
         for p in &self.creatures.projectiles {
             out.push(json!({"id": p.id, "kind": format!("{:?}", p.kind).split([' ', '{']).next().unwrap_or(""), "position": at(p.position), "velocity": at(p.velocity),

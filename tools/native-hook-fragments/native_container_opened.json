@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "container_opened",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_container_opened",
+      "neoforge": "none (NeoForge's PlayerContainerEvent.Open fires after the menu is open and is not cancellable)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a player opening one of the game's menus, cancellable (`native_container_opened`).",
+  "doc_summary": "a player opening one of the game's own menus: `native_container_opened(player, name, kind, pos, cancel)` is heard when a chest, furnace, crafting table, villager, anvil, lectern, horse inventory... is about to open (the job of NeoForge's `PlayerContainerEvent.Open`, but before the menu opens), after the checks that refuse it, with the menu type and the block's position, on a server, with the player's state swapped in. A mod sets `cancel` and nothing opens. Menus a mod opens (`native_open_menu`) are not heard. Bundles that use it need `\"hooks\": @API:native_container_opened@`."
+}

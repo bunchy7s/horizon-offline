@@ -2817,6 +2817,7 @@ dependencies = [
  "flate2",
  "horizon-core",
  "libm",
+ "log",
  "lz4_flex",
  "postcard",
  "serde",

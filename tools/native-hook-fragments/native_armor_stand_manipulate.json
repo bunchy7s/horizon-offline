@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "armor_stand_manipulate",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_armor_stand_manipulate",
+      "neoforge": "none (Bukkit's PlayerArmorStandManipulateEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a player taking an item from or putting one on an armor stand, cancellable (`native_armor_stand_manipulate`).",
+  "doc_summary": "a player taking an item from or putting one on an armor stand: `native_armor_stand_manipulate(player, name, stand_id, slot, cancel)` is heard after the stand's disabled-slot checks and before anything moves, with the stand's entity id and the slot the click reached (`mainhand`, `offhand`, `feet`, `legs`, `chest`, `head`), on a server, with the player's state swapped in. A mod sets `cancel` and neither the stand nor the player's hand changes. Bundles that use it need `\"hooks\": @API:native_armor_stand_manipulate@."
+}

@@ -600,6 +600,23 @@ impl Game<'_> {
         if held.is_none() && current.is_none() {
             return false;
         }
+        // A server's mods hear the swap before it happens, and may stop it.
+        // A stack of several on an occupied slot goes nowhere (below).
+        let moves = held
+            .as_ref()
+            .is_none_or(|h| h.count <= 1 || current.is_none());
+        if moves
+            && target.is_some()
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let stand = self.armor_stands[i].id as i32;
+            let slot_name = ["mainhand", "offhand", "feet", "legs", "chest", "head"][slot];
+            let mut cancel = false;
+            self.native_armor_stand_manipulate(player, &name, stand, slot_name, &mut cancel);
+            if cancel {
+                return true;
+            }
+        }
         // ArmorStand.swapItem.
         match held {
             // A player with infinite materials puts a copy of one on an empty

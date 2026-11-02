@@ -5,17 +5,28 @@
 //! Generate the trait and dispatch with `cargo run -p xtask -- mod-api`.
 use std::sync::{Arc, OnceLock};
 
-pub use crate::containers::{ModBlockEntity, ModContainer, ModFluidTanks};
+pub use crate::biome::BiomeColors;
+pub use crate::camera::CameraEntity;
+pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CustomRecipe, Ingredient};
 pub use crate::extras::Corner;
 pub use crate::extras_hud::Corners;
+pub use crate::first_person::Hand;
+pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
+pub use crate::game::{
+    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
+    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
+    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
+    NativeShake,
+};
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
 };
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::music::{Music, MusicLayer};
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -23,18 +34,21 @@ pub use horizon_core::{
     position::BlockPos,
     random::{LegacyRandom, RandomSource},
 };
+pub use horizon_world::consumable::UseAnimation;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
     },
     fluid::FluidState,
     level::{BlockId, Dimension as LevelDimension, PlacementContext},
+    loot::{LootStack, NativeLootContext},
     nbt::{Compound, Tag},
     registry::BlockStateId,
 };
 pub use serde_json;
 use serde_json::{Map, Value};
 use std::time::Duration;
+pub use winit::event::KeyEvent;
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.

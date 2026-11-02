@@ -1264,7 +1264,7 @@ pub enum Page {
     Online,
     /// Splitscreen: the profile another player joins as (`split_profiles`).
     SplitProfiles,
-    /// Splitscreen: enable joining on this computer.
+    /// Splitscreen: the monitor map and draft window arrangement.
     SplitSetup,
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -1512,6 +1512,7 @@ pub struct OptionsUi {
     pub calibration: Option<crate::hdr_calibration::Calibration>,
     /// Whether the window was fullscreen before calibration made it so (the game keeps it).
     pub calibration_fullscreen: Option<bool>,
+    pub split_setup: crate::split_ui::SplitUi,
     /// The AI Agent page's status lines (set by the game while it shows).
     pub agent_status: Vec<String>,
     /// Keyboard focus: the interactive target currently focused.
@@ -1528,8 +1529,6 @@ pub struct OptionsUi {
     /// The list's rows as last laid out: each row's top and bottom (GUI
     /// pixels), for the narration's row under the mouse.
     row_bands: Vec<[f32; 2]>,
-    /// Other local players are joined: leave before turning splitscreen off.
-    pub split_joined: bool,
 }
 impl Default for OptionsUi {
     fn default() -> Self {
@@ -1568,6 +1567,7 @@ impl Default for OptionsUi {
             split_profiles: Default::default(),
             calibration: None,
             calibration_fullscreen: None,
+            split_setup: Default::default(),
             agent_status: Vec::new(),
             focus: None,
             can_change_value: false,
@@ -1575,7 +1575,6 @@ impl Default for OptionsUi {
             framebuffer: [1280, 720],
             split_guest: false,
             row_bands: Vec::new(),
-            split_joined: false,
         }
     }
 }
@@ -2122,6 +2121,9 @@ impl OptionsUi {
         ) {
             self.graphics.reset();
         }
+        if page == Page::SplitSetup {
+            self.split_setup.reset();
+        }
         if page == Page::SplitProfiles {
             self.split_profiles.reset();
         }
@@ -2262,14 +2264,7 @@ impl OptionsUi {
 
     fn list_rows(&self, s: &Settings) -> Vec<Row> {
         match self.page() {
-            Page::SplitSetup => vec![Row::Buttons(
-                if self.split_guest || self.split_joined {
-                    inactive(self.extra_button(s, crate::extras::Item::Splitscreen))
-                } else {
-                    self.extra_button(s, crate::extras::Item::Splitscreen)
-                },
-                None,
-            )],
+            Page::SplitSetup => Vec::new(),
             Page::Extras => {
                 // Each section's switches two to a row, as vanilla's
                 // OptionsList.addSmall lays out an options screen.
@@ -3346,6 +3341,11 @@ impl OptionsUi {
                 .draw(level, s, batch, atlas, cursor, self.in_world);
             return;
         }
+        if self.page() == Page::SplitSetup {
+            self.split_setup.on = s.extras.splitscreen;
+            self.split_setup.draw(batch, atlas, cursor, self.in_world);
+            return;
+        }
         if self.page() == Page::SplitProfiles {
             self.split_profiles
                 .draw(batch, atlas, cursor, self.in_world, self.pad_style);
@@ -3645,6 +3645,26 @@ impl OptionsUi {
                 return vec![Event::ButtonClick];
             }
             return Vec::new();
+        }
+        if self.page() == Page::SplitSetup {
+            use crate::split_ui::Click;
+            if right {
+                return Vec::new();
+            }
+            self.split_setup.on = s.extras.splitscreen;
+            return match self.split_setup.click((x, y), size, drag) {
+                Click::Nothing => Vec::new(),
+                Click::Pressed => vec![Event::ButtonClick],
+                Click::Switch => {
+                    crate::extras::Item::Splitscreen.cycle(&mut s.extras, false);
+                    vec![Event::ButtonClick, Event::Changed]
+                }
+                Click::Done => {
+                    let mut events = vec![Event::ButtonClick];
+                    events.extend(self.back(s));
+                    events
+                }
+            };
         }
         if self.page() == Page::SplitProfiles {
             use crate::split_profiles::Click;
@@ -5343,6 +5363,61 @@ mod tests {
             vec![Event::ButtonClick]
         );
         assert!(ui.resource_error.is_none());
+    }
+
+    /// The texts of an options page, as laid out in `code`'s language, and the keys it lacked.
+    fn page_texts(code: &str, pages: &[Page]) -> (Vec<String>, Vec<String>) {
+        let s = Settings::default();
+        lang::scoped(lang::Language::load(&[], code), || {
+            let mut texts = Vec::new();
+            for page in pages {
+                let mut ui = OptionsUi::default();
+                ui.show(*page);
+                for w in ui.layout(&s, 480.0, 4000.0).0 {
+                    match w.kind {
+                        WKind::Button { label: t, .. }
+                        | WKind::Slider { label: t, .. }
+                        | WKind::Text { text: t, .. } => texts.push(t.plain()),
+                        _ => {}
+                    }
+                }
+            }
+            texts
+        })
+    }
+
+    /// Horizon's own options pages said "Splitscreen...", "Hide block-break particles" and
+    /// "Hotbar: Previous Slot" in every language (#1927).
+    #[test]
+    fn horizon_option_pages_follow_the_language() {
+        let (texts, missed) = page_texts("de_de", &[Page::Horizon, Page::Extras, Page::PadBinds]);
+        for want in [
+            "Splitscreen …",
+            "Partikel",
+            "Blockpartikel weg: Aus",
+            "Weicher Chat: Aus",
+            "Nachrichtenmarkierung: An",
+            "Kanäle für UI-Töne: Aus",
+            "Schnellzugriffsleiste: Vorheriger Platz",
+            "Schnellzugriffsleiste: Nächster Platz",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want:?} not in {texts:?}");
+        }
+        // Every key these pages ask for is in the table; vanilla's own keys (`options.*`,
+        // `key.*`: dotted ids without spaces) come from the prepared resources, which this
+        // language does not have.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|k| k.starts_with("horizon.") || k.contains(' ') || !k.contains('.'))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+        let (texts, _) = page_texts("pl_pl", &[Page::Extras, Page::PadBinds]);
+        for want in [
+            "Ukryj cząstki bloków: Wył.",
+            "Pasek szybkiego wyboru: poprzednie pole",
+        ] {
+            assert!(texts.iter().any(|t| t == want), "{want:?} not in {texts:?}");
+        }
     }
 
     #[test]

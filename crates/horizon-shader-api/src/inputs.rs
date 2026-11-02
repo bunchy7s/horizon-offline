@@ -241,6 +241,7 @@ pub const MATERIAL_INPUT: Struct = Struct {
         emission: "f32" = "How strongly the block itself shines, 0..1, by its kind of light: a redstone torch or a candle 7/15, a torch or lava 14/15, glowstone 1; 0 for most blocks.",
         normal: "vec3<f32>" = "The surface's geometric normal, a unit vector in world axes, facing the camera. A normal within about 3.6 degrees of an axis is that axis exactly, so distant block faces do not shimmer; flowing water's slopes are steeper and keep theirs.",
         tangent: "vec4<f32>" = "The surface's tangent: xyz the unit direction in world axes along which `uv.x` grows, w the sign (1 or -1) that makes `cross(normal, tangent.xyz) * tangent.w` the direction `uv.y` grows along (down the texture). With `normal` it turns a normal map's normals into world axes.",
+        colored_light: "vec3<f32>" = "The frame's coloured lights at this point (`[[particle_lights]]` and mods' visual lights), 0..1, to light the surface with as the pack likes; 0 where none reaches.",
     },
 };
 

@@ -189,7 +189,12 @@ P1 is alone, turning it off restores the normal controller reader. Leaving it on
 alone keeps watching for joins without a compositor.
 
 `HORIZON_SPLIT=N` remains a testing shortcut to enable it and add N-1 players.
-The Setup map and joining P1 on an external server are separate follow-ups.
+The Setup map previews the monitors, windows and player views. Click a player and choose a
+window or monitor, then **Apply** to move the actual views. **Revert** and **Done** discard
+unapplied moves. An emptied window closes only on Apply. A player joining or leaving resets
+the draft so it cannot apply a move to the wrong seat. P1's pause-menu shortcut opens Setup;
+another player's shortcut opens their profiles. Dragging, controller pick-up and joining P1
+on an external server follow separately.
 
 ## Shared rules
 

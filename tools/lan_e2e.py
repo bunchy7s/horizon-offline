@@ -11654,6 +11654,54 @@ def check_blast_bystanders(host, guest, out):
 
 CHECKS += ['blast-bystanders']
 CHECK_FNS['blast-bystanders'] = check_blast_bystanders
+def check_wind_remaining(host, guest, out):
+    """A wind burst pushes a firework rocket and a thrown trident (ServerExplosion.hurtEntities ->
+    Entity.pushFromExplosion; neither overrides ignoreExplosion). Real 26.3 server, wind charge into the floor,
+    tick freeze, tick step 1 after the burst: the rocket's Motion x -0.3174, -0.3650, -0.4197 and y 0.5971, 0.6371,
+    0.6771 on the next three ticks (it starts at (0, 0.08, 0), 0.8 west of the burst, 1.0 above the floor); a
+    trident 0.8 east gets (+0.446, +0.490) on the first tick when NoGravity holds. A summoned trident here
+    ignores NoGravity and falls first, so only its direction is asserted."""
+    hx, hy, hz = (int(v // 1) for v in pos_of(host))
+    x, y, z = hx + 6, hy, hz
+    host('command', command='gamemode spectator')
+
+    def read():
+        found = {}
+        for p in host.raw('simulation')['projectiles']:
+            if p['kind'] in ('minecraft:trident', 'minecraft:firework_rocket') and abs(p['position'][0] - x) < 4:
+                found[p['kind'].split(':')[1]] = p['velocity']
+        return found
+    detail = {}
+    try:
+        host('command', command='tick unfreeze')
+        for c in (f'fill {x - 8} {y - 1} {z - 8} {x + 8} {y - 1} {z + 8} minecraft:bedrock',
+                  f'fill {x - 8} {y} {z - 8} {x + 8} {y + 5} {z + 8} minecraft:air', 'kill @e[type=!player]', 'tick freeze',
+                  f'summon minecraft:trident {x + 1.3} {y + 1.0} {z + 0.5} {{NoGravity:1b}}',
+                  f'summon minecraft:firework_rocket {x - 0.3} {y + 1.0} {z + 0.5} {{LifeTime:200}}', 'tick step 2'):
+            host('command', command=c)
+        host.wait(8)
+        detail['before'] = read()
+        host('command', command=f'summon minecraft:wind_charge {x + 0.5} {y + 0.6} {z + 0.5} {{Motion:[0.0,-1.0,0.0]}}')
+        detail['ticks'] = []
+        for _ in range(3):
+            host('command', command='tick step 1')
+            host.wait(4)
+            detail['ticks'].append(read())
+    finally:
+        host('command', command='tick unfreeze')
+        host('command', command='kill @e[type=!player]')
+        host('command', command='gamemode creative')
+    first = detail['ticks'][0]
+    assert 'firework_rocket' in first and 'trident' in first, f'no rocket listed: {detail}'
+    rocket = first['firework_rocket']
+    assert abs(rocket[0] + 0.3174) < 0.01 and abs(rocket[1] - 0.5971) < 0.01, f'the rocket was not pushed like vanilla: {detail}'
+    trident = first['trident']
+    assert trident[0] > 0.2 and trident[1] > 0.1, f'the trident was not pushed away: {detail}'
+    return detail
+
+
+CHECKS += ['wind-remaining']
+CHECK_FNS['wind-remaining'] = check_wind_remaining
 
 
 def check_selector_tags(host, guest, out):
@@ -11761,6 +11809,56 @@ def check_mining_drop_latency(host, guest, out):
 
 CHECKS += ['mining-drop-latency']
 CHECK_FNS['mining-drop-latency'] = check_mining_drop_latency
+
+
+def check_scale_body(host, guest, out):
+    """#3684: a player's `minecraft:scale` is the same entity's attribute through a change of level and
+    a death. ServerPlayer.teleport keeps the player; ServerPlayer.restoreFrom copies the base values to
+    the body after a death (assignBaseValues), then sets its health to the max they give. The eye the
+    client sees stays at 0.162 (1.62 * 0.1), not back at 1.62, and a max health base of 40 respawns the
+    player with 40."""
+    seen = {}
+
+    def scale_of(player):
+        # The eye height the player's client has: the server's scale reaches it as an attribute update.
+        state = player('state')['player']
+        return round(state['eye'][1] - state['position'][1], 3)
+
+    for label, player in (('host', host), ('guest', guest)):
+        s = seen[label] = {}
+        player('command', command='gamemode creative')
+        player('command', command='attribute @s minecraft:scale base set 0.1')
+        player('command', command='attribute @s minecraft:max_health base set 40')
+        player.wait(20)
+        s['set'] = scale_of(player)
+        x, z = (int(v // 1) for v in pos_of(player)[::2])
+        into_level(player, NETHER, x, 100, z)
+        s['nether'] = scale_of(player)
+        player('command', command=f'execute in {OVERWORLD} run tp @s {x + 0.5} 200 {z + 0.5}')
+        wait_dimension(player, OVERWORLD, 400)
+        player.wait(40)
+        s['overworld'] = scale_of(player)
+        player('command', command='kill @s')
+        player.wait(30)
+        player.raw('respawn')
+        player.wait(60)
+        back_to_game(player)
+        s['respawned'] = scale_of(player)
+        s['health'] = player('state')['player']['health']
+        player('command', command='attribute @s minecraft:scale base set 1')
+        player('command', command='attribute @s minecraft:max_health base set 20')
+        player.wait(20)
+        s['reset'] = scale_of(player)
+    for label, s in seen.items():
+        for step in ('set', 'nether', 'overworld', 'respawned'):
+            assert s[step] == 0.162, f'{label} after {step}: {s}'
+        assert s['reset'] == 1.62, f'{label} reset: {s}'
+        assert s['health'] == 40, f'{label} respawned health: {s}'
+    return seen
+
+
+CHECKS += ['scale-body']
+CHECK_FNS['scale-body'] = check_scale_body
 
 
 if __name__ == '__main__':

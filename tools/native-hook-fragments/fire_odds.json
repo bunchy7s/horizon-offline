@@ -2,11 +2,19 @@
   "hooks": [
     {
       "name": "fire_odds",
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds"
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_fire_odds",
+      "mod_api": {
+        "contract": "replace",
+        "out": "odds"
+      }
     },
     {
       "name": "smoke_source",
-      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source"
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_smoke_source",
+      "mod_api": {
+        "contract": "replace",
+        "out": "smoke"
+      }
     }
   ],
   "rust_summary": "how fire burns a mod block (`native_fire_odds`, `FireBlock.setFlammable`), and a mod block under\na campfire that makes it a signal fire (`native_smoke_source`, `CampfireBlock.isSmokeSource`).",

@@ -157,7 +157,6 @@
   "How far mobs, crops and machines keep working. CPU time.": "Как далеко мобы, посевы и механизмы продолжают работать. Нагрузка на процессор.",
   "How far away mobs and items are drawn, as a share of normal.": "С какой дистанции рисуются мобы и предметы, в долях от обычной.",
   "Skips terrain hidden behind closed sections. Off costs a lot.": "Пропускает рельеф, скрытый за закрытыми секциями. Выключено — дорого.",
-  "Hides models behind opaque blocks. Entities update. Off with custom packs.": "Прячет модели за непрозрачными блоками. Сущности тикают. Выключать со своими наборами.",
   "Meshed sections uploaded per frame. Lower is smoother while loading.": "Секций меша за кадр. Меньше — плавнее во время загрузки.",
   "Soft shadows in corners. Costs chunk building time only.": "Мягкие тени по углам. Замедляет только построение чанков.",
   "Smaller copies of block textures for distant terrain: less shimmer.": "Уменьшенные копии текстур блоков для дали: меньше мерцания.",

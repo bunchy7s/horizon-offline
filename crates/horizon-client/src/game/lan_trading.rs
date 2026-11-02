@@ -57,6 +57,10 @@ impl Game<'_> {
             state.session.update_special_prices();
         }
         let title = self.merchant_display_name(&state);
+        if !self.guest_may_open(host, conn, "minecraft:merchant", None) {
+            self.merchant_closed(&mut state);
+            return;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let Some(window) = host.hub.open_merchant_window(conn, title) else {

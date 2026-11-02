@@ -1,7 +1,7 @@
 ActiveTextCollector.accept	inline	crates/horizon-client-render/src/screen_draw.rs::text	default overload: left-aligned text at x,y with default parameters
-ActiveTextCollector.acceptScrolling	port	crates/horizon-client-render/src/screen_draw.rs::scrolling_text	gap: minor: only the screen_draw widgets (Button) scroll; ui.rs centered_text clips
-ActiveTextCollector.acceptScrollingWithDefaultCenter	port	crates/horizon-client-render/src/ui.rs::centered_text	gap: minor: centres the message; wider text is clipped instead of scrolled
-ActiveTextCollector.defaultScrollingHelper	port	crates/horizon-client-render/src/screen_draw.rs::scrolling_text	gap: minor: only the screen_draw widgets (Button) call it; ui.rs centered_text still clips wider text. The offset is screen_draw.rs::scroll_offset
+ActiveTextCollector.acceptScrolling	port	crates/horizon-client-render/src/ui.rs::scrolling_text_around_at	the HudBatch widgets; a label that fits is clamped between left and right around centerX (title.rs::Button::draw_label_at passes the middle of a TextAndIcon button); screen_draw.rs::scrolling_text is the same for the screen_draw widgets
+ActiveTextCollector.acceptScrollingWithDefaultCenter	port	crates/horizon-client-render/src/ui.rs::scrolling_text_at	centre (left + right) / 2; ui::button, ui::slider and the tab labels (ui::menu_tab_label) draw through it
+ActiveTextCollector.defaultScrollingHelper	port	crates/horizon-client-render/src/screen_draw.rs::scrolling_text	the offset is ui.rs::scroll_offset (screen_draw.rs::scroll_offset for the screen_draw widgets); ui.rs::centered_text, for titles and text lines, still clips because vanilla does not scroll them
 ActiveTextCollector.findElementUnderCursor	port	crates/horizon-client-render/src/chat.rs::Chat::style_at	gap: minor: hit test covers chat lines only; book links use game/books.rs book_link_at
 ActiveTextCollector.isPointInRectangle	port	crates/horizon-client-render/src/ui.rs::hovered	half-open rectangle test with the same bounds
 ActiveTextCollector.ClickableStyleFinder.accept	port	crates/horizon-client-render/src/chat.rs::Chat::style_at	gap: minor: only chat lines are searched for click and hover styles
@@ -62,7 +62,7 @@ GuiGraphicsExtractor.textRendererForWidget	skip:ui		builds a text collector for 
 GuiGraphicsExtractor.textRenderer	skip:ui		builds a text collector; Horizon draws text directly
 GuiGraphicsExtractor.createDefaultTextParameters	skip:ui		default pose, opacity and scissor for text; Horizon passes colour and rectangle directly
 GuiGraphicsExtractor.RenderingTextCollector.accept	port	crates/horizon-client-render/src/screen_draw.rs::text	gap: minor: no hover or click registration here (see Chat::style_at)
-GuiGraphicsExtractor.RenderingTextCollector.acceptScrolling	port	crates/horizon-client-render/src/screen_draw.rs::scrolling_text	gap: minor: only the screen_draw widgets (Button) scroll; ui.rs centered_text clips
+GuiGraphicsExtractor.RenderingTextCollector.acceptScrolling	port	crates/horizon-client-render/src/screen_draw.rs::scrolling_text	the font's width and a 9 px line into defaultScrollingHelper, for the screen_draw widgets; ui.rs::scrolling_text_around_at is the same for the HudBatch widgets
 GuiGraphicsExtractor.ScissorStack.push	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: the pushed rectangle replaces the current one; it is not intersected
 GuiGraphicsExtractor.ScissorStack.pop	inline	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: Draw::NoScissor clears the scissor instead of restoring the enclosing one
 GuiGraphicsExtractor.ScissorStack.containsPoint	missing		minor: hover ignores the scissor, so a widget clipped out of view can still highlight
@@ -121,7 +121,7 @@ AbstractSelectionList.TrackedList.set	skip:java		delegate list wrapper
 AbstractSliderButton.getSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: the track outline is drawn while dragged only; keyboard focus does not highlight it; hover highlights only the handle
 AbstractSliderButton.getHandleSprite	inline	crates/horizon-client-render/src/ui.rs::slider	gap: minor: handle highlight follows hover only
 AbstractSliderButton.updateWidgetNarration	skip:other		narration only
-AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/ui.rs::slider	gap: minor: the label is clipped rather than scrolled
+AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/ui.rs::slider_ext	the whole message, value included, scrolls inside the slider (margin 2)
 AbstractSliderButton.handleCursor	port	crates/horizon-client-render/src/widgets.rs::widget_cursor	gap: minor: no resize cursor while dragging
 AbstractSliderButton.setFocused	missing		minor: keyboard focus does not enable value changes; there is no change-value state
 AbstractSliderButton.keyPressed	missing		minor: Left and Right do not move a focused slider; Enter does not toggle it
@@ -139,7 +139,7 @@ AbstractTextAreaWidget.extractBorder	skip:ui		frame sprite; no behaviour
 AbstractTextAreaWidget.withinContentAreaTopBottom	skip:ui		visibility cull while drawing lines
 AbstractWidget.extractRenderState	port	crates/horizon-client-render/src/ui.rs::hovered	gap: minor: the scissor test is not part of the hover check
 AbstractWidget.extractTooltipForNextRenderPass	port	crates/horizon-client-render/src/ui.rs::tooltip	gap: minor: unsure: widget hover delay not checked
-AbstractWidget.extractScrollingStringOverContents	port	crates/horizon-client-render/src/ui.rs::centered_text	gap: minor: text is clipped, not scrolled
+AbstractWidget.extractScrollingStringOverContents	port	crates/horizon-client-render/src/ui.rs::scrolling_text	ui::button and ui::slider (margin 2) draw it for the HudBatch widgets; screen_draw.rs::scrolling_string_over_contents for the screen_draw ones
 AbstractWidget.mouseClicked	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: click dispatch is per screen; the press sound is audio.rs Audio::play_button_click
 AbstractWidget.mouseReleased	port	crates/horizon-client-render/src/ui.rs::Scroll::release	gap: minor: only the scroll release; widget onRelease is per screen
 AbstractWidget.mouseDragged	port	crates/horizon-client-render/src/ui.rs::Scroll::drag	gap: minor: only scroll drag; widget onDrag is per screen

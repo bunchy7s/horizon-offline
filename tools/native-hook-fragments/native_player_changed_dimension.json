@@ -4,7 +4,10 @@
       "name": "player_changed_dimension",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_changed_dimension",
       "neoforge": "PlayerEvent.PlayerChangedDimensionEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "a player changing dimension (`native_player_changed_dimension`).",

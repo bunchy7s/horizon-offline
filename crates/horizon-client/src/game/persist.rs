@@ -493,8 +493,11 @@ impl Game<'_> {
                     }
                     "minecraft:trident" => {
                         if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
-                            self.tridents
-                                .push(super::trident::ThrownTrident::from_nbt(n));
+                            let mut t = super::trident::ThrownTrident::from_nbt(n);
+                            // One that came through a portal keeps its cooldown.
+                            super::lan_entities::assign_entity_id(&mut self.next_entity, &mut t.id);
+                            self.restore_portal_cooldown(t.id, &tag);
+                            self.tridents.push(t);
                         }
                     }
                     "minecraft:firework_rocket" => {
@@ -503,6 +506,8 @@ impl Game<'_> {
                             let id = self.next_entity;
                             let mut rocket = super::fireworks::Rocket::from_nbt(r);
                             rocket.id = id;
+                            // One that came through a portal keeps its cooldown.
+                            self.restore_portal_cooldown(id, &tag);
                             self.rockets.push(rocket);
                             self.remember(id, uuid, tag);
                         }
@@ -1085,11 +1090,17 @@ impl Game<'_> {
     }
     /// An entity Horizon keeps no compound for (orbs, projectiles, the
     /// crystals and the dragon) still keeps its `Tags`, by entity id, so
-    /// `@e[tag=]`, `/tag` and `/data get` see them.
+    /// `@e[tag=]`, `/tag` and `/data get` see them, and the `Item` a
+    /// fireball or a thrown item projectile was loaded with.
     pub(super) fn remember_tags(&mut self, id: u32, tag: &Tag) {
+        let mut map = horizon_world::nbt::Compound::new();
         if let Some(tags @ Tag::List(_)) = tag.get("Tags") {
-            let mut map = horizon_world::nbt::Compound::new();
             map.insert("Tags".into(), tags.clone());
+        }
+        if let Some(item @ Tag::Compound(_)) = tag.get("Item") {
+            map.insert("Item".into(), item.clone());
+        }
+        if !map.is_empty() {
             self.persist.raw.insert(id, Tag::Compound(map));
         }
     }

@@ -330,6 +330,7 @@ impl Split<'_> {
         guest.window = Some(window);
         guest.world_renderer_ready = true;
         guest.keyboard_mouse = false;
+        guest.split_window = host.split_window;
         guest.apply_settings();
         // Its pad comes from the split (`route_pads`): it never opens the controllers itself.
         guest.pad.feed = Some(PadState::default());

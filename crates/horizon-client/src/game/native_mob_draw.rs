@@ -20,7 +20,6 @@ use horizon_client::{
 /// `LivingEntityRenderState`: what a model reads to pose and animate itself.
 /// Angles are in degrees, interpolated to the frame's partial tick.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct NativeMobRender<'a> {
     /// The mob's network id, as the mob helpers and mod messages name it.
@@ -83,7 +82,6 @@ impl<'a> NativeMobRender<'a> {
 /// Which player a [`NativeMobRender`] is, for `native_player_submit` and
 /// `native_mob_layer`.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct NativePlayerRender<'a> {
     /// The player's profile name.

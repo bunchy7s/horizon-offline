@@ -158,7 +158,6 @@
   "How far mobs, crops and machines keep working. CPU time.": "Yaratıkların, ekinlerin ve makinelerin ne kadar uzaktan çalışmaya devam edeceğini belirler. İşlemci gücü kullanır.",
   "How far away mobs and items are drawn, as a share of normal.": "Yaratıkların ve eşyaların ne kadar uzaktan görüntüleneceğini, normal mesafeye oranla belirler.",
   "Skips terrain hidden behind closed sections. Off costs a lot.": "Kapalı alanların arkasında kalan arazilerin çizilmesini önler. Kapalı olması ciddi performans kaybına neden olur.",
-  "Hides models behind opaque blocks. Entities update. Off with custom packs.": "Opak blokların arkasında kalan modelleri gizler. Varlıkların güncellemeleri devam eder. Özel paketler kullanırken kapatın.",
   "Meshed sections uploaded per frame. Lower is smoother while loading.": "Her karede GPU'ya yüklenen oluşturulmuş bölüm sayısı. Daha düşük değerler yükleme sırasında daha akıcı bir deneyim sağlar.",
   "Soft shadows in corners. Costs chunk building time only.": "Köşelerde yumuşak gölgeler oluşturur. Yalnızca parça oluşturma süresini etkiler.",
   "Smaller copies of block textures for distant terrain: less shimmer.": "Uzak arazilerde blok dokularının daha küçük kopyalarını kullanır. Titreşimli görüntüyü azaltır.",

@@ -355,6 +355,40 @@ pub fn log_path() -> PathBuf {
     root().join("build.log")
 }
 
+/// Makes the build log fresh for a new attempt: its folder made, the last build's log
+/// emptied. The error says why it couldn't, so the Build log page can show it instead of
+/// the old file's contents.
+pub fn clear_log() -> Result<(), String> {
+    fs::create_dir_all(root()).map_err(|e| e.to_string())?;
+    fs::write(log_path(), "").map_err(|e| format!("{}: {e}", log_path().display()))
+}
+
+/// Appends `message` (with a newline) to the build log, so a failure that happens before any
+/// command runs is still recorded.
+pub fn append_log(message: &str) -> Result<(), String> {
+    let mut log = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path())
+        .map_err(|e| format!("{}: {e}", log_path().display()))?;
+    writeln!(log, "{message}").map_err(|e| e.to_string())
+}
+
+/// Records the whole attempt, including selection or export after compilation.
+fn logged<T>(build: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    clear_log()?;
+    let result = build();
+    match &result {
+        Ok(_) => {
+            let _ = append_log("Build completed.");
+        }
+        Err(error) => {
+            let _ = append_log(&format!("The build failed: {error}"));
+        }
+    }
+    result
+}
+
 const MANIFEST: &str = "horizon-mixin.toml";
 /// A registry download's manifest (`.hnmod`, `horizon_mods::index::native`), beside `mixins/<id>/`.
 const NATIVE_MANIFEST: &str = horizon_mods::index::native::MANIFEST;
@@ -1437,12 +1471,13 @@ struct Built {
 /// The pipeline both targets build with ([`build`], [`build_server`]): `folder`'s mods on the
 /// Horizon revision they pin (else `base`'s, the installed version whose game files the build
 /// reuses: a native build's own revision when it is one, [`base_for`]), compiled as `target`
-/// (the game, or the headless engine) and installed as its own version, `native-<revision>-<key>`
-/// (the key hashes the revision, the mods' files, the tool's commit, the profile and the
-/// target). A build already made is used again. Mods pinning different revisions build on the
-/// newest one, with the newest horizon-mixins they name, only when the player agreed to try
-/// (`anyway`): else the error starts with [`MISMATCH`] and says which. Nothing of the player's
-/// outside the launcher's data is touched: no instance is edited and no version selected here.
+/// (the game, or the headless engine) and installed as its own version,
+/// `native-<revision>-<key>` (the key hashes the revision, the mods' files, the tool's commit,
+/// the profile and the target). A build already made is used again. Mods pinning different
+/// revisions build on the newest one, with the newest horizon-mixins they name, only when the
+/// player agreed to try (`anyway`): else the error starts with [`MISMATCH`] and says which.
+/// Nothing of the player's outside the launcher's data is touched: no instance is edited and
+/// no version selected here.
 fn pipeline(
     base: &str,
     folder: &Path,
@@ -1454,7 +1489,6 @@ fn pipeline(
     let started = std::time::Instant::now();
     backend::need_prepared(base)?;
     fs::create_dir_all(root()).map_err(|e| e.to_string())?;
-    let _ = fs::write(log_path(), "");
     // The mods are copied first: the build and its key use the copy, whatever happens to the
     // folder meanwhile.
     let incoming = root().join("mods.incoming");
@@ -1740,19 +1774,21 @@ pub fn build(
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<String, String> {
-    let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
-    instances::edit(&instance.id, |meta| {
-        meta.version = Some(built.version.clone())
-    })?;
-    prune(&built.version);
-    if built.plan != Plan::UpToDate {
-        progress(Step::Done {
-            secs: built.secs,
-            profile: built.profile,
-            plan: built.plan,
-        });
-    }
-    Ok(built.version)
+    logged(|| {
+        let built = pipeline(base, folder, anyway, profile, Target::Client, &progress)?;
+        instances::edit(&instance.id, |meta| {
+            meta.version = Some(built.version.clone())
+        })?;
+        prune(&built.version);
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        Ok(built.version)
+    })
 }
 
 /// Builds `folder`'s mods as the headless engine a dedicated server runs (`horizon-engine`,
@@ -1773,58 +1809,60 @@ pub fn build_server(
     profile: Profile,
     progress: impl Fn(Step),
 ) -> Result<PathBuf, String> {
-    if output.symlink_metadata().is_ok() {
-        return Err(trf(
-            "{path} already exists. Move it away, or build into another folder.",
-            &[("path", &output.display().to_string())],
-        ));
-    }
-    let parent = output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let output = parent.canonicalize().map_err(|e| e.to_string())?.join(
-        output
-            .file_name()
-            .ok_or_else(|| tr("Choose a new folder for the server export."))?,
-    );
-    for managed in [backend::version_dir(""), root()] {
-        if managed
-            .canonicalize()
-            .is_ok_and(|dir| output.starts_with(dir))
-        {
-            return Err(tr("Export the server outside the launcher's managed folders.").into());
+    logged(|| {
+        if output.symlink_metadata().is_ok() {
+            return Err(trf(
+                "{path} already exists. Move it away, or build into another folder.",
+                &[("path", &output.display().to_string())],
+            ));
         }
-    }
-    let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
-    export(&Target::Server.directory(&built.version), &output)?;
-    // Exports are independent; keep only the newest cached server builds.
-    let cached = root().join("server-builds");
-    let builds = fs::read_dir(&cached)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().join(".installed").is_file())
-        .map(|e| {
-            let at = fs::metadata(e.path().join(".installed"))
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::UNIX_EPOCH);
-            (e.file_name().to_string_lossy().into_owned(), at)
-        })
-        .collect();
-    for old in stale(builds, &built.version, &[]) {
-        let _ = fs::remove_dir_all(cached.join(old));
-    }
-    if built.plan != Plan::UpToDate {
-        progress(Step::Done {
-            secs: built.secs,
-            profile: built.profile,
-            plan: built.plan,
-        });
-    }
-    let engine = output.join(Target::Server.binary());
-    Ok(std::path::absolute(&engine).unwrap_or(engine))
+        let parent = output
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        let output = parent.canonicalize().map_err(|e| e.to_string())?.join(
+            output
+                .file_name()
+                .ok_or_else(|| tr("Choose a new folder for the server export."))?,
+        );
+        for managed in [backend::version_dir(""), root()] {
+            if managed
+                .canonicalize()
+                .is_ok_and(|dir| output.starts_with(dir))
+            {
+                return Err(tr("Export the server outside the launcher's managed folders.").into());
+            }
+        }
+        let built = pipeline(base, folder, anyway, profile, Target::Server, &progress)?;
+        export(&Target::Server.directory(&built.version), &output)?;
+        // Exports are independent; keep only the newest cached server builds.
+        let cached = root().join("server-builds");
+        let builds = fs::read_dir(&cached)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().join(".installed").is_file())
+            .map(|e| {
+                let at = fs::metadata(e.path().join(".installed"))
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH);
+                (e.file_name().to_string_lossy().into_owned(), at)
+            })
+            .collect();
+        for old in stale(builds, &built.version, &[]) {
+            let _ = fs::remove_dir_all(cached.join(old));
+        }
+        if built.plan != Plan::UpToDate {
+            progress(Step::Done {
+                secs: built.secs,
+                profile: built.profile,
+                plan: built.plan,
+            });
+        }
+        let engine = output.join(Target::Server.binary());
+        Ok(std::path::absolute(&engine).unwrap_or(engine))
+    })
 }
 
 /// Copies the built version folder `from` into `output` (outside the managed versions) as one
@@ -2006,6 +2044,8 @@ fn stale(
 
 #[cfg(test)]
 mod tests {
+    static LOG_TEST: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     use super::*;
 
     #[test]
@@ -2818,6 +2858,7 @@ mod tests {
     /// and no instance is edited or version selected.
     #[test]
     fn a_server_build_refuses_an_existing_output_before_building() {
+        let _guard = LOG_TEST.lock().unwrap();
         let output = dir("server-output");
         let folder = dir("server-mods");
         write_bundle(&folder, "hello", "fn hook() {}");
@@ -2833,6 +2874,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("already exists"), "{err}");
+        assert!(fs::read_to_string(log_path()).unwrap().contains(&err));
         let managed = root().join("forbidden-export");
         let err = build_server(
             "v0.0.0-not-installed",
@@ -2868,6 +2910,57 @@ mod tests {
         assert_eq!(
             (Profile::Fast.name(), Profile::Release.name()),
             ("fast", "release")
+        );
+    }
+
+    /// The build log ([`clear_log`], [`append_log`]): fresh for every attempt, and an early
+    /// failure (before any command ran) recorded in it, in one test because they share the
+    /// one log file.
+    #[test]
+    fn the_log_is_fresh_per_attempt_and_keeps_early_failures() {
+        let _guard = LOG_TEST.lock().unwrap();
+        clear_log().unwrap();
+        append_log("the last build's output").unwrap();
+        clear_log().unwrap();
+        assert_eq!(fs::read(log_path()).unwrap(), b"");
+        append_log("a line").unwrap();
+        append_log("another").unwrap();
+        assert_eq!(fs::read_to_string(log_path()).unwrap(), "a line\nanother\n");
+        // A build that fails before anything runs empties the old log and says why.
+        let folder = dir("log-early");
+        write_bundle(&folder, "hello", "fn hook() {}");
+        let out = dir("log-early-out");
+        let err = build_server(
+            "v0.0.0-not-installed",
+            &folder,
+            &out.join("server"),
+            true,
+            Profile::Fast,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(err.contains("is not prepared yet"), "{err}");
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.contains("is not prepared yet"), "{log}");
+        assert!(!log.contains("the last build's output"), "{log}");
+        // A failure after compiler output keeps those diagnostics and the final reason.
+        let failure: Result<(), String> = logged(|| {
+            append_log("error[E0425]: cannot find value `missing` in this scope")?;
+            Err("Could not export the engine".into())
+        });
+        assert!(failure.is_err());
+        let log = fs::read_to_string(log_path()).unwrap();
+        assert!(log.starts_with("error[E0425]"), "{log}");
+        assert!(
+            log.ends_with("The build failed: Could not export the engine\n"),
+            "{log}"
+        );
+        assert!(!log.contains("Build completed."), "{log}");
+        let success: Result<(), String> = logged(|| Ok(()));
+        success.unwrap();
+        assert_eq!(
+            fs::read_to_string(log_path()).unwrap(),
+            "Build completed.\n"
         );
     }
 
