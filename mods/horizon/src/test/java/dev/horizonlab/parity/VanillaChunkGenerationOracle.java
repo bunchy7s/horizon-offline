@@ -223,7 +223,7 @@ public final class VanillaChunkGenerationOracle {
         staticTags.forEach(Registry.PendingTags::apply);
         components.forEach(net.minecraft.core.component.DataComponentInitializers.PendingComponents::apply);
         RegistryAccess access = loaded.layers().compositeAccess();
-        var settings = world.lookupOrThrow(Registries.NOISE_SETTINGS).getOrThrow(switch (dimension) {
+        net.minecraft.core.Holder<NoiseGeneratorSettings> settings = world.lookupOrThrow(Registries.NOISE_SETTINGS).getOrThrow(switch (dimension) {
             case "the_nether" -> NoiseGeneratorSettings.NETHER;
             case "the_end" -> NoiseGeneratorSettings.END;
             default -> NoiseGeneratorSettings.OVERWORLD;
@@ -234,6 +234,18 @@ public final class VanillaChunkGenerationOracle {
             case "the_end" -> TheEndBiomeSource.create(world.lookupOrThrow(Registries.BIOME));
             default -> MultiNoiseBiomeSource.createFromPreset(presets.getOrThrow(MultiNoiseBiomeSourceParameterLists.OVERWORLD));
         };
+        // A pack's level stem (dimension/<id>.json) stands in for the preset's, as when a world is
+        // created with the pack: its generator's biome source and noise settings.
+        if (datapacks != null) {
+            var dimensionLookups = TagLoader.buildUpdatedLookups(layers.replaceFrom(RegistryLayer.WORLD, world).getAccessForLoading(RegistryLayer.DIMENSIONS), staticTags);
+            var dimensions = RegistryDataLoader.load(resources, dimensionLookups, RegistryDataLoader.DIMENSION_REGISTRIES, Runnable::run).join();
+            var stemKey = ResourceKey.create(Registries.LEVEL_STEM, net.minecraft.resources.Identifier.withDefaultNamespace(dimension));
+            var stem = dimensions.lookupOrThrow(Registries.LEVEL_STEM).get(stemKey);
+            if (stem.isPresent() && stem.get().value().generator() instanceof NoiseBasedChunkGenerator noise) {
+                biomeSource = noise.getBiomeSource();
+                settings = noise.generatorSettings();
+            }
+        }
         ResourceKey<Level> levelKey = switch (dimension) {
             case "the_nether" -> Level.NETHER;
             case "the_end" -> Level.END;
