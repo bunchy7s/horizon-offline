@@ -4511,7 +4511,29 @@ impl Game<'_> {
                 {
                     m.damage_projectile(0.0, source, aim, [p.velocity.x, p.velocity.z]);
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() {
+                // To where the pearl started its last tick (oldPosition).
+                let mut to = p.previous;
+                let mut damage = 5.0;
+                let mut cancel = false;
+                // EntityTeleportEvent.EnderPearl: a server player's pearl.
+                if p.owner == Some(Who::Player)
+                    && let Some(from) = self.player.as_ref().map(|pl| pl.position)
+                    && let (Some(uuid), Some(name)) =
+                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut target = [to.x, to.y, to.z];
+                    self.native_ender_pearl_teleport(
+                        uuid,
+                        &name,
+                        p.id,
+                        [from.x, from.y, from.z],
+                        &mut target,
+                        &mut damage,
+                        &mut cancel,
+                    );
+                    to = Vec3::new(target[0], target[1], target[2]);
+                }
+                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
@@ -4522,8 +4544,6 @@ impl Game<'_> {
                         let from = pl.position;
                         self.spawn_mob("minecraft:endermite", [from.x, from.y, from.z], false);
                     }
-                    // To where the pearl started its last tick (oldPosition).
-                    let to = p.previous;
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
                         pl.velocity = Vec3::ZERO;
@@ -4531,7 +4551,9 @@ impl Game<'_> {
                         pl.teleported = true;
                     }
                     self.previous_position = to;
-                    self.hurt_player_by("minecraft:ender_pearl", 5.0);
+                    if damage > 0.0 {
+                        self.hurt_player_by("minecraft:ender_pearl", damage);
+                    }
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),

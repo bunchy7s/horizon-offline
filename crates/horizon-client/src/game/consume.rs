@@ -311,6 +311,25 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
     fn position(&mut self) -> Result<Vec3, Infallible> {
         Ok(self.at())
     }
+    fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, Infallible> {
+        // EntityTeleportEvent.ChorusFruit: only a server's player is heard.
+        let (Some(uuid), Some(name)) = (self.0.lan_acting_uuid, self.0.lan_acting_name.clone())
+        else {
+            return Ok(true);
+        };
+        let from = self.at();
+        let mut to = [target.x, target.y, target.z];
+        let mut cancel = false;
+        self.0.native_chorus_fruit_teleport(
+            uuid,
+            &name,
+            [from.x, from.y, from.z],
+            &mut to,
+            &mut cancel,
+        );
+        *target = Vec3::new(to[0], to[1], to[2]);
+        Ok(!cancel)
+    }
     fn random_teleport(&mut self, target: Vec3) -> Result<bool, Infallible> {
         Ok(self
             .0
