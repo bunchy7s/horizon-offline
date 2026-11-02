@@ -677,6 +677,12 @@ impl Entity for ArmorStand {
     fn is_ignoring_block_triggers(&self) -> bool {
         self.marker
     }
+    /// A NoGravity stand is not swept for the blocks it stands in (plates,
+    /// fire): measured beside the real server, it never presses a plate nor
+    /// catches fire, and does again once `NoGravity` is cleared.
+    fn sweeps_blocks_inside(&self) -> bool {
+        !self.no_gravity
+    }
     fn pushed_by_explosion(&self) -> bool {
         false
     }
@@ -884,5 +890,25 @@ impl EntityRules for FallingBlock {
     /// `FallingBlockEntity.getDefaultGravity`.
     fn get_default_gravity(&self) -> f64 {
         0.04
+    }
+}
+
+#[cfg(test)]
+mod no_gravity_stand_tests {
+    use super::Entity as _;
+    use horizon_client::entities::ArmorStand;
+    use horizon_core::geometry::Vec3;
+
+    #[test]
+    fn a_no_gravity_stand_is_not_swept_for_the_blocks_it_is_in() {
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        // A resting stand presses a plate (measured beside the real server)...
+        assert!(stand.sweeps_blocks_inside() && stand.triggers_blocks());
+        // ...a NoGravity one does not, nor does a marker.
+        stand.no_gravity = true;
+        assert!(!stand.sweeps_blocks_inside());
+        stand.no_gravity = false;
+        stand.marker = true;
+        assert!(!stand.triggers_blocks());
     }
 }
