@@ -76,8 +76,8 @@ LiquidBlock.neighborChanged	port	crates/horizon-world/src/level/fluids.rs::Sim::
 LiquidBlock.pickupBlock	port	crates/horizon-world/src/level/fluids.rs::Sim::pickup_block	source blocks only, leaves air and yields the bucket
 LoomBlock.useWithoutItem	port	crates/horizon-client/src/game/stations.rs::Game::open_station	opens the loom station
 LoomBlock.getMenuProvider	port	crates/horizon-client/src/game/stations.rs::Game::open_station	the loom menu over the block position
-Mirror.mirror	missing	-	minor: unsure: integer rotation mirror for 16-step rotations (banners, heads) not found; template transform works on positions only
-Mirror.getRotation	missing	-	minor: unsure: the 180 degree turn that a mirror implies is not found; template transform applies mirror to positions only
+Mirror.mirror	inline	crates/horizon-world/src/worldgen/structure/processor.rs::turn_facing	a hanging entity's Facing takes the same axis flips (LEFT_RIGHT swaps north and south, FRONT_BACK west and east) before the rotation; a block state's mirrored result is the exported per-state table (StateTransforms::mirror)
+Mirror.getRotation	inline	crates/horizon-world/src/worldgen/structure/processor.rs::turn_facing	the 180 degree turn an axis-flipped facing implies is the swap turn_facing makes; for a block state it is already in the exported mirror table
 MossyCarpetBlock.makeShapes	skip:data	-	collision and outline shapes are precomputed from the data
 MossyCarpetBlock.getCollisionShape	skip:data	-	collision shape per state comes from the data table
 MossyCarpetBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	base needs a non-air block below; a topper needs a moss carpet below
