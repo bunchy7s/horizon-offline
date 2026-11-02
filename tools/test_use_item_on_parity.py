@@ -4,8 +4,9 @@ both food and blocks (sweet and glow berries, carrots, potatoes), for sweet
 berry bushes, for spawn eggs used on a monster spawner, for shears carving
 pumpkins or cropping a growing plant's head (kelp, weeping and twisting vines,
 cave vines) to its top age, for copper golem statues turned to their next pose,
-for blocks placed where mobs and armor stands stand, for respawn anchors and for
-beds in the Nether and the End.
+for blocks placed where mobs and armor stands stand, for respawn anchors, for
+beds in the Nether and the End, and for doors, trapdoors and fence gates, which a
+hand opens unless their material cannot be (`BlockSetType.canOpenByHand`).
 
 Every case has a block at the origin, something above it, and a player three
 blocks south, survival or creative, hungry or full, sneaking or not, who
@@ -92,6 +93,7 @@ def respawn_case(rng, states, case):
 
 BED_COLORS = ['red', 'white', 'black', 'cyan', 'lime']
 FACINGS = {'north': (0, -1), 'south': (0, 1), 'west': (-1, 0), 'east': (1, 0)}
+OPPOSITE = {'north': 'south', 'south': 'north', 'west': 'east', 'east': 'west'}
 
 
 def bed_respawn_case(rng, states, case):
@@ -331,6 +333,59 @@ def jukebox_case(rng, states, case):
                         'creative': True, 'sneaking': False, 'food': 20}
 
 
+# Doors, trapdoors and fence gates of every material, and the ones whose `BlockSetType` cannot be
+# opened by hand (`DoorBlock.useWithoutItem`'s `type.canOpenByHand`).
+DOORS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar',
+         'bamboo', 'crimson', 'warped', 'copper', 'exposed_copper', 'weathered_copper', 'oxidized_copper',
+         'waxed_copper', 'iron']
+GATES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar',
+         'bamboo', 'crimson', 'warped']
+
+
+def openable_case(rng, states, case):
+    """A door, trapdoor or fence gate right-clicked by hand (`DoorBlock.useWithoutItem`,
+    `TrapDoorBlock.useWithoutItem`, `FenceGateBlock.useWithoutItem`): the ones whose
+    `BlockSetType.canOpenByHand` turn to their other `open` with their open or close sound and
+    `block_open`/`block_close`, a waterlogged trapdoor also schedules the water again, a fence gate
+    closed across the player turns to face them first (`player.getDirection`) and draws its sound's
+    pitch, and an iron one passes, so what the hand holds is placed against it instead."""
+    kind = rng.random()
+    facing = rng.choice(list(FACINGS))
+    if kind < 0.4:
+        material = rng.choice(DOORS)
+        props = {'facing': facing, 'half': 'lower', 'hinge': rng.choice(['left', 'right']),
+                 'open': rng.choice(['false', 'false', 'true']), 'powered': rng.choice(['false', 'true'])}
+        cells = [[0, 0, 0, states.get(material + '_door', **props)],
+                 [0, 1, 0, states.get(material + '_door', **{**props, 'half': 'upper'})]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up'])
+    elif kind < 0.75:
+        material = rng.choice(DOORS)
+        cells = [[0, 0, 0, states.get(material + '_trapdoor', facing=facing, half=rng.choice(['bottom', 'top']),
+                                      open=rng.choice(['false', 'false', 'true']),
+                                      powered=rng.choice(['false', 'true']),
+                                      waterlogged=rng.choice(['false', 'false', 'false', 'true']))]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up', 'down'])
+    else:
+        material = rng.choice(GATES)
+        cells = [[0, 0, 0, states.get(material + '_fence_gate', facing=facing,
+                                      open=rng.choice(['false', 'false', 'true']),
+                                      powered=rng.choice(['false', 'true']),
+                                      in_wall=rng.choice(['false', 'false', 'true']))]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up', 'down'])
+    held = rng.choice(['-', '-', 'stone', 'oak_planks', 'stick', 'iron_ingot', 'oak_door', 'oak_fence_gate'])
+    case['use_item'] = {'item': '-' if held == '-' else d_plain(held, rng.choice([1, 16])),
+                        'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.25, 'food': 20,
+                        'yaw': rng.choice([0, 45, 90, 135, 180, -90, -135, -180, 270, 315, 30, 200]),
+                        'face': face}
+    case['cells'] = cells
+
+
 def cases(facts, count, seed):
     rng = random.Random(seed)
     states = d.States(facts)
@@ -388,6 +443,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             jukebox_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.1:
+            openable_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case
