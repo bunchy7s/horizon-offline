@@ -622,6 +622,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 state = self.b.air();
                 self.set_block_and_update(pos, state);
             } else if new_fluid != fluid {
+                let name = match kind {
+                    FluidKind::Water | FluidKind::FlowingWater => "water",
+                    FluidKind::Lava | FluidKind::FlowingLava => "lava",
+                    FluidKind::Empty => return,
+                };
+                if !self.level.allow_fluid_level_change(
+                    pos,
+                    name,
+                    i32::from(fluid.amount()),
+                    i32::from(new_fluid.amount()),
+                ) {
+                    return;
+                }
                 fluid = new_fluid;
                 state = self.b.legacy_block(fluid);
                 self.set_block_and_update(pos, state);
