@@ -3284,7 +3284,7 @@ impl OptionsUi {
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
                         Row::Heading(key) => {
-                            let label = tr(key);
+                            let label = tr(&key);
                             self.heading_row(&mut out, label, &mut y, w, top);
                         }
                         Row::Note(text) => {
