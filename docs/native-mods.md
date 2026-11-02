@@ -856,9 +856,10 @@ A mod particle may opt into declarative behaviour in that same particle JSON (no
 }
 ```
 
-`animation` chooses how the particle walks through its sprites: `age` (default, first to last over its
+`animation` chooses how the particle walks through its sprites: `age` (first to last over its
 lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
-sprite, kept) or `first` (the first sprite, kept).
+sprite, kept) or `first` (the first sprite, kept). Without `animation` the particle keeps the sprite it was
+spawned with, as before.
 
 Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
 including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
