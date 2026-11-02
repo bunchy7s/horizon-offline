@@ -11522,13 +11522,15 @@ impl Game<'_> {
         // attack strength scales the base damage.
         let enchant_bonus = self.enchanted_damage(target_kind, damage) - damage;
         let mut amount = damage * (0.2 + scale * scale * 0.8);
+        // Player.attack decides the critical hit only for a hit with base or
+        // enchantment damage: checked before the mace's smash bonus is added.
+        let damaging = amount > 0.0 || enchant_bonus * scale > 0.0;
         // Item.getAttackDamageBonus (a mace's smash), before the critical hit.
         amount += self.smash_damage_bonus(target_kind);
         let vanilla_crit = living && self.critical_attack(scale);
         let mut crit = vanilla_crit;
-        let mut multiplier = 1.5;
-        // Player.attack decides the critical hit only for a hit that does damage.
-        if living && (amount > 0.0 || enchant_bonus * scale > 0.0) {
+        let mut multiplier = if vanilla_crit { 1.5 } else { 1.0 };
+        if living && damaging {
             self.native_critical_hit(target_kind, vanilla_crit, &mut crit, &mut multiplier);
         }
         if crit {
