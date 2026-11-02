@@ -130,7 +130,16 @@ impl<'a> Split<'a> {
         self.refresh_monitors();
         let live = self.draft();
         let (monitors, main) = self.setup_monitors();
-        let names = (0..self.players()).map(|i| self.name(i)).collect();
+        // A player whose controller disconnected says so on its tile.
+        let names = (0..self.players())
+            .map(|i| {
+                let name = self.name(i);
+                match self.lost.iter().any(|l| l.seat == self.seat_of(i)) {
+                    true => format!("{name} (no controller)"),
+                    false => name,
+                }
+            })
+            .collect();
         let seats: Vec<usize> = (0..self.players()).map(|i| self.seat_of(i)).collect();
         let moved = std::mem::replace(&mut self.setup_seats, seats) != self.setup_seats;
         let setup = &mut self.host.ui.options.split_setup;
@@ -140,14 +149,21 @@ impl<'a> Split<'a> {
         }
         let applied = setup.apply.take();
         let identify = std::mem::take(&mut setup.identify);
+        let give_up = std::mem::take(&mut setup.give_up_pad);
         if std::mem::take(&mut setup.toggle_names) {
             let e = &mut self.host.settings.extras;
             e.splitscreen_names = !e.splitscreen_names;
             self.host.settings.save(&Game::options_path());
         }
         let names_shown = self.host.settings.extras.splitscreen_names;
+        if give_up {
+            self.give_up_pad();
+        }
+        // Give Up Pad shows while P1 has a controller in a world others can join.
+        let p1_pad = self.p1_pad.owner.is_some() && self.in_world();
         let setup = &mut self.host.ui.options.split_setup;
         setup.names_shown = names_shown;
+        setup.p1_pad = p1_pad;
         setup.idle = self.surfaces.is_empty();
         setup.live = Some(live);
         setup.monitors = monitors;

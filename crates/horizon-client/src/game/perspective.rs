@@ -246,10 +246,16 @@ impl Game<'_> {
         // another player.
         let (entity, descending) = match self.camera_mob() {
             Some(m) => (super::remote_camera::mob_camera_entity(m), false),
-            None => (
-                self.player_camera_entity()?,
-                self.player.as_ref()?.shift_key_down,
-            ),
+            None => {
+                let mut entity = self.player_camera_entity()?;
+                if let Some(position) = self.remote_minecart_rider_position(partial) {
+                    // Already evaluated at partial: do not linearly interpolate
+                    // between tick endpoints across a corner a second time.
+                    entity.position = position;
+                    entity.previous = position;
+                }
+                (entity, self.player.as_ref()?.shift_key_down)
+            }
         };
         let mut view = self.view;
         let kind = match self.camera_type {
@@ -352,7 +358,14 @@ impl Game<'_> {
         let ride_turn = self
             .riding
             .and_then(|id| self.boats.iter().find(|b| b.id == id))
-            .map_or(0.0, |b| b.delta_rotation);
+            .map_or_else(
+                || {
+                    self.riding
+                        .and_then(|id| self.carts.iter().find(|c| c.id == id))
+                        .map_or(0.0, |c| c.passenger_yaw_delta)
+                },
+                |b| b.delta_rotation,
+            );
         let entity = CameraEntity {
             position: [p.position.x, p.position.y, p.position.z],
             previous: [
@@ -659,28 +672,31 @@ impl Game<'_> {
             &self.player_armor_layers(),
             out,
         );
-        let chest = self.armor[1].as_ref().map(|s| &*s.item);
-        // CapeLayer: no cape on an invisible player (`isInvisible`, whoever looks).
-        if !self.own_invisible() {
-            self.player_cape_geometry(m, chest, camera, alpha as f32, packed, out);
+        // AvatarRenderer.shouldRenderLayers: a spectator draws no layers.
+        if horizon_client::mobs::render::layers_shown(m) {
+            let chest = self.armor[1].as_ref().map(|s| &*s.item);
+            // CapeLayer: no cape on an invisible player (`isInvisible`, whoever looks).
+            if !self.own_invisible() {
+                self.player_cape_geometry(m, chest, camera, alpha as f32, packed, out);
+            }
+            self.player_ears_geometry(
+                m,
+                &self.own_profile_name(),
+                camera,
+                alpha as f32,
+                packed,
+                out,
+            );
+            self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
+            self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
+            self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
+            self.stuck_in_body_geometry(m, self.own_entity_id(), camera, alpha as f32, packed, out);
+            self.held_item_geometry(m, camera, alpha, packed, true, out);
+            // CustomHeadLayer: a pumpkin, skull or other head item.
+            self.head_item_geometry(m, camera, alpha, packed, true, out);
+            // `native_mob_layer`: a native mod's layer, over the vanilla ones.
+            self.mod_mob_layer_geometry(m, Some(who), alpha as f32, camera, packed, out);
         }
-        self.player_ears_geometry(
-            m,
-            &self.own_profile_name(),
-            camera,
-            alpha as f32,
-            packed,
-            out,
-        );
-        self.player_elytra_geometry(m, chest, camera, alpha as f32, packed, out);
-        self.spin_attack_geometry(m, camera, alpha as f32, packed, out);
-        self.shoulder_parrots_geometry(m, camera, alpha as f32, packed, out);
-        self.stuck_in_body_geometry(m, self.own_entity_id(), camera, alpha as f32, packed, out);
-        self.held_item_geometry(m, camera, alpha, packed, true, out);
-        // CustomHeadLayer: a pumpkin, skull or other head item.
-        self.head_item_geometry(m, camera, alpha, packed, true, out);
-        // `native_mob_layer`: a native mod's layer, over the vanilla ones.
-        self.mod_mob_layer_geometry(m, Some(who), alpha as f32, camera, packed, out);
         // LivingEntity.isCurrentlyGlowing: the Glowing effect.
         if self.potions.effects.get("glowing").is_some() {
             let color = super::glowing::team_color(self.own_team());
@@ -1499,6 +1515,25 @@ mod preview_tests {
         assert!(!hidden.is_empty(), "the armour still draws");
         assert!(hidden.iter().all(|v| v.uv[0] >= 0.5), "only the armour");
         assert_eq!(hidden.len() * 2, shown.len());
+        // AvatarRenderer.shouldRenderLayers: a spectator has no armour layer.
+        let mut ghost = m.clone();
+        ghost.extra.spectator = true;
+        assert!(!horizon_client::mobs::render::layers_shown(&ghost));
+        let mut with_armour = Vec::new();
+        let mut without = Vec::new();
+        for (armour, out) in [(&armour[..], &mut with_armour), (&[][..], &mut without)] {
+            horizon_client::mobs::render::render_layers(
+                &ghost,
+                1.0,
+                glam::DVec3::ZERO,
+                &atlas,
+                0xF0F0,
+                &data,
+                armour,
+                out,
+            );
+        }
+        assert!(without.is_empty() && with_armour.is_empty(), "no armour");
     }
 
     #[test]
