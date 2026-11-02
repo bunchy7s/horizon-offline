@@ -80,8 +80,10 @@ impl GameTools {
             tools: Vec::new(),
         };
         tools.rpc(
+            // The child is whichever `horizon-ctl` the player has installed, so open with the
+            // handshake revision: older versions do not know the stateless one.
             "initialize",
-            json!({ "protocolVersion": crate::mcp::PROTOCOL, "capabilities": {},
+            json!({ "protocolVersion": horizon_mcp::LEGACY, "capabilities": {},
                     "clientInfo": { "name": "horizon-launcher", "version": backend::VERSION } }),
         )?;
         tools.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))?;

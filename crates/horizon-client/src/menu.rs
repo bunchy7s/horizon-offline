@@ -406,7 +406,7 @@ pub fn native_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
-    let _ = (menu, slot, stack, may_place, max_stack);
+    crate::native_client_hooks::menu_slot_rules(menu, slot, stack, may_place, max_stack);
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -1471,7 +1471,9 @@ impl Menu {
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
             Role::Fuel if Self::is_bucket(stack) => return 1,
             Role::Mod | Role::ModResult => self.mod_slot(s, stack).1,
-            _ => CONTAINER_MAX,
+            // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
+            // item reaches; a native mod's item may, and its own size is the cap.
+            _ => u32::MAX,
         };
         own.min(Self::max_stack(env, stack))
     }
@@ -1489,7 +1491,7 @@ impl Menu {
         if (slot.container == MAIN || slot.role == Role::LoomResult)
             && let Some(st) = stack.as_mut()
         {
-            st.count = st.count.min(CONTAINER_MAX.min(Self::max_stack(env, st)));
+            st.count = st.count.min(Self::max_stack(env, st));
             // The beacon's container holds one item (getMaxStackSize 1).
             if self.kind == Kind::Beacon {
                 st.count = st.count.min(1);
@@ -1873,7 +1875,7 @@ impl Menu {
                 inv[i].as_ref().is_some_and(|have| {
                     have.same_item_same_components(stack)
                         && Self::stackable(env, have)
-                        && have.count < CONTAINER_MAX.min(Self::max_stack(env, have))
+                        && have.count < Self::max_stack(env, have)
                 })
             })
     }
@@ -1891,7 +1893,7 @@ impl Menu {
             empty.count = 0;
             empty
         });
-        let room = CONTAINER_MAX.min(Self::max_stack(env, cell)) - cell.count;
+        let room = Self::max_stack(env, cell).saturating_sub(cell.count);
         let add = stack.count.min(room);
         cell.count += add;
         tidy(&mut self.containers[PLAYER][slot]);
@@ -3457,6 +3459,31 @@ pub(crate) mod tests {
             chest.click(env, 0, 0, Input::QuickMove).unwrap();
             assert!(chest.equipped.is_empty());
         });
+    }
+
+    #[test]
+    fn installed_slot_rules_change_mod_menu_placement() {
+        let installed =
+            crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+                menu_slot_rules: |menu, slot, _, may_place, max_stack| {
+                    if menu == "test:rules" && slot == 0 {
+                        *may_place = false;
+                        *max_stack = 7;
+                    }
+                },
+                living_breathe: |_, _, _, _, _| {},
+                ingredient: |_, _, _| {},
+            });
+        assert!(installed.is_ok());
+        let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
+            id: "test:rules",
+            slots: 1,
+            data_slots: 0,
+            results: vec![],
+        })));
+        let menu = Menu::new(kind);
+        let stack = ItemStack::new("minecraft:stone", 1);
+        assert_eq!(menu.mod_slot(0, &stack), (false, 7));
     }
 
     /// A mod menu type: three slots, then a result (slot 3).

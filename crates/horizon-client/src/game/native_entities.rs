@@ -159,8 +159,8 @@ impl Game<'_> {
         let first = self.next_entity + 1;
         let deferred = (self.tnts.len(), self.falling.len(), self.rockets.len());
         let target = self.spawn_entity_from_nbt(tag);
-        // These roots load with id 0 and have no command Target variant.
-        // Select the newly appended root, never an older waiting entity.
+        // These roots take their id as they load, and a rocket has no command
+        // Target variant. Select the newly appended root, never an older waiting entity.
         let root = match kind {
             "minecraft:tnt" => self.tnts.get_mut(deferred.0).map(|e| &mut e.id),
             "minecraft:falling_block" => self.falling.get_mut(deferred.1).map(|e| &mut e.id),

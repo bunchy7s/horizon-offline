@@ -55,6 +55,15 @@ struct PageTable {
     group: Option<wgpu::BindGroup>,
 }
 
+/// Writes the fragment's alpha over the frame's and leaves its colour.
+pub(super) const ALPHA_ONLY: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent::REPLACE,
+};
 /// A run of the frame's index list drawn from one arena page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Call {
@@ -74,6 +83,7 @@ pub struct Flat {
     /// The solid draws as the water mirror's camera draws them (`fs_solid_mirror`).
     pub solid_mirror: wgpu::RenderPipeline,
     pub translucent: wgpu::RenderPipeline,
+    pub translucent_mark: wgpu::RenderPipeline,
     flatten: wgpu::ComputePipeline,
     compute_layout: wgpu::BindGroupLayout,
     flatten_seen: wgpu::ComputePipeline,
@@ -416,6 +426,14 @@ impl Flat {
                 "vs_terrain_flat",
                 "fs_translucent",
                 Some(wgpu::BlendState::ALPHA_BLENDING),
+                back,
+            ),
+            translucent_mark: pipeline(
+                &layout,
+                "Terrain translucent HDR mark (flat)",
+                "vs_terrain_flat",
+                "fs_translucent_mark",
+                Some(ALPHA_ONLY),
                 back,
             ),
             flatten,

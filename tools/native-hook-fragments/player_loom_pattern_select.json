@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_loom_pattern_select",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_loom_pattern_select",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player selected a loom pattern (`native_player_loom_pattern_select`).",
+  "doc_summary": "A server player selected loom pattern button `pattern`, after the menu accepted it: `native_player_loom_pattern_select(player, name, pattern)`. Bundles need \"hooks\": @API:player_loom_pattern_select@."
+}

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_item_cooldown",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_item_cooldown",
+      "neoforge": "none (NeoForge has no such event; Paper's PlayerItemCooldownEvent)",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "An item cooldown about to start for a server player, cancellable (`native_player_item_cooldown`).",
+  "doc_summary": "An item cooldown about to start for a server player: `native_player_item_cooldown(player, name, item, ticks, cancel)` is called for use cooldowns and for a shield disabled by a hit. `item` is the item id and `ticks` its duration. Set `cancel` to skip the cooldown; shield disable still stops the use and plays its configured sound. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need \"hooks\": @API:player_item_cooldown@."
+}

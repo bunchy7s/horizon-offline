@@ -170,7 +170,7 @@ impl Game<'_> {
         } else if self.riding == Some(vehicle_id) {
             // The server takes the player out, then teleports it.
             self.riding = None;
-            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == vehicle_id) {
+            if let Some(m) = self.mob_index.get_mut(&mut self.mobs, vehicle_id) {
                 m.rider = None;
             }
             // HappyGhast.removePassenger: a still timeout of 10 (the server's
@@ -237,9 +237,17 @@ impl Game<'_> {
             cart
         };
         if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
+            // The tick a rider takes its seat is a teleport (`Entity.moveTo`,
+            // which sets the old position too): the camera must not sweep from
+            // where the player stood to the cushion, boat or cart. The ticks
+            // after it move with the vehicle and interpolate as usual.
+            let first = self.posed_rider != self.riding;
+            self.posed_rider = self.riding;
             if let Some(v) = seat {
+                self.previous_position = if first { v } else { p.position };
                 p.position = v;
+            } else {
+                self.previous_position = p.position;
             }
             p.velocity = Vec3::ZERO;
             p.fall_distance = 0.0;
@@ -278,7 +286,7 @@ impl Game<'_> {
     pub(super) fn remote_move_vehicle(&mut self, position: [f64; 3], yaw: f32) {
         let at = Vec3::new(position[0], position[1], position[2]);
         if let Some(id) = self.driven_mount().map(|m| m.id)
-            && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
+            && let Some(m) = self.mob_index.get_mut(&mut self.mobs, id)
         {
             m.previous = at;
             m.position = at;
