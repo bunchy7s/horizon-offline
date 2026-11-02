@@ -881,5 +881,9 @@
   "Shader pack · off": "Gölgelendirici paketi · kapalı",
   "1 pack in {name}": "{name} içinde 1 paket",
   "{count} packs in {name}": "{name} içinde {count} paket",
-  "No resource packs. Find them on the Mods page under Modrinth.": "Kaynak paketi yok. Modlar sayfasında Modrinth altında bulabilirsiniz."
+  "No resource packs. Find them on the Mods page under Modrinth.": "Kaynak paketi yok. Modlar sayfasında Modrinth altında bulabilirsiniz.",
+  "No mods in {name} yet.": "{name} içinde henüz mod yok.",
+  "1 mod in {name}": "{name} içinde 1 mod",
+  "{count} mods in {name}": "{name} içinde {count} mod",
+  "Find mods": "Mod bul"
 }

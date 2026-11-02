@@ -881,5 +881,9 @@
   "Shader pack · off": "Paczka shaderów · wył.",
   "1 pack in {name}": "1 paczka w {name}",
   "{count} packs in {name}": "Paczki w {name}: {count}",
-  "No resource packs. Find them on the Mods page under Modrinth.": "Brak paczek zasobów. Znajdziesz je na stronie Mody, w zakładce Modrinth."
+  "No resource packs. Find them on the Mods page under Modrinth.": "Brak paczek zasobów. Znajdziesz je na stronie Mody, w zakładce Modrinth.",
+  "No mods in {name} yet.": "W {name} nie ma jeszcze modów.",
+  "1 mod in {name}": "1 mod w {name}",
+  "{count} mods in {name}": "Mody w {name}: {count}",
+  "Find mods": "Znajdź mody"
 }
