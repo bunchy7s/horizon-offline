@@ -94,9 +94,10 @@ pub enum ProjectileKind {
     /// flight that bursts on whatever it meets.
     WindCharge,
     BreezeWindCharge,
-    /// `ShulkerBullet`: homing on `target` in axis-aligned steps.
+    /// `ShulkerBullet`: homing on `target` in axis-aligned steps; one with
+    /// no target (a summoned one) falls like any projectile.
     ShulkerBullet {
-        target: Who,
+        target: Option<Who>,
         /// The current step direction (3D data value), if any.
         dir: Option<u8>,
         steps: i32,
@@ -169,10 +170,13 @@ impl ProjectileKind {
     }
 }
 /// The entity type a thrown potion's item names: `ThrownSplashPotion` for a
-/// splash potion, `ThrownLingeringPotion` for a lingering one.
+/// splash potion, `ThrownLingeringPotion` for a lingering one,
+/// `ThrownExperienceBottle` for a bottle.
 fn potion_entity_type(item: &str) -> &'static str {
     if item == "minecraft:lingering_potion" {
         "minecraft:lingering_potion"
+    } else if item == "minecraft:experience_bottle" {
+        "minecraft:experience_bottle"
     } else {
         "minecraft:splash_potion"
     }
@@ -181,6 +185,8 @@ fn potion_entity_type(item: &str) -> &'static str {
 fn potion_sprite(item: &str) -> &'static str {
     if item == "minecraft:lingering_potion" {
         "item/lingering_potion"
+    } else if item == "minecraft:experience_bottle" {
+        "item/experience_bottle"
     } else {
         "item/splash_potion"
     }
@@ -312,13 +318,16 @@ impl crate::entity_rules::EntityRules for Projectile {
     }
     /// Each projectile class's `getDefaultGravity`.
     fn get_default_gravity(&self) -> f64 {
-        match self.kind {
+        match &self.kind {
             ProjectileKind::Arrow { .. } | ProjectileKind::Trident => 0.05,
             ProjectileKind::SmallFireball
             | ProjectileKind::LargeFireball { .. }
             | ProjectileKind::WitherSkull { .. } => 0.0,
             ProjectileKind::LlamaSpit => 0.06,
+            // `ThrownExperienceBottle.getDefaultGravity` is 0.07.
+            ProjectileKind::Potion(stack) if &*stack.item == "minecraft:experience_bottle" => 0.07,
             ProjectileKind::Potion { .. } => 0.05,
+            ProjectileKind::ShulkerBullet { .. } => 0.04,
             _ => 0.03,
         }
     }
@@ -596,7 +605,7 @@ impl Projectile {
         );
         let mut p = Self::new(
             ProjectileKind::ShulkerBullet {
-                target,
+                target: Some(target),
                 dir: Some(1),
                 steps: 0,
                 delta: [0.0; 3],
@@ -627,7 +636,11 @@ impl Projectile {
         ]
     }
     fn target_box(&self, w: &impl ProjectileWorld) -> Option<Aabb> {
-        let ProjectileKind::ShulkerBullet { target, .. } = self.kind else {
+        let ProjectileKind::ShulkerBullet {
+            target: Some(target),
+            ..
+        } = self.kind
+        else {
             return None;
         };
         w.targets()
@@ -741,7 +754,8 @@ impl Projectile {
                 v.z + (dl[2] - v.z) * 0.2,
             );
         } else {
-            self.velocity.y -= 0.04;
+            // `Entity.applyGravity`: `getGravity` is 0 under NoGravity.
+            self.velocity.y -= crate::entity_rules::EntityRules::get_gravity(self);
         }
         let from = self.position;
         let to = from.add_vector(self.velocity);
@@ -1296,6 +1310,38 @@ mod tests {
         assert_eq!(settings("ruby:late"), (5, 3, true));
     }
 
+    /// `ShulkerBullet.tick` with no target: `applyGravity` (0.04, none under
+    /// NoGravity), then the move, no drag. 20 ticks from y 110 fall 8.4.
+    #[test]
+    fn a_shulker_bullet_without_a_target_falls_unless_no_gravity() {
+        let bullet = || {
+            Projectile::new(
+                ProjectileKind::ShulkerBullet {
+                    target: None,
+                    dir: None,
+                    steps: 0,
+                    delta: [0.0; 3],
+                    seed: 0,
+                },
+                Vec3::new(0.5, 110.0, 0.5),
+                None,
+            )
+        };
+        let w = Empty(vec![]);
+        let mut falling = bullet();
+        let mut held = bullet();
+        held.no_gravity = true;
+        for _ in 0..20 {
+            falling.tick(&w);
+            held.tick(&w);
+        }
+        assert!(
+            (falling.position.y - 101.6).abs() < 1e-6,
+            "{}",
+            falling.position.y
+        );
+        assert_eq!(held.position, Vec3::new(0.5, 110.0, 0.5));
+    }
     #[test]
     fn llama_spit_moves_first_then_drags_and_falls() {
         let mut p = Projectile::new(ProjectileKind::LlamaSpit, Vec3::new(0.0, 100.0, 0.0), None);

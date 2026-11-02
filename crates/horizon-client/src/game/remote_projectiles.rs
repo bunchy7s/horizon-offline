@@ -98,7 +98,7 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
         "minecraft:breeze_wind_charge" => ProjectileKind::BreezeWindCharge,
         // Homing state stays on the server; the client interpolates its positions.
         "minecraft:shulker_bullet" => ProjectileKind::ShulkerBullet {
-            target: horizon_client::mobs::Who::Player,
+            target: Some(horizon_client::mobs::Who::Player),
             dir: None,
             steps: 0,
             delta: [0.0; 3],

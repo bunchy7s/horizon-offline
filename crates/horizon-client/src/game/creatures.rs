@@ -1046,9 +1046,9 @@ impl Game<'_> {
                         for e in &mut events[from..] {
                             if let MobEvent::Projectile(p) = e
                                 && let ProjectileKind::ShulkerBullet { target, .. } = &mut p.kind
-                                && *target == Who::Player
+                                && *target == Some(Who::Player)
                             {
-                                *target = Who::Mob(id);
+                                *target = Some(Who::Mob(id));
                             }
                         }
                     }

@@ -173,7 +173,8 @@ impl Game<'_> {
                 let raw = self.persist.raw.get(&id);
                 entity_nbt::arrow_to_nbt(p, random_uuid(), owner, in_block, raw)
                     .or_else(|| entity_nbt::fireball_to_nbt(p, random_uuid(), owner, raw))
-                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))?
+                    .or_else(|| entity_nbt::throwable_to_nbt(p, random_uuid(), owner, raw))
+                    .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, random_uuid(), owner, raw))?
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
