@@ -1165,7 +1165,11 @@ impl Game<'_> {
             };
             let thrower = owner.is_some().then_some(Who::Player);
             self.projectile_event("minecraft:projectile_land", thrower, heard);
+            let item = stack.item.to_string();
             self.splash(&stack, at, mob, block, age, owner);
+            if item != "minecraft:experience_bottle" {
+                self.native_potion_splash(&item, [at.x, at.y, at.z]);
+            }
         }
     }
     /// `AreaEffectCloud.tick` for the lingering potions' clouds: the client

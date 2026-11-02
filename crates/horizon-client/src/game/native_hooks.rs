@@ -3980,6 +3980,12 @@ impl Game<'_> {
         let _ = (entity, kind, transformed, transformed_kind);
     }
 
+    /// A thrown splash or lingering potion applied its hit effects.
+    /// @API:native_potion_splash@.
+    pub(super) fn native_potion_splash(&mut self, item: &str, pos: [f64; 3]) {
+        let _ = (item, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
