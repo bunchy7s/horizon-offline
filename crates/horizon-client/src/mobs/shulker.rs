@@ -617,6 +617,10 @@ mod tests {
         k.id = "minecraft:shulker".into();
         k.species = Species::Shulker;
         k.max_head_y_rot = 180.0;
+        // EntityTypes.SHULKER: sized(1.0F, 1.0F).eyeHeight(0.5F).
+        k.width = 1.0;
+        k.height = 1.0;
+        k.eye_height = 0.5;
         let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
         m.extra.variant3 = 2;
         m
@@ -663,5 +667,53 @@ mod tests {
             "the head turns to the target, not back to the square body"
         );
         assert_eq!(m.body_yaw, 0.0);
+    }
+
+    #[test]
+    fn an_open_shell_hanging_below_a_block_stands_taller() {
+        // Shulker.getDefaultDimensions: a shell on Direction.DOWN (attach
+        // face 0) with currentPeekAmount p is `scale(1, 1 + p)` of its
+        // 1 x 1 x 0.5 box — the width is untouched, the height and the eyes
+        // grow. A client eases the peek 0.05 a tick towards the synced raw
+        // peek, 100 while ShulkerAttackGoal holds the lid open.
+        let mut m = shulker();
+        m.extra.variant3 = DOWN;
+        m.extra.counter = 100;
+        for _ in 0..10 {
+            client_tick(&mut m);
+        }
+        assert!((m.anim.v[PEEK] - 0.5).abs() < 1e-6, "{}", m.anim.v[PEEK]);
+        let (w, h, e) = m.dims();
+        assert!(
+            (w - 1.0).abs() < 1e-9 && (h - 1.5).abs() < 1e-5 && (e - 0.75).abs() < 1e-5,
+            "a half open shell is 1 x 1.5 with its eyes at 0.75: {w} x {h} x {e}"
+        );
+        // The same box `Mob::bounds_at` and the culling build from `height`.
+        assert!((f64::from(m.height()) - 1.5).abs() < 1e-5, "{}", m.height());
+    }
+
+    #[test]
+    fn only_a_shell_hanging_below_a_block_grows() {
+        // Every other attach face keeps the plain 1 x 1 x 0.5 box, however
+        // far the lid opens.
+        for face in [1u8, 2, 3, 4, 5] {
+            let mut m = shulker();
+            m.extra.variant3 = face;
+            m.extra.counter = 100;
+            for _ in 0..20 {
+                client_tick(&mut m);
+            }
+            assert_eq!(m.anim.v[PEEK], 1.0);
+            let (w, h, e) = m.dims();
+            assert!(
+                (w - 1.0).abs() < 1e-9 && (h - 1.0).abs() < 1e-9 && (e - 0.5).abs() < 1e-9,
+                "a shell on face {face} stays 1 x 1: {w} x {h} x {e}"
+            );
+        }
+        // A closed one under a block does not grow either.
+        let mut m = shulker();
+        m.extra.variant3 = DOWN;
+        let (_, h, _) = m.dims();
+        assert!((h - 1.0).abs() < 1e-9, "{h}");
     }
 }
