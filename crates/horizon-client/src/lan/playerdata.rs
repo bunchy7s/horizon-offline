@@ -18,15 +18,19 @@ use std::{
 /// `PlayerDataStorage`'s player directory (`players/data`), created on first use
 /// as its constructor does with `mkdirs`.
 pub fn directory(world: &Path) -> PathBuf {
-    let dir = world.join("players").join("data");
+    let dir = directory_path(world);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         log::warn!("Horizon: {} is not created: {e}", dir.display());
     }
     dir
 }
 
+fn directory_path(world: &Path) -> PathBuf {
+    world.join("players").join("data")
+}
+
 pub fn path(world: &Path, uuid: u128) -> PathBuf {
-    directory(world).join(format!("{}.dat", uuid_string(uuid)))
+    directory_path(world).join(format!("{}.dat", uuid_string(uuid)))
 }
 
 /// `UUIDUtil.uuidToIntArray`.

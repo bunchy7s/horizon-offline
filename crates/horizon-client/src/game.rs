@@ -15312,10 +15312,10 @@ impl Game<'_> {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
             let mut host = host;
+            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
                 self.guest_attachments_into(g);
                 horizon_client::lan::playerdata::save(g, &self.world_root);
-                let directory = horizon_client::lan::playerdata::directory(&self.world_root);
                 self.native_player_save_to_file(g.uuid, &g.name, &directory);
             }
             self.lan = Some(host);
