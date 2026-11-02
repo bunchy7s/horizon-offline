@@ -134,7 +134,7 @@ SynchedEntityData.DataValue.read	port	crates/horizon-protocol/src/entity_data.rs
 RealmsConnect.connect	skip:service		Realms
 RealmsConnect.abort	skip:service		Realms
 RealmsConnect.tick	skip:service		Realms
-RepeatedNarrator.narrate	skip:other		accessibility narration; Horizon has no narrator
+RepeatedNarrator.narrate	skip:service		Realms only: the long-running task screen's progress, said through GameNarrator.saySystemNow at most once per repeat period; Horizon has no Realms client
 ServerPlaceRecipe.tryPlaceRecipe	port	crates/horizon-client/src/menu/place.rs::Menu::place_recipe	places when craftable, else clears the grid and shows the ghost
 ServerPlaceRecipe.clearGrid	port	crates/horizon-client/src/menu/place.rs::Menu::clear_grid	returns the grid to the inventory
 ServerPlaceRecipe.clampToMaxStackSize	inline	crates/horizon-client/src/menu/place.rs::Menu::place	gap: minor: clamps by the slot's stack, not by each candidate item
