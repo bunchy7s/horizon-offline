@@ -86,6 +86,8 @@ pub(super) fn upload(
 fn stage(group: Group) -> &'static str {
     match group {
         Group::Gbuffers | Group::Translucent | Group::Shadow => "gbuffers",
+        Group::Setup => "setup",
+        Group::Begin => "begin",
         Group::Prepare => "prepare",
         Group::Deferred => "deferred",
         Group::Composite | Group::Final => "composite",
