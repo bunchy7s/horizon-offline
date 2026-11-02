@@ -44,10 +44,11 @@ pub struct SkinModels {
     /// Item models, the same way (`item_render::ItemRenderState::submit_skinned`).
     items: FxHashMap<usize, (Arc<BakedItemModel>, Option<StoredItem>)>,
     vertices: u32,
-    /// Whether the eyes render type's layers (spiders', endermen's...) are posed
-    /// here too, as [`SkinJob::FLAT`] draws (`gfx::Renderer::skins_eyes`); set
-    /// each frame.
-    pub eyes: bool,
+    /// Whether the layers improved transparency would draw in its stages are
+    /// posed here too (`gfx::Renderer::skins_tagged`; set each frame): the eyes
+    /// render type's (spiders', endermen's...) as [`SkinJob::FLAT`] draws, and
+    /// `entityTranslucent` layers (a horse's markings, a slime's outer cube).
+    pub tagged: bool,
 }
 
 /// A stored item model: its quads' vertices in order, by runs of quads that
@@ -511,7 +512,8 @@ mod tests {
     /// the bit and in the same order, for each mob it takes; the mobs it
     /// leaves to the CPU draw exactly as before. Twice: with the eyes render
     /// type's layers left to the CPU (improved transparency on), then posed
-    /// too (`SkinModels::eyes`). Needs the prepared resources.
+    /// too with a horse's markings and a slime's outer cube (`SkinModels::tagged`).
+    /// Needs the prepared resources.
     #[test]
     fn posed_on_the_gpu_every_mob_draws_what_the_cpu_draws() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -552,7 +554,7 @@ mod tests {
         let (mut posed, mut kept) = (0, 0);
         let mut ids: Vec<_> = types.types.keys().cloned().collect();
         ids.sort();
-        // The mobs posed at least once, without and with the eyes layers.
+        // The mobs posed at least once, without and with the tagged layers.
         let mut taken = [std::collections::BTreeSet::new(), Default::default()];
         for eyes in [false, true] {
             for (n, id) in ids.iter().enumerate() {
@@ -573,10 +575,14 @@ mod tests {
                         m.extra.variant2 = 5;
                         m.extra.variant3 = 3;
                     }
+                    // White field markings (`entityTranslucent`).
+                    if id == "minecraft:horse" {
+                        m.extra.variant2 = 2;
+                    }
                     let mut cpu = Vec::new();
                     render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
                     models.begin(&mut frame, store.len() as u32);
-                    models.eyes = eyes;
+                    models.tagged = eyes;
                     let mut gpu = Vec::new();
                     let mut skin = Skin::new(&mut models, &mut frame);
                     render::render_skinned(
@@ -625,15 +631,17 @@ mod tests {
         eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
         assert!(posed > 2 * 3 * 40, "only {posed} draws took the GPU path");
         let added: Vec<_> = taken[1].difference(&taken[0]).copied().collect();
-        eprintln!("posed only with the eyes layers: {added:?}");
+        eprintln!("posed only with the tagged layers: {added:?}");
         for id in [
             "minecraft:spider",
             "minecraft:cave_spider",
             "minecraft:enderman",
             "minecraft:phantom",
             "minecraft:copper_golem",
+            "minecraft:horse",
+            "minecraft:slime",
         ] {
-            assert!(added.contains(&id), "{id} not posed with its eyes");
+            assert!(added.contains(&id), "{id} not posed with its tagged layers");
         }
         assert!(taken[0].is_subset(&taken[1]));
     }
