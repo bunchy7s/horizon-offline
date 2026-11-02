@@ -4512,6 +4512,11 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// Local player movement input, after reading it and before applying it.
+    fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13798,4 +13803,34 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
+}
+/// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MovementInputEvent {
+    pub forward: f32,
+    pub strafe: f32,
+    pub jump: bool,
+    pub sneak: bool,
+}
+pub fn dispatch_movement_input(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    forward: &mut f32,
+    strafe: &mut f32,
+    jump: &mut bool,
+    sneak: &mut bool,
+) {
+    let mut event = MovementInputEvent {
+        forward: *forward,
+        strafe: *strafe,
+        jump: *jump,
+        sneak: *sneak,
+    };
+    for mod_hook in super::entered(mods, "movement_input") {
+        mod_hook.movement_input(host, &mut event);
+    }
+    *forward = event.forward;
+    *strafe = event.strafe;
+    *jump = event.jump;
+    *sneak = event.sneak;
 }
