@@ -34,7 +34,10 @@ impl HomeTab {
 impl Launcher {
     /// The tabs the selected instance has now, with how many things each holds (None: not known
     /// yet, or nothing to count). Screenshots and Console only once there is something to show.
-    fn home_tab_list(&mut self, cx: &mut Context<Self>) -> Vec<(HomeTab, Option<usize>)> {
+    pub(super) fn home_tab_list(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Vec<(HomeTab, Option<usize>)> {
         let mut tabs = vec![(HomeTab::Overview, None)];
         if self.selected_instance().is_none() {
             return tabs;
