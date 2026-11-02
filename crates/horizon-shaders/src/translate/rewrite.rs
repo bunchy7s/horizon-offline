@@ -237,11 +237,6 @@ impl Stage<'_> {
                     depth -= 1;
                     hidden.retain(|&(_, _, d)| d <= depth);
                     if depth == 0 {
-                        if let Some(ty) = returns {
-                            out.push_str(" return ");
-                            out.push_str(ty);
-                            out.push_str("(0); ");
-                        }
                         params.clear();
                         hidden.clear();
                         returns = None;
