@@ -1359,6 +1359,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_deep_sleep(player, name)`**: a server player reached 100 ticks asleep in a bed and now counts as deeply asleep for the night-skip check. Helpers looking up the guest through `self.lan` may find nothing during its tick.
 - **`native_player_change_main_hand(player, name, left)`**: a server player's client options changed their dominant hand; `left` is true for left-handed. Helpers looking up the guest through `self.lan` may find nothing during packet handling.
 - **`native_player_egg_throw(player, name)`**: a server player threw an egg after its projectile was launched and its use applied.
+- **`native_player_elytra_boost(player, name)`**: a server player used a firework rocket to boost while gliding, after the rocket was launched and consumed.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The
   player's state is swapped in for the call, as for their other actions, so `native_player` reads them; a

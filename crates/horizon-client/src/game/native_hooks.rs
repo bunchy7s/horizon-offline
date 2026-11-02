@@ -3307,6 +3307,13 @@ impl Game<'_> {
     pub(super) fn native_player_egg_throw(&mut self, player: u128, name: &str) {
         let _ = (player, name);
     }
+    /// A server player used a firework rocket to boost while gliding, after
+    /// the rocket was launched and consumed. Helpers looking up the guest
+    /// through `self.lan` may find nothing during its packet. Server-side.
+    /// @API:player_elytra_boost@.
+    pub(super) fn native_player_elytra_boost(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
