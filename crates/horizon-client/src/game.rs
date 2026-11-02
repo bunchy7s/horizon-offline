@@ -6014,9 +6014,8 @@ impl Game<'_> {
             if entity && hand == Hand::Off && self.with_hand(hand, |g| g.interact_entity(None))? {
                 return Ok(Some(hand));
             }
-            // A client of a server never hits a fence knot with its crosshair:
-            // `LeadItem.useOn` and `LeashFenceKnotEntity.interact` reach the
-            // server as a click on the fence block.
+            // A click on the fence block: `LeadItem.useOn`. A client whose crosshair
+            // met the knot first sends Interact with the knot's id instead.
             if on_block && self.with_hand(hand, Game::interact_knot) {
                 return Ok(Some(hand));
             }
@@ -6062,8 +6061,7 @@ impl Game<'_> {
             || self.interact_boat(target)
             || self.interact_cart(target)
             || self.interact_mob(target)?
-            // Knots are reached only through the crosshair pick for now: a
-            // guest's Interact naming a knot's id is a known gap.
+            // A guest's Interact naming a knot's id goes to `use_knot` before this.
             || target.is_none() && self.interact_knot())
     }
     /// `ItemStack.applyAfterUseComponentSideEffects`: a used stack with a
