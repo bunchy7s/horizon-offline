@@ -2247,7 +2247,7 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
         overlay.write(name, &bytes)
     };
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = horizon_threads::worker_count();
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads.min(TABLE_THREADS))
             .map(|_| {

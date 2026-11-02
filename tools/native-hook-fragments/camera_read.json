@@ -1,0 +1,9 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "camera", "target": "horizon_client::game::native_hooks::Game<'_>::native_camera", "mod_api": {}},
+    {"name": "block_collision", "target": "horizon_client::game::native_hooks::Game<'_>::native_block_collision", "mod_api": {}}
+  ],
+  "rust_summary": "reading the world camera and block collision boxes (`native_camera`, `native_block_collision`).",
+  "doc_summary": "Read the most recently extracted world camera with `native_camera()` (none before a world frame): position, interpolated eye height, partial tick, yaw, pitch, final FOV, near/far planes, dimension and column-major matrices. The view is camera-relative and includes bob and spin; the projection uses reversed Z. Earlier callbacks can see the previous frame. `native_block_collision(pos)` returns block-local boxes using the empty collision context; unloaded blocks and collision errors yield no boxes. Bundles need \"hooks\": @API:camera_read@."
+}

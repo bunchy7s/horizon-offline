@@ -2708,6 +2708,7 @@ struct Game<'a> {
     waypoints: horizon_client::locator_bar::ClientWaypoints,
     /// The camera the last frame drew from (position, yaw, pitch, fov), for the locator bar.
     locator_camera: Option<([f64; 3], f32, f32, f32)>,
+    native_camera_frame: Option<horizon_client::mod_api::NativeCamera>,
     /// `LocalPlayer.postEffects`: the chains the server has the screen run
     /// (`ClientboundPostEffectsPacket`), in order.
     post_effects: Vec<String>,
@@ -6013,9 +6014,8 @@ impl Game<'_> {
             if entity && hand == Hand::Off && self.with_hand(hand, |g| g.interact_entity(None))? {
                 return Ok(Some(hand));
             }
-            // A client of a server never hits a fence knot with its crosshair:
-            // `LeadItem.useOn` and `LeashFenceKnotEntity.interact` reach the
-            // server as a click on the fence block.
+            // A click on the fence block: `LeadItem.useOn`. A client whose crosshair
+            // met the knot first sends Interact with the knot's id instead.
             if on_block && self.with_hand(hand, Game::interact_knot) {
                 return Ok(Some(hand));
             }
@@ -6061,8 +6061,7 @@ impl Game<'_> {
             || self.interact_boat(target)
             || self.interact_cart(target)
             || self.interact_mob(target)?
-            // Knots are reached only through the crosshair pick for now: a
-            // guest's Interact naming a knot's id is a known gap.
+            // A guest's Interact naming a knot's id goes to `use_knot` before this.
             || target.is_none() && self.interact_knot())
     }
     /// `ItemStack.applyAfterUseComponentSideEffects`: a used stack with a
@@ -15367,6 +15366,32 @@ impl Game<'_> {
         let distance = (terrain_distance * 16) as f32;
         let depth_far =
             horizon_client::camera::depth_far(terrain_distance, self.settings.cloud_range);
+        // Only native mods read it: no matrices or allocation per frame without one.
+        let mods_read_camera = !horizon_client::mod_api::mods().is_empty();
+        self.native_camera_frame = (mods_read_camera && !title).then(|| {
+            let partial = camera_alpha as f32;
+            horizon_client::mod_api::NativeCamera {
+                position: camera.to_array(),
+                eye_height: self.view.eye_height_old
+                    + (self.view.eye_height - self.view.eye_height_old) * partial,
+                partial_tick: partial,
+                yaw,
+                pitch,
+                fov_degrees,
+                near: 0.05,
+                far: depth_far,
+                view: (bob * spin * horizon_client::camera::view_matrix(yaw, pitch))
+                    .to_cols_array(),
+                projection: glam::Mat4::perspective_rh(
+                    fov_degrees.to_radians(),
+                    size[0] as f32 / size[1].max(1) as f32,
+                    depth_far,
+                    0.05,
+                )
+                .to_cols_array(),
+                dimension: self.dim.id().to_string(),
+            }
+        });
         self.view_frustum = self
             .renderer
             .as_ref()
@@ -18477,6 +18502,7 @@ impl<'a> Game<'a> {
             waypoint_styles: prepared.waypoint_styles,
             waypoints: Default::default(),
             locator_camera: None,
+            native_camera_frame: None,
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),

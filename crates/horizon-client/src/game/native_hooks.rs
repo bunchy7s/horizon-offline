@@ -881,7 +881,7 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
     ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
@@ -2309,6 +2309,16 @@ impl Game<'_> {
     pub(super) fn native_commands(&mut self, commands: &mut Vec<&'static str>) {
         mod_api::dispatch_commands(self, mod_api::mods(), commands);
     }
+    /// Player FOV scale, after vanilla effects and before zoom and easing.
+    /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
+    pub(super) fn native_compute_fov_modifier(
+        &self,
+        player: &horizon_client::camera::FovPlayer,
+        base: f32,
+        modifier: &mut f32,
+    ) {
+        mod_api::dispatch_compute_fov_modifier(self, mod_api::mods(), player, base, modifier);
+    }
     /// Local player movement input, after reading it and before applying it.
     pub(super) fn native_movement_input(
         &self,
@@ -2383,6 +2393,24 @@ impl Game<'_> {
             partial,
             swing,
             equip,
+            canceled,
+        );
+    }
+
+    /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
+    pub(super) fn native_render_item_in_frame(
+        &self,
+        entity_id: u32,
+        pos: [i32; 3],
+        stack: &ItemStack,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_render_item_in_frame(
+            self,
+            mod_api::mods(),
+            entity_id,
+            pos,
+            stack,
             canceled,
         );
     }
@@ -7983,6 +8011,22 @@ impl Game<'_> {
     pub(super) fn native_block(&self, pos: [i32; 3]) -> String {
         let state = self.world.block(pos[0], pos[1], pos[2]);
         self.res.facts().get(state).name.to_string()
+    }
+    /// The most recently extracted world frame's camera, if one exists.
+    pub(super) fn native_camera(&self) -> Option<NativeCamera> {
+        self.native_camera_frame.clone()
+    }
+    /// Collision boxes in block-local coordinates with an empty collision context.
+    pub(super) fn native_block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.block_collision_shape(pos)
+            .boxes()
+            .iter()
+            .map(|bounds| {
+                let min = bounds.min_position();
+                let max = bounds.max_position();
+                [min.x, min.y, min.z, max.x, max.y, max.z]
+            })
+            .collect()
     }
     /// Property `key` of the block at `pos` (a machine's `facing`), if it
     /// has one. API 20.
