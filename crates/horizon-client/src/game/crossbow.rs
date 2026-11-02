@@ -148,13 +148,27 @@ impl Game<'_> {
             return;
         };
         let kind = shooter.kind.id.clone();
-        let vanilla = ItemStack::new(ARROW, 1);
+        let vanilla = Self::mob_vanilla_ammo(&shooter.extra, weapon);
         let mut projectile = Some(vanilla.clone());
         self.native_living_get_projectile(None, "", Some(mob), &kind, weapon, &mut projectile);
         let Some(ammo) = projectile.filter(|ammo| *ammo != vanilla && is_arrow(ammo)) else {
             return;
         };
         Self::arrow_from_ammo(&ammo, arrow);
+    }
+    /// `Monster.getProjectile`: the projectile `weapon` supports in the off
+    /// hand, then the main hand (`getHeldProjectile`), else a new arrow.
+    fn mob_vanilla_ammo(extra: &horizon_client::mobs::Extra, weapon: &ItemStack) -> ItemStack {
+        let supported =
+            |s: &ItemStack| is_arrow(s) || &*weapon.item == CROSSBOW && &*s.item == FIREWORK_ROCKET;
+        extra
+            .off_hand
+            .as_deref()
+            .map(|item| ItemStack::new(item, 1))
+            .into_iter()
+            .chain(extra.main_hand_stack().cloned())
+            .find(supported)
+            .unwrap_or_else(|| ItemStack::new(ARROW, 1))
     }
     /// `ProjectileUtil.getMobArrow`: `arrow` carries `ammo`'s item and effect.
     pub(super) fn arrow_from_ammo(ammo: &ItemStack, arrow: &mut Projectile) {
@@ -180,8 +194,10 @@ impl Game<'_> {
             return;
         };
         let kind = shooter.kind.id.clone();
-        let mut projectile = Some(ItemStack::new(ARROW, 1));
+        let mut projectile = Some(Self::mob_vanilla_ammo(&shooter.extra, weapon));
         self.native_living_get_projectile(None, "", Some(mob), &kind, weapon, &mut projectile);
+        // A crossbow takes arrows and firework rockets only.
+        let projectile = projectile.filter(|ammo| is_arrow(ammo) || &*ammo.item == FIREWORK_ROCKET);
         let Some(shooter) = self.mobs.iter_mut().find(|m| m.id == mob) else {
             return;
         };

@@ -2195,8 +2195,15 @@ impl Game<'_> {
                     self.launch_mob_projectile(arrow);
                 }
                 MobEvent::CrossbowShot { ammo, mut arrow } => {
-                    Self::arrow_from_ammo(&ammo, &mut arrow);
-                    self.launch_mob_projectile(arrow);
+                    if &*ammo.item == "minecraft:firework_rocket" {
+                        // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
+                        let mut at = arrow.position;
+                        at.y -= f64::from(0.15f32) - 0.1;
+                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                    } else {
+                        Self::arrow_from_ammo(&ammo, &mut arrow);
+                        self.launch_mob_projectile(arrow);
+                    }
                 }
                 MobEvent::CrossbowLoad { mob, weapon } => self.mob_crossbow_ammo(mob, &weapon),
                 MobEvent::Spawn(mut m) => {
