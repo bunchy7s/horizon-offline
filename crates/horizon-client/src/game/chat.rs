@@ -1013,6 +1013,12 @@ impl Game<'_> {
             // Screen.defaultHandleGameClickEvent: the dialog opens over the
             // screen, and closes back to it.
             Some(ClickEvent::ShowDialog(dialog)) => self.show_dialog_ref(&dialog),
+            // Screen.defaultHandleGameClickEvent: custom actions retain chat.
+            Some(ClickEvent::Custom { id, payload }) => {
+                if let Some(remote) = &self.remote {
+                    remote.session.send_custom_click(&id, payload);
+                }
+            }
             // Screen.defaultHandleClickEvent: a page link means nothing in chat.
             Some(ClickEvent::ChangePage(_)) | None => {}
         }

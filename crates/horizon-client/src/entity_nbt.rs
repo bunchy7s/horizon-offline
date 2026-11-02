@@ -2053,12 +2053,23 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
     }
     tag
 }
-/// `PrimedTnt.addAdditionalSaveData`: its `fuse`.
+/// `PrimedTnt.readAdditionalSaveData`: `explosion_power`, 4 by default and
+/// clamped to 0..128.
+pub fn tnt_power(tag: &Tag) -> f32 {
+    match tag.get("explosion_power") {
+        Some(Tag::Float(bits)) => f32::from_bits(*bits).clamp(0.0, 128.0),
+        _ => 4.0,
+    }
+}
+
+/// `PrimedTnt.addAdditionalSaveData`: its `fuse` and, when it is not the
+/// default, its `explosion_power`.
 pub fn tnt_to_nbt(
     position: Vec3,
     motion: Vec3,
     on_ground: bool,
     fuse: i32,
+    power: f32,
     uuid: [i32; 4],
     raw: Option<&Tag>,
 ) -> Tag {
@@ -2073,6 +2084,9 @@ pub fn tnt_to_nbt(
     }
     .tag(raw);
     put(&mut tag, "fuse", Tag::Short(fuse as i16));
+    if power != 4.0 {
+        put(&mut tag, "explosion_power", Tag::Float(power.to_bits()));
+    }
     // PrimedTnt writes its block state (a summoned `block_state` is kept).
     if tag.get("block_state").is_none() {
         put(&mut tag, "block_state", string("minecraft:tnt"));
@@ -2094,6 +2108,8 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         previous: position,
         velocity: motion(tag),
         on_ground: flag(tag, "OnGround"),
+        vertical_collision: false,
+        horizontal_collision: false,
         // Age -32768 marks items that never despawn; Horizon counts upwards.
         age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
@@ -3225,6 +3241,35 @@ fn read_villager(m: &mut Mob, tag: &Tag) {
 }
 
 #[cfg(test)]
+mod tnt_power_tests {
+    use super::*;
+
+    /// `PrimedTnt.readAdditionalSaveData`: `explosion_power` defaults to 4 and
+    /// is clamped to 0..128 both ways, so a summoned `explosion_power:200` is
+    /// 128 and one that is absent is ordinary TNT.
+    #[test]
+    fn explosion_power_is_read_clamped_and_defaulted() {
+        let with = |power: Option<f32>| {
+            let mut map = std::collections::BTreeMap::new();
+            if let Some(p) = power {
+                map.insert("explosion_power".into(), Tag::Float(p.to_bits()));
+            }
+            Tag::Compound(map)
+        };
+        assert_eq!(tnt_power(&with(None)), 4.0);
+        assert_eq!(tnt_power(&with(Some(10.0))), 10.0);
+        assert_eq!(tnt_power(&with(Some(200.0))), 128.0);
+        assert_eq!(tnt_power(&with(Some(-3.0))), 0.0);
+        // And it round-trips through the save, which writes it only when it is
+        // not the default.
+        let saved = tnt_to_nbt(Vec3::ZERO, Vec3::ZERO, false, 20, 10.0, [1, 2, 3, 4], None);
+        assert_eq!(tnt_power(&saved), 10.0);
+        let plain = tnt_to_nbt(Vec3::ZERO, Vec3::ZERO, false, 20, 4.0, [1, 2, 3, 4], None);
+        assert!(plain.get("explosion_power").is_none());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::items::ItemStack;
@@ -3391,6 +3436,8 @@ mod tests {
             previous: Vec3::ZERO,
             velocity: Vec3::new(0.0, -0.04, 0.0),
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 120,
             pickup_delay: 10,
             ticks: 0,

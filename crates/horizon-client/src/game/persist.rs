@@ -534,6 +534,9 @@ impl Game<'_> {
                                 on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
                                 owner: None,
                                 guest: None,
+                                // PrimedTnt.readAdditionalSaveData: 4 by default,
+                                // kept to 0..128.
+                                power: entity_nbt::tnt_power(&tag),
                             });
                             // `Entity.load`: the `PortalCooldown` of one that just came through.
                             self.remember(id, uuid, tag);
@@ -1268,6 +1271,7 @@ impl Game<'_> {
                     t.velocity,
                     t.on_ground,
                     t.fuse,
+                    t.power,
                     uuid,
                     self.persist.raw.get(&id),
                 );
