@@ -400,6 +400,16 @@ impl Game<'_> {
             if let Some(powered) = registry.id(&s) {
                 // The rod's onPlace schedules the 8-tick unpowering.
                 let _ = self.level_set(p, powered);
+                self.with_level(|b, level, ticks| {
+                    if level.redstone_experiments {
+                        b.lightning_rod_update_neighbors(
+                            level,
+                            ticks,
+                            BlockPos::new(p[0], p[1], p[2]),
+                            state,
+                        );
+                    }
+                });
             }
             // Level event 3002 with the rod's axis: sparks along it.
             let axis = match s.properties.get("facing").map(String::as_str) {

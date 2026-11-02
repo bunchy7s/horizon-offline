@@ -1366,6 +1366,29 @@ def tnt_minecart_rails():
     ]
 
 
+def minecart_drag():
+    """AbstractMinecart's drags are floats widened to double: getAirDrag (0.95F) off the rails, and
+    applyNaturalSlowdown's 0.95F in water. Positions and motions are compared to the last bit."""
+    return [
+        # A cart sent back by the stone at the track's end leaves the rails at x 0 and flies on.
+        *setup('/fill 0 209 0 12 209 0 minecraft:redstone_block', '/fill 0 210 0 9 210 0 minecraft:powered_rail',
+               '/setblock 10 210 0 minecraft:stone'),
+        cmd('/summon minecraft:minecart 1.5 210.0625 0.5 {Motion:[0.1d,0.0d,0.0d],Tags:["drag"]}'),
+        {'op': 'tick', 'n': 60},
+        cmd('/data get entity @e[tag=drag,limit=1] Pos'),
+        cmd('/data get entity @e[tag=drag,limit=1] Motion'),
+        *setup('/kill @e[type=!player]', '/fill 0 205 0 15 215 1 minecraft:air'),
+        # Waterlogged rails: the cart slows by 0.95F a tick more.
+        *setup('/fill 0 209 4 12 209 4 minecraft:stone', '/fill 0 210 4 12 210 4 minecraft:rail[waterlogged=true]'),
+        cmd('/summon minecraft:minecart 1.5 210.0625 4.5 {Motion:[0.3d,0.0d,0.0d],Tags:["wet"]}'),
+        {'op': 'tick', 'n': 20},
+        cmd('/data get entity @e[tag=wet,limit=1] Pos'),
+        cmd('/data get entity @e[tag=wet,limit=1] Motion'),
+        *setup('/kill @e[type=!player]', '/fill 0 205 3 15 215 5 minecraft:air'),
+        {'op': 'tick', 'n': 5},
+    ]
+
+
 def ender_dragon():
     """`/kill` on the fight's dragon ends the fight (#3319): `EnderDragon.kill` removes it and calls
     `EnderDragonFight.setDragonKilled`, so no new dragon takes its place, the exit portal opens and the
@@ -1678,6 +1701,7 @@ def groups():
         ('wither breaks', wither_breaks()),
         ('tnt minecart rails', tnt_minecart_rails()),
         ('creative shulker drops', creative_shulker_drops()),
+        ('minecart drag', minecart_drag()),
         ('ender dragon', ender_dragon()),
         ('place structure', place_structure()),
         ('tame wolf kills', tame_wolf_kills()),

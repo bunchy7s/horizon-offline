@@ -30,6 +30,7 @@ use crate::Preprocessed;
 mod atomic_vectors;
 mod geometry;
 mod image_parameters;
+mod integer_bounds;
 mod interface_blocks;
 mod ordering;
 mod rewrite;
@@ -996,7 +997,8 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             message,
         }]
     })?;
-    let text = specialized.as_str();
+    let bounded = integer_bounds::rewrite(&specialized);
+    let text = bounded.as_str();
     let at = |text: &str, span: naga::Span, message: String| {
         let start = span.to_range().map_or(0, |r| r.start);
         let line = text[..start.min(text.len())].matches('\n').count();
@@ -2625,6 +2627,22 @@ mod image_parameter_tests {
         )
         .unwrap();
         let result = translate_compute(&preprocess(&pack, "setup.csh", &Macros::standard()));
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+}
+
+#[cfg(test)]
+mod mixed_integer_bounds_tests {
+    #[test]
+    fn compute_clamp_with_signed_index_and_unsigned_bounds_compiles() {
+        let source = "#version 430\nlayout(local_size_x=1) in; layout(std430,binding=0) buffer Data{uint result;};void main(){int index=int(gl_LocalInvocationID.x);result=clamp(index,0u,47u);}";
+        let pack = crate::Pack::from_zip_bytes(
+            "integer-bounds.zip",
+            crate::pack::tests::zip(&[("shaders/setup.csh", source)]),
+        )
+        .unwrap();
+        let stage = crate::preprocess(&pack, "setup.csh", &crate::Macros::standard());
+        let result = crate::translate_compute(&stage);
         assert!(result.is_ok(), "{:?}", result.err());
     }
 }

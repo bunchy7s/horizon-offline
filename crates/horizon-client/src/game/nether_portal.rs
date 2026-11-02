@@ -1000,6 +1000,7 @@ impl Game<'_> {
                 t.velocity,
                 t.on_ground,
                 t.fuse,
+                t.power,
                 uuid,
                 self.persist_raw(id),
             );

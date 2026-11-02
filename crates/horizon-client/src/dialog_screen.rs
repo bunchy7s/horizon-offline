@@ -5,8 +5,32 @@
 use crate::{
     dialog::{Body, Control, Dialog, Kind},
     font::Font,
-    text::Text,
+    text::{Style, Text},
 };
+
+/// `ActiveTextCollector.ClickableStyleFinder.accept`: the style under a drawn
+/// message glyph, using the same visual order and advances as rendering.
+pub fn line_style_at(
+    font: &Font,
+    text: &Text,
+    x: f32,
+    y: f32,
+    cursor: (f32, f32),
+) -> Option<Style> {
+    let mut left = cursor.0 - x;
+    if left < 0.0 || !(0.0..9.0).contains(&(cursor.1 - y)) {
+        return None;
+    }
+    let text = text.resolve_legacy();
+    let visual = crate::bidi::visual(&text);
+    for (c, style) in visual.chars() {
+        left -= font.advance(c, style);
+        if left < 0.0 {
+            return Some(style.clone());
+        }
+    }
+    None
+}
 
 /// `HeaderAndFooterLayout.DEFAULT_HEADER_AND_FOOTER_HEIGHT`.
 const BAR: f32 = 33.0;
@@ -432,6 +456,52 @@ pub fn waiting_button(ticks: u32) -> (Text, bool, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn message_hit_testing_respects_sprite_advances_and_glyph_bounds() {
+        use crate::{component, hud::Rect, text::ClickEvent};
+        let font = Font::load(
+            std::path::Path::new("/nonexistent-horizon-dialog-test-resources"),
+            &std::collections::HashMap::new(),
+            &[],
+            (1, 1),
+            (0, 0),
+            Rect {
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+                w: 1,
+                h: 1,
+            },
+        );
+        let text = component::to_text(
+            &serde_json::json!([
+                {"object": "atlas", "sprite": "minecraft:item/potion"},
+                {"object": "atlas", "sprite": "minecraft:item/potion", "click_event": {
+                    "action": "custom", "id": "test:shop"
+                }},
+                {"object": "atlas", "sprite": "minecraft:item/potion"},
+            ]),
+            &mut |_| Text::empty(),
+        );
+        let style = |x, y| line_style_at(&font, &text, 10.0, 20.0, (x, y));
+        assert!(style(9.9, 20.0).is_none());
+        assert_eq!(style(17.9, 20.0).unwrap().click, None);
+        for x in [18.0, 21.0, 25.9] {
+            assert_eq!(
+                style(x, 24.0).unwrap().click,
+                Some(ClickEvent::Custom {
+                    id: "test:shop".into(),
+                    payload: None,
+                })
+            );
+        }
+        assert_eq!(style(26.0, 20.0).unwrap().click, None);
+        assert!(style(34.0, 20.0).is_none());
+        assert!(style(21.0, 19.9).is_none());
+        assert!(style(21.0, 29.0).is_none());
+    }
 
     #[test]
     fn grids_pack_full_rows_and_centre_the_rest() {

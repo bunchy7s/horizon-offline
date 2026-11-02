@@ -4047,6 +4047,20 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    fn trade_with_villager(&self, host: &mut dyn Host, event: &mut TradeWithVillagerEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A vault at `pos` changed to `state`. Its block state is updated.
     /// Server-side. @API:native_vault_change_state@.
     fn vault_change_state(&self, host: &mut dyn Host, event: &mut VaultChangeStateEvent<'_>) {
@@ -12200,6 +12214,29 @@ pub fn dispatch_trade_select(
     };
     for mod_hook in mods {
         mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::trade_with_villager`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeWithVillagerEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a MerchantOffer,
+}
+pub fn dispatch_trade_with_villager(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    merchant: u32,
+    kind: &str,
+    offer: &MerchantOffer,
+) {
+    let mut event = TradeWithVillagerEvent {
+        merchant,
+        kind,
+        offer,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_with_villager(host, &mut event);
     }
 }
 /// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
