@@ -4903,6 +4903,16 @@ impl Game<'_> {
     pub(super) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
         let _ = (player, name, reason);
     }
+    /// A server player's experience level changed, after the new level was applied. @API:player_level_change@.
+    pub(super) fn native_player_level_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        from: i32,
+        to: i32,
+    ) {
+        let _ = (player, name, from, to);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
