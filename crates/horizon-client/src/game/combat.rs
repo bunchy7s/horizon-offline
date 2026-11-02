@@ -265,9 +265,9 @@ impl Game<'_> {
                 // hit), in tenths.
                 MotionEvent::Health(HealthEvent::Statistic { name, amount }) => {
                     match *name {
-                        "resisted" => self.stats.custom("damage_resisted", *amount),
-                        "absorbed" => self.stats.custom("damage_absorbed", *amount),
-                        "blocked" => self.stats.custom("damage_blocked_by_shield", *amount),
+                        "resisted" => self.award_custom_stat("damage_resisted", *amount),
+                        "absorbed" => self.award_custom_stat("damage_absorbed", *amount),
+                        "blocked" => self.award_custom_stat("damage_blocked_by_shield", *amount),
                         _ => {}
                     }
                     continue;
@@ -308,8 +308,7 @@ impl Game<'_> {
                 }
             }
             // Player.actuallyHurt: damage_taken in tenths.
-            self.stats
-                .custom("damage_taken", (amount * 10.0).round() as i32);
+            self.award_custom_stat("damage_taken", (amount * 10.0).round() as i32);
             self.combat.entries.push(Entry {
                 damage_type: name,
                 damage: amount,

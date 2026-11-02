@@ -25,6 +25,7 @@ DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC manageme
 DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
 DedicatedServer.setForceGameMode	port	crates/horizon-client/src/game/dedicated/management.rs::Game::management	stores force-gamemode, updates the host and applies the default mode to online players
 MinecraftServerSettingsServiceImpl.setForceGameMode	port	crates/horizon-server/src/management_methods.rs::Game::force_game_mode	forwards the live setting to the game and persists it in server.toml
+MinecraftServerSettingsServiceImpl.setAutoSave	port	crates/horizon-server/src/management_methods.rs::Game::autosave	forwards the live save flag to the game; unlike a server property, it resets when the server restarts
 DedicatedServer.setGameMode	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	the /defaultgamemode command; gap: minor: the value is not written back to server.properties
 DedicatedServer.setAcceptsTransfers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setPauseWhenEmptySeconds	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
