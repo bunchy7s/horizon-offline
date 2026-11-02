@@ -1063,7 +1063,7 @@ impl Game<'_> {
     /// `Entity.teleportCrossDimension` away from the loaded dimension: the
     /// entity is saved and removed, and waits for its dimension to load.
     fn send_through_portal(&mut self, id: u32, entry: BlockPos) {
-        self.native_entity_portal(self.dim.id(), id, [entry.x, entry.y, entry.z]);
+        let arrivals = self.portals.arrivals.len();
         if let Some(i) = self.dropped.iter().position(|e| e.id == id) {
             let e = &self.dropped[i];
             let plan = self.entity_plan(entry, e.position, 0.25, 0.25, false);
@@ -1237,6 +1237,9 @@ impl Game<'_> {
             self.forget_entity(id);
             self.portals.arrivals.push(Arrival { plan, tag });
             self.portals.dirty = true;
+        }
+        if self.portals.arrivals.len() > arrivals {
+            self.native_entity_portal(self.dim.id(), id, [entry.x, entry.y, entry.z]);
         }
     }
     /// The chunks of the arrivals still waiting to land in `dim`, for the
