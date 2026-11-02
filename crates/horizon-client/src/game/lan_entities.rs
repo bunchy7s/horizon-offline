@@ -153,6 +153,7 @@ impl Game<'_> {
         hub: &mut Hub,
         out: &mut States,
         drain_minecart_steps: bool,
+        after: u32,
     ) {
         let guests: Vec<(u128, i32)> = hub
             .guests
@@ -160,7 +161,7 @@ impl Game<'_> {
             .filter(|g| hub.here(g))
             .map(|g| (g.uuid, g.entity_id))
             .collect();
-        for b in &self.boats {
+        for b in self.boats.iter().filter(|b| b.id > after) {
             let p = b.position;
             let mut e = state(b.id, &b.entity_type(), [p.x, p.y, p.z], b.yaw, b.on_ground);
             // Leashable.setLeashedTo / dropLeash: who holds the boat's lead.
@@ -188,7 +189,7 @@ impl Game<'_> {
             out.push(e);
         }
         let improvements = self.minecart_improvements();
-        for c in &mut self.carts {
+        for c in self.carts.iter_mut().filter(|c| c.id > after) {
             let p = c.position;
             let mut e = state(c.id, c.kind.id(), [p.x, p.y, p.z], c.yaw, c.on_ground());
             e.pitch = c.pitch;
@@ -239,7 +240,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for a in &self.armor_stands {
+        for a in self.armor_stands.iter().filter(|a| a.id > after) {
             let p = a.position;
             let mut e = state(
                 a.id,
@@ -310,7 +311,7 @@ impl Game<'_> {
             e.attributes = self.stand_attributes(a.id, &a.equipment);
             out.push(e);
         }
-        for f in &self.item_frames {
+        for f in self.item_frames.iter().filter(|f| f.id > after) {
             // ItemFrame.getAddEntityPacket: the block it hangs in and its direction.
             let mut e = state(f.id, f.kind(), f.pos.map(f64::from), 0.0, false);
             e.pitch = match f.facing {
@@ -343,7 +344,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for (p, &id) in &self.knot_ids {
+        for (p, &id) in self.knot_ids.iter().filter(|&(_, &id)| id > after) {
             // LeashFenceKnotEntity.getAddEntityPacket: the fence's block.
             out.push(state(
                 id,
@@ -353,7 +354,7 @@ impl Game<'_> {
                 false,
             ));
         }
-        for p in &self.paintings {
+        for p in self.paintings.iter().filter(|p| p.id > after) {
             let mut e = state(p.id, "minecraft:painting", p.pos.map(f64::from), 0.0, false);
             // Direction.get2DDataValue (south 0, west 1, north 2, east 3) to its
             // 3D data value and yaw.
@@ -373,7 +374,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for c in &self.cushions {
+        for c in self.cushions.iter().filter(|c| c.id > after) {
             let p = c.position;
             let mut e = state(c.id, "minecraft:cushion", [p.x, p.y, p.z], c.yaw, false);
             // Cushion.DATA_COLOR, set unless it is the default white.
@@ -384,7 +385,7 @@ impl Game<'_> {
             out.push(e);
         }
         // DATA_ITEM, `ItemStack.EMPTY` by default.
-        for o in self.ominous_spawners.iter().filter(|o| o.id != 0) {
+        for o in self.ominous_spawners.iter().filter(|o| o.id > after) {
             let mut e = state(
                 o.id,
                 "minecraft:ominous_item_spawner",
@@ -401,8 +402,8 @@ impl Game<'_> {
             ));
             out.push(e);
         }
-        self.lan_projectile_states(hub, out);
-        for o in &self.others {
+        self.lan_projectile_states(hub, out, after);
+        for o in self.others.iter().filter(|o| o.id > after) {
             let p = o.position;
             let mut e = state(o.id, &o.kind, [p.x, p.y, p.z], o.yaw, false);
             e.pitch = o.pitch;
@@ -541,20 +542,20 @@ impl Game<'_> {
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
     /// end crystals, as guests track them.
-    fn lan_projectile_states(&self, hub: &mut Hub, out: &mut States) {
+    fn lan_projectile_states(&self, hub: &mut Hub, out: &mut States, after: u32) {
         let owner = |who: Option<horizon_client::mobs::Who>| match who {
             Some(horizon_client::mobs::Who::Mob(id)) => id as i32,
             Some(horizon_client::mobs::Who::Player) | None => 0,
         };
         let at = |p: horizon_core::geometry::Vec3| [p.x, p.y, p.z];
-        for f in &self.fangs.list {
+        for f in self.fangs.list.iter().filter(|f| f.id > after) {
             out.push(state(f.id, "minecraft:evoker_fangs", f.pos, f.yaw, false));
         }
         // LightningBolt: each client draws and flashes its own.
-        for b in self.bolts.iter().filter(|b| b.id != 0) {
+        for b in self.bolts.iter().filter(|b| b.id > after) {
             out.push(state(b.id, "minecraft:lightning_bolt", b.at, 0.0, false));
         }
-        for t in self.tnts.iter().filter(|t| t.id != 0) {
+        for t in self.tnts.iter().filter(|t| t.id > after) {
             let mut e = state(t.id, "minecraft:tnt", at(t.position), 0.0, t.on_ground);
             e.velocity = at(t.velocity);
             // PrimedTnt.DATA_FUSE_ID, 80 by default; requiresPrecisePosition
@@ -565,7 +566,7 @@ impl Game<'_> {
             e.precise = t.on_ground;
             out.push(e);
         }
-        for f in self.falling.iter().filter(|f| f.id != 0) {
+        for f in self.falling.iter().filter(|f| f.id > after) {
             let mut e = state(f.id, "minecraft:falling_block", at(f.position), 0.0, false);
             e.velocity = at(f.velocity);
             // getAddEntityPacket: the block state; DATA_START_POS.
@@ -579,7 +580,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for p in self.creatures.projectiles.iter().filter(|p| p.id != 0) {
+        for p in self.creatures.projectiles.iter().filter(|p| p.id > after) {
             use horizon_client::projectiles::ProjectileKind as K;
             // A spectral arrow is its own entity type.
             let kind = if p.is_spectral_arrow() {
@@ -652,7 +653,9 @@ impl Game<'_> {
         }
         // Thrown potions and bottles: ThrowableItemProjectile.DATA_ITEM_STACK
         // (the potion's colour), which a plain bottle's type already has.
-        for (id, kind, stack, position, velocity) in self.potions.thrown_tracked() {
+        for (id, kind, stack, position, velocity) in
+            self.potions.thrown_tracked().filter(|(id, ..)| *id > after)
+        {
             let mut e = state(id, kind, at(position), 0.0, false);
             e.velocity = at(velocity);
             if stack.extra.is_some() || stack.count != 1 {
@@ -665,12 +668,12 @@ impl Game<'_> {
             out.push(e);
         }
         // EyeOfEnder: its item is the plain eye (DATA_ITEM_STACK's default).
-        for (id, position, velocity) in self.end.eyes_tracked() {
+        for (id, position, velocity) in self.end.eyes_tracked().filter(|(id, ..)| *id > after) {
             let mut e = state(id, "minecraft:eye_of_ender", position, 0.0, false);
             e.velocity = velocity;
             out.push(e);
         }
-        for t in self.tridents.iter().filter(|t| t.id != 0) {
+        for t in self.tridents.iter().filter(|t| t.id > after) {
             let mut e = state(t.id, "minecraft:trident", at(t.position), t.yaw, false);
             e.pitch = t.pitch;
             e.velocity = at(t.velocity);
@@ -691,7 +694,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for r in self.rockets.iter().filter(|r| r.id != 0) {
+        for r in self.rockets.iter().filter(|r| r.id > after) {
             let mut e = state(
                 r.id,
                 "minecraft:firework_rocket",
@@ -731,7 +734,7 @@ impl Game<'_> {
             }
             out.push(e);
         }
-        for c in self.crystals.iter().filter(|c| c.id != 0) {
+        for c in self.crystals.iter().filter(|c| c.id > after) {
             let mut e = state(c.id, "minecraft:end_crystal", at(c.position), 0.0, false);
             // EndCrystal.DATA_BEAM_TARGET and DATA_SHOW_BOTTOM (true by default).
             // The beam's default is listed so that clearing it (the respawn
@@ -757,13 +760,13 @@ impl Game<'_> {
             ),
             None,
         );
-        for b in self.dragon_fireballs.iter().filter(|b| b.id != 0) {
+        for b in self.dragon_fireballs.iter().filter(|b| b.id > after) {
             let p = b.position;
             let mut e = state(b.id, "minecraft:dragon_fireball", at(p), 0.0, false);
             e.velocity = [b.velocity.x, b.velocity.y, b.velocity.z];
             out.push(e);
         }
-        for b in self.breath_clouds.iter().filter(|b| b.id != 0) {
+        for b in self.breath_clouds.iter().filter(|b| b.id > after) {
             let mut e = state(b.id, "minecraft:area_effect_cloud", b.at, 0.0, false);
             e.meta.push((8, serializer::FLOAT, Value::Float(b.radius)));
             if b.waiting() {

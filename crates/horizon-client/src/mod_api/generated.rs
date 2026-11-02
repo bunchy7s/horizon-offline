@@ -4518,6 +4518,22 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
+    /// `slots` when the item is yours, for a backpack, a storage cell or a
+    /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
+    /// the item without slots, and vanilla's items have none. Asked at each
+    /// call of the item container helpers (`native_item_container_slots`,
+    /// `native_item_container_insert`, `native_item_container_extract`, in
+    /// `native_item_container.rs`). The contents are kept in the stack's
+    /// `minecraft:container`, as a shulker box item keeps them.
+    /// API @API:item_container@.
+    ///
+    /// Return `Some` to set `slots`; the first mod returning `Some` wins.
+    fn item_container(&self, host: &dyn Host, event: &mut ItemContainerEvent<'_>) -> Option<u32> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -4541,6 +4557,11 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    fn render_name_tag(&self, host: &dyn Host, event: &mut RenderNameTagEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// A screen was observed closing, at most once per frame.
     fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
@@ -13874,6 +13895,28 @@ pub fn dispatch_compute_fov_modifier(
     }
     *modifier = event.modifier;
 }
+/// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemContainerEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_container(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    slots: &mut Option<u32>,
+) {
+    if slots.is_some() {
+        return;
+    }
+    let mut event = ItemContainerEvent { item };
+    for mod_hook in super::entered(mods, "item_container") {
+        if let Some(replacement) = mod_hook.item_container(host, &mut event) {
+            *slots = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -13993,6 +14036,36 @@ pub fn dispatch_render_item_in_frame(
             break;
         }
     }
+}
+/// What [`Hooks::render_name_tag`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderNameTagEvent<'a> {
+    pub entity_id: u32,
+    pub kind: &'a str,
+    pub vanilla_visible: bool,
+    pub visible: bool,
+    pub text: &'a mut Option<String>,
+}
+pub fn dispatch_render_name_tag(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    kind: &str,
+    vanilla_visible: bool,
+    visible: &mut bool,
+    text: &mut Option<String>,
+) {
+    let mut event = RenderNameTagEvent {
+        entity_id,
+        kind,
+        vanilla_visible,
+        visible: *visible,
+        text,
+    };
+    for mod_hook in super::entered(mods, "render_name_tag") {
+        mod_hook.render_name_tag(host, &mut event);
+    }
+    *visible = event.visible;
 }
 /// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
