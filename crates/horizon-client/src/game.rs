@@ -2298,6 +2298,8 @@ struct Game<'a> {
     lod: Option<horizon_client::lod::Lod>,
     lod_source_attempted: bool,
     lod_observe: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    /// The server level far terrain keeps the chunks of.
+    lod_level: Option<String>,
     /// Beacon beam sections kept after their chunk unloads, so far terrain
     /// LOD still draws their beams (`beacon_geometry` refreshes them).
     far_beacons: HashMap<(i32, i32, i32), Vec<(u32, i32)>>,
@@ -16607,20 +16609,28 @@ impl Game<'_> {
         let enabled = self.far_terrain_choice().0 > 0
             && self.renderer.is_some()
             && self.player.is_some()
-            && self.title.is_none()
-            && (self.remote.is_none()
-                || self.integrated.is_some()
-                || self.server_far_terrain().is_some());
+            && self.title.is_none();
         if !enabled {
             if self.lod.is_some() || self.lod_source_attempted {
                 self.clear_lod();
             }
             return;
         }
+        // Another level: its own kept chunks. (Another world at the same
+        // address, a proxy's next server, comes through a new login; a seed
+        // changed at a respawn of the same level is a plugin hiding it.)
+        if self
+            .lod_level
+            .as_ref()
+            .is_some_and(|level| self.remote.as_ref().is_some_and(|r| r.level != *level))
+        {
+            self.clear_lod();
+        }
         if self.lod_source_attempted {
             return;
         }
         self.lod_source_attempted = true;
+        self.lod_level = None;
         let dim = self.dim;
         let source = match (&self.integrated, self.server_far_terrain(), &self.remote) {
             (Some(server), ..) => server.call(move |game| game.lod_source_in(dim)).flatten(),
@@ -16631,6 +16641,31 @@ impl Game<'_> {
                     remote.session.far_terrain(offer, biomes, states);
                 Some(source)
             }
+            // A friend's world (a new code at every share) or a splitscreen
+            // guest's (the player's own world, its other guests writing the
+            // same folder): nothing to keep.
+            (None, None, Some(remote))
+                if self.options.split_guest
+                    || remote
+                        .session
+                        .address
+                        .starts_with(horizon_client::net::FRIEND) =>
+            {
+                None
+            }
+            // No offer from a server: draw what it sent, on this visit and before.
+            (None, None, Some(remote)) => std::env::current_dir().ok().map(|home| {
+                use horizon_client::server_terrain as terrain;
+                let address = &remote.session.address;
+                let dir = terrain::level_dir(
+                    &home.join("server-terrain"),
+                    address,
+                    remote.hashed_seed,
+                    &remote.level,
+                );
+                self.lod_level = Some(remote.level.clone());
+                terrain::ServerTerrain::new(dir) as _
+            }),
             _ => Some(self.streaming.lod_source()),
         };
         if let Some(source) = source {
@@ -18612,6 +18647,7 @@ impl<'a> Game<'a> {
             lod_source_attempted: false,
             far_beacons: HashMap::new(),
             lod_observe: Default::default(),
+            lod_level: None,
             lod_covered_at: None,
             view_arrival: Default::default(),
             options,
