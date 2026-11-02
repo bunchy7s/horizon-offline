@@ -2023,6 +2023,7 @@ impl Game<'_> {
         tint: impl Fn(i32) -> Option<u32>,
         out: &mut Vec<Vertex>,
     ) {
+        let mut normals = horizon_client::item_render::FaceNormals::new(m);
         for model in models {
             for face in &model.faces {
                 let Some(s) = self
@@ -2052,8 +2053,7 @@ impl Game<'_> {
                     );
                 }
                 let normal = if diffuse {
-                    use horizon_client::item_render::{direction_vector, transform_normal};
-                    let n = transform_normal(m, direction_vector(face.quad.facing));
+                    let n = normals.face(face.quad.facing);
                     let n = n.to_array().map(|v| (v.clamp(-1.0, 1.0) * 127.0) as i8);
                     [n[0], n[1], n[2], 127]
                 } else {

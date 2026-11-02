@@ -544,7 +544,7 @@ pub struct Graphics {
     /// How finely far terrain is drawn; Full unless the player picks Reduced.
     pub far_detail: FarDetail,
     /// Far terrain from servers' BlueMap web maps; no server has one unless
-    /// the player names it (`blueMap:` lines).
+    /// the player names it (`blueMap:` lines) or turns on auto-detect.
     pub blue_map: crate::bluemap::Settings,
     /// Skip sections hidden behind closed ones (vanilla's occlusion graph).
     pub cave_culling: bool,
@@ -737,6 +737,7 @@ impl Graphics {
                         g.blue_map.radius = radius;
                     }
                 }
+                "blueMapAutoDetect" => g.blue_map.auto_detect = flag(g.blue_map.auto_detect),
                 "caveCulling" => g.cave_culling = flag(g.cave_culling),
                 "entityCulling" => g.entity_culling = EntityCullingMode::parse(value),
                 "leafCulling" => g.leaf_culling = LeafCullingMode::parse(value),
@@ -1010,6 +1011,7 @@ mod tests {
             far_detail: FarDetail::Reduced,
             blue_map: crate::bluemap::Settings {
                 radius: 40,
+                auto_detect: true,
                 // In their own file (`bluemap::SERVERS_FILE`).
                 servers: Vec::new(),
             },
