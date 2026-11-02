@@ -4358,6 +4358,8 @@ impl Game<'_> {
         let swinging = play.swing.swinging();
         if progress != play.last_progress && progress >= 0 {
             play.last_progress = progress;
+            let guest = &host.hub.guests[gi];
+            self.native_block_break_progress_update(guest.uuid, &guest.name, pos, progress);
             // The host player sees it too (on the server thread its window is a guest).
             self.destroy_block_progress(host.hub.guests[gi].entity_id, pos, progress);
             host.hub.broadcast_near(

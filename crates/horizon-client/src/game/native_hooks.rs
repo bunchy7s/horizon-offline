@@ -3199,6 +3199,18 @@ impl Game<'_> {
         let _ = (dimension, pos, from, to);
     }
 
+    /// A server guest's block-breaking animation changed to `progress` at
+    /// `pos` (0 through 9). @API:native_block_break_progress_update@.
+    pub(super) fn native_block_break_progress_update(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        progress: i32,
+    ) {
+        let _ = (player, name, pos, progress);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
