@@ -592,6 +592,7 @@ impl Game<'_> {
         let block = (super::creatures::ProjWorld {
             w: &w,
             targets: Vec::new(),
+            border: Some(self.border.bounds()),
         })
         .clip(from, to);
         if let Some((at, ..)) = block {

@@ -3131,14 +3131,16 @@ impl Renderer {
             "fs_entity_shadow",
             wgpu::ColorWrites::ALL,
         );
-        // RenderPipelines.ITEM_TRANSLUCENT: blended, depth tested. Drawn before
-        // translucent terrain, it cannot write depth: the water behind a
-        // glass item would fail the test and vanish (vanilla sorts these in
-        // its order independent transparency pass instead).
+        // RenderPipelines.ITEM_TRANSLUCENT: blended, depth tested and, like
+        // every vanilla pipeline that does not turn it off, depth writing.
+        // `LevelRenderer.executeClassicTransparency` draws the translucent
+        // features before the translucent terrain, so without the writes
+        // ice or water behind a dropped slime block or glass item would blend
+        // over it and the item would all but vanish (#7031, #7033).
         let translucent_item_pipeline = entity_pipeline(
             "Translucent items",
             None,
-            false,
+            true,
             wgpu::CompareFunction::GreaterEqual,
             Default::default(),
             alpha_blend,
@@ -8075,6 +8077,23 @@ impl Renderer {
                 pass.draw_indexed(0..text_quads * 6, (entity_quads * 4) as i32, 0..1);
                 pass.set_bind_group(0, &self.group, &[]);
             }
+            // FeatureRenderDispatcher.PreparedFrame.executeTranslucent: the shadows
+            // come before the translucent items, which then cover them (#7026).
+            if shadow_quads > 0 && !oit_on {
+                pass.set_pipeline(&self.shadow_blob_pipeline);
+                pass.set_bind_group(0, &self.entity_group, &[]);
+                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
+                pass.draw_indexed(
+                    0..shadow_quads * 6,
+                    ((base_quads
+                        - translucent_item_quads
+                        - translucent_particle_quads
+                        - shadow_quads)
+                        * 4) as i32,
+                    0..1,
+                );
+                pass.set_bind_group(0, &self.group, &[]);
+            }
             if translucent_item_quads > 0 && !oit_on {
                 pass.set_pipeline(&self.translucent_item_pipeline);
                 pass.set_bind_group(0, &self.entity_group, &[]);
@@ -8102,21 +8121,6 @@ impl Renderer {
                 pass.draw_indexed(
                     0..crumbling_quads * 6,
                     ((entity_quads + text_quads) * 4) as i32,
-                    0..1,
-                );
-                pass.set_bind_group(0, &self.group, &[]);
-            }
-            if shadow_quads > 0 && !oit_on {
-                pass.set_pipeline(&self.shadow_blob_pipeline);
-                pass.set_bind_group(0, &self.entity_group, &[]);
-                pass.set_vertex_buffer(0, self.entity_buffer.slice(..));
-                pass.draw_indexed(
-                    0..shadow_quads * 6,
-                    ((base_quads
-                        - translucent_item_quads
-                        - translucent_particle_quads
-                        - shadow_quads)
-                        * 4) as i32,
                     0..1,
                 );
                 pass.set_bind_group(0, &self.group, &[]);

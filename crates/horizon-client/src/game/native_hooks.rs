@@ -3395,6 +3395,25 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_hanging_place(self, mod_api::mods(), player, name, kind, pos, cancel);
     }
+    /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
+    /// a painting (`minecraft:painting`), `kind` its entity type and `pos` the
+    /// block it hangs in, is about to break: a server player's hit
+    /// (`player`, their state swapped in, so `native_tell` answers them), a
+    /// blast, or the wall it hangs on gone (`player` None for both). Where
+    /// `BlockAttachedEntity.hurtServer` and its survival check would kill
+    /// it, before anything drops or sounds. Set `cancel` and it stays, as it
+    /// was. A hit that only takes the item out of a frame does not break the
+    /// frame and is not asked. The game's own player's hit is not asked, nor
+    /// is `/kill`. @API:native_hanging_break@.
+    pub(super) fn native_hanging_break(
+        &mut self,
+        player: Option<u128>,
+        kind: &str,
+        pos: [i32; 3],
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_hanging_break(self, mod_api::mods(), player, kind, pos, cancel);
+    }
     /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
     /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
     /// empties `minecraft:water`): where `BucketItem.use` has found the block

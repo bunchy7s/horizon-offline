@@ -4,8 +4,10 @@
 //! type, found Interpolation(Flat)"). Each member of such a block becomes a varying of its own,
 //! `hz_<block>_<member>` (the name the next stage's block gives it too: stages match blocks by
 //! block name and members by name), and `instance.member` reads it. A block without an instance
-//! name keeps its members' names. Blocks with an instance array (a geometry stage's input) and
-//! blocks whose instance is used whole are left as written. Lines stay where they were.
+//! name keeps its members' names. Of a block with an instance array (a geometry stage's input,
+//! `in VertexData { vec2 uv; } vIn[];`), each member becomes an array, `vIn[i].uv` reading
+//! `hz_VertexData_uv[i]`. Blocks whose instance is used whole are left as written. Lines stay
+//! where they were.
 
 use super::scan::significant;
 use crate::macros::lex;
@@ -36,10 +38,19 @@ struct Block {
     name: String,
     members: Vec<(usize, Vec<(usize, String)>)>,
     instance: Option<(usize, String)>,
+    /// The instance's array suffix (`[]`, `[3]`), empty when it is not an array.
+    array: String,
 }
 
 /// `code` with its plain `in`/`out` interface blocks as varyings, or `None` when it has none.
 pub(super) fn flatten(code: &str) -> Option<String> {
+    flatten_as(code, "")
+}
+
+/// `flatten`, the members of an `in` block with an instance named `hz_<inputs><block>_<member>`:
+/// a geometry stage's input and output blocks may share their name (GLSL 4.60, 4.3.9), and the
+/// geometry stage reads its inputs under names of its own.
+pub(super) fn flatten_as(code: &str, inputs: &str) -> Option<String> {
     let mut tokens: Vec<String> = lex(code).into_iter().map(str::to_owned).collect();
     let blocks = find_blocks(&tokens);
     if blocks.is_empty() {
@@ -48,17 +59,25 @@ pub(super) fn flatten(code: &str) -> Option<String> {
     let mut changed = false;
     for b in blocks {
         let inside = |i: usize| (b.start..=b.end).contains(&i);
+        let prefix = if b.storage == "in" { inputs } else { "" };
         let renamed = |member: &str| match &b.instance {
-            Some(_) => format!("hz_{}_{member}", b.name),
+            Some(_) => format!("hz_{prefix}{}_{member}", b.name),
             None => member.to_owned(),
         };
-        // Every use of the instance outside the block must be `instance.member`.
+        // Every use of the instance outside the block must be `instance.member`, or
+        // `instance[i].member` for an instance array.
         let mut reads = Vec::new();
         if let Some((_, instance)) = &b.instance {
             let mut whole = false;
             for i in (0..tokens.len()).filter(|&i| !inside(i) && tokens[i] == *instance) {
-                let next = next_significant(&tokens, i + 1);
-                let member = next
+                let index = match b.array.is_empty() {
+                    true => Some(i),
+                    false => next_significant(&tokens, i + 1)
+                        .filter(|&o| tokens[o] == "[")
+                        .and_then(|o| closing(&tokens, o)),
+                };
+                let member = index
+                    .and_then(|x| next_significant(&tokens, x + 1))
                     .filter(|&d| tokens[d] == ".")
                     .and_then(|d| next_significant(&tokens, d + 1));
                 let known = member.filter(|&m| {
@@ -66,8 +85,8 @@ pub(super) fn flatten(code: &str) -> Option<String> {
                         .iter()
                         .any(|(_, names)| names.iter().any(|(_, n)| *n == tokens[m]))
                 });
-                match (next, known) {
-                    (Some(_), Some(m)) => reads.push((i, m)),
+                match (index, known) {
+                    (Some(x), Some(m)) => reads.push((i, x, m)),
                     _ => whole = true,
                 }
             }
@@ -75,10 +94,11 @@ pub(super) fn flatten(code: &str) -> Option<String> {
                 continue;
             }
         }
-        for (i, member) in reads {
+        for (i, index, member) in reads {
             tokens[i] = renamed(&tokens[member]);
-            // `.member` goes, with the spaces around it but not its line breaks.
-            for t in &mut tokens[i + 1..=member] {
+            // `.member` goes, with the spaces around it but not its line breaks; an index stays
+            // (`v[i].m` is `hz_B_m[i]`).
+            for t in &mut tokens[index + 1..=member] {
                 t.retain(|c| c == '\n');
             }
         }
@@ -91,7 +111,8 @@ pub(super) fn flatten(code: &str) -> Option<String> {
         for (first, names) in &b.members {
             tokens[*first] = format!("{} {}", b.storage, tokens[*first]);
             for (at, name) in names {
-                tokens[*at] = renamed(name);
+                // Of an instance array, each member is an array of the instance's size, outermost.
+                tokens[*at] = renamed(name) + &b.array;
             }
         }
         changed = true;
@@ -109,6 +130,24 @@ fn blank(t: &mut String) {
 
 fn next_significant(tokens: &[String], from: usize) -> Option<usize> {
     (from..tokens.len()).find(|&i| significant(&tokens[i]))
+}
+
+/// The `]` that closes the `[` at `open`.
+fn closing(tokens: &[String], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (j, t) in tokens.iter().enumerate().skip(open) {
+        match t.as_str() {
+            "[" => depth += 1,
+            "]" => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// The `in`/`out` interface blocks at global scope that can be flattened.
@@ -235,10 +274,17 @@ fn block(tokens: &[String], start: usize, open: usize) -> Option<Block> {
         .filter(|&j| significant(&tokens[j]))
         .collect();
     let end = (close + 1..tokens.len()).find(|&j| tokens[j] == ";")?;
-    let instance = match after.as_slice() {
-        [] => None,
-        [n] if super::scan::is_ident(&tokens[*n]) => Some((*n, tokens[*n].clone())),
-        _ => return None, // an instance array, or something else
+    let (instance, array) = match after.as_slice() {
+        [] => (None, String::new()),
+        // `vIn[]`, `vIn[3]`: a geometry stage's input (GLSL 4.60, 4.3.9).
+        [n, rest @ ..]
+            if super::scan::is_ident(&tokens[*n])
+                && (rest.is_empty() || tokens[rest[0]] == "[" && tokens[*rest.last()?] == "]") =>
+        {
+            let array = rest.iter().map(|&j| tokens[j].as_str()).collect();
+            (Some((*n, tokens[*n].clone())), array)
+        }
+        _ => return None,
     };
     if members.is_empty() {
         return None;
@@ -252,6 +298,7 @@ fn block(tokens: &[String], start: usize, open: usize) -> Option<Block> {
         name,
         members,
         instance,
+        array,
     })
 }
 
@@ -287,13 +334,25 @@ mod tests {
     }
 
     #[test]
+    fn an_instance_array_makes_each_member_an_array() {
+        let code = "in VertexData {\n    flat int id;\n    vec2 st[2];\n} vIn[];\n\
+                    void main() { int i = vIn[0].id; vec2 a = vIn[i + 1] . st[1]; }\n";
+        let out = flatten(code).unwrap();
+        assert_eq!(out.lines().count(), code.lines().count());
+        assert_eq!(
+            out.split_whitespace().collect::<Vec<_>>().join(" "),
+            "in flat int hz_VertexData_id[]; in vec2 hz_VertexData_st[][2]; void main() { \
+             int i = hz_VertexData_id[0]; vec2 a = hz_VertexData_st[i + 1][1]; }"
+        );
+    }
+
+    #[test]
     fn other_blocks_stay_as_written() {
         for code in [
-            // Uniform and storage blocks, a geometry stage's instance array, an instance
-            // used whole.
+            // Uniform and storage blocks, an instance used whole.
             "uniform Frame { float t; } frame;\nvoid main() {}\n",
             "buffer Data { float v[]; } data;\nvoid main() {}\n",
-            "in VertexData { flat int id; } vIn[];\nvoid main() {}\n",
+            "in VertexData { flat int id; } vIn[];\nvoid f(VertexData d) {}\nvoid main() { f(vIn[0]); }\n",
             "out VertexData { flat int id; } vOut;\nvoid f(int x) {}\nvoid main() { vOut = vOut; }\n",
         ] {
             assert_eq!(flatten(code), None, "{code}");

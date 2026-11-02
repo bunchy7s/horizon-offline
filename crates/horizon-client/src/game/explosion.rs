@@ -797,9 +797,8 @@ impl Game<'_> {
             // centre of its box.
             let (lo, hi) = self.paintings[i].bounds();
             let at = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
-            if blast_reaches(center, diameter, at) {
-                self.break_painting(i, false);
-            } else {
+            // A painting a mod keeps stays at `i`.
+            if !(blast_reaches(center, diameter, at) && self.break_painting(i, false)) {
                 i += 1;
             }
         }
