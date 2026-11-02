@@ -765,6 +765,17 @@ impl Game<'_> {
         }
     }
     pub(super) fn apply_effect_action(&mut self, action: EffectAction) {
+        let action = match action {
+            EffectAction::Heal(mut amount) if self.player.is_some() => {
+                let mut cancel = false;
+                self.native_living_heal(None, &mut amount, &mut cancel);
+                if cancel {
+                    return;
+                }
+                EffectAction::Heal(amount)
+            }
+            action => action,
+        };
         let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {

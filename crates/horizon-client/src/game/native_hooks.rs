@@ -1480,6 +1480,18 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    /// A living entity is about to heal (`LivingHealEvent`). `entity` is a
+    /// mob ID, or None for the player currently acting. Mods may change the
+    /// amount or cancel the heal. @API:native_living_heal@.
+    pub(super) fn native_living_heal(
+        &mut self,
+        entity: Option<u32>,
+        amount: &mut f32,
+        cancel: &mut bool,
+    ) {
+        let _ = (entity, amount, cancel);
+    }
+
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
