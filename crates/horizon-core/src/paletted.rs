@@ -723,10 +723,23 @@ impl PalettedContainer {
     }
 }
 impl PartialEq for PalettedContainer {
-    /// Equal when every entry is.
+    /// Equal when every entry is. The same width, palette and words are the
+    /// same entries, whatever they are: compared without reading each.
     fn eq(&self, other: &Self) -> bool {
         let entries = self.strategy.entries();
-        entries == other.strategy.entries() && (0..entries).all(|i| self.get(i) == other.get(i))
+        if entries != other.strategy.entries() {
+            return false;
+        }
+        let same_palette = match (&self.palette, &other.palette) {
+            (Palette::Single(a), Palette::Single(b)) => a == b,
+            (Palette::List(a), Palette::List(b)) => a == b,
+            (Palette::Global, Palette::Global) => true,
+            _ => false,
+        };
+        if same_palette && self.bits == other.bits && self.words == other.words {
+            return true;
+        }
+        (0..entries).all(|i| self.get(i) == other.get(i))
     }
 }
 
@@ -753,7 +766,7 @@ mod tests {
         *state
     }
     #[test]
-    fn runs_read_what_get_reads() {
+    fn runs_read_the_stored_values() {
         let mut state = 0x9E37_79B9_7F4A_7C15;
         // One value, a list palette, and the global palette.
         for distinct in [1u64, 5, 3000] {
@@ -767,8 +780,11 @@ mod tests {
                 let len = len.min(4096 - start);
                 let mut run = vec![u32::MAX; len];
                 container.get_run(start, &mut run);
-                let expected: Vec<u32> = (start..start + len).map(|i| container.get(i)).collect();
-                assert_eq!(run, expected, "{distinct} values, {start}+{len}");
+                assert_eq!(
+                    run,
+                    values[start..start + len],
+                    "{distinct} values, {start}+{len}"
+                );
             }
         }
     }

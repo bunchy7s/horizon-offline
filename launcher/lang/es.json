@@ -83,6 +83,11 @@
   "Classic arms": "Brazos clásicos",
   "Versions": "Versiones",
   "Release build: slower to build, slightly faster game": "Compilación release: tarda más, el juego va algo más rápido",
+  "Performance build": "Compilación de rendimiento",
+  "Dev build": "Compilación dev",
+  "Release build": "Compilación release",
+  "The everyday build for playing with mods": "La compilación diaria para jugar con mods",
+  "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow": "Para desarrollar un mod: los cambios en el mod se recompilan unas 6× más rápido, la lógica del juego va hasta unas dos veces más lenta",
   "Horizon mods": "Mods de Horizon",
   "Friends over the internet · Tailscale": "Amigos por internet · Tailscale",
   "Landscape": "Paisaje",
@@ -790,5 +795,15 @@
   "{path} is not a folder to build into.": "{path} no es una carpeta para compilar.",
   "Could not copy the build: {error}": "No se pudo copiar la compilación: {error}",
   "Could not move the build to {path}: {error}": "No se pudo mover la compilación a {path}: {error}",
-  "Native mods can use your microphone for voice chat when you enable it.": "Los mods nativos pueden usar tu micrófono para el chat de voz cuando lo actives."
+  "Native mods can use your microphone for voice chat when you enable it.": "Los mods nativos pueden usar tu micrófono para el chat de voz cuando lo actives.",
+  "Import a game build…": "Importar una compilación del juego…",
+  "Importing…": "Importando…",
+  "Imported builds": "Compilaciones importadas",
+  "Unsigned: you picked these programs yourself, and Horizon can't check where they came from. Updates never replace them.": "Sin firmar: elegiste estos programas tú mismo, y Horizon no puede comprobar de dónde vienen. Las actualizaciones nunca los reemplazan.",
+  "Game files from {base}": "Archivos del juego de {base}",
+  "Imported · {date}": "Importada · {date}",
+  "{file} is not a Horizon game for this computer.": "{file} no es un juego de Horizon para este ordenador.",
+  "Install a release or Nightly first: an imported build plays with its game files.": "Instala primero una versión o una Nightly: una compilación importada usa sus archivos del juego.",
+  "{file} holds no {program}.": "{file} no contiene ningún {program}.",
+  "Could not import the build: {error}": "No se pudo importar la compilación: {error}"
 }

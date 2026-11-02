@@ -72,7 +72,7 @@ ServerWaypointManager.remakeConnections	inline	crates/horizon-client/src/lan/way
 ServerWaypointManager.createConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::create_connection	
 ServerWaypointManager.updateConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_or_create	
 SoundEvent.create	skip:data		registry object construction; Horizon's sound_events.rs models sounds.json entries, not SoundEvent objects
-SoundEvent.getRange	missing		minor: no fixed-range sound events (fixed_range is not read anywhere); attenuation comes from the sounds.json value (Sound::attenuation_distance)
+SoundEvent.getRange	inline	crates/horizon-client/src/lan/containers.rs::Hub::broadcast_near	16*max(volume,1) is the whole formula: no 26.3 event sets a fixed range (SoundEvents never calls createFixedRangeEvent), and a player exactly on it is left out
 SoundEvents.register	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerForHolder	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerGoatHornSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer

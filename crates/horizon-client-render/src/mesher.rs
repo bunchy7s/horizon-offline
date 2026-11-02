@@ -10,9 +10,9 @@ mod sides;
 use crate::connected::{Pick, TileLayer};
 use crate::{
     assets::{Assets, RenderAssets},
-    biome::Biomes,
+    biome::{Biomes, GrassModifier},
     blocks::{BlockFacts, RenderShape},
-    chunk::{Chunk, Light, MIN_Y},
+    chunk::{Chunk, MIN_Y},
     graphics::LeafCullingMode,
     models::catalog::BakedFace,
 };
@@ -368,15 +368,15 @@ pub const ALL_VISIBLE: u64 = (1 << 36) - 1;
 fn visibility(pad: &Padded, info: &[Info]) -> u64 {
     let solid: Vec<bool> = info.iter().map(|i| i.solid).collect();
     let mut rows = Vec::new();
-    opaque_rows(pad, &solid, &mut rows);
+    solid_rows(pad, &solid, &mut rows);
     visibility_rows(&open_rows(&rows))
 }
-/// The section's non-opaque cells by row (`y << 4 | z`, bit x) from the padded
-/// opacity rows (`MeshScratch::opaque`).
-fn open_rows(opaque: &[u32]) -> [u16; 256] {
+/// The section's cells that are not `isSolidRender`, by row (`y << 4 | z`, bit
+/// x), from the padded rows of `MeshScratch::solid_rows`.
+fn open_rows(solid: &[u32]) -> [u16; 256] {
     std::array::from_fn(|r| {
         let (y, z) = ((r >> 4) as i32, (r & 15) as i32);
-        !(opaque[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
+        !(solid[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
     })
 }
 /// The cells of `open` connected to `seeds` (a subset) within the row: an
@@ -753,6 +753,10 @@ impl MeshTables {
             .copied()
             .unwrap_or(false)
     }
+    /// HDR output's tier of a state (`hdr_tier`), for what meshes it elsewhere (the LOD tiles).
+    pub fn hdr_tier(&self, state: BlockStateId) -> u8 {
+        self.info.get(state.0 as usize).map_or(0, |i| i.tier)
+    }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
         Some(MeshFacts {
@@ -922,14 +926,10 @@ impl Padded {
             let sources: [[Source; 3]; 3] = std::array::from_fn(|rz| {
                 std::array::from_fn(|rx| match region[rz][rx] {
                     None => Source::Missing,
-                    // `Chunk::get` and `Chunk::light` outside the column's sections.
-                    Some(c) => {
-                        let s = (wy - c.min_y()) >> 4;
-                        match c.sections.get(s as usize).filter(|_| s >= 0) {
-                            Some(section) => Source::Section(section),
-                            None => Source::Outside(if s < 0 { 0 } else { 0xF0 }),
-                        }
-                    }
+                    Some(c) => match c.section_at(wy) {
+                        Ok(section) => Source::Section(section),
+                        Err(light) => Source::Outside(light),
+                    },
                 })
             });
             for z in -B..16 + B {
@@ -977,10 +977,7 @@ fn fill_run(
                 Some(own) => blocks.copy_from_slice(own),
                 None => section.blocks.get_run(at, blocks),
             }
-            match &section.light {
-                Light::Uniform(v) => light.fill(*v),
-                Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
-            }
+            section.light.copy_run(at, light);
         }
         Source::Outside(v) => {
             blocks.fill(0);
@@ -1015,11 +1012,11 @@ pub struct MeshScratch {
     own: Option<Box<[u32; 4096]>>,
     leaf: leaf_culling::LeafMask,
     /// Per padded row (`pi(-B, y, z) / P`), bit `x + B` set where the block
-    /// is `isSolidRender`.
-    opaque: Vec<u32>,
+    /// is `isSolidRender` (`MeshTables::solid`).
+    solid_rows: Vec<u32>,
 }
-/// Fills `rows` with the padded section's opacity, one bit per block (`MeshScratch::opaque`).
-fn opaque_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
+/// Fills `rows` with the padded section's `isSolidRender` blocks, one bit each (`MeshScratch::solid_rows`).
+fn solid_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
     rows.clear();
     rows.extend(pad.blocks.as_chunks::<P>().0.iter().map(|row| {
         row.iter().enumerate().fold(0u32, |bits, (x, &id)| {
@@ -1041,6 +1038,8 @@ fn hidden(rows: &[u32], x: i32, y: i32, z: i32) -> bool {
 mod leaf_culling_tests;
 #[cfg(test)]
 mod reuse_tests;
+#[cfg(test)]
+mod tint_tests;
 /// Set on a terrain vertex's sprite layer when its texture alpha must be ignored.
 pub const OPAQUE_LAYER: u16 = 1 << 15;
 /// The bits of `TerrainVertex::color`'s alpha byte that hold how brightly its face shines
@@ -1153,6 +1152,8 @@ struct Tints<'a> {
     /// Chunk x, chunk z and the section's lowest block y.
     origin: [i32; 3],
     layers: [Option<Box<Layer>>; 16],
+    /// `uniform_biome`, once computed.
+    uniform: Option<Option<u16>>,
 }
 impl<'a> Tints<'a> {
     fn new(
@@ -1170,6 +1171,7 @@ impl<'a> Tints<'a> {
             plains: biomes.id("minecraft:plains"),
             origin,
             layers: Default::default(),
+            uniform: None,
         }
     }
     /// The biome of block `(x, y, z)` (section-local x/z, y in 0..16), as `BiomeManager.getBiome`
@@ -1208,8 +1210,52 @@ impl<'a> Tints<'a> {
             plains
         }
     }
+    /// The biome every block of the section's blend squares zooms to, when they
+    /// all do: `quart_at_block` picks one of the eight quart cells at its base
+    /// cell plus 0 or 1 on each axis, so if every such cell the section reaches
+    /// holds one biome, every zoomed cell is that biome.
+    fn uniform_biome(&mut self) -> Option<u16> {
+        if let Some(uniform) = self.uniform {
+            return uniform;
+        }
+        let (r, [cx, cz, base_y]) = (self.radius, self.origin);
+        // The base cells of blocks lo..=hi, and the cell past the last.
+        let span = |lo: i32, hi: i32| (lo.wrapping_sub(2) >> 2)..=(hi.wrapping_sub(2) >> 2) + 1;
+        let (xs, ys, zs) = (
+            span(cx * 16 - r, cx * 16 + 15 + r),
+            span(base_y, base_y + 15),
+            span(cz * 16 - r, cz * 16 + 15 + r),
+        );
+        let first = Self::quart_biome(
+            self.region,
+            self.plains,
+            [cx, cz],
+            [*xs.start(), *ys.start(), *zs.start()],
+        );
+        let uniform = ys
+            .flat_map(|y| zs.clone().map(move |z| (y, z)))
+            .flat_map(|(y, z)| xs.clone().map(move |x| [x, y, z]))
+            .all(|q| Self::quart_biome(self.region, self.plains, [cx, cz], q) == first)
+            .then_some(first);
+        self.uniform = Some(uniform);
+        uniform
+    }
     /// The blended tint of block `(x, y, z)` (section-local x/z, y in 0..16).
     fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
+        // One biome over every blend square: the mean of (2r+1)^2 equal
+        // colours is that colour, unless it varies by position (swamp grass).
+        if let Some(biome) = self.uniform_biome() {
+            let info = self.biomes.get(biome);
+            match resolver {
+                Resolver::Grass if !matches!(info.modifier, GrassModifier::Swamp) => {
+                    return self.biomes.grass(biome, 0.0, 0.0) & 0xFF_FFFF;
+                }
+                Resolver::Grass => {}
+                Resolver::Foliage => return info.foliage & 0xFF_FFFF,
+                Resolver::Dry => return info.dry_foliage & 0xFF_FFFF,
+                Resolver::Water => return info.water & 0xFF_FFFF,
+            }
+        }
         let r = self.radius;
         let dim = (16 + 2 * r) as usize;
         let layer = self.layers[y as usize].get_or_insert_with(|| {
@@ -1301,6 +1347,8 @@ pub struct Mesher<'a> {
     pub nether_shading: bool,
     /// A shader pack lights the faces (its `oldLighting` off): no face shading in the colours.
     pub shader_pack_lighting: bool,
+    /// OptiFine/Iris separate ambient occlusion: vertex RGB does not include AO, and AO factor is passed in vertex alpha.
+    pub separate_ao: bool,
     pub assets: &'a Assets,
     pub render: &'a RenderAssets,
     pub tables: &'a MeshTables,
@@ -1347,8 +1395,8 @@ impl Mesher<'_> {
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
         scratch.padded.fill(region, sy, own);
         let pad = &scratch.padded;
-        opaque_rows(pad, &self.tables.solid, &mut scratch.opaque);
-        let opaque = &scratch.opaque;
+        solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
+        let opaque = &scratch.solid_rows;
         out.visibility = visibility_rows(&open_rows(opaque));
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
@@ -1388,7 +1436,11 @@ impl Mesher<'_> {
                     }
                     if state.fluid.kind() != FluidKind::Empty {
                         let water = tints.get(Resolver::Water, x, y, z);
-                        let shade = (self.nether_shading, self.shader_pack_lighting);
+                        let shade = (
+                            self.nether_shading,
+                            self.shader_pack_lighting,
+                            self.separate_ao,
+                        );
                         fluid::tesselate(self.tables, shade, pad, water, &mut out, [x, y, z]);
                     }
                     if !state.model {
@@ -1536,19 +1588,23 @@ impl Mesher<'_> {
         } else {
             lighting::cardinal(self.nether_shading, shade_face)
         };
-        // Grey level per vertex before tinting, and vanilla light coords.
-        let (gray, coords) = if ao {
+        // Grey level per vertex before tinting, vanilla light coords, and ambient occlusion factor.
+        let (gray, coords, ao_factor) = if ao {
             let info = &self.tables.info;
             let (brightness, coords) =
                 lighting::ambient_occlusion(pad, info, state, pos, &q.positions, q.facing);
-            let gray = brightness.map(|b| lighting::scale(lighting::gray(b), directional));
-            (gray, coords)
+            let gray = if self.separate_ao {
+                [lighting::gray(directional); 4]
+            } else {
+                brightness.map(|b| lighting::scale(lighting::gray(b), directional))
+            };
+            (gray, coords, brightness)
         } else {
             let coords = match q.cull {
                 Some(d) => lighting::coords(pad, state, lighting::step(pos, d)),
                 None => lighting::flat(pad, state, pos, &q.positions, q.facing),
             };
-            ([lighting::gray(directional); 4], [coords; 4])
+            ([lighting::gray(directional); 4], [coords; 4], [1.0f32; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
         // OptiFine connected textures: another sprite, or one per quarter, and the overlays
@@ -1591,12 +1647,18 @@ impl Mesher<'_> {
                     None => [g; 3],
                 };
                 let p = q.positions[i];
+                let color = if self.separate_ao {
+                    let ao_byte = (ao_factor[i] * 255.0).round().clamp(0.0, 255.0) as u32;
+                    ao_byte << 24 | (pack_rgb(rgb) & 0x00FF_FFFF)
+                } else {
+                    emitting(pack_rgb(rgb), tier)
+                };
                 (
                     TerrainVertex::new(
                         [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
                         uv[i],
                         0,
-                        emitting(pack_rgb(rgb), tier),
+                        color,
                         pack_coords(lighting::with_emission(coords[i], q.light_emission)),
                     ),
                     uv[i],

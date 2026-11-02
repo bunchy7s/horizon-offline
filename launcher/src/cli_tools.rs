@@ -15,6 +15,8 @@ const NOT_TOOLS: &[&str] = &[
     "agent-config",
     "no-ai",
     "native-build",
+    // It installs a program nothing signed: the player's decision.
+    "import-build",
     // They install native code nobody reviewed, and say it first: the player's decision.
     "mods add-github",
     "mods update-github",

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "hopper_pickup_item",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_hopper_pickup_item",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no direct equivalent; Bukkit's InventoryPickupItemEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A hopper is about to pick up a dropped item (`native_hopper_pickup_item`).",
+  "doc_summary": "A hopper is about to pick up a dropped stack: `native_hopper_pickup_item(dimension, pos, item, count, cancel)` names its position and stack. Set `cancel` to leave the item in the world. Bundles need \"hooks\": @API:hopper_pickup_item@."
+}

@@ -15,11 +15,11 @@ Column.create	inline	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem:
 Column.scan	port	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::scan	
 Column.scanDirection	inline	crates/horizon-world/src/worldgen/dripstone.rs::Speleothem::scan	the up and down walks are one closure
 Column.Ray.toString	skip:debug		debug text
-DebugLevelSource	missing		debug_all_block_states preset falls back to a normal world (dedicated.rs warns); no block-state grid at y 70 with a barrier floor at y 60
-FlatLevelSource.createState	missing		flat worlds get no structure state: the default Superflat villages and strongholds (structure_overrides) never generate
+DebugLevelSource	home	crates/horizon-client/src/debugworld.rs	the minecraft:debug preset: one of every block state in a square grid at HEIGHT 70 over a barrier floor at BARRIER_HEIGHT 60 (DebugTerrain; `state_for` is getBlockStateFor, `grid` GRID_WIDTH and GRID_HEIGHT)
+FlatLevelSource.createState	port	crates/horizon-client/src/flatgen.rs::FlatTerrain::structure_settings	the layers, the fixed biome and structure_overrides as a FlatSettings; VanillaTerrain::for_flat runs those sets on the flat ground, strongholds searched with seed 0, and none when structure_overrides is empty
 FlatLevelSource.buildTerrain	port	crates/horizon-client/src/flatgen.rs::FlatTerrain::proto	stacks the layers from the minimum Y
-FlatLevelSource.getBaseHeight	missing		no flat base-height query; nothing needs it while flat has no structures
-FlatLevelSource.getBaseColumn	missing		no flat base-column query; same as getBaseHeight
+FlatLevelSource.getBaseHeight	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::noise_column	the flat arm answers the heightmap query from the layers, top down; a null layer is air and never stops it, and the level minimum is the answer when no layer is opaque
+FlatLevelSource.getBaseColumn	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::noise_column	the flat arm reads the layers as a column, a null layer as air; `Pipeline::base_column` and `noise_blocks` are the two faces of it
 LegacyRandomSource.setSeed	port	crates/horizon-core/src/random.rs::LegacyRandom::set_seed	also drops the cached gaussian
 LegacyRandomSource.next	port	crates/horizon-core/src/random.rs::LegacyRandom::bits	
 LegacyRandomSource.LegacyPositionalRandomFactory.at	port	crates/horizon-core/src/random/positional.rs::LegacyPositionalRandom::at	
@@ -64,7 +64,7 @@ WorldDimensions.keysInOrder	skip:other		orders the dimension registry; Horizon h
 WorldDimensions.replaceOverworldGenerator	inline	crates/horizon-client/src/save.rs::write_world_gen_settings_with	a flat generator replaces the overworld when world_gen_settings is written
 WorldDimensions.withOverworld	inline	crates/horizon-client/src/save.rs::write_world_gen_settings_with	same as replaceOverworldGenerator
 WorldDimensions.overworld	inline	crates/horizon-client/src/flatgen.rs::FlatTerrain::from_settings	reads the overworld generator from world_gen_settings; a normal one is OverworldGenerator::for_world
-WorldDimensions.specialWorldProperty	inline	crates/horizon-client/src/save.rs::WorldGen::read	flat flag only; there is no debug world
+WorldDimensions.specialWorldProperty	inline	crates/horizon-client/src/save.rs::WorldGen::read	the preset from the overworld generator: Flat for minecraft:flat, Debug for minecraft:debug, else Normal
 WorldDimensions.isVanillaLike	skip:other		stability only picks the experimental-settings warning; Horizon's preset dimensions are stable
 WorldDimensions.isStableOverworld	skip:other		same as isVanillaLike
 WorldDimensions.isStableNether	skip:other		same as isVanillaLike
