@@ -379,6 +379,20 @@ pub struct BlockSection<'r> {
     extra: Compound,
 }
 impl<'r> BlockSection<'r> {
+    /// The section's heap bytes: its packed storage, and its palette, counts
+    /// and free list (`horizon-ctl memory`; extra NBT not counted).
+    pub fn heap_bytes(&self) -> [usize; 2] {
+        [
+            self.storage.as_ref().map_or(0, PackedStorage::heap_bytes),
+            self.palette.capacity() * std::mem::size_of::<BlockStateId>()
+                + self.counts.capacity() * std::mem::size_of::<u16>()
+                + self.free.capacity() * std::mem::size_of::<u32>(),
+        ]
+    }
+    /// Bits per block of its packed storage, 0 for a single-state section.
+    pub fn storage_bits(&self) -> u8 {
+        self.storage.as_ref().map_or(0, PackedStorage::bits)
+    }
     pub fn registry(&self) -> &'r BlockRegistry {
         self.registry
     }

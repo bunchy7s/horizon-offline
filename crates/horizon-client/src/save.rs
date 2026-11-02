@@ -4978,6 +4978,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     fn prepare_loaded(&self, worker: &mut G::Worker, chunk: &Chunk) {
         self.inner.prepare_loaded(worker, chunk);
     }
+    fn all_idle(&self) {
+        self.inner.all_idle();
+    }
     fn idle(&self, worker: &mut G::Worker) {
         self.inner.idle(worker);
     }
@@ -5002,6 +5005,12 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
         proto: &crate::streaming::Proto,
     ) -> Option<crate::section_mask::SectionMask> {
         self.inner.non_air_sections(proto)
+    }
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        self.inner.cache_census()
+    }
+    fn proto_heap_bytes(&self, proto: &crate::streaming::Proto) -> ([usize; 6], [usize; 16]) {
+        self.inner.proto_heap_bytes(proto)
     }
     fn save_protos(&self, protos: &[&crate::streaming::Proto]) {
         self.save
