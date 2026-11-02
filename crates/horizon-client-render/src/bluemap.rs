@@ -20,7 +20,27 @@ use crate::{
     lod::{Column, Span},
 };
 use horizon_world::registry::{BlockRegistry, BlockStateId};
-use std::sync::Mutex;
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Condvar, Mutex, Weak},
+    time::{Duration, Instant, SystemTime},
+};
+
+/// Downloaded tiles kept on disk per server, at most.
+const DISK_CAP: u64 = 256 << 20;
+/// A cached tile older than this is fetched again (and drawn meanwhile).
+const MAX_AGE: Duration = Duration::from_secs(3 * 24 * 3600);
+/// One request at a time, this far apart at least.
+const REQUEST_GAP: Duration = Duration::from_millis(100);
+/// After a failed request the server is left alone this long, doubling.
+const BACKOFF: Duration = Duration::from_secs(15);
+const MAX_BACKOFF: Duration = Duration::from_secs(600);
+/// Decoded tiles kept in memory, at most this many bytes of pixels (a
+/// 500-block tile is about 2 MiB) and this many tiles.
+const MAX_TILE_BYTES: usize = 192 << 20;
+const MAX_TILES: usize = 2048;
+const MAX_CHUNKS: usize = 4096;
+const MAX_QUEUE: usize = 4096;
 
 /// Where the player names the servers' maps (`Settings::servers`), beside
 /// `horizon-graphics.txt`: kept out of the graphics settings, which shared
@@ -202,6 +222,11 @@ impl Lowres {
                 size >= lowres.factor && size.checked_mul(coarsest).is_some_and(|b| b <= 1 << 26)
             })
             .then_some(lowres)
+    }
+    /// How many decoded tiles fit `MAX_TILE_BYTES`.
+    fn tiles_in_memory(&self) -> usize {
+        let pixels = (self.tile[0] as usize + 1) * (self.tile[1] as usize + 1);
+        (MAX_TILE_BYTES / (pixels * std::mem::size_of::<Pixel>())).max(16)
     }
     /// Blocks a pixel of `level` (1 = finest) spans, about.
     pub fn scale(&self, level: u8) -> i32 {
@@ -563,12 +588,578 @@ impl Palette {
     }
 }
 
+type Key = (u8, i32, i32);
+type Columns = Arc<[Column; 256]>;
+/// The level's map: its id, its folder on the server and its lowres layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MapInfo {
+    id: String,
+    root: String,
+    lowres: Lowres,
+}
+enum Slot {
+    Ready(Arc<Tile>),
+    Missing,
+    Waiting,
+}
+/// What the map knows of the server, and what it wants from it.
+#[derive(Default)]
+struct State {
+    map: Option<MapInfo>,
+    tiles: FxHashMap<Key, Slot>,
+    chunks: FxHashMap<(i32, i32), Columns>,
+    queue: FxHashSet<Key>,
+    center: Option<[i32; 2]>,
+    /// Where `center` was when the area in reach was last announced.
+    anchor: Option<[i32; 2]>,
+    /// The server failed the last request: nothing waits for it until then.
+    offline_until: Option<Instant>,
+    /// Block areas `[x0, z0, x1, z1)` whose data arrived (`take_changed`).
+    changed: Vec<[i32; 4]>,
+    generation: u64,
+}
+struct Inner {
+    base: String,
+    level: String,
+    chosen: Vec<(String, String)>,
+    dir: PathBuf,
+    radius: i32,
+    palette: Palette,
+    state: Mutex<State>,
+    wake: Condvar,
+}
+/// One level's BlueMap: tiles are read from the disk cache on the far-terrain
+/// threads and downloaded on a worker of its own.
+pub struct BlueMap {
+    inner: Arc<Inner>,
+}
+
 /// `https://map.example.net/#world:0:64:0...` → `https://map.example.net`.
 pub fn base_url(url: &str) -> String {
     let url = url.trim();
     let url = url.split(['#', '?']).next().unwrap_or(url);
     let url = url.strip_suffix("index.html").unwrap_or(url);
     url.trim_end_matches('/').to_owned()
+}
+
+impl BlueMap {
+    /// The map of `level` at `url`, its tiles cached in `dir`; nothing is
+    /// downloaded until `start`.
+    pub fn new(
+        url: &str,
+        level: &str,
+        chosen: Vec<(String, String)>,
+        dir: PathBuf,
+        radius_blocks: i32,
+        palette: Palette,
+    ) -> Self {
+        let inner = Arc::new(Inner {
+            base: base_url(url),
+            level: level.into(),
+            chosen,
+            dir,
+            radius: radius_blocks,
+            palette,
+            state: Mutex::default(),
+            wake: Condvar::new(),
+        });
+        let map = inner.map_info(|_, name| std::fs::read(inner.dir.join(name)).ok());
+        inner.state.lock().unwrap().map = map;
+        Self { inner }
+    }
+    /// Downloads what lookups want, on a thread that ends with the map.
+    pub fn start(&self) {
+        let inner = Arc::downgrade(&self.inner);
+        let spawned = std::thread::Builder::new()
+            .name("BlueMap".into())
+            .spawn(move || fetch(inner));
+        if let Err(e) = spawned {
+            log::warn!("Horizon: BlueMap worker: {e}");
+        }
+    }
+    /// The player's block position: tiles are downloaded around it.
+    pub fn set_center(&self, x: i32, z: i32) {
+        let mut state = self.inner.state.lock().unwrap();
+        state.center = Some([x, z]);
+        let step = (self.inner.radius / 4).max(64);
+        let moved = state
+            .anchor
+            .is_none_or(|[ax, az]| (x - ax).abs() >= step || (z - az).abs() >= step);
+        if !moved {
+            return;
+        }
+        let r = self.inner.radius;
+        // What came into reach: the new square less the old one.
+        match state.anchor.replace([x, z]) {
+            Some([ax, az]) => {
+                if x > ax {
+                    state.announce([ax + r, z - r, x + r, z + r]);
+                } else if x < ax {
+                    state.announce([x - r, z - r, ax - r, z + r]);
+                }
+                if z > az {
+                    state.announce([x - r, az + r, x + r, z + r]);
+                } else if z < az {
+                    state.announce([x - r, z - r, x + r, az - r]);
+                }
+            }
+            None => state.announce([x - r, z - r, x + r, z + r]),
+        }
+    }
+    /// Block areas whose data came since the last call: far terrain samples
+    /// them again.
+    pub fn take_changed(&self) -> Vec<[i32; 4]> {
+        std::mem::take(&mut self.inner.state.lock().unwrap().changed)
+    }
+    /// Bumped whenever a lookup may find something new.
+    pub fn generation(&self) -> u64 {
+        self.inner.state.lock().unwrap().generation
+    }
+    /// A chunk's columns from the finest level.
+    pub fn chunk(&self, cx: i32, cz: i32) -> Found<Columns> {
+        if let Some(columns) = self.inner.state.lock().unwrap().chunks.get(&(cx, cz)) {
+            return Found::Ready(columns.clone());
+        }
+        let mut columns: [Column; 256] = std::array::from_fn(|_| Column::default());
+        let mut last = None;
+        let (mut any, mut waiting) = (false, false);
+        for (i, column) in columns.iter_mut().enumerate() {
+            let (x, z) = (cx * 16 + (i % 16) as i32, cz * 16 + (i / 16) as i32);
+            match self.inner.pixel(&mut last, 1, x, z) {
+                Found::Ready(pixel) => {
+                    *column = self.inner.palette.column(pixel);
+                    any = true;
+                }
+                Found::Waiting => waiting = true,
+                Found::Absent => {}
+            }
+        }
+        if waiting {
+            return Found::Waiting;
+        }
+        if !any {
+            return Found::Absent;
+        }
+        let columns = Arc::new(columns);
+        let mut state = self.inner.state.lock().unwrap();
+        if state.chunks.len() >= MAX_CHUNKS {
+            state.chunks.clear();
+        }
+        state.chunks.insert((cx, cz), columns.clone());
+        Found::Ready(columns)
+    }
+    /// The column of a far-terrain cell `width` blocks wide, from the
+    /// coarsest level fine enough for it.
+    pub fn reduced_column(&self, x: i32, z: i32, width: i32) -> Found<Column> {
+        let Some(map) = self.inner.state.lock().unwrap().map.clone() else {
+            return Found::Absent;
+        };
+        let level = map.lowres.level_for(width);
+        let half = width / 2;
+        match self.inner.pixel(&mut None, level, x + half, z + half) {
+            Found::Ready(pixel) => Found::Ready(self.inner.palette.column(pixel)),
+            Found::Waiting => Found::Waiting,
+            Found::Absent => Found::Absent,
+        }
+    }
+}
+
+/// The tile a lookup used last (a chunk's 256 columns mostly share one).
+type Last = Option<(Key, Option<Arc<Tile>>)>;
+
+impl State {
+    fn announce(&mut self, area: [i32; 4]) {
+        if self.changed.len() >= 256 {
+            let all = self.changed.drain(..).fold(area, |a, b| {
+                [
+                    a[0].min(b[0]),
+                    a[1].min(b[1]),
+                    a[2].max(b[2]),
+                    a[3].max(b[3]),
+                ]
+            });
+            self.changed.push(all);
+        } else {
+            self.changed.push(area);
+        }
+        self.generation += 1;
+    }
+    fn announce_reach(&mut self, radius: i32) {
+        if let Some([x, z]) = self.center {
+            self.announce([x - radius, z - radius, x + radius, z + radius]);
+        }
+    }
+    /// How far a tile is from the player, squared, if in reach.
+    fn near(&self, lowres: &Lowres, key: Key, radius: i32) -> Option<i64> {
+        let [x, z] = self.center?;
+        let (x0, x1) = lowres.span(0, key.0, key.1);
+        let (z0, z1) = lowres.span(1, key.0, key.2);
+        let dx = (x0 - x).max(x - x1).max(0);
+        let dz = (z0 - z).max(z - z1).max(0);
+        (dx.max(dz) <= radius).then(|| i64::from(dx).pow(2) + i64::from(dz).pow(2))
+    }
+    fn want(&mut self, key: Key, wake: &Condvar) {
+        if self.queue.len() < MAX_QUEUE && self.queue.insert(key) {
+            wake.notify_one();
+        }
+    }
+}
+
+impl Inner {
+    /// The level's map from settings files, cached or downloaded: `get`
+    /// takes a file's path on the server and its name in the cache (the
+    /// server's names never pick a path here).
+    fn map_info(&self, mut get: impl FnMut(&str, &str) -> Option<Vec<u8>>) -> Option<MapInfo> {
+        let root = Root::parse(&get("settings.json", "settings.json")?)?;
+        let id = pick_map(&root.maps, &self.level, &self.chosen)?;
+        let lowres = Lowres::parse(&get(
+            &format!("{}/{id}/settings.json", root.data_root),
+            &format!("{}.json", crate::server_terrain::server_folder(&id)),
+        )?)?;
+        Some(MapInfo {
+            id,
+            root: root.data_root,
+            lowres,
+        })
+    }
+    fn tile_file(&self, map: &MapInfo, (level, x, z): Key) -> PathBuf {
+        self.dir
+            .join(crate::server_terrain::server_folder(&map.id))
+            .join(level.to_string())
+            .join(format!("{x}_{z}"))
+    }
+    fn pixel(&self, last: &mut Last, level: u8, x: i32, z: i32) -> Found<Pixel> {
+        let Some(map) = self.state.lock().unwrap().map.clone() else {
+            return Found::Absent;
+        };
+        let level = level.min(map.lowres.levels);
+        let (tx, px) = map.lowres.locate(0, level, x);
+        let (tz, pz) = map.lowres.locate(1, level, z);
+        let key = (level, tx, tz);
+        let tile = match last {
+            Some((k, tile)) if *k == key => tile.clone(),
+            _ => {
+                let tile = match self.tile(&map, key) {
+                    Found::Ready(tile) => Some(tile),
+                    Found::Waiting => return Found::Waiting,
+                    Found::Absent => None,
+                };
+                *last = Some((key, tile.clone()));
+                tile
+            }
+        };
+        tile.map_or(Found::Absent, |t| Found::Ready(t.pixel(px, pz)))
+    }
+    /// A tile from memory, else the disk cache, else wanted from the server
+    /// when it is in reach.
+    fn tile(&self, map: &MapInfo, key: Key) -> Found<Arc<Tile>> {
+        match self.state.lock().unwrap().tiles.get(&key) {
+            Some(Slot::Ready(tile)) => return Found::Ready(tile.clone()),
+            Some(Slot::Missing) => return Found::Absent,
+            Some(Slot::Waiting) => return Found::Waiting,
+            None => {}
+        }
+        let cached = read_cached(&self.tile_file(map, key), &map.lowres);
+        let mut state = self.state.lock().unwrap();
+        let ready = state
+            .tiles
+            .values()
+            .filter(|slot| matches!(slot, Slot::Ready(_)))
+            .count();
+        if state.tiles.len() >= MAX_TILES || ready >= map.lowres.tiles_in_memory() {
+            state.tiles.retain(|_, slot| matches!(slot, Slot::Waiting));
+        }
+        let reachable = state.near(&map.lowres, key, self.radius).is_some()
+            && state.offline_until.is_none_or(|t| t <= Instant::now());
+        match cached {
+            Some((tile, fresh)) => {
+                if !fresh && reachable {
+                    state.want(key, &self.wake);
+                }
+                let tile = tile.map(Arc::new);
+                let slot = tile.clone().map_or(Slot::Missing, Slot::Ready);
+                state.tiles.insert(key, slot);
+                tile.map_or(Found::Absent, Found::Ready)
+            }
+            None if reachable => {
+                state.want(key, &self.wake);
+                state.tiles.insert(key, Slot::Waiting);
+                Found::Waiting
+            }
+            None => Found::Absent,
+        }
+    }
+}
+/// Writes a file whole or not at all: a crash or a full disk mid-write
+/// leaves the old one (or none), never half a tile.
+fn write_whole(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    std::fs::write(&part, bytes)?;
+    std::fs::rename(&part, path)
+}
+/// A cached tile (`None` inside: the server has none there) and whether it
+/// is fresh; `None`: not cached.
+fn read_cached(file: &Path, lowres: &Lowres) -> Option<(Option<Tile>, bool)> {
+    let fresh = |path: &Path| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| SystemTime::now().duration_since(t).ok())
+            .is_some_and(|age| age < MAX_AGE)
+    };
+    // One that doesn't decode (cut short, or of an older `tileSize`) is
+    // fetched again: the worker keeps only those that do.
+    let png = file.with_extension("png");
+    if let Ok(bytes) = std::fs::read(&png) {
+        return decode_tile(&bytes, lowres).map(|tile| (Some(tile), fresh(&png)));
+    }
+    let none = file.with_extension("none");
+    none.exists().then(|| (None, fresh(&none)))
+}
+
+/// The download worker's own state.
+struct Worker {
+    agent: ureq::Agent,
+    backoff: Duration,
+    /// Bytes in the disk cache, counted on the first download.
+    disk: Option<u64>,
+    /// The settings were fetched on this visit.
+    settings: bool,
+}
+
+/// The download worker: settings first, then the wanted tile nearest the
+/// player, one request at a time. A failure leaves the server alone for a
+/// while, and lookups stop waiting for it meanwhile.
+fn fetch(inner: Weak<Inner>) {
+    let mut worker = Worker {
+        agent: ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .user_agent(&format!("Horizon/{}", horizon_core::release::VERSION))
+            .build(),
+        backoff: BACKOFF,
+        disk: None,
+        settings: false,
+    };
+    loop {
+        let Some(inner) = inner.upgrade() else { return };
+        let pause = worker.step(&inner);
+        drop(inner);
+        if !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+    }
+}
+
+impl Worker {
+    /// `Err`: the server didn't answer; `Ok(None)`: it has nothing there.
+    fn get(&self, inner: &Inner, path: &str) -> Result<Option<Vec<u8>>, ()> {
+        use std::io::Read;
+        match self.agent.get(&format!("{}/{path}", inner.base)).call() {
+            Ok(response) if response.status() == 204 => Ok(None),
+            Ok(response) => {
+                let mut body = Vec::new();
+                response
+                    .into_reader()
+                    .take(8 << 20)
+                    .read_to_end(&mut body)
+                    .map_err(|_| ())?;
+                Ok(Some(body))
+            }
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(_) => Err(()),
+        }
+    }
+    fn failed(&mut self, inner: &Inner) {
+        let mut state = inner.state.lock().unwrap();
+        state.offline_until = Some(Instant::now() + self.backoff);
+        // What waited for the server won't come: it is drawn without.
+        state.tiles.retain(|_, slot| !matches!(slot, Slot::Waiting));
+        state.queue.clear();
+        state.generation += 1;
+        log::debug!("Horizon: BlueMap at {} isn't answering", inner.base);
+        self.backoff = (self.backoff * 2).min(MAX_BACKOFF);
+    }
+    fn answered(&mut self, inner: &Inner) {
+        if self.backoff > BACKOFF {
+            // Lookups made while it was down find something now.
+            inner.state.lock().unwrap().announce_reach(inner.radius);
+        }
+        self.backoff = BACKOFF;
+    }
+    /// One request, or a wait for one; how long to pause after it.
+    fn step(&mut self, inner: &Inner) -> Duration {
+        let offline = inner.state.lock().unwrap().offline_until;
+        if let Some(wait) = offline.and_then(|t| t.checked_duration_since(Instant::now())) {
+            return wait.min(Duration::from_secs(1));
+        }
+        let started = Instant::now();
+        // The settings, once a visit: the cached ones serve until then.
+        if !self.settings {
+            let mut files = Vec::new();
+            let map = inner.map_info(|path, name| {
+                let body = self.get(inner, path).ok().flatten()?;
+                files.push((name.to_owned(), body.clone()));
+                Some(body)
+            });
+            let Some(map) = map else {
+                self.failed(inner);
+                return Duration::ZERO;
+            };
+            for (name, body) in files {
+                let _ = std::fs::create_dir_all(&inner.dir);
+                let _ = write_whole(&inner.dir.join(name), &body);
+            }
+            self.settings = true;
+            self.answered(inner);
+            let mut state = inner.state.lock().unwrap();
+            if state.map.as_ref() != Some(&map) {
+                // Tiles cut for other lowres settings would be read wrong.
+                if state.map.as_ref().is_some_and(|old| old.id == map.id) {
+                    let _ = std::fs::remove_dir_all(
+                        inner
+                            .dir
+                            .join(crate::server_terrain::server_folder(&map.id)),
+                    );
+                }
+                state.map = Some(map);
+                state.tiles.clear();
+                state.chunks.clear();
+                state.announce_reach(inner.radius);
+            }
+            return REQUEST_GAP;
+        }
+        let next = {
+            let mut state = inner.state.lock().unwrap();
+            let picked = state.map.clone().and_then(|map| {
+                let mut far = Vec::new();
+                let mut best = None;
+                for &key in &state.queue {
+                    match state.near(&map.lowres, key, inner.radius) {
+                        Some(d) if best.is_none_or(|(b, _)| d < b) => best = Some((d, key)),
+                        Some(_) => {}
+                        None => far.push(key),
+                    }
+                }
+                // Out of reach since: forgotten, wanted again if it comes back.
+                for key in far {
+                    state.queue.remove(&key);
+                    if matches!(state.tiles.get(&key), Some(Slot::Waiting)) {
+                        state.tiles.remove(&key);
+                    }
+                }
+                let (_, key) = best?;
+                state.queue.remove(&key);
+                Some((map, key))
+            });
+            if picked.is_none() {
+                let _ = inner.wake.wait_timeout(state, Duration::from_secs(1));
+            }
+            picked
+        };
+        let Some((map, key)) = next else {
+            return Duration::ZERO;
+        };
+        let (level, x, z) = key;
+        let path = format!(
+            "{}/{}/tiles/{level}/{}.png",
+            map.root,
+            map.id,
+            tile_path(x, z)
+        );
+        let body = match self.get(inner, &path) {
+            Ok(body) => body,
+            Err(()) => {
+                self.failed(inner);
+                return Duration::ZERO;
+            }
+        };
+        self.answered(inner);
+        let tile = body.as_deref().and_then(|b| decode_tile(b, &map.lowres));
+        let file = inner.tile_file(&map, key);
+        let _ = std::fs::create_dir_all(file.parent().unwrap_or(&inner.dir));
+        let (png, none) = (file.with_extension("png"), file.with_extension("none"));
+        let written = match (&tile, &body) {
+            (Some(_), Some(body)) if std::fs::read(&png).is_ok_and(|old| old == *body) => {
+                // Unchanged: fresh for another `MAX_AGE`.
+                let _ = std::fs::File::options()
+                    .append(true)
+                    .open(&png)
+                    .and_then(|f| f.set_modified(SystemTime::now()));
+                None
+            }
+            (Some(_), Some(body)) => {
+                let _ = std::fs::remove_file(&none);
+                write_whole(&png, body).ok().map(|()| body.len() as u64)
+            }
+            // Not a tile (an error page): a cached one is kept.
+            (None, Some(_)) if png.exists() => None,
+            _ => {
+                let _ = std::fs::remove_file(&png);
+                write_whole(&none, &[]).ok().map(|()| 0)
+            }
+        };
+        let mut state = inner.state.lock().unwrap();
+        match written {
+            Some(bytes) => {
+                let disk = self.disk.get_or_insert_with(|| folder_size(&inner.dir));
+                *disk += bytes;
+                if *disk > DISK_CAP {
+                    *disk = prune(&inner.dir, DISK_CAP * 3 / 4);
+                }
+                let slot = tile.map_or(Slot::Missing, |t| Slot::Ready(Arc::new(t)));
+                state.tiles.insert(key, slot);
+                state.chunks.clear();
+                let (x0, x1) = map.lowres.span(0, level, x);
+                let (z0, z1) = map.lowres.span(1, level, z);
+                state.announce([x0, z0, x1, z1]);
+            }
+            // Nothing new, or not kept: a later lookup reads the disk again.
+            None => {
+                if matches!(state.tiles.get(&key), Some(Slot::Waiting)) {
+                    state.tiles.remove(&key);
+                }
+            }
+        }
+        REQUEST_GAP.saturating_sub(started.elapsed())
+    }
+}
+
+fn cached_files(dir: &Path, out: &mut Vec<(SystemTime, u64, PathBuf)>) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            cached_files(&path, out);
+        } else if path.extension().is_some_and(|e| e == "png" || e == "none") {
+            out.push((
+                meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                meta.len(),
+                path,
+            ));
+        }
+    }
+}
+fn folder_size(dir: &Path) -> u64 {
+    let mut files = Vec::new();
+    cached_files(dir, &mut files);
+    files.iter().map(|(_, len, _)| len).sum()
+}
+/// Deletes the oldest tiles until at most `keep` bytes are left; the bytes left.
+fn prune(dir: &Path, keep: u64) -> u64 {
+    let mut files = Vec::new();
+    cached_files(dir, &mut files);
+    files.sort_unstable();
+    let mut total: u64 = files.iter().map(|(_, len, _)| len).sum();
+    for (_, len, path) in files {
+        if total <= keep {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total -= len;
+        }
+    }
+    total
 }
 
 #[cfg(test)]
@@ -831,5 +1422,147 @@ mod tests {
             }),
             Column::default()
         );
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("horizon-bluemap-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    /// Cached settings and tiles serve without the server; a missing tile
+    /// is wanted only near the player, and real data waits for it.
+    #[test]
+    fn cached_tiles_serve_and_far_ones_are_not_wanted() {
+        let dir = scratch("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("settings.json"), br#"{"maps":["world"]}"#).unwrap();
+        std::fs::write(dir.join("world.json"), br#"{"lowres":{}}"#).unwrap();
+        let green = |_: usize, _: usize| Pixel {
+            color: 0xFF57_7133,
+            height: 70,
+            block_light: 0,
+        };
+        let tiles = dir.join("world/1");
+        std::fs::create_dir_all(&tiles).unwrap();
+        std::fs::write(tiles.join("0_-1.png"), tile_png(&LOWRES, green)).unwrap();
+        std::fs::write(tiles.join("1_-1.none"), []).unwrap();
+        let map = BlueMap::new(
+            "https://map.example.net/",
+            "minecraft:overworld",
+            Vec::new(),
+            dir.clone(),
+            256,
+            palette(),
+        );
+        // Chunk (1, -1) lies in tile (0, -1).
+        let Found::Ready(columns) = map.chunk(1, -1) else {
+            panic!("cached tile")
+        };
+        assert_eq!(columns[0].surface.map(|s| s.height), Some(71));
+        assert_eq!(
+            map.chunk(2, -1),
+            Found::Absent,
+            "the server has nothing there"
+        );
+        // No player yet: nothing is near, nothing waited for.
+        assert_eq!(map.chunk(40, 40), Found::Absent);
+        map.set_center(40 * 16, 40 * 16);
+        assert_eq!(map.take_changed(), [[384, 384, 896, 896]]);
+        assert_eq!(map.chunk(40, 40), Found::Waiting);
+        assert_eq!(map.inner.state.lock().unwrap().queue.len(), 1);
+        assert_eq!(map.chunk(-400, 0), Found::Absent, "past the radius");
+        // A wide cell reads the coarsest level, here not cached either.
+        assert_eq!(map.reduced_column(40 * 16, 40 * 16, 1024), Found::Waiting);
+        assert!(map.inner.state.lock().unwrap().queue.contains(&(3, 1, 1)));
+        // Moving a little announces nothing; far enough, the new strip.
+        map.set_center(40 * 16 + 10, 40 * 16);
+        assert!(map.take_changed().is_empty());
+        map.set_center(40 * 16 + 100, 40 * 16);
+        assert_eq!(map.take_changed(), [[896, 384, 996, 896]]);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Real chunks the server sent come first; BlueMap fills the rest.
+    #[test]
+    fn stored_chunks_win_over_the_map() {
+        use crate::{server_terrain::ServerTerrain, streaming::LodSource};
+        let dir = scratch("terrain");
+        let maps = dir.join("map");
+        std::fs::create_dir_all(&maps).unwrap();
+        std::fs::write(maps.join("settings.json"), br#"{"maps":["world"]}"#).unwrap();
+        std::fs::write(maps.join("world.json"), br#"{"lowres":{}}"#).unwrap();
+        let green = |_: usize, _: usize| Pixel {
+            color: 0xFF57_7133,
+            height: 70,
+            block_light: 0,
+        };
+        for level in 1..=3 {
+            let tiles = maps.join(format!("world/{level}"));
+            std::fs::create_dir_all(&tiles).unwrap();
+            std::fs::write(tiles.join("0_0.png"), tile_png(&LOWRES, green)).unwrap();
+        }
+        let map = BlueMap::new(
+            "http://map.example.net",
+            "minecraft:overworld",
+            Vec::new(),
+            maps,
+            256,
+            palette(),
+        );
+        let terrain = ServerTerrain::new(dir.join("chunks"), Some(Arc::new(map)));
+        let real = Column::from_surface(Some(crate::lod::Surface {
+            height: 100,
+            state: BlockStateId(9),
+            water: None,
+            biome: 0,
+        }));
+        let columns = Arc::new(std::array::from_fn(|_| real.clone()));
+        terrain.store((0, 0), &columns).unwrap();
+        let mut sampler = terrain.clone().sampler();
+        assert_eq!(sampler.sample(3, 3).map(|s| s.height), Some(100));
+        assert_eq!(sampler.sample(20, 3).map(|s| s.height), Some(71));
+        assert_eq!(sampler.sample(-1, 3), None, "neither has it");
+        // Wider cells are reduced to spans: their top.
+        let mut top = |x, z, width| {
+            let column = sampler.reduced_column(x, z, width);
+            column.spans.last().map(|s| s.max)
+        };
+        assert_eq!(top(16, 0, 8), Some(71));
+        assert_eq!(top(0, 0, 16), Some(100));
+        // A wide cell: the stored chunk at its middle, else the map.
+        assert_eq!(top(0, 0, 64), Some(71));
+        assert_eq!(top(-16, -16, 32), Some(100));
+        sampler.request_detail(&[(0, 0), (1, 0), (-1, 0)], [0, 0]);
+        let details = sampler.drain_details();
+        assert_eq!(details.len(), 3);
+        assert_eq!(details[0].1, columns);
+        assert_eq!(details[1].1[0].surface.map(|s| s.height), Some(71));
+        assert_eq!(details[2].1[0], Column::default());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_oldest_tiles_go_past_the_cap() {
+        let dir = scratch("prune");
+        std::fs::create_dir_all(dir.join("a/1")).unwrap();
+        for (i, name) in ["old", "mid", "new"].iter().enumerate() {
+            let path = dir.join(format!("a/1/{name}.png"));
+            std::fs::write(&path, [0u8; 100]).unwrap();
+            let time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000 + i as u64);
+            std::fs::File::options()
+                .append(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(time)
+                .unwrap();
+        }
+        std::fs::write(dir.join("settings.json"), [0u8; 50]).unwrap();
+        assert_eq!(folder_size(&dir), 300);
+        assert_eq!(prune(&dir, 150), 100);
+        assert!(dir.join("a/1/new.png").exists() && !dir.join("a/1/mid.png").exists());
+        assert!(dir.join("settings.json").exists(), "only tiles are pruned");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
