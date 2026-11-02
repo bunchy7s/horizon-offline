@@ -7767,7 +7767,8 @@ impl Game<'_> {
                 id: e.id,
                 position: [e.position.x, e.position.y, e.position.z],
                 stack: e.stack.clone(),
-                pickup_delay: e.pickup_delay,
+                // API 42 exposes an unsigned delay; keep its existing projection.
+                pickup_delay: e.pickup_delay.clamp(0, i64::from(u32::MAX)) as u32,
             })
             .collect()
     }

@@ -1718,6 +1718,26 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def item_lifetime_counters():
+    target = '00000000-0000-0000-0000-000000000001'
+    ops = setup('/forceload add 0 0', f'/kill {target}')
+    for age in (-32768, -1, 0, 5998, 5999, 6000, 32767):
+        for delay in (-1, 0, 1, 2, 32767):
+            ops.append(cmd('/summon item 4.5 210 4.5 '
+                           '{UUID:[I;0,0,0,1],NoGravity:1b,Item:{id:"minecraft:stone",count:1}}'))
+            ops.append({'op': 'tick', 'n': 3})
+            ops.append(cmd(f'/data get entity {target} Age'))
+            ops += setup(f'/data merge entity {target} {{Age:{age}s,PickupDelay:{delay}s}}')
+            for step in range(4):
+                if step:
+                    ops.append({'op': 'tick', 'n': 1})
+                ops.append(cmd(f'/execute if entity {target}'))
+                ops.append(cmd(f'/data get entity {target} Age'))
+                ops.append(cmd(f'/data get entity {target} PickupDelay'))
+            ops += setup(f'/kill {target}')
+    return ops + setup('/forceload remove 0 0')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1747,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('item lifetime counters', item_lifetime_counters()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
