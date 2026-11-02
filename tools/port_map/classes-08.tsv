@@ -1,4 +1,4 @@
-ExperimentalRedstoneWireEvaluator	port	crates/horizon-world/src/level/redstone/experimental.rs::Sim::experimental_wire_update	two queues and insertion-ordered power changes with oriented neighbor notifications
+ExperimentalRedstoneWireEvaluator	home	crates/horizon-world/src/level/redstone/experimental.rs	the two-queue evaluator, Evaluator in that file, is what Sim::experimental_wire_update drives: wires found with their orientation, power written in first-discovery order
 InstantNeighborUpdater	skip:other		never instantiated in vanilla 26.3; Level always uses CollectingNeighborUpdater
 NeighborUpdater.executeShapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::execute	Shape arm: wire skip flag, then update_shape and update_or_destroy
 NeighborUpdater.executeUpdate	port	crates/horizon-world/src/level/hooks.rs::Sim::neighbor_changed	per-block neighbour change dispatch
