@@ -85,7 +85,10 @@ def pick_case(rng):
 
 
 def cases(rng):
-    for _ in range(4000):
+    for n in range(4000):
+        if n % 4 == 3:
+            yield pick_case(rng)
+            continue
         kind = rng.choice(list(SCREENS))
         width, height = SCREENS[kind] or (176, 114 + 18 * rng.randint(1, 6))
         left, top = rng.randrange(0, 300), rng.randrange(0, 120)
