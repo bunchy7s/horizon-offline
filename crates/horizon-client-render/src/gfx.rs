@@ -3254,12 +3254,23 @@ impl Renderer {
             alpha_blend,
             false,
         );
+        // RenderPipelines.ENTITY_SOLID: a surface of an entity that is coplanar with
+        // terrain wins the tie in vanilla (the boat's floor over the trapdoor on the
+        // ground it is stopped by, #5950). Terrain and entities are separate draw
+        // paths here, so their fp32 depths of the same plane differ by a few dozen
+        // ulps and the tie came out either way, as a jagged strip of the trapdoor
+        // through the hull's floor. The same constant as the shadows' covers that
+        // spread; a model's feet sit 0.001 above the ground, far beyond it.
         let entity_pipeline = entity_pipeline(
             "Entities",
             None,
             true,
             wgpu::CompareFunction::GreaterEqual,
-            Default::default(),
+            wgpu::DepthBiasState {
+                constant: 128,
+                slope_scale: 0.0,
+                clamp: 0.0,
+            },
             alpha_blend,
             false,
         );
