@@ -38,6 +38,8 @@ distance (docs/benchmark-report.md), over --repeats games. Games run with no
 audio, from a scratch directory under .local/perf-bench.
 """
 import argparse
+import contextlib
+import hashlib
 import bisect
 import datetime
 import json
@@ -53,6 +55,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -318,7 +321,8 @@ def size_label(label, width, height):
 
 def scene_list(args):
     picked = args.scenes.split(",") if args.scenes else [s[0] for s in SCENES]
-    return [s for s in SCENES if s[0] in picked]
+    # --server-bots adds the crowd scene over the bots.
+    return [s for s in SCENES if s[0] in picked] + list(getattr(args, "extra_scenes", None) or [])
 
 
 def yaw(start, end):
@@ -451,6 +455,103 @@ def wait_loaded(control, near, limit, min_chunks=0):
     raise TimeoutError(f"not loaded after {limit} s")
 
 
+BENCH_PLAYER = "Bench"
+
+
+class LocalServer:
+    """--server: a local dedicated server every client of the run joins instead of creating a world. Seed SEED,
+    creative, offline, view distance = the run's render distance, BENCH_PLAYER an operator (the scenes use /tp
+    and /time). Its world stays in WORK/server-<kind>-rd<d> between runs; one that is new gets an unmeasured
+    warm-up join first, so every measured join reads terrain already generated: the clients are compared, not
+    the server's generation."""
+
+    def __init__(self, args, distance):
+        self.kind, self.dir = args.server, WORK / f"server-{args.server}-rd{distance}"
+        self.fresh = not (self.dir / "world").exists()
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            self.port = probe.getsockname()[1]
+        props = {"level-seed": SEED, "online-mode": "false", "server-ip": "127.0.0.1", "server-port": self.port,
+                 "view-distance": distance, "simulation-distance": 12, "gamemode": "creative",
+                 "force-gamemode": "true", "spawn-protection": 0, "allow-flight": "true", "max-players": 300,
+                 "white-list": "false", "level-name": "world"}
+        (self.dir / "server.properties").write_text("".join(f"{k}={v}\n" for k, v in props.items()))
+        (self.dir / "eula.txt").write_text("eula=true\n")
+        # UUIDUtil.createOfflinePlayerUUID: a name-based (version 3) UUID of "OfflinePlayer:<name>".
+        offline = uuid.UUID(bytes=hashlib.md5(f"OfflinePlayer:{BENCH_PLAYER}".encode()).digest(), version=3)
+        (self.dir / "ops.json").write_text(json.dumps(
+            [{"uuid": str(offline), "name": BENCH_PLAYER, "level": 4, "bypassesPlayerLimit": False}]))
+        if self.kind == "horizon":
+            binary = Path(args.server_build).resolve() / ("horizon-client.exe" if sys.platform == "win32" else "horizon-client")
+            self.command = [str(binary), "--resources", str(Path(args.resources).resolve()), "--dedicated", "--nogui"]
+        else:
+            java = Path(os.environ["JAVA_HOME"]) / "bin/java" if os.environ.get("JAVA_HOME") else "java"
+            self.command = [str(java), "-Xmx4G", "-jar", str(VANILLA / "jars/server.jar"), "nogui"]
+
+    @property
+    def address(self):
+        return f"127.0.0.1:{self.port}"
+
+    def __enter__(self):
+        self.log_path = self.dir / "server.log"
+        self.log = self.log_path.open("w")
+        env = lab.game_env(HORIZON_TELEMETRY_URL="off") if self.kind == "horizon" else None
+        self.proc = subprocess.Popen(self.command, cwd=self.dir, env=env, stdin=subprocess.PIPE, text=True,
+                                     stdout=self.log, stderr=subprocess.STDOUT)
+        deadline = time.time() + 600
+        while "Done (" not in self.log_path.read_text(errors="replace"):
+            if self.proc.poll() is not None or time.time() > deadline:
+                self.__exit__()
+                raise RuntimeError(f"the {self.kind} server did not start; see {self.log_path}")
+            time.sleep(0.5)
+        return self
+
+    def crowd(self, args):
+        """--server-bots: horizon-bots walking around the spawn for the whole run (they need a few seconds to join
+        and settle), and the scene that flies over them: (name, from, to, pitch)."""
+        binary = Path(args.bots_build or args.build).resolve() / ("horizon-bots.exe" if sys.platform == "win32" else "horizon-bots")
+        self.bots = subprocess.Popen([str(binary), "--server", self.address, "--bots", str(args.server_bots),
+                                      "--behaviour", "walk", "--view-distance", "10", "--join-every", "0.1",
+                                      "--seconds", "100000", "--seed", str(SEED)],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        deadline = time.time() + 120
+        for line in self.bots.stdout:
+            if '"spawn"' in line:
+                sx, sy, sz = json.loads(line)["spawn"]
+                break
+            if time.time() > deadline:
+                raise RuntimeError("horizon-bots: no spawn position")
+        else:
+            raise RuntimeError("horizon-bots ended before a bot spawned")
+        threading.Thread(target=self.bots.stdout.read, daemon=True).start()
+        time.sleep(args.server_bots * 0.1 + 10)
+        # Bots fly 24 blocks above the spawn, 8 to 48 blocks out (horizon-bots' walk).
+        return ("crowd", (sx - 32.0, sy + 40.0, sz), (sx + 32.0, sy + 40.0, sz), 50.0)
+
+    def __exit__(self, *_):
+        if getattr(self, "bots", None):
+            stop(self.bots)
+        try:
+            self.proc.stdin.write("stop\n")
+            self.proc.stdin.flush()
+            self.proc.wait(timeout=120)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+        stop(self.proc)
+        self.log.close()
+
+
+def scene_commands(args, control, start, pitch):
+    """Time and teleport for a scene: the game's own commands, or the server's when it joined one."""
+    if args.server:
+        control("command time set 6000")
+        control("command tp @s {} {} {} 0 {}".format(*start, pitch))
+    else:
+        control("time 6000")
+        control("tp {} {} {}".format(*start))
+
+
 def run_horizon(args, distance):
     game_dir = WORK / "horizon"
     shutil.rmtree(game_dir, ignore_errors=True)
@@ -495,12 +596,18 @@ def run_horizon(args, distance):
         title, at = poll(control, lambda s: s.get("screen") == "title" and s.get("renderer"), 300)
         result["renderer"] = title["renderer"]
         result["startup"] = {"title_s": at - started}
-        control(f"open {WORLD} {SEED} creative")
-        result["startup"]["world_s"] = wait_loaded(control, lambda p: True, args.timeout, view_chunks(distance)) - started
+        if args.server:
+            joined = time.time()
+            control(f"connect {args.server_address} {BENCH_PLAYER}")
+        else:
+            control(f"open {WORLD} {SEED} creative")
+        loaded = wait_loaded(control, lambda p: True, args.timeout, view_chunks(distance))
+        result["startup"]["world_s"] = loaded - started
+        if args.server:
+            result["startup"]["join_s"] = loaded - joined
         for name, start, end, pitch in scene_list(args):
-            control("time 6000")
             meshed = control("status")["meshed_sections"]
-            control("tp {} {} {}".format(*start))
+            scene_commands(args, control, start, pitch)
             tp = time.time()
             # A zero-length flight holds the player at the start, flying.
             control("fly {0} {1} {2} {0} {1} {2} 0.1 {3}".format(*start, pitch))
@@ -650,6 +757,7 @@ def run_vanilla(args, distance):
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
         "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        **({"server": args.server_address} if args.server else {}),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -664,7 +772,7 @@ def run_vanilla(args, distance):
                "-Dfabric.log.disableAnsi=true",
                "-cp", os.pathsep.join(map(str, game_jars + fabric)),
                "net.fabricmc.loader.impl.launch.knot.KnotClient",
-               "--username", "Bench", "--uuid", "00000000000000000000000000000000", "--accessToken", "0",
+               "--username", BENCH_PLAYER, "--uuid", "00000000000000000000000000000000", "--accessToken", "0",
                "--offlineDeveloperMode", "--version", lab.VERSION, "--gameDir", str(game_dir),
                "--assetsDir", str(assets), "--assetIndex", manifest["assetIndex"]["id"],
                "--width", str(args.width), "--height", str(args.height)]
@@ -702,7 +810,9 @@ def driven(args, distance, command, game_dir, env, log, events, options, loaded_
         "renderer": {k: title[k] for k in ("gpu", "vendor", "backend", "driver", "size",
                                            "render_distance", "simulation_distance")},
         "startup": {"title_s": title["epoch_ms"] / 1000 - started,
-                    "world_s": world["ready_epoch_ms"] / 1000 - started},
+                    "world_s": world["ready_epoch_ms"] / 1000 - started,
+                    # --server: the driver connects as soon as the title screen shows.
+                    **({"join_s": (world["ready_epoch_ms"] - title["epoch_ms"]) / 1000} if args.server else {})},
         "scenes": {},
     }
     windows = []
@@ -743,6 +853,7 @@ def run_neoforge(args, distance):
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
         "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        **({"server": args.server_address} if args.server else {}),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -856,6 +967,8 @@ def report(args, distance, runs, app):
     conditions = {"scenario": "perf_bench:" + ",".join(first["scenes"]), "seed": str(SEED),
                   "render_distance": distance, "simulation_distance": 12, "vsync": False,
                   "offscreen": bool(args.offscreen), "repeats": len(runs), "warmup_s": args.settle}
+    if getattr(args, "server", None):
+        conditions["server"] = args.server
     if first["load_before"] is not None:
         conditions["load_avg_1m"] = rnd(first["load_before"])
     if size:
@@ -868,6 +981,7 @@ def report(args, distance, runs, app):
 
     metric("startup.title_ms", [r["startup"]["title_s"] * 1000 for r in runs])
     metric("startup.world_ms", [r["startup"]["world_s"] * 1000 for r in runs])
+    metric("startup.join_ms", [r["startup"]["join_s"] * 1000 for r in runs if "join_s" in r["startup"]])
     for name in first["scenes"]:
         scenes = [r["scenes"][name] for r in runs if name in r["scenes"]]
         flights = [frames(name, i, s["frame_ms"], s.get("cpu_ms", ()), s.get("gpu_ms", ())) for i, s in enumerate(scenes)]
@@ -967,6 +1081,13 @@ def main():
                    help="horizon: measure a later start, after one start to the title screen built the caches")
     p.add_argument("--mod-jars", help="neoforge: the mod jars to load (the user's own; never committed)")
     p.add_argument("--deps", help="neoforge: their required libraries")
+    p.add_argument("--server", choices=["horizon", "vanilla"],
+                   help="join a local dedicated server (Horizon's, or your own 26.3 server.jar) instead of creating "
+                        "a world: startup.join_ms is connect to loaded")
+    p.add_argument("--server-build", help="--server horizon: the server's binary folder (default --build)")
+    p.add_argument("--server-bots", type=int, default=0,
+                   help="--server: this many horizon-bots walk around the spawn, and a 'crowd' scene flies over them")
+    p.add_argument("--bots-build", help="--server-bots: horizon-bots' folder (default --build)")
     p.add_argument("--table", nargs="+", metavar="LABEL", help="compare saved runs with matching recorded conditions, and exit")
     args = p.parse_args()
     if args.table:
@@ -983,11 +1104,20 @@ def main():
         args.label = size_label(label, args.width, args.height)
         for d in [int(x) for x in args.distances.split(",")]:
             runs = []
-            for _ in range(args.repeats):
-                load_before = load_average()
-                result = run(args, d)
-                result["load_before"], result["load_after"] = load_before, load_average()
-                runs.append(result)
+            with contextlib.ExitStack() as stack:
+                if args.server:
+                    args.server_build = args.server_build or args.build
+                    server = stack.enter_context(LocalServer(args, d))
+                    args.server_address = server.address
+                    args.extra_scenes = [server.crowd(args)] if args.server_bots else []
+                    if server.fresh:
+                        print(f"warm-up join of the new {args.server} server world (not measured)")
+                        run(args, d)
+                for _ in range(args.repeats):
+                    load_before = load_average()
+                    result = run(args, d)
+                    result["load_before"], result["load_after"] = load_before, load_average()
+                    runs.append(result)
             out = ROOT / "benchmarks/perf" / f"{args.label}-rd{d}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(report(args, d, runs, app(args)), indent=1) + "\n")

@@ -110,6 +110,7 @@ mod arena;
 pub mod compositor;
 mod cull;
 mod end_sky;
+pub mod entity_skin;
 mod flat;
 mod frame_gen;
 mod hdr;
@@ -627,6 +628,9 @@ pub struct Frame<'a> {
     pub glowing: &'a [Vertex],
     /// Runs of `entities` by entity, while a shader pack draws them (`pack_draw::EntitySpan`).
     pub entity_spans: &'a [pack_draw::EntitySpan],
+    /// Ordinary entity models posed on the GPU (`entity_skin`), drawn before `entities`'
+    /// ordinary ones; only when `Renderer::skins_entities` said so.
+    pub skin: Option<&'a entity_skin::SkinFrame>,
     pub weather: &'a [crate::weather::Vertex],
     pub weather_time: crate::weather::Time,
     /// Horizon Extras' dynamic lights, nearest first (`dynamic_light::select`); empty when off.
@@ -856,6 +860,8 @@ pub struct Renderer {
     entity_buffer: wgpu::Buffer,
     entity_capacity: u64,
     entity_batch: EntityBatch,
+    /// Ordinary entity models posed on the GPU; `None` without compute shaders.
+    entity_skin: Option<entity_skin::EntitySkin>,
     group: wgpu::BindGroup,
     globals: wgpu::Buffer,
     /// The resource packs' LabPBR maps (normals, specular), for native shader packs.
@@ -1523,37 +1529,64 @@ async fn open_device(
     api: GraphicsApi,
     layers: u32,
 ) -> Result<Opened> {
-    // A software adapter (WARP, llvmpipe) is a last resort: a later backend may
-    // have the real GPU (#3978: a Fermi GPU with no Vulkan and no DX12 driver
-    // still has OpenGL).
-    match open_device_with(window, offscreen, api, layers, false).await {
-        Ok(opened) => Ok(opened),
-        Err(first) => match open_device_with(window, offscreen, api, layers, true).await {
+    let wgpu_backend = std::env::var_os("WGPU_BACKEND").is_some();
+    let mut first = None;
+    for (order, allow_cpu) in device_search(api.with_env(), std::env::consts::OS, wgpu_backend) {
+        match open_device_with(window, offscreen, &order, layers, allow_cpu).await {
             Ok(opened) => {
-                log::warn!(
-                    "Horizon renderer: no GPU adapter could be used ({first}); \
-                     rendering on the CPU, which is slow"
-                );
-                Ok(opened)
+                if let Some(first) = &first {
+                    log::warn!(
+                        "Horizon renderer: the chosen graphics API gave no GPU ({first}); {}",
+                        if allow_cpu {
+                            "rendering on the CPU, which is slow"
+                        } else {
+                            "using the GPU through another one"
+                        }
+                    );
+                }
+                return Ok(opened);
             }
-            Err(_) => Err(first),
-        },
+            Err(e) => {
+                first.get_or_insert(e);
+            }
+        }
     }
+    Err(first.unwrap_or_else(|| NO_GPU_DRIVER.into()))
 }
-/// `open_device`, taking an adapter of the CPU type (software rendering) only
-/// when `allow_cpu`.
+/// The tries `open_device` makes, in turn: the chosen API's backends (`backend_order`) on a
+/// real GPU; when the player chose one API, the other backends `Auto` would try, on a real
+/// GPU; and last the chosen backends with a software adapter (WARP, llvmpipe) allowed.
+/// Software rendering takes most of a weak CPU even on the title screen: an Intel HD 2500 has
+/// DirectX 12 only through WARP and its GPU through OpenGL (#5185), and a Fermi GPU has no
+/// Vulkan or DirectX 12 driver but OpenGL (#3978). DirectX 12 never falls back to Vulkan: the
+/// launcher chooses it after Vulkan crashed in the driver (#746), which the game can't catch.
+fn device_search(
+    api: GraphicsApi,
+    os: &str,
+    wgpu_backend: bool,
+) -> Vec<(Vec<wgpu::Backends>, bool)> {
+    let chosen = backend_order(api, os, wgpu_backend);
+    let others: Vec<_> = backend_order(GraphicsApi::Auto, os, wgpu_backend)
+        .into_iter()
+        .filter(|b| !chosen.contains(b))
+        .filter(|&b| !(api == GraphicsApi::Dx12 && b == wgpu::Backends::VULKAN))
+        .collect();
+    let mut tries = vec![(chosen.clone(), false)];
+    if !others.is_empty() {
+        tries.push((others, false));
+    }
+    tries.push((chosen, true));
+    tries
+}
+/// `open_device` on `order`'s backends in turn, taking an adapter of the CPU type
+/// (software rendering) only when `allow_cpu`.
 async fn open_device_with(
     window: &Arc<Window>,
     offscreen: bool,
-    api: GraphicsApi,
+    order: &[wgpu::Backends],
     layers: u32,
     allow_cpu: bool,
 ) -> Result<Opened> {
-    let order = backend_order(
-        api.with_env(),
-        std::env::consts::OS,
-        std::env::var_os("WGPU_BACKEND").is_some(),
-    );
     let mut failures = Vec::new();
     for (attempt, backends) in order.iter().copied().enumerate() {
         let name = backends_name(backends);
@@ -3443,10 +3476,14 @@ impl Renderer {
             mapped_at_creation: false,
         });
         let entity_capacity = 1 << 14;
+        let entity_skin = entity_skin::EntitySkin::new(
+            &device,
+            animate::SpriteAnimator::compute(&adapter, &device),
+        );
         let entity_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Entity vertices"),
             size: entity_capacity * std::mem::size_of::<Vertex>() as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            usage: entity_skin::EntitySkin::usage(entity_skin.is_some()),
             mapped_at_creation: false,
         });
         let flat_wanted = flat::wanted(&adapter, &device);
@@ -3672,6 +3709,7 @@ impl Renderer {
             entity_buffer,
             entity_capacity,
             entity_batch: EntityBatch::default(),
+            entity_skin,
             group,
             globals,
             pbr_maps,
@@ -4841,6 +4879,23 @@ impl Renderer {
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
+    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`): not
+    /// while a shader pack or a native pack draws entities from their vertices, nor while
+    /// frame generation follows them.
+    /// The posed models' store size (`SkinFrame::base`), with entity skinning.
+    pub fn skinned_models(&self) -> Option<u32> {
+        self.entity_skin
+            .as_ref()
+            .map(entity_skin::EntitySkin::stored)
+    }
+
+    pub fn skins_entities(&self) -> bool {
+        self.entity_skin.is_some()
+            && !self.frame_gen.on
+            && self.pack_post.is_none()
+            && self.native.is_none()
+    }
+
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
@@ -6412,6 +6467,13 @@ impl Renderer {
             oit_on,
         );
         self.entity_batch.append_shadow_only(frame.shadow_only);
+        // The posed models' vertices come first: the ordinary entities' draw takes them in.
+        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
+            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
+            None => false,
+        });
+        let posed = skin.map_or(0, |s| s.vertices);
+        let entity_quads = entity_quads + posed / 4;
         let weather_quads = frame.weather.len() as u32 / 4;
         let world_quads = entity_quads
             + text_quads
@@ -6467,7 +6529,7 @@ impl Renderer {
             camera,
         );
         // Frame generation's made frame draws its own hand, halfway, after the others.
-        let made_hand_vertex = self.entity_batch.combined.len() as i32;
+        let made_hand_vertex = (posed as usize + self.entity_batch.combined.len()) as i32;
         if fg {
             self.frame_gen
                 .halfway_hand(frame.hand, hand_view, &mut self.entity_batch.combined);
@@ -6484,22 +6546,32 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        let entity_vertices = all_entities.len() as u64;
+        let entity_vertices = u64::from(posed) + all_entities.len() as u64;
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Entity vertices"),
                 size: self.entity_capacity * std::mem::size_of::<Vertex>() as u64,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: entity_skin::EntitySkin::usage(self.entity_skin.is_some()),
                 mapped_at_creation: false,
             });
         }
-        if entity_vertices > 0 {
+        if !all_entities.is_empty() {
             self.uploads.buffer(
                 &mut encoder,
                 &self.entity_buffer,
-                0,
+                u64::from(posed) * std::mem::size_of::<Vertex>() as u64,
                 bytemuck::cast_slice(all_entities),
+            );
+        }
+        if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
+            skinner.dispatch(
+                &self.device,
+                &mut self.uploads,
+                &mut encoder,
+                skin,
+                &self.entity_buffer,
+                0,
             );
         }
         self.entity_outline.prepare(
@@ -8522,8 +8594,9 @@ impl Renderer {
         if let Some(radius) = menu_blur {
             let format = self.config.format;
             let device = &self.device;
+            let software = is_software(self.info.device_type);
             self.menu_blur
-                .get_or_insert_with(|| crate::menu_blur::MenuBlur::new(device, format))
+                .get_or_insert_with(|| crate::menu_blur::MenuBlur::new(device, format, software))
                 .apply(
                     &self.device,
                     &self.queue,
@@ -9310,6 +9383,37 @@ mod tests {
         for api in GraphicsApi::ALL {
             assert_eq!(backend_order(api, "windows", true), [Backends::default()]);
             assert_eq!(order(api, "macos"), [Backends::default()]);
+        }
+    }
+    #[test]
+    fn a_chosen_api_without_a_gpu_tries_the_others_before_software() {
+        use super::{GraphicsApi, device_search};
+        use wgpu::Backends;
+        let (v, d, g) = (Backends::VULKAN, Backends::DX12, Backends::GL);
+        // #5185: DirectX 12 chosen on an Intel HD 2500 (WARP only): OpenGL's GPU before WARP.
+        assert_eq!(
+            device_search(GraphicsApi::Dx12, "windows", false),
+            [(vec![d], false), (vec![g], false), (vec![d], true)]
+        );
+        assert_eq!(
+            device_search(GraphicsApi::Vulkan, "windows", false),
+            [(vec![v], false), (vec![d, g], false), (vec![v], true)]
+        );
+        assert_eq!(
+            device_search(GraphicsApi::Auto, "windows", false),
+            [(vec![v, d, g], false), (vec![v, d, g], true)]
+        );
+        assert_eq!(
+            device_search(GraphicsApi::OpenGl, "linux", false),
+            [(vec![g], false), (vec![v], false), (vec![g], true)]
+        );
+        // WGPU_BACKEND and macOS: one set of backends, nothing else to try.
+        let all = Backends::default();
+        for (os, env) in [("windows", true), ("macos", false)] {
+            assert_eq!(
+                device_search(GraphicsApi::Vulkan, os, env),
+                [(vec![all], false), (vec![all], true)]
+            );
         }
     }
     /// The second try at a backend shows the adapters wgpu hides for reporting

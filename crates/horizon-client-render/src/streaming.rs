@@ -6,21 +6,19 @@ use crate::fast_hash::{FxHashMap, FxHashSet};
 use crate::section_mask::SectionMask;
 use crate::{
     chunk::Chunk,
+    chunk_map::ChunkMembershipDelta,
     graphics::LeafCullingMode,
     light::{LightChanges, LightTables, apply_lighting, apply_relighting, light_chunk},
     mesher::{MeshScratch, MeshTables, Mesher, Region, SectionMesh, borrow},
     world::World,
 };
 use horizon_core::biome::BiomeZoom;
+use horizon_threads::jobs::{Class, PerWorker, Rank, Registration, Source};
 use horizon_world::block_render::FaceVisibility;
 use horizon_world::worldgen::decoration_order::DecorationOrder;
 use std::{
     collections::{BinaryHeap, HashSet, VecDeque},
-    sync::{
-        Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
-    thread,
+    sync::{Arc, Condvar, Mutex, MutexGuard, RwLock, TryLockError},
 };
 
 /// How long a worker waits with nothing to do before it gives back its
@@ -33,7 +31,8 @@ pub type Proto = Box<dyn std::any::Any + Send>;
 /// (biomes, noise, surface, carvers), decoration of a 3x3 neighbourhood
 /// (FEATURES, which may write into neighbours), then conversion of a chunk
 /// whose eight neighbours are decorated into a final column. Implementations
-/// must be thread-safe; each worker thread owns one `Worker`.
+/// must be thread-safe; each worker of the shared pool
+/// (`horizon_threads::jobs`) keeps one `Worker` per streamer.
 pub trait ChunkGenerator: Send + Sync + 'static {
     type Worker: Send + 'static;
     fn worker(&self) -> Self::Worker;
@@ -276,8 +275,6 @@ impl Ord for Queued {
 }
 struct Shared {
     queue: Mutex<BinaryHeap<Queued>>,
-    ready: Condvar,
-    stop: AtomicBool,
     /// What meshing reads (block models and sprites), swapped when resource
     /// packs reload; each mesh job takes the current one.
     context: RwLock<Arc<WorkerContext>>,
@@ -285,11 +282,6 @@ struct Shared {
     /// Only workers use this pool; frames never wait for its lock. Retaining
     /// cleared buffers avoids racing the renderer for the process heap.
     meshes: Mutex<MeshPool>,
-    /// Workers that have freed their buffers ([`IDLE_RELEASE`]) and taken no
-    /// job since: the last of them gives the freed memory back to the OS.
-    released: AtomicUsize,
-    /// The workers that started.
-    workers: AtomicUsize,
 }
 #[derive(Default)]
 struct MeshPool {
@@ -364,7 +356,11 @@ pub struct Streaming {
     /// next arrive, though read from the save (`World::loaded_chunks`).
     dropped_new: FxHashSet<(i32, i32)>,
     non_air_sections: Arc<dyn Fn(&Proto) -> Option<SectionMask> + Send + Sync>,
-    threads: Vec<thread::JoinHandle<()>>,
+    /// This streamer's place in the shared pool (`horizon_threads::jobs`);
+    /// dropping it waits for its running jobs.
+    jobs: Registration,
+    /// The workers its in-flight work is sized for.
+    workers: usize,
     order: u64,
     /// Ticks since the columns and protos that fell out of range were swept.
     scan_age: u8,
@@ -476,6 +472,14 @@ pub struct Streaming {
 /// Snapshot only after a scan found no missing candidates. Public range fields
 /// and `World::chunks` can change without going through Streaming, so compare
 /// their values and structural membership token rather than a frame timeout.
+///
+/// A scan also keeps every candidate it found, nearest first (`plan`): while
+/// the ranges stay the same and no column leaves (`World::chunks` removals, or
+/// `invalidate` for proto chunks dropped), no column becomes wanted, so the
+/// next batches are the plan's entries still missing. A full scan looks at
+/// every column of the areas (thousands at render distance 32), and one ran
+/// whenever a worker finished: it took a quarter of the thread that runs
+/// `Streaming::update` while a world loaded.
 #[derive(Default)]
 struct GenerationScan {
     exhausted: bool,
@@ -485,16 +489,51 @@ struct GenerationScan {
     forced: HashSet<(i32, i32)>,
     band: Option<Band>,
     chunk_revision: u64,
+    plan: Vec<(i64, i32, i32)>,
+    /// Entries before it are no longer missing.
+    next: usize,
+    /// What `plan` was made for: the ranges, the loading screen and
+    /// decoration; the chunk map's revision is `chunk_revision`.
+    plan_basis: Option<(bool, bool)>,
 }
 impl GenerationScan {
-    fn unchanged(&self, ranges: &Ranges<'_>, world: &World) -> bool {
-        self.exhausted
-            && self.center == ranges.center
+    fn same_ranges(&self, ranges: &Ranges<'_>) -> bool {
+        self.center == ranges.center
             && self.radius == ranges.radius
             && self.extra == ranges.extra
             && self.forced == *ranges.forced
             && self.band.as_ref() == ranges.band
+    }
+    fn unchanged(&self, ranges: &Ranges<'_>, world: &World) -> bool {
+        self.exhausted
+            && self.same_ranges(ranges)
             && self.chunk_revision == world.chunks.membership_revision()
+    }
+    /// A column may be wanted again (a proto chunk was dropped): the next
+    /// call scans the areas again.
+    fn invalidate(&mut self) {
+        self.exhausted = false;
+        self.plan_basis = None;
+    }
+    /// Whether `plan` still holds every candidate: same ranges, and no
+    /// column left the chunk map since it was made.
+    fn plan_holds(&mut self, input: &GenerationInputs<'_>) -> bool {
+        if self.plan_basis != Some((input.loading, input.decorates))
+            || !self.same_ranges(&input.ranges)
+        {
+            return false;
+        }
+        let revision = input.world.chunks.membership_revision();
+        if revision != self.chunk_revision {
+            let Some(mut changes) = input.world.chunks.deltas_since(self.chunk_revision) else {
+                return false;
+            };
+            if !changes.all(|(_, change)| matches!(change, ChunkMembershipDelta::Added(_))) {
+                return false;
+            }
+            self.chunk_revision = revision;
+        }
+        true
     }
     fn remember(&mut self, ranges: Ranges<'_>, world: &World) {
         self.exhausted = true;
@@ -532,6 +571,30 @@ impl GenerationScan {
             || self.unchanged(&input.ranges, input.world)
         {
             return None;
+        }
+        let missing = |&(_, x, z): &(i64, i32, i32)| {
+            !input.world.chunks.contains_key(&(x, z))
+                && !input.generating.contains(&(x, z))
+                && !input.protos.contains_key(&(x, z))
+                && !input.finishing.contains(&(x, z))
+        };
+        if self.plan_holds(&input) {
+            while self.next < self.plan.len() && !missing(&self.plan[self.next]) {
+                self.next += 1;
+            }
+            let room = capacity - input.generating.len();
+            let batch: Vec<_> = self.plan[self.next..]
+                .iter()
+                .filter(|c| missing(c))
+                .take(room)
+                .copied()
+                .collect();
+            // Past the plan's end, the full scan below decides whether
+            // anything is left (and remembers when nothing is).
+            if !batch.is_empty() {
+                self.exhausted = false;
+                return Some(batch);
+            }
         }
         {
             let mut wanted = Vec::new();
@@ -592,26 +655,194 @@ impl GenerationScan {
                     }
                 }
             }
+            let ranges = Ranges {
+                center: input.ranges.center,
+                radius: input.ranges.radius,
+                extra: input.ranges.extra,
+                forced: input.ranges.forced,
+                cover: input.ranges.cover,
+                band: input.ranges.band,
+            };
+            self.remember(ranges, input.world);
             if wanted.is_empty() {
-                let ranges = Ranges {
-                    center: input.ranges.center,
-                    radius: input.ranges.radius,
-                    extra: input.ranges.extra,
-                    forced: input.ranges.forced,
-                    cover: input.ranges.cover,
-                    band: input.ranges.band,
-                };
-                self.remember(ranges, input.world);
+                self.plan.clear();
+                self.plan_basis = None;
             } else {
-                // A bounded batch may leave candidates behind. Keep scanning
-                // as capacity opens, even if no range or membership changed.
+                // A bounded batch may leave candidates behind: the next calls
+                // take them from the plan as capacity opens.
                 self.exhausted = false;
+                self.plan_basis = Some((input.loading, input.decorates));
             }
             wanted.sort_unstable();
             wanted.dedup();
+            self.plan.clear();
+            self.plan.extend_from_slice(&wanted);
+            self.next = 0;
             wanted.truncate(capacity - input.generating.len());
             Some(wanted)
         }
+    }
+}
+/// What a pool worker keeps for one streamer between its jobs: the
+/// generator's worker, and the face visibility table and its occlusion
+/// cache (like vanilla's per-thread cache: cloning it per job copied every
+/// state and face shape) and the mesher's scratch.
+struct WorkerLocal<W> {
+    worker: W,
+    faces: Option<(Arc<MeshTables>, FaceVisibility)>,
+    mesh_scratch: MeshScratch,
+}
+/// A streamer's jobs, run by the process's shared pool (`horizon_threads::jobs`).
+struct Jobs<G: ChunkGenerator> {
+    shared: Arc<Shared>,
+    generator: Arc<G>,
+    light: Arc<LightTables>,
+    locals: PerWorker<WorkerLocal<G::Worker>>,
+}
+impl<G: ChunkGenerator> Source for Jobs<G> {
+    fn next(&self) -> Option<Rank> {
+        let queue = self.shared.queue.lock().unwrap();
+        queue.peek().map(|q| {
+            // Jobs without a column (saves, meshes to free) go first.
+            let class = if q.at.is_none() {
+                Class::Urgent
+            } else {
+                Class::Near
+            };
+            Rank::new(class, q.priority)
+        })
+    }
+    fn run(&self, worker: usize) -> bool {
+        let Some(job) = self.shared.queue.lock().unwrap().pop() else {
+            return false;
+        };
+        let done = self.locals.with(
+            worker,
+            || WorkerLocal {
+                worker: self.generator.worker(),
+                faces: None,
+                mesh_scratch: MeshScratch::default(),
+            },
+            |local| self.run_job(job.job, local),
+        );
+        if let Some(done) = done {
+            self.shared.done.send(done);
+        }
+        true
+    }
+    fn idle(&self, worker: usize) {
+        // A server nobody is on, a client standing still: free the
+        // generator's buffers (and the mesher's face cache and scratch)
+        // until the next job needs them.
+        self.locals.with_existing(worker, |local| {
+            self.generator.idle(&mut local.worker);
+            local.faces = None;
+            local.mesh_scratch = MeshScratch::default();
+        });
+    }
+    fn all_idle(&self) {
+        // No worker needs retained mesh capacity now. Drop it outside the
+        // pool lock; the pool then asks the allocator to return freed pages.
+        let meshes = std::mem::take(&mut *self.shared.meshes.lock().unwrap());
+        drop(meshes);
+    }
+}
+impl<G: ChunkGenerator> Jobs<G> {
+    fn run_job(&self, job: Job, local: &mut WorkerLocal<G::Worker>) -> Option<Done> {
+        let (generator, shared, light) = (&self.generator, &self.shared, &self.light);
+        let WorkerLocal {
+            worker,
+            faces,
+            mesh_scratch,
+        } = local;
+        let done = match job {
+            Job::Generate(x, z) => match generator.load(x, z) {
+                Some(chunk) => {
+                    generator.prepare_loaded(&mut *worker, &chunk);
+                    Done::Generated(chunk)
+                }
+                None => {
+                    let proto = generator.proto(&mut *worker, x, z);
+                    let decorated = generator.is_decorated(&proto);
+                    Done::Proto(x, z, proto, decorated)
+                }
+            },
+            Job::Decorate(x, z, mut region, finals) => {
+                // The final chunks' proto chunks, made here: a
+                // generated proto chunk holding their blocks.
+                for (i, snapshot) in &finals {
+                    if let Some(proto) = generator.proto_beside_final(&mut *worker, snapshot) {
+                        region[*i] = proto;
+                    }
+                }
+                generator.decorate(&mut *worker, &mut region);
+                let mut writes = FinalWrites::default();
+                for (i, snapshot) in &finals {
+                    let blocks = generator.final_writes(snapshot, &region[*i]);
+                    writes
+                        .block_entities
+                        .extend(generator.final_block_entities(&region[*i], &blocks));
+                    writes.blocks.extend(blocks);
+                    region[*i] = Box::new(());
+                }
+                let finals = finals.into_iter().map(|(i, _)| i).collect();
+                Done::Decorated(x, z, region, finals, writes)
+            }
+            Job::Finish(proto) => {
+                let mut chunk = generator.finish(proto);
+                chunk.generated = true;
+                Done::Generated(chunk)
+            }
+            Job::Save(protos) => {
+                let refs: Vec<&Proto> = protos.iter().map(|(_, p)| p).collect();
+                generator.save_protos(&refs);
+                Done::Saved(protos)
+            }
+            Job::LightView(x, z, proto) => {
+                let view = generator.light_view(&proto);
+                Done::LightView(x, z, proto, view)
+            }
+            Job::Free(meshes) => {
+                for (_, mesh) in meshes {
+                    let rejected = shared.meshes.lock().unwrap().put(mesh);
+                    drop(rejected);
+                }
+                return None;
+            }
+            Job::Light(x, z, region, seq, sky) => {
+                Done::Lit(x, z, light_chunk(&borrow(&region), light, sky), seq)
+            }
+            Job::Mesh(x, sy, z, region, seq, settings) => {
+                let context = shared.context.read().unwrap().clone();
+                let visibility = match faces.take() {
+                    Some((tables, visibility)) if Arc::ptr_eq(&tables, &context.tables) => {
+                        visibility
+                    }
+                    _ => context.tables.visibility.clone(),
+                };
+                let mut mesher = Mesher {
+                    nether_shading: settings.nether,
+                    shader_pack_lighting: settings.shader_pack_lighting,
+                    zoom: settings.zoom,
+                    blend_radius: settings.blend_radius,
+                    smooth_lighting: settings.smooth_lighting,
+                    cutout_leaves: settings.cutout_leaves,
+                    translucent_layers: &settings.translucent_layers,
+                    leaf_culling: settings.leaf_culling,
+                    assets: &context.assets,
+                    render: &context.render,
+                    tables: &context.tables,
+                    biomes: &context.biomes,
+                    visibility,
+                };
+                let recycled = shared.meshes.lock().unwrap().take();
+                let mut mesh = mesher.mesh_reusing(&borrow(&region), sy, recycled, mesh_scratch);
+                mesh.sort_solid();
+                *faces = Some((context.tables.clone(), mesher.visibility));
+                Done::Meshed(x, sy, z, mesh, seq)
+            }
+        };
+        Some(done)
     }
 }
 pub struct WorkerContext {
@@ -629,190 +860,23 @@ impl Streaming {
     ) -> Self {
         let shared = Arc::new(Shared {
             queue: Mutex::new(BinaryHeap::new()),
-            ready: Condvar::new(),
-            stop: AtomicBool::new(false),
             context: RwLock::new(context.clone()),
             done: Mailbox::default(),
             meshes: Mutex::new(MeshPool::default()),
-            released: AtomicUsize::new(0),
-            workers: AtomicUsize::new(0),
         });
         let light_tables = context.light.clone();
         let saves: Arc<dyn Saves> = generator.clone();
-        let threads = (0..threads.max(1))
-            .map(|i| {
-                let shared = shared.clone();
-                let generator = generator.clone();
-                let light = context.light.clone();
-                thread::Builder::new()
-                    .name(format!("horizon-worker-{i}"))
-                    .spawn(move || {
-                        // Ticks and frames come first (horizon_threads).
-                        horizon_threads::behind_server();
-                        let mut worker = generator.worker();
-                        // The face visibility table and its occlusion cache stay with
-                        // the worker across mesh jobs, like vanilla's per-thread cache:
-                        // cloning it per job copied every state and face shape.
-                        let mut faces: Option<(Arc<MeshTables>, FaceVisibility)> = None;
-                        let mut mesh_scratch = MeshScratch::default();
-                        loop {
-                            let job = {
-                                let mut queue = shared.queue.lock().unwrap();
-                                let mut released = false;
-                                loop {
-                                    if shared.stop.load(Ordering::Relaxed) {
-                                        return;
-                                    }
-                                    if let Some(job) = queue.pop() {
-                                        if released {
-                                            shared.released.fetch_sub(1, Ordering::Relaxed);
-                                        }
-                                        break job.job;
-                                    }
-                                    if released {
-                                        queue = shared.ready.wait(queue).unwrap();
-                                        continue;
-                                    }
-                                    let (woken, wait) =
-                                        shared.ready.wait_timeout(queue, IDLE_RELEASE).unwrap();
-                                    queue = woken;
-                                    if wait.timed_out() && queue.is_empty() {
-                                        // A server nobody is on, a client standing still:
-                                        // free the generator's buffers (and the mesher's
-                                        // face cache and scratch) until the next job
-                                        // needs them.
-                                        drop(queue);
-                                        generator.idle(&mut worker);
-                                        faces = None;
-                                        mesh_scratch = MeshScratch::default();
-                                        released = true;
-                                        // The allocator keeps freed pages until memory
-                                        // runs short: once every worker has freed its own,
-                                        // hand them back.
-                                        if shared.released.fetch_add(1, Ordering::Relaxed) + 1
-                                            == shared.workers.load(Ordering::Relaxed)
-                                        {
-                                            // No worker needs retained mesh capacity now.
-                                            // Drop it outside the pool lock before asking
-                                            // the allocator to return freed pages.
-                                            let meshes =
-                                                std::mem::take(&mut *shared.meshes.lock().unwrap());
-                                            drop(meshes);
-                                            horizon_threads::release_free_memory();
-                                        }
-                                        queue = shared.queue.lock().unwrap();
-                                    }
-                                }
-                            };
-                            let done = match job {
-                                Job::Generate(x, z) => match generator.load(x, z) {
-                                    Some(chunk) => {
-                                        generator.prepare_loaded(&mut worker, &chunk);
-                                        Done::Generated(chunk)
-                                    }
-                                    None => {
-                                        let proto = generator.proto(&mut worker, x, z);
-                                        let decorated = generator.is_decorated(&proto);
-                                        Done::Proto(x, z, proto, decorated)
-                                    }
-                                },
-                                Job::Decorate(x, z, mut region, finals) => {
-                                    // The final chunks' proto chunks, made here: a
-                                    // generated proto chunk holding their blocks.
-                                    for (i, snapshot) in &finals {
-                                        if let Some(proto) =
-                                            generator.proto_beside_final(&mut worker, snapshot)
-                                        {
-                                            region[*i] = proto;
-                                        }
-                                    }
-                                    generator.decorate(&mut worker, &mut region);
-                                    let mut writes = FinalWrites::default();
-                                    for (i, snapshot) in &finals {
-                                        let blocks = generator.final_writes(snapshot, &region[*i]);
-                                        writes.block_entities.extend(
-                                            generator.final_block_entities(&region[*i], &blocks),
-                                        );
-                                        writes.blocks.extend(blocks);
-                                        region[*i] = Box::new(());
-                                    }
-                                    let finals = finals.into_iter().map(|(i, _)| i).collect();
-                                    Done::Decorated(x, z, region, finals, writes)
-                                }
-                                Job::Finish(proto) => {
-                                    let mut chunk = generator.finish(proto);
-                                    chunk.generated = true;
-                                    Done::Generated(chunk)
-                                }
-                                Job::Save(protos) => {
-                                    let refs: Vec<&Proto> = protos.iter().map(|(_, p)| p).collect();
-                                    generator.save_protos(&refs);
-                                    Done::Saved(protos)
-                                }
-                                Job::LightView(x, z, proto) => {
-                                    let view = generator.light_view(&proto);
-                                    Done::LightView(x, z, proto, view)
-                                }
-                                Job::Free(meshes) => {
-                                    for (_, mesh) in meshes {
-                                        let rejected = shared.meshes.lock().unwrap().put(mesh);
-                                        drop(rejected);
-                                    }
-                                    continue;
-                                }
-                                Job::Light(x, z, region, seq, sky) => {
-                                    Done::Lit(x, z, light_chunk(&borrow(&region), &light, sky), seq)
-                                }
-                                Job::Mesh(x, sy, z, region, seq, settings) => {
-                                    let context = shared.context.read().unwrap().clone();
-                                    let visibility = match faces.take() {
-                                        Some((tables, visibility))
-                                            if Arc::ptr_eq(&tables, &context.tables) =>
-                                        {
-                                            visibility
-                                        }
-                                        _ => context.tables.visibility.clone(),
-                                    };
-                                    let mut mesher = Mesher {
-                                        nether_shading: settings.nether,
-                                        shader_pack_lighting: settings.shader_pack_lighting,
-                                        zoom: settings.zoom,
-                                        blend_radius: settings.blend_radius,
-                                        smooth_lighting: settings.smooth_lighting,
-                                        cutout_leaves: settings.cutout_leaves,
-                                        translucent_layers: &settings.translucent_layers,
-                                        leaf_culling: settings.leaf_culling,
-                                        assets: &context.assets,
-                                        render: &context.render,
-                                        tables: &context.tables,
-                                        biomes: &context.biomes,
-                                        visibility,
-                                    };
-                                    let recycled = shared.meshes.lock().unwrap().take();
-                                    let mut mesh = mesher.mesh_reusing(
-                                        &borrow(&region),
-                                        sy,
-                                        recycled,
-                                        &mut mesh_scratch,
-                                    );
-                                    mesh.sort_solid();
-                                    faces = Some((context.tables.clone(), mesher.visibility));
-                                    Done::Meshed(x, sy, z, mesh, seq)
-                                }
-                            };
-                            shared.done.send(done);
-                        }
-                    })
-            })
-            // A thread the system refuses (a container's process limit reached) leaves the pool a
-            // worker short: a server that panicked here went down with its players' moves unsaved.
-            .filter_map(|spawned| {
-                spawned
-                    .inspect_err(|e| log::error!("Horizon: chunk worker not started: {e}"))
-                    .ok()
-            })
-            .collect::<Vec<_>>();
-        shared.workers.store(threads.len(), Ordering::Relaxed);
+        let pool = horizon_threads::jobs::pool();
+        let source = Arc::new(Jobs {
+            shared: shared.clone(),
+            generator: generator.clone(),
+            light: context.light.clone(),
+            locals: horizon_threads::jobs::PerWorker::new(pool.threads()),
+        });
+        let jobs = pool.register(source);
+        // The work kept in flight is sized for the workers this streamer may
+        // use: the pool's, or fewer when asked (tests, a placeholder).
+        let workers = threads.clamp(1, pool.threads());
         let non_air_sections = {
             let generator = generator.clone();
             Arc::new(move |p: &Proto| generator.non_air_sections(p))
@@ -820,7 +884,8 @@ impl Streaming {
         Self {
             shared,
             non_air_sections,
-            threads,
+            jobs,
+            workers,
             order: 0,
             scan_age: 0,
             scan_area: ((i32::MIN, i32::MIN), i32::MIN),
@@ -1019,7 +1084,7 @@ impl Streaming {
             order: self.order,
             job,
         });
-        self.shared.ready.notify_one();
+        self.jobs.notify();
     }
     /// Rank the queued jobs again when what their priorities were computed
     /// from changed: the centre, the extra areas, the band, or the loading
@@ -1489,7 +1554,7 @@ impl Streaming {
                 .map(|(k, _)| *k)
                 .collect();
             if !far.is_empty() {
-                self.generation_scan.exhausted = false;
+                self.generation_scan.invalidate();
             }
             // Those decoration wrote to are saved first (see
             // `ChunkGenerator::save_protos`), and dropped once back.
@@ -1538,7 +1603,7 @@ impl Streaming {
         // Decorate chunks whose 3x3 proto neighbourhood is available, in
         // vanilla's order: decoration is order dependent where write regions
         // overlap (see `DecorationOrder`).
-        let workers = self.threads.len();
+        let workers = self.workers;
         if self.decorates && self.order_area != Some((self.center, self.radius)) {
             let (decorated, chunks) = (&self.decorated, &world.chunks);
             // The render distance is the server view distance in singleplayer.
@@ -1600,14 +1665,24 @@ impl Streaming {
                 w.0 = self.decoration_order.rank_or_append(w.2, w.3);
             }
             wanted.sort_unstable();
+            // Most wanted chunks are blocked, and the same neighbours are
+            // asked about for each of them: what `waits_for` says is kept for
+            // the pass (nothing it reads changes in it but `decorated`, which
+            // updates the entry). Without it, scheduling at render distance 32
+            // took most of the thread that runs it while the world loaded.
+            let waiting: std::cell::RefCell<FxHashMap<(i32, i32), bool>> = Default::default();
             for (_, _, x, z) in wanted {
                 if self.decorating >= workers * 2 {
                     break;
                 }
-                if self
-                    .decoration_order
-                    .blocked(x, z, |nx, nz| waits_for(self, nx, nz))
-                {
+                if self.decoration_order.blocked(x, z, |nx, nz| {
+                    if let Some(&known) = waiting.borrow().get(&(nx, nz)) {
+                        return known;
+                    }
+                    let known = waits_for(self, nx, nz);
+                    waiting.borrow_mut().insert((nx, nz), known);
+                    known
+                }) {
                     continue;
                 }
                 let keys: Vec<(i32, i32)> =
@@ -1627,6 +1702,7 @@ impl Streaming {
                     .collect();
                 if !finals.is_empty() && !self.saves_beside_final {
                     self.decorated.insert((x, z));
+                    waiting.borrow_mut().insert((x, z), false);
                     continue;
                 }
                 if !keys.iter().enumerate().all(|(i, k)| {
@@ -1680,7 +1756,7 @@ impl Streaming {
         for key in gone {
             world.dirty_light.remove(&key);
         }
-        let room = (self.threads.len() * 4).saturating_sub(self.lighting.len());
+        let room = (self.workers * 4).saturating_sub(self.lighting.len());
         nearest_first(&mut light, room);
         for (_, x, z) in light {
             let Some(region) = self.light_region(world, x, z) else {
@@ -1766,7 +1842,7 @@ impl Streaming {
         // jobs went stale long before a worker reached them (#3629). What
         // stays dirty is asked for again, from the current centre, as
         // capacity frees; `requeue` then has a small queue to keep close.
-        let room = (self.threads.len() * 32).saturating_sub(self.meshing.len());
+        let room = (self.workers * 32).saturating_sub(self.meshing.len());
         nearest_first(&mut candidates, room);
         for (_, x, z, sections) in candidates {
             let Some(region) = Self::region(world, x, z) else {
@@ -2438,11 +2514,8 @@ impl Drop for Streaming {
                 None => break,
             }
         }
-        self.shared.stop.store(true, Ordering::Relaxed);
-        self.shared.ready.notify_all();
-        for t in self.threads.drain(..) {
-            let _ = t.join();
-        }
+        // `jobs` leaves the pool after this, once its running jobs are
+        // done; the jobs still queued go with the queue.
     }
 }
 /// The queued jobs' priorities computed again from each one's column
@@ -3140,6 +3213,70 @@ mod tests {
             gate.exhausted = false;
             assert!(f.assert_same(&mut gate, 3));
             assert_eq!(baseline_candidates(f.input(), 3).len(), 1);
+        }
+    }
+
+    /// Batches taken from the plan are the full scan's, as jobs finish,
+    /// columns and proto chunks leave and the centre moves.
+    #[test]
+    fn generation_plan_matches_full_scans_as_columns_arrive() {
+        for decorates in [false, true] {
+            let mut f = GenerationFixture::new(6, decorates);
+            let mut gate = GenerationScan::default();
+            let chunk = Arc::new(Chunk::empty(0, 0));
+            let mut seed = 0x2545_F491_4F6C_DD1Du64;
+            let mut rand = |n: u64| {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                seed % n
+            };
+            let mut scheduled = 0;
+            for step in 0..600 {
+                let capacity = 3 + rand(6) as usize;
+                let expected = baseline_candidates(f.input(), capacity);
+                let batch = gate.candidates(f.input(), capacity).unwrap_or_default();
+                assert_eq!(batch, expected, "step {step}");
+                for (_, x, z) in batch {
+                    f.generating.insert((x, z));
+                    scheduled += 1;
+                }
+                // Some jobs finish: as a proto chunk, or a final column.
+                let mut done: Vec<_> = f.generating.iter().copied().collect();
+                done.sort_unstable();
+                for key in done {
+                    if rand(3) != 0 {
+                        continue;
+                    }
+                    f.generating.remove(&key);
+                    if rand(2) == 0 {
+                        f.protos.insert(key, None);
+                    } else {
+                        f.world.chunks.insert(key, chunk.clone());
+                    }
+                    gate.exhausted = false;
+                }
+                // Now and then a column or a proto chunk leaves.
+                if rand(20) == 0 {
+                    let mut keys: Vec<_> = f.world.chunks.keys().copied().collect();
+                    keys.sort_unstable();
+                    if let Some(key) = keys.get(rand(keys.len().max(1) as u64) as usize) {
+                        f.world.chunks.remove(key);
+                    }
+                }
+                if rand(20) == 0 {
+                    let mut keys: Vec<_> = f.protos.keys().copied().collect();
+                    keys.sort_unstable();
+                    if let Some(key) = keys.get(rand(keys.len().max(1) as u64) as usize) {
+                        f.protos.remove(key);
+                        gate.invalidate();
+                    }
+                }
+                if step == 300 {
+                    f.center = (3, -2);
+                }
+            }
+            assert!(scheduled > 200);
         }
     }
 
