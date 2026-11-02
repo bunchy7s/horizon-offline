@@ -17582,6 +17582,23 @@ impl Game<'_> {
                             self.title_shortcut(shortcut);
                             return Ok(());
                         }
+                        // `TabNavigationBar.keyPressed` comes before the open
+                        // tab's own widgets: Ctrl plus a digit or Tab picks a
+                        // tab instead of reaching them.
+                        if let PhysicalKey::Code(key) = event.physical_key {
+                            let ctrl = self.has_control_down_with_quirk();
+                            let shift = self.has_shift_down();
+                            let tab = self
+                                .title
+                                .as_mut()
+                                .and_then(|t| t.tab_bar_key(key, ctrl, shift));
+                            if let Some(sound) = tab {
+                                if sound {
+                                    self.audio.play_button_click();
+                                }
+                                return Ok(());
+                            }
+                        }
                         let (w, h) = self.gui_size();
                         match event.physical_key {
                             // `WorldListEntry.keyPressed`: Space joins too, with the button click sound.

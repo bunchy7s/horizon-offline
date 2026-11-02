@@ -260,6 +260,48 @@ pub(super) fn tab_at(w: f32, (x, y): (f32, f32)) -> Option<usize> {
         .then(|| ((x - x0) / width) as usize)
         .filter(|i| *i < TABS.len())
 }
+/// `TabNavigationBar.tabs.size()`: the last tab Ctrl+0 and Ctrl+4..9 land on.
+pub(super) fn tab_count() -> usize {
+    TABS.len()
+}
+/// `InputConstants.Key.getNumericKeyValue`: the digit a key stands for, on the
+/// number row or the keypad, and 0 for the `0` key. `None` for every other key.
+fn numeric_key(key: winit::keyboard::KeyCode) -> Option<u8> {
+    use winit::keyboard::KeyCode;
+    Some(match key {
+        KeyCode::Digit0 | KeyCode::Numpad0 => 0,
+        KeyCode::Digit1 | KeyCode::Numpad1 => 1,
+        KeyCode::Digit2 | KeyCode::Numpad2 => 2,
+        KeyCode::Digit3 | KeyCode::Numpad3 => 3,
+        KeyCode::Digit4 | KeyCode::Numpad4 => 4,
+        KeyCode::Digit5 | KeyCode::Numpad5 => 5,
+        KeyCode::Digit6 | KeyCode::Numpad6 => 6,
+        KeyCode::Digit7 | KeyCode::Numpad7 => 7,
+        KeyCode::Digit8 | KeyCode::Numpad8 => 8,
+        KeyCode::Digit9 | KeyCode::Numpad9 => 9,
+        _ => return None,
+    })
+}
+/// `TabNavigationBar.getNextTabIndex`: the tab Ctrl plus `key` asks for, before
+/// `Mth.clamp` to the tabs there are. A digit is `floorMod(key - 1, 10)`, so
+/// Ctrl+1 is the first tab and Ctrl+0 the tenth; Tab steps one tab forward,
+/// or back with Shift, wrapping. Every Create World tab is active, so the
+/// walk never has to skip one. `None` where the key is neither a digit nor
+/// Tab, which the bar ignores and the screen reads itself.
+pub(super) fn next_tab_index(
+    tab: usize,
+    key: winit::keyboard::KeyCode,
+    shift: bool,
+) -> Option<usize> {
+    if let Some(digit) = numeric_key(key) {
+        return Some((i32::from(digit) - 1).rem_euclid(10) as usize);
+    }
+    if key != winit::keyboard::KeyCode::Tab {
+        return None;
+    }
+    let next = tab as i32 + if shift { -1 } else { 1 };
+    Some(next.rem_euclid(TABS.len() as i32) as usize)
+}
 /// GridLayoutTab.doLayout: the open tab's grid, aligned at (0.5, 1/6) in the
 /// area between the tab bar and the footer.
 fn grid(w: f32, h: f32, tab: usize) -> (f32, f32) {
