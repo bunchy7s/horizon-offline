@@ -49,6 +49,10 @@ pub struct PackInputs {
     pub elytra_flying: bool,
     /// `cloudHeight`, see [`cloud_height`].
     pub cloud_height: f32,
+    /// `cloudTime`: how far the game's clouds have moved along X, in blocks (`clouds::drift`
+    /// times vanilla's 0.03 blocks a tick). Iris 1.11.7 gives it, though ShaderDoc doesn't list
+    /// it: observed with a probe pack, three game times 0.03 apart per tick.
+    pub cloud_time: f32,
     /// The values native mods hand their packs (`frame.mods`, `native_shader_params`).
     pub mod_params: [[f32; 4]; 8],
     /// The player's state, for Iris's status uniforms.
@@ -260,6 +264,7 @@ pub const NAMES: &[&str] = &[
     "logicalHeightLimit",
     "hasSkylight",
     "hasCeiling",
+    "cloudTime",
     "isElytraFlying",
     "cloudHeight",
 ];
@@ -557,6 +562,7 @@ impl FrameUniforms {
                 "heldBlockLightValue2" => Value::i(&[inputs.held_light[1]]),
                 "isElytraFlying" => Value::i(&[inputs.elytra_flying as i32]),
                 "cloudHeight" => Value::f(&[inputs.cloud_height]),
+                "cloudTime" => Value::f(&[inputs.cloud_time]),
                 // renderStage is NONE outside gbuffers draws.
                 _ => status_value(name, inputs).unwrap_or(Value::i(&[0])),
             }
@@ -900,6 +906,25 @@ mod initial_history_tests {
             float(&u, "cameraPosition")
         );
     }
+    /// Iris 1.11.7 (probe pack, a world saved at game time 5073 and loaded about ten seconds
+    /// before): `cloudTime` read 157.98, 160.56 and 163.11, four seconds apart. That is the
+    /// clouds' drift at 0.03 blocks a tick, 5266 ticks in.
+    #[test]
+    fn cloud_time_is_how_far_the_clouds_drifted() {
+        let hud = HudBatch::new([800, 450]);
+        let f = frame(&hud);
+        let mut u = FrameUniforms::default();
+        let drift = crate::clouds::drift(5266, 0.0, 256);
+        let input = PackInputs {
+            cloud_time: drift as f32 * 0.030_000_001,
+            ..Default::default()
+        };
+        u.update(&f, &input, [800, 450]);
+        assert!((float(&u, "cloudTime")[0] - 157.98).abs() < 1e-3);
+        // A trip across the 256-cell texture takes 256 * 400 ticks, then starts again.
+        assert_eq!(crate::clouds::drift(256 * 400 + 3, 0.25, 256), 3.25);
+    }
+
     #[test]
     fn environmental_smoothing_starts_at_the_first_inputs_without_resetting_each_frame() {
         let hud = HudBatch::new([800, 450]);

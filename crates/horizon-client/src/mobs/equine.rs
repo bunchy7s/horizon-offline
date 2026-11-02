@@ -718,6 +718,7 @@ pub fn ridden_step(m: &mut Mob) {
             m.velocity.x += f64::from(-0.4 * s * r.jump);
             m.velocity.z += f64::from(0.4 * c * r.jump);
         }
+        crate::motion::native_living_jump(m.id, &m.kind.id);
         if let Some(rider) = m.rider.as_mut() {
             rider.jump = 0.0;
         }
@@ -751,7 +752,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         return super::llama::ai_step(m, w);
     }
     if m.alive() && m.random.next_int_bound(900).unwrap_or(1) == 0 && m.death_time == 0 {
-        m.health = (m.health + 1.0).min(m.attrs.max_health);
+        m.heal(1.0);
     }
     // Grazing (canEatGrass: horses and donkeys alike).
     if m.alive() && m.rider.is_none() {

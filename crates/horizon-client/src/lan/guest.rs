@@ -9,8 +9,12 @@ use crate::{
 };
 use horizon_core::geometry::{Aabb, Vec3};
 use horizon_protocol::{
+    attachment_sync,
     item::Stack,
-    packets::{configuration::ClientInformation, play},
+    packets::{
+        configuration::{ClientInformation, CustomPayload},
+        play,
+    },
 };
 use std::{
     collections::VecDeque,
@@ -200,6 +204,8 @@ pub struct Guest {
     // Chunks.
     pub center: Option<(i32, i32)>,
     pub sent_chunks: crate::fast_hash::FxHashSet<(i32, i32)>,
+    /// Sent as far-ring columns and needing a near snapshot on promotion.
+    pub far_sent_chunks: crate::fast_hash::FxHashSet<(i32, i32)>,
     pub chunk_queue: Vec<(i32, i32)>,
     /// The far ring's chunks still to send, past the view distance (`lan::far`), closest first.
     pub far_queue: Vec<(i32, i32)>,
@@ -416,6 +422,7 @@ impl Guest {
             load_timeout: CLIENT_LOADED_TIMEOUT,
             center: None,
             sent_chunks: Default::default(),
+            far_sent_chunks: Default::default(),
             chunk_queue: Vec::new(),
             far_queue: Vec::new(),
             unacknowledged: 0,
@@ -500,6 +507,25 @@ impl Guest {
             self.note_change(packet);
         }
         self.sender.send(packet.encode());
+    }
+    /// Whether the guest is placed and on a Horizon client (the only one that
+    /// reads synced attachments).
+    pub fn reads_attachment_sync(&self) -> bool {
+        self.placed && self.brand == "horizon"
+    }
+    /// A holder's synced attachments, if the guest reads them; a message too big
+    /// for one payload is not sent.
+    pub fn send_attachment_sync(&self, message: &attachment_sync::Message) {
+        if !self.reads_attachment_sync() {
+            return;
+        }
+        match attachment_sync::encode(message) {
+            Ok(data) => self.send(&play::Clientbound::CustomPayload(CustomPayload {
+                channel: attachment_sync::CHANNEL.into(),
+                data,
+            })),
+            Err(e) => log::debug!("Horizon: attachment sync not sent: {e}"),
+        }
     }
     /// What `packet` changes about how the client moves, for the prediction's replay: kept until
     /// the tick's ping places it (`Hub::anticheat_ping`).

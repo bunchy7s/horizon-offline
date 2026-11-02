@@ -127,7 +127,7 @@ pub struct NativeLootContext<'a> {
     /// Where the roll happens: the origin, the block entity and the level,
     /// when the game rolled the table at a place (a broken block's drops,
     /// a mob's death loot); None for the other rolls. Either engine fills it.
-    /// API @API:loot_context_place@.
+    /// API 156.
     pub place: Option<Rc<NativeLootPlace>>,
 }
 
@@ -135,7 +135,7 @@ pub struct NativeLootContext<'a> {
 /// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
 /// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
 /// the time; `WeatherCheck`: the rain and the thunder). The game sets it
-/// around a roll with [`with_native_loot_place`]. API @API:loot_context_place@.
+/// around a roll with [`with_native_loot_place`]. API 156.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeLootPlace {
     /// `ORIGIN`: a broken block's centre, a dead mob's position.
@@ -171,7 +171,7 @@ thread_local! {
 /// Runs `roll` with `place` as where its loot rolls happen: every
 /// [`NativeLootContext`] made inside it, by either engine, carries it. The
 /// place before is back when `roll` returns, so these nest.
-/// API @API:loot_context_place@.
+/// API 156.
 pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
     struct Restore(Option<Rc<NativeLootPlace>>);
     impl Drop for Restore {
