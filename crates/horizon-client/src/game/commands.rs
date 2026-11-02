@@ -659,19 +659,11 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id)
-                if self
-                    .mobs
-                    .iter()
-                    .any(|m| m.id == id && m.custom_name.is_some()) =>
-            {
-                let name = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.id == id)
-                    .and_then(|m| m.custom_name.clone());
-                Text::literal(name.unwrap_or_default())
-            }
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map_or_else(|| Text::translate("entity.", &[]), |m| m.command_name()),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = match other {

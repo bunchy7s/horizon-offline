@@ -1718,6 +1718,37 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def villager_command_names():
+    ops = setup('/forceload add 0 0')
+    case = 0
+    for profession in ('none', 'nitwit', 'cleric', 'farmer', 'librarian'):
+        for named in (False, True):
+            case += 1
+            target = f'00000000-0000-0000-0000-0030{case:08x}'
+            custom = ',CustomName:{text:"Ada"}' if named else ''
+            ops += setup(f'/summon villager 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                         'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                         f'VillagerData:{{profession:"minecraft:{profession}",type:"minecraft:plains",level:1}}{custom}}}')
+            for path in ('VillagerData', 'Pos', 'Rotation'):
+                ops.append(cmd(f'/data get entity {target} {path}'))
+            changed = 'cleric' if profession == 'farmer' else 'farmer'
+            ops.append(cmd(f'/data merge entity {target} '
+                           f'{{VillagerData:{{profession:"minecraft:{changed}",type:"minecraft:plains",level:1}}}}'))
+            ops.append(cmd(f'/data get entity {target} VillagerData'))
+            ops += setup(f'/kill {target}')
+    for kind in ('zombie_villager', 'wandering_trader'):
+        case += 1
+        target = f'00000000-0000-0000-0000-0030{case:08x}'
+        ops += setup(f'/summon {kind} 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                     'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                     'VillagerData:{profession:"minecraft:cleric",type:"minecraft:plains",level:1}}')
+        for path in ('Pos', 'Rotation'):
+            ops.append(cmd(f'/data get entity {target} {path}'))
+        ops += setup(f'/kill {target}')
+    ops.append({'op': 'tick', 'n': 25})
+    return ops + setup('/forceload remove 0 0')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1758,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('villager command names', villager_command_names()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),

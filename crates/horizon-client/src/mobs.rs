@@ -2066,6 +2066,24 @@ impl Seen {
     }
 }
 impl Mob {
+    /// The name used by command replies: CustomName takes precedence over the type.
+    pub fn command_name(&self) -> crate::text::Text {
+        if let Some(name) = &self.custom_name {
+            return crate::text::Text::literal(name);
+        }
+        // Villager.getTypeName returns its registered profession's name.
+        if self.species() == Species::Villager {
+            let professions = &render::PROFESSIONS;
+            let profession = professions[self.extra.variant2 as usize % professions.len()];
+            return crate::text::Text::translate(
+                &format!("entity.minecraft.villager.{profession}"),
+                &[],
+            );
+        }
+        let id = crate::command::args::normalize(&self.kind.id);
+        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+    }
+
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
