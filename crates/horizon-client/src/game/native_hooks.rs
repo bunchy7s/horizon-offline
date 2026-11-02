@@ -4854,6 +4854,11 @@ impl Game<'_> {
     ) {
         let _ = (entity, item, count, pos);
     }
+    /// A leashed mob's leash was removed, before any lead drop is handled
+    /// (Bukkit's `EntityUnleashEvent`). @API:native_entity_unleash@.
+    pub(super) fn native_entity_unleash(&mut self, entity: u32, kind: &str) {
+        let _ = (entity, kind);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
