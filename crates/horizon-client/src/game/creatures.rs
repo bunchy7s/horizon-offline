@@ -4531,7 +4531,10 @@ impl Game<'_> {
                         &mut damage,
                         &mut cancel,
                     );
-                    to = Vec3::new(target[0], target[1], target[2]);
+                    // A target that is not a number keeps the pearl's.
+                    if target.iter().all(|v| v.is_finite()) {
+                        to = Vec3::new(target[0], target[1], target[2]);
+                    }
                 }
                 if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was

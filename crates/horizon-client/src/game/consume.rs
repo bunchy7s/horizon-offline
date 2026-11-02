@@ -327,7 +327,15 @@ impl TeleportConsumeWorld for Teleporter<'_, '_> {
             &mut to,
             &mut cancel,
         );
-        *target = Vec3::new(to[0], to[1], to[2]);
+        // Keep the mod's spot inside the level as vanilla's own draw is (a
+        // huge y would walk down a long way); one that is not a number keeps
+        // the draw.
+        if to.iter().all(|v| v.is_finite()) {
+            let shape = self.0.level_shapes.get(self.0.dim.id());
+            let high = shape.min_y + shape.logical_height - 1;
+            let y = to[1].clamp(f64::from(shape.min_y), f64::from(high));
+            *target = Vec3::new(to[0], y, to[2]);
+        }
         Ok(!cancel)
     }
     fn random_teleport(&mut self, target: Vec3) -> Result<bool, Infallible> {

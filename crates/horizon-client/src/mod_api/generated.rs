@@ -2634,8 +2634,9 @@ pub trait Hooks: Send + Sync {
     /// (NeoForge's `EntityTeleportEvent.ChorusFruit`, vanilla's
     /// `TeleportRandomlyConsumeEffect.apply`): once per attempt (up to 16),
     /// after they stopped riding. `from` is their feet, `target` the spot
-    /// drawn; a mod may move it, and the game still looks down from it for
-    /// ground it may land on. Canceling ends the effect: no teleport and no
+    /// drawn; a mod may move it (its y kept inside the level's height, a
+    /// value that is not a number ignored), and the game still looks down
+    /// from it for ground it may land on. Canceling ends the effect: no teleport and no
     /// more attempts. The player's state is swapped in
     /// (`native_acting_player`). Foxes are not heard. @API:chorus_fruit_teleport@.
     ///
@@ -2699,7 +2700,8 @@ pub trait Hooks: Send + Sync {
     /// `ThrownEnderpearl.onHit` for a player owner): `pearl` is the pearl's
     /// entity id, `from` their feet now, `target` where the pearl started
     /// its last tick and `damage` the fall damage they then take (5). A mod
-    /// may move `target` or change `damage` (0 or less: none). Canceling
+    /// may move `target` (a value that is not a number is ignored) or change
+    /// `damage` (0 or less: none). Canceling
     /// keeps the player where they are: no endermite roll, no teleport, no
     /// damage and no sound; the pearl is used up either way. The player's
     /// state is swapped in (`native_acting_player`). The hit itself is

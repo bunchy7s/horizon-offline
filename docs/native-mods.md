@@ -1421,7 +1421,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_chorus_fruit_teleport(player, name, from, target, cancel)`**: a server player whose `teleport_randomly`
   consume effect (chorus fruit) is about to try a spot (NeoForge's `EntityTeleportEvent.ChorusFruit`,
   `TeleportRandomlyConsumeEffect.apply`): once per attempt, up to 16, after they stopped riding. A mod may move
-  `target`; the game still looks down from it for ground to land on, inside the border. Canceling ends the effect: no
+  `target` (its y is kept inside the level's height); the game still looks down from it for ground to land on, inside
+  the border. Canceling ends the effect: no
   teleport and no more attempts. Foxes eating chorus fruit are not heard. Bundles need
   `"hooks": @API:chorus_fruit_teleport@`.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
