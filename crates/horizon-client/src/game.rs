@@ -6600,6 +6600,7 @@ impl Game<'_> {
                 Some(BlockEntity::StructureBlock(_)) => self.structure_block_placed(key),
                 Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
                 Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),
+                Some(BlockEntity::Jukebox(_)) => self.jukebox_placed(target, &stack),
                 Some(BlockEntity::Sign(sign)) if !sign.waxed => self.open_sign_editor(key, true),
                 _ => {}
             }
