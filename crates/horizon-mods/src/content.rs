@@ -611,12 +611,13 @@ impl Content {
             let own = namespace == id;
             let owned = own || manifest.namespaces.iter().any(|n| n == namespace);
             // Vanilla's own files stay vanilla's; a mod may only add to its
-            // tags, and to the convention tags mods share.
+            // tags and atlases, and to the convention tags mods share.
             let shared = matches!(namespace, "minecraft" | "c");
-            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/"));
+            let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
+            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
             if !allowed {
                 return Err(format!(
-                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces) or to vanilla and convention (c) tags"
+                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
                 ));
             }
             if !own && top == "data" && rest.starts_with("horizon/") {
@@ -1192,9 +1193,10 @@ capabilities = ["registries"]
             ("data/minecraft/tags/block/mineable/pickaxe.json", b"{}"),
             ("data/c/tags/item/gems/ruby.json", b"{}"),
             ("assets/ruby/textures/block/ruby_block.png", b"png"),
+            ("assets/minecraft/atlases/blocks.json", b"{}"),
         ];
         let content = hmod("ok", MANIFEST_TEXT, files).unwrap();
-        assert_eq!(content.files.len(), 6);
+        assert_eq!(content.files.len(), 7);
         assert_eq!(
             content.blocks,
             [Block {

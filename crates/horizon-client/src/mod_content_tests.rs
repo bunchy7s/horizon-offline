@@ -192,6 +192,24 @@ fn tags_merge_without_repeats() {
     );
 }
 
+#[test]
+fn a_mods_atlas_sources_follow_vanillas() {
+    let vanilla = r#"{"sources": [{"type": "directory", "source": "block", "prefix": "block/"}]}"#;
+    let more = [J::Obj(vec![
+        ("type".into(), J::Str("directory".into())),
+        ("source".into(), J::Str("mek_chemical".into())),
+    ])];
+    let merged: serde_json::Value =
+        serde_json::from_str(&merge_atlas(Some(vanilla), &more, "a").unwrap()).unwrap();
+    let sources: Vec<_> = merged["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(sources, ["block", "mek_chemical"]);
+}
+
 /// Registry IDs and state IDs must not depend on package discovery order.
 #[test]
 fn allocated_ids_follow_mod_and_entry_order_after_vanilla() {
@@ -1537,6 +1555,38 @@ fn listed_namespaces_join_the_root() {
     let tags: BTreeMap<String, String> =
         serde_json::from_slice(&fs::read(root.join("worldgen/biome_tags.json")).unwrap()).unwrap();
     assert!(tags.contains_key("kaisyn:has_tower"));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A mod's `assets/minecraft/atlases/blocks.json` adds its sources after vanilla's.
+#[test]
+fn a_content_root_appends_a_mods_atlas_sources() {
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-atlas-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("gauge"),
+        &[
+            ("horizon-mod.toml", &manifest("gauge", "")),
+            (
+                "assets/minecraft/atlases/blocks.json",
+                r#"{"sources": [{"type": "minecraft:directory", "source": "gauge_liquid", "prefix": "gauge_liquid/"}]}"#,
+            ),
+        ],
+    );
+    let root = scratch.join("root");
+    build(&base, &[m], &root).unwrap();
+    let sources = |dir: &Path| -> Vec<serde_json::Value> {
+        let text = fs::read(dir.join("assets/minecraft/atlases/blocks.json")).unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&text).unwrap();
+        doc["sources"].as_array().unwrap().clone()
+    };
+    let (vanilla, built) = (sources(&base), sources(&root));
+    assert_eq!(built.len(), vanilla.len() + 1);
+    assert_eq!(built[..vanilla.len()], vanilla[..]);
+    assert_eq!(built[vanilla.len()]["source"], "gauge_liquid");
     let _ = fs::remove_dir_all(&scratch);
 }
 

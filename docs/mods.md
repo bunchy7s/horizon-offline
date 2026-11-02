@@ -293,8 +293,9 @@ data, and client prediction of its clicks.
 
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
 `data/<id>/`, and those its manifest lists), plus additions to vanilla tags
-(`data/minecraft/tags/`) and to the convention tags NeoForge and Fabric mods
-share (`data/c/tags/`).
+(`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
+share (`data/c/tags/`), and sources added to vanilla's atlases
+(`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under
