@@ -509,8 +509,19 @@ runtime or new dependency. Server-sent events can replace the polling later if a
   - notifications: the supervisor pushes them to every connected client as vanilla's `JsonRpcNotificationService`
     does (a JSON-RPC request without an `id`, its one parameter in an array), through a queue and a thread so a slow
     client never holds the game's output. Built: `server/started` (the game's `Done`) and `server/stopping`
-    (when the supervisor or the game's own `stop` begins the shutdown, once per run);
-  - planned: `serversettings/*` and `gamerules`, the other notifications and the heartbeat.
+    (when the supervisor or the game's own `stop` begins the shutdown, once per run), `server/saving` and
+    `server/saved` (around every world save of the running game: `save-all`, the autosave, the pause when
+    empty; a save the game makes while it stops is after the last one the supervisor hears of), and
+    `players/joined` and `players/left` (from the game's typed events, within a quarter of a second), and
+    `operators/*`, `allowlist/*`, `bans/*` and `ip_bans/*` `added`/`removed`: each of the game's lists tells a
+    watcher what `add`, `remove` and `clear` do, as vanilla's `StoredUserList` tells its `NotificationService`,
+    so a change by the console, a command in the game or the protocol itself is told alike (`clear` once per
+    entry); the event stream carries them as `operators_added`, `bans_removed`... too;
+  - game rules: `gamerules` lists every rule the game has as a typed rule (`{key, type, value}`), `gamerules/update`
+    sets one (checked against its type and bounds, logged and set only when the value changes) and
+    `notification/gamerules/updated` follows every change, by that method or by `/gamerule`
+    (`Game::set_game_rule`);
+  - planned: the rest of `serversettings/*`, the activity and world-upgrade notifications and the heartbeat.
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
 

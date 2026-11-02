@@ -677,10 +677,10 @@ pub fn mob_to_nbt(
         | "minecraft:trader_llama" => {
             map.insert("Tame".into(), Tag::Byte(i8::from(m.extra.tame)));
             map.insert("Temper".into(), Tag::Int(i32::from(m.extra.variant3)));
-            // AbstractHorse.addAdditionalSaveData; Horizon models neither.
-            for key in ["EatingHaystack", "Bred"] {
-                map.entry(key.into()).or_insert(Tag::Byte(0));
-            }
+            map.insert("Bred".into(), Tag::Byte(i8::from(m.extra.bred)));
+            // AbstractHorse.addAdditionalSaveData; Horizon does not model the
+            // eating haystack yet.
+            map.entry("EatingHaystack".into()).or_insert(Tag::Byte(0));
             if let Some(owner) = m.extra.owner {
                 map.insert("Owner".into(), Tag::IntArray(owner.to_vec()));
             }
@@ -1608,6 +1608,7 @@ pub fn mob_from_nbt(
     if crate::mobs::equine::is_equine(m.species()) {
         m.extra.tame = flag(tag, "Tame");
         m.extra.variant3 = number(tag.get("Temper")).unwrap_or(0).clamp(0, 100) as u8;
+        m.extra.bred = flag(tag, "Bred");
         m.extra.owner = crate::save::uuid_from_tag(tag.get("Owner"));
         let v = number(tag.get("Variant")).unwrap_or(0) as i32;
         m.extra.variant = (v & 0xFF).clamp(0, 6) as u8;
@@ -2033,7 +2034,10 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
         ("Item", item_to_nbt(&e.stack)),
         ("Health", Tag::Short(e.health as i16)),
         ("Fire", Tag::Short(e.fire_ticks as i16)),
-        ("Age", Tag::Short(e.age.min(i16::MAX as u32) as i16)),
+        (
+            "Age",
+            Tag::Short(e.age.clamp(i16::MIN as i32, i16::MAX as i32) as i16),
+        ),
         (
             "PickupDelay",
             Tag::Short(e.pickup_delay.min(i16::MAX as u32) as i16),
@@ -2110,8 +2114,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         on_ground: flag(tag, "OnGround"),
         vertical_collision: false,
         horizontal_collision: false,
-        // Age -32768 marks items that never despawn; Horizon counts upwards.
-        age: number(tag.get("Age")).unwrap_or(0).max(0) as u32,
+        age: number(tag.get("Age")).unwrap_or(0) as i32,
         pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
         bob_offset,
         ticks: 0,

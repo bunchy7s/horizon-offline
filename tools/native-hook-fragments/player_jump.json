@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_jump",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_jump",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerJumpEvent)",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A guest jumped from the ground (`native_player_jump`).",
+  "doc_summary": "A guest jumped: `native_player_jump(player, name)` is called after accepted movement made the server player jump from the ground, once the guest's movement simulation finished. The guest's state is swapped in. Bundles need \"hooks\": @API:player_jump@."
+}

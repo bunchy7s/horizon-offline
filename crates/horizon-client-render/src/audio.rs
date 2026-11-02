@@ -1206,8 +1206,13 @@ impl Audio {
     /// `SoundManager.reload` (resource packs changed): stop every sound, then
     /// read sound events and sound files from the new resource root.
     pub fn reload(&mut self, root: &Path) {
+        self.reload_with(root, SoundRegistry::load(root));
+    }
+    /// [`Self::reload`] with the root's sound events already read
+    /// (`SoundRegistry::load`, which a pack reload runs off the render thread).
+    pub fn reload_with(&mut self, root: &Path, registry: SoundRegistry) {
         self.stop_all();
-        self.engine.registry = SoundRegistry::load(root);
+        self.engine.registry = registry;
         self.backend.root = root.to_owned();
         let mut cache = self.backend.cache.lock().unwrap();
         cache.entries.clear();

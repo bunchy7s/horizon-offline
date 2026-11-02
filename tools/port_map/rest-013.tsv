@@ -110,8 +110,8 @@ MinecraftServer.createProfiler	skip:server		profiler setup
 MinecraftServer.startRecordingMetrics	skip:server		metrics recording for the profiler
 MinecraftServer.createGameModeForPlayer	missing		minor: demo mode is not implemented; --demo is accepted and ignored (dedicated.rs preflight)
 MinecraftServer.stopTimeProfiler	skip:debug		debug profiler stop
-MinecraftServer.setAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: the save-on/save-off flag is kept, but the tick's autosave does not read it
-MinecraftServer.isAutoSave	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	reads the same flag for the save-on reply only
+MinecraftServer.setAutoSave	port	crates/horizon-client/src/game/dedicated.rs::set_auto_save	changes the shared server-level save flag; the tick skips periodic saves while it is disabled
+MinecraftServer.isAutoSave	port	crates/horizon-client/src/game/dedicated.rs::auto_save	reads the shared server-level save flag
 MinecraftServer.storeChunkIoError	skip:debug		writes a chunk IO crash report
 MinecraftServer.reportChunkLoadFailure	missing		unsure: no chunk-load failure log or report found in save.rs or streaming.rs
 MinecraftServer.reportChunkSaveFailure	port	crates/horizon-client/src/save.rs::Persistent::save_finished	gap: minor: logs only; no debug report and no low-disk warning

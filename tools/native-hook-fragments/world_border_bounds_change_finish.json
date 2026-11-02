@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "world_border_bounds_change_finish",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_bounds_change_finish",
+      "side": "server",
+      "cancellable": false,
+      "neoforge": "none (NeoForge has no such event; Bukkit's WorldBorderBoundsChangeFinish)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A timed world border size change finished (`native_world_border_bounds_change_finish`).",
+  "doc_summary": "A timed world border size change finished: `native_world_border_bounds_change_finish()` fires after the border reaches its final size. Bundles need \"hooks\": @API:world_border_bounds_change_finish@."
+}
