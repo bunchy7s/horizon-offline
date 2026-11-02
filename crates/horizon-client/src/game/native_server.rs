@@ -722,9 +722,8 @@ impl Game<'_> {
 
 /// An experience orb as a server mod reads it (`native_experience_orbs`).
 /// Read by mods only.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(super) struct NativeExperienceOrb {
+pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
     pub position: [f64; 3],

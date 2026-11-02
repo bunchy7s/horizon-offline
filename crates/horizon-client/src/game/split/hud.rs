@@ -9,6 +9,7 @@ use std::time::Duration;
 /// moment, with why), a question its controller answers, and notices nobody has to answer.
 #[derive(Default)]
 pub(in crate::game) struct Hud {
+    pub(in crate::game) menu: bool,
     pub(super) badge: Option<String>,
     pub(super) place: Option<(String, Instant)>,
     pub(super) prompt: Option<Prompt>,
@@ -77,9 +78,14 @@ pub(super) fn lost_prompt(name: &str) -> Prompt {
 }
 
 impl Game<'_> {
-    /// Another player's pause menu opens its profiles to switch identity.
+    /// P1 opens Setup; another player opens profiles to switch identity.
     pub(in crate::game) fn open_split_settings(&mut self) {
-        self.open_options_at(false, horizon_client::options_ui::Page::SplitProfiles);
+        let page = if self.options.split_guest {
+            horizon_client::options_ui::Page::SplitProfiles
+        } else {
+            horizon_client::options_ui::Page::SplitSetup
+        };
+        self.open_options_at(false, page);
     }
 
     /// Splitscreen over this player's view, above the other toasts (`ToastManager`'s slots).

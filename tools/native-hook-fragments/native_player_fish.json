@@ -4,7 +4,11 @@
       "name": "player_fish",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_fish",
       "neoforge": "none (NeoForge's ItemFishedEvent fires after the loot roll, in FishingHook.retrieve; Bukkit's PlayerFishEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "a player's fishing rod: cast, bite, catch, reel-in, cancellable (`native_player_fish`).",

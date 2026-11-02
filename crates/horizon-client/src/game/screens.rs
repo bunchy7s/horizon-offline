@@ -258,7 +258,7 @@ impl Game<'_> {
             self.external_server(),
             links,
             additions.is_some(),
-            self.options.split_guest,
+            self.options.split_guest || self.split_hud.menu,
         ) {
             let is_focused = self.pause_focus == Some(id);
             let hover = active && (ui::hovered(self.cursor, x, y, bw, 20.0) || is_focused);
@@ -272,10 +272,15 @@ impl Game<'_> {
                 tooltip = Some(Text::translate("menu.custom_options.tooltip", &[]));
             }
         }
-        for (i, (x, y, sprite)) in
-            pause_icons(w, h, links, additions.is_some(), self.options.split_guest)
-                .into_iter()
-                .enumerate()
+        for (i, (x, y, sprite)) in pause_icons(
+            w,
+            h,
+            links,
+            additions.is_some(),
+            self.options.split_guest || self.split_hud.menu,
+        )
+        .into_iter()
+        .enumerate()
         {
             let active = icon_active(i, friends);
             let is_focused = (self.pause_focus == Some(10) && i == FRIENDS_ICON)
@@ -391,7 +396,13 @@ impl Game<'_> {
         };
         let links = !self.server_links().is_empty();
         let additions = self.pause_screen_additions();
-        let icons = pause_icons(w, h, links, additions.is_some(), self.options.split_guest);
+        let icons = pause_icons(
+            w,
+            h,
+            links,
+            additions.is_some(),
+            self.options.split_guest || self.split_hud.menu,
+        );
         let friends = icons[FRIENDS_ICON];
         let hit = pause_buttons(
             w,
@@ -399,7 +410,7 @@ impl Game<'_> {
             self.external_server(),
             links,
             additions.is_some(),
-            self.options.split_guest,
+            self.options.split_guest || self.split_hud.menu,
         )
         .into_iter()
         .find(|b| b.5 && ui::hovered(self.cursor, b.0, b.1, b.2, 20.0))
@@ -439,7 +450,7 @@ impl Game<'_> {
             self.external_server(),
             links,
             self.pause_screen_additions().is_some(),
-            self.options.split_guest,
+            self.options.split_guest || self.split_hud.menu,
         );
         let mut active_ids: Vec<u8> = buttons.into_iter().filter(|b| b.5).map(|b| b.4).collect();
         let friends = self.friends_view().shown;
@@ -487,7 +498,7 @@ impl Game<'_> {
                     self.external_server(),
                     links,
                     self.pause_screen_additions().is_some(),
-                    self.options.split_guest,
+                    self.options.split_guest || self.split_hud.menu,
                 );
                 let mut rects: Vec<(u8, f32, f32, f32)> = buttons
                     .into_iter()
@@ -500,7 +511,7 @@ impl Game<'_> {
                     h,
                     links,
                     self.pause_screen_additions().is_some(),
-                    self.options.split_guest,
+                    self.options.split_guest || self.split_hud.menu,
                 )
                 .into_iter()
                 .enumerate()
