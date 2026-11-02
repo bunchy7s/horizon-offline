@@ -13,5 +13,5 @@
     }
   ],
   "rust_summary": "A player took an anvil's result (`native_anvil_craft_pre`).",
-  "doc_summary": "A player took an anvil's result: `native_anvil_craft_pre(player, name, pos, craft, cancel)` (NeoForge's `AnvilCraftEvent.Pre`) runs before the levels are charged, the inputs used up and the anvil worn. `craft` holds the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip the matching `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Bundles need \"hooks\": @API:anvil_craft_pre@."
+  "doc_summary": "A player took an anvil's result: `native_anvil_craft_pre(player, name, pos, craft, cancel)` (NeoForge's `AnvilCraftEvent.Pre`) runs before the levels are charged, the inputs used up and the anvil worn. `craft` holds the left and right inputs and the result as they were before. Set `cancel` to refuse the take and skip the matching `native_anvil_craft_post`: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. Bundles need \"hooks\": @API:native_anvil_craft_pre@."
 }
