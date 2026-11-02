@@ -19297,6 +19297,9 @@ fn load_resources(
     publish: &mut dyn FnMut(UiResources, &std::path::Path),
 ) -> Result<Loaded> {
     let threads = settings.horizon.worker_threads();
+    // One pool of workers for every level's streaming, the client's and the
+    // server thread's (horizon_threads::jobs), sized before any world opens.
+    horizon_threads::jobs::configure(threads);
     horizon_client::sprites::set_texture_budget(settings.horizon.texture_budget_mib);
     horizon_client::sprites::set_labpbr_maps(shader_packs::picks_native_pack(settings));
     // Stage A: the menu bundle (atlas and panorama). With a loading screen it is
@@ -20615,9 +20618,8 @@ pub fn run_with() -> Result<()> {
     horizon_threads::put_helpers_behind();
     if options.execution_role.is_client() {
         // The render thread, like the server thread, ahead of the workers on
-        // macOS and Windows. While terrain loads, the worker pools (two with
-        // single player's server thread) and other programs outnumber the
-        // cores, and a frame that gave its core up (in a GPU submit) waited
+        // macOS and Windows. While terrain loads, the workers
+        // (horizon_threads::jobs) and other programs outnumber the cores, and a frame that gave its core up (in a GPU submit) waited
         // 10 to 200 ms to get one back.
         horizon_threads::favour_current();
     }

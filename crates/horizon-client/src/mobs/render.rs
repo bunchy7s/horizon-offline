@@ -3084,6 +3084,170 @@ mod scroll_tests {
             ]
         );
     }
+
+    /// `anim::Poses` keys parts by a hash of their name: within any vanilla model, two
+    /// different names never share one (they would share a pose).
+    #[test]
+    fn no_two_part_names_share_a_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        fn names<'a>(p: &'a Part, out: &mut Vec<&'a str>) {
+            out.push(&p.name);
+            for c in &p.children {
+                names(c, out);
+            }
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let mut models = 0;
+        for kind in types.types.values() {
+            for model in std::iter::once(&kind.model).chain(kind.layers.values()) {
+                let mut all = Vec::new();
+                names(model, &mut all);
+                let mut keys = std::collections::HashMap::new();
+                for name in all {
+                    let other = *keys.entry(super::super::anim::key(name)).or_insert(name);
+                    assert_eq!(other, name, "{} shares a key", kind.id);
+                }
+                models += 1;
+            }
+        }
+        assert!(models > 100);
+    }
+
+    /// The CPU cost of posing a mob farm (tools/stress_scenes.py `stress_mobs`): 1000 mobs of
+    /// 8 kinds through `render_with`, as `mob_geometry` draws them each frame. Prints the median
+    /// thread CPU time per frame (busy machines stretch wall time), the vertices and a hash of them (the same hash before and after a speed-up
+    /// means the same picture). `cargo test --profile fast -p horizon-client --lib
+    /// benchmark_mob_farm_geometry -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual benchmark; needs the prepared resources"]
+    fn benchmark_mob_farm_geometry() {
+        use std::{hash::Hasher, hint::black_box, time::Instant};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kinds = [
+            "husk", "creeper", "cow", "pig", "sheep", "chicken", "villager", "spider",
+        ]
+        .map(|k| std::sync::Arc::new(types.types[&format!("minecraft:{k}")].clone()));
+        let mobs: Vec<Mob> = (0..1000u32)
+            .map(|i| {
+                let (layer, row, col) = (i / 200, i / 20 % 10, i % 20);
+                let at = horizon_core::geometry::Vec3::new(
+                    -14.25 + 1.5 * f64::from(col),
+                    1.0 + 2.5 * f64::from(layer),
+                    8.0 + 2.0 * f64::from(row),
+                );
+                let mut m = Mob::new(i + 1, kinds[i as usize % 8].clone(), at, 180.0);
+                m.previous = at;
+                m.age = i;
+                m
+            })
+            .collect();
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name.len() as f32 / 64.0;
+            Some([h, h, h + 0.25, h + 0.25])
+        };
+        let camera = glam::DVec3::new(0.5, 9.6, 0.5);
+        let mut out = Vec::new();
+        let frame = |out: &mut Vec<Vertex>| {
+            out.clear();
+            for m in &mobs {
+                render_with(m, 0.5, camera, &atlas, 0xf0f0, &data, &[], out);
+            }
+        };
+        frame(&mut out);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash.write(bytemuck::cast_slice(&out));
+        // The thread's own CPU time where the platform gives it, else wall time.
+        let timed = |f: &mut dyn FnMut()| {
+            let (wall, cpu) = (Instant::now(), horizon_client_render::spans::thread_cpu());
+            f();
+            match (horizon_client_render::spans::thread_cpu(), cpu) {
+                (Some(end), Some(start)) => (end - start).as_secs_f64() * 1000.0,
+                _ => wall.elapsed().as_secs_f64() * 1000.0,
+            }
+        };
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            times.push(timed(&mut || frame(black_box(&mut out))));
+        }
+        times.sort_by(f64::total_cmp);
+        println!(
+            "mob farm: 1000 mobs, {} vertices, {:.3} ms/frame (median of 30, min {:.3}), hash {:016x}",
+            out.len(),
+            times[15],
+            times[0],
+            hash.finish()
+        );
+        // Where it goes: the body's poses alone (state, pose map, setupAnim), then the
+        // body's vertices alone from those poses.
+        let median = |mut f: Box<dyn FnMut() + '_>| {
+            let mut t: Vec<f64> = (0..30).map(|_| timed(&mut f)).collect();
+            t.sort_by(f64::total_cmp);
+            t[15]
+        };
+        let posed: Vec<(std::sync::Arc<Part>, Poses)> = mobs
+            .iter()
+            .map(|m| {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                (model, poses)
+            })
+            .collect();
+        let poses_ms = median(Box::new(|| {
+            for m in &mobs {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                black_box(&poses);
+            }
+        }));
+        let mut body = Vec::new();
+        let draw_ms = median(Box::new(|| {
+            body.clear();
+            for (m, (model, poses)) in mobs.iter().zip(&posed) {
+                let base = base_transform(m, 0.5, camera);
+                draw(
+                    model,
+                    base,
+                    poses,
+                    [0.0, 0.0, 0.25, 0.25],
+                    u32::MAX,
+                    0xf0f0,
+                    0,
+                    &mut body,
+                );
+            }
+            black_box(&body);
+        }));
+        println!(
+            "  body poses only {poses_ms:.3} ms; body vertices only {draw_ms:.3} ms ({} vertices)",
+            body.len()
+        );
+    }
 }
 
 #[cfg(test)]
