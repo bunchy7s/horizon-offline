@@ -1053,7 +1053,7 @@ pub fn lines(
 /// `ItemLore.addToTooltip`: each lore component under dark purple italic, with
 /// the component's own styles (including explicit `false`) winning on children.
 pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
-    let Some(Tag::List(entries)) = stack.data().and_then(|d| d.other("minecraft:lore")) else {
+    let Some(raw) = stack.data().and_then(|d| d.other("minecraft:lore")) else {
         return Vec::new();
     };
     let base = crate::text::Style {
@@ -1061,10 +1061,32 @@ pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
         italic: Some(true),
         ..Default::default()
     };
-    entries
-        .iter()
-        .map(|entry| {
-            let mut text = crate::entity_nbt::name_text(entry).resolve_legacy();
+    let lines: Vec<crate::text::Text> = match raw {
+        Tag::List(entries) => entries
+            .iter()
+            .map(|entry| crate::entity_nbt::name_text(entry).resolve_legacy())
+            .collect(),
+        Tag::String(s) => {
+            let str_val = s.to_string_lossy();
+            let trimmed = str_val.trim();
+            if trimmed.starts_with('[')
+                && let Ok(serde_json::Value::Array(items)) =
+                    serde_json::from_str::<serde_json::Value>(trimmed)
+            {
+                items
+                    .iter()
+                    .map(|item| crate::scoreboard::comp_text(item).resolve_legacy())
+                    .collect()
+            } else {
+                vec![crate::entity_nbt::name_text(raw).resolve_legacy()]
+            }
+        }
+        Tag::Compound(_) => vec![crate::entity_nbt::name_text(raw).resolve_legacy()],
+        _ => Vec::new(),
+    };
+    lines
+        .into_iter()
+        .map(|mut text| {
             for span in &mut text.spans {
                 span.style.inherit(&base);
             }
@@ -1358,6 +1380,57 @@ mod tests {
             .push(("minecraft:rarity".into(), Tag::String("uncommon".into())));
         sword.enchant("minecraft:sharpness", 1);
         assert_eq!(rarity(&sword, "common"), "rare");
+    }
+
+    #[test]
+    fn lore_texts_handles_compound_lists_and_json_strings() {
+        // Direct command components from issue #6405
+        let cmd = r#"[custom_name=[{"text":"Simple Custom Name","italic":false}],lore=[[{"text":"Simple Custom Lore","italic":false}]],rarity=epic,enchantments={aqua_affinity:1},unbreakable={}]"#;
+        let comp = horizon_items::item_data::command_components(cmd).unwrap();
+        let (damage, extra) = horizon_items::item_data::decode_components(Some(&comp));
+        let stack = ItemStack {
+            item: "minecraft:stick".into(),
+            count: 1,
+            damage,
+            extra,
+        };
+        assert_eq!(rarity(&stack, "common"), "epic");
+        let name = styled_name(&stack, || "fallback".into());
+        assert_eq!(name.plain(), "Simple Custom Name");
+        assert_eq!(name.spans[0].style.italic, Some(false));
+
+        let lore = lore_texts(&stack);
+        assert_eq!(lore.len(), 1);
+        assert_eq!(lore[0].plain(), "Simple Custom Lore");
+        assert_eq!(lore[0].spans[0].style.italic, Some(false));
+        assert_eq!(lore[0].spans[0].style.color, Some(crate::text::DARK_PURPLE));
+        assert!(TooltipDisplay::for_stack(&stack).shows("minecraft:lore"));
+
+        // Lore as a JSON string array
+        let mut json_array_stack = ItemStack::new("minecraft:stick", 1);
+        json_array_stack.data_mut().set_other(
+            "minecraft:lore",
+            Some(Tag::String(
+                r#"[{"text":"Array line","italic":false}]"#.into(),
+            )),
+        );
+        let lore_arr = lore_texts(&json_array_stack);
+        assert_eq!(lore_arr.len(), 1);
+        assert_eq!(lore_arr[0].plain(), "Array line");
+        assert_eq!(lore_arr[0].spans[0].style.italic, Some(false));
+
+        // Lore as a list of JSON strings
+        let mut json_str_stack = ItemStack::new("minecraft:stick", 1);
+        json_str_stack.data_mut().set_other(
+            "minecraft:lore",
+            Some(Tag::List(vec![Tag::String(
+                r#"{"text":"String line","color":"gold"}"#.into(),
+            )])),
+        );
+        let lore_str = lore_texts(&json_str_stack);
+        assert_eq!(lore_str.len(), 1);
+        assert_eq!(lore_str[0].plain(), "String line");
+        assert_eq!(lore_str[0].spans[0].style.color, Some(0xffaa00));
     }
 
     #[test]

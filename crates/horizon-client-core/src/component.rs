@@ -483,7 +483,16 @@ fn inline_object(
 /// else is a component (`ComponentSerialization`).
 pub fn name_text(tag: &Tag) -> Text {
     match tag {
-        Tag::String(s) => Text::legacy(&s.to_string_lossy()),
+        Tag::String(s) => {
+            let str_val = s.to_string_lossy();
+            let trimmed = str_val.trim();
+            if (trimmed.starts_with('{') || trimmed.starts_with('['))
+                && let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed)
+            {
+                return crate::scoreboard::comp_text(&v);
+            }
+            Text::legacy(&str_val)
+        }
         t => crate::scoreboard::comp_text(&crate::scoreboard::tag_to_json(t)),
     }
 }
@@ -687,5 +696,22 @@ mod tests {
         assert_eq!(v["text"], Value::String("Infinity".into()));
         let (v, _) = parse_snbt("{n:1.5}").unwrap();
         assert_eq!(v["n"], Value::from(1.5));
+    }
+
+    #[test]
+    fn name_text_parses_json_strings_and_legacy() {
+        let legacy = Tag::String("§6Golden Name".into());
+        let text = name_text(&legacy);
+        assert_eq!(text.plain(), "Golden Name");
+
+        let json_obj = Tag::String(r#"{"text":"Custom Name","italic":false}"#.into());
+        let text = name_text(&json_obj);
+        assert_eq!(text.plain(), "Custom Name");
+        assert_eq!(text.spans[0].style.italic, Some(false));
+
+        let json_arr = Tag::String(r#"[{"text":"Custom Array","bold":true}]"#.into());
+        let text = name_text(&json_arr);
+        assert_eq!(text.plain(), "Custom Array");
+        assert_eq!(text.spans[0].style.bold, Some(true));
     }
 }
