@@ -3125,7 +3125,7 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
-    /// A player took an anvil's result at `pos` (`AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` holds the inputs and the result as they were before. Set `cancel` to skip all of that; the result is still taken. @API:native_anvil_craft_pre@.
+    /// A player took an anvil's result at `pos` (`AnvilCraftEvent.Pre`), before the levels are charged, the inputs used up and the anvil worn. `craft` holds the inputs and the result as they were before. Set `cancel` to refuse the take: the result stays in its slot and the inputs, levels, inventory and cursor are as before the click. @API:native_anvil_craft_pre@.
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn anvil_craft_pre(&self, host: &mut dyn Host, event: &mut AnvilCraftPreEvent<'_>) -> Flow {

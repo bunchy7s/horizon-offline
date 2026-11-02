@@ -126,7 +126,13 @@ impl Game<'_> {
         if let Some(maps) = maps {
             self.register_made_maps(maps);
         }
-        let dropped = std::mem::take(&mut menu.dropped);
+        // A taken anvil result waits for AnvilCraftEvent.Pre: what the click
+        // dropped waits with it (lan_station_op throws it or refuses the take).
+        let dropped = if menu.anvil_craft.is_some() {
+            Vec::new()
+        } else {
+            std::mem::take(&mut menu.dropped)
+        };
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
         let crafted = std::mem::take(&mut menu.crafted);

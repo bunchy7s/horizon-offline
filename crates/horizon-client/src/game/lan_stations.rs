@@ -80,7 +80,8 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
-        menu.anvil_hook = kind == Kind::Anvil;
+        // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
+        menu.anvil_hook = kind == Kind::Anvil && !horizon_client::mod_api::mods().is_empty();
         if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
             && kind == Kind::Enchanting
         {
@@ -137,7 +138,12 @@ impl Game<'_> {
                 let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
                 (slots, gs.menu.data[0])
             });
-            self.guest_menu_op(host, gi, &mut gs.menu, op);
+            let mut undo = None;
+            let hook = gs.menu.anvil_hook;
+            self.guest_menu_op(host, gi, &mut gs.menu, |menu, env| {
+                undo = hook.then(|| menu.anvil_undo());
+                op(menu, env);
+            });
             // AnvilCraftEvent.Pre: the taken result's onTake waits for the mods.
             let mut anvil_craft = gs.menu.anvil_craft.take();
             let mut cancelled = false;
@@ -146,11 +152,17 @@ impl Game<'_> {
                 let (uuid, name) = (guest.uuid, guest.name.clone());
                 let mut cancel = false;
                 self.native_anvil_craft_pre(uuid, &name, gs.pos, craft, &mut cancel);
-                if cancel {
+                if cancel && let Some(undo) = undo {
+                    // The take is refused: the result, inputs, cost, inventory
+                    // and cursor are as before the click (the resync below
+                    // tells the client).
                     anvil_craft = None;
                     cancelled = true;
+                    self.guest_menu_op(host, gi, &mut gs.menu, |menu, _| menu.anvil_cancel(undo));
                 } else {
                     gs.menu.anvil_take(&self.menu_env());
+                    let dropped = std::mem::take(&mut gs.menu.dropped);
+                    self.drop_guest_items(host, gi, dropped);
                 }
             }
             // A cancelled take runs no createResult: the inputs are untouched.
