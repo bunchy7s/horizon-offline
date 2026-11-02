@@ -157,21 +157,24 @@ impl Arena {
         Self::with_usage(device, 4, capacity, usage, LARGE_PAGE_BYTES)
     }
     /// The sorted-index arena and, when `split`, the translucent arena
-    /// (vertices of `stride`), both with large pages, which no shader binds;
-    /// otherwise translucent quads stay in the section arena, and the indices
-    /// in pages flat draws (`flat`) bind as storage.
+    /// (vertices of `stride`) with large pages, which no shader binds;
+    /// otherwise translucent quads stay in the section arena. The indices go in
+    /// large pages too, unless flat draws (`flat`) bind their pages as storage.
     pub fn translucent_arenas(
         device: &wgpu::Device,
         stride: u64,
         flat: bool,
         split: bool,
     ) -> (Self, Option<Self>) {
-        if split {
-            let indices = Self::translucent_indices(device, 1 << 16);
-            (indices, Some(Self::translucent(device, stride, 1 << 18)))
+        let indices = if split && !flat {
+            Self::translucent_indices(device, 1 << 16)
         } else {
-            (Self::indices(device, 1 << 16, flat), None)
-        }
+            Self::indices(device, 1 << 16, flat)
+        };
+        (
+            indices,
+            split.then(|| Self::translucent(device, stride, 1 << 18)),
+        )
     }
     fn with_usage(
         device: &wgpu::Device,
@@ -927,6 +930,121 @@ mod tests {
         }
     }
 
+    /// Flat draws find a section's origin by the id its blocks name, in the section arena's
+    /// tables and, split, in the translucent arena's (`flat::TRANSLUCENT_KEYS`). Translucent
+    /// quads a shrink moves (`move_off_page`) keep naming their section, or flat draws would
+    /// put them at another section's origin.
+    #[test]
+    fn moved_translucent_quads_keep_their_section_s_flat_id() {
+        use super::super::{Part, SectionGpu, flat, move_off_page, upload::Uploads};
+        let Some((device, queue)) = device() else {
+            eprintln!("no GPU adapter: skipped");
+            return;
+        };
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(
+                "@vertex fn vs() -> @builtin(position) vec4<f32> { return vec4<f32>(0.0); }
+                 @fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(0.0); }"
+                    .into(),
+            ),
+        });
+        let terrain_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[],
+        });
+        let pipeline = |layout: &wgpu::PipelineLayout, label: &str, _: &str, _: &str, _, _| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let mut flat = flat::Flat::new(&device, &terrain_layout, 4 * GRAIN, 0, pipeline);
+        let stride = std::mem::size_of::<crate::mesher::TerrainVertex>() as u64;
+        let mut translucent = Arena::translucent(&device, stride, 4 * GRAIN);
+        translucent.page_limit = 4 * GRAIN;
+        flat.set_translucent_page_vertices(translucent.page_vertices());
+        let mut uploads = Uploads::new(&device);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        // Page 0: another section's grain, then this one's two; page 1: a grain taken.
+        let (_, other) = alloc(&mut translucent, &device, &queue, GRAIN).unwrap();
+        let (_, at) = alloc(&mut translucent, &device, &queue, 2 * GRAIN).unwrap();
+        let (_, rest) = alloc(&mut translucent, &device, &queue, GRAIN).unwrap();
+        assert_eq!(
+            alloc(&mut translucent, &device, &queue, GRAIN),
+            Some((1, 0))
+        );
+        translucent.release(0, rest, GRAIN);
+        let key = |page: u32| page + flat::TRANSLUCENT_KEYS;
+        let other_id = flat.add(&device, &mut encoder, &mut uploads, key(0), other, GRAIN);
+        // Its solid quads in the section arena's page 0, its translucent ones here.
+        let id = flat.add(&device, &mut encoder, &mut uploads, 0, 0, GRAIN);
+        flat.place(
+            &device,
+            &mut encoder,
+            &mut uploads,
+            id,
+            key(0),
+            at,
+            2 * GRAIN,
+        );
+        let mut section = SectionGpu {
+            page: 0,
+            start: 0,
+            translucent_at: (0, at),
+            solid: 64,
+            sides: crate::mesher::Sides::unsorted(64),
+            translucent: 128,
+            sort: super::super::translucency::SortState::new(Vec::new()),
+            sorted_indices: None,
+            flat_id: Some(id),
+            fading: None,
+            leaving: None,
+            animated_layers: Box::new([]),
+        };
+        translucent.close(0);
+        let mut budget = u64::MAX;
+        assert!(move_off_page(
+            &mut translucent,
+            &mut encoder,
+            Some((&mut flat, &device, &mut uploads)),
+            std::iter::once(&mut section),
+            0,
+            Part::Translucent,
+            &mut budget
+        ));
+        uploads.finish(&encoder);
+        queue.submit([encoder.finish()]);
+        let (page, start) = section.translucent_at;
+        assert_eq!(page, 1);
+        assert_eq!(section.flat_id, Some(id));
+        let named =
+            |page: u32, grain: u64| read(&device, &queue, flat.blocks(key(page)), grain * 4);
+        for grain in start / GRAIN..(start / GRAIN + 2) {
+            assert_eq!(named(1, grain), id, "grain {grain} of its new range");
+        }
+        // The section arena's table and the other section's grain are untouched.
+        assert_eq!(read(&device, &queue, flat.blocks(0), 0), id);
+        assert_eq!(named(0, other / GRAIN), other_id);
+    }
+
     /// Draws bind a large page up to the end of its last range in use, a grain at
     /// least: wgpu clears what a binding covers and nothing wrote when the frame is
     /// submitted, so a grown page bound whole had its new tail cleared on the GPU.
@@ -1028,9 +1146,9 @@ mod tests {
     }
 
     /// The translucent arena comes with the split layout alone, and only then
-    /// are the index pages large. Otherwise, as while a shader pack's terrain
-    /// draws flat (gfx's `translucent_split`), translucent quads keep to the
-    /// section arena, and flat draws (`flat`) bind the index pages as storage.
+    /// are the index pages large, unless flat draws (`flat`) bind them as
+    /// storage. Otherwise, as while a shader pack's terrain draws flat (gfx's
+    /// `translucent_split`), translucent quads keep to the section arena.
     #[test]
     fn translucent_arenas_follow_the_layout() {
         let devices = devices();
@@ -1050,9 +1168,9 @@ mod tests {
                     assert_eq!(translucent.is_some(), split, "{case}");
                     let bytes = indices.page_vertices() * 4;
                     let storage = indices.usage.contains(wgpu::BufferUsages::STORAGE);
-                    assert_eq!(storage, flat && !split, "{case}");
+                    assert_eq!(storage, flat, "{case}");
                     assert!(!storage || bytes <= limits.max_storage_buffer_binding_size);
-                    assert_eq!(bytes > PAGE_BYTES, split && large, "{case}");
+                    assert_eq!(bytes > PAGE_BYTES, split && !flat && large, "{case}");
                     if let Some(t) = translucent {
                         assert_eq!(t.page_vertices() * 24 > PAGE_BYTES, large, "{case}");
                     }

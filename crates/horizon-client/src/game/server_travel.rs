@@ -2,8 +2,8 @@
 //!
 //! A server holds a level per dimension (game/levels.rs). A player who steps
 //! into a Nether or End portal moves to the destination's level, which opens
-//! if nobody was there: the swap is the in-frame path's portal plans and
-//! arrival search, and the player hears it as `ServerPlayer.teleport` into
+//! if nobody was there: the portal plans and arrival search pick the exit,
+//! and the player hears it as `ServerPlayer.teleport` into
 //! another level: a Respawn packet keeping all data, then a teleport to the
 //! exit once the destination has loaded around them.
 
@@ -896,7 +896,6 @@ impl Game<'_> {
         let clock_rate = self.network_clock_rate();
         TickCtx {
             world: &mut self.world,
-            host: None,
             entities: &[],
             next_entity: &mut self.next_entity,
             spawn,

@@ -43,13 +43,6 @@ impl Game<'_> {
         {
             return (!g.dead).then_some((g.position, [g.yaw, g.pitch]));
         }
-        if id == host.host_entity {
-            let p = self.player.as_ref()?;
-            return Some((
-                [p.position.x, p.position.y, p.position.z],
-                [self.yaw, self.pitch],
-            ));
-        }
         if let Some(special) = self.camera_extra(id) {
             return Some((special.position, special.rotation));
         }
@@ -101,9 +94,6 @@ impl Game<'_> {
         // Player.isPickable: not a spectator.
         if let Some(g) = host.hub.guests.iter().find(|g| g.entity_id == id) {
             return !g.spectator() && !g.dead;
-        }
-        if id == host.host_entity {
-            return self.player.is_some() && !self.spectator();
         }
         if self.camera_extra(id).is_some() {
             return true;

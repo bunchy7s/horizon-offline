@@ -16,8 +16,8 @@ use horizon_world::registry::BlockStateId;
 /// An `AreaEffectCloud` a server tracks: what its client tick reads.
 pub(super) struct RemoteCloud {
     id: u32,
-    at: [f64; 3],
-    radius: f32,
+    pub(super) at: [f64; 3],
+    pub(super) radius: f32,
     waiting: bool,
     particle: ParticleOptions,
 }
@@ -325,6 +325,7 @@ impl Game<'_> {
                 on_ground: false,
                 owner: None,
                 guest: None,
+                power: 4.0,
             }),
             // FallingBlockEntity.recreateFromPacket: the block state is the data.
             "minecraft:falling_block" => self.falling.push(FallingBlock {
@@ -610,15 +611,16 @@ impl Game<'_> {
         // fuse down (the swell and flash follow it) between the server's
         // updates (every 10 ticks), and a client discards it when the fuse
         // runs out; only the server explodes it.
-        let (world, collision, assets, facts) = (
+        let (world, collision, assets, facts, fluids) = (
             &self.world,
             self.collision,
             &self.pack.assets,
             self.res.facts(),
+            &self.res.motion().fluids,
         );
         self.tnts.retain_mut(|t| {
             // A fluid lookup that fails leaves it where its move put it.
-            let _ = t.tick(world, collision, assets, facts);
+            let _ = t.tick(world, collision, assets, facts, fluids);
             t.fuse > 0
         });
         // FallingBlockEntity.tick runs on a client too: the block falls by
@@ -918,11 +920,13 @@ mod tests {
 
     #[test]
     fn a_thrown_item_falls_and_drags_like_a_throwable_projectile() {
-        // ThrowableProjectile.tick: gravity 0.03, then the air drag 0.99.
+        // ThrowableProjectile.tick: gravity 0.03, then the air drag 0.99F
+        // (`getAirDrag`, a float widened to the double it scales by).
+        let drag = f64::from(0.99_f32);
         let mut p = thrown(ProjectileKind::Egg);
         remote_projectile_tick(&mut p, &Empty);
-        assert!((p.velocity.x - 1.5 * 0.99).abs() < 1e-9, "{p:?}");
-        assert!((p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9, "{p:?}");
+        assert!((p.velocity.x - 1.5 * drag).abs() < 1e-9, "{p:?}");
+        assert!((p.velocity.y - (-0.03 * drag)).abs() < 1e-9, "{p:?}");
         // A wind charge keeps its speed: no gravity and no drag
         // (AbstractWindCharge: acceleration 0, inertia 1).
         let mut p = thrown(ProjectileKind::WindCharge);

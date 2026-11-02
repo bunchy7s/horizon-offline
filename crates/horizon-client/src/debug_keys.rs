@@ -28,6 +28,10 @@ pub enum DebugAction {
     NetworkCharts,
     LightmapTexture,
     ImprovedTransparency,
+    /// F3+R: start a repro recording, or stop it and write its bundle.
+    RecordSession,
+    /// F3+E: write the bundle now.
+    ExportRepro,
 }
 
 /// The mappings `handleDebugKeys` tests, in its order.
@@ -67,6 +71,14 @@ pub const ACTIONS: [(&str, DebugAction); 20] = [
         "key.debug.improvedTransparency",
         DebugAction::ImprovedTransparency,
     ),
+];
+
+/// Horizon's own debug keys: fixed, so they never enter the options table that
+/// vanilla parity compares (`MAPPINGS`). Off until the AI Agent page enables
+/// them; `Game` decides that in `debug_action`.
+const HORIZON_ACTIONS: [(&str, DebugAction); 2] = [
+    ("key.keyboard.r", DebugAction::RecordSession),
+    ("key.keyboard.e", DebugAction::ExportRepro),
 ];
 
 /// GLFW's key actions.
@@ -212,6 +224,11 @@ impl DebugKeys {
         let mut did = false;
         for (name, action) in ACTIONS {
             if binds.get(name) == key {
+                did |= host.debug_action(action, shift);
+            }
+        }
+        for (name, action) in HORIZON_ACTIONS {
+            if key == name {
                 did |= host.debug_action(action, shift);
             }
         }

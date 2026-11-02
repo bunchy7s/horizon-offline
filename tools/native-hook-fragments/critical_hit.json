@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "critical_hit",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_critical_hit",
+      "neoforge": "CriticalHitEvent",
+      "side": "both",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A player's melee hit on a living target decides whether it is critical (`native_critical_hit`).",
+  "doc_summary": "A player's damaging melee hit on a living target: `native_critical_hit(target_kind, vanilla_critical, critical, damage_multiplier)` may force or deny the critical hit and change its multiplier (1.5 for a vanilla crit, else 1.0); the sweep, sound and particles follow the decided result. Not fired for a dragon part or a hit that does no damage. Bundles need \"hooks\": @API:critical_hit@."
+}

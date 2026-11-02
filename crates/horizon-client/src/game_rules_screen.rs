@@ -6,7 +6,7 @@
 use crate::{
     confirm_screen::Confirm,
     font::Font,
-    gamerules::{self, GameRules, RULES, Rule, Value},
+    gamerules::{self, GameRules, Rule, Value},
     hud::{HudAtlas, HudBatch},
     lang,
     text::{Style, Text, named_color},
@@ -153,8 +153,8 @@ impl RulesScreen {
     fn build(rules: &GameRules, in_world: bool) -> Self {
         // setInitialFocus: the search box.
         let search = EditBox::new(0.0, 0.0, SEARCH_WIDTH, 15.0);
-        let numbers = RULES
-            .iter()
+        let numbers = rules
+            .available_rules()
             .filter(|r| matches!(r.default, Value::Int(_)))
             .map(|r| {
                 let mut b = EditBox::new(0.0, 0.0, 44.0, 20.0);
@@ -181,7 +181,7 @@ impl RulesScreen {
         let filter = self.search.value.to_lowercase();
         let has = |s: &str| s.to_lowercase().contains(&filter);
         let mut categories: Vec<(&'static str, Vec<&'static Rule>)> = Vec::new();
-        for r in RULES {
+        for r in self.values.available_rules() {
             let key = name_key(r);
             let description = format!("{key}.description");
             let matches = has(r.name)
@@ -238,8 +238,8 @@ impl RulesScreen {
             .any(|(name, b)| gamerules::rule(name).is_none_or(|r| parse(r, &b.value).is_none()))
     }
     fn changes(&self) -> Vec<(&'static str, Value)> {
-        RULES
-            .iter()
+        self.values
+            .available_rules()
             .filter_map(|r| {
                 let value = self.values.get(r.name)?;
                 (Some(value) != self.initial.get(r.name)).then_some((r.name, value))
@@ -636,6 +636,7 @@ impl RulesScreen {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gamerules::RULES;
 
     #[test]
     fn a_switch_narrates_its_name_value_description_and_next_value() {

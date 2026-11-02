@@ -61,7 +61,7 @@ Climate.RTree.search	port	crates/horizon-world/src/worldgen/climate/index.rs::Cl
 Climate.RTree.Node.distance	port	crates/horizon-world/src/worldgen/climate/index.rs::distance	squared distance from the target to the node's box
 Climate.RTree.SubTree.search	port	crates/horizon-world/src/worldgen/climate/index.rs::ClimateIndex::search	recursive search over the children
 Climate.Sampler.sample	port	crates/horizon-world/src/worldgen/climate.rs::ClimateSampler::sample	samples the six climate fields at a quart
-FixedBiomeSource.findBiomeHorizontal	missing		unsure: flat worlds use one fixed biome, and this override picks a random point in the box; Horizon's ring search is the generic one and draws random values in a different order
+FixedBiomeSource.findBiomeHorizontal	port	crates/horizon-world/src/worldgen/structure/stronghold.rs::RingSearch::find_fixed	the one biome is allowed or it is not; an allowed one draws a random point of the square (two draws, no reservoir search), and the ring search takes the ring chunk itself when it is not
 FixedBiomeSource.findClosestBiome3d	port	crates/horizon-world/src/worldgen/generator.rs::Pipeline::find_closest_biome	generic 3D search; for one biome its first sample is the origin
 MobSpawnSettings.SpawnerData.toString	skip:debug		debug text only
 MultiNoiseBiomeSource.stable	skip:other		preset check used only by world creation dimension validation

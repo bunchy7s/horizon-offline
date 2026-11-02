@@ -1951,6 +1951,7 @@ impl Game<'_> {
                         .play("minecraft:entity.mooshroom.shear", sound_at, 1.0, 1.0);
                     // convertTo(COW): the cow takes its place, then the mushrooms drop.
                     self.convert_mob(i, "minecraft:cow");
+                    self.mooshroom_shear_puff([at.x, at.y, at.z], height);
                     let drops = self.sequence_loot(
                         "minecraft:shearing/mooshroom",
                         &format!("minecraft:shearing/mooshroom/{variant}"),

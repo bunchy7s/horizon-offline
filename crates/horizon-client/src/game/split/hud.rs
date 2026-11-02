@@ -58,7 +58,7 @@ fn panel(batch: &mut HudBatch, atlas: &horizon_client::hud::HudAtlas, [px, py, p
 pub(super) struct Prompt {
     pub(super) ask: Ask,
     pub(super) title: String,
-    pub(super) choices: Vec<(Button, &'static str)>,
+    pub(super) choices: Vec<(Button, String)>,
 }
 
 /// What a prompt asks: a controller may join (every view, a strip at the top: nobody stops
@@ -70,12 +70,20 @@ pub(super) enum Ask {
     Lost,
 }
 
+/// A splitscreen prompt's text in the selected language (`horizon.splitscreen.prompt.*`).
+pub(super) fn tr(key: &str, args: &[&dyn std::fmt::Display]) -> String {
+    horizon_client::lang::tr(&format!("horizon.splitscreen.prompt.{key}"), args)
+}
+
 /// The question on a waiting player's view.
 pub(super) fn lost_prompt(name: &str) -> Prompt {
     Prompt {
         ask: Ask::Lost,
-        title: format!("{name}: controller disconnected"),
-        choices: vec![(Button::South, "Use another"), (Button::East, "Leave")],
+        title: tr("lost", &[&name]),
+        choices: vec![
+            (Button::South, tr("lost.use_another", &[])),
+            (Button::East, tr("lost.leave", &[])),
+        ],
     }
 }
 
@@ -119,7 +127,7 @@ impl Game<'_> {
             let glyphs: Vec<_> = prompt
                 .choices
                 .iter()
-                .map(|&(b, what)| (b.label(style), b.color(style), what))
+                .map(|(b, what)| (b.label(style), b.color(style), what.as_str()))
                 .collect();
             let line: f32 = glyphs
                 .iter()

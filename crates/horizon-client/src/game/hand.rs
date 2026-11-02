@@ -423,7 +423,6 @@ impl Game<'_> {
             || before(self.interaction_hit().map(|h| h.1))
             || before(self.dragon_hit().map(|h| h.1))
             || before(self.mob_hit().map(|h| h.1))
-            || before(self.guest_hit().map(|h| h.1))
             || before(self.redirectable_hit().map(|h| h.1))
     }
     /// `LocalPlayer.isHandsBusy`: paddling a boat.
