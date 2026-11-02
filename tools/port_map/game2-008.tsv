@@ -34,7 +34,7 @@ StonecutterMenu.removed	port	crates/horizon-client/src/game/stations.rs::Game::c
 ArrowItem.asProjectile	port	crates/horizon-client/src/game/dispenser.rs::Game::shoot_projectile_item	dispensed arrows are built in the arrow arm of the item shot
 BlockItem.updateBlockEntityComponents	port	crates/horizon-client/src/block_entity_item.rs::place	the placed block entity takes the item's components
 BlockItem.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::place	the placement checks, including the survive check, run in Sim::place
-BlockItem.onDestroyed	missing		unsure: a container item whose item entity is destroyed should spill its contents; no Horizon code does this
+BlockItem.onDestroyed	missing		no `onDestroyed` on any item: an item entity of a shulker box or a bundle destroyed by fire or lava spills nothing
 BoatItem.getBoat	port	crates/horizon-client/src/game/boats.rs::Game::place_boat	boat placed at the hit point with the item's stack config
 BucketItem.playEmptySound	port	crates/horizon-world/src/level/buckets.rs::Sim::empty_sound	
 BundleItem.getWeightSafe	port	crates/horizon-items/src/bundle.rs::Contents::weight_fraction	float fraction; vanilla compares an exact Fraction
@@ -42,7 +42,7 @@ BundleItem.getBarWidth	port	crates/horizon-items/src/bundle.rs::Contents::bar
 BundleItem.getBarColor	port	crates/horizon-items/src/bundle.rs::Contents::bar	
 BundleItem.removeOneItemFromBundle	port	crates/horizon-items/src/bundle.rs::Contents::remove_one	
 BundleItem.getTooltipImage	port	crates/horizon-items/src/bundle.rs::tooltip_layout	gap: minor: the tooltip_display rule that hides the bundle contents is not checked here
-BundleItem.onDestroyed	missing		unsure: a bundle whose item entity is destroyed should spill its contents; no Horizon code does this
+BundleItem.onDestroyed	missing		same as `BlockItem.onDestroyed`: nothing spills a destroyed item entity's contents
 BundleItem.playRemoveOneSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	the menu queues the same sound in menu/bundle.rs
 BundleItem.playInsertSound	port	crates/horizon-client/src/menu/bundle.rs::Menu::carried_bundle_click	queues the insert or insert-fail sound
 BundleItem.playDropContentsSound	port	crates/horizon-client/src/game.rs::Game::drop_bundle_content	
@@ -54,8 +54,8 @@ CrossbowItem.createProjectile	port	crates/horizon-client/src/arrows.rs::Ticker::
 CrossbowItem.getShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the shot pitch per index is inline
 CrossbowItem.getRandomShotPitch	inline	crates/horizon-client/src/game/crossbow.rs::Game::shoot_crossbow	the random pitch formula is inline
 CrossbowItem.getPowerForTime	inline	crates/horizon-client/src/game/crossbow.rs::Game::tick_crossbow	the charge fraction capped at one is the tick check against the charge time
-DyeColor.getMixedColor	missing		player: a baby sheep, wolf or cat from parents of two dye colours gets a mixed colour; Horizon has no breeding dye mix (only sheep_color for spawns)
-DyeColor.findColorMixInRecipes	missing		player: part of the same breeding dye mix; the crafting recipe lookup for two dyes is not done for offspring
+DyeColor.getMixedColor	port	crates/horizon-client/src/game/creatures.rs::Game::dye_mix	the colour of the crafting recipe that mixes the two dyes, else one of the two picked at random (`next_boolean`); `creatures.rs:3153`, `:3176` and `:3222` give the offspring of a sheep, wolf or cat its colour with it
+DyeColor.findColorMixInRecipes	port	crates/horizon-client/src/game/creatures.rs::Game::dye_color_mix_in_recipes	the two dyes laid out as a 2x2 crafting grid through `Recipes::find`, and the result read back as a dye colour by its `_dye` suffix
 FireworkRocketItem.createDispenseConfig	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_projectile	rocket config: offset 0.5000099, uncertainty 1, power 0.5, event 1004
 FireworkRocketItem.getEntityJustOutsideOfBlockPos	port	crates/horizon-client/src/game/dispenser.rs::Game::dispense_position	the position just outside the dispenser on the facing side
 HangingEntityItem.mayPlace	port	crates/horizon-client/src/game/paintings.rs::Game::place_painting	paintings take no vertical face; an item frame (ItemFrameItem.mayPlace) may go on one and only needs the build height, which place_item_frame checks
@@ -84,7 +84,7 @@ Item.Properties.horseArmor	skip:data		registration builder
 Item.Properties.nautilusArmor	skip:data		registration builder
 Item.Properties.requiredFeatures	skip:data		registration builder
 Item.Properties.delayedHolderComponent	skip:data		registration builder
-Item.Properties.loweredMobVisibility	missing		unsure: the mob_visibility component is not read by Horizon's mob targeting
+Item.Properties.loweredMobVisibility	missing		the `mob_visibility` component is parsed (it is in `item_model.rs`'s component table and the protocol's item hash), but no mob targeting reads it
 Item.Properties.finalizeInitializer	skip:data		registration builder
 Item.TooltipContext.of	skip:java		tooltip context factory; Horizon passes the level and player to the tooltip functions
 ItemStack.validateStrict	skip:java		codec-side validation of components and stack size
@@ -97,7 +97,7 @@ ItemStack.isBroken	inline	crates/horizon-client/src/game.rs::Game::damage_held	t
 ItemStack.nextDamageWillBreak	inline	crates/horizon-client/src/game/trident.rs::Game::use_trident	gap: minor: only the trident's check is ported here
 ItemStack.processDurabilityChange	port	crates/horizon-client/src/game/enchant_effects.rs::Game::durability_loss	the Unbreaking-adjusted loss
 ItemStack.applyDamage	port	crates/horizon-client/src/game.rs::Game::damage_held	gap: minor: no item durability advancement trigger fires
-ItemStack.hurtAndConvertOnBreak	missing		unsure: a carrot or fungus on a stick that breaks should become a fishing rod; no conversion was found
+ItemStack.hurtAndConvertOnBreak	missing		nothing converts a broken carrot on a stick or fungus on a stick into a fishing rod
 ItemStack.hurtEnemy	port	crates/horizon-client/src/game/mace.rs::Game::weapon_wear	the per-hit durability loss of a weapon
 ItemStack.interactLivingEntity	port	crates/horizon-client/src/game.rs::Game::interact_entity	equip-on-interact is in the mob paths (nautili.rs, ghasts.rs)
 ItemStack.copy	skip:java		value copy
@@ -111,21 +111,21 @@ ItemStack.hashStackList	skip:java		hash for collections
 ItemStack.onCraftedBy	inline	crates/horizon-client/src/game.rs::Game::click_inventory	gap: minor: the crafted statistic is added only on the inventory grid craft path here
 ItemStack.set	skip:other		component write; Horizon stores component data in typed fields
 ItemStack.update	skip:java		functional update helper
-ItemStack.applyComponentsAndValidate	missing		unsure: a validated component patch has no single Horizon counterpart; /item modify is a separate path
+ItemStack.applyComponentsAndValidate	missing		a validated component patch has no single counterpart: `/item modify` goes through its own path
 ItemStack.getStyledHoverName	port	crates/horizon-client/src/game/stations.rs::Game::stack_hover_name	gap: minor: plain text; the rarity colour and italic style are not applied here
 ItemStack.addToTooltip	port	crates/horizon-client/src/item_tooltip.rs::lines	
 ItemStack.addUnitComponentToTooltip	inline	crates/horizon-client/src/game/stations.rs::Game::stack_tooltip_lines	unit lines such as unbreakable, gated by the tooltip display
 ItemStack.canPlaceOnBlockInAdventureMode	port	crates/horizon-client/src/game/game_mode.rs::Game::can_place_on_in_adventure	the can_place_on predicates gate a placement in adventure mode
-ItemStack.canBreakBlockInAdventureMode	missing		player: in adventure mode a block can be broken only when the held item's can_break list allows it; Horizon does not read that component
-ItemStack.getDamageSource	missing		unsure: a stack's damage_type component is not read when a weapon hits; no Horizon reader found
+ItemStack.canBreakBlockInAdventureMode	port	crates/horizon-client/src/game/game_mode.rs::Game::adventure_predicate	the main-hand stack's `can_break` predicate against the block at the position (one predicate or a list, block ids or tags, exact or ranged state properties; a predicate with `nbt` or `components` never matches), read by `game_mode.rs:200`; the same fn answers `can_place_on`
+ItemStack.getDamageSource	missing		a stack's `damage_type` component is not read when a weapon hits: the attack builds its damage from the mob's own sources (`mobs::Damage`), and `damage_type` is only used for the enchantment damage tags
 ItemStackTemplate.fromNonEmptyStack	port	crates/horizon-items/src/item_data.rs::template_tag	stack to template tag
 ItemStackTemplate.withCount	skip:java		record copy with a new count
 ItemStackTemplate.apply	port	crates/horizon-assets/src/item_model.rs::stack_from_template	
-ItemUtils.onContainerDestroyed	missing		unsure: destroyed container items do not spill their contents; see BlockItem.onDestroyed
+ItemUtils.onContainerDestroyed	missing		the shared spill of a destroyed container item has no counterpart; see `BlockItem.onDestroyed`
 Items.registerBlock	skip:data		item registry bootstrap
 Items.registerItem	skip:data		item registry bootstrap
 JukeboxSong.hasFinished	port	crates/horizon-items/src/items.rs::Song::finished	
-JukeboxSongPlayer.setSongWithoutPlaying	missing		unsure: no load path restores a jukebox's song start tick
+JukeboxSongPlayer.setSongWithoutPlaying	inline	crates/horizon-client/src/save.rs::decode_block_entity	the load sets the record and `ticks_since_song_started` straight into the `Jukebox` block entity, which is the whole of `setSongWithoutPlaying`; the song carries on from that tick in `tick_jukebox`
 JukeboxSongPlayer.play	port	crates/horizon-client/src/game/jukebox.rs::Game::start_song	the song starts at the jukebox with its sound
 JukeboxSongPlayer.shouldEmitJukeboxPlayingEvent	inline	crates/horizon-client/src/game/jukebox.rs::Game::tick_jukebox	
 JukeboxSongPlayer.spawnMusicParticles	inline	crates/horizon-client/src/game/jukebox.rs::Game::tick_jukebox	the note particle is emitted in tick_jukebox
@@ -138,7 +138,7 @@ MapItem.createNewSavedData	port	crates/horizon-client/src/game/maps.rs::MapData:
 MapItem.getCorrectStateForFluidBlock	inline	crates/horizon-client/src/game/maps.rs::Game::update_map	the map colour pass
 MapItem.inventoryTick	port	crates/horizon-client/src/game/maps.rs::Game::tick_maps	
 MapItem.lockMap	port	crates/horizon-client/src/menu.rs::Menu::map_crafted	the lock branch of the post processing
-MapItem.useOn	missing		player: using a map on a banner block should toggle that banner's marker on the map; Horizon has no banner toggle
+MapItem.useOn	port	crates/horizon-client/src/game/maps.rs::Game::use_map_on_banner	a map used on a block in the `minecraft:banners` tag toggles that banner's marker (`MapData::toggle_banner`); a failed toggle ends the use without a swing, and `game/remote.rs` predicts the same for its own map
 MobBucketItem.emptyContents	port	crates/horizon-world/src/level/buckets.rs::Sim::bucket_empty	the MobWater and Nothing contents
 PotionItem.getDefaultInstance	skip:data		default stack data
 PotionItem.useOn	port	crates/horizon-client/src/game/potions.rs::Game::use_water_bottle_on_block	a water bottle poured on #convertible_to_mud makes mud and empties the bottle
