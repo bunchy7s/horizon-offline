@@ -513,7 +513,12 @@ impl Game<'_> {
             };
             // `updateForLiving`: seeded by the entity id plus the context ordinal.
             let seed = mob.id as i32 + ordinal;
-            let state = self.resolve_item(&stack, context, Some(&owner), seed);
+            let hand = if off_hand {
+                horizon_client::cit::Hand::Off
+            } else {
+                horizon_client::cit::Hand::Main
+            };
+            let state = self.resolve_item_in_hand(&stack, context, Some(&owner), seed, hand);
             if lit {
                 self.submit_item_world(&state, t, light, out);
             } else {

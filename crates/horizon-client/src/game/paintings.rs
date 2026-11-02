@@ -230,6 +230,9 @@ impl Game<'_> {
                 return false;
             }
         }
+        if self.hanging_place_cancelled("minecraft:painting", pos) {
+            return true;
+        }
         let (lo, hi) = candidate.bounds();
         let at = [
             (lo[0] + hi[0]) / 2.0,

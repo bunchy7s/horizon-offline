@@ -417,24 +417,35 @@ pub(crate) fn with_built_test_world_rules(
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../.local/horizon-client")
         .join(horizon_core::VANILLA_VERSION);
+    with_resource_test_world(&root, others, mob_griefing, build, f)
+}
+/// The same mob world loaded from a content mod's resource root.
+#[cfg(test)]
+pub(crate) fn with_resource_test_world(
+    root: &std::path::Path,
+    others: &[Seen],
+    mob_griefing: bool,
+    build: impl FnOnce(&mut crate::world::World, &horizon_world::registry::BlockRegistry),
+    f: impl FnOnce(&MobWorld<'_>, &super::MobTypes),
+) -> bool {
     if !root.join("entity-types.json").exists() || !root.join("movement-properties.nbt").exists() {
         return false;
     }
-    let assets = crate::assets::Assets::load(&root).unwrap();
+    let assets = crate::assets::Assets::load(root).unwrap();
     let registry = assets.registry;
-    let facts = BlockFacts::load(&root, registry).unwrap();
-    let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
-    let data = super::MobData::load(&root, &facts);
-    let types = super::MobTypes::load(&root).unwrap();
-    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let facts = BlockFacts::load(root, registry).unwrap();
+    let motion = crate::motion::MotionResources::load(root, &assets).unwrap();
+    let data = super::MobData::load(root, &facts);
+    let types = super::MobTypes::load(root).unwrap();
+    let biomes = crate::biome::Biomes::load(root).unwrap();
     let items = crate::items::Items::load(
-        &root,
+        root,
         registry,
         &facts,
         &horizon_world::loot::PackOverlay::NONE,
     )
     .unwrap();
-    let collision = crate::collisions::load(&root, registry).unwrap();
+    let collision = crate::collisions::load(root, registry).unwrap();
     let air = registry.default_state("minecraft:air").unwrap();
     let mut world = crate::world::World::new(air, 0);
     build(&mut world, registry);

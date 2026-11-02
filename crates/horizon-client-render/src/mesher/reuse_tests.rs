@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk::Light;
 
 #[test]
 fn padded_reuse_resets_missing_neighbors_and_matches_chunk_reads_across_layouts() {
@@ -45,6 +46,65 @@ fn padded_reuse_resets_missing_neighbors_and_matches_chunk_reads_across_layouts(
     }
 }
 
+#[test]
+fn padded_fill_reads_every_neighbour_and_its_light_like_chunk_reads() {
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut pad = Padded::default();
+    let mut own = Box::new([0; 4096]);
+    for min_y in [MIN_Y, 0] {
+        let layout = crate::chunk::ColumnLayout::new(min_y, 32 * 16).unwrap();
+        // Nine chunks with their own blocks and per-block light, near the
+        // bottom and top sections too, where the padding leaves the column.
+        let chunks: Vec<Chunk> = (0..9)
+            .map(|i| {
+                let mut c = Chunk::with_layout(i % 3 - 1, i / 3 - 1, layout);
+                for s in [0, 1, 30, 31] {
+                    for _ in 0..300 {
+                        let (x, y, z) = (next() % 16, next() % 16, next() % 16);
+                        let y = min_y + s * 16 + y as i32;
+                        c.set(x as i32, y, z as i32, 1 + (next() % 40) as u32);
+                    }
+                    let mut light = Box::new([0u8; 4096]);
+                    light.iter_mut().for_each(|l| *l = next() as u8);
+                    std::sync::Arc::make_mut(&mut c.sections[s as usize]).light =
+                        Light::Full(light);
+                }
+                c
+            })
+            .collect();
+        let region: [[Option<&Chunk>; 3]; 3] =
+            std::array::from_fn(|rz| std::array::from_fn(|rx| Some(&chunks[rz * 3 + rx])));
+        for sy in [0, 1, 30, 31] {
+            pad.fill(&region, sy, &mut own);
+            let base_y = min_y + sy * 16;
+            for y in -B..16 + B {
+                for z in -B..16 + B {
+                    for x in -B..16 + B {
+                        let c = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize].unwrap();
+                        let (cx, cy, cz) = (x & 15, base_y + y, z & 15);
+                        assert_eq!(
+                            pad.blocks[pi(x, y, z)],
+                            c.get(cx, cy, cz),
+                            "{min_y} {sy} {x} {y} {z}"
+                        );
+                        assert_eq!(
+                            pad.light[pi(x, y, z)],
+                            c.light(cx, cy, cz),
+                            "{min_y} {sy} {x} {y} {z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Run explicitly with prepared assets; never silently pass without exercising geometry.
 /// With a shader pack lighting the faces, every face of a lone stone block has one colour; the
 /// game's face shading (up 1.0, down 0.5, north/south 0.8, east/west 0.6) is left to the pack.
@@ -72,6 +132,7 @@ fn a_shader_pack_lights_the_faces_itself() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting,
+            separate_ao: false,
             assets: &assets,
             render: &render,
             tables: &tables,
@@ -96,6 +157,54 @@ fn a_shader_pack_lights_the_faces_itself() {
     };
     assert_eq!(colours(false).len(), 4);
     assert_eq!(colours(true).len(), 1);
+}
+
+#[test]
+#[ignore = "requires prepared 26.3 resources (HORIZON_MESH_TEST_RESOURCES or .local/horizon-client/26.3)"]
+fn separate_ao_passes_ao_in_alpha_without_darkening_rgb() {
+    let root = std::env::var_os("HORIZON_MESH_TEST_RESOURCES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../.local/horizon-client/26.3")
+        });
+    let assets = Assets::load(&root).unwrap();
+    let facts = BlockFacts::load(&root, assets.registry).unwrap();
+    let biomes = Biomes::load(&root).unwrap();
+    let render = assets.reload(&root).unwrap();
+    let visibility = crate::models::load_visibility(&root, assets.registry).unwrap();
+    let tables = MeshTables::new(&assets, &render, &facts, visibility.clone()).unwrap();
+    let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
+    let mut chunk = Chunk::empty(0, 0);
+    // Place stone with neighbouring blocks to create AO variations.
+    chunk.set(8, MIN_Y + 8, 8, stone);
+    chunk.set(9, MIN_Y + 8, 8, stone);
+    let mut region = [[None; 3]; 3];
+    region[1][1] = Some(&chunk);
+    let mut mesher = Mesher {
+        nether_shading: false,
+        shader_pack_lighting: true,
+        separate_ao: true,
+        assets: &assets,
+        render: &render,
+        tables: &tables,
+        biomes: &biomes,
+        visibility,
+        zoom: BiomeZoom::new(0),
+        blend_radius: 0,
+        smooth_lighting: true,
+        cutout_leaves: true,
+        translucent_layers: &[],
+        leaf_culling: LeafCullingMode::Off,
+    };
+    let mesh = mesher.mesh(&region, 0);
+    assert!(!mesh.solid.is_empty());
+    for v in &mesh.solid {
+        // RGB components should be pure un-darkened white (0xFFFFFF) because shader_pack_lighting is on.
+        assert_eq!(v.color & 0x00FF_FFFF, 0x00FF_FFFF);
+        // Alpha holds the AO factor, which must be non-zero.
+        assert!(v.color >> 24 > 0);
+    }
 }
 
 #[test]
@@ -149,6 +258,7 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             assets: &assets,
             render: &render,
             tables: &tables,
@@ -181,7 +291,7 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
                 assert!(scratch.own.is_none());
                 assert_eq!(scratch.padded.blocks.capacity(), 0);
                 assert_eq!(scratch.padded.light.capacity(), 0);
-                assert_eq!(scratch.visibility.capacity(), 0);
+                assert_eq!(scratch.solid_rows.capacity(), 0);
             }
             fresh.sort_solid();
             recycled.sort_solid();

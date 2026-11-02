@@ -49,7 +49,7 @@ pub struct Calibration {
     values: [f32; 3],
     /// Which values were Auto (peak, paper white): saved as Auto again unless the
     /// player moved them.
-    auto: [Option<f32>; 2],
+    auto: [Option<f32>; 3],
     dragging: bool,
 }
 
@@ -125,11 +125,12 @@ impl Calibration {
         Self {
             step: 0,
             values: [
-                g.hdr_black_level as f32 / 100.0,
+                g.black_level_nits(),
                 g.peak_nits() as f32,
                 g.paper_white_nits() as f32,
             ],
             auto: [
+                (g.hdr_black_level == 0).then_some(g.black_level_nits()),
                 (g.hdr_peak == 0).then_some(g.peak_nits() as f32),
                 (g.hdr_paper_white == 0).then_some(g.paper_white_nits() as f32),
             ],
@@ -146,15 +147,11 @@ impl Calibration {
     fn label(&self) -> Text {
         let v = self.values[self.step];
         let step = self.current();
-        let nits = match step {
+        let value = match step {
             Step::Black => format!("{v:.2}"),
             _ => format!("{v:.0}"),
         };
-        Text::literal(format!(
-            "{}: {}",
-            step.name(),
-            lang::tr("%s nits", &[&nits])
-        ))
+        Text::literal(format!("{}: {}", step.name(), value))
     }
     /// The step, its nits and where the controls start (a share of the height), for
     /// HDR output's test picture.
@@ -284,11 +281,12 @@ impl Calibration {
     /// Writes what the player landed on into Horizon's settings.
     pub fn save(&self, s: &mut Settings) {
         let g = &mut s.horizon;
-        g.hdr_black_level = (self.values[0] * 100.0).round() as u32;
-        let [peak, paper_white] = [1, 2].map(|i| match self.auto[i - 1] {
+        let scale = [100.0, 1.0, 1.0];
+        let [black, peak, paper_white] = [0, 1, 2].map(|i| match self.auto[i] {
             Some(auto) if auto == self.values[i] => 0,
-            _ => self.values[i].round() as u32,
+            _ => (self.values[i] * scale[i]).round() as u32,
         });
+        g.hdr_black_level = black;
         g.hdr_peak = peak;
         g.hdr_paper_white = paper_white;
     }

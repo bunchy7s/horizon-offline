@@ -187,6 +187,7 @@ pub(crate) fn discovery() -> Result<Arc<serde_json::Value>, JoinError> {
     let doc: serde_json::Value = agent()
         .get(&discovery_url())
         .call()
+        .inspect_err(|e| log::warn!("The services discovery document: {e}"))
         .ok()
         .and_then(|r| r.into_string().ok())
         .and_then(|t| serde_json::from_str(&t).ok())
@@ -253,9 +254,33 @@ pub fn join_request(session: &AuthSession, server_hash: &str) -> String {
     .to_string()
 }
 
+/// A join that got no answer is worth one more try, as leaving and joining
+/// again would be: `join` is safe to repeat, it only records the server's
+/// hash. Any other answer is the service's own and stands.
+fn with_one_retry(
+    mut join: impl FnMut() -> Result<(), JoinError>,
+    pause: Duration,
+) -> Result<(), JoinError> {
+    match join() {
+        Err(JoinError::Unavailable) => {
+            std::thread::sleep(pause);
+            join()
+        }
+        result => result,
+    }
+}
+
 /// MinecraftServicesSessionService.joinServer: tell the session service this
-/// account is joining the server whose hash is `server_hash`.
+/// account is joining the server whose hash is `server_hash`. Horizon tries
+/// twice when the service doesn't answer; vanilla asks the player to.
 pub fn join_server(session: &AuthSession, server_hash: &str) -> Result<(), JoinError> {
+    with_one_retry(
+        || join_server_once(session, server_hash),
+        Duration::from_millis(500),
+    )
+}
+
+fn join_server_once(session: &AuthSession, server_hash: &str) -> Result<(), JoinError> {
     let doc = discovery()?;
     let url = endpoint(&doc, "session", "join").ok_or(JoinError::Unavailable)?;
     match agent()
@@ -264,11 +289,19 @@ pub fn join_server(session: &AuthSession, server_hash: &str) -> Result<(), JoinE
         .send_string(&join_request(session, server_hash))
     {
         Ok(_) => Ok(()),
-        Err(ureq::Error::Status(status, response)) => Err(JoinError::from_response(
-            status,
-            &response.into_string().unwrap_or_default(),
-        )),
-        Err(ureq::Error::Transport(_)) => Err(JoinError::Unavailable),
+        Err(ureq::Error::Status(status, response)) => {
+            if status >= 500 {
+                log::warn!("The session service's join answered {status}");
+            }
+            Err(JoinError::from_response(
+                status,
+                &response.into_string().unwrap_or_default(),
+            ))
+        }
+        Err(ureq::Error::Transport(e)) => {
+            log::warn!("The session service's join: {e}");
+            Err(JoinError::Unavailable)
+        }
     }
 }
 
@@ -563,6 +596,41 @@ mod tests {
     use super::*;
 
     const UUID: u128 = 0x069a79f444e94726a5befca90e38aaf5;
+
+    /// Runs `with_one_retry` over these answers, in order: the result and how
+    /// many it asked for.
+    fn joined(answers: &[Result<(), JoinError>]) -> (Result<(), JoinError>, usize) {
+        let mut asked = 0;
+        let result = with_one_retry(
+            || {
+                asked += 1;
+                answers[asked - 1].clone()
+            },
+            Duration::ZERO,
+        );
+        (result, asked)
+    }
+
+    #[test]
+    fn a_join_with_no_answer_is_tried_once_more() {
+        let none = Err(JoinError::Unavailable);
+        assert_eq!(joined(&[none.clone(), Ok(())]), (Ok(()), 2));
+        // Twice without an answer: the message the player knows.
+        assert_eq!(joined(&[none.clone(), none.clone()]), (none, 2));
+    }
+
+    #[test]
+    fn a_join_the_service_answered_is_not_tried_again() {
+        assert_eq!(joined(&[Ok(())]), (Ok(()), 1));
+        for refused in [
+            JoinError::InvalidSession,
+            JoinError::Banned,
+            JoinError::InsufficientPrivileges,
+            JoinError::Other("Status: 429".into()),
+        ] {
+            assert_eq!(joined(&[Err(refused.clone())]), (Err(refused), 1));
+        }
+    }
 
     fn write(dir: &Path, text: &str, mode: u32) -> std::path::PathBuf {
         let path = dir.join("session.json");

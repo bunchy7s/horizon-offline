@@ -1376,3 +1376,33 @@ mod trident_tests {
         assert_eq!(ranged_attack_uncertainty(3), 2.0, "hard");
     }
 }
+
+#[cfg(test)]
+mod creative_target_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    /// #6790: an angry zombified piglin lets go of a player in creative mode
+    /// (`TargetGoal.canContinueToUse` / `TargetingConditions` skip invulnerable
+    /// players).
+    #[test]
+    fn an_angry_zombified_piglin_drops_a_creative_player() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            let mut player = test_player(Vec3::new(3.5, 64.0, 0.5));
+            player.creative = true;
+            w.player = Some(player);
+            let kind = Arc::new(types.types["minecraft:zombified_piglin"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            m.ai.target = Some(Who::Player);
+            m.extra.anger = 300;
+            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            for _ in 0..40 {
+                let mut events = Vec::new();
+                m.tick(&w, &mut lr, &mut events);
+            }
+            assert_eq!(m.ai.target, None, "anger {}", m.extra.anger);
+        });
+    }
+}

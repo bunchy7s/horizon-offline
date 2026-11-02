@@ -5,7 +5,7 @@
 //! markMessageAsProcessed). Without a signed-in
 //! account, or on a server that plays the account under another profile
 //! (offline mode), there is no session and everything goes unsigned.
-use super::{Game, Screen};
+use super::{Game, Screen, books::BookScreen, dialogs::ClosedDialog};
 use horizon_client::{
     auth::{self, ChatKeyPair},
     command::{Dispatcher, Registries},
@@ -18,6 +18,7 @@ use horizon_protocol::{
     secure_chat::{Body, Encoder, LastSeenTracker, Signature},
 };
 use std::sync::Arc;
+use winit::keyboard::KeyCode;
 
 /// ClientPacketListener.sendChatAcknowledgement's threshold.
 const ACK_AFTER: i32 = 64;
@@ -62,6 +63,13 @@ enum CommandAccept {
     Copy,
 }
 
+/// The screen a clicked command left, which answering no returns to
+/// (openSendConfirmationWindow's `currentScreen`).
+pub(super) enum Behind {
+    Book(Box<BookScreen>),
+    Dialog(ClosedDialog),
+}
+
 /// The `ConfirmScreen` of ClientPacketListener.openSendConfirmationWindow.
 pub(super) struct CommandPrompt {
     command: String,
@@ -69,6 +77,9 @@ pub(super) struct CommandPrompt {
     accept: CommandAccept,
     /// A screen is open behind it: the second button says Back, not Cancel.
     over_screen: bool,
+    behind: Option<Behind>,
+    /// The button Tab or an arrow key moved to.
+    focus: Option<usize>,
 }
 
 /// `FriendlyByteBuf.readUtf(256)` counts UTF-16 code units, not Unicode scalar
@@ -299,7 +310,8 @@ impl Game<'_> {
         } else {
             CommandCheck::ParseErrors
         };
-        let over_screen = self.screen != Screen::Playing;
+        // screenAfterCommand: what stays once it has run, a dialog included.
+        let over_screen = self.screen != Screen::Playing || self.dialog_open();
         let (message, accept) = match check {
             CommandCheck::NoIssues => {
                 self.send(S::ChatCommand(play::ChatCommand {
@@ -329,7 +341,18 @@ impl Game<'_> {
             message,
             accept,
             over_screen,
+            behind: None,
+            focus: None,
         });
+        self.capture(false);
+    }
+
+    /// The command just clicked left this screen: if it asks, no returns there.
+    pub(super) fn command_prompt_returns_to(&mut self, behind: Behind) {
+        if let Some(prompt) = self.command_prompt.as_mut() {
+            prompt.behind = Some(behind);
+            prompt.over_screen = true;
+        }
     }
 
     /// The translation key of the open confirmation's message.
@@ -341,14 +364,16 @@ impl Game<'_> {
     /// its two buttons.
     fn command_prompt_layout(&self, prompt: &CommandPrompt, size: (f32, f32)) -> Choice {
         let command = Text::literal(&prompt.command).with_color(0xFF_FF55);
-        Choice::new(
+        let mut choice = Choice::new(
             &self.gui.atlas.font,
             size,
             &Text::translate("multiplayer.confirm_command.title", &[]),
             &Text::translate(prompt.message, &[command]),
             2,
             150.0,
-        )
+        );
+        choice.focus = prompt.focus;
+        choice
     }
 
     pub(super) fn draw_command_prompt(&self, batch: &mut HudBatch) {
@@ -392,11 +417,8 @@ impl Game<'_> {
         let Some(prompt) = self.command_prompt.take() else {
             return;
         };
-        if !yes {
-            return;
-        }
-        match prompt.accept {
-            CommandAccept::Run => {
+        match (yes, prompt.accept, prompt.behind) {
+            (true, CommandAccept::Run, _) => {
                 if self.remote.is_some() {
                     self.send(S::ChatCommand(play::ChatCommand {
                         command: prompt.command,
@@ -404,11 +426,44 @@ impl Game<'_> {
                 }
             }
             // Gui.openChatAndAddText.
-            CommandAccept::Suggest => self.open_chat(&format!("/{}", prompt.command)),
-            CommandAccept::Copy => {
+            (true, CommandAccept::Suggest, _) => self.open_chat(&format!("/{}", prompt.command)),
+            (true, CommandAccept::Copy, _) => {
                 use horizon_client::clipboard::Clipboard;
                 self.clipboard.set(&format!("/{}", prompt.command));
             }
+            (false, _, Some(Behind::Book(book))) => self.book = Some(*book),
+            (false, _, Some(Behind::Dialog(dialog))) => self.reopen_dialog(dialog),
+            (false, _, None) => {}
+        }
+        if self.screen == Screen::Playing && !self.screen_over_playing() {
+            self.capture(true);
+        }
+    }
+
+    /// ConfirmScreen.keyPressed, and what its buttons take from the keyboard
+    /// (Screen's focus navigation, AbstractButton's Enter and Space).
+    pub(super) fn command_prompt_key(&mut self, key: KeyCode) {
+        let (size, shift) = (self.gui_size(), self.has_shift_down());
+        let Some(prompt) = &self.command_prompt else {
+            return;
+        };
+        let mut choice = self.command_prompt_layout(prompt, size);
+        match key {
+            KeyCode::Escape => return self.answer_command_prompt(false),
+            KeyCode::Tab => choice.tab(shift),
+            KeyCode::ArrowLeft | KeyCode::ArrowRight => choice.arrow(key == KeyCode::ArrowLeft),
+            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space => {
+                if let Some(button) = choice.pressed() {
+                    self.audio.play_button_click();
+                    self.answer_command_prompt(button == 0);
+                }
+                return;
+            }
+            _ => return,
+        }
+        let focus = choice.focus;
+        if let Some(prompt) = self.command_prompt.as_mut() {
+            prompt.focus = focus;
         }
     }
 

@@ -2605,6 +2605,7 @@ impl Goal for EatBlock {
                 // The particles and the dirt `setBlock` are the same gate.
                 if cx.w.mob_griefing {
                     cx.events.push(MobEvent::SetBlockName {
+                        mob: Some(m.id),
                         pos: [x, y - 1, z],
                         name: "minecraft:dirt",
                         effect: true,

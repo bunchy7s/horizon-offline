@@ -562,11 +562,7 @@ fn pack_lighting(
                     }
                 }
             }
-            if data.iter().all(|&v| v == data[0]) {
-                Light::Uniform(data[0])
-            } else {
-                Light::Full(data)
-            }
+            Light::packed(data)
         })
         .collect()
 }
@@ -810,10 +806,9 @@ impl<'w> Region<'w> {
             return;
         };
         let slot = &mut self.slots[slot];
-        let light = slot.light.get_or_insert_with(|| match &slot.section.light {
-            Light::Uniform(v) => Box::new([*v; 4096]),
-            Light::Full(a) => a.clone(),
-        });
+        let light = slot
+            .light
+            .get_or_insert_with(|| slot.section.light.to_array());
         let i = index(x, y, z);
         light[i] = f(light[i]);
     }
@@ -830,7 +825,7 @@ impl<'w> Region<'w> {
             drop(slot.section);
             let (cx, s, cz) = slot.key;
             self.world
-                .set_section_light(cx, s as usize, cz, Light::Full(light));
+                .set_section_light(cx, s as usize, cz, Light::packed(light));
         }
     }
 }
@@ -1624,21 +1619,20 @@ mod tests {
         current.set(8, MIN_Y, 8, TORCH);
         let region = [[None; 3], [None, Some(&current), None], [None; 3]];
         let lights = light_chunk(&region, &tables(), true);
-        let Light::Full(data) = &lights[0] else {
-            panic!("torch light varies");
+        let storage = |light: &Light| match light {
+            Light::Full(data) => data.as_ptr(),
+            Light::Sky(layer, _) | Light::Block(layer, _) => layer.as_ptr(),
+            Light::Uniform(_) => panic!("torch light varies"),
         };
-        let result_storage = data.as_ptr();
+        let result_storage = storage(&lights[0]);
         let snapshot = current.clone();
         current.set(8, MIN_Y, 8, STONE);
         Arc::make_mut(&mut current.sections[0]).biomes.set(0, 3);
         let edited_snapshot = current.clone();
         apply_lighting(&mut current, lights);
-        let Light::Full(data) = &current.sections[0].light else {
-            panic!("torch light varies");
-        };
         assert_eq!(
             result_storage,
-            data.as_ptr(),
+            storage(&current.sections[0].light),
             "returned light storage moves without cloning"
         );
         current.lit = true;

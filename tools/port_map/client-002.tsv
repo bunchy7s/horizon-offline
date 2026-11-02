@@ -108,7 +108,7 @@ ClientPacketListener.sendChatAcknowledgement	port	crates/horizon-client/src/game
 ClientPacketListener.sendCommand	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_command	message arguments signed with a chat session; the unsigned packet otherwise
 ClientPacketListener.verifyCommand	port	crates/horizon-client/src/game/remote_chat.rs::verify_command	over the tree the server sent
 ClientPacketListener.isValidCommand	port	crates/horizon-command/src/lib.rs::ParseResults::is_valid	
-ClientPacketListener.openSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_unattended_command	a clicked book or dialog is already closed: no answer returns to it
+ClientPacketListener.openSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::send_unattended_command	no returns to the book or dialog the click left; the screen is drawn over the chat behind, not in its place
 ClientPacketListener.openCommandSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::answer_command_prompt	Run Command sends it
 ClientPacketListener.openSignedCommandSendConfirmationWindow	port	crates/horizon-client/src/game/remote_chat.rs::Game::answer_command_prompt	into the chat box, or the clipboard over a screen; a kept chat draft is not put before it
 ClientPacketListener.broadcastClientInformation	port	crates/horizon-client/src/game/remote.rs::Game::tick_remote_level	gap: minor: only view distance and chat visibility are sent, and only when they change

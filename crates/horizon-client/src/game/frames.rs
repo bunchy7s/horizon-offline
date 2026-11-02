@@ -125,6 +125,17 @@ impl Game<'_> {
                 .iter()
                 .any(|o| o.id != f.id && o.facing == f.facing && overlaps(o.bounds()))
     }
+    /// Asks the mods whether the acting guest may place a hanging entity
+    /// of type `kind` at `pos` (`native_hanging_place`): true when one
+    /// cancelled it. A game's own player is not asked.
+    pub(super) fn hanging_place_cancelled(&mut self, kind: &str, pos: [i32; 3]) -> bool {
+        let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) else {
+            return false;
+        };
+        let mut cancel = false;
+        self.native_hanging_place(uuid, &name, kind, pos, &mut cancel);
+        cancel
+    }
     /// `ItemFrameItem.useOn`.
     pub(super) fn place_item_frame(&mut self, hit: &Hit, stack: &ItemStack) -> bool {
         let glow = match &*stack.item {
@@ -161,6 +172,14 @@ impl Game<'_> {
         };
         if !self.frame_survives(&frame) {
             return false;
+        }
+        let kind = if glow {
+            "minecraft:glow_item_frame"
+        } else {
+            "minecraft:item_frame"
+        };
+        if self.hanging_place_cancelled(kind, pos) {
+            return true;
         }
         self.next_entity += 1;
         self.audio
@@ -224,11 +243,14 @@ impl Game<'_> {
             return false;
         }
         let at = center(&self.item_frames[i]);
+        let entity_id = self.item_frames[i].id;
+        let action;
         if self.item_frames[i].item.is_none() {
             let Some(held) = self.held().cloned() else {
                 return false;
             };
             self.item_frames[i].item = Some(ItemStack { count: 1, ..held });
+            action = "put";
             self.audio
                 .play(&sound(&self.item_frames[i], "add_item"), Some(at), 1.0, 1.0);
             if !self.creative {
@@ -237,12 +259,21 @@ impl Game<'_> {
         } else {
             let f = &mut self.item_frames[i];
             f.rotation = (f.rotation + 1) % 8;
+            action = "rotate";
             let s = sound(f, "rotate_item");
             self.audio.play(&s, Some(at), 1.0, 1.0);
         }
         let p = self.item_frames[i].pos;
         self.world.modified.insert((p[0] >> 4, p[2] >> 4));
         self.frame_output_changed(p);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            let frame = self.item_frames.iter().find(|f| f.id == entity_id);
+            let item = frame
+                .and_then(|f| f.item.as_ref())
+                .map_or_else(String::new, |s| s.item.to_string());
+            let rotation = frame.map_or(0, |f| f.rotation);
+            self.native_player_item_frame_change(player, &name, entity_id, action, &item, rotation);
+        }
         self.swing_arm();
         true
     }
@@ -264,6 +295,13 @@ impl Game<'_> {
             return true;
         }
         let with_frame = self.item_frames[i].item.is_none();
+        let entity_id = self.item_frames[i].id;
+        let old_item = self.item_frames[i]
+            .item
+            .as_ref()
+            .map_or("", |s| &*s.item)
+            .to_owned();
+        let rotation = self.item_frames[i].rotation;
         let at = center(&self.item_frames[i]);
         let f = if with_frame {
             self.item_frames.remove(i)
@@ -283,6 +321,16 @@ impl Game<'_> {
         self.world.modified.insert((f.pos[0] >> 4, f.pos[2] >> 4));
         if f.item.is_some() {
             self.frame_output_changed(f.pos);
+        }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_item_frame_change(
+                player,
+                &name,
+                entity_id,
+                if with_frame { "break" } else { "remove_item" },
+                if with_frame { "" } else { &old_item },
+                rotation,
+            );
         }
         true
     }
