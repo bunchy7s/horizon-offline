@@ -1120,6 +1120,40 @@ mod school_tests {
         k.species = Species::Cod;
         Mob::new(id, kind, Vec3::ZERO, 0.0)
     }
+    /// `Salmon.getDefaultDimensions` is `getSalmonScale()` applied to the whole
+    /// fish box: small 0.5, medium 1.0, large 1.5.
+    #[test]
+    fn a_salmon_box_follows_its_variant() {
+        let mut k = kind();
+        Arc::make_mut(&mut k).species = Species::Salmon;
+        let mut m = Mob::new(1, k, Vec3::ZERO, 0.0);
+        m.extra.variant = 1;
+        let (w, h, e) = m.dims();
+        let (bw, bh, be) = (w as f32, h as f32, e as f32);
+        m.extra.variant = 0;
+        assert_eq!(
+            m.dims(),
+            (
+                f64::from(bw * 0.5),
+                f64::from(bh * 0.5),
+                f64::from(be * 0.5)
+            ),
+            "a small salmon is half the medium box"
+        );
+        m.extra.variant = 2;
+        assert_eq!(
+            m.dims(),
+            (
+                f64::from(bw * 1.5),
+                f64::from(bh * 1.5),
+                f64::from(be * 1.5)
+            ),
+            "a large salmon is half again"
+        );
+        // The medium variant is the type's box, unchanged.
+        m.extra.variant = 1;
+        assert_eq!(m.dims(), (w, h, e));
+    }
     #[test]
     fn school_sizes() {
         assert_eq!(max_school_size(Species::Cod), 8);
