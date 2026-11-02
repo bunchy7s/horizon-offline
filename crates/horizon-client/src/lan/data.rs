@@ -183,8 +183,7 @@ pub fn component_nbt(v: &Value) -> Tag {
 
 impl SyncData {
     /// No registries, tags or recipes: enough for tests of the login phase.
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
+    pub fn empty() -> Self {
         Self {
             builtin: Builtin::default(),
             dynamic: Dynamic::default(),
