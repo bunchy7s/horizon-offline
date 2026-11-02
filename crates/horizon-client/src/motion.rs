@@ -344,6 +344,10 @@ pub struct PlayerMotion {
     pub local_crouching: bool,
     pub pose: crate::pose::Pose,
     pub dimensions: crate::pose::Dimensions,
+    /// The `minecraft:scale` the dimensions were last built with
+    /// (`Entity.refreshDimensions`), for the poses the body takes before it
+    /// next refreshes.
+    pub scale: f32,
     pub speed: f32,
     /// `LocalPlayer.itemUseSpeedMultiplier` while using an item (not riding).
     pub item_use_speed: Option<f32>,
@@ -559,6 +563,7 @@ impl PlayerMotion {
             local_crouching: false,
             pose: crate::pose::Pose::Standing,
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
+            scale: 1.0,
             swimming: false,
             is_passenger: false,
             fire_ticks: -20,
@@ -717,6 +722,18 @@ impl PlayerMotion {
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
     pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+        self.packed_attributes(true)
+    }
+    /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
+    /// over from the old one. A body that comes back from a death takes the
+    /// base values only (`assignBaseValues`); the same player in another
+    /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
+    /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
+    /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+        self.packed_attributes(restore_all)
+    }
+    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
         use horizon_client_core::nbt_value::string;
         use horizon_world::nbt::Tag;
         let list = self
@@ -729,7 +746,7 @@ impl PlayerMotion {
                     ("base", Tag::Double(packed.base.to_bits())),
                 ];
                 // `modifiers` is an optional field whose default is the empty list.
-                if !packed.modifiers.is_empty() {
+                if modifiers && !packed.modifiers.is_empty() {
                     let modifiers = packed
                         .modifiers
                         .iter()
@@ -1035,9 +1052,9 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.spectator {
             self.player.flying = true;
             self.player.ground.on_ground = false;
-        } else if !self.player.may_fly {
-            self.player.flying = false;
-        } else if !was_jumping && jumping && !self.player.was_auto_jump {
+        } else if self.player.may_fly && !was_jumping && jumping && !self.player.was_auto_jump {
+            // `LocalPlayer.aiStep`: mayfly gates the flight toggle, not the
+            // flying state independently supplied by the server's abilities.
             if self.player.jump_trigger_time == 0 {
                 self.player.jump_trigger_time = 7;
             } else if !self.player.swimming {
@@ -5164,6 +5181,60 @@ mod tests {
         w.player.mobility_restricted = false;
         w.controlled_simulation_tick(sprint_key).unwrap();
         assert!(w.player.sprinting);
+    }
+
+    #[test]
+    fn server_forced_flight_survives_without_permission_to_toggle_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            eprintln!("skipped forced flight: prepared resources unavailable");
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 3).unwrap();
+        let start = Vec3::new(20.5, 20.0, 20.5);
+        let mut player = PlayerMotion::new(&resources, start).unwrap();
+        player.may_fly = false;
+        player.flying = true;
+        player.flying_speed = 0.0;
+        let mut w = MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        };
+        // Idle, movement in all directions, and repeated jump presses must
+        // neither cancel server-forced flight nor move a zero-speed flyer.
+        for tick in 0..60 {
+            w.controlled_simulation_tick(crate::sprint::Keys {
+                forward: tick % 4 == 0,
+                backward: tick % 4 == 1,
+                left: tick % 4 == 2,
+                right: tick % 4 == 3,
+                jump: tick % 2 == 0,
+                shift: tick % 3 == 0,
+                ..Default::default()
+            })
+            .unwrap();
+            assert!(w.player.flying, "server-forced flight ended on tick {tick}");
+            assert_eq!(w.player.position, start);
+            assert_eq!(w.player.velocity, Vec3::ZERO);
+        }
+        // A later abilities update from the server can still end flight.
+        w.player.flying = false;
+        for _ in 0..3 {
+            w.controlled_simulation_tick(crate::sprint::Keys::default())
+                .unwrap();
+        }
+        assert!(!w.player.flying);
+        assert!(w.player.position.y < start.y);
     }
 
     /// Vanilla `Player.getFlyingSpeed`: a flying player moves at the ability

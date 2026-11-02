@@ -385,7 +385,7 @@ impl Game<'_> {
     pub(super) fn tick_hand(&mut self) {
         // LocalPlayer.applyInput (the camera is the player's own).
         if self.player.is_some() {
-            self.sway.tick(self.pitch, self.yaw);
+            self.sway.tick_wrapped(self.pitch, self.yaw);
         }
         self.swing.tick();
         let main = self.inventory[self.selected].clone();

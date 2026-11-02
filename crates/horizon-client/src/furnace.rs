@@ -6,7 +6,6 @@ use crate::{
     items::{ItemStack, Items},
     providers::Providers,
 };
-use std::sync::Arc;
 
 /// The furnace methods that read the recipes.
 pub trait FurnaceCooking {
@@ -22,15 +21,15 @@ pub trait FurnaceCooking {
     /// (`Slot.setByPlayer`; partial takes and merges keep the stack).
     fn input_clicked(&mut self, recipes: &Recipes, before: Option<ItemStack>);
     /// One server tick. Returns `Some(lit)` when the LIT block state must change.
-    fn tick(&mut self, recipes: &Recipes, items: &Items, providers: &Providers) -> Option<bool>;
-}
-fn remainder(item: &str) -> Option<&'static str> {
-    match item {
-        "minecraft:lava_bucket" | "minecraft:water_bucket" | "minecraft:milk_bucket" => {
-            Some("minecraft:bucket")
-        }
-        _ => None,
-    }
+    /// `drops` collects what the furnace lets fall at its position
+    /// (`Containers.dropItemStack`): the remainder of a fuel when more of it is left.
+    fn tick(
+        &mut self,
+        recipes: &Recipes,
+        items: &Items,
+        providers: &Providers,
+        drops: &mut Vec<ItemStack>,
+    ) -> Option<bool>;
 }
 impl FurnaceCooking for Furnace {
     fn set_input(&mut self, recipes: &Recipes, stack: Option<ItemStack>) {
@@ -59,7 +58,13 @@ impl FurnaceCooking for Furnace {
             self.set_input(recipes, after);
         }
     }
-    fn tick(&mut self, recipes: &Recipes, items: &Items, providers: &Providers) -> Option<bool> {
+    fn tick(
+        &mut self,
+        recipes: &Recipes,
+        items: &Items,
+        providers: &Providers,
+        drops: &mut Vec<ItemStack>,
+    ) -> Option<bool> {
         let was_lit = self.lit_remaining > 0;
         let mut lit = false;
         if self.lit_remaining > 0 {
@@ -101,16 +106,19 @@ impl FurnaceCooking for Furnace {
                                     (ratio * self.cooking_total as f32).ceil() as i32;
                             }
                             if time > 0 {
+                                // AbstractFurnaceBlockEntity.consumeFuel: the fuel's crafting
+                                // remainder takes the slot once the stack is used up, else
+                                // it is dropped.
                                 if let Some(f) = self.items[1].as_mut() {
-                                    let item = f.item.clone();
+                                    let remainder = items
+                                        .get(&f.item)
+                                        .and_then(|i| i.crafting_remainder.as_deref())
+                                        .map(|r| ItemStack::new(r, 1));
                                     f.count -= 1;
                                     if f.count == 0 {
-                                        self.items[1] = remainder(&item).map(|r| ItemStack {
-                                            item: Arc::from(r),
-                                            count: 1,
-                                            damage: 0,
-                                            extra: None,
-                                        });
+                                        self.items[1] = remainder;
+                                    } else if let Some(remainder) = remainder {
+                                        drops.push(remainder);
                                     }
                                 }
                                 lit = true;
@@ -169,5 +177,100 @@ fn total_time(time: u32, speed: f32) -> i32 {
         (time as f32 / speed).ceil() as i32
     } else {
         time as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{containers::FurnaceKind, items::Items};
+    use horizon_world::loot::PackOverlay;
+    use std::{collections::HashMap, fs};
+
+    /// A furnace with `fuel` x `count` burning `test:ore` into `test:ingot`, over a
+    /// data root holding that one recipe and an item table with two fuels: `test:coal`
+    /// (no remainder) and `test:cell` (a content mod's item that leaves `test:husk`).
+    fn burn(fuel: &str, count: u32) -> (Furnace, Vec<ItemStack>) {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-furnace-remainder-{}-{}-{count}",
+            std::process::id(),
+            fuel.replace(':', "-")
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        fs::write(
+            root.join("data/minecraft/recipe/test_ingot.json"),
+            br#"{"type":"minecraft:smelting","ingredient":"test:ore","result":{"id":"test:ingot"}}"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("data/minecraft/loot_table")).unwrap();
+        let fuel_component =
+            r#"{"minecraft:cooking_fuel": {"burn_time": 200, "speed_multiplier": 1.0}}"#;
+        fs::write(
+            root.join("items.json"),
+            format!(
+                r#"{{"test:ore": {{}}, "test:ingot": {{}}, "test:coal": {fuel_component}, "test:cell": {fuel_component}, "test:husk": {{}}}}"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join(horizon_items::items::MOD_CRAFT_REMAINDERS),
+            r#"{"test:cell": "test:husk"}"#,
+        )
+        .unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let providers = Providers::load(&root);
+        let mut furnace = Furnace {
+            kind: FurnaceKind::Furnace,
+            items: [
+                Some(ItemStack::new("test:ore", 1)),
+                Some(ItemStack::new(fuel, count)),
+                None,
+            ],
+            lit_remaining: 0,
+            lit_total: 0,
+            cooking_timer: 0,
+            cooking_total: 0,
+            speed: 1.0,
+            recipes_used: HashMap::new(),
+        };
+        let mut drops = Vec::new();
+        let lit = furnace.tick(&recipes, &items, &providers, &mut drops);
+        let _ = fs::remove_dir_all(&root);
+        assert_eq!(lit, Some(true), "the fuel lit the furnace");
+        (furnace, drops)
+    }
+
+    fn fuel_slot(furnace: &Furnace) -> Option<(&str, u32)> {
+        furnace.items[1].as_ref().map(|s| (&*s.item, s.count))
+    }
+
+    /// `AbstractFurnaceBlockEntity.consumeFuel`: the last of a fuel with a remainder
+    /// leaves it in the fuel slot.
+    #[test]
+    fn the_last_fuel_leaves_its_remainder_in_the_slot() {
+        let (furnace, drops) = burn("test:cell", 1);
+        assert_eq!(fuel_slot(&furnace), Some(("test:husk", 1)));
+        assert!(drops.is_empty());
+    }
+
+    /// With more of the fuel left, the remainder is dropped at the furnace.
+    #[test]
+    fn a_fuel_still_in_the_stack_drops_its_remainder() {
+        let (furnace, drops) = burn("test:cell", 3);
+        assert_eq!(fuel_slot(&furnace), Some(("test:cell", 2)));
+        assert_eq!(drops, vec![ItemStack::new("test:husk", 1)]);
+    }
+
+    /// A fuel without a remainder leaves nothing.
+    #[test]
+    fn a_fuel_without_a_remainder_leaves_nothing() {
+        let (furnace, drops) = burn("test:coal", 1);
+        assert_eq!(fuel_slot(&furnace), None);
+        assert!(drops.is_empty());
+        let (furnace, drops) = burn("test:coal", 2);
+        assert_eq!(fuel_slot(&furnace), Some(("test:coal", 1)));
+        assert!(drops.is_empty());
     }
 }

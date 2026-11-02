@@ -218,11 +218,17 @@ impl Game<'_> {
         let Some(BlockEntity::Furnace(f)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
-        let Some(lit) = f.tick(
+        let mut drops = Vec::new();
+        let lit = f.tick(
             world_recipes!(self),
             world_items!(self),
             self.res.providers(),
-        ) else {
+            &mut drops,
+        );
+        for stack in drops {
+            self.campfire_drop(pos, stack);
+        }
+        let Some(lit) = lit else {
             return Ok(());
         };
         let state = self.world.block(pos.0, pos.1, pos.2);

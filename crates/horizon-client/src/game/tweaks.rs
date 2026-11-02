@@ -459,19 +459,15 @@ impl Game<'_> {
     }
     fn hdr_input(&mut self, name: &str) -> bool {
         if self.screen != Screen::Playing
+            || self.title.is_some()
             || self.settings.horizon.hdr_key != name
             || !horizon_client::graphics::hdr_offered()
         {
             return false;
         }
-        if self.title.is_none() {
-            self.capture(false);
-        }
-        self.open_options_at(
-            self.title.is_some(),
-            horizon_client::options_ui::Page::GraphicsHdr,
-        );
-        self.options_to_game = self.title.is_none();
+        self.capture(false);
+        self.open_options_at(false, horizon_client::options_ui::Page::GraphicsHdr);
+        self.options_to_game = true;
         true
     }
     fn sort_input(&mut self, name: &str) -> bool {

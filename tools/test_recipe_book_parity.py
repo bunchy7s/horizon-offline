@@ -66,6 +66,16 @@ def main():
                     op['drop'] = rng.choice(['recipes', 'toBeDisplayed'])
                 ops.append(op)
         cases.append({'ops': ops})
+    # An empty batch, a recipe the book never had, a highlight taken back
+    # twice, and the settings of all four book types carried through a save
+    # and a load: states the random batches leave out.
+    cases.append({'ops': [{'op': 'give', 'ids': []}, {'op': 'take', 'ids': []}, {'op': 'save'}, {'op': 'load'}]})
+    cases.append({'ops': [{'op': 'take', 'ids': ids[:4]}, {'op': 'seen', 'id': ids[0]},
+                          {'op': 'seen', 'id': ids[0]}, {'op': 'save'}, {'op': 'load'}, {'op': 'seen', 'id': ids[1]}]})
+    cases.append({'ops': [{'op': 'give', 'ids': ids[:6]},
+                          *[{'op': 'set', 'type': t, 'open': o, 'filtering': f}
+                            for t in TYPES for o, f in ((True, False), (False, True))],
+                          {'op': 'save'}, {'op': 'load'}, {'op': 'save'}, {'op': 'load', 'drop': 'toBeDisplayed'}]})
     (work / 'cases.jsonl').write_text(''.join(json.dumps(c) + '\n' for c in cases))
     vanilla.run('VanillaRecipeBookOracle', work / 'cases.jsonl', work / 'native.txt')
     lib.cargo_example('horizon-client', 'recipe_book_fixture', lib.RESOURCES, work / 'cases.jsonl', work / 'rust.txt')

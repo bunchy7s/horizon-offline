@@ -559,6 +559,11 @@ impl Game<'_> {
             .get(key)
             .map(String::as_str)
     }
+    /// The block `state` is a state of: its name, as `GameLevel`'s helper of
+    /// the same name gives it for the hooks that get a state in the world.
+    pub(super) fn native_state_block(&self, state: BlockStateId) -> Option<&str> {
+        self.pack.assets.registry.state(state).map(|s| &*s.name)
+    }
 }
 
 #[cfg(test)]

@@ -60,8 +60,8 @@ PiglinBruteAi.initFightActivity	inline	crates/horizon-client/src/mobs/piglin.rs:
 PiglinBruteAi.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_brute	idle behaviour as goals: stroll, look at player, targets
 PiglinBruteAi.initMemories	missing		minor: no home point is remembered, so the brute never returns to where it spawned
 PiglinBruteAi.isNearestValidAttackTarget	missing		minor: the brute never drops a target for a nearer one; target goals keep theirs until it dies or is lost
-PiglinBruteAi.maybePlayActivitySound	missing		player: a piglin brute never growls while it fights; the angry sound is not in Horizon
-PiglinBruteAi.playActivitySound	missing		player: no angry sound when a piglin brute starts a fight (entity.piglin_brute.angry is not played)
+PiglinBruteAi.maybePlayActivitySound	port	crates/horizon-client/src/mobs/piglin.rs::maybe_play_brute_sound	the level random is drawn every tick and the angry grunt plays under 0.0125 while the brute is fighting
+PiglinBruteAi.playActivitySound	port	crates/horizon-client/src/mobs/piglin.rs::play_brute_sound	entity.piglin_brute.angry when the fight activity starts
 PiglinBruteAi.setAngerTarget	missing		minor: no 600-tick anger memory; the target goals keep the target instead
 PiglinBruteAi.updateActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_brute	gap: minor: no fight and idle activity switch; the melee goal sets the aggressive flag
 StartAdmiringItemIfSeen.create	inline	crates/horizon-client/src/game/piglins.rs::Game::piglin_pickups	gap: player: a piglin takes a wanted item and admires it in hand; it does not stop to admire one it only sees on the ground

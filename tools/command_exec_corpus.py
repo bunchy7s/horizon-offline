@@ -1002,6 +1002,19 @@ def progression():
         cmd('/advancement revoke @s everything'),
         cmd('/advancement revoke @s everything'),
         cmd('/advancement grant @s only minecraft:nonexistent'),
+        # The advancement subtree a `from` grants, one criterion of an
+        # advancement that needs hundreds (`adventuring_time` wants every
+        # biome), and a `through` that keeps what is below the named one.
+        cmd('/advancement revoke @s everything'),
+        cmd('/advancement grant @s from minecraft:story/mine_stone'),
+        cmd('/advancement grant @s only minecraft:adventure/adventuring_time minecraft:plains'),
+        cmd('/advancement grant @s only minecraft:adventure/adventuring_time'),
+        cmd('/advancement revoke @s only minecraft:adventure/adventuring_time minecraft:plains'),
+        cmd('/advancement grant @s through minecraft:story/upgrade_tools'),
+        cmd('/advancement grant @s until minecraft:story/mine_stone'),
+        cmd('/advancement revoke @s everything'),
+        cmd('/advancement grant @e[type=!minecraft:player] everything'),
+        cmd('/experience query @s levels'),
         cmd('/recipe give @s minecraft:oak_planks'),
         cmd('/recipe give @s minecraft:oak_planks'),
         cmd('/recipe take @s minecraft:oak_planks'),

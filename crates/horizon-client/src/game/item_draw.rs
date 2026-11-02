@@ -9,6 +9,7 @@ use horizon_assets::item_model::{
 };
 use horizon_client::{
     block_entity_render::{diffuse_lights, vertex_light},
+    cit::{Hand as CitHand, Kind as CitKind},
     hud::{HudBatch, Rect},
     item_render::{self, ItemRenderState, SpecialHost, WorldSink},
     items::ItemStack,
@@ -293,15 +294,71 @@ impl Game<'_> {
         owner: Option<&OwnerState>,
         seed: i32,
     ) -> ItemRenderState {
+        self.resolve_item_in_hand(stack, display, owner, seed, CitHand::Main)
+    }
+    /// `ItemStack.hasFoil`, with the item's default glint.
+    fn has_foil(&self, stack: &ItemStack) -> bool {
+        let item_glint = self
+            .res
+            .items()
+            .enchantments
+            .props
+            .get(&*stack.item)
+            .is_some_and(|p| p.glint);
+        stack.has_foil(item_glint)
+    }
+    /// [`Self::resolve_item`] of a stack held in `hand`, which OptiFine CIT rules can test
+    /// (GUI items count as the main hand).
+    pub(super) fn resolve_item_in_hand(
+        &self,
+        stack: &ItemStack,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        seed: i32,
+        hand: CitHand,
+    ) -> ItemRenderState {
         let level = self.item_level();
-        let mut state = self.pack.item_renderer.resolve(
+        let renderer = &self.pack.item_renderer;
+        let (rule, glint) = renderer.cit.as_ref().map_or((None, None), |cit| {
+            let item_max = self
+                .res
+                .items()
+                .get(&stack.item)
+                .map_or(0, |i| i.max_damage);
+            let max_damage = item_render::cit::stack_max_damage(stack, item_max);
+            (
+                cit.rules.select(CitKind::Item, stack, hand, max_damage),
+                cit.rules
+                    .glint(stack, hand, max_damage, self.has_foil(stack)),
+            )
+        });
+        let mut state = renderer.resolve_with_rule(
             &item_render::stack_view(stack),
             display,
             owner,
             Some(&level),
             seed,
             &self.item_env(),
+            rule,
         );
+        if let Some(glint) = glint {
+            // The pack's enchantment rules replace vanilla's glint unless one keeps it, so far
+            // only in the GUI, where their own layers draw: held, dropped and framed items keep
+            // vanilla's until theirs do. The pack's `useGlint=false` removes it everywhere.
+            let gui = display == DisplayContext::Gui;
+            let pack_keeps = renderer
+                .cit
+                .as_ref()
+                .is_none_or(|c| c.rules.global.use_glint);
+            if !glint.vanilla && (gui || !pack_keeps) {
+                for layer in &mut state.layers {
+                    layer.foil = horizon_assets::item_model::FoilType::None;
+                }
+            }
+            if gui && !glint.is_empty() {
+                state.cit_glint = Some(glint);
+            }
+        }
         state.hdr_tier = self.luminance().hdr_tier(&stack.item);
         if state.hdr_tier > 0 && self.renderer.as_ref().is_some_and(|r| r.hdr_on()) {
             state.hdr_light = self.luminance().of(&stack.item);

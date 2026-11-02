@@ -130,6 +130,7 @@ impl Game<'_> {
         let equipped = std::mem::take(&mut menu.equipped);
         let brewed = std::mem::take(&mut menu.brewed);
         let crafted = std::mem::take(&mut menu.crafted);
+        let item_crafted = std::mem::take(&mut menu.item_crafted);
         menu.drops.clear();
         store_player(menu, &mut host.hub.guests[gi]);
         if !brewed.is_empty() {
@@ -145,6 +146,15 @@ impl Game<'_> {
             self.as_guest(host, conn, |g| {
                 for (recipe, ingredients) in &crafted {
                     g.trigger_recipe_crafted(recipe, ingredients);
+                }
+            });
+        }
+        if !item_crafted.is_empty() {
+            let conn = host.hub.guests[gi].conn;
+            self.as_guest(host, conn, |g| {
+                let player = g.native_acting_id();
+                for (recipe, stack) in &item_crafted {
+                    g.native_item_crafted(player, recipe, stack);
                 }
             });
         }

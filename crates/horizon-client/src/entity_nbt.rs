@@ -2343,6 +2343,20 @@ pub fn fireball_to_nbt(
     if let Some(power) = power {
         put(&mut tag, "ExplosionPower", Tag::Byte(power as i8));
     }
+    // Fireball.addAdditionalSaveData: the item it is drawn as, one of the loaded
+    // item or else a fire charge (`setItem` refuses an empty stack and keeps one).
+    if matches!(
+        p.kind,
+        ProjectileKind::LargeFireball { .. } | ProjectileKind::SmallFireball
+    ) {
+        let mut item = tag
+            .get("Item")
+            .and_then(item_from_nbt)
+            .filter(|i| i.count > 0 && &*i.item != "minecraft:air")
+            .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:fire_charge", 1));
+        item.count = 1;
+        put(&mut tag, "Item", item_to_nbt(&item));
+    }
     Some(tag)
 }
 
@@ -4671,6 +4685,61 @@ mod fireball_nbt_tests {
             ]);
             assert_eq!(fireball_from_nbt(&tag, None).unwrap().kind, kind);
         }
+    }
+
+    /// `Fireball.addAdditionalSaveData` / `readAdditionalSaveData`: both fireballs save
+    /// `Item`, a fire charge by default, and a loaded one stays, as one item.
+    #[test]
+    fn a_fireball_saves_its_item() {
+        let item_of = |tag: &Tag| {
+            let item = tag.get("Item").and_then(item_from_nbt).unwrap();
+            (item.item.to_string(), item.count)
+        };
+        for id in ["minecraft:fireball", "minecraft:small_fireball"] {
+            let plain = Tag::compound([
+                ("id", Tag::String(id.into())),
+                ("Pos", doubles(&[0.0, 0.0, 0.0])),
+            ]);
+            let p = fireball_from_nbt(&plain, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&plain)).unwrap();
+            assert_eq!(
+                item_of(&back),
+                ("minecraft:fire_charge".to_owned(), 1),
+                "{id}"
+            );
+            // A loaded item stays, as a single one.
+            let mut loaded = plain.clone();
+            put(
+                &mut loaded,
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:diamond", 5)),
+            );
+            let p = fireball_from_nbt(&loaded, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&loaded)).unwrap();
+            assert_eq!(item_of(&back), ("minecraft:diamond".to_owned(), 1), "{id}");
+            // An empty one falls back to the fire charge.
+            let mut empty = plain.clone();
+            put(
+                &mut empty,
+                "Item",
+                item_to_nbt(&crate::items::ItemStack::new("minecraft:air", 1)),
+            );
+            let p = fireball_from_nbt(&empty, None).unwrap();
+            let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&empty)).unwrap();
+            assert_eq!(
+                item_of(&back),
+                ("minecraft:fire_charge".to_owned(), 1),
+                "{id}"
+            );
+        }
+        // The wind charges are not `Fireball`s: they save no item.
+        let wind = Tag::compound([
+            ("id", Tag::String("minecraft:wind_charge".into())),
+            ("Pos", doubles(&[0.0, 0.0, 0.0])),
+        ]);
+        let p = fireball_from_nbt(&wind, None).unwrap();
+        let back = fireball_to_nbt(&p, [1, 2, 3, 4], None, Some(&wind)).unwrap();
+        assert!(back.get("Item").is_none());
     }
 
     #[test]

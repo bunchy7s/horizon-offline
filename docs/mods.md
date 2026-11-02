@@ -144,8 +144,8 @@ round-trip through saved NBT; negative zero is not supported. A key such as
 recipe uses it, as a milk bucket leaves a bucket (vanilla's
 `Item.Properties.craftRemainder`, not a data component): a vanilla item or
 one of the mod's own, refused at load otherwise. It holds on the crafting
-table, the inventory grid and the crafter, not yet as furnace fuel or in a
-brewing stand. What the item leaves once eaten
+table, the inventory grid, the crafter and as furnace fuel (the last of the stack leaves it in
+the fuel slot, a stack with more left drops it), not yet in a brewing stand. What the item leaves once eaten
 or drunk is the `minecraft:use_remainder` component instead:
 
 ```json

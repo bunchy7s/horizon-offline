@@ -7,6 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
+    mod_api::NativeLootDrops,
 };
 use horizon_world::nbt::Tag;
 
@@ -163,7 +164,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = super::native_hooks::NativeLootDrops {
+        let context = NativeLootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,

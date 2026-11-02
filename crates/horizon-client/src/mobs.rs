@@ -2799,6 +2799,11 @@ impl Mob {
         } else {
             0.0
         };
+        // LivingEntity.getDamageAfterArmorAbsorb asks `hurtArmor` *before*
+        // `CombatRules.getDamageAfterAbsorb`, so a worn piece wears by the
+        // damage the armour, toughness and enchantment reductions have not
+        // touched yet, and only a hit outside `#bypasses_armor` asks at all.
+        let armor_hit = (!source.bypasses_armor() && amount > 0.0).then_some(amount);
         if !source.bypasses_armor() && self.kind.armor + worn + covered > 0.0 {
             // CombatRules.getDamageAfterAbsorb
             let armor = self.kind.armor + worn + covered;
@@ -2881,17 +2886,19 @@ impl Mob {
         if !absorbed && dealt != 0.0 {
             self.record_damage(source, dealt);
         }
-        // LivingEntity.hurtArmor: the body armour a mob wears (a horse's) wears
-        // on a hit that reached it. A wolf's armour has its own rule
-        // (`Wolf.actuallyHurt`, `hurt_wolf_armor`).
-        if dealt > 0.0
+        // LivingEntity.hurtArmor: `Horse` is the only mob that overrides it, and
+        // it hands `doHurtEquipment` the body slot alone. A wolf's armour has
+        // its own rule (`Wolf.actuallyHurt`, `hurt_wolf_armor`) and a player's
+        // four pieces theirs, so the other "body slot" species — donkey, mule,
+        // llama, camel, the skeleton and zombie horses — wear nothing, whatever
+        // `drops::head_is_body` says about where the item lives.
+        if let Some(damage) = armor_hit
+            && self.species() == Species::Horse
             && self.extra.head.is_some()
-            && self.species() != Species::Wolf
-            && drops::head_is_body(self.species())
         {
             self.outbox.push(MobEvent::ArmorHurt {
                 mob: self.id,
-                amount: dealt,
+                amount: damage,
                 kind: source.kind,
             });
         }
@@ -4325,10 +4332,14 @@ mod armor_hurt_tests {
     use horizon_core::geometry::Vec3;
 
     fn horse() -> Mob {
+        mob("minecraft:horse", Species::Horse)
+    }
+
+    fn mob(id: &str, species: Species) -> Mob {
         let mut kind = kind();
         let k = Arc::make_mut(&mut kind);
-        k.id = "minecraft:horse".into();
-        k.species = Species::Horse;
+        k.id = id.into();
+        k.species = species;
         Mob::new(1, kind, Vec3::ZERO, 0.0)
     }
 
@@ -4361,6 +4372,72 @@ mod armor_hurt_tests {
                 .outbox
                 .iter()
                 .any(|e| matches!(e, MobEvent::ArmorHurt { .. }))
+        );
+    }
+
+    /// `Horse` is the only mob that overrides `LivingEntity.hurtArmor` (the
+    /// base one is empty, `LivingEntity.java:1887`), so a donkey wearing a body
+    /// item — `/item replace entity @e[type=minecraft:donkey,limit=1]
+    /// armor.body with minecraft:wolf_armor` — wears nothing, even though
+    /// `drops::head_is_body` stores a donkey's body item in the slot a horse's
+    /// goes in.
+    #[test]
+    fn a_donkey_wearing_a_body_item_wears_nothing() {
+        let mut donkey = mob("minecraft:donkey", Species::Donkey);
+        donkey.extra.head = Some("minecraft:wolf_armor".into());
+        assert!(
+            donkey.damage(6.0, Damage::of(DamageKind::MobAttack)),
+            "the hit landed"
+        );
+        assert!(
+            !donkey
+                .outbox
+                .iter()
+                .any(|e| matches!(e, MobEvent::ArmorHurt { .. })),
+            "only a horse's own override wears its body piece"
+        );
+    }
+
+    /// `getDamageAfterArmorAbsorb` asks `hurtArmor` only when the damage type
+    /// is not in `#bypasses_armor` (`LivingEntity.java:1907-1909`), so a horse
+    /// that falls keeps its body piece whole.
+    #[test]
+    fn a_fall_does_not_wear_the_body_piece() {
+        let mut m = horse();
+        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        assert!(
+            m.damage(6.0, Damage::of(DamageKind::Fall)),
+            "the fall landed"
+        );
+        assert!(
+            !m.outbox
+                .iter()
+                .any(|e| matches!(e, MobEvent::ArmorHurt { .. })),
+            "a #bypasses_armor hit asks for no wear"
+        );
+    }
+
+    /// The wear is measured by the damage `hurtArmor` is handed, which is the
+    /// one the armour, toughness and enchantment reductions have not touched
+    /// yet: 8 raw damage is `8 / 4 = 2` durability even though plate leaves far
+    /// less than 8 through to the health.
+    #[test]
+    fn the_wear_is_the_damage_before_the_armour_reduction() {
+        let mut m = horse();
+        let k = Arc::make_mut(&mut m.kind);
+        k.armor = 20.0;
+        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        let before = m.health;
+        assert!(m.damage(8.0, Damage::of(DamageKind::MobAttack)));
+        assert!(m.health < before, "the hit reached the health");
+        let owed = m.outbox.iter().find_map(|e| match e {
+            MobEvent::ArmorHurt { amount, .. } => Some(*amount),
+            _ => None,
+        });
+        assert_eq!(
+            owed,
+            Some(8.0),
+            "the pre-reduction damage, not the damage the health took"
         );
     }
 }

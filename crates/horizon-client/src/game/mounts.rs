@@ -536,8 +536,14 @@ impl Game<'_> {
         let rear = Vec3::new(rear[0], rear[1], rear[2])
             .rotate_y(-m.yaw * (std::f64::consts::PI / 180.0) as f32);
         at = Vec3::new(at.x + rear.x, at.y + rear.y, at.z + rear.z);
+        // The tick a rider takes its seat is a teleport (`Entity.moveTo`), which
+        // sets the old position too: the camera must not sweep from where the
+        // player stood to the seat. The ticks after it move with the mount and
+        // are interpolated as usual.
+        let first = self.posed_rider != self.riding;
+        self.posed_rider = self.riding;
         if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
+            self.previous_position = if first { at } else { p.position };
             p.position = at;
             p.velocity = Vec3::ZERO;
             p.fall_distance = 0.0;

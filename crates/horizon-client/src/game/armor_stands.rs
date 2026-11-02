@@ -4,6 +4,8 @@
 //! the default pose, the hit wobble and humanoid armor layers.
 use super::{Game, InteractTarget};
 use horizon_client::{
+    cit::{Hand, Kind, Rule},
+    cit_armor,
     entities::ArmorStand,
     items::ItemStack,
     mesher::Vertex,
@@ -154,6 +156,27 @@ impl ArmorStandAssets {
     }
 }
 impl Game<'_> {
+    /// OptiFine CIT: the winning armour or elytra rule (`kind`) of the worn `stack`. No lookup
+    /// without CIT rules.
+    pub(super) fn cit_worn_rule(&self, kind: Kind, stack: &ItemStack) -> Option<&Rule> {
+        let rules = &self.pack.item_renderer.cit.as_ref()?.rules;
+        let item_max = self.items().get(&stack.item).map_or(0, |i| i.max_damage);
+        horizon_client::item_render::cit::worn_rule(rules, kind, stack, item_max)
+            .and_then(|i| rules.rules.get(i))
+    }
+    /// The atlas rect of an armour layer `texture` of equipment asset `asset`, or of the one CIT
+    /// armour rule `cit` puts there when the atlas has it.
+    fn armor_layer_rect(
+        &self,
+        cit: Option<&Rule>,
+        asset: &str,
+        kind: &str,
+        texture: &str,
+    ) -> Option<[f32; 4]> {
+        let sprites = &self.gui.atlas.sprites;
+        let r = cit_armor::worn_layer(cit, asset, kind, texture, |s| sprites.get(s))?;
+        Some([r.u0, r.v0, r.u1, r.v1])
+    }
     /// `HumanoidArmorLayer` for the player: (model, texture rect, colour,
     /// overlay) of each worn piece, head to feet.
     pub(super) fn player_armor_layers(&self) -> Vec<(&Part, [f32; 4], u32, u32, bool)> {
@@ -185,7 +208,7 @@ impl Game<'_> {
         )
     }
     /// The layers of the armour items `worn` (with their stacks when known,
-    /// for trims), head to feet.
+    /// for trims and CIT armour rules), head to feet.
     fn armor_layers(
         &self,
         worn: [Option<(&str, Option<&ItemStack>)>; 4],
@@ -240,18 +263,13 @@ impl Game<'_> {
             };
             // Every layer of the asset, the leather overlay too, then the
             // trim layer over the armour.
+            let cit = stack.and_then(|s| self.cit_worn_rule(Kind::Armor, s));
             for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(r) = self.gui.atlas.sprites.get(texture.as_str()) else {
+                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
                     continue;
                 };
                 let color = layer_color(*undyed, stack);
-                out.push((
-                    part,
-                    [r.u0, r.v0, r.u1, r.v1],
-                    color,
-                    if i == 0 { overlay } else { 0 },
-                    false,
-                ));
+                out.push((part, uv, color, if i == 0 { overlay } else { 0 }, false));
                 // The layer's OptiFine emissive overlay, full bright without the glint.
                 if let Some(g) = emissive
                     .overlay(texture)
@@ -999,8 +1017,9 @@ impl Game<'_> {
             apply_pose(&mut layer_poses, &a.pose);
             // EquipmentLayerRenderer: every layer of the asset, the leather overlay
             // too; the shader glint goes on the first layer only (renderShaderGlint).
+            let cit = self.cit_worn_rule(Kind::Armor, stack);
             for (i, (texture, undyed)) in layers.iter().enumerate() {
-                let Some(uv) = uv_of(texture) else {
+                let Some(uv) = self.armor_layer_rect(cit, &asset, kind, texture) else {
                     continue;
                 };
                 let color = layer_color(*undyed, Some(stack));
@@ -1049,6 +1068,7 @@ impl Game<'_> {
         // never crouches or glides, so its wings rest folded.
         self.wings_geometry(
             a.equipment[4].as_ref().map(|s| &*s.item),
+            a.equipment[4].as_ref(),
             None,
             a.small,
             base,
@@ -1296,7 +1316,12 @@ impl Game<'_> {
                     oz / 16.0,
                 ));
             let seed = a.id as i32 + if left { 1 } else { 2 };
-            let state = self.resolve_item(stack, context, Some(&owner), seed);
+            // OptiFine CIT `hand=off` rules: slot 1 is the off hand.
+            let state = if left {
+                self.resolve_item_in_hand(stack, context, Some(&owner), seed, Hand::Off)
+            } else {
+                self.resolve_item(stack, context, Some(&owner), seed)
+            };
             self.submit_item_world(&state, pose, light, out);
         }
         // `CustomHeadLayer`: a worn skull draws the skull model.

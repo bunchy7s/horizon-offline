@@ -329,6 +329,7 @@ struct Globals {
     /// HDR output's tier windows, low to very bright: where the lift starts, where it is
     /// full (`hdr::Hdr::windows`); zero without HDR.
     hdr_windows: [[f32; 4]; 2],
+    hdr_light: [f32; 4],
 }
 pub type SectionKey = (i32, i32, i32);
 /// The water mirror's targets: the world as a camera mirrored about the water plane sees
@@ -1110,7 +1111,7 @@ const SPRITE_ARRAYS: u32 = 8;
 /// array. wgpu's OpenGL backend picks a texture's target from its layer
 /// count when it is created: one layer makes a 2D texture and a multiple of
 /// six a cube map, neither of which can be viewed as an array.
-fn array_layers(count: u32, gl: bool) -> u32 {
+pub(crate) fn array_layers(count: u32, gl: bool) -> u32 {
     match count {
         _ if !gl => count,
         0 | 1 => 2,
@@ -4009,6 +4010,10 @@ impl Renderer {
     pub fn section_count(&self) -> usize {
         self.sections.len()
     }
+    /// The running native pack's `[[particle_lights]]`.
+    pub fn particle_lights(&self) -> Option<&[horizon_shader_api::manifest::ParticleLight]> {
+        self.native.as_ref().map(|n| n.particle_lights.as_slice())
+    }
     /// Whether one of Horizon's own packs with `[shadow]` draws, whose shadow pass takes the
     /// frame's `shadow_only` quads.
     pub fn native_shadow(&self) -> bool {
@@ -4883,6 +4888,11 @@ impl Renderer {
             let world = pack_post::World {
                 atlas: self.pack_atlas.as_ref().map(|a| (a.view.clone(), a.size())),
                 lightmap: self.lightmap_view.clone(),
+                gui_size: self
+                    .hud
+                    .atlas_texture
+                    .as_ref()
+                    .map_or([1, 1], |t| [t.width(), t.height()]),
                 terrain: self.pack_atlas.as_ref().map(|_| pack_post::Geometry {
                     buffers: if flat { &buffers[..1] } else { &buffers },
                     table: self.flat.as_ref().filter(|_| flat).map(|f| &f.draw_layout),
@@ -5355,6 +5365,8 @@ impl Renderer {
     }
     /// `checks`: the error scopes of a scaled screenshot's frame, checked before its PNG is written.
     fn draw_frame(&mut self, frame: &Frame, checks: Option<GpuChecks>) -> Result<bool> {
+        // Its steps as spans (HORIZON_SPIKES): each lap names the step that just ended.
+        let mut laps = crate::spans::laps();
         let landing = Instant::now();
         self.land_frame();
         // Waiting for the previous frame (offscreen: at most two on the GPU), not work.
@@ -5410,6 +5422,7 @@ impl Renderer {
             }
             self.surface_unconfigured = false;
         }
+        laps.lap("r_prepare");
         // Frame generation: its present thread acquires and presents, this frame draws
         // into frames of its own. Not over menus that blur the frame, a shader pack's
         // own post passes, HDR or the title screen.
@@ -5536,6 +5549,7 @@ impl Renderer {
         let views = self.views(frame);
         let pose = frame.bob * frame.spin;
         let view_proj = views.primary().view_proj(pose);
+        laps.lap("r_acquire");
         // TAA runs where the world post pass does, not under a shader pack's own.
         let taa = !frame.title
             && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
@@ -5675,9 +5689,21 @@ impl Renderer {
                 0.0,
             ],
             hdr_windows: self.hdr.as_ref().map_or([[0.0; 4]; 2], hdr::Hdr::windows),
+            hdr_light: [
+                frame.sky.sky_light_factor,
+                // The underwater overlay: the sky and fog are the water's own colour there.
+                if frame.screen.iter().any(|q| q.world_tint) {
+                    0.0
+                } else {
+                    frame.sky.sky_light_factor
+                },
+                0.0,
+                0.0,
+            ],
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
+        laps.lap("r_targets");
         // GameRenderer.render3dHud: the hand's projection at hudFov, with the
         // bob in its pose rather than the projection (same product).
         let hand_projection = Mat4::from_cols_array(&crate::camera::hand_projection(
@@ -5883,6 +5909,7 @@ impl Renderer {
         }
         self.origins.clear();
         let (sections, retiring) = (&self.sections, &self.lod_retiring);
+        laps.lap("r_cameras");
         // `LevelRenderer.extractSectionDrawGroups`: each section's `getVisibility`. Once
         // nothing is fading (the usual frame), every section is whole without a lookup.
         let fade_ms = fade_millis(frame.chunk_fade);
@@ -6064,6 +6091,7 @@ impl Renderer {
         self.draw_pages.extend_from_slice(&self.phase2_pages);
         let culling = cull.is_some();
         let solid_draws = self.draws.len() as u32;
+        laps.lap("r_section_groups");
         // LevelRenderer: nearby sections each frame, plus a rotating eighth
         // (at least 15) of the visible list. Cached views avoid needless sorts.
         self.translucent_draws.clear();
@@ -6261,6 +6289,7 @@ impl Renderer {
             (shadow_first + shadow_solid) as usize,
         );
         let shadow_translucent = self.draws.len() as u32 - shadow_first - shadow_solid;
+        laps.lap("r_nearby");
         // Metal replays a multi-draw as one draw call per entry.
         self.section_draw_calls = if self.multi_draw && self.info.backend != wgpu::Backend::Metal {
             (0..self.section_draws)
@@ -6346,12 +6375,19 @@ impl Renderer {
                 &self.queue,
                 frame.entities,
                 frame.entity_spans,
+                frame.crumbling_sprite,
                 &mut self.pack_entity_rest,
             );
             entities = &self.pack_entity_rest;
         }
         // GameRenderer.useImprovedTransparency. A shader pack keeps its own
         // path.
+        let hdr_lighting = self.native.is_none()
+            && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
+            && std::env::var_os("HORIZON_HDR_LIGHTING").is_none_or(|v| v != "0");
+        if let Some(hdr) = &mut self.hdr {
+            hdr.lighting = hdr_lighting;
+        }
         let oit_on = self.improved_transparency
             && !frame.title
             && self.pack_post.as_ref().is_none_or(|p| p.1.is_none())
@@ -6387,6 +6423,7 @@ impl Renderer {
             + translucent_particle_quads
             + translucent_item_quads
             + oit_entity_quads;
+        laps.lap("r_draw_lists");
         // Where the tail of materials the classic and the improved passes
         // both draw ends: the shadows, particles and items count back from it.
         let base_quads = world_quads - oit_entity_quads;
@@ -6532,6 +6569,7 @@ impl Renderer {
                 bytemuck::bytes_of(&uniform),
             );
         }
+        laps.lap("r_materials");
         // Every upload before the frame's first pass: a pass ends wgpu-core's
         // command buffer, so copies between passes would need one more.
         if !frame.screen.is_empty() {
@@ -6658,6 +6696,7 @@ impl Renderer {
                 .flatten();
         }
         let pack_reads_world = pack_post || native_post;
+        laps.lap("r_uploads");
         // Phase 2 of occlusion culling draws over the depth, and a shader pack or TAA reads it.
         let keep_depth = pack_reads_world
             || (taa && self.world_post.taa)
@@ -6789,6 +6828,7 @@ impl Renderer {
             }
         };
         let sky_visible = sky_open(frame);
+        laps.lap("r_world_pass");
         // One of Horizon's own packs: this frame's inputs; in a timed frame its sky draws in a
         // pass of its own, so that it has a time of its own.
         let mut native_sky_pass = false;
@@ -6927,6 +6967,7 @@ impl Renderer {
             pass.set_bind_group(0, &self.group, &[]);
             sky.draw(&mut pass, &native.frame);
         }
+        laps.lap("r_pack_inputs");
         // The water mirror, for one of Horizon's own packs that reads it: the world as a
         // camera mirrored about the water plane sees it, into a half-resolution target the
         // material stage samples as `reflection`.
@@ -7064,6 +7105,7 @@ impl Renderer {
             };
             native.frame.fit_surface(&self.device, size);
         }
+        laps.lap("r_mirror");
         // One of Horizon's own packs with a material stage: terrain draws with its pipelines,
         // which read the pack's frame at group 3.
         let material = self
@@ -8054,6 +8096,7 @@ impl Renderer {
                 (&view_target, self.config.format.remove_srgb_suffix()),
             );
         }
+        laps.lap("r_passes");
         // Under `HORIZON_FRAMEGEN_DEBUG=generated` a screenshot is the made frame.
         let shown_texture = match &fg_frames {
             Some((_, generated)) if fg_made && frame_gen::generated_only() => generated,
@@ -9103,6 +9146,14 @@ mod tests {
     }
 
     #[test]
+    fn a_reported_black_level_rounds_down() {
+        use super::hundredths_of_a_nit as h;
+        assert_eq!(h(0.005), 0);
+        assert_eq!(h(0.05), 5);
+        assert_eq!(h(5.0), 100);
+        assert_eq!(h(f32::NAN), 0);
+    }
+    #[test]
     fn os_luminances_become_auto_values() {
         use super::os_reported;
         use crate::graphics::Reported;
@@ -9119,14 +9170,16 @@ mod tests {
             os_reported(&info(Some(998.4), Some(240.0))),
             Some(Reported {
                 paper_white: 240,
-                peak: 998
+                peak: 998,
+                black: 0
             })
         );
         assert_eq!(
             os_reported(&info(Some(120.0), Some(1000.0))),
             Some(Reported {
                 paper_white: 480,
-                peak: 480
+                peak: 480,
+                black: 0
             })
         );
         // White above the calibrated peak (a Samsung QD-OLED's 380, the slider at 456).
@@ -9134,7 +9187,8 @@ mod tests {
             os_reported(&info(Some(380.0), Some(456.0))),
             Some(Reported {
                 paper_white: 456,
-                peak: 456
+                peak: 456,
+                black: 0
             })
         );
         assert_eq!(os_reported(&info(Some(1000.0), None)), None);
@@ -9917,6 +9971,15 @@ fn flush_display_log() {
         (log.last, log.at) = (line, Some(now));
     }
 }
+/// A reported black level, within the setting's range. Rounded down: OLEDs report a figure
+/// just above 0, like KWin's 0.005, which isn't worth lifting the shadows for.
+fn hundredths_of_a_nit(nits: f32) -> u32 {
+    if nits.is_finite() && nits > 0.0 {
+        ((nits * 100.0) as u32).min(100)
+    } else {
+        0
+    }
+}
 fn log_os_reported(reported: Option<crate::graphics::Reported>) {
     log_display(match reported {
         Some(r) => format!(
@@ -9939,6 +10002,7 @@ fn os_reported(info: &wgpu::DisplayHdrInfo) -> Option<crate::graphics::Reported>
     let paper_white = (white.round() as u32).clamp(80, 480);
     Some(crate::graphics::Reported {
         paper_white,
+        black: hundredths_of_a_nit(luminance.min_nits.unwrap_or(0.0)),
         // Windows' SDR brightness slider can set white above the reported peak (480 against
         // a calibrated 380): the highlights then stay at white instead of dropping below it.
         peak: (peak.round() as u32).clamp(200, 10_000).max(paper_white),
@@ -9964,5 +10028,6 @@ fn reported(l: horizon_hdr::wayland::Luminances) -> crate::graphics::Reported {
     crate::graphics::Reported {
         paper_white: 203,
         peak: peak.clamp(200, 10_000),
+        black: hundredths_of_a_nit(l.target_min * 203.0 / l.reference.max(1.0)),
     }
 }

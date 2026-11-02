@@ -1378,6 +1378,33 @@ impl LootContext<'_> {
     fn enchantment_level(&self, id: &str) -> u32 {
         self.held.map_or(0, |h| h.enchantment_level(id))
     }
+    /// The context a mod's own loot kind sees in this engine: the block and
+    /// the tool it has, and a seed from the roll's random. The entity, the
+    /// damage, the player and the biome belong to the main loot engine's
+    /// rolls; they are None here (docs/native-mods.md, API 133).
+    fn native_loot_context<R: RandomSource>(
+        &self,
+        random: &mut R,
+    ) -> horizon_world::loot::NativeLootContext<'_> {
+        horizon_world::loot::NativeLootContext {
+            entity: None,
+            damage: None,
+            player: None,
+            block: (!self.block.is_empty()).then_some(self.block),
+            tool: self.held.map(|h| horizon_world::loot::NativeLootTool {
+                item: h.item.to_string(),
+                enchantments: h
+                    .enchantments()
+                    .iter()
+                    .map(|(id, lvl)| (id.to_string(), *lvl as i32))
+                    .collect(),
+            }),
+            luck: 0.0,
+            biome: None,
+            seed: random.next_long(),
+            place: horizon_world::loot::current_native_loot_place(),
+        }
+    }
     fn number<R: RandomSource>(v: &Value, random: &mut R) -> f32 {
         match v {
             Value::Number(n) => n.as_f64().unwrap_or(0.0) as f32,
@@ -1551,28 +1578,9 @@ impl LootContext<'_> {
             // does not have: held true (a double plant's other half is taken
             // as there). Unknown types fail, as in loot.rs.
             "minecraft:location_check" => true,
-            // A mod's own kind: the condition hook answers. This engine
-            // (block drops, entity drops, loot_table, interact_loot) has
-            // no LootStack, so the function hook isn't here yet.
+            // A mod's own kind: the condition hook answers.
             k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
-                let ctx = horizon_world::loot::NativeLootContext {
-                    entity: None,
-                    damage: None,
-                    player: None,
-                    block: (!self.block.is_empty()).then_some(self.block),
-                    tool: self.held.map(|h| horizon_world::loot::NativeLootTool {
-                        item: h.item.to_string(),
-                        enchantments: h
-                            .enchantments()
-                            .iter()
-                            .map(|(id, lvl)| (id.to_string(), *lvl as i32))
-                            .collect(),
-                    }),
-                    luck: 0.0,
-                    biome: None,
-                    seed: random.next_long(),
-                    place: horizon_world::loot::current_native_loot_place(),
-                };
+                let ctx = self.native_loot_context(random);
                 let mut holds = false;
                 horizon_world::loot::native_loot_condition(k, c, &ctx, &mut holds);
                 holds
@@ -1870,10 +1878,153 @@ impl LootContext<'_> {
                         stack.count = stack.count.min(max as u32);
                     }
                 }
+                // A mod's own kind: the function hook changes the stack, as it
+                // does in the main loot engine.
+                k if k.contains(':') && !k.starts_with("minecraft:") => {
+                    let ctx = self.native_loot_context(random);
+                    mod_function(k, f, &ctx, stack, horizon_world::loot::native_loot_function);
+                }
                 _ => {}
             }
         }
     }
+}
+
+/// The items engine's stack as the loot engine's (`LootStack`), for a mod's
+/// function hook: the parts of it the hook can change and the engine takes
+/// back. The components the engine keeps as saved travel as their JSON, as
+/// `set_components` writes them.
+fn loot_of(stack: &ItemStack) -> horizon_world::loot::LootStack {
+    let mut components: Vec<(String, Value)> = Vec::new();
+    if let Some(data) = stack.data() {
+        for (id, value) in &data.other {
+            components.push((
+                id.clone(),
+                horizon_client_core::scoreboard::tag_to_json(value),
+            ));
+        }
+        if let Some(name) = &data.custom_name {
+            components.push((
+                "minecraft:custom_name".to_owned(),
+                horizon_client_core::scoreboard::tag_to_json(name),
+            ));
+        }
+        if let Some((material, pattern)) = &data.trim {
+            components.push((
+                "minecraft:trim".to_owned(),
+                serde_json::json!({"material": &**material, "pattern": &**pattern}),
+            ));
+        }
+    }
+    horizon_world::loot::LootStack {
+        item: stack.item.to_string(),
+        count: stack.count as i32,
+        damage: stack.damage as i32,
+        enchantments: stack
+            .crafting_enchantments()
+            .iter()
+            .map(|(id, level)| (id.to_string(), *level as i32))
+            .collect(),
+        potion: stack.potion().map(str::to_owned),
+        map: false,
+        exploration: None,
+        ominous_amplifier: stack
+            .data()
+            .and_then(|d| d.ominous_amplifier)
+            .map(i32::from),
+        stew_effects: stack
+            .data()
+            .map(|d| {
+                d.stew_effects
+                    .iter()
+                    .map(|(effect, ticks)| (effect.to_string(), *ticks))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        names: Vec::new(),
+        components,
+    }
+}
+
+/// What a mod's loot function left in its stack, applied to the engine's.
+/// Only what changed is written, so a field the hook did not touch keeps the
+/// engine's own form of it.
+fn apply_loot(
+    before: &horizon_world::loot::LootStack,
+    after: &horizon_world::loot::LootStack,
+    stack: &mut ItemStack,
+) {
+    if after.item != before.item {
+        stack.item = Arc::from(after.item.as_str());
+    }
+    if after.count != before.count {
+        stack.count = after.count.max(0) as u32;
+    }
+    if after.damage != before.damage {
+        stack.damage = after.damage.max(0) as u32;
+    }
+    if after.enchantments != before.enchantments {
+        let levels = after
+            .enchantments
+            .iter()
+            .filter(|(_, level)| *level > 0)
+            .map(|(id, level)| (Arc::from(id.as_str()), *level as u32))
+            .collect();
+        stack.set_crafting_enchantments(levels);
+    }
+    if after.potion != before.potion {
+        stack.data_mut().potion = after.potion.as_deref().map(Arc::from);
+    }
+    if after.ominous_amplifier != before.ominous_amplifier {
+        stack.data_mut().ominous_amplifier = after.ominous_amplifier.map(|a| a.clamp(0, 255) as u8);
+    }
+    if after.stew_effects != before.stew_effects {
+        stack.data_mut().stew_effects = after
+            .stew_effects
+            .iter()
+            .map(|(effect, ticks)| (Arc::from(effect.as_str()), *ticks))
+            .collect();
+    }
+    // `SetNameFunction`'s components: the names the hook set.
+    for (id, text) in &after.names {
+        if !before.names.iter().any(|(i, t)| i == id && t == text) {
+            stack.data_mut().set_loot_name(id, text);
+        }
+    }
+    // `SetComponentsFunction`'s patch: the components the hook changed or
+    // added are set, and the ones it dropped (gone from the stack) removed.
+    for (id, value) in &after.components {
+        if !before.components.iter().any(|(i, v)| i == id && v == value) {
+            stack.data_mut().set_loot_component(id, value);
+        }
+    }
+    for (id, _) in &before.components {
+        if !after.components.iter().any(|(i, _)| i == id) {
+            stack.data_mut().set_loot_component(id, &Value::Null);
+        }
+    }
+    stack.tidy();
+}
+
+/// `native_loot_function` with the items engine's stack: the stack as the
+/// loot engine's, the hook, and back what it changed. `hook` is the hook
+/// point (`horizon_world::loot::native_loot_function`); a test passes its own.
+fn mod_function(
+    kind: &str,
+    data: &Value,
+    ctx: &horizon_world::loot::NativeLootContext<'_>,
+    stack: &mut ItemStack,
+    hook: impl FnOnce(
+        &str,
+        &Value,
+        &horizon_world::loot::NativeLootContext<'_>,
+        &mut horizon_world::loot::LootStack,
+    ),
+) {
+    let before = loot_of(stack);
+    let mut after = before.clone();
+    hook(kind, data, ctx, &mut after);
+    apply_loot(&before, &after, stack);
 }
 
 /// `DispensibleContainerItem`: shared contents for hand use and dispensers.
@@ -2157,6 +2308,96 @@ mod tests {
         assert_eq!(drops(json!({"type":"mymod:always"}), ""), 0);
         assert_eq!(drops(json!("mymod:always"), "minecraft:stone"), 0);
         assert_eq!(drops(Value::Null, "minecraft:stone"), 1);
+    }
+
+    /// A mod's function kind changes the stack the items engine drops: what
+    /// the hook leaves in the stack comes back (item, count, a component),
+    /// through the conversion the block-drop path uses.
+    #[test]
+    fn a_mod_function_changes_the_stack_the_items_engine_drops() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let mut random = LegacyRandom::new(7);
+        let block = ctx(&items, None, &props, "minecraft:stone");
+        let native = block.native_loot_context(&mut random);
+        let mut stack = ItemStack::new("minecraft:stone", 1);
+        mod_function(
+            "mymod:seven",
+            &json!({"type": "mymod:seven"}),
+            &native,
+            &mut stack,
+            |_, _, _, loot| {
+                loot.item = "minecraft:diamond".to_owned();
+                loot.count = 7;
+                loot.components.push((
+                    "minecraft:custom_data".to_owned(),
+                    json!({"machine": "furnace"}),
+                ));
+            },
+        );
+        assert_eq!(&*stack.item, "minecraft:diamond");
+        assert_eq!(stack.count, 7);
+        assert_eq!(
+            stack.data().and_then(|d| d.other("minecraft:custom_data")),
+            Some(&horizon_client_core::scoreboard::json_to_tag(
+                &json!({"machine": "furnace"})
+            ))
+        );
+    }
+
+    /// A function that leaves the stack alone keeps its own form: the round
+    /// trip through the loot engine's stack changes nothing.
+    #[test]
+    fn a_mod_function_that_changes_nothing_keeps_the_stacks_form() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let mut random = LegacyRandom::new(7);
+        let block = ctx(&items, None, &props, "minecraft:stone");
+        let native = block.native_loot_context(&mut random);
+        let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+        stack.enchant("minecraft:sharpness", 3);
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &json!("Excalibur"));
+        let before = stack.clone();
+        mod_function(
+            "mymod:nothing",
+            &json!({"type": "mymod:nothing"}),
+            &native,
+            &mut stack,
+            |_, _, _, _| {},
+        );
+        assert_eq!(stack, before);
+    }
+
+    /// The items engine reaches the function hook: a pool whose function kind
+    /// is a mod's draws the hook's one `next_long` where a vanilla pool draws
+    /// none. The hook is unclaimed here, so the drop keeps its count.
+    #[test]
+    fn a_mod_function_kind_reaches_the_items_engines_roll() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let vanilla = json!({"pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item","name":"minecraft:stone"}]}]});
+        let modded = json!({"pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item","name":"minecraft:stone"}],
+            "modifier":[{"type":"mymod:duplicate","factor":2}]}]});
+        let mut a = LegacyRandom::new(100);
+        let mut b = LegacyRandom::new(100);
+        let _ = ctx(&items, None, &props, "minecraft:stone").evaluate(&vanilla, &mut a);
+        let expected: Vec<i64> = (0..5).map(|_| b.next_long()).collect();
+        let got: Vec<i64> = (0..5).map(|_| a.next_long()).collect();
+        assert_eq!(got, expected, "a vanilla table shifted the random");
+
+        let mut c = LegacyRandom::new(100);
+        let mut d = LegacyRandom::new(100);
+        let drops = ctx(&items, None, &props, "minecraft:stone").evaluate(&modded, &mut c);
+        let _ = d.next_long(); // the hook's seed
+        let expected: Vec<i64> = (0..5).map(|_| d.next_long()).collect();
+        let got: Vec<i64> = (0..5).map(|_| c.next_long()).collect();
+        assert_eq!(got, expected, "the mod function did not draw its seed");
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].count, 1);
     }
 
     #[test]

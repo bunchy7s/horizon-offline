@@ -293,7 +293,7 @@ impl StartupMenu {
                 | KeyCode::ArrowUp
                 | KeyCode::ArrowDown),
             ) => {
-                title.arrow_key(key, viewport);
+                title.arrow_key(key, viewport, self.modifiers.shift_key());
             }
             _ => {
                 let cleared = !title.has_caret_field()

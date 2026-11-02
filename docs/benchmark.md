@@ -59,6 +59,24 @@ Options: `--distances 8,16`, `--sizes 1920x1080`, `--scenes village,ocean`, `--s
 
 On Windows, run `python tools\perf_bench.py ...` the same way. Horizon's control endpoint there is a localhost TCP port, which the game writes to a `.json` file in the temporary folder. `--build` can point at an installed release (`%APPDATA%\horizon-launcher\versions\vX.Y.Z`, with `--resources` its `.local\horizon-client\26.3`), and the report then gives that release's version.
 
+## Frame pacing
+
+`tools/pacing_bench.py` measures smoothness rather than throughput: every frame of the sessions where players see
+hitches, a fast flight (64 blocks a second over new terrain), eight long teleports, trips to the Nether and back, and
+the inventory and pause menu opened and closed twenty times. For each it reports the median, p99 and p99.9 frame
+times, the slowest frame, the 1% and 0.1% lows and the frames over 33 ms. The game runs with `HORIZON_SPIKES`, so
+every slow frame also logs its timed spans (wall and thread CPU time): the report keeps the slowest ones next to the
+figures, which says whether a hitch was work (a span's CPU time) or waiting (the GPU, a lock, a file).
+`Renderer`'s frame and `entity_geometry` time their steps as spans too (`spans::laps`).
+
+```sh
+python3 tools/pacing_bench.py --build target/fast --label main --distances 32
+python3 tools/pacing_bench.py --compare main mybranch
+```
+
+`--size 320x180` keeps a software renderer (Mesa's lavapipe on a machine with no GPU) from hiding the CPU side; there
+only the spans' CPU times mean anything.
+
 ## Results
 
 Saved runs go to `benchmarks/perf/`; `--table` prints them as Markdown.

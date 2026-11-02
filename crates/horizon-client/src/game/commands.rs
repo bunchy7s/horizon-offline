@@ -3000,6 +3000,7 @@ impl Game<'_> {
     }
     /// `MinecraftServer.setDifficulty(difficulty, true)`.
     pub(super) fn set_difficulty_forced(&mut self, i: u8) {
+        let from = self.ui.difficulty;
         self.ui.difficulty = i;
         // The level data holds the world's difficulty: it survives the
         // reopen, so it follows the command.
@@ -3017,6 +3018,10 @@ impl Game<'_> {
                     difficulty: i32::from(i),
                     locked: self.level.difficulty_locked,
                 }));
+        }
+        if from != i {
+            let (from, to) = difficulty_names(from, i);
+            self.native_difficulty_changed(from, to);
         }
     }
     fn cmd_spawnpoint(&mut self, ctx: &Context) -> R<i32> {
@@ -3756,6 +3761,30 @@ pub(super) fn block_input_matches(
         && b.properties
             .iter()
             .all(|(k, v)| s.properties.get(k) == Some(v))
+}
+
+/// The names `native_difficulty_changed` hears for a change from `from` to
+/// `to`: the four difficulties of `options.difficulty.*`, the index kept in
+/// range as the command and the options keep it.
+fn difficulty_names(from: u8, to: u8) -> (&'static str, &'static str) {
+    (
+        DIFFICULTIES[usize::from(from) & 3],
+        DIFFICULTIES[usize::from(to) & 3],
+    )
+}
+
+#[cfg(test)]
+mod difficulty_tests {
+    use super::difficulty_names;
+
+    #[test]
+    fn a_difficulty_change_names_both_ends() {
+        assert_eq!(difficulty_names(0, 3), ("peaceful", "hard"));
+        assert_eq!(difficulty_names(2, 1), ("normal", "easy"));
+        // The four difficulties are the only indexes the command and the
+        // options keep; an index outside them still names one.
+        assert_eq!(difficulty_names(7, 4), ("hard", "peaceful"));
+    }
 }
 
 #[cfg(test)]

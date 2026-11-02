@@ -68,7 +68,12 @@ impl Game<'_> {
             .flatten()
     }
     fn entity_nbt_in_level(&mut self, t: Target) -> Option<Tag> {
-        let player_uuid = self.level.player_uuid;
+        // The acting player's own UUID: a guest's turn (the window's player on
+        // the server thread) keeps the world owner's in `level`.
+        let player_uuid = self
+            .lan_acting_uuid
+            .map(horizon_client::lan::playerdata::uuid_ints)
+            .or(self.level.player_uuid);
         Some(match t {
             Target::Guest(_) => {
                 return self
