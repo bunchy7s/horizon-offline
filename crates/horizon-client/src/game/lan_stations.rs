@@ -13,7 +13,7 @@ use super::{
 use horizon_client::{
     containers::BlockEntity,
     items::ItemStack,
-    menu::{Kind, Menu},
+    menu::{AnvilCraft, Kind, Menu},
 };
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, Clientbound as C};
@@ -69,6 +69,10 @@ impl Game<'_> {
         let Some((menu_type, kind, _)) = menu_of(station.kind) else {
             return false;
         };
+        // The mods may stop the menu; the click is spent.
+        if !self.guest_may_open(host, conn, menu_type, Some(station.pos)) {
+            return true;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable(station.kind.title_key(), &[]);
@@ -76,6 +80,8 @@ impl Game<'_> {
             return true;
         };
         let mut menu = Box::new(Menu::new(kind));
+        // Without a mod the take runs AnvilMenu.onTake's order in the click itself.
+        menu.anvil_hook = kind == Kind::Anvil && !horizon_client::mod_api::mods().is_empty();
         if let Some(g) = host.hub.guests.iter_mut().find(|g| g.conn == conn)
             && kind == Kind::Enchanting
         {
@@ -121,12 +127,82 @@ impl Game<'_> {
         if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn)
             && !host.hub.guests[gi].spectator()
         {
-            self.guest_menu_op(host, gi, &mut gs.menu, op);
+            // createResult runs when the inputs change (or a rename): a click
+            // elsewhere must not hand the hooks their own result again.
+            let result_slot = match gs.kind {
+                StationKind::Anvil | StationKind::Grindstone => Some(2),
+                StationKind::Smithing => Some(3),
+                _ => None,
+            };
+            let before = result_slot.map(|r| {
+                let slots: Vec<_> = (0..=r).map(|s| gs.menu.slot(s).cloned()).collect();
+                (slots, gs.menu.data[0])
+            });
+            let mut undo = None;
+            let hook = gs.menu.anvil_hook;
+            self.guest_menu_op(host, gi, &mut gs.menu, |menu, env| {
+                undo = hook.then(|| menu.anvil_undo());
+                op(menu, env);
+            });
+            // AnvilCraftEvent.Pre: the taken result's onTake waits for the mods.
+            let mut anvil_craft = gs.menu.anvil_craft.take();
+            let mut cancelled = false;
+            if let Some(craft) = &anvil_craft {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut cancel = false;
+                self.native_anvil_craft_pre(uuid, &name, gs.pos, craft, &mut cancel);
+                if cancel && let Some(undo) = undo {
+                    // The take is refused: the result, inputs, cost, inventory
+                    // and cursor are as before the click (the resync below
+                    // tells the client).
+                    anvil_craft = None;
+                    cancelled = true;
+                    self.guest_menu_op(host, gi, &mut gs.menu, |menu, _| menu.anvil_cancel(undo));
+                } else {
+                    gs.menu.anvil_take(&self.menu_env());
+                    let dropped = std::mem::take(&mut gs.menu.dropped);
+                    self.drop_guest_items(host, gi, dropped);
+                }
+            }
+            // A cancelled take runs no createResult: the inputs are untouched.
+            let recomputed = !cancelled
+                && before.is_some_and(|(slots, cost)| {
+                    cost != gs.menu.data[0]
+                        || slots
+                            .iter()
+                            .enumerate()
+                            .any(|(s, b)| gs.menu.slot(s) != b.as_ref())
+                });
+            if recomputed && gs.kind == StationKind::Anvil {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut result = gs.menu.slot(2).cloned();
+                self.native_prepare_anvil(uuid, &name, gs.pos, &mut result, &mut gs.menu.data[0]);
+                let env = self.menu_env();
+                gs.menu.set_slot(&env, 2, result);
+            }
+            if recomputed && gs.kind == StationKind::Grindstone {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut result = gs.menu.slot(2).cloned();
+                self.native_prepare_grindstone(uuid, &name, gs.pos, &mut result);
+                let env = self.menu_env();
+                gs.menu.set_slot(&env, 2, result);
+            }
+            if recomputed && gs.kind == StationKind::Smithing {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut result = gs.menu.slot(3).cloned();
+                self.native_prepare_smithing(uuid, &name, gs.pos, &mut result);
+                let env = self.menu_env();
+                gs.menu.set_slot(&env, 3, result);
+            }
             self.lan_station_sounds(&mut gs);
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);
             }
-            self.lan_station_combined(host, conn, &mut gs);
+            self.lan_station_combined(host, conn, &mut gs, anvil_craft.as_ref());
             if let Some(button) = gs.menu.enchant_button.take() {
                 self.lan_enchant(host, gi, &mut gs, button);
             }
@@ -149,6 +225,9 @@ impl Game<'_> {
     /// `LecternBlock.openScreen` for a guest: `minecraft:lectern` over the
     /// block entity, with its book and page.
     pub(super) fn lan_open_lectern(&mut self, host: &mut LanHost, conn: u32, key: (i32, i32, i32)) {
+        if !self.guest_may_open(host, conn, "minecraft:lectern", Some([key.0, key.1, key.2])) {
+            return;
+        }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
         let title = horizon_protocol::text::translatable("container.lectern", &[]);
@@ -256,8 +335,15 @@ impl Game<'_> {
 
     /// The rest of a taken anvil or smithing result's `onTake`: the guest
     /// pays the levels, the anvil wears (level event 1030 or 1029), the
-    /// smithing table sounds (1044).
-    fn lan_station_combined(&mut self, host: &mut LanHost, conn: u32, gs: &mut GuestStation) {
+    /// smithing table sounds (1044). An anvil's `craft` is then reported to
+    /// the mods (`AnvilCraftEvent.Post`).
+    fn lan_station_combined(
+        &mut self,
+        host: &mut LanHost,
+        conn: u32,
+        gs: &mut GuestStation,
+        craft: Option<&AnvilCraft>,
+    ) {
         let change = std::mem::take(&mut gs.menu.level_change);
         if change != 0 {
             self.as_guest(host, conn, |g| g.give_levels(change));
@@ -271,6 +357,12 @@ impl Game<'_> {
             let creative = gs.menu.creative;
             // A broken anvil closes the menu on the next stillValid check.
             self.anvil_used(gs.pos, creative);
+            if let Some(craft) = craft
+                && let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn)
+            {
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                self.native_anvil_craft_post(uuid, &name, gs.pos, craft);
+            }
         }
     }
 
@@ -286,9 +378,28 @@ impl Game<'_> {
             bookcases,
             gs.menu.slot(0),
         );
+        let guest = &host.hub.guests[gi];
+        let mut costs = offers.costs;
+        self.native_prepare_item_enchant(guest.uuid, &guest.name, gs.pos, &mut costs);
+        let mut clues = offers.clues;
         for i in 0..3 {
-            gs.menu.data[i] = offers.costs[i];
-            let clue = offers.clues[i].as_ref();
+            // A cost a mod changed shows the clue of the list it will give.
+            if costs[i] != offers.costs[i]
+                && let Some(stack) = gs.menu.slot(0)
+            {
+                clues[i] = horizon_client::stations::enchant_clue(
+                    &self.stations().enchantments,
+                    self.items(),
+                    seed,
+                    i,
+                    costs[i],
+                    stack,
+                );
+            }
+        }
+        for i in 0..3 {
+            gs.menu.data[i] = costs[i];
+            let clue = clues[i].as_ref();
             gs.menu.data[4 + i] = clue
                 .and_then(|(e, _)| host.hub.registry_id("minecraft:enchantment", e))
                 .unwrap_or(-1);
@@ -305,7 +416,8 @@ impl Game<'_> {
             return;
         };
         let g = &host.hub.guests[gi];
-        let (seed, creative, conn) = (g.xp_seed, g.creative(), g.conn);
+        let (seed, creative, conn, uuid, name) =
+            (g.xp_seed, g.creative(), g.conn, g.uuid, g.name.clone());
         let Some(enchanted) = horizon_client::stations::apply_enchantment(
             &self.stations().enchantments,
             self.items(),
@@ -316,11 +428,12 @@ impl Game<'_> {
         ) else {
             return;
         };
+        let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(host, conn, |game| {
             game.give_levels(-need);
-            game.stats.custom("enchant_item", 1);
+            game.award_custom_stat("enchant_item", 1);
             // CriteriaTriggers.ENCHANTED_ITEM, with the levels it cost.
             game.trigger_enchanted_item(&enchanted, need);
         });
@@ -344,6 +457,7 @@ impl Game<'_> {
             1.0,
             pitch,
         );
+        self.native_enchant_item(uuid, &name, gs.pos, &enchanted_for_hook, need);
     }
 
     /// `ServerGamePacketListenerImpl.handleRenameItem`: the guest's anvil
@@ -438,9 +552,28 @@ impl Game<'_> {
         }) {
             return;
         }
+        let identity = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()));
+        let mut selected = false;
+        let kind = host
+            .play
+            .get(&conn)
+            .and_then(|p| p.station.as_ref())
+            .filter(|s| s.window == window)
+            .map(|s| s.kind);
         self.lan_station_op(host, conn, Some(window), |menu, env| {
-            menu.button(env, id);
+            selected = menu.button(env, id);
         });
+        if selected && let Some((player, name)) = identity {
+            match kind {
+                Some(StationKind::Loom) => {
+                    self.native_player_loom_pattern_select(player, &name, id);
+                }
+                Some(StationKind::Stonecutter) => {
+                    self.native_player_stonecutter_recipe_select(player, &name, id);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// The whole station menu and its changed data slots for the client
@@ -573,6 +706,15 @@ impl Game<'_> {
         else {
             return;
         };
+        let Some((player, name)) = host
+            .hub
+            .guests
+            .iter()
+            .find(|g| g.conn == conn)
+            .map(|g| (g.uuid, g.name.clone()))
+        else {
+            return;
+        };
         // An id the registry doesn't have fails the packet's codec.
         let mut powers: [Option<(i32, String)>; 2] = [None, None];
         for (k, id) in [primary, secondary].into_iter().enumerate() {
@@ -615,10 +757,17 @@ impl Game<'_> {
         if let Some(BlockEntity::Beacon(b)) =
             self.world.block_entities.get_mut(&(pos[0], pos[1], pos[2]))
         {
-            b.primary = primary;
-            b.secondary = secondary;
+            b.primary = primary.clone();
+            b.secondary = secondary.clone();
             select_sound = !b.sections.is_empty();
         }
+        self.native_player_change_beacon_effect(
+            player,
+            &name,
+            pos,
+            primary.as_deref().unwrap_or(""),
+            secondary.as_deref().unwrap_or(""),
+        );
         if select_sound {
             self.beacon_sound(pos, "minecraft:block.beacon.power_select");
         }

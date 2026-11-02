@@ -12,6 +12,8 @@ pub(super) struct PackAtlas {
     pub sprite: u32,
     /// Layers per sprite array.
     split: u32,
+    /// OptiFine/Iris separate ambient occlusion: pass vertex alpha to hz_Color.a.
+    pub separate_ao: bool,
 }
 
 impl PackAtlas {
@@ -57,6 +59,7 @@ impl PackAtlas {
             columns,
             sprite,
             split,
+            separate_ao: false,
         };
         atlas.copy(encoder, arrays, 0..layers);
         Some(atlas)
@@ -161,8 +164,9 @@ impl PackAtlas {
                 "layout(set = 1, binding = 0) readonly buffer HzBlockSlots { uint hz_block_slots[]; };\n\
                  layout(set = 1, binding = 1) readonly buffer HzSlotOrigins { vec4 hz_slot_origins[]; };\n",
             );
-            // `mc_Entity` of each sprite layer: id, then 1 for fluids or -1 (the game's table),
-            // and the arena page's vertices (`TerrainVertex`, six words each).
+            // Of each sprite layer, `mc_Entity` (id, then 1 for fluids or -1) and
+            // `at_midBlock.w` (its block's light), the game's table; and the arena page's
+            // vertices (`TerrainVertex`, six words each).
             declarations.push_str(
                 "layout(set = 3, binding = 0) readonly buffer HzBlockIds { int hz_block_ids[]; };\n\
                  layout(set = 3, binding = 1) readonly buffer HzVertices { uint hz_vertices[]; };\n",
@@ -179,7 +183,12 @@ impl PackAtlas {
         ];
         let columns = self.columns;
         // UVs past a sprite (models up to 2, distant tiles) cannot repeat in an atlas: clamped.
-        // The colour's alpha holds HDR's emission level (`mesher::EMISSION_BITS`): packs get 1.
+        // The colour's alpha holds HDR's emission level (`mesher::EMISSION_BITS`): packs get 1 unless separate_ao.
+        let color_a = if self.separate_ao {
+            "hz_v_color.a"
+        } else {
+            "1.0"
+        };
         let body = format!(
             "    vec4 hz_origin = {origin};\n    \
              uint hz_layer = hz_v_layer & 32767u;\n    \
@@ -189,7 +198,7 @@ impl PackAtlas {
              hz_MultiTexCoord0 = vec4((hz_cell + clamp(vec2(hz_v_uv) * (hz_origin.w > 0.0 ? uintBitsToFloat(floatBitsToUint(hz_origin.w) & 0xff800000u) : fract(abs(hz_origin.w))), 0.0, 1.0)) * hz_scale, 0.0, 1.0);\n    \
              hz_MultiTexCoord1 = vec4(float(hz_v_light.y), float(hz_v_light.x), 0.0, 1.0);\n    \
              hz_MultiTexCoord2 = hz_MultiTexCoord1;\n    \
-             hz_Color = vec4(hz_v_color.rgb, 1.0);\n    \
+             hz_Color = vec4(hz_v_color.rgb, {color_a});\n    \
              hz_Normal = vec3(0.0, 1.0, 0.0);\n    \
              hz_tangent = vec4(1.0, 0.0, 0.0, 1.0);\n",
             scale[0], scale[1],
@@ -200,13 +209,15 @@ impl PackAtlas {
         }
         declarations.push_str("vec2 hz_cell; vec2 hz_scale; vec4 hz_tangent;\n");
         let entity = if flat {
-            "vec4(float(hz_block_ids[2u * hz_layer]), float(hz_block_ids[2u * hz_layer + 1u]), 0.0, 0.0)"
+            "vec4(float(hz_block_ids[3u * hz_layer]), float(hz_block_ids[3u * hz_layer + 1u]), 0.0, 0.0)"
         } else {
             "vec4(-1.0, -1.0, 0.0, 0.0)"
         };
-        // The block a face belongs to: half a block behind its centre (the quad's diagonal).
+        // The block a face belongs to: half a block behind its centre (the quad's diagonal);
+        // w, the light it gives (Iris's `BLOCK_EMISSION_ATTRIBUTE`, 0 to 15).
         let mid_block = if flat {
-            "vec4((floor((hz_p0 + hz_p2) * 0.5 - 0.5 * hz_Normal) + 0.5 - hz_v_pos) * 64.0, 0.0)"
+            "vec4((floor((hz_p0 + hz_p2) * 0.5 - 0.5 * hz_Normal) + 0.5 - hz_v_pos) * 64.0, \
+             float(hz_block_ids[3u * hz_layer + 2u]))"
         } else {
             "vec4(0.0)"
         };
@@ -312,5 +323,51 @@ mod tests {
         // Layer 4 (second array, its second layer) is in row 1, column 1.
         assert_eq!([red(0, 0), red(2, 0), red(4, 0)], [0, 40, 80]);
         assert_eq!([red(1, 3), red(3, 2), red(5, 2)], [120, 160, 0]);
+    }
+
+    #[test]
+    fn terrain_inputs_respects_separate_ao() {
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let (device, _) = pollster::block_on(adapter.request_device(&Default::default())).unwrap();
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 16,
+                height: 16,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        let mut atlas = PackAtlas {
+            texture,
+            view,
+            columns: 1,
+            sprite: 16,
+            split: 1,
+            separate_ao: false,
+        };
+        let inputs_default = atlas.terrain_inputs(false);
+        assert!(
+            inputs_default
+                .body
+                .contains("hz_Color = vec4(hz_v_color.rgb, 1.0);")
+        );
+
+        atlas.separate_ao = true;
+        let inputs_separate = atlas.terrain_inputs(false);
+        assert!(
+            inputs_separate
+                .body
+                .contains("hz_Color = vec4(hz_v_color.rgb, hz_v_color.a);")
+        );
     }
 }

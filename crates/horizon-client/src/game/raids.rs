@@ -434,8 +434,9 @@ impl Game<'_> {
             .raids
             .create_or_extend(center, difficulty, amplifier, seed);
         if triggered {
-            self.stats.custom("raid_trigger", 1);
+            self.award_custom_stat("raid_trigger", 1);
             self.trigger_player("minecraft:voluntary_exile");
+            self.native_raid_state_change(id, center, "triggered");
         }
         Some(id)
     }
@@ -461,6 +462,8 @@ impl Game<'_> {
     pub(super) fn raid_command_stop(&mut self, id: i32) {
         if let Some(r) = self.raiding.raids.get_mut(id) {
             r.stop();
+            let center = r.center;
+            self.native_raid_state_change(id, center, "stopped");
         }
     }
     pub(super) fn raid_set_omen(&mut self, id: i32, level: i32) -> i32 {
@@ -597,6 +600,18 @@ impl Game<'_> {
         }
         let centers = self.village_centers();
         let infos = self.raider_infos();
+        let old_states: HashMap<_, _> = self
+            .raiding
+            .raids
+            .ids()
+            .into_iter()
+            .filter_map(|id| {
+                self.raiding
+                    .raids
+                    .get(id)
+                    .map(|r| (id, (r.status, r.center)))
+            })
+            .collect();
         let mut raids = std::mem::take(&mut self.raiding.raids);
         let actions = {
             let lvl = Lvl {
@@ -608,6 +623,13 @@ impl Game<'_> {
             raids.tick(&lvl, self.ui.rules.bool("raids"), &members)
         };
         self.raiding.raids = raids;
+        for (id, (old, _)) in old_states {
+            if let Some(r) = self.raiding.raids.get(id)
+                && r.status != old
+            {
+                self.native_raid_state_change(id, r.center, r.status.name());
+            }
+        }
         for (id, action) in actions {
             self.apply_raid_action(id, action);
         }
@@ -638,7 +660,7 @@ impl Game<'_> {
                         EffectInstance::new("hero_of_the_village", raid::HERO_DURATION, amplifier);
                     effect.visible = false;
                     g.potions.effects.add(effect);
-                    g.stats.custom("raid_win", 1);
+                    g.award_custom_stat("raid_win", 1);
                     g.trigger_player("minecraft:hero_of_the_village");
                 }
             }),
@@ -683,6 +705,7 @@ impl Game<'_> {
                 self.mount_mob(rider, id);
             }
         }
+        self.native_raid_spawn_wave(raid_id, pos, wave, spawns.len());
     }
     /// `Raid.joinRaid` for a new raider: placed at the block's centre one
     /// above, finalized for an event, its raid buffs applied.

@@ -320,7 +320,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health && heal > 0.0 {
-            m.health = (m.health + heal).min(m.attrs.max_health);
+            m.heal(heal);
             used = true;
         }
         if m.is_baby() && age_up > 0 && !m.extra.age_locked {
@@ -351,6 +351,8 @@ impl Game<'_> {
         // Animal.setInLove: entity event 18.
         if loved {
             self.love_cause.insert(id, self.lan_acting);
+            let kind = self.mobs[index].kind.id.clone();
+            self.native_entity_enter_love_mode(id, &kind, self.lan_acting_uuid);
             self.mob_event_particles(id, 18);
         }
         self.consume_held();
@@ -612,6 +614,18 @@ impl Game<'_> {
                     m.persistent = true;
                     // AbstractHorse.tameWithName: entity event 7, spawnTamingParticles(true).
                     self.mob_event_particles(mob, 7);
+                }
+                if let Some(kind) = self
+                    .mobs
+                    .iter()
+                    .find(|m| m.id == mob)
+                    .map(|m| m.kind.id.clone())
+                {
+                    let owner = self
+                        .level
+                        .player_uuid
+                        .map(horizon_client::lan::playerdata::ints_uuid);
+                    self.native_entity_tame(mob, &kind, owner);
                 }
             }
             MobEvent::Buck { mob } => {

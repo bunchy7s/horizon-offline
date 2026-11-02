@@ -583,6 +583,9 @@ struct NewBlock<'a> {
     /// Each state's template state offset and combination index, in registry order
     /// (`state_order`).
     order: Vec<(u32, u32)>,
+    /// The sign whose item places this block on a wall, which makes that item
+    /// this block's too (`StandingAndWallBlockItem.registerBlocks`).
+    wall_of: Option<String>,
 }
 impl NewBlock<'_> {
     /// Template states and declared combinations in registry order.
@@ -600,6 +603,8 @@ struct NewItem {
     rarity: Option<Rarity>,
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
+    /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
+    wall_block: Option<String>,
 }
 
 struct Plan<'a> {
@@ -1054,7 +1059,18 @@ impl<'a> Plan<'a> {
                     default,
                     combos,
                     order,
+                    wall_of: None,
                 });
+            }
+        }
+        // A sign's wall form, which `Content` checked against its mod's blocks.
+        let pairs: Vec<_> = blocks
+            .iter()
+            .filter_map(|b| Some((b.decl.wall_block.clone()?, b.decl.id.clone())))
+            .collect();
+        for (wall, sign) in pairs {
+            if let Some(block) = blocks.iter_mut().find(|b| b.decl.id == wall) {
+                block.wall_of = Some(sign);
             }
         }
         if next > MAX_STATES {
@@ -1101,6 +1117,7 @@ impl<'a> Plan<'a> {
                     rarity: None,
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
+                    wall_block: b.decl.wall_block.clone(),
                 });
             }
         }
@@ -1112,6 +1129,7 @@ impl<'a> Plan<'a> {
                     rarity: i.rarity,
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
+                    wall_block: None,
                 });
             }
         }
@@ -1148,13 +1166,15 @@ impl<'a> Plan<'a> {
 
     /// What moves in a new block's copies of its template's rows: the
     /// block, and the template's item when it has another name. A block
-    /// without an item gets `minecraft:air` where rows name one.
+    /// without an item gets `minecraft:air` where rows name one, except a
+    /// sign's wall form, whose item is the paired sign's.
     fn renames(&self, b: &NewBlock) -> Vec<Rename> {
         let mut out = vec![b.rename.clone()];
+        let own = b.decl.item.then_some(b.decl.id.as_str());
         if let Some(item) = b.item.as_deref().filter(|i| *i != b.decl.template)
-            && b.decl.item
+            && let Some(to) = own.or(b.wall_of.as_deref())
         {
-            out.push(Rename::new(item, &b.decl.id));
+            out.push(Rename::new(item, to));
         }
         out
     }
@@ -1180,7 +1200,7 @@ impl<'a> Plan<'a> {
                 }
                 if gameplay {
                     row.set("id", J::Num(next.into()));
-                    if !b.decl.item {
+                    if !b.decl.item && b.wall_of.is_none() {
                         row.set("item", J::Str("minecraft:air".into()));
                     }
                     self.override_gameplay(b, combo, &mut row);
@@ -1276,6 +1296,11 @@ impl<'a> Plan<'a> {
             };
             let mut v = v.clone();
             v.rename(&i.rename, false);
+            if let Some(wall) = &i.wall_block
+                && let Some(fields) = v.get_mut("fields")
+            {
+                fields.set("wallBlock", J::Str(wall.clone()));
+            }
             if components {
                 if let Some(n) = i.max_stack_size {
                     v.set("minecraft:max_stack_size", J::Num(n.into()));
@@ -1343,8 +1368,15 @@ impl<'a> Plan<'a> {
                         for r in &self.renames(b) {
                             v.rename(r, false);
                         }
-                        if !b.decl.item {
+                        if !b.decl.item && b.wall_of.is_none() {
                             v.set("item", J::Str("minecraft:air".into()));
+                        }
+                        // `SignBlock.getWoodType`: the wood's name is what
+                        // the editor reads of it.
+                        if let Some(wood) = &b.decl.wood_type
+                            && let Some(name) = v.at("fields/type/name")
+                        {
+                            *name = J::Str(wood.clone());
                         }
                         // A connecting block: the chorus plant's PipeBlock
                         // without its rules, joining the declared tag.
@@ -1942,6 +1974,11 @@ impl Overlay<'_> {
         };
         for entry in read.flatten() {
             let rel = rel.join(entry.file_name());
+            // The base's files in one file: it describes the base, not this root (and
+            // would be copied where links are not made).
+            if rel == Path::new(horizon_core::prepared_files::FILE_NAME) {
+                continue;
+            }
             link(&self.base.join(&rel), &self.out.join(&rel))?;
         }
         Ok(())
@@ -1996,8 +2033,25 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
         }
         Ok(())
     } else {
-        fs::copy(target, at).map(|_| ())
+        link_file(target, at, |target, at| fs::hard_link(target, at))
     }
+}
+/// A file of the overlay where symlinks need a privilege: a hard link to the base's file, which costs a name where
+/// a copy costs the file's bytes (the base is ~28,000 files, 0.6 GiB), or a copy when no link can be made (another
+/// volume, a filesystem without links, the NTFS limit on links to one file). A link shares the base file's data,
+/// which is safe because the overlay is only ever replaced name by name (`Overlay::write` removes the name before it
+/// writes), never written in place. A symlink is copied through, as before: linked, it would stay a symlink.
+#[cfg(any(not(unix), test))]
+fn link_file(
+    target: &Path,
+    at: &Path,
+    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let symlink = fs::symlink_metadata(target).is_ok_and(|m| m.file_type().is_symlink());
+    if !symlink && hard_link(target, at).is_ok() {
+        return Ok(());
+    }
+    fs::copy(target, at).map(|_| ())
 }
 
 /// A tag file's JSON text with `more` appended to its values (no repeats).

@@ -36,7 +36,7 @@ pub fn native_living_breathe(
     consume: &mut i32,
     refill: &mut i32,
 ) {
-    let _ = (entity, kind, can_breathe, consume, refill);
+    crate::native_client_hooks::living_breathe(entity, kind, can_breathe, consume, refill);
 }
 
 /// `vanilla`'s breathing after the mods have had their say.
@@ -54,6 +54,60 @@ pub fn breathe(entity: u32, kind: &str, vanilla: Breath) -> Breath {
         consume: now.consume.max(0),
         refill: now.refill.max(0),
     }
+}
+
+/// An entity that can't breathe and has no air (`LivingDrownEvent`, posted
+/// from `LivingEntity.baseTick`), with vanilla's answers as the defaults: it
+/// drowns at -20 air, for 2 damage and 8 bubbles. Bubble count is read-only;
+/// changes to the event field do not affect the vanilla entity event. Asked on
+/// servers, for the entities `native_living_breathe` is. API 356.
+#[inline(never)]
+pub fn native_living_drown(
+    entity: u32,
+    kind: &str,
+    is_drowning: &mut bool,
+    damage_amount: &mut f32,
+    bubble_count: i32,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::living_drown(
+        entity,
+        kind,
+        is_drowning,
+        damage_amount,
+        bubble_count,
+        cancel,
+    );
+}
+
+/// A drowning tick as the mods left it.
+pub struct Drowning {
+    pub damage: Option<f32>,
+}
+
+/// `breath` applied to `air` (`apply`), then `LivingEntity.baseTick`'s
+/// drowning, which the mods may change when `server` (`native_living_drown`).
+/// An entity that drowns is set to 0 air.
+pub fn drown(
+    entity: u32,
+    kind: &str,
+    air: &mut i32,
+    breath: Breath,
+    server: bool,
+) -> Option<Drowning> {
+    let (next, drowned) = apply(*air, 300, breath);
+    *air = if drowned { *air - breath.consume } else { next };
+    let (mut drowning, mut damage, mut cancel) = (drowned, 2.0, false);
+    if server && !breath.can_breathe && *air <= 0 {
+        native_living_drown(entity, kind, &mut drowning, &mut damage, 8, &mut cancel);
+    }
+    if cancel || !drowning {
+        return None;
+    }
+    *air = 0;
+    Some(Drowning {
+        damage: (damage > 0.0).then_some(damage),
+    })
 }
 
 /// The air supply after `breath`: raised up to `max` when it can breathe,

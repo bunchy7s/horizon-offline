@@ -12,7 +12,7 @@ use super::{
     undead,
 };
 use crate::blocks::Fluid;
-use crate::breathing::{Breath, apply, breathe};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -549,6 +549,20 @@ pub fn is_monster(s: Species) -> bool {
     )
 }
 /// One full entity tick. Returns false when the mob is gone.
+/// `Mob.getTarget` / `Mob.setTarget` (`asValidTarget`): a player in creative
+/// or spectator mode is never a mob's target, however the target was set (an
+/// alert from another mob included). A `NeutralMob` angry at that player stops
+/// being angry (`NeutralMob.updatePersistentAnger`).
+fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
+    if m.ai.target == Some(Who::Player)
+        && w.player.as_ref().is_some_and(|p| p.creative || p.spectator)
+    {
+        m.ai.target = None;
+        if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
+            m.extra.anger = 0;
+        }
+    }
+}
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
@@ -577,6 +591,7 @@ pub fn tick(
     if m.ai.last_hurt_by_player > 0 {
         m.ai.last_hurt_by_player -= 1;
     }
+    drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, events);
     if m.removed {
@@ -621,6 +636,7 @@ pub fn tick(
         if m.species() == Species::Endermite {
             endermite_lifetime(m);
         }
+        ageable_step(m, w, level_random, events);
         // AbstractHorse.tick runs the stand counter down with or without AI.
         if super::equine::is_equine(m.species())
             && !super::camel::is_camel(m.species())
@@ -1025,14 +1041,14 @@ fn base_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 refill: if drowns { 0 } else { 4 },
             };
             let breath = breathe(m.id, &m.kind.id, vanilla);
-            let (air, drowned) = apply(m.air, 300, breath);
-            m.air = air;
-            if drowned {
+            if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
                 events.push(MobEvent::Drown {
                     mob: m.id,
                     at: [m.position.x, m.position.y, m.position.z],
                 });
-                m.damage(2.0, Damage::of(DamageKind::Drown));
+                if let Some(damage) = drowning.damage {
+                    m.damage(damage, Damage::of(DamageKind::Drown));
+                }
             }
         }
 
@@ -1248,6 +1264,68 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 fn turtle_ambient_silent(m: &Mob) -> bool {
     m.fluids.in_water || !m.on_ground || m.is_baby()
 }
+/// `AgeableMob.aiStep` runs even when `Mob.serverAiStep` is disabled.
+fn ageable_step(
+    m: &mut Mob,
+    w: &MobWorld,
+    level_random: &mut LegacyRandom,
+    events: &mut Vec<MobEvent>,
+) {
+    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
+    // players are sent them), then the age.
+    if m.extra.forced_age_timer > 0 {
+        if m.extra.forced_age_timer % 4 == 0 {
+            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
+            let r = &mut m.random;
+            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
+            let y = m.position.y + h * r.next_double() + 0.5;
+            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
+            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
+            events.push(MobEvent::LevelParticles {
+                kind: "happy_villager",
+                at: [x, y, z],
+                spread: [0.0; 3],
+                speed: 0.0,
+                count: 1,
+            });
+        }
+        m.extra.forced_age_timer -= 1;
+    }
+    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
+    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
+    // a baby grows unless an age lock holds it; a breeding pause counts down.
+    if m.alive() && super::finalize::ageable(m.species()) {
+        if can_age_up(m) {
+            let (bw, bh, _) = m.dims();
+            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
+            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
+            // sulfur cube's size), which the age write used to skip.
+            let next = m.extra.age + 1;
+            super::finalize::set_age(m, next);
+            // setAge at the age boundary: refreshDimensions.
+            if m.extra.age >= 0 {
+                m.fudge_position_after_size_change(w, bw, bh);
+                if m.species() == Species::Villager {
+                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
+                }
+                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
+                if m.species() == Species::Turtle {
+                    events.push(MobEvent::GiftLoot {
+                        mob: m.id,
+                        table: "minecraft:gameplay/turtle_grow",
+                        at: [m.position.x, m.position.y, m.position.z],
+                    });
+                }
+            }
+        } else if m.extra.age > 0 {
+            m.extra.age -= 1;
+        }
+    }
+    if super::finalize::ageable(m.species()) {
+        make_age_locked_particle(m, events);
+    }
+}
+
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
 fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Parrot {
@@ -1322,59 +1400,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &
     if m.kind.flags.climber {
         m.climbing = m.horizontal_collision;
     }
-    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
-    // players are sent them), then the age.
-    if m.extra.forced_age_timer > 0 {
-        if m.extra.forced_age_timer % 4 == 0 {
-            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
-            let r = &mut m.random;
-            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
-            let y = m.position.y + h * r.next_double() + 0.5;
-            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
-            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
-            events.push(MobEvent::LevelParticles {
-                kind: "happy_villager",
-                at: [x, y, z],
-                spread: [0.0; 3],
-                speed: 0.0,
-                count: 1,
-            });
-        }
-        m.extra.forced_age_timer -= 1;
-    }
-    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
-    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
-    // a baby grows unless an age lock holds it; a breeding pause counts down.
-    if m.alive() && super::finalize::ageable(m.species()) {
-        if can_age_up(m) {
-            let (bw, bh, _) = m.dims();
-            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
-            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
-            // sulfur cube's size), which the age write used to skip.
-            let next = m.extra.age + 1;
-            super::finalize::set_age(m, next);
-            // setAge at the age boundary: refreshDimensions.
-            if m.extra.age >= 0 {
-                m.fudge_position_after_size_change(w, bw, bh);
-                if m.species() == Species::Villager {
-                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
-                }
-                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
-                if m.species() == Species::Turtle {
-                    events.push(MobEvent::GiftLoot {
-                        mob: m.id,
-                        table: "minecraft:gameplay/turtle_grow",
-                        at: [m.position.x, m.position.y, m.position.z],
-                    });
-                }
-            }
-        } else if m.extra.age > 0 {
-            m.extra.age -= 1;
-        }
-    }
-    if super::finalize::ageable(m.species()) {
-        make_age_locked_particle(m, events);
-    }
+    ageable_step(m, w, level_random, events);
     if m.alive() {
         // Animal.aiStep
         if m.extra.age != 0 {
@@ -1488,6 +1514,15 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         // Warden.doPush: touching it angers it, then the push itself.
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
+        }
+        // IronGolem.doPush: a monster that is not a creeper becomes its target
+        // one time in 20, and the draw is made for those alone, then the push.
+        if m.species() == Species::IronGolem
+            && let Who::Mob(id) = who
+            && w.seen(id).is_some_and(super::golem::golem_prey)
+            && m.random.next_int_bound(20).unwrap_or(1) == 0
+        {
+            m.ai.target = Some(who);
         }
         // Entity.push: passengers of the same vehicle (a rider and its mount
         // among them) never push each other.
@@ -1812,12 +1847,11 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     let d = m.distance_sqr(p);
     let persistent = m.persistent || requires_custom_persistence(m);
     // removeWhenFarAway: animals, villagers, golems, patrols and raiders,
-    // zombie villagers being cured and ridden mobs stay.
+    // zombie villagers being cured and ridden mobs stay, bar the two felines.
     let creature = m.kind.category == "creature";
+    let feline_goes = feline_removed_when_far(m.species(), m.extra.tame || m.extra.trusting, m.age);
     let removable = !(never_removed_when_far(m.species())
-        || creature && m.kind.flags.animal && !m.extra.jockey && m.species() != Species::Ocelot
-        // Ocelot.removeWhenFarAway: `!isTrusting() && tickCount > 2400`.
-        || m.species() == Species::Ocelot && (m.extra.trusting || m.age <= 2400)
+        || creature && m.kind.flags.animal && !m.extra.jockey && !feline_goes
         || super::raider::keeps_alive(m, d)
         || super::zombie_villager::keeps_alive(m)
         || super::riders::keeps_alive(m));
@@ -1842,6 +1876,13 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
         m.ai.no_action_time = 0;
     }
     true
+}
+/// `Cat.removeWhenFarAway` and `Ocelot.removeWhenFarAway`: an untamed cat or an
+/// untrusting ocelot is removed once it is older than 2400 ticks. That is
+/// `Entity.tickCount`, not `AgeableMob.age`, which only counts a baby up to
+/// adulthood. `Animal.removeWhenFarAway` keeps every other animal.
+fn feline_removed_when_far(s: Species, tamed: bool, ticks: u32) -> bool {
+    matches!(s, Species::Cat | Species::Ocelot) && !tamed && ticks > 2400
 }
 /// The types whose `removeWhenFarAway` is always false (`Villager`,
 /// `WanderingTrader`, `AbstractGolem`: iron, snow and copper golems and
@@ -2567,7 +2608,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
             {
-                m.health = (m.health + 1.0).min(m.attrs.max_health);
+                m.heal(1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
@@ -2722,8 +2763,12 @@ pub fn intern_sound(s: &std::sync::Arc<str>) -> &'static str {
     set.insert(leaked);
     leaked
 }
-/// `getSwimSound`.
-pub fn swim_sound(m: &Mob) -> &'static str {
+/// `getSwimSound`. A skeleton horse's own override counts the steps it takes
+/// through the water, so it needs the mob, not just its species.
+pub fn swim_sound(m: &mut Mob) -> &'static str {
+    if m.species() == Species::SkeletonHorse {
+        return super::equine::skeleton_horse_swim_sound(m);
+    }
     match m.species() {
         Species::Drowned => "entity.drowned.swim",
         Species::Axolotl => "entity.axolotl.swim",
@@ -2770,6 +2815,23 @@ mod despawn_tests {
         }
         for s in [Species::Zombie, Species::ZombieVillager, Species::Pillager] {
             assert!(!never_removed_when_far(s), "{s:?}");
+        }
+    }
+
+    /// `Cat.removeWhenFarAway` (`!isTame() && tickCount > 2400`) and
+    /// `Ocelot.removeWhenFarAway` (`!isTrusting() && tickCount > 2400`): the two
+    /// animals vanilla lets go, on `Entity.tickCount` and never on
+    /// `AgeableMob.age`, which an adult keeps at 0.
+    #[test]
+    fn an_untamed_feline_goes_once_it_is_old() {
+        for s in [Species::Cat, Species::Ocelot] {
+            assert!(!feline_removed_when_far(s, false, 2400), "{s:?}");
+            assert!(feline_removed_when_far(s, false, 2401), "{s:?}");
+            assert!(!feline_removed_when_far(s, true, 12000), "{s:?}");
+        }
+        // Animal.removeWhenFarAway: every other animal stays at any age.
+        for s in [Species::Cow, Species::Sheep, Species::Wolf] {
+            assert!(!feline_removed_when_far(s, false, 12000), "{s:?}");
         }
     }
 }
@@ -3380,6 +3442,75 @@ mod age_up_tests {
     use super::*;
     use std::sync::Arc;
 
+    /// Official Java 26.3: NoAI leaves both age clocks running. AgeLocked
+    /// holds a baby's age, but a positive breeding cooldown still expires.
+    #[test]
+    fn age_clocks_tick_with_no_ai_and_respect_baby_age_lock() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, types| {
+            for species in ["pig", "cow", "horse", "turtle"] {
+                for no_ai in [true, false] {
+                    for locked in [false, true] {
+                        for age in [-2, 2] {
+                            let kind =
+                                Arc::new(types.types[&format!("minecraft:{species}")].clone());
+                            let mut m = Mob::new(1, kind, Vec3::new(4.0, 220.0, 4.0), 0.0);
+                            m.no_ai = no_ai;
+                            m.no_gravity = true;
+                            m.persistent = true;
+                            m.extra.age_locked = locked;
+                            super::super::finalize::set_age(&mut m, age);
+                            let (mut random, mut events) = (LegacyRandom::new(0), Vec::new());
+                            let expected = if age > 0 {
+                                [1, 0, 0, 0]
+                            } else if locked {
+                                [-2, -2, -2, -2]
+                            } else {
+                                [-1, 0, 0, 0]
+                            };
+                            for (elapsed, expected_age) in expected.into_iter().enumerate() {
+                                let previous_age = m.extra.age;
+                                let previous_position = m.position;
+                                tick(&mut m, w, &mut random, &mut events);
+                                assert_eq!(
+                                    m.extra.age,
+                                    expected_age,
+                                    "{species}: NoAI={no_ai}, AgeLocked={locked}, initial Age={age}, tick={}",
+                                    elapsed + 1
+                                );
+                                if no_ai {
+                                    assert_eq!(m.velocity, Vec3::ZERO);
+                                    // Growing dimensions can reposition the mob at adulthood.
+                                    if previous_age != -1 || expected_age != 0 {
+                                        assert_eq!(m.position, previous_position);
+                                    }
+                                }
+                            }
+                            if species == "turtle" && age < 0 && !locked {
+                                assert_eq!(
+                                    events
+                                        .iter()
+                                        .filter(|event| matches!(
+                                            event,
+                                            MobEvent::GiftLoot {
+                                                table: "minecraft:gameplay/turtle_grow",
+                                                ..
+                                            }
+                                        ))
+                                        .count(),
+                                    1,
+                                    "growing up drops one scute"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        if !ran {
+            eprintln!("age clock regression needs prepared vanilla resources");
+        }
+    }
+
     /// A baby goat `age` ticks from adulthood, from no vanilla data.
     fn baby_goat(age: i32) -> Mob {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
@@ -3591,5 +3722,61 @@ mod silverfish_walk_target_tests {
             assert!(dirt < 10.0, "standing on dirt falls through, got {dirt}");
         });
         let _ = ran;
+    }
+}
+
+#[cfg(test)]
+mod iron_golem_push_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, category: &str) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        kind.category = category.into();
+        Mob::new(id, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// `IronGolem.doPush`: a monster that is not a creeper and bumps the golem
+    /// becomes its target one time in 20, and the draw is made for those alone,
+    /// so a creeper or an animal leaves the golem's random alone.
+    #[test]
+    fn an_iron_golem_targets_the_monster_that_bumps_it() {
+        // CI has no prepared 26.3 data, so a world that does not build skips
+        // the whole check rather than asserting the data exists.
+        let hits = |victim: Mob| -> Option<u32> {
+            let seen = victim.seen(None);
+            let mut hits = 0;
+            let ran = with_test_world(&[seen], |w, _| {
+                let mut golem = mob(1, Species::IronGolem, "monster");
+                for _ in 0..400 {
+                    let mut events = Vec::new();
+                    push_entities(&mut golem, w, &mut events);
+                    if golem.ai.target.is_some() {
+                        hits += 1;
+                        golem.ai.target = None;
+                    }
+                }
+            });
+            ran.then_some(hits)
+        };
+        let Some(zombie) = hits(mob(2, Species::Zombie, "monster")) else {
+            return;
+        };
+        assert!(
+            zombie > 0,
+            "a zombie that bumps the golem is taken as its target"
+        );
+        assert_eq!(
+            hits(mob(3, Species::Creeper, "monster")),
+            Some(0),
+            "IronGolem.doPush never targets a creeper"
+        );
+        assert_eq!(
+            hits(mob(4, Species::Cow, "creature")),
+            Some(0),
+            "a pushed animal is not an Enemy"
+        );
     }
 }

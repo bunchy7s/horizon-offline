@@ -958,6 +958,7 @@ impl EatBerries {
             }
             if count > 0 {
                 cx.events.push(MobEvent::DropItem {
+                    mob: m.id,
                     item: "minecraft:sweet_berries".into(),
                     count: count as u32,
                     at,
@@ -975,6 +976,7 @@ impl EatBerries {
         } else {
             // CaveVines.use: one glow berry, the vine goes back to bare.
             cx.events.push(MobEvent::DropItem {
+                mob: m.id,
                 item: "minecraft:glow_berries".into(),
                 count: 1,
                 at,

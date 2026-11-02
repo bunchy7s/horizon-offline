@@ -32,6 +32,17 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
             Ok(json!(true))
         }
         "server/system_message" => game.system_message(argument),
+        "serversettings/autosave" => game.autosave(client, None),
+        "serversettings/autosave/set" => game.autosave(
+            client,
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
+        "gamerules" => game.gamerules(client, None),
+        "gamerules/update" => game.gamerules(client, Some(argument)),
         "serversettings/motd" => game.motd(client, None),
         "serversettings/motd/set" => game.motd(
             client,
@@ -57,6 +68,47 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                 argument
                     .as_str()
                     .ok_or_else(|| invalid_params("Not a string"))?,
+            ),
+        ),
+        "serversettings/force_game_mode" => game.force_game_mode(client, None),
+        "serversettings/force_game_mode/set" => game.force_game_mode(
+            client,
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
+        "serversettings/max_players" => game.max_players(client, None),
+        "serversettings/max_players/set" => game.max_players(
+            client,
+            Some(
+                argument
+                    .as_i64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .ok_or_else(|| invalid_params(format!("Not a number: {argument}")))?,
+            ),
+        ),
+        "serversettings/use_allowlist" => game.allowlist_setting(client, "use_allowlist", None),
+        "serversettings/use_allowlist/set" => game.allowlist_setting(
+            client,
+            "use_allowlist",
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
+        "serversettings/enforce_allowlist" => {
+            game.allowlist_setting(client, "enforce_allowlist", None)
+        }
+        "serversettings/enforce_allowlist/set" => game.allowlist_setting(
+            client,
+            "enforce_allowlist",
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
             ),
         ),
         "allowlist" => Ok(lists.allowlist()),
@@ -290,6 +342,120 @@ struct Game<'a> {
 }
 
 impl Game<'_> {
+    /// `MinecraftServerSettingsServiceImpl.isUsingWhitelist`, `setUsingWhitelist`,
+    /// `isEnforceWhitelist` and `setEnforceWhitelist`.
+    fn allowlist_setting(
+        &self,
+        client: u32,
+        setting: &str,
+        value: Option<bool>,
+    ) -> Result<Value, Failure> {
+        let mut request = json!({
+            "method": format!("serversettings/{setting}")
+        });
+        if let Some(value) = value {
+            request["method"] = json!(format!("serversettings/{setting}/set"));
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            let property = match setting {
+                "use_allowlist" => "whitelist",
+                "enforce_allowlist" => "enforce_whitelist",
+                _ => unreachable!("allowlist setting is validated by its callers"),
+            };
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                property,
+                toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `GameRulesService.get` and `update`: the game's rules as typed rules, or the one `update` set.
+    fn gamerules(&self, client: u32, update: Option<&Value>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "gamerules" });
+        if let Some(update) = update {
+            request["method"] = json!("gamerules/update");
+            request["value"] = update.clone();
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(invalid) = reply["invalid"].as_str() {
+            return Err(invalid_params(invalid));
+        }
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.isAutoSave`: read the game's live save flag.
+    /// `MinecraftServerSettingsServiceImpl.setAutoSave`: update that flag and return its new value.
+    fn autosave(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/autosave" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/autosave/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.forceGameMode` and `setForceGameMode`.
+    fn force_game_mode(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/force_game_mode" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/force_game_mode/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "properties",
+                "force-gamemode",
+                toml::Value::Boolean(value),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.getMaxPlayers` and `setMaxPlayers`.
+    fn max_players(&self, client: u32, value: Option<usize>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/max_players" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/max_players/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "server",
+                "max_players",
+                toml::Value::Integer(value as i64),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.getGameMode` and `setGameMode`.
     fn game_mode(&self, client: u32, value: Option<&str>) -> Result<Value, Failure> {
         let mut request = json!({ "method": "serversettings/game_mode" });
@@ -544,6 +710,51 @@ impl Lists<'_> {
     }
 }
 
+/// `ServerStateService.status`, as `server/status` answers it (and the heartbeat carries it).
+pub fn status(shared: &Shared) -> Value {
+    Game { shared }.status()
+}
+
+/// The notification a change of one of the lists is, from the game's typed event (`operators_added`,
+/// `bans_removed`...): `JsonRpcNotificationService`'s `playerOped`/`playerDeoped` (an `OperatorDto`),
+/// `playerAddedToAllowlist`/`playerRemovedFromAllowlist` and `playerUnbanned` (a `PlayerDto`), `playerBanned`
+/// (a `UserBanDto`), `ipBanned` (an `IpBanDto`) and `ipUnbanned` (the address).
+pub fn list_notification(kind: &str, event: &Value) -> Option<(&'static str, Value)> {
+    let player = || json!({ "id": event["uuid"], "name": event["name"] });
+    let operator = || {
+        json!({
+            "player": player(),
+            "permissionLevel": event["level"],
+            "bypassesPlayerLimit": event["bypassesPlayerLimit"],
+        })
+    };
+    let reason = event["reason"].as_str().map(str::to_owned);
+    let source = event["source"].as_str().unwrap_or_default();
+    let expires = event["expires"].as_i64();
+    Some(match kind {
+        "operators_added" => ("notification/operators/added", operator()),
+        "operators_removed" => ("notification/operators/removed", operator()),
+        "allowlist_added" => ("notification/allowlist/added", player()),
+        "allowlist_removed" => ("notification/allowlist/removed", player()),
+        "bans_added" => (
+            "notification/bans/added",
+            ban(("player", player()), &reason, source, expires),
+        ),
+        // `MinecraftServer.onGameRuleChanged`: the rule as a typed rule (the event's own `type` is its kind).
+        "gamerule" => (
+            "notification/gamerules/updated",
+            json!({ "key": event["key"], "type": event["valueType"], "value": event["value"] }),
+        ),
+        "bans_removed" => ("notification/bans/removed", player()),
+        "ip_bans_added" => (
+            "notification/ip_bans/added",
+            ban(("ip", event["ip"].clone()), &reason, source, expires),
+        ),
+        "ip_bans_removed" => ("notification/ip_bans/removed", event["ip"].clone()),
+        _ => return None,
+    })
+}
+
 /// A `UserBanDto` or `IpBanDto`: the reason when there is one, the end as an ISO-8601 instant.
 fn ban(who: (&str, Value), reason: &Option<String>, source: &str, expires: Option<i64>) -> Value {
     let mut b = json!({ "source": source });
@@ -569,6 +780,84 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         Shared::with_install(&dir, None)
+    }
+
+    #[test]
+    fn a_change_of_a_list_is_the_notification_vanilla_sends() {
+        let id = "93e029a5-04a0-349d-90b2-f7e145b2644f";
+        let event = |fields: Value| {
+            let mut event = json!({ "name": "Kim0", "uuid": id });
+            event
+                .as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            event
+        };
+        let player = json!({ "id": id, "name": "Kim0" });
+        let note = |kind, fields| list_notification(kind, &event(fields)).unwrap();
+        assert_eq!(
+            note(
+                "operators_added",
+                json!({ "level": 3, "bypassesPlayerLimit": true })
+            ),
+            (
+                "notification/operators/added",
+                json!({ "player": player, "permissionLevel": 3, "bypassesPlayerLimit": true })
+            )
+        );
+        assert_eq!(
+            note(
+                "operators_removed",
+                json!({ "level": 4, "bypassesPlayerLimit": false })
+            )
+            .0,
+            "notification/operators/removed"
+        );
+        assert_eq!(
+            note("allowlist_added", json!({})),
+            ("notification/allowlist/added", player.clone())
+        );
+        assert_eq!(
+            note("bans_removed", json!({})),
+            ("notification/bans/removed", player.clone())
+        );
+        // A ban says why and until when, as the lists do; no reason or end leaves them out.
+        assert_eq!(
+            note(
+                "bans_added",
+                json!({ "reason": "griefing", "source": "Kim", "expires": 1_793_491_200_000_i64 })
+            ),
+            (
+                "notification/bans/added",
+                json!({ "player": player, "source": "Kim", "reason": "griefing", "expires": "2026-11-01T00:00:00Z" })
+            )
+        );
+        assert_eq!(
+            note(
+                "ip_bans_added",
+                json!({ "ip": "10.0.0.1", "source": "Rcon", "reason": null, "expires": null })
+            ),
+            (
+                "notification/ip_bans/added",
+                json!({ "ip": "10.0.0.1", "source": "Rcon" })
+            )
+        );
+        assert_eq!(
+            note("ip_bans_removed", json!({ "ip": "10.0.0.1" })),
+            ("notification/ip_bans/removed", json!("10.0.0.1"))
+        );
+        // A game rule changed: the rule as a typed rule, whose `type` the event keeps as `valueType`.
+        assert_eq!(
+            note(
+                "gamerule",
+                json!({ "key": "minecraft:pvp", "valueType": "boolean", "value": false })
+            ),
+            (
+                "notification/gamerules/updated",
+                json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
+            )
+        );
+        assert!(list_notification("kick", &event(json!({}))).is_none());
     }
 
     #[test]

@@ -37,6 +37,8 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
+# `horizon-launcher mcp`: the Model Context Protocol, shared with horizon-ctl and horizon-server.
+horizon-mcp = { path = "../crates/horizon-mcp" }
 horizon-prepare = { path = "../crates/horizon-prepare" }
 # Join a friend: invite codes (the game does the joining).
 horizon-friends = { path = "../crates/horizon-friends" }
@@ -84,6 +86,11 @@ raw-window-handle = "0.6"
 keyring = { version = "3", features = ["windows-native"] }
 # The computer's memory, the end of the Launch panel's memory slider; already in the lockfile.
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+# Shortcuts written by the shell itself (shortcut::write_windows_link): the hand-laid Shell Link has
+# no target ID list, so Explorer shows an empty target and starts nothing.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell"] }
+# Per-user setup: the Uninstall entry and the launcher's own key under HKCU (installer.rs).
+winreg = "0.56"
 
 [target.'cfg(windows)'.build-dependencies]
 # The icon resource in the .exe (build.rs).

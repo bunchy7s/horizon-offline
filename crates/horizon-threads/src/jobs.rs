@@ -65,6 +65,10 @@ pub trait Source: Send + Sync {
     fn idle(&self, _worker: usize) {}
     /// Every worker is idle: free what the workers share.
     fn all_idle(&self) {}
+    /// What a heap-census build tags its jobs' allocations (`crate::heap_tag`).
+    fn label(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
 
 /// How long a worker waits with no job before it frees its buffers.
@@ -384,7 +388,11 @@ fn work(inner: &Inner, worker: usize) {
             }
             // A panicking job loses its own work, not the worker: the panic
             // hook has already reported it.
-            let _ = catch_unwind(AssertUnwindSafe(|| entry.source.run(worker)));
+            let _ = catch_unwind(AssertUnwindSafe(|| {
+                let _tag =
+                    crate::HEAP_CENSUS.then(|| crate::heap_census::tag(entry.source.label()));
+                entry.source.run(worker)
+            }));
             if far {
                 inner.far.fetch_sub(1, Ordering::SeqCst);
             }

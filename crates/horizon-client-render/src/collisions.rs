@@ -183,11 +183,23 @@ where
         max_step: f32,
         on_ground: bool,
     ) -> Result<Vec3> {
+        let context = CollisionContext::position(bounds.min_position().y);
+        self.resolve_with_context(bounds, movement, max_step, on_ground, context)
+    }
+    /// [`Self::resolve`] with the entity's captured collision context.
+    pub fn resolve_with_context(
+        &mut self,
+        bounds: Aabb,
+        movement: Vec3,
+        max_step: f32,
+        on_ground: bool,
+        context: CollisionContext<'_>,
+    ) -> Result<Vec3> {
         Ok(resolve_world_movement(
             self,
             MovementRequest {
                 entity: EntityIdentity(0),
-                context: CollisionContext::position(bounds.min_position().y),
+                context,
                 bounds,
                 movement,
                 max_step,
@@ -210,6 +222,25 @@ impl SceneCollisions<'_, '_> {
         on_ground: bool,
     ) -> Result<Vec3> {
         self.resolve_with_context(bounds, movement, max_step, on_ground, self.context(bounds))
+    }
+    /// [`Self::resolve`], also stopped by the world border's walls when one is
+    /// given with the moving entity's x and z: `Entity.collectColliders` adds
+    /// `WorldBorder.getCollisionShape` for any entity inside and close to it.
+    pub fn resolve_in_border(
+        self,
+        bounds: Aabb,
+        movement: Vec3,
+        max_step: f32,
+        on_ground: bool,
+        border: Option<(&BorderGeometry, [f64; 2])>,
+    ) -> Result<Vec3> {
+        let context = self.context(bounds);
+        EntityCollisions {
+            blocks: self,
+            entities: &[],
+            border,
+        }
+        .resolve_with_context(bounds, movement, max_step, on_ground, context)
     }
     /// Resolve movement with the entity's captured collision context. Most
     /// callers only need the position context; entities such as falling blocks
@@ -296,6 +327,88 @@ where
     )
     .unwrap_or(false)
 }
+impl SceneCollisions<'_, '_> {
+    /// Whether a `BlockCollisionScan` of `bounds` would find no shape, told without
+    /// building one: no block that can collide in its inner cells, and no block that
+    /// reaches out of its cell in the sections of its outer ones (where unsure, false:
+    /// the scan decides). The same cells, blocks and section flags the scan reads.
+    pub fn cells_without_collision(&self, bounds: Aabb) -> bool {
+        let (min, max) = (bounds.min_position(), bounds.max_position());
+        if !min.is_finite() || !max.is_finite() {
+            return false;
+        }
+        // The scan's cells: one past the box on every side (`block_collision_scan::cells`).
+        let lo = BlockPos::containing(Vec3::new(min.x - 1.0e-7, min.y - 1.0e-7, min.z - 1.0e-7))
+            .offset(-1, -1, -1);
+        let hi = BlockPos::containing(Vec3::new(max.x + 1.0e-7, max.y + 1.0e-7, max.z + 1.0e-7))
+            .offset(1, 1, 1);
+        let size = |a: i32, b: i32| i64::from(b) - i64::from(a) + 1;
+        let cells = size(lo.x, hi.x) * size(lo.y, hi.y) * size(lo.z, hi.z);
+        if lo.x > hi.x || lo.y > hi.y || lo.z > hi.z || cells > 4096 {
+            return false;
+        }
+        let mut column: Option<((i32, i32), Option<&crate::chunk::Chunk>)> = None;
+        let mut section: Option<((i32, i32), i32, bool)> = None;
+        for z in lo.z..=hi.z {
+            for y in lo.y..=hi.y {
+                for x in lo.x..=hi.x {
+                    let outer = [
+                        x == lo.x || x == hi.x,
+                        y == lo.y || y == hi.y,
+                        z == lo.z || z == hi.z,
+                    ];
+                    let kind = outer.into_iter().filter(|&o| o).count();
+                    if kind == 3 {
+                        continue;
+                    }
+                    let at = (x >> 4, z >> 4);
+                    let chunk = match column {
+                        Some((c, chunk)) if c == at => chunk,
+                        _ => {
+                            let chunk = self.world.chunks.get(&at).map(|c| &**c);
+                            column = Some((at, chunk));
+                            chunk
+                        }
+                    };
+                    // The scan passes the cells of a column that is not resident.
+                    let Some(chunk) = chunk else {
+                        continue;
+                    };
+                    if kind != 0 {
+                        let reaches = match section {
+                            Some((c, sy, reaches)) if c == at && sy == y >> 4 => reaches,
+                            _ => {
+                                let reaches = self.section_reaches_out(chunk, y >> 4);
+                                section = Some((at, y >> 4, reaches));
+                                reaches
+                            }
+                        };
+                        if reaches {
+                            return false;
+                        }
+                        continue;
+                    }
+                    if self.binding.may_collide(chunk.block(x, y, z)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    /// `may_reach_out`: whether a section's palette holds a block that reaches out of
+    /// its cell; a global palette, or a section outside the column, may.
+    fn section_reaches_out(&self, chunk: &crate::chunk::Chunk, section_y: i32) -> bool {
+        let blocks = usize::try_from(section_y - (chunk.min_y() >> 4))
+            .ok()
+            .and_then(|s| chunk.sections.get(s))
+            .map(|section| &section.blocks);
+        blocks.is_none_or(|blocks| {
+            blocks.is_global() || blocks.maybe_has(|v| self.binding.reaches_out(BlockStateId(v)))
+        })
+    }
+}
 impl<'w> BlockCollisionWorld for SceneCollisions<'w, '_> {
     type Error = io::Error;
     /// The resident column, looked up once per chunk the scan enters.
@@ -309,13 +422,7 @@ impl<'w> BlockCollisionWorld for SceneCollisions<'w, '_> {
     /// From the section's palette, without reading its blocks; a palette
     /// of the whole registry reads every cell.
     fn may_reach_out(&mut self, chunk: Self::Chunk, section_y: i32) -> io::Result<bool> {
-        let blocks = usize::try_from(section_y - (chunk.min_y() >> 4))
-            .ok()
-            .and_then(|s| chunk.sections.get(s))
-            .map(|section| &section.blocks);
-        Ok(blocks.is_none_or(|blocks| {
-            blocks.is_global() || blocks.maybe_has(|v| self.binding.reaches_out(BlockStateId(v)))
-        }))
+        Ok(self.section_reaches_out(chunk, section_y))
     }
     fn is_suffocating(
         &mut self,
@@ -617,6 +724,25 @@ mod border_movement_tests {
         );
     }
 
+    /// A minecart (0.98 wide, 0.7 tall) rolling east at its top speed of 0.4 a tick, 0.11
+    /// blocks short of the wall: the wall takes all but the 0.11 (`move_cart` hands the
+    /// cart's x and z to `with_border`, as every entity does in `Entity.move`).
+    #[test]
+    fn a_minecart_sized_body_stops_at_the_border_wall() {
+        // Centre x = 4.4, half width 0.49: the cart's east face is at 4.89, the wall at 5.0.
+        let bounds = Aabb::new(Vec3::new(3.91, 0.0, -0.49), Vec3::new(4.89, 0.7, 0.49));
+        let border = border();
+        let mut collisions = EntityCollisions::with_border(EmptyCollisions, &border, [4.4, 0.0]);
+        let moved = collisions
+            .resolve(bounds, Vec3::new(0.4, 0.0, 0.0), 0.0, false)
+            .expect("the movement resolves");
+        assert!(
+            (moved.x - 0.11).abs() < 1.0e-9,
+            "the cart was not stopped by the border: {moved:?}"
+        );
+        assert_eq!(moved.z, 0.0);
+    }
+
     /// Away from the border, the same body moves the whole way.
     #[test]
     fn a_body_away_from_the_border_moves_whole() {
@@ -767,5 +893,90 @@ mod shulker_collision_tests {
         let delta2 = progress_delta_aabb(1.0, Direction::Up as u8, 0.5, 1.0, [0.5, 0.0, 0.5]);
         assert!((delta2[1] - 1.5).abs() < 1.0e-9);
         assert!((delta2[4] - 2.0).abs() < 1.0e-9);
+    }
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    /// Boxes swept through air, past torches (no collision shape), a fence (a shape
+    /// reaching into the cell above) and the scene's stone: wherever the cells say no
+    /// block can collide, the full resolution returns the movement, to the bit; the rest
+    /// is left to it. Needs the prepared resources.
+    #[test]
+    fn cells_without_collision_leave_the_movement_as_resolving_does() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("cached-collision.nbt").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = load(&root, assets.registry).unwrap();
+        let mut world = World::test_scene(&assets, &render, 3).unwrap();
+        let state = |name: &str| assets.registry.default_state(name).unwrap();
+        // Torches, and a fence at the bottom of a section above air.
+        for x in 17..30 {
+            world.set(x, 20, 20, state("minecraft:torch")).unwrap();
+        }
+        world.set(5, 32, 5, state("minecraft:oak_fence")).unwrap();
+        let scene = SceneCollisions {
+            world: &world,
+            binding: &binding,
+            subject: None,
+        };
+        // Under the fence: its section's outer cells may hold a shape reaching in.
+        let under = Aabb::new(Vec3::new(5.4, 31.6, 5.4), Vec3::new(5.6, 31.8, 5.6));
+        assert!(!scene.cells_without_collision(under.expand_towards(Vec3::new(0.0, 0.1, 0.0))));
+        // A torch's cell, and the air just over the scene's stone floor (y 0..4).
+        let torches = Aabb::new(Vec3::new(20.4, 20.1, 20.4), Vec3::new(20.6, 20.3, 20.6));
+        assert!(scene.cells_without_collision(torches));
+        let over_floor = Aabb::new(Vec3::new(30.4, 5.2, 30.4), Vec3::new(30.6, 5.4, 30.6));
+        assert!(scene.cells_without_collision(over_floor));
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let (mut skipped, mut resolved) = (0, 0);
+        for i in 0..4000 {
+            let size = if i % 2 == 0 { 0.2 } else { 0.6 };
+            // Near the floor (y 0..4) and the stepped pyramid (y 4..11) for most, higher for the rest.
+            let height = if i % 4 == 0 { 40.0 } else { 14.0 };
+            let at = Vec3::new(next() * 80.0 - 40.0, next() * height, next() * 80.0 - 40.0);
+            let bb = Aabb::new(at, Vec3::new(at.x + size, at.y + size, at.z + size));
+            let reach = if i % 3 == 0 { 3.0 } else { 0.3 };
+            let d = Vec3::new(
+                (next() - 0.5) * reach,
+                (next() - 0.5) * reach,
+                (next() - 0.5) * reach,
+            );
+            let fast = scene.cells_without_collision(bb.expand_towards(d));
+            let mut full = SceneCollisions {
+                world: &world,
+                binding: &binding,
+                subject: None,
+            };
+            let moved = full.resolve(bb, d, 0.0, false).unwrap();
+            if fast {
+                skipped += 1;
+                assert_eq!(
+                    moved.components().map(f64::to_bits),
+                    d.components().map(f64::to_bits),
+                    "{bb:?} by {d:?}"
+                );
+            } else {
+                resolved += 1;
+            }
+        }
+        assert!(
+            skipped > 500 && resolved > 500,
+            "{skipped} skipped, {resolved} resolved"
+        );
     }
 }

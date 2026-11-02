@@ -348,6 +348,9 @@ class StressSceneTests(unittest.TestCase):
         summons = lambda name, kind: sum(c.startswith(f"summon {kind} ") for c in stress_scenes.setup(name))
         self.assertEqual(sum(summons("stress_mobs", k) for k in stress_scenes.MOBS), 1000)
         self.assertEqual(summons("stress_items", "item"), 2000)
+        self.assertEqual(sum(summons("stress_held", k) for k in stress_scenes.HOLDERS), 1000)
+        self.assertEqual(sum(summons("stress_eyes", k) for k in stress_scenes.EYED), 1000)
+        self.assertEqual(sum(summons("stress_glowing", k) for k in stress_scenes.MOBS), 1000)
         self.assertEqual(summons("stress_frames", "item_frame"), 512)
         self.assertEqual(summons("stress_armor_stands", "armor_stand"), 500)
         self.assertEqual(stress_scenes.setup("stress_empty"), stress_scenes.SETTINGS + stress_scenes.floor(

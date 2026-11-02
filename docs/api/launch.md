@@ -8,12 +8,14 @@ reference implementation. Proposed in horizon-rust/horizon#3545.
 
 | | |
 | --- | --- |
-| Version | 0.1.0, printed by `horizon-client --launch-api` |
+| Version | 0.1.0, printed by `horizon-client --launch-api` and `horizon-prepare --launch-api` |
 | Level | experimental ([stability.md](stability.md)): preview once preparing and the guide are covered too |
-| Covers | starting `horizon-client`: its options, the session JSON, the exit codes, the crash report's path; preparing with `horizon-prepare`: `--output`, `--check`, `--complete`, `--progress json` |
-| Not yet | finding a build, asking the preparer what it supports (see Not there yet) |
+| Covers | starting `horizon-client`: its options, the session JSON, the exit codes, the crash report's path; preparing with `horizon-prepare`: `--launch-api`, `--output`, `--check`, `--complete`, `--progress json` |
+| Not yet | finding a build (see Not there yet) |
 
 ## Guide
+
+The whole way, from picking a build to playing: [launch-guide.md](launch-guide.md). In short:
 
 1. Start Horizon only for a player signed in with a Microsoft account that owns Minecraft: Java Edition, and
    hand over that account's session (`--session-stdin`, or `--session-file`), never on the command line. This
@@ -58,10 +60,18 @@ downloads nothing: it reads the files of a Minecraft the player owns (Guide, ste
 pins in `research-lock.json`.
 
 ```sh
+horizon-prepare --launch-api
 horizon-prepare --prepare --output PREPARED --complete --progress json
 horizon-prepare --check --output PREPARED
 ```
 
+- `--launch-api`: prints one JSON object on stdout and exits 0 (1, with an `error:` line, when there is no
+  `research-lock.json` beside it or at `--root`). `launch_api` is the version, the same as
+  `horizon-client --launch-api`'s; `horizon` is the preparer's own; `minecraft` and `java_major` are the pins it
+  prepares for (the game files it needs, and the Java `--java-home` must give); `schema` and `output_version`
+  are the layout and contents of the resources it writes, the ones `--check` compares; `options` lists the
+  options above and below as `{"name", "value"}` (`value` is the placeholder, null for a flag) and
+  `exit_codes` its exit codes. Pass only options it lists; readers ignore fields they don't know.
 - `--output DIR`: where the resources go; the preparer's scratch files stay in its own `.local/`. One
   preparation at a time writes to a folder; a second one waits.
 - `--check`: exit 0 when the resources are complete and current for this preparer. Otherwise exit 1, with each
@@ -105,14 +115,11 @@ test keeps the contract and the code together.
 
 ## Not there yet
 
-- **Asking the preparer what it supports:** `horizon-prepare --launch-api`, with its output version, schema and
-  Java major.
 - **Finding a build:** a signed release index and builds kept longer than seven days.
-- **A guide**, "Running Horizon from another launcher", from picking a build to playing.
 
 ## Changelog
 
 - 0.1.0 (not released yet, so still one version): `horizon-client`'s `--game-dir`, `--home`, `--player-dir`, `--fullscreen`,
-  `--session-stdin`, `--launch-api`, exit code 2 for a refused command line; `horizon-prepare`'s `--output`,
-  `--check`, `--complete`, `--progress json`, `--version-json`, `--client-jar`, `--libraries-dir`, `--assets-dir`
-  and `--java-home`.
+  `--session-stdin`, `--launch-api`, exit code 2 for a refused command line; `horizon-prepare`'s `--launch-api`,
+  `--output`, `--check`, `--complete`, `--progress json`, `--version-json`, `--client-jar`, `--libraries-dir`,
+  `--assets-dir` and `--java-home`.

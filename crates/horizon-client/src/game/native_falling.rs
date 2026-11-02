@@ -16,7 +16,7 @@ const NATIVE_FALLING_MAX_SPEED: f64 = 3.9;
 
 /// What a mod's falling block does when it lands and when it hits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct NativeFalling {
+pub struct NativeFalling {
     /// `FallingBlockEntity.dropItem`: whether it drops as an item where it
     /// can't be placed.
     pub drop_item: bool,

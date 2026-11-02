@@ -12,7 +12,7 @@ use crate::{
     assets::{Assets, RenderAssets},
     biome::{Biomes, GrassModifier},
     blocks::{BlockFacts, RenderShape},
-    chunk::{Chunk, Light, MIN_Y},
+    chunk::{Chunk, MIN_Y},
     graphics::LeafCullingMode,
     models::catalog::BakedFace,
 };
@@ -50,6 +50,9 @@ pub struct Vertex {
 /// `Vertex::normal` of a baked-colour quad of an `entitySolid` model: the render type culls
 /// back faces, which the entity pipelines here do not, so `entity.wgsl` discards them.
 pub const CULL_BACK: [i8; 4] = [0, 0, 0, 1];
+/// `Vertex::normal.w` of a shaded quad of an `entityCutoutCull` model (the bat): shaded by the
+/// normal like -127, and `entity.wgsl` also discards its back-facing pixels.
+pub const SHADED_CULL_W: i8 = -126;
 /// A section vertex: vanilla's `DefaultVertexFormat.BLOCK` (position, colour,
 /// UV0, UV2) with the sprite's array layer beside the light, in 24 bytes
 /// rather than vanilla's 28: the UV is fixed point, which holds model UVs
@@ -368,15 +371,15 @@ pub const ALL_VISIBLE: u64 = (1 << 36) - 1;
 fn visibility(pad: &Padded, info: &[Info]) -> u64 {
     let solid: Vec<bool> = info.iter().map(|i| i.solid).collect();
     let mut rows = Vec::new();
-    opaque_rows(pad, &solid, &mut rows);
+    solid_rows(pad, &solid, &mut rows);
     visibility_rows(&open_rows(&rows))
 }
-/// The section's non-opaque cells by row (`y << 4 | z`, bit x) from the padded
-/// opacity rows (`MeshScratch::opaque`).
-fn open_rows(opaque: &[u32]) -> [u16; 256] {
+/// The section's cells that are not `isSolidRender`, by row (`y << 4 | z`, bit
+/// x), from the padded rows of `MeshScratch::solid_rows`.
+fn open_rows(solid: &[u32]) -> [u16; 256] {
     std::array::from_fn(|r| {
         let (y, z) = ((r >> 4) as i32, (r & 15) as i32);
-        !(opaque[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
+        !(solid[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
     })
 }
 /// The cells of `open` connected to `seeds` (a subset) within the row: an
@@ -753,6 +756,10 @@ impl MeshTables {
             .copied()
             .unwrap_or(false)
     }
+    /// HDR output's tier of a state (`hdr_tier`), for what meshes it elsewhere (the LOD tiles).
+    pub fn hdr_tier(&self, state: BlockStateId) -> u8 {
+        self.info.get(state.0 as usize).map_or(0, |i| i.tier)
+    }
     pub fn facts(&self, state: BlockStateId) -> Option<MeshFacts> {
         let i = self.info.get(state.0 as usize)?;
         Some(MeshFacts {
@@ -922,14 +929,10 @@ impl Padded {
             let sources: [[Source; 3]; 3] = std::array::from_fn(|rz| {
                 std::array::from_fn(|rx| match region[rz][rx] {
                     None => Source::Missing,
-                    // `Chunk::get` and `Chunk::light` outside the column's sections.
-                    Some(c) => {
-                        let s = (wy - c.min_y()) >> 4;
-                        match c.sections.get(s as usize).filter(|_| s >= 0) {
-                            Some(section) => Source::Section(section),
-                            None => Source::Outside(if s < 0 { 0 } else { 0xF0 }),
-                        }
-                    }
+                    Some(c) => match c.section_at(wy) {
+                        Ok(section) => Source::Section(section),
+                        Err(light) => Source::Outside(light),
+                    },
                 })
             });
             for z in -B..16 + B {
@@ -977,10 +980,7 @@ fn fill_run(
                 Some(own) => blocks.copy_from_slice(own),
                 None => section.blocks.get_run(at, blocks),
             }
-            match &section.light {
-                Light::Uniform(v) => light.fill(*v),
-                Light::Full(all) => light.copy_from_slice(&all[at..at + light.len()]),
-            }
+            section.light.copy_run(at, light);
         }
         Source::Outside(v) => {
             blocks.fill(0);
@@ -1015,11 +1015,11 @@ pub struct MeshScratch {
     own: Option<Box<[u32; 4096]>>,
     leaf: leaf_culling::LeafMask,
     /// Per padded row (`pi(-B, y, z) / P`), bit `x + B` set where the block
-    /// is `isSolidRender`.
-    opaque: Vec<u32>,
+    /// is `isSolidRender` (`MeshTables::solid`).
+    solid_rows: Vec<u32>,
 }
-/// Fills `rows` with the padded section's opacity, one bit per block (`MeshScratch::opaque`).
-fn opaque_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
+/// Fills `rows` with the padded section's `isSolidRender` blocks, one bit each (`MeshScratch::solid_rows`).
+fn solid_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
     rows.clear();
     rows.extend(pad.blocks.as_chunks::<P>().0.iter().map(|row| {
         row.iter().enumerate().fold(0u32, |bits, (x, &id)| {
@@ -1350,6 +1350,8 @@ pub struct Mesher<'a> {
     pub nether_shading: bool,
     /// A shader pack lights the faces (its `oldLighting` off): no face shading in the colours.
     pub shader_pack_lighting: bool,
+    /// OptiFine/Iris separate ambient occlusion: vertex RGB does not include AO, and AO factor is passed in vertex alpha.
+    pub separate_ao: bool,
     pub assets: &'a Assets,
     pub render: &'a RenderAssets,
     pub tables: &'a MeshTables,
@@ -1396,8 +1398,8 @@ impl Mesher<'_> {
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
         scratch.padded.fill(region, sy, own);
         let pad = &scratch.padded;
-        opaque_rows(pad, &self.tables.solid, &mut scratch.opaque);
-        let opaque = &scratch.opaque;
+        solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
+        let opaque = &scratch.solid_rows;
         out.visibility = visibility_rows(&open_rows(opaque));
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {
@@ -1437,7 +1439,11 @@ impl Mesher<'_> {
                     }
                     if state.fluid.kind() != FluidKind::Empty {
                         let water = tints.get(Resolver::Water, x, y, z);
-                        let shade = (self.nether_shading, self.shader_pack_lighting);
+                        let shade = (
+                            self.nether_shading,
+                            self.shader_pack_lighting,
+                            self.separate_ao,
+                        );
                         fluid::tesselate(self.tables, shade, pad, water, &mut out, [x, y, z]);
                     }
                     if !state.model {
@@ -1585,27 +1591,57 @@ impl Mesher<'_> {
         } else {
             lighting::cardinal(self.nether_shading, shade_face)
         };
-        // Grey level per vertex before tinting, and vanilla light coords.
-        let (gray, coords) = if ao {
+        // Grey level per vertex before tinting, vanilla light coords, and ambient occlusion factor.
+        let (gray, coords, ao_factor) = if ao {
             let info = &self.tables.info;
             let (brightness, coords) =
                 lighting::ambient_occlusion(pad, info, state, pos, &q.positions, q.facing);
-            let gray = brightness.map(|b| lighting::scale(lighting::gray(b), directional));
-            (gray, coords)
+            let gray = if self.separate_ao {
+                [lighting::gray(directional); 4]
+            } else {
+                brightness.map(|b| lighting::scale(lighting::gray(b), directional))
+            };
+            (gray, coords, brightness)
         } else {
             let coords = match q.cull {
                 Some(d) => lighting::coords(pad, state, lighting::step(pos, d)),
                 None => lighting::flat(pad, state, pos, &q.positions, q.facing),
             };
-            ([lighting::gray(directional); 4], [coords; 4])
+            ([lighting::gray(directional); 4], [coords; 4], [1.0f32; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
-        // OptiFine connected textures: another sprite, or one per quarter, and the overlays
-        // drawn over it (a few per face at most; more are dropped).
-        let connected = &self.render.connected;
+        // Fusion's and then OptiFine's connected textures: another sprite, or one per quarter,
+        // and the overlays drawn over it (a few per face at most; more are dropped).
+        let (fusion, connected) = (&self.render.fusion, &self.render.connected);
         let mut overlays = [None; 8];
         let mut count = 0;
-        let pick = if connected.is_empty() {
+        let mut push = |overlay| {
+            if let Some(slot) = overlays.get_mut(count) {
+                *slot = Some(overlay);
+                count += 1;
+            }
+        };
+        let neighbour =
+            |[dx, dy, dz]: [i32; 3]| pad.blocks[pi(pos[0] + dx, pos[1] + dy, pos[2] + dz)];
+        let fused = face.fusion.and_then(|rule| {
+            fusion.pick(
+                rule,
+                id,
+                CtmFace::ALL[q.facing as usize],
+                q.tint_index,
+                neighbour,
+                |s| {
+                    self.tables
+                        .info
+                        .get(s as usize)
+                        .is_some_and(|i| i.opaque_cube)
+                },
+                &mut push,
+            )
+        });
+        let pick = if let Some(pick) = fused {
+            pick
+        } else if connected.is_empty() {
             Pick::Keep
         } else {
             let tints = &*tints;
@@ -1614,7 +1650,7 @@ impl Mesher<'_> {
                 face.layer as u16,
                 CtmFace::ALL[q.facing as usize],
                 [world.x, world.y, world.z],
-                |[dx, dy, dz]| pad.blocks[pi(pos[0] + dx, pos[1] + dy, pos[2] + dz)],
+                neighbour,
                 || Some(tints.biome(pos[0], pos[1], pos[2])),
                 // A pane's tiles are drawn with the cube's UVs (below), so that is its texture.
                 || {
@@ -1624,12 +1660,7 @@ impl Mesher<'_> {
                         CtmAxes::texture(&q.positions, &q.uv)
                     }
                 },
-                |overlay| {
-                    if let Some(slot) = overlays.get_mut(count) {
-                        *slot = Some(overlay);
-                        count += 1;
-                    }
-                },
+                &mut push,
             )
         };
         let vertices = |tint: Option<u32>, uv: [[f32; 2]; 4]| {
@@ -1640,12 +1671,18 @@ impl Mesher<'_> {
                     None => [g; 3],
                 };
                 let p = q.positions[i];
+                let color = if self.separate_ao {
+                    let ao_byte = (ao_factor[i] * 255.0).round().clamp(0.0, 255.0) as u32;
+                    ao_byte << 24 | (pack_rgb(rgb) & 0x00FF_FFFF)
+                } else {
+                    emitting(pack_rgb(rgb), tier)
+                };
                 (
                     TerrainVertex::new(
                         [p[0] + origin[0], p[1] + origin[1], p[2] + origin[2]],
                         uv[i],
                         0,
-                        emitting(pack_rgb(rgb), tier),
+                        color,
                         pack_coords(lighting::with_emission(coords[i], q.light_emission)),
                     ),
                     uv[i],
@@ -1699,6 +1736,7 @@ impl Mesher<'_> {
                     }
                 }
             }
+            Pick::Nothing => {}
         }
         // Overlays: the face again, after it (equal depth passes), tinted as their rule says.
         // `layer=cutout` is an alpha cutout whatever the tile's alpha, but over a translucent
@@ -1711,6 +1749,7 @@ impl Mesher<'_> {
             Pick::Keep => self.translucent(own),
             Pick::Tile(t) => self.translucent(tile(t)),
             Pick::Quarters(tiles) => tiles.into_iter().any(|t| self.translucent(tile(t))),
+            Pick::Nothing => false,
         };
         // Overlay tiles face the standard way too (Continuity: "overlay textures always have the
         // standard orientation"), whatever turns the model's own UVs (dirt's and sand's random

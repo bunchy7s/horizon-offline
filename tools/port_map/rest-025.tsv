@@ -1,4 +1,14 @@
 PistonMovingBlockEntity.moveCollidedEntities	port	crates/horizon-client/src/game/piston_push.rs::Game::push_for_piston	push loop; per-box distance from crates/horizon-world/src/piston_push.rs::collided_amount
+PistonMovingBlockEntity.tick	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston_tick	a moving piston reports the push moveCollidedEntities would do at its new progress, and the caller moves the entities because Ticks has none
+PistonMovingBlockEntity.finalTick	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston_final_tick	the arrival: the moved state is placed and the block's own update runs
+PistonMovingBlockEntity.getExtendedProgress	port	crates/horizon-world/src/piston_push.rs::extended_progress	where along its travel the moved block is, in blocks
+PistonMovingBlockEntity.getMovement	port	crates/horizon-world/src/piston_push.rs::get_movement	how far an entity stands inside the block it must be pushed out of, along the movement's axis
+PistonMovingBlockEntity.moveByPositionAndProgress	port	crates/horizon-world/src/piston_push.rs::move_by_position_and_progress	a box moved to the block's position and on to where the moved block currently is
+PistonMovingBlockEntity.matchesStickyCritera	port	crates/horizon-world/src/piston_push.rs::matches_sticky_criteria	the sticky test on the block ahead of the piston
+PistonMovingBlockEntity.getCollisionRelatedBlockState	port	crates/horizon-world/src/piston_push.rs::uses_moved_state	the collision state is the moved block's, unless a retracting source piston shows its head
+PistonMovingBlockEntity.fixEntityWithinPistonBase	port	crates/horizon-world/src/piston_push.rs::fix_within_piston_base	a retracting source piston drags an entity still inside its own block out the opposite way
+PistonMovingBlockEntity.saveAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_to_nbt	the moved state, facing, progress, extending and source fields, into the compound the entity's id and position are written to as well
+PistonMovingBlockEntity.loadAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_from_nbt	the moved state, facing, progress, extending and source read back, for an entity whose block is still a moving piston
 SideChainPart.whenConnectedToTheRight	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_right	same arms as vanilla
 SideChainPart.whenConnectedToTheLeft	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_left	same arms as vanilla
 ProtoChunk.getFluidState	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::fluid_state	gap: minor: read through the region's block queries; no chunk-level accessor, fluid comes from the block state

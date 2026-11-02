@@ -3588,3 +3588,354 @@ fn a_file_item_whose_remainder_was_refused_takes_only_its_mod_out() {
     // A remainder that is the mod's own block item is kept too (`jar`).
     assert_eq!(left, ["jar", "good", "vanilla"]);
 }
+
+/// A sign's four forms come from its template, whatever the blocks are named,
+/// its wood from its declaration, and its item places the wall form it names
+/// and is that form's item too. A `road_sign` of stone is no sign.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn signs_take_their_form_wood_and_wall_block_from_their_declaration() {
+    use horizon_world::level::{Behaviours, ItemKind};
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-signs-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("signs"),
+        &[
+            ("horizon-mod.toml", &manifest("signs", "")),
+            (
+                "data/signs/horizon/block/notice.json",
+                r#"{"template": "minecraft:oak_sign", "wood_type": "signs:elm", "wall_block": "signs:board"}"#,
+            ),
+            (
+                "data/signs/horizon/block/board.json",
+                r#"{"template": "minecraft:oak_wall_sign", "wood_type": "signs:elm", "item": false}"#,
+            ),
+            (
+                "data/signs/horizon/block/lantern.json",
+                r#"{"template": "minecraft:spruce_hanging_sign", "wall_block": "signs:bracket"}"#,
+            ),
+            (
+                "data/signs/horizon/block/bracket.json",
+                r#"{"template": "minecraft:spruce_wall_hanging_sign", "wood_type": "cherry", "item": false}"#,
+            ),
+            (
+                "data/signs/horizon/block/road_sign.json",
+                r#"{"template": "minecraft:stone"}"#,
+            ),
+        ],
+    );
+    let root = resource_root(&base, std::slice::from_ref(&m), &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let behaviours = Behaviours::load(registry, &root).unwrap();
+    let block = |name: &str| facts.get(registry.default_state(name).unwrap());
+    let form = |hanging, wall| Some(crate::blocks::SignForm { hanging, wall });
+    assert_eq!(block("signs:notice").sign_form(), form(false, false));
+    assert_eq!(block("signs:board").sign_form(), form(false, true));
+    assert_eq!(block("signs:lantern").sign_form(), form(true, false));
+    assert_eq!(block("signs:bracket").sign_form(), form(true, true));
+    assert_eq!(block("signs:road_sign").sign_form(), None);
+    assert_eq!(
+        block("minecraft:oak_wall_sign").sign_form(),
+        form(false, true)
+    );
+    // The declared wood, or the template's.
+    assert_eq!(facts.wood_type("signs:notice"), Some("signs:elm"));
+    assert_eq!(facts.wood_type("signs:bracket"), Some("cherry"));
+    assert_eq!(facts.wood_type("signs:lantern"), Some("spruce"));
+    assert_eq!(
+        facts.wood_type("minecraft:dark_oak_wall_sign"),
+        Some("dark_oak")
+    );
+    assert_eq!(facts.wood_type("signs:road_sign"), None);
+    // Each item places its sign and the wall form it names, which it is the item of.
+    let id = |name: &str| behaviours.table.block_by_name(name);
+    let notice = behaviours.item_binding("signs:notice").unwrap();
+    assert_eq!(notice.kind, ItemKind::StandingAndWall);
+    assert_eq!(
+        (Some(notice.block), notice.wall_block),
+        (id("signs:notice"), id("signs:board"))
+    );
+    let lantern = behaviours.item_binding("signs:lantern").unwrap();
+    assert_eq!(lantern.kind, ItemKind::HangingSign);
+    assert_eq!(
+        (Some(lantern.block), lantern.wall_block),
+        (id("signs:lantern"), id("signs:bracket"))
+    );
+    assert_eq!(&*block("signs:board").item, "signs:notice");
+    assert_eq!(&*block("signs:bracket").item, "signs:lantern");
+    let mut renderer =
+        crate::block_entity_render::BlockEntityRenderer::load(&root, registry).unwrap();
+    renderer.add_mod_signs(&facts, registry);
+    for name in [
+        "signs:notice",
+        "signs:board",
+        "signs:lantern",
+        "signs:bracket",
+    ] {
+        assert!(
+            renderer.renders(registry.default_state(name).unwrap().0),
+            "{name}"
+        );
+    }
+    assert!(!renderer.renders(registry.default_state("signs:road_sign").unwrap().0));
+    // Vanilla's pair stays as it was.
+    let oak = behaviours.item_binding("minecraft:oak_sign").unwrap();
+    assert_eq!(oak.wall_block, id("minecraft:oak_wall_sign"));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// `WorldGenRegion.setBlock`: a feature that places a mod's sign leaves it its
+/// block entity, which goes by the template's class and not the block's name.
+#[test]
+#[ignore = "full content root: CI and pr_ready run it"]
+fn a_feature_gives_a_mods_sign_its_block_entity() {
+    use crate::containers::BlockEntity;
+    use crate::streaming::{ChunkGenerator, Proto};
+
+    let Some(base) = prepared() else {
+        return;
+    };
+    let scratch =
+        std::env::temp_dir().join(format!("horizon-mod-sign-feature-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let m = folder_mod(
+        &scratch.join("post"),
+        &[
+            ("horizon-mod.toml", &manifest("post", "")),
+            (
+                "data/post/horizon/block/notice.json",
+                r#"{"template": "minecraft:oak_sign"}"#,
+            ),
+            (
+                "data/post/worldgen/configured_feature/notice.json",
+                r#"{"type": "minecraft:ore", "size": 9, "discard_chance_on_air_exposure": 0.0,
+                    "targets": [{"target": {"predicate_type": "minecraft:tag_match",
+                        "tag": "minecraft:stone_ore_replaceables"},
+                        "state": "post:notice"}]}"#,
+            ),
+            (
+                "data/post/worldgen/placed_feature/notice.json",
+                r#"{"feature": "post:notice", "placement": [
+                    {"type": "minecraft:count", "count": 40}, {"type": "minecraft:in_square"},
+                    {"type": "minecraft:height_range", "height": {"type": "minecraft:uniform",
+                        "min_inclusive": {"absolute": -32}, "max_inclusive": {"absolute": 48}}},
+                    {"type": "minecraft:biome"}]}"#,
+            ),
+            (
+                "data/post/neoforge/biome_modifier/add_notice.json",
+                r##"{"type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
+                    "features": "post:notice", "step": "underground_ores"}"##,
+            ),
+        ],
+    );
+    let root = resource_root(&base, &[m], &scratch.join("cache")).unwrap();
+    let assets = Assets::load(&root).unwrap();
+    let registry = assets.registry;
+    let facts = BlockFacts::load(&root, registry).unwrap();
+    let biomes = crate::biome::Biomes::load(&root).unwrap();
+    let notice = registry.default_state("post:notice").unwrap().0;
+    let generate = |signs: bool| -> (usize, usize) {
+        let mut terrain =
+            crate::vanillagen::VanillaTerrain::new(&root.join("worldgen"), registry, &biomes, 1234)
+                .unwrap();
+        if signs {
+            terrain.add_mod_signs(&facts);
+        }
+        let mut worker = terrain.worker();
+        let mut region: [Proto; 9] =
+            std::array::from_fn(|i| terrain.proto(&mut worker, i as i32 % 3 - 1, i as i32 / 3 - 1));
+        terrain.decorate(&mut worker, &mut region);
+        let [_, _, _, _, center, ..] = region;
+        let chunk = terrain.finish(center);
+        let mut placed = 0;
+        for y in chunk.min_y()..chunk.max_y() {
+            for z in 0..16 {
+                for x in 0..16 {
+                    placed += usize::from(chunk.get(x, y, z) == notice);
+                }
+            }
+        }
+        let entities = chunk
+            .block_entities
+            .iter()
+            .filter(|(_, e)| matches!(e, BlockEntity::Sign(s) if !s.hanging))
+            .count();
+        (placed, entities)
+    };
+    let (placed, entities) = generate(false);
+    assert!(placed > 0, "the feature places the sign");
+    assert_eq!(entities, 0, "by its name alone it has none");
+    assert_eq!(generate(true), (placed, placed));
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A small stand-in for the base root: nested folders, an empty file, an empty folder.
+fn small_base(base: &Path) {
+    for (name, bytes) in [
+        ("items.json", &b"{}"[..]),
+        ("empty.log", &b""[..]),
+        ("assets/minecraft/lang/en_us.json", &b"{\"a\": 1}"[..]),
+        (
+            "data/minecraft/tags/block/logs.json",
+            &b"{\"values\": []}"[..],
+        ),
+    ] {
+        let path = base.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    fs::create_dir_all(base.join("worldgen/empty-folder")).unwrap();
+}
+
+/// Every folder (`None`) and file (`Some(bytes)`) under `root`, by relative path.
+fn tree(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Option<Vec<u8>>>) {
+        for entry in fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                out.insert(rel, None);
+                walk(root, &path, out);
+            } else {
+                out.insert(rel, Some(fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// Writes into a file where it is (same data), not by replacing it: what a link shares and a copy does not.
+fn edit_in_place(path: &Path, bytes: &[u8]) {
+    use std::io::Write;
+    let mut file = fs::File::options()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .unwrap();
+    file.write_all(bytes).unwrap();
+}
+
+/// The overlay looks like the base, and shares its files (a hard link on Windows, a symlink elsewhere) rather than
+/// holding copies of them.
+#[test]
+fn the_overlay_shares_the_base_files() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-share-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let (base, out) = (scratch.join("base"), scratch.join("root"));
+    small_base(&base);
+    Overlay::new(&base, &out).unwrap();
+    assert_eq!(tree(&out), tree(&base));
+    edit_in_place(
+        &base.join("assets/minecraft/lang/en_us.json"),
+        b"{\"a\": 2}",
+    );
+    assert_eq!(
+        fs::read(out.join("assets/minecraft/lang/en_us.json")).unwrap(),
+        b"{\"a\": 2}",
+        "the overlay copied the base file instead of linking it"
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Writing a file of the overlay replaces the name, so the base file it was linked to keeps its bytes and the other
+/// files of the overlay still follow the base.
+#[test]
+fn writing_into_the_overlay_leaves_the_base_alone() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-write-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let (base, out) = (scratch.join("base"), scratch.join("root"));
+    small_base(&base);
+    let overlay = Overlay::new(&base, &out).unwrap();
+    let before = tree(&base);
+    overlay
+        .write(
+            "data/minecraft/tags/block/logs.json",
+            b"{\"values\": [\"mod:log\"]}",
+        )
+        .unwrap();
+    overlay.write("items.json", b"{\"mod\": 1}").unwrap();
+    overlay.write("assets/mod/new.json", b"{}").unwrap();
+    assert_eq!(tree(&base), before, "a write reached the base");
+    assert_eq!(
+        fs::read(out.join("data/minecraft/tags/block/logs.json")).unwrap(),
+        b"{\"values\": [\"mod:log\"]}"
+    );
+    assert_eq!(fs::read(out.join("items.json")).unwrap(), b"{\"mod\": 1}");
+    edit_in_place(
+        &base.join("assets/minecraft/lang/en_us.json"),
+        b"{\"a\": 3}",
+    );
+    assert_eq!(
+        fs::read(out.join("assets/minecraft/lang/en_us.json")).unwrap(),
+        b"{\"a\": 3}"
+    );
+    // A rebuild starts by removing the overlay: that removes names, not the base's data.
+    fs::remove_dir_all(&out).unwrap();
+    assert_eq!(fs::read(base.join("items.json")).unwrap(), b"{}");
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Where a hard link cannot be made (another volume, a filesystem without links) a file is copied, as it always was
+/// on Windows; where it can, the file is linked.
+#[test]
+fn a_file_is_linked_or_else_copied() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-linkfile-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    let target = scratch.join("base.json");
+    fs::write(&target, b"original").unwrap();
+
+    let linked = scratch.join("linked.json");
+    link_file(&target, &linked, |from, to| fs::hard_link(from, to)).unwrap();
+    edit_in_place(&target, b"edited");
+    assert_eq!(fs::read(&linked).unwrap(), b"edited", "not a link");
+
+    let copied = scratch.join("copied.json");
+    fs::write(&target, b"original").unwrap();
+    link_file(&target, &copied, |_, _| {
+        Err(std::io::Error::other("no links here"))
+    })
+    .unwrap();
+    edit_in_place(&target, b"edited");
+    assert_eq!(fs::read(&copied).unwrap(), b"original", "not a copy");
+
+    // A target that is not there is an error whichever way the file is made.
+    let missing = link_file(
+        &scratch.join("missing.json"),
+        &scratch.join("x.json"),
+        |from, to| fs::hard_link(from, to),
+    );
+    assert!(missing.is_err());
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A symlink in the base is copied through, as before; linked, the overlay's file would be a symlink too.
+#[cfg(unix)]
+#[test]
+fn a_symlink_file_is_copied_through() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-symfile-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    fs::write(scratch.join("real.json"), b"real").unwrap();
+    std::os::unix::fs::symlink("real.json", scratch.join("alias.json")).unwrap();
+    let at = scratch.join("copy.json");
+    link_file(&scratch.join("alias.json"), &at, |from, to| {
+        fs::hard_link(from, to)
+    })
+    .unwrap();
+    assert!(!fs::symlink_metadata(&at).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(&at).unwrap(), b"real");
+    let _ = fs::remove_dir_all(&scratch);
+}

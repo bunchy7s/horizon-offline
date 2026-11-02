@@ -3,59 +3,10 @@
 //! sinking, slowing, climbing and freezing are `PlayerMotion`'s
 //! (`crate::motion`); placing it is the powder snow bucket's `BlockItem.place`.
 use super::Game;
-use horizon_client::{
-    Result,
-    items::ItemStack,
-    mobs::Who,
-    particles::{ParticleOptions, ParticleType},
-};
-use horizon_core::{geometry::Vec3, position::BlockPos, random::RandomSource};
+use horizon_client::{Result, items::ItemStack, mobs::Who};
+use horizon_core::{position::BlockPos, random::RandomSource};
 
 impl Game<'_> {
-    /// `ClientPacketListener.handleParticleEvent` for the one ALTERNATIVE
-    /// snowflake `PowderSnowBlock.entityInside` sends: no spread, its speed.
-    pub(super) fn snowflake(&mut self, position: Vec3, velocity: Vec3) {
-        let r = self.particles.random();
-        // nextDouble() * dist for each axis, the distances being 0.
-        let offset = [
-            r.next_double() * 0.0,
-            r.next_double() * 0.0,
-            r.next_double() * 0.0,
-        ];
-        let options = ParticleOptions::simple(ParticleType::Snowflake);
-        self.particles.add(
-            &options,
-            [
-                position.x + offset[0],
-                position.y + offset[1],
-                position.z + offset[2],
-            ],
-            [velocity.x, velocity.y, velocity.z],
-        );
-    }
-    /// The EXTINGUISH effect of the powder snow the player went into this
-    /// tick: burning, it destroys those blocks (a player always may), then
-    /// its fire goes out (`Entity.clearFire`) with the extinguish sound.
-    pub(super) fn powder_snow_fire(&mut self) -> Result<()> {
-        let Some(player) = self.player.as_mut() else {
-            return Ok(());
-        };
-        let entered = std::mem::take(&mut player.powder_snow_entered);
-        let at = [player.position.x, player.position.y, player.position.z];
-        if entered.is_empty() || player.fire_ticks <= 0 {
-            return Ok(());
-        }
-        for pos in entered {
-            self.with_level(|b, level, ticks| b.destroy_block(level, ticks, pos, false));
-            self.world.modified.insert((pos.x >> 4, pos.z >> 4));
-        }
-        self.process_level_events()?;
-        if let Some(player) = self.player.as_mut() {
-            player.fire_ticks = 0;
-        }
-        self.extinguish_sound(at);
-        Ok(())
-    }
     /// Entity.playEntityOnFireExtinguishedSound
     pub(super) fn extinguish_sound(&mut self, at: [f64; 3]) {
         let r = self.particles.random();
@@ -83,13 +34,6 @@ impl Game<'_> {
         }
         self.extinguish_sound([at.x, at.y, at.z]);
     }
-    /// The in-window player's rain extinguish (a server's player has its
-    /// fire put out by the server).
-    pub(super) fn rain_extinguish_in_frame(&mut self) {
-        if self.remote.is_none() {
-            self.rain_extinguish_player();
-        }
-    }
     /// Whether the block at `pos` is powder snow.
     pub(super) fn is_powder_snow(&self, pos: [i32; 3]) -> bool {
         &*self
@@ -112,7 +56,7 @@ impl Game<'_> {
             return Ok(());
         };
         self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
-        self.stats.add("used", "minecraft:bucket", 1);
+        self.award_stat("used", "minecraft:bucket", 1);
         if let Some(eye) = self
             .player
             .as_ref()

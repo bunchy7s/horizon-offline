@@ -4,6 +4,7 @@
 /// The game window's boot screen, before wgpu's first frame paints over it.
 #[cfg(target_os = "windows")]
 pub mod boot_paint;
+pub mod heap_census;
 pub mod jobs;
 pub mod memory_limit;
 
@@ -207,6 +208,18 @@ pub fn catch_stop_signals() {}
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.
 pub use mimalloc::MiMalloc as Allocator;
 
+/// The global allocator of a build with the `alloc-census` feature: live
+/// heap bytes by startup step and thread, for `horizon-ctl memory`.
+pub use heap_census::CensusAllocator;
+/// Whether this build counts the heap by tag (feature `alloc-census`).
+pub const HEAP_CENSUS: bool = cfg!(feature = "alloc-census");
+/// Tag the calling thread's allocations `name` while the guard lives, in a
+/// build that counts the heap ([`HEAP_CENSUS`]); nothing otherwise.
+#[inline]
+pub fn heap_tag(name: &'static str) -> Option<heap_census::Tag> {
+    HEAP_CENSUS.then(|| heap_census::tag(name))
+}
+
 /// `mi_option_purge_delay` in mimalloc.h (index 15 in v2 and v3); the bindings
 /// don't name it.
 const PURGE_DELAY: libmimalloc_sys::mi_option_t = 15;
@@ -220,6 +233,36 @@ pub fn configure_allocator() {
     unsafe {
         libmimalloc_sys::mi_option_set(PURGE_DELAY, 0);
     }
+}
+
+/// The bytes the allocator has committed now and at its peak (mimalloc's
+/// process info), for `horizon-ctl memory`.
+pub fn allocator_commit() -> (usize, usize) {
+    let mut info = [0usize; 8];
+    let [
+        elapsed,
+        user,
+        system,
+        rss,
+        peak_rss,
+        commit,
+        peak_commit,
+        faults,
+    ] = &mut info;
+    // SAFETY: writes eight integers through pointers to them.
+    unsafe {
+        libmimalloc_sys::mi_process_info(
+            elapsed,
+            user,
+            system,
+            rss,
+            peak_rss,
+            commit,
+            peak_commit,
+            faults,
+        );
+    }
+    (info[5], info[6])
 }
 
 /// Give back to the OS the memory the allocator holds free, after something

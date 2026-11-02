@@ -15,7 +15,9 @@ const MODEL_WORDS: u32 = 7u;
 const PART_WORDS: u32 = 25u;
 // A job (16 words): first model vertex, vertex count, first part, first output
 // vertex, the texture rect (4 floats), scroll, colour, light, overlay,
-// whether the overlay is the armour glint (its model UV in `glint_uv`), 3 spare.
+// whether the overlay is the armour glint (its model UV in `glint_uv`), the mode
+// (`SkinJob::mode`: 0 a model, 1 an item's quads, 2 a model with no normal),
+// whether its quads cull back faces (`SkinJob::cull`), 1 spare (0: `keep`'s).
 const JOB_WORDS: u32 = 16u;
 // `mesher::Vertex` (11 words): pos (3), uv (2), layer, color, light, normal
 // (4 x i8), glint_uv (2).
@@ -30,6 +32,20 @@ fn f(words: u32) -> f32 {
     return bitcast<f32>(words);
 }
 
+// A zero the compiler cannot see (the job's last word). Metal compiles shaders
+// with fast math: it would fuse `a * b + c` into one rounding and reorder sums,
+// a bit off the CPU's separate operations. A value xored with `keep` is opaque
+// to it, so each operation below rounds on its own, in the CPU's order.
+var<private> keep: u32;
+
+fn r(v: f32) -> f32 {
+    return bitcast<f32>(bitcast<u32>(v) ^ keep);
+}
+
+fn r3(v: vec3<f32>) -> vec3<f32> {
+    return bitcast<vec3<f32>>(bitcast<vec3<u32>>(v) ^ vec3(keep));
+}
+
 fn part_f(part: u32, i: u32) -> f32 {
     return f(parts[part * PART_WORDS + i]);
 }
@@ -40,8 +56,8 @@ fn scroll_u(u: f32, scroll: f32) -> f32 {
         return u;
     }
     // Rust's `%` on floats: the remainder with the dividend's sign.
-    let s = u + scroll;
-    return s - trunc(s);
+    let s = r(u + scroll);
+    return r(s - r(trunc(s)));
 }
 
 // `Polygon::vertex_normal`'s packing: clamped, times 127, cut toward zero.
@@ -72,33 +88,50 @@ fn skin(
     let light = jobs[j + 10u];
     let overlay = jobs[j + 11u];
     let glint = jobs[j + 12u] != 0u;
+    let mode = jobs[j + 13u];
+    let cull = jobs[j + 14u] != 0u;
+    keep = jobs[j + 15u];
     for (var k = lane; k < count; k += 64u) {
         let v = (first + k) * MODEL_WORDS;
         let p = vec3(f(model[v]), f(model[v + 1u]), f(model[v + 2u]));
         let uv = vec2(f(model[v + 3u]), f(model[v + 4u]));
         let axis = model[v + 5u];
         let part = first_part + model[v + 6u];
-        // glam's Mat4::transform_point3, in its order.
-        var pos = vec3(part_f(part, 0u), part_f(part, 1u), part_f(part, 2u)) * p.x;
-        pos = vec3(part_f(part, 4u), part_f(part, 5u), part_f(part, 6u)) * p.y + pos;
-        pos = vec3(part_f(part, 8u), part_f(part, 9u), part_f(part, 10u)) * p.z + pos;
-        pos = vec3(part_f(part, 12u), part_f(part, 13u), part_f(part, 14u)) + pos;
+        // glam's Mat4::transform_point3, in its order, each operation rounded.
+        var pos = r3(vec3(part_f(part, 0u), part_f(part, 1u), part_f(part, 2u)) * p.x);
+        pos = r3(r3(vec3(part_f(part, 4u), part_f(part, 5u), part_f(part, 6u)) * p.y) + pos);
+        pos = r3(r3(vec3(part_f(part, 8u), part_f(part, 9u), part_f(part, 10u)) * p.z) + pos);
+        pos = r3(vec3(part_f(part, 12u), part_f(part, 13u), part_f(part, 14u)) + pos);
         // An axis normal times the normal matrix is that column, exactly.
         let c = 16u + (axis % 3u) * 3u;
         var n = vec3(part_f(part, c), part_f(part, c + 1u), part_f(part, c + 2u));
         if axis >= 3u {
             n = -n;
         }
+        // An item's colour by axis, shaded on the CPU, and `mesher::CULL_BACK`.
+        var vertex_color = color;
+        var normal = pack(n);
+        if cull {
+            // `mesher::SHADED_CULL_W` (-126) in the normal's w byte.
+            normal = (normal & 0x00ffffffu) | (u32(-126 & 0xff) << 24u);
+        }
+        if mode == 1u {
+            vertex_color = parts[part * PART_WORDS + 16u + axis];
+            normal = 1u << 24u;
+        } else if mode == 2u {
+            // The eyes render type's layers: no normal (`SkinJob::FLAT`).
+            normal = 0u;
+        }
         let o = (dst + k) * VERTEX_WORDS;
         out[o] = bitcast<u32>(pos.x);
         out[o + 1u] = bitcast<u32>(pos.y);
         out[o + 2u] = bitcast<u32>(pos.z);
-        out[o + 3u] = bitcast<u32>(rect.x + (rect.z - rect.x) * scroll_u(uv.x, scroll));
-        out[o + 4u] = bitcast<u32>(rect.y + (rect.w - rect.y) * uv.y);
+        out[o + 3u] = bitcast<u32>(rect.x + r(r(rect.z - rect.x) * scroll_u(uv.x, scroll)));
+        out[o + 4u] = bitcast<u32>(rect.y + r(r(rect.w - rect.y) * uv.y));
         out[o + 5u] = overlay;
-        out[o + 6u] = color;
+        out[o + 6u] = vertex_color;
         out[o + 7u] = light;
-        out[o + 8u] = pack(n);
+        out[o + 8u] = normal;
         if glint {
             out[o + 9u] = bitcast<u32>(uv.x);
             out[o + 10u] = bitcast<u32>(uv.y);

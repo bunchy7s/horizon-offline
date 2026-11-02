@@ -880,15 +880,20 @@ fn bucket_source_removal_drains_spread_water() {
     let mut w = world!();
     w.floor(0, 10, "stone");
     let at = BlockPos::new(0, 1, 0);
-    assert!(w.b().bucket_empty(
-        &mut w.level,
-        &mut w.ticks,
-        at,
-        BucketContent::Fluid(crate::fluid::FluidKind::Water),
-        "minecraft:item.bucket.empty",
-        false,
-        false
-    ));
+    assert!(
+        w.b()
+            .bucket_empty(
+                &mut w.level,
+                &mut w.ticks,
+                at,
+                None,
+                BucketContent::Fluid(crate::fluid::FluidKind::Water),
+                "minecraft:item.bucket.empty",
+                false,
+                false
+            )
+            .is_some()
+    );
     for _ in 0..60 {
         w.tick();
     }
@@ -1940,6 +1945,73 @@ fn a_broken_moving_piston_drops_the_block_it_carries() {
     );
 }
 
+/// `MovingPistonBlock.useWithoutItem`: a moving piston with no block entity (its
+/// move is not in flight) is removed by the click, and one that is still moving
+/// keeps its block and passes the click on.
+#[test]
+fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
+    let mut w = world!();
+    let moving = w.id("moving_piston", &[("facing", "east"), ("type", "normal")]);
+    let orphan = BlockPos::new(0, 1, 0);
+    let in_flight = BlockPos::new(4, 1, 4);
+    let air = w.id("air", &[]);
+    for pos in [orphan, in_flight] {
+        w.put(pos, moving);
+    }
+    w.ticks.moving_pistons.push((
+        in_flight,
+        MovingPiston {
+            moved_state: w.id("sand", &[]),
+            direction: Direction::East,
+            extending: true,
+            source: false,
+            progress: 0.5,
+            progress_o: 0.4,
+            last_ticked: 0,
+            death_ticks: 0,
+            id: 0,
+        },
+    ));
+    assert_eq!(w.use_block(orphan), InteractionResult::Consume);
+    assert_eq!(w.get(orphan), air, "the orphan moving piston is removed");
+    assert_eq!(w.use_block(in_flight), InteractionResult::Pass);
+    assert_eq!(
+        w.get(in_flight),
+        moving,
+        "a moving piston in flight keeps its block"
+    );
+}
+
+/// `MovingPistonBlock.destroy`: a moving piston that goes away takes the
+/// extended piston base behind it with it; an unextended base stays.
+#[test]
+fn breaking_a_moving_piston_removes_its_extended_base() {
+    let mut w = world!();
+    let moving = w.id("moving_piston", &[("facing", "east"), ("type", "normal")]);
+    let extended = w.id("piston", &[("facing", "east"), ("extended", "true")]);
+    let retracted = w.id("piston", &[("facing", "east"), ("extended", "false")]);
+    let air = w.id("air", &[]);
+    // The head at (1, 1, 0) faces east, so its base is at (0, 1, 0).
+    w.put(BlockPos::new(0, 1, 0), extended);
+    w.put(BlockPos::new(1, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(1, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(0, 1, 0)),
+        air,
+        "the extended base goes with the moving piston"
+    );
+    w.put(BlockPos::new(5, 1, 0), retracted);
+    w.put(BlockPos::new(6, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(6, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(5, 1, 0)),
+        retracted,
+        "an unextended base is left alone"
+    );
+}
+
 #[test]
 fn dripstone_fills_cauldrons() {
     let mut w = world!();
@@ -2214,6 +2286,21 @@ fn placing_and_breaking_report_the_affected_state() {
 fn dispenser_buckets_pick_up_and_empty() {
     let mut w = world!();
     let at = BlockPos::new(0, 10, 0);
+    // A dispenser has no hit result: nothing beside to try.
+    let empty = |w: &mut World, content, sound: &str, creative| {
+        w.f.behaviours
+            .bucket_empty(
+                &mut w.level,
+                &mut w.ticks,
+                at,
+                None,
+                content,
+                sound,
+                false,
+                creative,
+            )
+            .is_some()
+    };
     let water = w.id("water", &[("level", "0")]);
     w.put(at, water);
     let picked = w.b().bucket_pickup(&mut w.level, &mut w.ticks, at, false);
@@ -2246,15 +2333,9 @@ fn dispenser_buckets_pick_up_and_empty() {
     w.put(at, barrier);
     let sound = "minecraft:item.bucket.empty";
     let content = BucketContent::Fluid(crate::fluid::FluidKind::Water);
-    assert!(
-        !w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, false, false)
-    );
+    assert!(!empty(&mut w, content, sound, false));
     assert_eq!(w.prop(at, "waterlogged"), "false");
-    assert!(
-        w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, false, true)
-    );
+    assert!(empty(&mut w, content, sound, true));
     assert_eq!(w.prop(at, "waterlogged"), "true");
     assert_eq!(
         w.b().bucket_pickup(&mut w.level, &mut w.ticks, at, false),
@@ -2268,46 +2349,67 @@ fn dispenser_buckets_pick_up_and_empty() {
     // Emptying water into air makes a source; stone refuses.
     let air = w.b().air();
     w.put(at, air);
-    assert!(
-        w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, false, false)
-    );
+    assert!(empty(&mut w, content, sound, false));
     assert_eq!(w.name(at), "water[level=0]");
     let stone = w.id("stone", &[]);
     w.put(at, stone);
-    assert!(
-        !w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, false, false)
-    );
+    assert!(!empty(&mut w, content, sound, false));
     // Water fills a waterloggable slab instead of replacing it.
     let dry = w.id("oak_slab", &[]);
     w.put(at, dry);
-    assert!(
-        w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, false, false)
-    );
+    assert!(empty(&mut w, content, sound, false));
     assert_eq!(w.prop(at, "waterlogged"), "true");
-    // Sneak-clicking the slab refuses: only air takes a fluid under Shift.
-    let dry = w.id("oak_slab", &[]);
-    w.put(at, dry);
-    assert!(
-        !w.b()
-            .bucket_empty(&mut w.level, &mut w.ticks, at, content, sound, true, false)
-    );
-    assert_eq!(w.prop(at, "waterlogged"), "false");
     // Powder snow only goes into empty space.
     let air = w.b().air();
     w.put(at, air);
-    assert!(w.b().bucket_empty(
-        &mut w.level,
-        &mut w.ticks,
-        at,
+    assert!(empty(
+        &mut w,
         BucketContent::Powder,
         "minecraft:item.bucket.empty_powder_snow",
-        false,
         false
     ));
     assert_eq!(w.name(at), "powder_snow[]");
+}
+
+#[test]
+fn clicked_bucket_pours_beside_a_refusing_block() {
+    let mut w = world!();
+    let at = BlockPos::new(0, 10, 0);
+    let above = BlockPos::new(0, 11, 0);
+    let sound = "minecraft:item.bucket.empty";
+    let content = BucketContent::Fluid(crate::fluid::FluidKind::Water);
+    let air = w.b().air();
+    let click = |w: &mut World, sneaking: bool| {
+        w.f.behaviours.bucket_empty(
+            &mut w.level,
+            &mut w.ticks,
+            at,
+            Some(above),
+            content,
+            sound,
+            sneaking,
+            false,
+        )
+    };
+    // Sneak-clicking a slab pours beside it, where Shift no longer counts.
+    let slab = w.id("oak_slab", &[]);
+    w.put(at, slab);
+    assert_eq!(click(&mut w, true), Some(above));
+    assert_eq!(w.prop(at, "waterlogged"), "false");
+    assert_eq!(w.name(above), "water[level=0]");
+    // A double slab holds no water: the click fills the block beside it.
+    w.put(above, air);
+    let double = w.id("oak_slab", &[("type", "double")]);
+    w.put(at, double);
+    assert_eq!(click(&mut w, false), Some(above));
+    assert_eq!(w.prop(at, "type"), "double");
+    assert_eq!(w.name(above), "water[level=0]");
+    // Both refusing empties nothing.
+    let stone = w.id("stone", &[]);
+    w.put(above, stone);
+    assert_eq!(click(&mut w, false), None);
+    assert_eq!(w.prop(at, "type"), "double");
+    assert_eq!(w.get(above), stone);
 }
 
 #[test]
