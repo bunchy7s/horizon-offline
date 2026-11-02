@@ -3473,6 +3473,12 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server applied `velocity` to a player, when syncing changed motion to
+    /// that player's client. Guest lookup helpers may find nothing.
+    /// @API:player_velocity@.
+    pub(super) fn native_player_velocity(&mut self, player: u128, name: &str, velocity: [f64; 3]) {
+        let _ = (player, name, velocity);
+    }
     /// A server player removed an entity's leash, after it was cleared.
     /// Guest lookup helpers may find nothing during packet handling.
     /// @API:player_unleash_entity@.

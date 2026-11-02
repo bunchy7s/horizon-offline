@@ -4175,6 +4175,7 @@ impl Game<'_> {
             }
         }
         if let (Some(v), Some(g)) = (marked, host.hub.guest(conn)) {
+            self.native_player_velocity(g.uuid, &g.name, [v.x, v.y, v.z]);
             g.send(&C::SetEntityMotion(play::SetEntityMotion {
                 id: g.entity_id,
                 velocity: [v.x, v.y, v.z],
