@@ -1064,4 +1064,63 @@ mod tests {
             assert!(view.get(9).is_some());
         }
     }
+
+    struct EquipRules;
+    impl Rules for EquipRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, _: &str) -> Option<usize> {
+            None
+        }
+        fn equip_slot(&self, item: &str) -> Option<&str> {
+            (item == "minecraft:shield").then_some("offhand")
+        }
+    }
+
+    /// A shift-click in the inventory menu puts a shield in the empty off-hand
+    /// slot: `InventoryMenu.quickMoveStack` asks `getEquipmentSlotForItem` for
+    /// `EquipmentSlot.OFFHAND` and moves it to slot 45 before it tries the
+    /// hotbar. A full off hand, or an item with no `equippable` slot, still
+    /// goes to the hotbar.
+    #[test]
+    fn inventory_quick_move_equips_an_off_hand_item() {
+        let rules = EquipRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 9 is the first main-inventory slot, 45 the off hand.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        assert!(view.get(36).is_none());
+        // The off hand is taken: the next shield goes to the hotbar instead.
+        view.guest.inventory[9] = Some(ItemStack::new("minecraft:shield", 1));
+        click(&mut view, &mut drag, 9, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(36).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+        assert!(view.get(9).is_none());
+        // An item that equips nowhere is untouched by the off-hand branch.
+        view.guest.inventory[10] = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 10, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(37).as_ref().map(|s| s.count), Some(3));
+        assert_eq!(
+            view.get(45).as_ref().map(|s| &*s.item),
+            Some("minecraft:shield")
+        );
+    }
 }
