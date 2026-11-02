@@ -305,7 +305,8 @@ impl Game<'_> {
             return;
         };
         let g = &host.hub.guests[gi];
-        let (seed, creative, conn) = (g.xp_seed, g.creative(), g.conn);
+        let (seed, creative, conn, uuid, name) =
+            (g.xp_seed, g.creative(), g.conn, g.uuid, g.name.clone());
         let Some(enchanted) = horizon_client::stations::apply_enchantment(
             &self.stations().enchantments,
             self.items(),
@@ -316,6 +317,7 @@ impl Game<'_> {
         ) else {
             return;
         };
+        let enchanted_for_hook = enchanted.clone();
         let need = button as i32 + 1;
         // Player.onEnchantmentPerformed, and EnchantmentMenu's awardStat(ENCHANT_ITEM).
         self.as_guest(host, conn, |game| {
@@ -344,6 +346,7 @@ impl Game<'_> {
             1.0,
             pitch,
         );
+        self.native_enchant_item(uuid, &name, gs.pos, &enchanted_for_hook, need);
     }
 
     /// `ServerGamePacketListenerImpl.handleRenameItem`: the guest's anvil
