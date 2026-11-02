@@ -135,6 +135,32 @@ pub enum HostEvent {
     MainHandChanged(u32, bool),
     /// A guest changed their client language option.
     LocaleChanged(u32, String),
+    /// A guest's client finished loading the level around them.
+    PlayerLoaded(u32),
+    /// A guest changed recipe book settings.
+    RecipeBookSettings {
+        conn: u32,
+        book: i32,
+        open: bool,
+        filtering: bool,
+    },
+    /// A guest changed sneaking in a player input packet, already applied.
+    Sneak {
+        conn: u32,
+        sneaking: bool,
+    },
+    /// A loaded guest sent their current player input flags.
+    Input {
+        conn: u32,
+        flags: i32,
+    },
+    /// A guest was kicked, with the reason rendered by the hub.
+    Kicked {
+        conn: u32,
+        player: u128,
+        name: String,
+        reason: String,
+    },
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -205,12 +231,17 @@ fn take_tracking(g: &mut Guest, out: &mut Vec<TrackingBatch>) {
 pub struct Hub {
     /// Clicks on and closings of native mods' menus, for the game.
     pub native_menu_events: Vec<super::menu::NativeMenuEvent>,
+    /// Kicks waiting for the game thread to notify native mods.
+    pending_kicks: Vec<HostEvent>,
     /// The entities players started and stopped tracking, collected by
     /// `collect_tracking`, for the game to tell the mods.
     pub native_tracking: Vec<TrackingBatch>,
     /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
     /// tell the mods.
     pub native_advancement_grants: Vec<TickGrants>,
+    /// Whether any native mod is loaded: `Input` and `Sneak` events only exist for them, so
+    /// the hub queues none otherwise. The game sets it before each poll.
+    pub mods_loaded: bool,
     /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
     /// only players of at least that permission level see them, in the
     /// player list, the world and their joining and leaving.
@@ -569,8 +600,10 @@ impl Hub {
             entity_gone: Vec::new(),
             mod_commands: (serde_json::Value::Null, None),
             native_menu_events: Vec::new(),
+            pending_kicks: Vec::new(),
             native_tracking: Vec::new(),
             native_advancement_grants: Vec::new(),
+            mods_loaded: false,
             hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -834,8 +867,15 @@ impl Hub {
         // The log's "lost connection" line gives the reason, as vanilla's.
         let text = self.english(&reason);
         if let Some(g) = self.guest_mut(conn) {
-            g.left_reason = text;
+            g.left_reason = text.clone();
+            let (player, name) = (g.uuid, g.name.clone());
             g.sender.disconnect(reason);
+            self.pending_kicks.push(HostEvent::Kicked {
+                conn,
+                player,
+                name,
+                reason: text,
+            });
         }
     }
 
@@ -1534,7 +1574,7 @@ impl Hub {
     pub fn poll(&mut self, ctx: &mut TickCtx) -> Vec<HostEvent> {
         self.ticks += 1;
         self.anticheat_tick(ctx.tick_rate);
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.pending_kicks);
         for event in self.lan.poll() {
             match event {
                 NetEvent::Joined(j) => {
@@ -3034,6 +3074,7 @@ impl Hub {
                     g.loaded = true;
                     g.loading = false;
                     g.load_timeout = 0;
+                    events.push(HostEvent::PlayerLoaded(conn));
                 }
                 // PlayerChunkSender.onChunkBatchReceivedByClient.
                 S::ChunkBatchReceived(p) => {
@@ -3079,8 +3120,18 @@ impl Hub {
                     if let Some(book) = crate::recipe_book::BookType::ALL.get(p.book_type as usize)
                     {
                         let settings = &mut self.guests[i].recipe_book;
+                        let changed = settings.open[book.index()] != p.open
+                            || settings.filtering[book.index()] != p.filtering;
                         settings.open[book.index()] = p.open;
                         settings.filtering[book.index()] = p.filtering;
+                        if changed {
+                            events.push(HostEvent::RecipeBookSettings {
+                                conn,
+                                book: p.book_type,
+                                open: p.open,
+                                filtering: p.filtering,
+                            });
+                        }
                     }
                 }
                 S::ClientInformation(info) => {
@@ -3117,7 +3168,21 @@ impl Hub {
                     let g = &mut self.guests[i];
                     g.input = p.flags;
                     if g.client_loaded() {
-                        g.sneaking = p.flags & 32 != 0;
+                        // The events only tell the mods: nothing is queued with none loaded.
+                        let listening = self.mods_loaded;
+                        if listening {
+                            events.push(HostEvent::Input {
+                                conn,
+                                flags: i32::from(p.flags),
+                            });
+                        }
+                        let sneaking = p.flags & 32 != 0;
+                        if g.sneaking != sneaking {
+                            g.sneaking = sneaking;
+                            if listening {
+                                events.push(HostEvent::Sneak { conn, sneaking });
+                            }
+                        }
                     }
                     // handlePlayerInput only records keys and updates crouching.
                     // Sprinting persists after the sprint key is released (or

@@ -4102,6 +4102,13 @@ impl Game<'_> {
                 if extra_life > 0 {
                     item.age = 6000 - extra_life.min(32766);
                     alive = true;
+                } else if self.serving.is_some() || self.options.dedicated.is_some() {
+                    self.native_item_despawn(
+                        item.id,
+                        &item.stack.item,
+                        item.stack.count as i32,
+                        [item.position.x, item.position.y, item.position.z],
+                    );
                 }
             }
             if !alive || removed[i] {
@@ -13361,9 +13368,12 @@ impl Game<'_> {
     /// sound every fifth level (at most every 100 ticks).
     pub(super) fn give_orb_points(&mut self, gained: u32) {
         let at = self.eye_position();
+        let old_level = self.experience.level;
+        let gave = self.experience.give(gained as i32);
+        self.native_player_level_changed(old_level);
         // Player.giveExperienceLevels runs per level, so the first multiple of 5
         // crossed plays the sound (and starts the cooldown for the rest).
-        if let Some(level) = self.experience.give(gained as i32)
+        if let Some(level) = gave
             && self.ticks > self.last_level_up + 100
         {
             self.last_level_up = self.ticks;
