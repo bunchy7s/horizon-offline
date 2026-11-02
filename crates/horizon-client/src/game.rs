@@ -56,6 +56,7 @@ mod agent_settings;
 mod allays;
 mod armor_stands;
 mod atlas_slots;
+mod attachment_sync;
 mod banners;
 mod beacon;
 mod beds;
@@ -2011,7 +2012,10 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let atlas = startup::time("ui.atlas", || HudAtlas::build_over(root, defaults));
+            let mod_image = !horizon_client::mod_api::mods().is_empty();
+            let atlas = startup::time("ui.atlas", || {
+                HudAtlas::build_over_with_image(root, defaults, mod_image)
+            });
             let panorama = panorama
                 .join()
                 .unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -4102,6 +4106,13 @@ impl Game<'_> {
                 if extra_life > 0 {
                     item.age = 6000 - extra_life.min(32766);
                     alive = true;
+                } else if self.serving.is_some() || self.options.dedicated.is_some() {
+                    self.native_item_despawn(
+                        item.id,
+                        &item.stack.item,
+                        item.stack.count as i32,
+                        [item.position.x, item.position.y, item.position.z],
+                    );
                 }
             }
             if !alive || removed[i] {
@@ -8773,9 +8784,15 @@ impl Game<'_> {
     /// (special ones never do).
     fn award_crafted(&mut self, crafts: &[(String, Vec<Option<ItemStack>>)]) {
         for (recipe, ingredients) in crafts {
-            self.trigger_recipe_crafted(recipe, ingredients);
+            // The whole id: the advancements' `recipe_crafted` criteria name
+            // `minecraft:x`, and the crafting copy names the recipe bare.
+            let recipe = horizon_client::crafting::qualified(recipe);
+            self.trigger_recipe_crafted(&recipe, ingredients);
         }
-        let recipes: Vec<String> = crafts.iter().map(|(r, _)| r.clone()).collect();
+        let recipes: Vec<String> = crafts
+            .iter()
+            .map(|(r, _)| horizon_client::crafting::qualified(r))
+            .collect();
         let index = &world_stations!(self).recipe_index;
         let (_, unlocked) = self.level.recipe_book.add_recipes(index, &recipes);
         self.recipe_unlocked(&unlocked);
@@ -13355,9 +13372,12 @@ impl Game<'_> {
     /// sound every fifth level (at most every 100 ticks).
     pub(super) fn give_orb_points(&mut self, gained: u32) {
         let at = self.eye_position();
+        let old_level = self.experience.level;
+        let gave = self.experience.give(gained as i32);
+        self.native_player_level_changed(old_level);
         // Player.giveExperienceLevels runs per level, so the first multiple of 5
         // crossed plays the sound (and starts the cooldown for the rest).
-        if let Some(level) = self.experience.give(gained as i32)
+        if let Some(level) = gave
             && self.ticks > self.last_level_up + 100
         {
             self.last_level_up = self.ticks;

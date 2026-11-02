@@ -43,6 +43,12 @@ use std::{
     sync::Arc,
 };
 
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`). @API:native_living_jump@.
+#[inline(never)]
+pub fn native_living_jump(entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(entity, kind);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
@@ -400,6 +406,8 @@ pub struct PlayerMotion {
     /// it travels on the server: `isLocalInstanceAuthoritative` is false, so
     /// its moves check no fall damage.
     pub server_copy: bool,
+    /// A speculative anticheat replay, whose native callbacks must not escape.
+    pub(crate) replaying: bool,
     /// The span of `events` a wall hit on the server's copy pushed (sound and
     /// damage): `server_travel` keeps them while it drops the simulated moves.
     pub wall_hit_events: Option<std::ops::Range<usize>>,
@@ -604,6 +612,7 @@ impl PlayerMotion {
             burn_from_stepping_immune: false,
             old_position: position,
             server_copy: false,
+            replaying: false,
             wall_hit_events: None,
             client_side: false,
             entity_id: 0,
@@ -1202,13 +1211,16 @@ impl MotionWorld<'_, '_, '_> {
     /// client's own keys, and the sprinting it said it had (its
     /// ServerboundPlayerCommandPacket comes before the tick's move).
     pub fn replayed_tick(&mut self, keys: crate::sprint::Keys, sprinting: bool) -> Result<()> {
-        self.local_tick(keys, |player, _| {
+        self.player.replaying = true;
+        let result = self.local_tick(keys, |player, _| {
             if player.sprinting == sprinting {
                 Ok(())
             } else {
                 player.set_sprinting(sprinting)
             }
-        })
+        });
+        self.player.replaying = false;
+        result
     }
     /// `LocalPlayer.aiStep` and the travel it ends with; `sprint` is the
     /// sprint phase.
@@ -1953,6 +1965,9 @@ impl MotionWorld<'_, '_, '_> {
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
+        if !self.player.replaying {
+            native_living_jump(self.player.entity_id as u32, "minecraft:player");
+        }
         self.player
             .events
             .push(MotionEvent::Health(crate::health::HealthEvent::Statistic {

@@ -245,7 +245,7 @@ fn spit(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
 /// `AbstractHorse.aiStep` for llamas, which never graze: the slow healing.
 pub fn ai_step(m: &mut Mob, w: &MobWorld) {
     if m.alive() && m.random.next_int_bound(900).unwrap_or(1) == 0 && m.death_time == 0 {
-        m.health = (m.health + 1.0).min(m.attrs.max_health);
+        m.heal(1.0);
     }
     if is_trader(m) {
         super::caravan::trader_llama_tick(m, w);

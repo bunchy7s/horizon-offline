@@ -1305,6 +1305,18 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
         augment(i, ingredients, stacks, &mut owner, &mut seen)
     })
 }
+/// A resource id with its default namespace filled in — the whole id the
+/// book, the network copy and the advancements' JSON know a recipe by,
+/// whatever the caller passes. `sources` names a `minecraft:` recipe bare
+/// on purpose (vanilla's own ids); this puts the namespace back.
+pub fn qualified(id: &str) -> String {
+    if id.contains(':') {
+        id.to_owned()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
 impl Recipes {
     pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Result<Self> {
         let sources = Self::sources(root, overlay)?;
