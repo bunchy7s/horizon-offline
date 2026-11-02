@@ -3132,6 +3132,13 @@ impl Game<'_> {
         let _ = (player, name, pos, cancel);
     }
 
+    /// A sculk catalyst at `pos` has begun blooming after taking experience.
+    /// The catalyst block state has changed. Server-side.
+    /// @API:native_sculk_bloom@.
+    pub(super) fn native_sculk_bloom(&mut self, dimension: &str, pos: [i32; 3]) {
+        let _ = (dimension, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

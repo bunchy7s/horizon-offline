@@ -1358,6 +1358,7 @@ impl Game<'_> {
     fn catalyst_bloom(&mut self, key: (i32, i32, i32)) {
         let pos = BlockPos::new(key.0, key.1, key.2);
         self.with_level(|b, level, ticks| b.sculk_catalyst_bloom(level, ticks, pos));
+        self.native_sculk_bloom(self.dim.id(), [key.0, key.1, key.2]);
         let _ = self.process_level_events();
         let c = center(key);
         let options = ParticleOptions::simple(ParticleType::SculkSoul);
