@@ -2324,7 +2324,7 @@ impl Game<'_> {
                     self.native_player_bundle_item_select(
                         guest.uuid,
                         &guest.name,
-                        i32::from(p.slot),
+                        p.slot,
                         p.index,
                     );
                 }
