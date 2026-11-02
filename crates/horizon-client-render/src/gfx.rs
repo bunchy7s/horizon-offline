@@ -828,6 +828,12 @@ pub struct Renderer {
     /// Solid quads facing away from the eye are left out (`mesher::Sides`).
     sides_on: bool,
     sky: wgpu::RenderPipeline,
+    /// The main sky without the sunrise fan, which `sunrise_pipeline` draws as
+    /// geometry over it. The mirror keeps `sky`: its per-pixel fan is cheap at
+    /// the reflection's size and needs no second projection.
+    sky_base: wgpu::RenderPipeline,
+    sunrise_pipeline: wgpu::RenderPipeline,
+    sunrise_buffer: wgpu::Buffer,
     dark_disc: wgpu::RenderPipeline,
     /// Clears the world pass's depth to the far plane so the first-person hand draws in the
     /// same pass (`hand_in_world`), as the hand's own pass would clear it.
@@ -2373,6 +2379,47 @@ impl Renderer {
             false,
             None,
         );
+        let sky_base = pipeline(
+            "Sky base",
+            "vs_sky",
+            "fs_sky_base",
+            &[],
+            tri,
+            None,
+            false,
+            false,
+            None,
+        );
+        let sunrise_attributes = wgpu::vertex_attr_array![0=>Float32x4, 1=>Float32];
+        let sunrise_buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: 20,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &sunrise_attributes,
+        })];
+        let sunrise_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            // The sky's HDR alpha is the destination's; the fan only tints it.
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let sunrise_pipeline = pipeline(
+            "Sunrise fan",
+            "vs_sunrise",
+            "fs_sunrise",
+            &sunrise_buffers,
+            tri,
+            None,
+            false,
+            false,
+            Some(sunrise_blend),
+        );
         let dark_disc = pipeline(
             "Dark disc",
             "vs_sky",
@@ -3704,6 +3751,12 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let sunrise_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Sunrise fan vertices"),
+            size: (sunrise_fan::VERTICES * 5 * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let entity_capacity = 1 << 14;
         let entity_skin = entity_skin::EntitySkin::new(
             &device,
@@ -3884,6 +3937,9 @@ impl Renderer {
             cull,
             flat,
             sky,
+            sky_base,
+            sunrise_pipeline,
+            sunrise_buffer,
             dark_disc,
             depth_reset,
             lines,
@@ -6225,6 +6281,27 @@ impl Renderer {
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
+        // The sunrise fan as sixteen triangles. Its clip positions use the sky's
+        // own view (no TAA jitter, bob or spin: `fs_sky`'s `view_ray` has none),
+        // and its apex weight interpolates the barycentric the shader used to
+        // compute for every sky pixel.
+        if frame.sky.sunrise_color[3] > 0.001 && !frame.title && frame.skybox {
+            let sky_view_proj = views.primary().view_proj(Mat4::IDENTITY);
+            let mut mesh = [[0.0f32; 5]; sunrise_fan::VERTICES];
+            for (to, from) in mesh
+                .iter_mut()
+                .zip(sunrise_fan::mesh(frame.sky.sunrise_color[3], sun))
+            {
+                let clip = sky_view_proj * glam::Vec4::new(from[0], from[1], from[2], 1.0);
+                *to = [clip.x, clip.y, clip.z, clip.w, from[3]];
+            }
+            self.uploads.buffer(
+                &mut encoder,
+                &self.sunrise_buffer,
+                0,
+                bytemuck::cast_slice(&mesh),
+            );
+        }
         laps.lap("r_targets");
         // GameRenderer.render3dHud: the hand's projection at hudFov, with the
         // bob in its pose rather than the projection (same product).
@@ -7851,8 +7928,13 @@ impl Renderer {
                     {
                         Some((sky, native)) => sky.draw(&mut pass, native),
                         None => {
-                            pass.set_pipeline(&self.sky);
+                            pass.set_pipeline(&self.sky_base);
                             pass.draw(0..3, 0..1);
+                            if frame.sky.sunrise_color[3] > 0.001 {
+                                pass.set_pipeline(&self.sunrise_pipeline);
+                                pass.set_vertex_buffer(0, self.sunrise_buffer.slice(..));
+                                pass.draw(0..sunrise_fan::VERTICES as u32, 0..1);
+                            }
                         }
                     }
                 }

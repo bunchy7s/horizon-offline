@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher 已移除。",
   "These could not be removed:": "以下内容无法删除：",
   "Launch Horizon": "启动 Horizon",
-  "Something went wrong.": "出了点问题。"
+  "Something went wrong.": "出了点问题。",
+  "Instances": "实例",
+  "Join the Discord": "加入 Discord",
+  "Restart to update": "重启以更新",
+  "Duplicate…": "复制…",
+  "Create a desktop shortcut": "创建桌面快捷方式",
+  "Remove the desktop shortcut": "移除桌面快捷方式",
+  "Click again to delete": "再次点击以删除",
+  "Update available": "有可用更新"
 }

@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher was removed.",
   "These could not be removed:": "These could not be removed:",
   "Launch Horizon": "Launch Horizon",
-  "Something went wrong.": "Something went wrong."
+  "Something went wrong.": "Something went wrong.",
+  "Instances": "インスタンス",
+  "Join the Discord": "Discord に参加",
+  "Restart to update": "再起動して更新",
+  "Duplicate…": "複製…",
+  "Create a desktop shortcut": "デスクトップにショートカットを作成",
+  "Remove the desktop shortcut": "デスクトップのショートカットを削除",
+  "Click again to delete": "もう一度クリックで削除",
+  "Update available": "アップデートあり"
 }

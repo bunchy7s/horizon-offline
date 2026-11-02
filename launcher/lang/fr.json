@@ -837,5 +837,13 @@
   "Horizon Launcher was removed.": "Horizon Launcher a été supprimé.",
   "These could not be removed:": "Ceci n’a pas pu être supprimé :",
   "Launch Horizon": "Lancer Horizon",
-  "Something went wrong.": "Une erreur s’est produite."
+  "Something went wrong.": "Une erreur s’est produite.",
+  "Instances": "Instances",
+  "Join the Discord": "Rejoindre le Discord",
+  "Restart to update": "Redémarrer pour mettre à jour",
+  "Duplicate…": "Dupliquer…",
+  "Create a desktop shortcut": "Créer un raccourci sur le bureau",
+  "Remove the desktop shortcut": "Supprimer le raccourci du bureau",
+  "Click again to delete": "Cliquer encore pour supprimer",
+  "Update available": "Mise à jour disponible"
 }

@@ -15,8 +15,11 @@ mod cull;
 mod datapacks_page;
 mod dev_options;
 mod export_page;
+mod frame;
 mod game_tools;
 mod github_mods_page;
+mod glass;
+mod glass_ui;
 mod home;
 mod home_tabs;
 mod import_page;
@@ -42,6 +45,7 @@ mod partner;
 mod perf;
 mod plate;
 mod profile_heads;
+mod scene;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
@@ -235,6 +239,10 @@ struct Launcher {
     language_menu: bool,
     /// The top bar's quick switch of who plays (`switch_page.rs`).
     account_menu: bool,
+    /// The glass sidebar's ⋮ menu (`frame.rs`).
+    row_menu: frame::RowMenu,
+    /// The glass look's colours for the player's accent (`horizon_theme::glass`).
+    look: horizon_theme::glass::Glass,
     /// Where the mouse went down to close a menu by pressing outside it, so that the
     /// same press, ending on the menu's own button, doesn't open it again.
     menu_closed_at: Option<Point<Pixels>>,
@@ -379,6 +387,9 @@ struct Launcher {
     side_servers: Vec<horizon_launcher::servers::Entry>,
     /// The pixel art made for this window (`art.rs`), and pictures downloaded by URL.
     sky: sky::Sky,
+    /// The pixel sunset of the new design (dark appearance): its own view, so a frame of it
+    /// alone redraws nothing else.
+    scene: gpui::Entity<scene::Scene>,
     /// When the sky next asks for a frame, and the timer that will draw it.
     sky_wake: Option<(Instant, gpui::Task<()>)>,
     /// The window's scale, as of its last frame, for art drawn outside `render`'s reach.
@@ -499,6 +510,8 @@ impl Launcher {
             hue_dragging: false,
             language_menu: false,
             account_menu: false,
+            row_menu: Default::default(),
+            look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
             background_error: None,
@@ -594,6 +607,7 @@ impl Launcher {
             offline_name: offline_name(),
             side_servers: horizon_launcher::servers::list(),
             sky: sky::Sky::default(),
+            scene: cx.new(|_| scene::Scene::new()),
             sky_wake: None,
             scale: window.scale_factor(),
         };
@@ -4711,18 +4725,38 @@ impl Render for Launcher {
         if self.opening.is_none() && window.focused(cx).is_none() {
             window.focus(&self.root_focus, cx);
         }
-        let (sky, next) = self.sky.render(
-            &t.night,
-            (size.width.into(), size.height.into()),
-            window.scale_factor(),
-            window.is_window_active(),
-            Instant::now(),
-        );
-        if let Some(next) = next {
-            self.wake_sky(next, cx);
-        }
-        let topbar = self.topbar(cx);
-        let sidebar = self.sidebar(window, cx);
+        // Dark: the new design's scene; Light keeps the dawn sky until the design has a light
+        // look.
+        glass::begin_build(window);
+        let sky = if t.dark {
+            self.scene.clone().into_any_element()
+        } else {
+            let (sky, next) = self.sky.render(
+                &t.night,
+                (size.width.into(), size.height.into()),
+                window.scale_factor(),
+                window.is_window_active(),
+                Instant::now(),
+            );
+            if let Some(next) = next {
+                self.wake_sky(next, cx);
+            }
+            sky.into_any_element()
+        };
+        // Dark: the glass frame over the scene; Light keeps the night one over the dawn.
+        let (topbar, sidebar) = if t.dark {
+            (
+                self.glass_topbar(cx),
+                self.glass_sidebar(window, cx).into_any_element(),
+            )
+        } else {
+            (self.topbar(cx), self.sidebar(window, cx).into_any_element())
+        };
+        let row_menu = if t.dark {
+            self.row_menu(window, cx)
+        } else {
+            None
+        };
         let mut root = div()
             .id("root")
             .track_focus(&self.root_focus)
@@ -4749,6 +4783,11 @@ impl Render for Launcher {
                 cx.notify();
             }))
             .capture_any_mouse_down(|_, _, _| KEYBOARD.store(false, Ordering::Relaxed))
+            .on_mouse_move(cx.listener(|this, ev: &gpui::MouseMoveEvent, window, cx| {
+                let size = window.viewport_size();
+                this.scene
+                    .update(cx, |scene, cx| scene.point(ev.position, size, cx));
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -4801,6 +4840,7 @@ impl Render for Launcher {
                             ),
                     ),
             );
+        root = root.children(row_menu);
         if self.page == Page::Servers {
             if let Some(dialog) = self.create_dialog(cx) {
                 root = root.child(dialog);
@@ -5025,6 +5065,11 @@ fn main() {
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_BOLD),
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_DISPLAY_BOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_DISPLAY_SEMIBOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_HEADING_SEMIBOLD),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_REGULAR),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_MEDIUM),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_SEMIBOLD),
                 ])
                 .expect("bundled fonts");
             cx.bind_keys(key_bindings());
