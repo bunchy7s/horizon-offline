@@ -2300,7 +2300,8 @@ struct Game<'a> {
     lod_observe: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
     /// The server level far terrain keeps the chunks of.
     lod_level: Option<String>,
-    /// The server's BlueMap far terrain draws from, when the player named one.
+    /// The server's BlueMap far terrain draws from, when the player named one
+    /// or Find BlueMap found it.
     lod_blue_map: Option<Arc<horizon_client::bluemap::BlueMap>>,
     /// Beacon beam sections kept after their chunk unloads, so far terrain
     /// LOD still draws their beams (`beacon_geometry` refreshes them).
@@ -16668,29 +16669,33 @@ impl Game<'_> {
                 let root = home.join("server-terrain");
                 let dir = terrain::level_dir(&root, address, remote.hashed_seed, &remote.level);
                 self.lod_level = Some(remote.level.clone());
-                // Past them, the server's BlueMap, if the player named it.
-                let blue_map = self
-                    .settings
-                    .horizon
-                    .blue_map
-                    .server(address)
-                    .map(|server| {
-                        use horizon_client::bluemap;
-                        log::info!("Horizon: far terrain also draws {}'s BlueMap", remote.level);
-                        let map = Arc::new(bluemap::BlueMap::new(
-                            &server.url,
-                            &remote.level,
-                            server.maps.clone(),
-                            root.join(terrain::server_folder(address)).join("BlueMap"),
-                            self.settings.horizon.blue_map.radius_blocks(),
-                            bluemap::Palette::from_game(
-                                self.pack.assets.registry,
-                                self.res.biomes(),
-                            ),
-                        ));
-                        map.start();
-                        map
-                    });
+                // Past them, the server's BlueMap, if the player named it or
+                // lets Horizon look for it (on the BlueMap worker).
+                let maps = root.join(terrain::server_folder(address)).join("BlueMap");
+                let settings = &self.settings.horizon.blue_map;
+                let blue_map = horizon_client::bluemap_detect::source(
+                    settings,
+                    address,
+                    &maps,
+                    std::time::SystemTime::now(),
+                )
+                .map(|source| {
+                    use horizon_client::{bluemap, bluemap_detect::Source};
+                    // The map's address only at debug: logs land in crash reports.
+                    log::info!("Horizon: far terrain also draws {}'s BlueMap", remote.level);
+                    if let Source::Url { url, .. } = &source {
+                        log::debug!("Horizon: BlueMap at {url}");
+                    }
+                    let map = Arc::new(bluemap::BlueMap::from_source(
+                        source,
+                        &remote.level,
+                        maps,
+                        settings.radius_blocks(),
+                        bluemap::Palette::from_game(self.pack.assets.registry, self.res.biomes()),
+                    ));
+                    map.start();
+                    map
+                });
                 self.lod_blue_map = blue_map.clone();
                 terrain::ServerTerrain::new(dir, blue_map) as _
             }),
@@ -16726,8 +16731,8 @@ impl Game<'_> {
         }
         if let (Some(map), Some(p), Some(lod)) = (&self.lod_blue_map, &self.player, &mut self.lod) {
             map.set_center(p.position.x.floor() as i32, p.position.z.floor() as i32);
-            for area in map.take_changed() {
-                lod.refresh(area);
+            for change in map.take_changed() {
+                lod.refresh(change.area, change.widths);
             }
         }
         if let Some(p) = &self.player {

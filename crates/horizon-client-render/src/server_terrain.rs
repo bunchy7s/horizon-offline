@@ -109,7 +109,8 @@ struct State {
 }
 
 /// One level's stored terrain, shared by the far-terrain threads. A chunk
-/// it doesn't have comes from the server's BlueMap, if the player named it.
+/// it doesn't have comes from the server's BlueMap, if the player named it
+/// or Find BlueMap found it.
 pub struct ServerTerrain {
     dir: PathBuf,
     blue_map: Option<Arc<BlueMap>>,
