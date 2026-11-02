@@ -4535,6 +4535,21 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A screen was observed closing, at most once per frame.
+    fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    fn screen_init_post(&self, host: &dyn Host, event: &mut ScreenInitPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening, at most once per frame.
+    fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13907,5 +13922,50 @@ pub fn dispatch_render_item_in_frame(
             *canceled = true;
             break;
         }
+    }
+}
+/// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenClosingEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_closing(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenClosingEvent { screen };
+    for mod_hook in super::entered(mods, "screen_closing") {
+        mod_hook.screen_closing(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_init_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenInitPostEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_init_post(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenInitPostEvent { screen };
+    for mod_hook in super::entered(mods, "screen_init_post") {
+        mod_hook.screen_init_post(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_opening`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenOpeningEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_opening(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenOpeningEvent { screen };
+    for mod_hook in super::entered(mods, "screen_opening") {
+        mod_hook.screen_opening(host, &mut event);
     }
 }
