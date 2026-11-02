@@ -2100,7 +2100,7 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
   entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
   player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
-  with last frame's (a motion blur's own motion vectors); `spans` only name the type (API @API:world_drawn_motion@).
+  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
 - `native_render_needs(needs)`: set `entity_spans` to have the entity geometry split into runs by entity without a
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
