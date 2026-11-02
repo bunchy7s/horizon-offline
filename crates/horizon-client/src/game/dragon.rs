@@ -139,6 +139,16 @@ pub(super) struct Crystal {
     /// `setPermanentlyInvulnerable` (respawned spike crystals).
     pub invulnerable: bool,
 }
+impl Crystal {
+    /// `EntityType.END_CRYSTAL`: 2 x 2.
+    pub(super) fn bounds(&self) -> Aabb {
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
+            Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
+        )
+    }
+}
 #[derive(Clone, Debug, Default)]
 struct Path {
     nodes: Vec<[i32; 3]>,
@@ -3210,6 +3220,8 @@ impl Game<'_> {
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
             leash: None,
             spectator: false,

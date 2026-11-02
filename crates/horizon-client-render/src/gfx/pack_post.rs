@@ -478,6 +478,7 @@ struct ShadowCacheKey {
 }
 
 pub struct PackPost {
+    setup_pending: bool,
     pub notes: Vec<String>,
     passes: Vec<Pass>,
     /// Shadow cache for temporal reprojection.
@@ -2286,6 +2287,7 @@ impl PackPost {
         let flat_normal = [128u8, 128, 255, 255];
         Self {
             notes,
+            setup_pending: true,
             passes,
             terrain,
             water,
@@ -3338,6 +3340,7 @@ impl PackPost {
         if self.targets.as_ref().is_some_and(|t| t.size == size) {
             return;
         }
+        self.setup_pending = true;
         let sizes: [[u32; 2]; BUFFERS] =
             std::array::from_fn(|i| self.sizes[i].map_or(size, |s| s.resolve(size)));
         let full_chain = |size: [u32; 2]| 32 - size[0].max(size[1]).max(1).leading_zeros();
@@ -3771,7 +3774,6 @@ impl PackPost {
             self.gpu.clear,
             &mut self.zeros,
         );
-        self.run_shadow(device, queue, encoder, terrain, frame);
         let Some(targets) = &self.targets else { return };
         let main = |m: u16, i: usize| usize::from(m & 1 << i != 0);
         let view = |m: u16, i: usize, alt: bool| {
@@ -3901,8 +3903,17 @@ impl PackPost {
                 .any(|(p, late)| p.is_some() && late)
         });
         let mut water_drawn = self.water.is_none() && self.weather.is_none() && !late_entities;
+        let mut shadow_drawn = false;
         for pass in &mut passes {
-            if !terrain_drawn && pass.group != Group::Prepare {
+            if pass.group == Group::Setup && !self.setup_pending {
+                continue;
+            }
+            let early = matches!(pass.group, Group::Setup | Group::Begin);
+            if !early && !shadow_drawn {
+                self.run_shadow(device, queue, encoder, terrain, frame);
+                shadow_drawn = true;
+            }
+            if !terrain_drawn && !early && pass.group != Group::Prepare {
                 terrain_drawn = true;
                 self.draw_opaque(device, queue, encoder, size, frame, terrain);
             }
@@ -3981,6 +3992,10 @@ impl PackPost {
             self.mips_valid &= !pass.written;
         }
         self.passes = passes;
+        self.setup_pending = false;
+        if !shadow_drawn {
+            self.run_shadow(device, queue, encoder, terrain, frame);
+        }
         if !terrain_drawn {
             self.draw_opaque(device, queue, encoder, size, frame, terrain);
         }

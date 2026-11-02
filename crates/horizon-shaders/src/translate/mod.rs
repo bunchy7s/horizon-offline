@@ -30,6 +30,8 @@ use crate::Preprocessed;
 mod atomic_vectors;
 mod geometry;
 mod image_parameters;
+mod integer_bounds;
+mod interface_blocks;
 mod ordering;
 mod rewrite;
 mod scan;
@@ -237,6 +239,13 @@ fn translate(
     } else {
         GBUFFERS_MATRICES.to_owned()
     };
+    // Interface blocks travel as plain varyings (`interface_blocks`).
+    let flat = |pp: &Preprocessed| {
+        interface_blocks::flatten(&pp.code).map(|code| Preprocessed { code, ..pp.clone() })
+    };
+    let (vertex_flat, fragment_flat) = (flat(vertex), flat(fragment));
+    let vertex = vertex_flat.as_ref().unwrap_or(vertex);
+    let fragment = fragment_flat.as_ref().unwrap_or(fragment);
     let mut v = Stage::scan(vertex, ShaderStage::Vertex);
     let mut f = Stage::scan(fragment, ShaderStage::Fragment);
     v.gbuffers = gbuffers.is_some();
@@ -988,7 +997,8 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             message,
         }]
     })?;
-    let text = specialized.as_str();
+    let bounded = integer_bounds::rewrite(&specialized);
+    let text = bounded.as_str();
     let at = |text: &str, span: naga::Span, message: String| {
         let start = span.to_range().map_or(0, |r| r.start);
         let line = text[..start.min(text.len())].matches('\n').count();
@@ -1906,6 +1916,41 @@ mod tests {
         .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// Interface blocks between the stages may give members their own interpolation (GLSL 4.60,
+    /// 4.3.9; Shrimple's gbuffers programs): a `flat` member arrives flat.
+    #[test]
+    fn interface_block_members_keep_their_qualifiers() {
+        let vsh = "#version 330 compatibility\nout VertexData {\n    flat int id;\n    vec2 uv;\n} vOut;\n\
+                   void main() { gl_Position = ftransform(); vOut.id = 3; vOut.uv = vec2(0.5); }\n";
+        let fsh = "#version 330 compatibility\nin VertexData {\n    flat int id;\n    vec2 uv;\n} vIn;\n\
+                   void main() { gl_FragData[0] = vec4(float(vIn.id), vIn.uv, 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let entry = &p.fragment.entry_points[0].function;
+        let mut flats = 0;
+        for arg in &entry.arguments {
+            let bindings: Vec<&naga::Binding> = match &p.fragment.types[arg.ty].inner {
+                naga::TypeInner::Struct { members, .. } => {
+                    members.iter().filter_map(|m| m.binding.as_ref()).collect()
+                }
+                _ => arg.binding.iter().collect(),
+            };
+            for b in bindings {
+                if let naga::Binding::Location {
+                    interpolation: Some(naga::Interpolation::Flat),
+                    ..
+                } = b
+                {
+                    flats += 1;
+                }
+            }
+        }
+        assert_eq!(flats, 1, "one flat input, `id`");
+    }
+
     /// A function that returns a value may reach its end without a `return` (GLSL 4.60, 6.1:
     /// the value is undefined): after a loop (Lux's `MaxIdx`), an `if` without `else`, a
     /// `switch` without `default`; it returns zero there. A function ending in its own
@@ -2582,6 +2627,22 @@ mod image_parameter_tests {
         )
         .unwrap();
         let result = translate_compute(&preprocess(&pack, "setup.csh", &Macros::standard()));
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+}
+
+#[cfg(test)]
+mod mixed_integer_bounds_tests {
+    #[test]
+    fn compute_clamp_with_signed_index_and_unsigned_bounds_compiles() {
+        let source = "#version 430\nlayout(local_size_x=1) in; layout(std430,binding=0) buffer Data{uint result;};void main(){int index=int(gl_LocalInvocationID.x);result=clamp(index,0u,47u);}";
+        let pack = crate::Pack::from_zip_bytes(
+            "integer-bounds.zip",
+            crate::pack::tests::zip(&[("shaders/setup.csh", source)]),
+        )
+        .unwrap();
+        let stage = crate::preprocess(&pack, "setup.csh", &crate::Macros::standard());
+        let result = crate::translate_compute(&stage);
         assert!(result.is_ok(), "{:?}", result.err());
     }
 }

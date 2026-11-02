@@ -490,7 +490,7 @@ impl Game<'_> {
         let f = self.res.facts().get(state);
         let name = &*f.name;
         name.ends_with("_banner")
-            || name.ends_with("_sign")
+            || f.sign_form().is_some()
             || name.ends_with("_pressure_plate")
             || !(f.legacy_solid || matches!(name, "minecraft:water" | "minecraft:lava"))
     }

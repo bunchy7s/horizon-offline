@@ -1045,6 +1045,7 @@ mod tests {
         pub(super) struct NativeScreen;
         pub(super) struct ModBlockEntity;
         pub(super) struct ModContainer;
+        pub(super) struct MerchantOffer;
         pub(super) struct ModFluidTanks;
         pub(super) struct ModEnergyBuffer;
         pub(super) struct LootStack;

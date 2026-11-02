@@ -59,6 +59,9 @@ impl TextureFlags {
     }
 }
 pub struct HudAtlas {
+    /// Identity of this packed atlas, used to invalidate cached model UV data
+    /// even when a resource reload places sprites at the same coordinates.
+    pub revision: u64,
     /// RGBA8, `width` by `height`, as built: empty once `pack_pixels` has
     /// compressed them (read them through `pixels()`).
     pub pixels: Vec<u8>,
@@ -526,6 +529,10 @@ fn galactic_widths(
     widths
 }
 impl HudAtlas {
+    fn next_revision() -> u64 {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
     /// The atlas's pixels: as built, or uncompressed again after
     /// `pack_pixels` (a renderer being rebuilt).
     pub fn pixels(&self) -> std::borrow::Cow<'_, [u8]> {
@@ -700,6 +707,7 @@ impl HudAtlas {
         );
         let white = sprites["horizon/white"];
         Self {
+            revision: Self::next_revision(),
             font: crate::font::Font::load(
                 Path::new("horizon-boot"),
                 &sprites,
@@ -1143,6 +1151,7 @@ impl HudAtlas {
             white,
         );
         Ok(Self {
+            revision: Self::next_revision(),
             galactic_widths: galactic_widths(&sprites, &pixels, width, height),
             pixels,
             packed: None,
