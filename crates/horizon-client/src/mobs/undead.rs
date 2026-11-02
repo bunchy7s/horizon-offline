@@ -905,7 +905,11 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         1.6,
         (14 - id * 4) as f32,
     );
-    cx.events.push(MobEvent::Projectile(p));
+    cx.events.push(MobEvent::BowShot {
+        mob: m.id,
+        weapon: crate::items::ItemStack::new("minecraft:bow", 1),
+        arrow: p,
+    });
     let pitch = 1.0 / (m.random.next_float() * 0.4 + 0.8);
     cx.events.push(MobEvent::Sound(
         "entity.skeleton.shoot",

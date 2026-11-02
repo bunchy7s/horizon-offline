@@ -4223,6 +4223,23 @@ impl Game<'_> {
         let _ = (player, name, bow, hand, has_ammo, cancel);
     }
 
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// skeleton or illusioner (`entity`, `kind`). `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:native_living_get_projectile@.
+    pub(super) fn native_living_get_projectile(
+        &mut self,
+        player: Option<u128>,
+        name: &str,
+        entity: Option<u32>,
+        kind: &str,
+        weapon: &ItemStack,
+        projectile: &mut Option<ItemStack>,
+    ) {
+        let _ = (player, name, entity, kind, weapon, projectile);
+    }
+
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied. @API:native_entity_toggle_glide@.
     pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {

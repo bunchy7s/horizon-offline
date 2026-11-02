@@ -15,6 +15,14 @@ use horizon_core::{geometry::Vec3, random::RandomSource};
 
 const CROSSBOW: &str = "minecraft:crossbow";
 const FIREWORK_ROCKET: &str = "minecraft:firework_rocket";
+const ARROW: &str = "minecraft:arrow";
+
+/// What `getProjectile` returned: the ammunition and, while it is still the
+/// stack found in the inventory, the slot it is taken from.
+pub(super) struct Ammo {
+    pub(super) stack: ItemStack,
+    pub(super) slot: Option<usize>,
+}
 
 /// `ProjectileWeaponItem.ARROW_ONLY`, for the arrows Horizon shoots.
 fn is_arrow(stack: &ItemStack) -> bool {
@@ -97,9 +105,55 @@ impl Game<'_> {
         }
     }
     /// `Player.getProjectile` for `weapon` (`projectile_slot`).
-    pub(super) fn projectile_slot(&self, weapon: &str) -> Option<usize> {
+    fn projectile_slot(&self, weapon: &str) -> Option<usize> {
         let hands = [OFFHAND_SLOT, self.selected].map(|slot| (slot, self.stack_in(slot)));
         projectile_slot(weapon, hands, &self.inventory)
+    }
+    /// `Player.getProjectile` for `weapon`, as `LivingGetProjectileEvent` leaves
+    /// it: a creative player without arrows has `hasInfiniteMaterials`' arrow.
+    pub(super) fn get_projectile(&mut self, weapon: &ItemStack) -> Option<Ammo> {
+        let slot = self.projectile_slot(&weapon.item);
+        let vanilla = match slot {
+            Some(i) => self.stack_in(i).cloned(),
+            None => self.creative.then(|| ItemStack::new(ARROW, 1)),
+        };
+        let mut projectile = vanilla.clone();
+        let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
+        let name = self.acting_player_name().to_owned();
+        self.native_living_get_projectile(
+            Some(player),
+            &name,
+            None,
+            "minecraft:player",
+            weapon,
+            &mut projectile,
+        );
+        let slot = slot.filter(|_| projectile == vanilla);
+        projectile.map(|stack| Ammo { stack, slot })
+    }
+    /// `AbstractSkeleton.performRangedAttack`'s `getProjectile`: the arrow
+    /// `mob` shot becomes the replaced ammunition's (`ProjectileUtil.getMobArrow`).
+    pub(super) fn mob_bow_ammo(&mut self, mob: u32, weapon: &ItemStack, arrow: &mut Projectile) {
+        let Some(shooter) = self.mobs.iter().find(|m| m.id == mob) else {
+            return;
+        };
+        let kind = shooter.kind.id.clone();
+        let vanilla = ItemStack::new(ARROW, 1);
+        let mut projectile = Some(vanilla.clone());
+        self.native_living_get_projectile(None, "", Some(mob), &kind, weapon, &mut projectile);
+        let Some(ammo) = projectile.filter(|ammo| *ammo != vanilla && is_arrow(ammo)) else {
+            return;
+        };
+        if let ProjectileKind::Arrow { effect, .. } = &mut arrow.kind {
+            if &*ammo.item == "minecraft:spectral_arrow" {
+                *effect = Some(("minecraft:glowing", 200));
+            } else if let Some(tipped) = super::dispenser::tipped_effect(&ammo) {
+                *effect = Some(tipped);
+            }
+        }
+        if let Some(a) = arrow.arrow.as_mut() {
+            a.set_item(&horizon_client::arrows::drawn_ammo(&ammo, false));
+        }
     }
     /// `CrossbowItem.use`: shoot when charged, else start charging.
     pub(super) fn use_crossbow(&mut self, stack: &ItemStack) -> bool {
@@ -112,7 +166,7 @@ impl Game<'_> {
         }
         if stack.data().is_some_and(|d| !d.charged.is_empty()) {
             self.shoot_crossbow();
-        } else if self.projectile_slot(CROSSBOW).is_some() || self.creative {
+        } else if self.get_projectile(stack).is_some() || self.creative {
             self.start_using_item();
         }
         true
@@ -145,12 +199,13 @@ impl Game<'_> {
             } else {
                 1
             };
-            let slot_ammo = self.projectile_slot(CROSSBOW);
-            let ammo = slot_ammo
-                .and_then(|i| self.stack_in(i).cloned())
-                .unwrap_or_else(|| ItemStack::new("minecraft:arrow", 1));
-            if !self.creative {
-                let Some(i) = slot_ammo else { return };
+            let ammo = self.get_projectile(stack);
+            if !self.creative && ammo.is_none() {
+                return;
+            }
+            if !self.creative
+                && let Some(i) = ammo.as_ref().and_then(|a| a.slot)
+            {
                 let cell = self.stack_in_mut(i);
                 if let Some(s) = cell.as_mut() {
                     s.count -= 1;
@@ -159,6 +214,7 @@ impl Game<'_> {
                     }
                 }
             }
+            let ammo = ammo.map_or_else(|| ItemStack::new(ARROW, 1), |a| a.stack);
             // useAmmo: the extra multishot arrows and creative's are intangible.
             let drawn = (0..shots)
                 .map(|i| horizon_client::arrows::drawn_ammo(&ammo, self.creative || i > 0))

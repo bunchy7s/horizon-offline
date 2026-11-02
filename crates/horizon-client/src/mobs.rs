@@ -1553,6 +1553,13 @@ pub enum MobEvent {
         vehicle: u32,
     },
     Projectile(crate::projectiles::Projectile),
+    /// An arrow `mob` shot with `weapon` (`AbstractSkeleton.performRangedAttack`):
+    /// the game asks for the ammunition (`getProjectile`) before it flies.
+    BowShot {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
     /// Spawn a new mob (breeding, slime splitting, chicken eggs...).
     Spawn(Box<Mob>),
     /// Spawn a mob by type id at a position (conversions, splits).

@@ -6485,7 +6485,7 @@ impl Game<'_> {
         }
         if !on_block && &*stack.item == "minecraft:bow" {
             // BowItem.use: ArrowNockEvent, then FAIL without ammunition.
-            let has_ammo = self.creative || self.projectile_slot("minecraft:bow").is_some();
+            let has_ammo = self.creative || self.get_projectile(&stack).is_some();
             let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
             let name = self.acting_player_name().to_owned();
             let (hand, mut cancel) = (self.hand, false);
@@ -13834,19 +13834,18 @@ impl Game<'_> {
         if power < 0.1 {
             return;
         }
-        let arrow_slot = self.projectile_slot("minecraft:bow");
-        if arrow_slot.is_none() && !self.creative {
+        let weapon = self.held().cloned();
+        let ammo = weapon.as_ref().and_then(|w| self.get_projectile(w));
+        if ammo.is_none() && !self.creative {
             return;
         }
+        let arrow_slot = ammo.as_ref().and_then(|a| a.slot);
         let Some(eye) = self.eye_position() else {
             return;
         };
         // BowItem.shootProjectile: shootFromRotation(power * 3, inaccuracy 1).
         let p = Vec3::new(eye[0], eye[1] - 0.1, eye[2]);
-        let ammo = arrow_slot
-            .and_then(|i| self.stack_in(i).cloned())
-            .unwrap_or_else(|| ItemStack::new("minecraft:arrow", 1));
-        let weapon = self.held().cloned();
+        let ammo = ammo.map_or_else(|| ItemStack::new("minecraft:arrow", 1), |a| a.stack);
         let (power_bonus, infinity) = self.bow_enchantments(&ammo.item);
         let effect = dispenser::tipped_effect(&ammo).or_else(|| {
             (&*ammo.item == "minecraft:spectral_arrow").then_some(("minecraft:glowing", 200))
