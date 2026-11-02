@@ -2863,6 +2863,47 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_menu_button_v2(self, mod_api::mods(), pos, entity, id, carried);
     }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or anywhere with `native_insert_item`)
+    /// and set `handled`: the slot then keeps what is left of `stack`, the
+    /// game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, nothing you did to `stack` counts and the game
+    /// moves it as for any container.
+    ///
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator, nor a menu no longer valid.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API @API:menu_quick_move@.
+    pub(super) fn native_menu_quick_move(
+        &mut self,
+        pos: [i32; 3],
+        entity: &mut ModBlockEntity,
+        container_slots: usize,
+        slot: usize,
+        stack: &mut ItemStack,
+        handled: &mut bool,
+    ) {
+        mod_api::dispatch_menu_quick_move(
+            self,
+            mod_api::mods(),
+            pos,
+            entity,
+            container_slots,
+            slot,
+            stack,
+            handled,
+        );
+    }
     /// The commands native mods add to the server's command tree: push
     /// yours. Asked once when a world opens to players (a dedicated
     /// server, a LAN host, single player's server thread); every player's
@@ -7794,7 +7835,7 @@ impl Game<'_> {
     }
     /// Puts back a mod block entity taken out for a call, unless the call
     /// removed or replaced it, with what its `setChanged` does.
-    fn put_back_mod_block_entity(
+    pub(super) fn put_back_mod_block_entity(
         &mut self,
         pos: Pos,
         mut taken: ModBlockEntity,
