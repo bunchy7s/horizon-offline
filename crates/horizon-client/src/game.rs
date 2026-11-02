@@ -8746,9 +8746,15 @@ impl Game<'_> {
     /// (special ones never do).
     fn award_crafted(&mut self, crafts: &[(String, Vec<Option<ItemStack>>)]) {
         for (recipe, ingredients) in crafts {
-            self.trigger_recipe_crafted(recipe, ingredients);
+            // The whole id: the advancements' `recipe_crafted` criteria name
+            // `minecraft:x`, and the crafting copy names the recipe bare.
+            let recipe = horizon_client::crafting::qualified(recipe);
+            self.trigger_recipe_crafted(&recipe, ingredients);
         }
-        let recipes: Vec<String> = crafts.iter().map(|(r, _)| r.clone()).collect();
+        let recipes: Vec<String> = crafts
+            .iter()
+            .map(|(r, _)| horizon_client::crafting::qualified(r))
+            .collect();
         let index = &world_stations!(self).recipe_index;
         let (_, unlocked) = self.level.recipe_book.add_recipes(index, &recipes);
         self.recipe_unlocked(&unlocked);
