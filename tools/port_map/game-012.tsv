@@ -38,7 +38,7 @@ Frog.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_compon
 Frog.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:frog/variant` name sets the variant (WARM over TEMPERATE)
 Frog.customServerAiStep	port	crates/horizon-client/src/mobs/frog.rs::server_ai_step	the attackables sensor and memory timers; the activities run as goals
 Frog.getBreedOffspring	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother becomes pregnant with frogspawn instead of a baby
-Frog.spawnChildFromBreeding	missing		player: frogs never become pregnant (IS_PREGNANT) and so never lay frogspawn; no breed goal means this is never reached, and the generic baby spawn would be wrong for frogs anyway
+Frog.spawnChildFromBreeding	port	crates/horizon-client/src/mobs/goals.rs::Breed::tick	the mother takes IS_PREGNANT (frog.rs::set_pregnant) instead of a baby, and the LaySpawn goal then lays the frogspawn on the water
 Frog.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	variant by biome (live spawns set it in spawning.rs::finalize from biome.frog); the long jump cooldown it sets has no user
 Frog.createAttributes	skip:data		attributes come from entity-types.json
 Frog.checkFrogSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	frogs_spawnable_on below and bright enough
