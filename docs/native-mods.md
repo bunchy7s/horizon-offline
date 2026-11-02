@@ -2134,9 +2134,13 @@ The renderer module re-exports the game's wgpu types.
 
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
 only what its hook calls, and an unexpected call fails loudly. Drive the hook through
-`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. Game
-values that are `#[non_exhaustive]`, `NativeServerPlayer` and the events, can't be built outside horizon-client:
-return `None` for them, or test the logic beneath the hook. The level hosts are small enough to implement whole.
+`horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. The
+events and these `#[non_exhaustive]` values can't be built outside horizon-client: `NativeScreenView` (the
+`dispatch_screen_*` hooks), `NativeLifecycleContext` (`dispatch_world_lifecycle`, `dispatch_server_tick`),
+`NativeLootDrops` (`dispatch_loot_drops`) and `NativeServerPlayer` (`dispatch_perform_command` takes one as an
+argument). A test outside can't call those dispatches, and a `Host` answer doesn't help; test the logic beneath the
+hook instead. `NativeServerPlayer` is also returned by `Host::server_players` and `Host::acting_player`, which a test
+double can answer with an empty list or `None`. The level hosts are small enough to implement whole.
 NeoForge's GameTest is the in-game counterpart.
 
 ```rust
