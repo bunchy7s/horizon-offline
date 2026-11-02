@@ -74,7 +74,7 @@ ResourceMetadata.fromJsonStream	port	crates/horizon-client-render/src/packs.rs::
 ResourceMetadata.of	skip:java		map-backed metadata constructor
 ResourceMetadata.getTypedSections	skip:java		typed view over sections; Horizon reads sections by key
 ResourceProvider.getResourceOrThrow	skip:java		Option instead of a thrown FileNotFound
-SimpleJsonResourceReloadListener.prepare	port	crates/horizon-client-render/src/datapack.rs::DataStore::load	gap: player: only function, item_modifier, predicate and function-tag files are read; recipes, loot tables and advancements from datapacks are not
+SimpleJsonResourceReloadListener.prepare	port	crates/horizon-client-render/src/datapack.rs::DataStore::load	functions and function tags are parsed, and the content tables' files (recipe, recipe_filter, loot_table, advancement, trade_set, villager_trade, dialog, data_maps, tags) are kept by id in `files` for those tables to merge over the resource root
 SimplePreparableReloadListener.reload	port	crates/horizon-client/src/game/packs.rs::stage_pack	gap: minor: the prepare half; apply_staged_pack does the apply
 SimpleReloadInstance.of	port	crates/horizon-client/src/game/packs.rs::PackReload::spawn	stage then apply, in one call: the worker stages, drive_pack_reload applies
 SimpleReloadInstance.startTasks	inline	crates/horizon-client/src/game/packs.rs::Game::reload_packs	defers while a world or rest loads; errors go to Options

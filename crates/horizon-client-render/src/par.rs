@@ -7,9 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Threads take the next item as they finish one, so a run of slow items
 /// doesn't hold back the others.
 pub fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
-    let threads = std::thread::available_parallelism()
-        .map_or(1, |n| n.get())
-        .min(items.len());
+    let threads = horizon_threads::worker_count().min(items.len());
     if threads <= 1 {
         return items.iter().map(f).collect();
     }
