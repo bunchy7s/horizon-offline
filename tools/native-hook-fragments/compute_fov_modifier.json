@@ -12,8 +12,5 @@
     }
   ],
   "rust_summary": "a per-tick player FOV modifier hook (`native_compute_fov_modifier`).",
-  "doc_summary": "a per-tick player FOV modifier hook (`native_compute_fov_modifier`). Bundles need \"hooks\": @API:compute_fov_modifier@.",
-  "comments": [
-    "docs/native-mods.md"
-  ]
+  "doc_summary": "a per-tick player FOV modifier hook (`native_compute_fov_modifier`). Bundles need \"hooks\": @API:compute_fov_modifier@."
 }
