@@ -2870,15 +2870,18 @@ impl Game<'_> {
     /// below `container_slots` it is the block's own slot (`entity.items`),
     /// from there on the player's inventory (27 main slots, then the hotbar).
     /// `stack` is a copy of what the slot holds; take what you move out of
-    /// it (put it in `entity.items`, or anywhere with `native_insert_item`)
-    /// and set `handled`: the slot then keeps what is left of `stack`, the
-    /// game's routing is skipped, and the player's client gets the menu
-    /// again. Left unhandled, nothing you did to `stack` counts and the game
-    /// moves it as for any container.
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
     ///
     /// For a mod container on a vanilla menu type and on a mod menu type,
     /// the left or right button, a slot that holds something and that the
-    /// mod's screen shows; not for a spectator, nor a menu no longer valid.
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
     /// Asked once per click, where vanilla asks `quickMoveStack` again while
     /// it keeps moving the same item. The player's state is swapped in, so
     /// `native_acting_player` names them; `entity` is out of the world

@@ -2,7 +2,9 @@
 //! (`native_menu_quick_move`, `AbstractContainerMenu.quickMoveStack`) before
 //! the game's own routing.
 use super::{Game, lan::LanHost};
-use horizon_client::{block_entities::Pos, containers::BlockEntity, lan::menu::Slots};
+use horizon_client::{
+    block_entities::Pos, containers::BlockEntity, items::ItemStack, lan::menu::Slots,
+};
 use horizon_protocol::packets::play;
 
 /// `ClickType.QUICK_MOVE`'s id in `ServerboundContainerClickPacket`.
@@ -44,6 +46,39 @@ pub(super) fn quick_move_slot(
     }
 }
 
+/// What a quick move the mods were asked about leaves: when one took it
+/// (`handled`), the clicked slot holds what is left of `stack`, whatever the
+/// mods wrote there, and their other changes to the block's items stay;
+/// otherwise the block's items are as they were before the call (`before`),
+/// so nothing a mod moved without taking the click is kept twice.
+fn settle(
+    at: MenuSlot,
+    handled: bool,
+    stack: ItemStack,
+    before: &[Option<ItemStack>],
+    items: &mut Vec<Option<ItemStack>>,
+    inventory: &mut [Option<ItemStack>],
+) {
+    if !handled {
+        before.clone_into(items);
+        return;
+    }
+    let left = (stack.count > 0).then_some(stack);
+    match at {
+        MenuSlot::Container(k) => {
+            if items.len() <= k {
+                items.resize(k + 1, None);
+            }
+            items[k] = left;
+        }
+        MenuSlot::Inventory(i) => {
+            if let Some(s) = inventory.get_mut(i) {
+                *s = left;
+            }
+        }
+    }
+}
+
 impl Game<'_> {
     /// `ServerGamePacketListenerImpl.handleContainerClick` for a quick move
     /// in a guest's open mod container menu (on a vanilla menu type or the
@@ -71,7 +106,7 @@ impl Game<'_> {
             return false;
         };
         let Some(at) = quick_move_slot(
-            i32::from(p.input),
+            p.input,
             i32::from(p.button),
             i32::from(p.slot),
             menu.size,
@@ -79,9 +114,14 @@ impl Game<'_> {
         ) else {
             return false;
         };
-        // A spectator's click and a menu no longer valid change nothing: the
-        // game's own path answers them.
-        if g.spectator() || !menu.slots.still_valid(&self.world, g, menu.pos) {
+        // A spectator's or a dead player's click and a menu no longer valid
+        // change nothing, and a shift-click during a drag only ends the drag
+        // (`doClick`'s resetQuickCraft): the game's own path answers them.
+        if g.spectator()
+            || g.dead
+            || menu.drag.is_some()
+            || !menu.slots.still_valid(&self.world, g, menu.pos)
+        {
             return false;
         }
         let size = menu.size;
@@ -100,12 +140,6 @@ impl Game<'_> {
         if !handled {
             return false;
         }
-        if let Some(g) = host.hub.guest_mut(conn) {
-            // doClick: a click of another type ends an unfinished drag.
-            if let Some(m) = g.menu.as_mut() {
-                m.drag = None;
-            }
-        }
         // The mod menu type's engine starts over from the block entity next click.
         if let Some(play) = host.play.get_mut(&conn)
             && play
@@ -116,8 +150,18 @@ impl Game<'_> {
         {
             play.crafting.machine = None;
         }
-        // sendAllDataToRemote: the client predicted the game's routing.
-        host.hub.resend_menu(conn, window, &self.world);
+        // sendAllDataToRemote: the client predicted the game's routing. A mod
+        // that removed its own block leaves no menu to send: it closes, and
+        // the inventory goes out on its own.
+        if matches!(
+            self.world.block_entities.get(&pos),
+            Some(BlockEntity::Mod(_))
+        ) {
+            host.hub.resend_menu(conn, window, &self.world);
+        } else if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
+            host.hub.close_container(conn);
+            host.hub.send_inventory(gi);
+        }
         true
     }
 
@@ -148,22 +192,14 @@ impl Game<'_> {
             &mut stack,
             &mut handled,
         );
-        if handled {
-            let left = (stack.count > 0).then_some(stack);
-            match at {
-                MenuSlot::Container(k) => {
-                    if taken.items.len() <= k {
-                        taken.items.resize(k + 1, None);
-                    }
-                    taken.items[k] = left;
-                }
-                MenuSlot::Inventory(i) => {
-                    if let Some(s) = self.inventory.get_mut(i) {
-                        *s = left;
-                    }
-                }
-            }
-        }
+        settle(
+            at,
+            handled,
+            stack,
+            &items,
+            &mut taken.items,
+            &mut self.inventory,
+        );
         self.put_back_mod_block_entity(pos, taken, &items);
         handled
     }
@@ -171,7 +207,17 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MenuSlot, quick_move_slot};
+    use super::{MenuSlot, quick_move_slot, settle};
+    use horizon_client::items::ItemStack;
+
+    fn stack(item: &str, count: u32) -> ItemStack {
+        ItemStack {
+            item: item.into(),
+            count,
+            damage: 0,
+            extra: None,
+        }
+    }
 
     /// A quick move asks about the clicked slot only: a `generic_9x1` menu
     /// has the container's 9, then the main inventory, then the hotbar.
@@ -228,5 +274,80 @@ mod tests {
             quick_move_slot(1, 0, 9, 9, &[0, 1, 2, 3, 4, 5, 6, 7, 8]),
             Some(MenuSlot::Inventory(9))
         );
+    }
+
+    /// A taken shift-click from the inventory: the clicked slot keeps what the
+    /// mod left, and what it put in its block stays there.
+    #[test]
+    fn a_taken_click_leaves_the_remainder_in_the_clicked_slot() {
+        let before = vec![None; 9];
+        let mut items = before.clone();
+        items[8] = Some(stack("minecraft:cobblestone", 32));
+        let mut inventory = vec![None; 36];
+        inventory[0] = Some(stack("minecraft:cobblestone", 64));
+        let left = stack("minecraft:cobblestone", 32);
+        settle(
+            MenuSlot::Inventory(0),
+            true,
+            left.clone(),
+            &before,
+            &mut items,
+            &mut inventory,
+        );
+        assert_eq!(inventory[0], Some(left));
+        assert_eq!(items[8], Some(stack("minecraft:cobblestone", 32)));
+        // All of it taken: the slot empties.
+        settle(
+            MenuSlot::Inventory(0),
+            true,
+            stack("minecraft:cobblestone", 0),
+            &before,
+            &mut items,
+            &mut inventory,
+        );
+        assert_eq!(inventory[0], None);
+    }
+
+    /// A taken click on the block's own slot: the remainder wins over what the
+    /// mod wrote to that slot, so a moved stack is never also left behind.
+    #[test]
+    fn the_clicked_container_slot_gets_the_remainder() {
+        let before = vec![Some(stack("minecraft:dirt", 10))];
+        // The mod moved the dirt to a slot past the menu's and left the clicked one as it was.
+        let mut items = vec![
+            Some(stack("minecraft:dirt", 10)),
+            None,
+            Some(stack("minecraft:dirt", 10)),
+        ];
+        let mut inventory = vec![None; 36];
+        settle(
+            MenuSlot::Container(0),
+            true,
+            stack("minecraft:dirt", 0),
+            &before,
+            &mut items,
+            &mut inventory,
+        );
+        assert_eq!(items, [None, None, Some(stack("minecraft:dirt", 10))]);
+    }
+
+    /// A click no mod took leaves the block's items as they were before the
+    /// call, so a mod that moved items without taking it duplicates nothing.
+    #[test]
+    fn an_untaken_click_keeps_the_items_as_they_were() {
+        let before = vec![Some(stack("minecraft:dirt", 10)), None];
+        let mut items = vec![None, Some(stack("minecraft:dirt", 10))];
+        let mut inventory = vec![None; 36];
+        inventory[3] = Some(stack("minecraft:dirt", 5));
+        settle(
+            MenuSlot::Inventory(3),
+            false,
+            stack("minecraft:dirt", 0),
+            &before,
+            &mut items,
+            &mut inventory,
+        );
+        assert_eq!(items, before);
+        assert_eq!(inventory[3], Some(stack("minecraft:dirt", 5)));
     }
 }

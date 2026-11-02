@@ -1978,14 +1978,16 @@ asked on the server before the game's own routing, for the mod block entity at `
 with the left or right button, on a vanilla menu type (`minecraft:generic_9x1`...) or on the mod's own menu type. `slot`
 is the menu's index: below `container_slots` the block's own slot (`entity.items[slot]`), from there the player's
 inventory, its 27 main slots, then the hotbar. `stack` is a copy of what that slot holds. Take what you move out of
-`stack` (into `entity.items`, or into any block with `native_insert_item`) and set `handled`: the slot keeps what is
-left of `stack`, the game's routing is skipped, and the player's client gets the whole menu again. Unhandled, the
-game moves the stack as for any container, and what you did to `stack` doesn't count. This is how a storage terminal
+`stack` (into `entity.items`, or into another block with `native_insert_item`) and set `handled`: the slot holds what
+is left of `stack` (whatever you wrote to that slot of `entity.items`), the game's routing is skipped, and the player's
+client gets the whole menu again. Unhandled, `entity.items` goes back to what it held and the game moves the stack as
+for any container; a later mod sees what an earlier one did to `stack`. If the mod removes its own block, the menu
+closes and the player's inventory is sent again. This is how a storage terminal
 whose items live in other blocks, or a screen that hides the container's slots, takes a shift-click from the
 inventory, and how a machine sends fuel to its fuel slot and ores to its input.
 
-Not asked for an empty slot, a slot the mod's screen hides, another click type, a spectator, or a menu no longer
-valid. It is asked once per click, where vanilla asks `quickMoveStack` again while the same item keeps moving: move
+Not asked for an empty slot, a slot the mod's screen hides, another click type, a spectator or a dead player, a menu
+no longer valid, or a shift-click during a drag (it only ends the drag, as in vanilla). It is asked once per click, where vanilla asks `quickMoveStack` again while the same item keeps moving: move
 all you want in one call. The clicking player's state is swapped in (`native_acting_player` names them), and `entity`
 is out of the world during the call, as in `native_menu_button`. Only a server's players (single player's server
 thread, LAN guests, a dedicated server) shift-click this way; a native mod's own menus (`native_open_menu`) get their
