@@ -1874,6 +1874,51 @@ mod tests {
         assert!(m.damage(1.0, Damage::player([0.0, 64.0, 1.0])));
         assert!(m.extra.sitting);
     }
+
+    /// `Cat.canMate` and `Wolf.canMate`: the seeker only has to be tamed, so a
+    /// mob ordered to sit still goes looking for a mate. Only a wolf's
+    /// *partner* is refused while it sits (`wolf.isInSittingPose()`), which is
+    /// the one sitting check vanilla makes.
+    #[test]
+    fn a_sitting_tame_mob_still_looks_for_a_mate() {
+        use crate::mobs::goals::{Breed, Cx, Goal};
+        use crate::mobs::world::with_test_world;
+        let named = |species, name: &str, id: u32, sat: bool| {
+            let mut m = sitting(species, name);
+            m.id = id;
+            m.extra.in_love = 600;
+            m.extra.sitting = sat;
+            m
+        };
+        for (species, name, seeker_sat, partner_sat, breeds) in [
+            // A tamed cat pairs with a tamed cat, sitting or not.
+            (Species::Cat, "minecraft:cat", true, true, true),
+            (Species::Cat, "minecraft:cat", true, false, true),
+            // A wolf pairs unless the wolf it would take is sitting.
+            (Species::Wolf, "minecraft:wolf", true, false, true),
+            (Species::Wolf, "minecraft:wolf", true, true, false),
+            (Species::Wolf, "minecraft:wolf", false, true, false),
+        ] {
+            let mut seeker = named(species, name, 1, seeker_sat);
+            let partner = named(species, name, 2, partner_sat);
+            let seen = [partner.seen(None)];
+            with_test_world(&seen, |w, _| {
+                let mut events = Vec::new();
+                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut cx = Cx {
+                    w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                let mut goal = Breed::new(1.0);
+                assert_eq!(
+                    goal.can_use(&mut seeker, &mut cx),
+                    breeds,
+                    "{name}: seeker sits {seeker_sat}, partner sits {partner_sat}"
+                );
+            });
+        }
+    }
 }
 
 /// `NeutralMob.isAngryAtAllPlayers`: with the `universal_anger` game rule on, a

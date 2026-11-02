@@ -19,6 +19,9 @@ mod frame;
 mod game_tools;
 mod github_mods_page;
 mod glass;
+mod glass_home;
+mod glass_home_lists;
+mod glass_home_tabs;
 mod glass_ui;
 mod home;
 mod home_tabs;
@@ -340,6 +343,20 @@ struct Launcher {
     download_seen: Option<(Instant, usize)>,
     /// The tab open under Home's hero (`home_tabs.rs`).
     home_tab: home_tabs::HomeTab,
+    /// Home's Play or folder menu, while open (glass look).
+    home_menu: glass_home::HomeMenu,
+    /// Whether the pointer is over Home's folder button, which then shows its ⋯.
+    folder_hovered: bool,
+    /// The list row under the pointer in Home's glass tabs (a world, a server): it shows its
+    /// actions then.
+    list_hover: Option<SharedString>,
+    /// A Home list row's ⋯ menu, while open, and whether its Delete… was clicked once.
+    list_menu: Option<(SharedString, bool)>,
+    /// The size of Home's tab strip, measured as it is laid out: the glass panel's plate cuts
+    /// its corner around it.
+    home_strip: std::rc::Rc<std::cell::Cell<Option<gpui::Size<Pixels>>>>,
+    /// When the running game was first seen running, for Home's "Playing for…".
+    client_since: Option<Instant>,
     /// The selected instance's mods, for Home's Mods tab (`instance_mods.rs`).
     instance_mods: instance_mods::InstanceMods,
     /// Modrinth projects' icon URLs (`instance_mods.rs`).
@@ -576,6 +593,12 @@ impl Launcher {
             prepare_started: None,
             download_seen: None,
             home_tab: home_tabs::HomeTab::from_env(),
+            home_menu: Default::default(),
+            folder_hovered: false,
+            list_hover: None,
+            list_menu: None,
+            home_strip: Default::default(),
+            client_since: None,
             instance_mods: Default::default(),
             project_icons: Default::default(),
             play_pressed: None,
@@ -1744,18 +1767,32 @@ static HOVER: Mutex<HoverState> = Mutex::new(HoverState {
 });
 
 fn track_hover(el: Stateful<Div>, id: SharedString) -> Stateful<Div> {
-    el.on_hover(move |hovered, window, _| {
-        let mut state = HOVER.lock().unwrap();
-        let is_on = state.on.as_ref().is_some_and(|(h, _)| *h == id);
-        if *hovered && !is_on {
-            state.off = state.on.take();
-            state.on = Some((id.clone(), Instant::now()));
-        } else if !*hovered && is_on {
-            state.off = Some((id.clone(), Instant::now()));
-            state.on = None;
-        }
-        window.refresh();
-    })
+    el.on_hover(move |hovered, window, _| note_hover(&id, *hovered, window))
+}
+
+/// Whether `id` is the element [`hover_fade`] shows hovered now.
+fn hover_is(id: &SharedString) -> bool {
+    HOVER
+        .lock()
+        .unwrap()
+        .on
+        .as_ref()
+        .is_some_and(|(h, _)| h == id)
+}
+
+/// Records that `id` is now hovered or not, for [`hover_fade`]: an element whose own hover
+/// listener does more calls it.
+fn note_hover(id: &SharedString, hovered: bool, window: &mut Window) {
+    let mut state = HOVER.lock().unwrap();
+    let is_on = state.on.as_ref().is_some_and(|(h, _)| h == id);
+    if hovered && !is_on {
+        state.off = state.on.take();
+        state.on = Some((id.clone(), Instant::now()));
+    } else if !hovered && is_on {
+        state.off = Some((id.clone(), Instant::now()));
+        state.on = None;
+    }
+    window.refresh();
 }
 
 /// A layer under an element's content that fades `color` in while it is hovered. `bleed` lets
@@ -2935,18 +2972,6 @@ impl Launcher {
         let version = java
             .as_ref()
             .map_or_else(|| backend::game_version(&tag), |j| j.minecraft.clone());
-        let hero = match &java {
-            // Its own game: the Minecraft version and the loader, never Horizon's.
-            Some(j) => {
-                let game = match &j.loader {
-                    Some(l) => format!("{version} · {} {}", l.kind.name(), l.version),
-                    None => version.clone(),
-                };
-                self.hero("", &game, true, cx)
-            }
-            None => self.hero(&tag, &version, prepared, cx),
-        };
-        let actions = self.home_actions(prepared || java.is_some(), java.is_some(), cx);
         let left = self.download_left();
         let steps = self.preparing.then(|| self.steps(&version, left));
 
@@ -3056,7 +3081,8 @@ impl Launcher {
         let mut rows = div()
             .flex()
             .flex_col()
-            .children(self.instance_row(1, cx))
+            // The glass look's sidebar ⋮ menu holds what the Instance row offers.
+            .children((!t.dark).then(|| self.instance_row(1, cx)).flatten())
             .children(self.export_panel(cx))
             .children(self.launch_panel(cx))
             .children(self.memory_row(cx));
@@ -3139,73 +3165,100 @@ impl Launcher {
             }
         }
 
-        // The banner: the hero and the Play row over the sky (`sky.rs`), or over the player's
-        // own picture under a veil of the page colour. It reaches the content's edges and the top
-        // bar.
-        let veil = |angle: f32, from: f32, to: f32, at: f32| {
+        // The glass look's head (the mockup's `HomeView`) replaces the banner; the preparation's
+        // steps stay right under it, where the player looks after pressing Play.
+        let banner = if t.dark {
             div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(gpui::linear_gradient(
-                    angle,
-                    gpui::linear_color_stop(t.page.opacity(from), 0.),
-                    gpui::linear_color_stop(t.page.opacity(to), at),
-                ))
-        };
-        let picture = self.home_background().map(|path| {
-            [
-                gpui::img(path)
+                .flex()
+                .flex_col()
+                .gap(px(24.))
+                .child(self.glass_home_head(&tag, prepared, cx))
+                .children(steps)
+        } else {
+            let hero = match &java {
+                // Its own game: the Minecraft version and the loader, never Horizon's.
+                Some(j) => {
+                    let game = match &j.loader {
+                        Some(l) => format!("{version} · {} {}", l.kind.name(), l.version),
+                        None => version.clone(),
+                    };
+                    self.hero("", &game, true, cx)
+                }
+                None => self.hero(&tag, &version, prepared, cx),
+            };
+            let actions = self.home_actions(prepared || java.is_some(), java.is_some(), cx);
+            // The banner: the hero and the Play row over the sky (`sky.rs`), or over the player's
+            // own picture under a veil of the page colour. It reaches the content's edges and the top
+            // bar.
+            let veil = |angle: f32, from: f32, to: f32, at: f32| {
+                div()
                     .absolute()
                     .top_0()
                     .left_0()
                     .size_full()
-                    .object_fit(gpui::ObjectFit::Cover)
-                    .into_any_element(),
-                veil(90., 0.82, 0., 0.62).into_any_element(),
-                veil(180., 0., 0.75, 1.).into_any_element(),
-            ]
-        });
-        let banner = div()
-            .relative()
-            .flex()
-            .flex_col()
-            .justify_end()
-            .min_h(px(340.))
-            .mx(px(-theme::PAGE_GUTTER))
-            .px(px(theme::PAGE_GUTTER))
-            .pb(px(28.))
-            .gap(px(24.))
-            .overflow_hidden()
-            .children(picture.into_iter().flatten())
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_end()
-                    .gap(px(32.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(28.))
-                            .child(hero)
-                            .child(actions)
-                            // The preparation's steps right under Play, where the player looks
-                            // after pressing it, not below the fold (#666).
-                            .children(steps),
-                    )
-                    // Notes and friends are Horizon's.
-                    .children(java.is_none().then(|| self.home_card(&tag, cx))),
-            );
+                    .bg(gpui::linear_gradient(
+                        angle,
+                        gpui::linear_color_stop(t.page.opacity(from), 0.),
+                        gpui::linear_color_stop(t.page.opacity(to), at),
+                    ))
+            };
+            let picture = self.home_background().map(|path| {
+                [
+                    gpui::img(path)
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .into_any_element(),
+                    veil(90., 0.82, 0., 0.62).into_any_element(),
+                    veil(180., 0., 0.75, 1.).into_any_element(),
+                ]
+            });
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .justify_end()
+                .min_h(px(340.))
+                .mx(px(-theme::PAGE_GUTTER))
+                .px(px(theme::PAGE_GUTTER))
+                .pb(px(28.))
+                .gap(px(24.))
+                .overflow_hidden()
+                .children(picture.into_iter().flatten())
+                .child(
+                    div()
+                        .relative()
+                        .flex()
+                        .items_end()
+                        .gap(px(32.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(28.))
+                                .child(hero)
+                                .child(actions)
+                                // The preparation's steps right under Play, where the player looks
+                                // after pressing it, not below the fold (#666).
+                                .children(steps),
+                        )
+                        // Notes and friends are Horizon's.
+                        .children(java.is_none().then(|| self.home_card(&tag, cx))),
+                )
+        };
         let mut page = div().flex().flex_col().gap(px(28.)).child(banner);
         if let Some(e) = self.prepare_error.clone() {
             page = page.child(notice(e, &t));
         }
-        page = page.child(self.home_tabs(rows, cx));
+        page = page.child(if t.dark {
+            self.glass_home_tabs(rows, cx)
+        } else {
+            self.home_tabs(rows, cx)
+        });
         if let Some(e) = self.client_error.clone() {
             page = page.child(notice(e, &t));
         }
