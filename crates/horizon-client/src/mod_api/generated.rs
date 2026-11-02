@@ -2477,7 +2477,7 @@ pub trait Hooks: Send + Sync {
     /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
     /// with read-only force. Fires on the Game running the bow release, including
     /// LAN guests; a remote client's own release path is not covered. Crossbows
-    /// and `ArrowNockEvent` are not covered. 318.
+    /// are not covered; `native_arrow_nock` is the bow's start. 318.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn arrow_loose(&self, host: &mut dyn Host, event: &mut ArrowLooseEvent<'_>) -> Flow {
@@ -4512,6 +4512,17 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:arrow_nock@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn arrow_nock(&self, host: &mut dyn Host, event: &mut ArrowNockEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Player FOV scale, after vanilla effects and before zoom and easing.
     /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
     fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
@@ -4546,6 +4557,18 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:living_get_projectile@.
+    ///
+    /// Every mod gets `event.projectile` in order and may add, change or remove projectile.
+    fn living_get_projectile(&self, host: &mut dyn Host, event: &mut LivingGetProjectileEvent<'_>) {
+        let _ = host;
+        let _ = event;
     }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
@@ -13884,6 +13907,42 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
         mod_hook.living_jump(&mut event);
     }
 }
+/// What [`Hooks::arrow_nock`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ArrowNockEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub bow: &'a ItemStack,
+    pub hand: Hand,
+    pub has_ammo: bool,
+}
+pub fn dispatch_arrow_nock(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    bow: &ItemStack,
+    hand: Hand,
+    has_ammo: bool,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = ArrowNockEvent {
+        player,
+        name,
+        bow,
+        hand,
+        has_ammo,
+    };
+    for mod_hook in super::entered(mods, "arrow_nock") {
+        if matches!(mod_hook.arrow_nock(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ComputeFovModifierEvent<'a> {
@@ -13957,6 +14016,38 @@ pub fn dispatch_item_container(
             *slots = Some(replacement);
             break;
         }
+    }
+}
+/// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingGetProjectileEvent<'a> {
+    pub player: Option<u128>,
+    pub name: &'a str,
+    pub entity: Option<u32>,
+    pub kind: &'a str,
+    pub weapon: &'a ItemStack,
+    pub projectile: &'a mut Option<ItemStack>,
+}
+pub fn dispatch_living_get_projectile(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    name: &str,
+    entity: Option<u32>,
+    kind: &str,
+    weapon: &ItemStack,
+    projectile: &mut Option<ItemStack>,
+) {
+    let mut event = LivingGetProjectileEvent {
+        player,
+        name,
+        entity,
+        kind,
+        weapon,
+        projectile,
+    };
+    for mod_hook in super::entered(mods, "living_get_projectile") {
+        mod_hook.living_get_projectile(host, &mut event);
     }
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

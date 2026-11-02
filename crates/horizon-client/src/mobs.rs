@@ -1627,6 +1627,27 @@ pub enum MobEvent {
         vehicle: u32,
     },
     Projectile(crate::projectiles::Projectile),
+    /// An arrow `mob` shot with `weapon` (`AbstractSkeleton.performRangedAttack`):
+    /// the game asks for the ammunition (`getProjectile`) before it flies.
+    BowShot {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
+    /// `mob` finished charging `weapon` (`CrossbowItem.onUseTick`): the game
+    /// asks for the ammunition (`getProjectile`), and plays the end sound
+    /// at `at` only when the crossbow loaded.
+    CrossbowLoad {
+        mob: u32,
+        weapon: crate::items::ItemStack,
+        at: [f64; 3],
+        pitch: f32,
+    },
+    /// `arrow` shot from the `ammo` a mob's crossbow was charged with.
+    CrossbowShot {
+        ammo: crate::items::ItemStack,
+        arrow: crate::projectiles::Projectile,
+    },
     /// Spawn a new mob (breeding, slime splitting, chicken eggs...).
     Spawn(Box<Mob>),
     /// Spawn a mob by type id at a position (conversions, splits).
