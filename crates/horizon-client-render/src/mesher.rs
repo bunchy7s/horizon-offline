@@ -10,7 +10,7 @@ mod sides;
 use crate::connected::{Pick, TileLayer};
 use crate::{
     assets::{Assets, RenderAssets},
-    biome::Biomes,
+    biome::{Biomes, GrassModifier},
     blocks::{BlockFacts, RenderShape},
     chunk::{Chunk, Light, MIN_Y},
     graphics::LeafCullingMode,
@@ -1041,6 +1041,8 @@ fn hidden(rows: &[u32], x: i32, y: i32, z: i32) -> bool {
 mod leaf_culling_tests;
 #[cfg(test)]
 mod reuse_tests;
+#[cfg(test)]
+mod tint_tests;
 /// Set on a terrain vertex's sprite layer when its texture alpha must be ignored.
 pub const OPAQUE_LAYER: u16 = 1 << 15;
 /// The bits of `TerrainVertex::color`'s alpha byte that hold how brightly its face shines
@@ -1153,6 +1155,8 @@ struct Tints<'a> {
     /// Chunk x, chunk z and the section's lowest block y.
     origin: [i32; 3],
     layers: [Option<Box<Layer>>; 16],
+    /// `uniform_biome`, once computed.
+    uniform: Option<Option<u16>>,
 }
 impl<'a> Tints<'a> {
     fn new(
@@ -1170,6 +1174,7 @@ impl<'a> Tints<'a> {
             plains: biomes.id("minecraft:plains"),
             origin,
             layers: Default::default(),
+            uniform: None,
         }
     }
     /// The biome of block `(x, y, z)` (section-local x/z, y in 0..16), as `BiomeManager.getBiome`
@@ -1208,8 +1213,52 @@ impl<'a> Tints<'a> {
             plains
         }
     }
+    /// The biome every block of the section's blend squares zooms to, when they
+    /// all do: `quart_at_block` picks one of the eight quart cells at its base
+    /// cell plus 0 or 1 on each axis, so if every such cell the section reaches
+    /// holds one biome, every zoomed cell is that biome.
+    fn uniform_biome(&mut self) -> Option<u16> {
+        if let Some(uniform) = self.uniform {
+            return uniform;
+        }
+        let (r, [cx, cz, base_y]) = (self.radius, self.origin);
+        // The base cells of blocks lo..=hi, and the cell past the last.
+        let span = |lo: i32, hi: i32| (lo.wrapping_sub(2) >> 2)..=(hi.wrapping_sub(2) >> 2) + 1;
+        let (xs, ys, zs) = (
+            span(cx * 16 - r, cx * 16 + 15 + r),
+            span(base_y, base_y + 15),
+            span(cz * 16 - r, cz * 16 + 15 + r),
+        );
+        let first = Self::quart_biome(
+            self.region,
+            self.plains,
+            [cx, cz],
+            [*xs.start(), *ys.start(), *zs.start()],
+        );
+        let uniform = ys
+            .flat_map(|y| zs.clone().map(move |z| (y, z)))
+            .flat_map(|(y, z)| xs.clone().map(move |x| [x, y, z]))
+            .all(|q| Self::quart_biome(self.region, self.plains, [cx, cz], q) == first)
+            .then_some(first);
+        self.uniform = Some(uniform);
+        uniform
+    }
     /// The blended tint of block `(x, y, z)` (section-local x/z, y in 0..16).
     fn get(&mut self, resolver: Resolver, x: i32, y: i32, z: i32) -> u32 {
+        // One biome over every blend square: the mean of (2r+1)^2 equal
+        // colours is that colour, unless it varies by position (swamp grass).
+        if let Some(biome) = self.uniform_biome() {
+            let info = self.biomes.get(biome);
+            match resolver {
+                Resolver::Grass if !matches!(info.modifier, GrassModifier::Swamp) => {
+                    return self.biomes.grass(biome, 0.0, 0.0) & 0xFF_FFFF;
+                }
+                Resolver::Grass => {}
+                Resolver::Foliage => return info.foliage & 0xFF_FFFF,
+                Resolver::Dry => return info.dry_foliage & 0xFF_FFFF,
+                Resolver::Water => return info.water & 0xFF_FFFF,
+            }
+        }
         let r = self.radius;
         let dim = (16 + 2 * r) as usize;
         let layer = self.layers[y as usize].get_or_insert_with(|| {
