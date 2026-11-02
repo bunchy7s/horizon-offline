@@ -1,4 +1,5 @@
 use super::*;
+use crate::chunk::Light;
 
 #[test]
 fn padded_reuse_resets_missing_neighbors_and_matches_chunk_reads_across_layouts() {
