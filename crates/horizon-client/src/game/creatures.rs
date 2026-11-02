@@ -2095,6 +2095,30 @@ impl Game<'_> {
                         }
                     }
                 }
+                MobEvent::PufferfishSting {
+                    mob,
+                    target,
+                    amount,
+                    source,
+                } => {
+                    // Pufferfish.touch: `playSound(PUFFER_FISH_STING, 1, 1)`
+                    // sits inside the `hurtServer` branch, so only a hit that
+                    // landed stings, at the fish's own position as
+                    // `Entity.playSound` puts it, and not when it is silent.
+                    if self.mob_hits_mob(target, amount, source)
+                        && let Some(m) = self.mobs.iter_mut().find(|m| m.id == mob)
+                    {
+                        let at = [m.position.x, m.position.y, m.position.z];
+                        if !m.silent {
+                            self.handle_mob_events(vec![MobEvent::Sound(
+                                "entity.puffer_fish.sting",
+                                at,
+                                1.0,
+                                1.0,
+                            )])?;
+                        }
+                    }
+                }
                 MobEvent::SonicBoom {
                     target,
                     attacker,

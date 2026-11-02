@@ -1534,6 +1534,15 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// `Pufferfish.touch` on a mob (`Pufferfish.aiStep`): the hit, then, only
+    /// when `hurtServer` let it land, the fish's `entity.puffer_fish.sting`
+    /// and the poison it gives.
+    PufferfishSting {
+        mob: u32,
+        target: u32,
+        amount: f32,
+        source: Damage,
+    },
     /// `LivingEntity.stabAttack`'s `target.stopRiding()`: a spear knocks the
     /// target off its mount.
     StabDismount {
