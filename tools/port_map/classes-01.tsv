@@ -105,12 +105,12 @@ AbstractMinecartContainer.createMenu	inline	crates/horizon-client/src/game/minec
 AbstractMinecartContainer.remove	inline	crates/horizon-client/src/game/minecarts.rs::Game::hurt_cart	contents spill when the cart breaks, if entity_drops is on
 MinecartChest.interact	inline	crates/horizon-client/src/game/minecarts.rs::Game::interact_cart	chest arm: opens the cart's items and plays the chest sound
 MinecartCommandBlock.activateMinecart	inline	crates/horizon-client/src/game/minecarts.rs::Game::activate_cart	gap: minor: no command ever runs; the cart holds no command since its editor is missing
-MinecartCommandBlock.defineSynchedData	missing		minor: the command text and last output are not synced; no command cart holds a command
+MinecartCommandBlock.defineSynchedData	port	crates/horizon-client/src/game/minecarts.rs::command_due	the cart's command is held on the cart and runs when an activator rail sets it due
 MinecartCommandBlock.interact	port	crates/horizon-client/src/game/remote.rs::Game::remote_use_entity	the client opens the command editor of the cart it right-clicked
-MinecartCommandBlock.onSyncedDataUpdated	missing		minor: no synced command text to load into the cart
+MinecartCommandBlock.onSyncedDataUpdated	inline	crates/horizon-client/src/game/minecarts.rs	the command is the cart's own field rather than synched entity data
 MinecartCommandBlock.readAdditionalSaveData	inline	crates/horizon-client/src/game/minecarts.rs::Minecart::from_nbt	gap: minor: the saved Command text is not read
-MinecartCommandBlock.MinecartCommandBase.createCommandSourceStack	missing		minor: no command runs from a cart, so no source stack is built
-MinecartCommandBlock.MinecartCommandBase.onUpdated	missing		minor: no command text changes to push to the cart
+MinecartCommandBlock.MinecartCommandBase.createCommandSourceStack	port	crates/horizon-client/src/game/minecarts.rs:1350	the due command runs with the cart as its source
+MinecartCommandBlock.MinecartCommandBase.onUpdated	inline	crates/horizon-client/src/game/minecarts.rs::command_due	set by the activator rail at minecarts.rs:1051
 MinecartFurnace.addAdditionalSaveData	port	crates/horizon-client/src/game/minecarts.rs::Minecart::to_nbt	
 MinecartFurnace.addFuel	inline	crates/horizon-client/src/game/minecarts.rs::Game::interact_cart	furnace arm: coal or charcoal adds 3600 ticks of fuel up to 32000
 MinecartFurnace.applyNaturalSlowdown	port	crates/horizon-client/src/game/minecarts.rs::Game::natural_slowdown	
@@ -149,7 +149,7 @@ PlayerEnderChestContainer.startOpen	port	crates/horizon-client/src/game/storage.
 PlayerEnderChestContainer.stillValid	inline	crates/horizon-client/src/game/storage.rs::Game::tick_container_reach	closes the chest when the player walks away
 PlayerEnderChestContainer.stopOpen	port	crates/horizon-client/src/game/storage.rs::Game::close_ender_chest	
 PlayerEnderChestContainer.storeAsSlots	skip:java		saves the ender chest as slots; Horizon writes ender_items
-RecipeCraftingHolder.setRecipeUsed	missing		minor: the last recipe used by a crafting block is not remembered
+RecipeCraftingHolder.setRecipeUsed	port	crates/horizon-client-render/src/containers.rs::recipe_used_key	the recipe a block last crafted is kept under that key and saved (save.rs, furnace.rs)
 RemoteSlot.Synchronized.matches	skip:java		compares a slot with its last synced copy; Horizon sends the slot when it changes
 ResultContainer.isEmpty	port	crates/horizon-client/src/menu.rs::Menu::has_item	the result slot is empty when it has no item
 ShulkerBoxMenu.quickMoveStack	port	crates/horizon-client/src/game/storage.rs::Game::container_quick_move	
@@ -158,7 +158,7 @@ TransientCraftingContainer.getItem	skip:java		slot read of a menu-owned grid; Ho
 TransientCraftingContainer.isEmpty	skip:java		emptiness of a menu-owned grid; Horizon reads menu slots directly
 TransientCraftingContainer.removeItem	skip:java		slot removal of a menu-owned grid; Horizon takes from menu slots directly
 TransientCraftingContainer.setItem	skip:java		slot write of a menu-owned grid; Horizon writes menu slots directly
-AdventureModePredicate	missing		unsure: no can_place_on or can_break list check found in the client
+AdventureModePredicate	port	crates/horizon-client/src/game.rs::can_place_on_in_adventure	the can_place_on / can_break lists are checked before a placement in adventure mode
 ArrayItemProvider.findNext	inline	crates/horizon-client/src/game/recipe_book.rs::Game::draw_ghost	ghost slot item list
 ArrayItemProvider.next	inline	crates/horizon-client/src/game/recipe_book.rs::Game::draw_ghost	ghost slot item list
 ArrayItemProvider.peek	inline	crates/horizon-client/src/game/recipe_book.rs::Game::draw_ghost	ghost slot item list
