@@ -19,7 +19,7 @@ sent the same things over TLS, and every answer is compared exactly:
   message, difficulty, default and forced game mode read and changed (including saved properties), autosave
   read and changed (including its reset after restart), allowlist use and enforcement read and changed
   (including saved properties and restart), and
-  `server/stop`;
+  `server/stop`; the live pause-when-empty timer read and changed (including its saved property and restart);
 - the TLS version each server agrees on.
 
 A parse error's `data` is Gson's message in vanilla and serde's in Horizon: left out. The notifications the
@@ -177,6 +177,15 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":90,"method":"minecraft:serversettings/enforce_allowlist"}',
     '{"jsonrpc":"2.0","id":91,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
     '{"jsonrpc":"2.0","id":92,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":95,"method":"minecraft:serversettings/pause_when_empty_seconds"}',
+    '{"jsonrpc":"2.0","id":96,"method":"minecraft:serversettings/pause_when_empty_seconds/set","params":[10]}',
+    '{"jsonrpc":"2.0","id":97,"method":"minecraft:serversettings/pause_when_empty_seconds"}',
+    '{"jsonrpc":"2.0","id":98,"method":"minecraft:serversettings/pause_when_empty_seconds/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":99,"method":"minecraft:serversettings/pause_when_empty_seconds"}',
+    '{"jsonrpc":"2.0","id":100,"method":"minecraft:serversettings/pause_when_empty_seconds/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":101,"method":"minecraft:serversettings/pause_when_empty_seconds"}',
+    '{"jsonrpc":"2.0","id":102,"method":"minecraft:serversettings/pause_when_empty_seconds/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":103,"method":"minecraft:serversettings/pause_when_empty_seconds"}',
 ]
 
 
@@ -408,6 +417,9 @@ def main():
                 sides[side]['saved_enforce_allowlist'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('enforce-whitelist=')), None)
+                sides[side]['saved_pause_when_empty_seconds'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('pause-when-empty-seconds=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
@@ -417,6 +429,8 @@ def main():
                     sides[side]['saved_config_use_allowlist'] = 'whitelist = true' in (
                         folder / 'server.toml').read_text()
                     sides[side]['saved_config_enforce_allowlist'] = 'enforce_whitelist = true' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_pause_when_empty_seconds'] = 'pause-when-empty-seconds = 30' in (
                         folder / 'server.toml').read_text()
             finally:
                 server.stop()
@@ -437,6 +451,12 @@ def main():
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_autosave'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":104,"method":"minecraft:serversettings/pause_when_empty_seconds"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_pause_when_empty_seconds'] = reply
                     ws.send('{"jsonrpc":"2.0","id":93,"method":"minecraft:serversettings/use_allowlist"}')
                     while True:
                         reply = normal(ws.receive(timeout=60))
@@ -481,12 +501,20 @@ def main():
             failures.append('Horizon did not save allowlist use in server.toml')
         if not horizon['saved_config_enforce_allowlist']:
             failures.append('Horizon did not save allowlist enforcement in server.toml')
+        if vanilla['saved_pause_when_empty_seconds'] != horizon['saved_pause_when_empty_seconds'] or \
+                vanilla['saved_pause_when_empty_seconds'] != '30':
+            failures.append(f"saved pause-when-empty seconds: vanilla {vanilla['saved_pause_when_empty_seconds']!r}, Horizon {horizon['saved_pause_when_empty_seconds']!r}")
+        if not horizon['saved_config_pause_when_empty_seconds']:
+            failures.append('Horizon did not save pause-when-empty seconds in server.toml')
         if vanilla['restarted_force_game_mode'] != horizon['restarted_force_game_mode'] or \
                 vanilla['restarted_force_game_mode'] != {'jsonrpc': '2.0', 'id': 64, 'result': True}:
             failures.append(f"restarted forced game mode: vanilla {vanilla['restarted_force_game_mode']!r}, Horizon {horizon['restarted_force_game_mode']!r}")
         if vanilla['restarted_autosave'] != horizon['restarted_autosave'] or \
                 vanilla['restarted_autosave'] != {'jsonrpc': '2.0', 'id': 74, 'result': True}:
             failures.append(f"restarted autosave: vanilla {vanilla['restarted_autosave']!r}, Horizon {horizon['restarted_autosave']!r}")
+        if vanilla['restarted_pause_when_empty_seconds'] != horizon['restarted_pause_when_empty_seconds'] or \
+                vanilla['restarted_pause_when_empty_seconds'] != {'jsonrpc': '2.0', 'id': 104, 'result': 30}:
+            failures.append(f"restarted pause-when-empty seconds: vanilla {vanilla['restarted_pause_when_empty_seconds']!r}, Horizon {horizon['restarted_pause_when_empty_seconds']!r}")
         if vanilla['restarted_use_allowlist'] != horizon['restarted_use_allowlist'] or \
                 vanilla['restarted_use_allowlist'] != {'jsonrpc': '2.0', 'id': 93, 'result': True}:
             failures.append(f"restarted allowlist use: vanilla {vanilla['restarted_use_allowlist']!r}, Horizon {horizon['restarted_use_allowlist']!r}")
