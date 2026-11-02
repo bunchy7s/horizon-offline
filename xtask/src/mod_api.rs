@@ -1089,6 +1089,9 @@ mod tests {
             pub mod camera {
                 pub struct CameraEntity;
             }
+            pub mod menu {
+                pub struct AnvilCraft;
+            }
             pub mod fog {
                 #[derive(Clone, Copy)]
                 pub struct FogType;
