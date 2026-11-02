@@ -749,7 +749,14 @@ fn parse_local(reader: &mut Reader) -> CmdResult<Coordinates> {
             }
             reader.skip();
         }
-        if !reader.can_read() || reader.peek() != '^' {
+        if !reader.can_read() {
+            return Err(CommandError::tr_at(
+                "argument.pos.missing.double",
+                &[],
+                reader,
+            ));
+        }
+        if reader.peek() != '^' {
             reader.cursor = start;
             return Err(CommandError::tr_at("argument.pos.mixed", &[], reader));
         }
