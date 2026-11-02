@@ -3473,6 +3473,17 @@ impl Game<'_> {
     ) {
         let _ = (player, name, recipe);
     }
+    /// A server player removed an entity's leash, after it was cleared.
+    /// Guest lookup helpers may find nothing during packet handling.
+    /// @API:player_unleash_entity@.
+    pub(super) fn native_player_unleash_entity(
+        &mut self,
+        player: u128,
+        name: &str,
+        entity_id: u32,
+    ) {
+        let _ = (player, name, entity_id);
+    }
     /// A server player toggled an ageable mob's age lock with a golden
     /// dandelion, after the lock and item use changed. @API:player_toggle_entity_age_lock@.
     pub(super) fn native_player_toggle_entity_age_lock(
