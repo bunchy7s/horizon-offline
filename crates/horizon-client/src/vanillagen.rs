@@ -193,8 +193,27 @@ impl VanillaTerrain {
         dimension: &str,
         structures: bool,
     ) -> crate::Result<Self> {
+        Self::for_world_with_settings(
+            dir, overrides, registry, biomes, seed, preset, dimension, structures, None,
+        )
+    }
+    /// `for_world_with` with the saved dimension's generator and type, below
+    /// any dimension supplied by the world's data packs.
+    pub fn for_world_with_settings(
+        dir: &Path,
+        overrides: &WorldgenOverrides,
+        registry: &'static BlockRegistry,
+        biomes: &Biomes,
+        seed: i64,
+        preset: &str,
+        dimension: &str,
+        structures: bool,
+        saved_stem: Option<&serde_json::Value>,
+    ) -> crate::Result<Self> {
         let data: Arc<GeneratorData> = shared_data_with(dir, overrides, registry)?;
-        let generator = OverworldGenerator::for_world(data, seed, preset, dimension, structures)?;
+        let generator = OverworldGenerator::for_world_with_settings(
+            data, seed, preset, dimension, structures, saved_stem,
+        )?;
         Self::assemble(dir, registry, biomes, generator, seed, preset, dimension)
     }
     /// A superflat overworld with the structures its settings allow
