@@ -5428,7 +5428,8 @@ impl Game<'_> {
             return;
         }
         // SignBlock.useWithoutItem: the text editor, not a container.
-        if horizon_client::signs::sign_kind(&name).is_some() {
+        let block = self.world.block(pos[0], pos[1], pos[2]);
+        if self.res.facts().get(block).sign_form().is_some() {
             self.use_sign_empty_hand(pos);
             return;
         }
@@ -6193,17 +6194,16 @@ impl Game<'_> {
             // opening the editor, unless the side has click commands to run
             // (`shouldTryToChainAnotherHangingSign`).
             let chains_sign = hit.face == [0, -1, 0]
-                && held
-                    .as_ref()
-                    .is_some_and(|s| s.item.ends_with("_hanging_sign"))
-                && {
-                    let name = &self
-                        .res
-                        .facts()
-                        .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
-                        .name;
-                    name.ends_with("_hanging_sign") && !name.contains("_wall_")
-                }
+                // `instanceof HangingSignItem`, independent of the item's name.
+                && held.as_ref().is_some_and(|s| {
+                    self.res.behaviours().item_binding(&s.item)
+                        .is_some_and(|i| i.kind == horizon_world::level::ItemKind::HangingSign)
+                })
+                && self
+                    .res
+                    .facts()
+                    .get(self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]))
+                    .has_class("CeilingHangingSignBlock")
                 && matches!(
                     self.world
                         .block_entities
@@ -20097,12 +20097,14 @@ fn load_world_rest(
             Behaviours::load_with_gameplay(registry, root, behaviour_json, gameplay_projection)
         })
     };
-    let load_block_entity_render = || {
+    let load_block_entity_render = || -> Result<_> {
         let _step = startup::step("rest.block_entity_render");
         if !draws {
             return Ok(Default::default());
         }
-        BlockEntityRenderer::load_with_visibility(root, registry, visibility)
+        let mut renderer = BlockEntityRenderer::load_with_visibility(root, registry, visibility)?;
+        renderer.add_mod_signs(facts, registry);
+        Ok(renderer)
     };
     let load_animate = || -> Result<_> {
         let _step = startup::step("rest.animate_fog");

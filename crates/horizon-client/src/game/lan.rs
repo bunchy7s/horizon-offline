@@ -1302,12 +1302,14 @@ impl Game<'_> {
             .get("minecraft:worldgen/biome")
             .map(|v| v.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_default();
-        let mut encoder = ChunkEncoder::new(
-            self.res
-                .facts()
-                .states
-                .iter()
-                .map(|s| (s.name.clone(), s.fluid_level > 0 || s.waterlogged)),
+        let mut encoder = ChunkEncoder::with_signs(
+            self.res.facts().states.iter().map(|s| {
+                (
+                    s.name.clone(),
+                    s.fluid_level > 0 || s.waterlogged,
+                    s.sign_form(),
+                )
+            }),
             &sync.builtin,
             &biome_names,
             &registry,

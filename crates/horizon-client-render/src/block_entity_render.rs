@@ -358,6 +358,23 @@ fn intern(facing: &str) -> &'static str {
         _ => "down",
     }
 }
+/// A sign's way of standing: a wall sign faces away from its wall, another
+/// turns by its rotation segment.
+fn sign(hanging: bool, wall: bool, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
+    let angle = if wall {
+        y_rot(intern(&prop("facing").unwrap_or_default()))
+    } else {
+        prop("rotation")
+            .and_then(|r| r.parse::<f32>().ok())
+            .unwrap_or(0.0)
+            * 22.5
+    };
+    Kind::Sign {
+        hanging,
+        wall,
+        angle,
+    }
+}
 fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
     let facing = || intern(&prop("facing").unwrap_or_default());
@@ -387,20 +404,7 @@ fn classify(name: &str, prop: &dyn Fn(&str) -> Option<String>) -> Kind {
         }
     };
     if let Some(hanging) = signs::sign_kind(name) {
-        let wall = name.contains("_wall_");
-        let angle = if wall {
-            y_rot(facing())
-        } else {
-            prop("rotation")
-                .and_then(|r| r.parse::<f32>().ok())
-                .unwrap_or(0.0)
-                * 22.5
-        };
-        return Kind::Sign {
-            hanging,
-            wall,
-            angle,
-        };
+        return sign(hanging, name.contains("_wall_"), prop);
     }
     let unwaxed = name.strip_prefix("waxed_").unwrap_or(name);
     match unwaxed {
@@ -1374,6 +1378,16 @@ impl BlockEntityRenderer {
             .read()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+    /// A mod's signs, known by class where vanilla's go by name (`classify`).
+    pub fn add_mod_signs(&mut self, facts: &crate::blocks::BlockFacts, registry: &BlockRegistry) {
+        for (id, kind) in self.kinds.iter_mut().enumerate() {
+            let state = BlockStateId(id as u32);
+            if let (Some(form), Some(s)) = (facts.get(state).sign_form(), registry.state(state)) {
+                let prop = |k: &str| s.properties.get(k).cloned();
+                *kind = sign(form.hanging, form.wall, &prop);
+            }
+        }
     }
     fn kind(&self, state: u32) -> &Kind {
         self.kinds.get(state as usize).unwrap_or(&Kind::None)
