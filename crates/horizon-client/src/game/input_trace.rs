@@ -399,9 +399,20 @@ impl Game<'_> {
         );
     }
 
+    /// Whether anything can read the trace: the control socket (agent control
+    /// on), the repro shortcuts, or a recording under way. Otherwise every key
+    /// and mouse motion skips it, so a player who uses none of them pays
+    /// nothing per input event.
+    fn tracing_input(&self) -> bool {
+        self.control.is_some() || self.settings.extras.repro_keys || self.repro.recording_active()
+    }
+
     /// Record an input event and, when a person steps into an agent's run, tell
     /// every watcher once.
     pub(super) fn note_input(&mut self, origin: InputOrigin, kind: TraceKind) {
+        if !self.tracing_input() {
+            return;
+        }
         let kind_name = kind.name();
         // An agent waiting on a task or a wait, or a client still connected, is
         // watching even when its last line was minutes ago.
@@ -425,7 +436,7 @@ impl Game<'_> {
     /// Keep the window events that are input. Agent-made window events are left
     /// out: the control-socket line that caused them is recorded instead.
     pub(super) fn trace_window_event(&mut self, origin: InputOrigin, event: &WindowEvent) {
-        if origin == InputOrigin::Agent {
+        if origin == InputOrigin::Agent || !self.tracing_input() {
             return;
         }
         match event {
