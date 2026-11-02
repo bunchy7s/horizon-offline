@@ -2834,6 +2834,75 @@ impl Game<'_> {
             dimension,
         );
     }
+    /// A player whose login the server has accepted (NeoForge's
+    /// `PlayerNegotiationEvent` stage): the name, whitelist, ban and
+    /// server-full checks have passed and the player holds a place, but their
+    /// saved state is not loaded and they are not placed in a level yet. Set
+    /// `cancel` to refuse them: they are disconnected with `reason` (a plain
+    /// "Disconnected" if it is left unset) and nothing else of the join (the
+    /// join message, `native_player_logged_in`) happens. Once for each player
+    /// who joins, on a server. The player is not placed yet and their client
+    /// has no world to show a message in, so no player's state is swapped in
+    /// and `native_tell` reaches nobody: the refusal `reason` is the answer.
+    /// The checks that need no mod (name, whitelist, bans, a full server,
+    /// the proxy's forwarding) refuse earlier, on the connection, and this
+    /// hook does not hear those players. @API:native_player_login@.
+    pub(super) fn native_player_login(
+        &mut self,
+        player: u128,
+        name: &str,
+        cancel: &mut bool,
+        reason: &mut Option<Text>,
+    ) {
+        let _ = (player, name, cancel, reason);
+    }
+    /// The command tree a server sends a player (NeoForge's and Paper's
+    /// "commands sent to a player" stage): when they join and when their
+    /// level changes (`/op`, `/deop`, the LAN settings). `names` are the
+    /// root commands their client would get, vanilla's they may use and the
+    /// mods'; take a name out and that client gets the tree without it
+    /// (and without what it leads to), so it neither completes nor
+    /// highlights it. This hides the command from the client only: the
+    /// server still runs a typed one, `native_player_command` stops it.
+    /// For a player who is already on, their state is swapped in and the
+    /// helpers (`native_tell`...) work; for one who is joining it is not, and
+    /// their client has no world to tell yet. The tree the hub sends again by
+    /// itself (after a respawn or a change of level) keeps the last answer
+    /// and does not ask again; the integrated server's owner is not asked
+    /// when the world's cheats are switched. @API:native_player_commands_sent@.
+    pub(super) fn native_player_commands_sent(
+        &mut self,
+        player: u128,
+        name: &str,
+        names: &mut Vec<String>,
+    ) {
+        let _ = (player, name, names);
+    }
+    /// A server player's sprint started or stopped: their client sent
+    /// `START_SPRINTING` or `STOP_SPRINTING` (the sprint key, a double tap
+    /// forward, or letting go) and the server's player is now `sprinting`
+    /// (vanilla's `setSprinting` in `handlePlayerCommand`). Heard only when it
+    /// changes. It cannot be stopped, and it hears what the client asks, not
+    /// what the server does: a sprint that ends by itself (a hit's knockback,
+    /// hunger, a wall) is not reported. The player's state is swapped in, so
+    /// the helpers and `native_tell` work. Once for each change, on a server.
+    /// @API:native_player_sprint@.
+    pub(super) fn native_player_sprint(&mut self, player: u128, name: &str, sprinting: bool) {
+        let _ = (player, name, sprinting);
+    }
+    /// A server player's client answered a resource pack in play (vanilla's
+    /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
+    /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
+    /// downloaded, 5 invalid URL, 6 failed reload, 7 discarded. Heard when the
+    /// packet arrives, after the server has handled it; it cannot be stopped.
+    /// The player's state is swapped in, so the helpers and `native_tell`
+    /// work. The pack a dedicated server offers in the configuration
+    /// (`resource-pack` in `server.properties`) is answered before the
+    /// player has joined, and those answers are not heard. Once for each
+    /// answer, on a server. @API:native_resource_pack_status@.
+    pub(super) fn native_resource_pack_status(&mut self, player: u128, name: &str, status: i32) {
+        let _ = (player, name, status);
+    }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
