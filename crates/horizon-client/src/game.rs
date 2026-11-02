@@ -3828,9 +3828,7 @@ impl Game<'_> {
             stuck: Vec3::ZERO,
         });
         // ServerLevel.addFreshEntity.
-        if !self.native_entity_joins(self.next_entity, "minecraft:item", position, false) {
-            self.dropped.pop();
-        } else {
+        if self.native_joins_flush(false, self.next_entity) {
             self.native_item_spawn(self.next_entity, &item, count, position);
         }
     }
@@ -7277,6 +7275,8 @@ impl Game<'_> {
     /// What the tick runs after the local player's own update: effects, the
     /// world's entities and blocks, and the network hub.
     fn tick_world(&mut self, running: bool) -> Result<()> {
+        // Entities added since the last tick join the level before it ticks.
+        self.native_joins_flush(false, 0);
         self.share_spawn_conditions();
         horizon_client::mobs::sulfur_cube::set_tnt_explodes(self.ui.rules.bool("tnt_explodes"));
         self.update_chunk_tickets();
@@ -13126,9 +13126,7 @@ impl Game<'_> {
             health: 5,
         });
         // ServerLevel.addFreshEntity.
-        if !self.native_entity_joins(self.next_entity, "minecraft:experience_orb", at, false) {
-            self.orbs.pop();
-        }
+        self.native_joins_flush(false, 0);
     }
     fn can_place_used_fire(&mut self, target: [i32; 3]) -> bool {
         let pos = BlockPos::new(target[0], target[1], target[2]);

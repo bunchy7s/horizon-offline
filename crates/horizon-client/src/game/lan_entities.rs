@@ -633,7 +633,7 @@ impl Game<'_> {
                 // `potion_contents`, whose effects the guest's splash and
                 // whose colour its drawing need. A plain splash potion is the
                 // client's default and is not sent.
-                K::Potion(stack) if stack.extra.is_some() || stack.count != 1 => {
+                K::Potion(stack, _) if stack.extra.is_some() || stack.count != 1 => {
                     e.meta.push((
                         8,
                         serializer::ITEM_STACK,

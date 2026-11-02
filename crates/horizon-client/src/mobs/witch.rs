@@ -224,9 +224,9 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
     };
     let start = Vec3::new(m.position.x, m.eye_y() - 0.1, m.position.z);
     let mut p = Projectile::new(
-        ProjectileKind::Potion(Box::new(
+        ProjectileKind::potion(
             crate::items::ItemStack::new("minecraft:splash_potion", 1).with_potion(potion),
-        )),
+        ),
         start,
         Some(Who::Mob(m.id)),
     );

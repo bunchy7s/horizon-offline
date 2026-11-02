@@ -711,9 +711,15 @@ pub trait Hooks: Send + Sync {
     /// an arrival through a portal). `entity` is its ID and `kind` its type
     /// (`minecraft:item`). It is already in the level's lists, so helpers that
     /// take an entity ID find it. Set `canceled` to keep it out: it is taken
-    /// back out as if never added, and a `/summon` of it fails. 47 tells
-    /// item entities and experience orbs; later APIs add other kinds, so check
-    /// `kind`. Server-side.
+    /// back out as if never added, and a `/summon` of it fails. Tells every
+    /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
+    /// armor stands, primed TNT, falling blocks, projectiles, rockets,
+    /// tridents), once each, in the order they were created; check `kind`. A
+    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
+    /// `/summon` and a chunk's entities are told at once). A mod that
+    /// cancels one of the others sees it removed before it ticks again.
+    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
+    /// the entities Horizon keeps without simulating. Server-side.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn entity_join_level(&self, host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
@@ -3208,6 +3214,23 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut FoodLevelChangedEvent<'_>,
     ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// An item frame (`minecraft:item_frame`, `minecraft:glow_item_frame`) or
+    /// a painting (`minecraft:painting`), `kind` its entity type and `pos` the
+    /// block it hangs in, is about to break: a server player's hit
+    /// (`player`, their state swapped in, so `native_tell` answers them), a
+    /// blast, or the wall it hangs on gone (`player` None for both). Where
+    /// `BlockAttachedEntity.hurtServer` and its survival check would kill
+    /// it, before anything drops or sounds. Set `cancel` and it stays, as it
+    /// was. A hit that only takes the item out of a frame does not break the
+    /// frame and is not asked. The game's own player's hit is not asked, nor
+    /// is `/kill`. @API:native_hanging_break@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn hanging_break(&self, host: &mut dyn Host, event: &mut HangingBreakEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -10409,6 +10432,32 @@ pub fn dispatch_food_level_changed(
         }
     }
     *to = event.to;
+}
+/// What [`Hooks::hanging_break`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HangingBreakEvent<'a> {
+    pub player: Option<u128>,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_hanging_break(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: Option<u128>,
+    kind: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = HangingBreakEvent { player, kind, pos };
+    for mod_hook in mods {
+        if matches!(mod_hook.hanging_break(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::hanging_place`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
