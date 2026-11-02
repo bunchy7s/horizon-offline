@@ -903,14 +903,18 @@ impl Launcher {
         let glass = t.dark
             && matches!(
                 f,
-                Field::ServerName | Field::ServerAddress | Field::InstanceModsFilter
+                Field::ServerName
+                    | Field::ServerAddress
+                    | Field::InstanceModsFilter
+                    | Field::ConsoleSearch
             );
         let base = if glass {
-            // The mods filter sits in a list's head: the mockup's small `FIELD`, as tall as
-            // the buttons beside it.
-            crate::glass_ui::field(focused, invalid).when(f == Field::InstanceModsFilter, |d| {
-                d.h(px(36.)).px(px(12.)).rounded(px(10.))
-            })
+            // The mods filter and the log search sit by buttons: the mockup's small `FIELD`, as
+            // tall as they are.
+            crate::glass_ui::field(focused, invalid).when(
+                matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+            )
         } else {
             div()
                 .flex()
