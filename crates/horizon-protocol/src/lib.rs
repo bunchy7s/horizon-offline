@@ -3,6 +3,7 @@
 //! every connection state, shared by the Horizon client and (later) server.
 // `deny`, not `forbid`: crypto/blocks.rs allows the ARMv8 AES intrinsics, nothing else.
 #![deny(unsafe_code)]
+pub mod adapter;
 pub mod buf;
 pub mod chunk;
 pub mod connection;

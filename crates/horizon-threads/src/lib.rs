@@ -4,6 +4,7 @@
 /// The game window's boot screen, before wgpu's first frame paints over it.
 #[cfg(target_os = "windows")]
 pub mod boot_paint;
+pub mod jobs;
 pub mod memory_limit;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -219,6 +220,36 @@ pub fn configure_allocator() {
     unsafe {
         libmimalloc_sys::mi_option_set(PURGE_DELAY, 0);
     }
+}
+
+/// The bytes the allocator has committed now and at its peak (mimalloc's
+/// process info), for `horizon-ctl memory`.
+pub fn allocator_commit() -> (usize, usize) {
+    let mut info = [0usize; 8];
+    let [
+        elapsed,
+        user,
+        system,
+        rss,
+        peak_rss,
+        commit,
+        peak_commit,
+        faults,
+    ] = &mut info;
+    // SAFETY: writes eight integers through pointers to them.
+    unsafe {
+        libmimalloc_sys::mi_process_info(
+            elapsed,
+            user,
+            system,
+            rss,
+            peak_rss,
+            commit,
+            peak_commit,
+            faults,
+        );
+    }
+    (info[5], info[6])
 }
 
 /// Give back to the OS the memory the allocator holds free, after something

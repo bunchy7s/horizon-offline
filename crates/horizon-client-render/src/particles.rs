@@ -4093,6 +4093,47 @@ impl ParticleEngine {
         }
     }
 
+    /// The particles that `entries` name, as lights: where each is this frame, its entry's colour
+    /// as RGB and reach, and its alpha as the intensity.
+    pub fn lights(
+        &self,
+        entries: &[horizon_shader_api::manifest::ParticleLight],
+        partial: f32,
+    ) -> Vec<([f64; 3], u32, f32, f32)> {
+        let shining: Vec<(ParticleType, u32, f32)> = entries
+            .iter()
+            .flat_map(|e| {
+                let [r, g, b] = e.color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u32);
+                e.particles.iter().filter_map(move |name| {
+                    let name = if name.contains(':') {
+                        name.clone()
+                    } else {
+                        format!("minecraft:{name}")
+                    };
+                    Some((
+                        ParticleType::from_name(&name)?,
+                        r << 16 | g << 8 | b,
+                        e.reach,
+                    ))
+                })
+            })
+            .collect();
+        if shining.is_empty() {
+            return Vec::new();
+        }
+        let f = f64::from(partial);
+        self.particles
+            .iter()
+            .filter(|p| p.rgba[3] > 0.0)
+            .filter_map(|p| {
+                let (_, rgb, reach) = shining.iter().find(|(ty, ..)| *ty == p.ty)?;
+                let at =
+                    std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * f);
+                Some((at, *rgb, *reach, p.rgba[3].clamp(0.0, 1.0)))
+            })
+            .collect()
+    }
+
     /// Camera-facing quads (`QuadParticleRenderState.renderRotatedQuad`).
     pub fn render(
         &self,

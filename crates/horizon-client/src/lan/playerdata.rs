@@ -6,7 +6,10 @@ use crate::{
     save::{Level, put, read_dat, uuid_from_tag, write_dat},
 };
 use horizon_protocol::crypto::uuid_string;
-use horizon_world::nbt::Tag;
+use horizon_world::{
+    attachments::{ATTACHMENTS_KEY, attachment_compound},
+    nbt::Tag,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
@@ -126,6 +129,15 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         .map(|s| [s[0] + 0.5, s[1], s[2] + 0.5]);
     guest.respawn_elsewhere = level.respawn_elsewhere.clone();
     guest.saved = level.player_extra.clone();
+    guest.attachments = match attachment_compound(
+        guest
+            .saved
+            .as_ref()
+            .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
+    ) {
+        Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
+        _ => Default::default(),
+    };
     guest.seen_credits = level.seen_credits;
     guest.post_effects.clone_from(&level.post_effects);
     guest.last_death = level.last_death.clone();
@@ -220,6 +232,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     level.post_effects.clone_from(&guest.post_effects);
     level.last_death = guest.last_death.clone();
     level.player_extra = guest.saved.clone();
+    let extra = level
+        .player_extra
+        .get_or_insert_with(|| Tag::Compound(Default::default()));
+    if let Tag::Compound(map) = extra
+        && attachment_compound(map.get(&ATTACHMENTS_KEY.into())).is_ok()
+    {
+        let data = guest.attachments.to_nbt();
+        if data.is_empty() {
+            map.remove(&ATTACHMENTS_KEY.into());
+        } else {
+            map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+        }
+    }
     // The vehicle the player rides (`ServerPlayer.saveParentVehicle`), or
     // the one its file names that has not come back yet (kept in `saved`).
     level.root_vehicle = guest.saved_vehicle;
@@ -250,12 +275,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     }
     // LivingEntity.addAdditionalSaveData: the live body's AttributeMap.pack,
     // or the list the file had while the player has no body yet.
-    if let Some(m) = guest.motion.as_deref() {
+    // A player between two bodies (a respawn, a change of level) saves what
+    // the next one takes over.
+    let attributes = guest
+        .motion
+        .as_deref()
+        .map(crate::motion::PlayerMotion::saved_attributes)
+        .or_else(|| guest.carried_attributes.clone());
+    if let Some(attributes) = attributes {
         let extra = level
             .player_extra
             .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
         if let horizon_world::nbt::Tag::Compound(map) = extra {
-            map.insert("attributes".into(), m.saved_attributes());
+            map.insert("attributes".into(), attributes);
         }
     }
     level.recipe_book = guest.recipe_book.clone();
@@ -369,6 +401,34 @@ mod tests {
         assert!(load_owner(&mut g, &dir, Some(&saved)));
         assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn player_attachments_survive_playerdata_and_respawn() {
+        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        let keep = AttachmentType {
+            namespace: "test",
+            name: "keep",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                decode: |c| match c.get(&"count".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: true,
+        };
+        let dir = world("attachments");
+        let mut original = guest();
+        original.attachments.set(&keep, 31).unwrap();
+        save(&original, &dir);
+        let mut loaded = guest();
+        loaded.uuid = original.uuid;
+        assert!(load(&mut loaded, &dir));
+        loaded.attachments = loaded.attachments.copy_on_death().unwrap();
+        assert_eq!(loaded.attachments.get(&keep), Ok(31));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -488,6 +548,89 @@ mod tests {
         let assets = crate::assets::Assets::load(&root).ok()?;
         let resources = crate::motion::MotionResources::load(&root, &assets).ok()?;
         Some((assets, resources))
+    }
+
+    /// A body at scale 0.1 with a permanent +0.4 on its step height, such as
+    /// a command or a datapack gives.
+    fn small_body(resources: &crate::motion::MotionResources) -> crate::motion::PlayerMotion {
+        use horizon_world::attributes::{Modifier, Operation};
+        let mut m = crate::motion::PlayerMotion::new(resources, horizon_core::geometry::Vec3::ZERO)
+            .expect("a body");
+        let key = m.attributes.key("minecraft:scale").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.set_base_value(0.1, o))
+            .unwrap();
+        let key = m.attributes.key("minecraft:step_height").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        let step = Modifier::new("test:step", 0.4, Operation::AddValue).unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.add_permanent(step, o))
+            .unwrap();
+        m
+    }
+
+    #[test]
+    fn a_new_body_takes_the_scale_of_the_old_one() {
+        // #3684: ServerPlayer.restoreFrom copies the base values to the body
+        // that follows a death (assignBaseValues) and, for the same player in
+        // another level, the permanent modifiers too (assignPermanentModifiers).
+        // The body Horizon made on a respawn or a level change started from
+        // the defaults: a player at /attribute scale 0.1 was 1.0 again.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let next = |g: &Guest| {
+            let mut m =
+                crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                    .expect("a body");
+            m.apply_saved_attributes(g.carried_attributes.as_ref())
+                .unwrap();
+            m
+        };
+        for (restore_all, step) in [(false, 0.6), (true, 1.0)] {
+            let mut g = guest();
+            g.motion = Some(Box::new(small_body(&resources)));
+            g.new_body(restore_all);
+            assert!(g.motion.is_none());
+            let mut m = next(&g);
+            assert_eq!(m.attribute("minecraft:scale").unwrap(), 0.1);
+            assert!((m.attribute("minecraft:step_height").unwrap() - step).abs() < 1e-9);
+            // The tick that follows rebuilds the box at that scale.
+            m.refresh_attributes().unwrap();
+            assert_eq!(m.dimensions.width, 0.6 * 0.1);
+            assert_eq!(m.dimensions.height, 1.8 * 0.1);
+        }
+        // No body before: nothing to hand over.
+        let mut g = guest();
+        g.new_body(true);
+        assert!(g.carried_attributes.is_none());
+    }
+
+    #[test]
+    fn a_player_between_two_bodies_saves_the_attributes_the_next_one_takes() {
+        // #3684: logging out after a respawn, before the new body has ticked,
+        // must not write the file's older list over the scale.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let mut g = guest();
+        g.motion = Some(Box::new(small_body(&resources)));
+        g.new_body(false);
+        let mut level = Level::default();
+        store(&g, &mut level, None);
+        let tag = level.player_tag();
+        let mut read = Level::default();
+        read.read_player(&tag);
+        read.player_extra = Some(tag);
+        let mut back =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .expect("a body");
+        back.apply_saved_attributes(read.player_extra.as_ref().and_then(|t| t.get("attributes")))
+            .unwrap();
+        assert_eq!(back.attribute("minecraft:scale").unwrap(), 0.1);
     }
 
     #[test]

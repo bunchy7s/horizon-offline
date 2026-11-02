@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_pickup_arrow",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_pickup_arrow",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player picked up an arrow (`native_player_pickup_arrow`).",
+  "doc_summary": "A server player picked up an arrow after it was removed and its pickup was applied: `native_player_pickup_arrow(player, name, entity_id, item)` gives the pickup item id. Bundles need \"hooks\": @API:player_pickup_arrow@."
+}

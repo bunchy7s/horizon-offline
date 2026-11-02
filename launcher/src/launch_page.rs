@@ -11,10 +11,21 @@ use horizon_launcher::launch;
 pub(super) struct LaunchPanel {
     /// The instance it is for: picking another closes it.
     instance: String,
-    /// What Save did, or why not.
-    saved: Option<Result<String, String>>,
+    /// What Save did: Ok with the summary of what runs (None when nothing runs), or Err with reason.
+    saved: Option<Result<Option<String>, String>>,
     /// What this computer has for the Linux switches, looked at when the panel opens.
     found: launch::Found,
+}
+
+/// What saving the memory slider did, kept to show under the slider in the active language.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum MemorySaved {
+    /// Saved to the instance: the limit in MB, or None for no limit.
+    Ok(Option<u32>),
+    /// What was typed was not a valid memory limit.
+    Invalid,
+    /// Saving failed on disk.
+    Error(String),
 }
 
 /// The memory row on Home. What it shows comes from the selected instance, except during a drag.
@@ -26,7 +37,7 @@ pub(super) struct MemorySlider {
     /// The value being dragged to; inside, none is no limit.
     dragging: Option<Option<u32>>,
     /// What the last change did, or why not.
-    saved: Option<Result<String, String>>,
+    saved: Option<MemorySaved>,
     /// The instance whose value is being typed: saved to it when the box loses the keyboard, even
     /// if that's because another instance was picked.
     typing: Option<String>,
@@ -94,12 +105,8 @@ impl Launcher {
             })
         });
         let saved = saved.map(|i| {
-            let said = match i.launch.summary() {
-                Some(what) => trf("Saved: the next Play {what}.", &[("what", &what)]),
-                None => tr("Saved: nothing runs around the game.").to_string(),
-            };
             self.reload_instances();
-            said
+            i.launch.summary()
         });
         if let Some(p) = &mut self.launch {
             p.saved = Some(saved);
@@ -119,10 +126,7 @@ impl Launcher {
             };
             *on = !*on;
         });
-        panel.saved = Some(saved.map(|i| match i.launch.summary() {
-            Some(what) => trf("Saved: the next Play {what}.", &[("what", &what)]),
-            None => tr("Saved: nothing runs around the game.").to_string(),
-        }));
+        panel.saved = Some(saved.map(|i| i.launch.summary()));
         self.reload_instances();
     }
 
@@ -167,13 +171,10 @@ impl Launcher {
             Some(java) => java.memory_mb = memory,
             None => m.launch.set_memory_limit(memory),
         });
-        self.memory_slider.saved = Some(saved.map(|_| match memory {
-            Some(mb) => trf(
-                "Saved: the next Play uses at most {mb} MB.",
-                &[("mb", &mb.to_string())],
-            ),
-            None => tr("Saved: no memory limit on the next Play.").to_string(),
-        }));
+        self.memory_slider.saved = Some(match saved {
+            Ok(_) => MemorySaved::Ok(memory),
+            Err(e) => MemorySaved::Error(e),
+        });
         self.reload_instances();
     }
 
@@ -189,10 +190,7 @@ impl Launcher {
     fn save_typed_memory(&mut self, id: &str) {
         let typed = self.servers.value(Field::MemoryLimit).to_owned();
         let Ok(memory) = launch::parse_memory(&typed) else {
-            self.memory_slider.saved = Some(Err(tr(
-                "Type a number of MB like 4096, or 4gb, or leave it empty for no limit.",
-            )
-            .to_string()));
+            self.memory_slider.saved = Some(MemorySaved::Invalid);
             return;
         };
         let same = instances::list()
@@ -310,9 +308,18 @@ impl Launcher {
                 MouseButton::Left,
                 cx.listener(|this, _: &MouseUpEvent, _, cx| this.finish_memory(cx)),
             );
-        let result = self.memory_slider.saved.clone().map(|s| match s {
-            Ok(said) => text(theme::CAPTION).text_color(t.muted).child(said),
-            Err(e) => text(theme::CAPTION).text_color(t.danger).child(e),
+        let result = self.memory_slider.saved.as_ref().map(|s| match s {
+            MemorySaved::Ok(Some(mb)) => text(theme::CAPTION).text_color(t.muted).child(trf(
+                "Saved: the next Play uses at most {mb} MB.",
+                &[("mb", &mb.to_string())],
+            )),
+            MemorySaved::Ok(None) => text(theme::CAPTION)
+                .text_color(t.muted)
+                .child(tr("Saved: no memory limit on the next Play.")),
+            MemorySaved::Invalid => text(theme::CAPTION).text_color(t.danger).child(tr(
+                "Type a number of MB like 4096, or 4gb, or leave it empty for no limit.",
+            )),
+            MemorySaved::Error(e) => text(theme::CAPTION).text_color(t.danger).child(e.clone()),
         });
         Some(
             blocks::panel(&t)
@@ -475,7 +482,12 @@ impl Launcher {
             },
         ));
         let result = saved.map(|s| match s {
-            Ok(said) => text(theme::CAPTION).text_color(t.muted).child(said),
+            Ok(Some(what)) => text(theme::CAPTION)
+                .text_color(t.muted)
+                .child(trf("Saved: the next Play {what}.", &[("what", &what)])),
+            Ok(None) => text(theme::CAPTION)
+                .text_color(t.muted)
+                .child(tr("Saved: nothing runs around the game.")),
             Err(e) => text(theme::CAPTION).text_color(t.danger).child(e),
         });
         Some(

@@ -30,6 +30,11 @@ Games:
                 (mods/horizon/src/neoforge-bench) + the jars of --mod-jars and
                 --deps, the user's own; 26.3 options it does not know are ignored
 
+Many-entity stress scenes (tools/stress_scenes.py: mobs, dropped items, item frames, armor stands,
+containers, signs, banners, particles), built by the same vanilla commands in every game and held still:
+
+    python3 tools/perf_bench.py --game horizon --scenes stress --distances 16 --label stress-horizon
+
 --port-work loads the mods a horizon-port-pack work folder carried over into
 Horizon as dev mods.
 
@@ -38,6 +43,8 @@ distance (docs/benchmark-report.md), over --repeats games. Games run with no
 audio, from a scratch directory under .local/perf-bench.
 """
 import argparse
+import contextlib
+import hashlib
 import bisect
 import datetime
 import json
@@ -53,14 +60,16 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
 try:
-    from . import lab, runtime
+    from . import lab, runtime, stress_scenes
 except ImportError:
     import lab
     import runtime
+    import stress_scenes
 
 ROOT = lab.ROOT
 WORK = ROOT / ".local/perf-bench"
@@ -317,8 +326,36 @@ def size_label(label, width, height):
 
 
 def scene_list(args):
+    """(name, from, to, pitch) of the scenes asked for: the flights, then the stress scenes ("stress" is all of them)."""
     picked = args.scenes.split(",") if args.scenes else [s[0] for s in SCENES]
-    return [s for s in SCENES if s[0] in picked]
+    if "stress" in picked:
+        picked += stress_scenes.NAMES
+    # --server-bots adds the crowd scene over the bots.
+    return ([s for s in SCENES if s[0] in picked] + list(getattr(args, "extra_scenes", None) or [])
+            + [stress_scenes.scene(n) for n in stress_scenes.NAMES if n in picked])
+
+
+# Seconds a stress scene settles after its setup: the server spawns, the client receives and draws it.
+STRESS_SETTLE = 6.0
+
+
+def first_stress(args):
+    """The first stress scene of the run, which sets the game rules for all of them."""
+    return next((s[0] for s in scene_list(args) if s[0] in stress_scenes.NAMES), None)
+
+
+def settle_seconds(args, name):
+    return max(args.settle, STRESS_SETTLE) if name in stress_scenes.NAMES else args.settle
+
+
+def scene_rss(sampler, windows):
+    """Median resident memory (MB) inside each named window: {name: MB}."""
+    out = {}
+    for name, (a, b) in windows.items():
+        during = [rss for t, rss in sampler.samples if a <= t <= b]
+        if during:
+            out[name] = statistics.median(during) / 2**20
+    return out
 
 
 def yaw(start, end):
@@ -451,6 +488,103 @@ def wait_loaded(control, near, limit, min_chunks=0):
     raise TimeoutError(f"not loaded after {limit} s")
 
 
+BENCH_PLAYER = "Bench"
+
+
+class LocalServer:
+    """--server: a local dedicated server every client of the run joins instead of creating a world. Seed SEED,
+    creative, offline, view distance = the run's render distance, BENCH_PLAYER an operator (the scenes use /tp
+    and /time). Its world stays in WORK/server-<kind>-rd<d> between runs; one that is new gets an unmeasured
+    warm-up join first, so every measured join reads terrain already generated: the clients are compared, not
+    the server's generation."""
+
+    def __init__(self, args, distance):
+        self.kind, self.dir = args.server, WORK / f"server-{args.server}-rd{distance}"
+        self.fresh = not (self.dir / "world").exists()
+        self.dir.mkdir(parents=True, exist_ok=True)
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            self.port = probe.getsockname()[1]
+        props = {"level-seed": SEED, "online-mode": "false", "server-ip": "127.0.0.1", "server-port": self.port,
+                 "view-distance": distance, "simulation-distance": 12, "gamemode": "creative",
+                 "force-gamemode": "true", "spawn-protection": 0, "allow-flight": "true", "max-players": 300,
+                 "white-list": "false", "level-name": "world"}
+        (self.dir / "server.properties").write_text("".join(f"{k}={v}\n" for k, v in props.items()))
+        (self.dir / "eula.txt").write_text("eula=true\n")
+        # UUIDUtil.createOfflinePlayerUUID: a name-based (version 3) UUID of "OfflinePlayer:<name>".
+        offline = uuid.UUID(bytes=hashlib.md5(f"OfflinePlayer:{BENCH_PLAYER}".encode()).digest(), version=3)
+        (self.dir / "ops.json").write_text(json.dumps(
+            [{"uuid": str(offline), "name": BENCH_PLAYER, "level": 4, "bypassesPlayerLimit": False}]))
+        if self.kind == "horizon":
+            binary = Path(args.server_build).resolve() / ("horizon-client.exe" if sys.platform == "win32" else "horizon-client")
+            self.command = [str(binary), "--resources", str(Path(args.resources).resolve()), "--dedicated", "--nogui"]
+        else:
+            java = Path(os.environ["JAVA_HOME"]) / "bin/java" if os.environ.get("JAVA_HOME") else "java"
+            self.command = [str(java), "-Xmx4G", "-jar", str(VANILLA / "jars/server.jar"), "nogui"]
+
+    @property
+    def address(self):
+        return f"127.0.0.1:{self.port}"
+
+    def __enter__(self):
+        self.log_path = self.dir / "server.log"
+        self.log = self.log_path.open("w")
+        env = lab.game_env(HORIZON_TELEMETRY_URL="off") if self.kind == "horizon" else None
+        self.proc = subprocess.Popen(self.command, cwd=self.dir, env=env, stdin=subprocess.PIPE, text=True,
+                                     stdout=self.log, stderr=subprocess.STDOUT)
+        deadline = time.time() + 600
+        while "Done (" not in self.log_path.read_text(errors="replace"):
+            if self.proc.poll() is not None or time.time() > deadline:
+                self.__exit__()
+                raise RuntimeError(f"the {self.kind} server did not start; see {self.log_path}")
+            time.sleep(0.5)
+        return self
+
+    def crowd(self, args):
+        """--server-bots: horizon-bots walking around the spawn for the whole run (they need a few seconds to join
+        and settle), and the scene that flies over them: (name, from, to, pitch)."""
+        binary = Path(args.bots_build or args.build).resolve() / ("horizon-bots.exe" if sys.platform == "win32" else "horizon-bots")
+        self.bots = subprocess.Popen([str(binary), "--server", self.address, "--bots", str(args.server_bots),
+                                      "--behaviour", "walk", "--view-distance", "10", "--join-every", "0.1",
+                                      "--seconds", "100000", "--seed", str(SEED)],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        deadline = time.time() + 120
+        for line in self.bots.stdout:
+            if '"spawn"' in line:
+                sx, sy, sz = json.loads(line)["spawn"]
+                break
+            if time.time() > deadline:
+                raise RuntimeError("horizon-bots: no spawn position")
+        else:
+            raise RuntimeError("horizon-bots ended before a bot spawned")
+        threading.Thread(target=self.bots.stdout.read, daemon=True).start()
+        time.sleep(args.server_bots * 0.1 + 10)
+        # Bots fly 24 blocks above the spawn, 8 to 48 blocks out (horizon-bots' walk).
+        return ("crowd", (sx - 32.0, sy + 40.0, sz), (sx + 32.0, sy + 40.0, sz), 50.0)
+
+    def __exit__(self, *_):
+        if getattr(self, "bots", None):
+            stop(self.bots)
+        try:
+            self.proc.stdin.write("stop\n")
+            self.proc.stdin.flush()
+            self.proc.wait(timeout=120)
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pass
+        stop(self.proc)
+        self.log.close()
+
+
+def scene_commands(args, control, start, pitch):
+    """Time and teleport for a scene: the game's own commands, or the server's when it joined one."""
+    if args.server:
+        control("command time set 6000")
+        control("command tp @s {} {} {} 0 {}".format(*start, pitch))
+    else:
+        control("time 6000")
+        control("tp {} {} {}".format(*start))
+
+
 def run_horizon(args, distance):
     game_dir = WORK / "horizon"
     shutil.rmtree(game_dir, ignore_errors=True)
@@ -490,17 +624,23 @@ def run_horizon(args, distance):
     sampler.start()
     control = Control(sock)
     result = {"options_txt": options, "scenes": {}}
-    windows = []
+    windows, scene_windows = [], {}
     try:
         title, at = poll(control, lambda s: s.get("screen") == "title" and s.get("renderer"), 300)
         result["renderer"] = title["renderer"]
         result["startup"] = {"title_s": at - started}
-        control(f"open {WORLD} {SEED} creative")
-        result["startup"]["world_s"] = wait_loaded(control, lambda p: True, args.timeout, view_chunks(distance)) - started
+        if args.server:
+            joined = time.time()
+            control(f"connect {args.server_address} {BENCH_PLAYER}")
+        else:
+            control(f"open {WORLD} {SEED} creative")
+        loaded = wait_loaded(control, lambda p: True, args.timeout, view_chunks(distance))
+        result["startup"]["world_s"] = loaded - started
+        if args.server:
+            result["startup"]["join_s"] = loaded - joined
         for name, start, end, pitch in scene_list(args):
-            control("time 6000")
             meshed = control("status")["meshed_sections"]
-            control("tp {} {} {}".format(*start))
+            scene_commands(args, control, start, pitch)
             tp = time.time()
             # A zero-length flight holds the player at the start, flying.
             control("fly {0} {1} {2} {0} {1} {2} 0.1 {3}".format(*start, pitch))
@@ -510,13 +650,27 @@ def run_horizon(args, distance):
             # Section meshes built while loading and while flying (Horizon only).
             loaded_meshes = control("status")["meshed_sections"]
             scene["meshes_load"] = loaded_meshes - meshed
-            time.sleep(args.settle)
-            loaded_meshes = control("status")["meshed_sections"]
+            if name in stress_scenes.NAMES:
+                for line in stress_scenes.setup(name, first=name == first_stress(args)):
+                    control("command " + line)
+            time.sleep(settle_seconds(args, name))
+            before = control("status")
+            loaded_meshes = before["meshed_sections"]
             begin = time.time()
             summary = control("fly {} {} {} {} {} {} {} {} raw".format(*start, *end, args.seconds, pitch))
             windows.append((begin, time.time()))
+            scene_windows[name] = windows[-1]
             scene.update({k: summary.get(k) or [] for k in ("frame_ms", "cpu_ms", "gpu_ms")})
             status = control("status")
+            # The client's own ticks: the frames' tick phase over the ticks the flight ran.
+            ticks = status.get("ticks", 0) - before.get("ticks", 0)
+            tick_phase = (summary.get("phases_avg_ms") or {}).get("tick")
+            if ticks > 0 and tick_phase is not None:
+                scene["client_tick_ms"] = tick_phase * summary.get("frames", 0) / ticks
+            scene["entities"] = {"mobs": status.get("mobs"), "block_entities": status.get("block_entities")}
+            if name in stress_scenes.NAMES:
+                for line in stress_scenes.cleanup(name):
+                    control("command " + line)
             scene["meshes_flight"] = status["meshed_sections"] - loaded_meshes
             renderer = status.get("renderer") or {}
             scene["gpu_mb"] = nvidia_memory_mb(proc.pid) or (renderer.get("gpu_allocated_bytes") or 0) / 2**20 or None
@@ -531,6 +685,8 @@ def run_horizon(args, distance):
         sampler.stop.set()
         sock.unlink(missing_ok=True)
     result["memory"] = sampler.summary(windows)
+    for name, mb in scene_rss(sampler, scene_windows).items():
+        result["scenes"][name]["rss_mb"] = mb
     args.release = release_version(WORK / f"horizon-rd{distance}.log")
     return result
 
@@ -649,7 +805,8 @@ def run_vanilla(args, distance):
     script = WORK / "script.json"
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
-        "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        "scenes": driver_scenes(args),
+        **({"server": args.server_address} if args.server else {}),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -664,7 +821,7 @@ def run_vanilla(args, distance):
                "-Dfabric.log.disableAnsi=true",
                "-cp", os.pathsep.join(map(str, game_jars + fabric)),
                "net.fabricmc.loader.impl.launch.knot.KnotClient",
-               "--username", "Bench", "--uuid", "00000000000000000000000000000000", "--accessToken", "0",
+               "--username", BENCH_PLAYER, "--uuid", "00000000000000000000000000000000", "--accessToken", "0",
                "--offlineDeveloperMode", "--version", lab.VERSION, "--gameDir", str(game_dir),
                "--assetsDir", str(assets), "--assetIndex", manifest["assetIndex"]["id"],
                "--width", str(args.width), "--height", str(args.height)]
@@ -674,6 +831,18 @@ def run_vanilla(args, distance):
         env["LD_LIBRARY_PATH"] = ":".join(libs + [env.get("LD_LIBRARY_PATH", "")]).strip(":")
     log = (WORK / f"{args.game}-rd{distance}.log").open("w")
     return driven(args, distance, command, game_dir, env, log, events, options, loaded_mods)
+
+
+def driver_scenes(args):
+    """The scenes as the driver mods read them: stress scenes carry their setup commands and settle time."""
+    out = []
+    for n, a, b, p in scene_list(args):
+        scene = {"name": n, "from": a, "to": b, "pitch": p, "settle": settle_seconds(args, n)}
+        if n in stress_scenes.NAMES:
+            scene["setup"] = stress_scenes.setup(n, first=n == first_stress(args))
+            scene["cleanup"] = stress_scenes.cleanup(n)
+        out.append(scene)
+    return out
 
 
 def driven(args, distance, command, game_dir, env, log, events, options, loaded_mods):
@@ -702,20 +871,29 @@ def driven(args, distance, command, game_dir, env, log, events, options, loaded_
         "renderer": {k: title[k] for k in ("gpu", "vendor", "backend", "driver", "size",
                                            "render_distance", "simulation_distance")},
         "startup": {"title_s": title["epoch_ms"] / 1000 - started,
-                    "world_s": world["ready_epoch_ms"] / 1000 - started},
+                    "world_s": world["ready_epoch_ms"] / 1000 - started,
+                    # --server: the driver connects as soon as the title screen shows.
+                    **({"join_s": (world["ready_epoch_ms"] - title["epoch_ms"]) / 1000} if args.server else {})},
         "scenes": {},
     }
-    windows = []
+    windows, scene_windows = [], {}
     loaded = {e["scene"]: e for e in by("loaded")}
     flights = {e["scene"]: e for e in by("fly")}
     for flown in by("flown"):
         name = flown["scene"]
         windows.append((flights[name]["epoch_ms"] / 1000, flown["epoch_ms"] / 1000))
+        scene_windows[name] = windows[-1]
         scene = {"load_s": loaded[name]["load_ms"] / 1000, "frame_ms": flown["frame_ms"],
                  "chunks": flown["chunks"], "gpu_mb": nvidia}
+        if flown.get("tick_ms"):
+            scene["client_tick_ms"] = statistics.mean(flown["tick_ms"])
+        if "entities" in flown:
+            scene["entities"] = flown["entities"]
         result["scenes"][name] = scene
         print_scene(args.game, distance, name, scene)
     result["memory"] = sampler.summary(windows)
+    for name, mb in scene_rss(sampler, scene_windows).items():
+        result["scenes"][name]["rss_mb"] = mb
     return result
 
 
@@ -742,7 +920,8 @@ def run_neoforge(args, distance):
     script = WORK / "script.json"
     script.write_text(json.dumps({
         "world": WORLD, "seed": SEED, "settle": args.settle, "seconds": args.seconds, "timeout": args.timeout,
-        "scenes": [{"name": n, "from": a, "to": b, "pitch": p} for n, a, b, p in scene_list(args)],
+        "scenes": driver_scenes(args),
+        **({"server": args.server_address} if args.server else {}),
     }))
     events = WORK / f"{args.game}-rd{distance}.events.jsonl"
     events.unlink(missing_ok=True)
@@ -856,6 +1035,8 @@ def report(args, distance, runs, app):
     conditions = {"scenario": "perf_bench:" + ",".join(first["scenes"]), "seed": str(SEED),
                   "render_distance": distance, "simulation_distance": 12, "vsync": False,
                   "offscreen": bool(args.offscreen), "repeats": len(runs), "warmup_s": args.settle}
+    if getattr(args, "server", None):
+        conditions["server"] = args.server
     if first["load_before"] is not None:
         conditions["load_avg_1m"] = rnd(first["load_before"])
     if size:
@@ -868,6 +1049,7 @@ def report(args, distance, runs, app):
 
     metric("startup.title_ms", [r["startup"]["title_s"] * 1000 for r in runs])
     metric("startup.world_ms", [r["startup"]["world_s"] * 1000 for r in runs])
+    metric("startup.join_ms", [r["startup"]["join_s"] * 1000 for r in runs if "join_s" in r["startup"]])
     for name in first["scenes"]:
         scenes = [r["scenes"][name] for r in runs if name in r["scenes"]]
         flights = [frames(name, i, s["frame_ms"], s.get("cpu_ms", ()), s.get("gpu_ms", ())) for i, s in enumerate(scenes)]
@@ -877,6 +1059,9 @@ def report(args, distance, runs, app):
         for key in ("avg_fps", "low_1pct_fps", "low_01pct_fps"):
             metric(f"fps.{name}.{key}", [f[key] for f in flights if f])
         metric(f"memory.{name}.gpu_mb", [s.get("gpu_mb") for s in scenes])
+        metric(f"memory.{name}.rss_mb", [s.get("rss_mb") for s in scenes])
+        metric(f"tick.{name}.client_ms", [s.get("client_tick_ms") for s in scenes])
+        metric(f"cpu.{name}.p50_ms", [f.get("cpu_p50_ms") for f in flights if f])
     metric("memory.rss_peak_mb", [r["memory"].get("rss_peak_mb") for r in runs])
     metric("memory.rss_steady_mb", [r["memory"].get("rss_steady_mb") for r in runs])
     metric("memory.footprint_peak_mb", [r["memory"].get("footprint_peak_mb") for r in runs])
@@ -923,6 +1108,22 @@ def table(labels):
                 cells.append(" / ".join(cell(m.get(f"fps.{scene}.{k}")) for k in ("avg_fps", "low_1pct_fps", "low_01pct_fps")))
             print(f"| {d} | {scene} | " + " | ".join(cells) + " |")
     print()
+    # Per-scene costs where any run recorded them (stress scenes): frame CPU, client tick, resident memory.
+    per_scene = ("cpu.{}.p50_ms", "tick.{}.client_ms", "memory.{}.rss_mb")
+    rows = [(d, scene) for d in distances
+            for scene in sorted({k.split(".")[1] for by in runs.values() if d in by for k in by[d]["metrics"]
+                                 if k.split(".")[0] in ("cpu", "tick") or (k.startswith("memory.") and k.endswith(".rss_mb"))})]
+    if rows:
+        print("| RD | scene | " + " | ".join(f"{l}: frame CPU p50 ms / client tick ms / RSS MB" for l in labels) + " |")
+        print("| --- | --- |" + " --- |" * len(labels))
+        for d, scene in rows:
+            cells = []
+            for l in labels:
+                m = runs.get(l, {}).get(d, {}).get("metrics", {})
+                cells.append(" / ".join(cell(m.get(k.format(scene)), 0 if k.startswith("memory") else 2)
+                                        for k in per_scene))
+            print(f"| {d} | {scene} | " + " | ".join(cells) + " |")
+        print()
     print("| RD | " + " | ".join(f"{l}: title / world s, mean scene load s, RSS steady / peak MB, footprint steady / peak MB, load avg" for l in labels) + " |")
     print("| --- |" + " --- |" * len(labels))
     for d in distances:
@@ -967,6 +1168,13 @@ def main():
                    help="horizon: measure a later start, after one start to the title screen built the caches")
     p.add_argument("--mod-jars", help="neoforge: the mod jars to load (the user's own; never committed)")
     p.add_argument("--deps", help="neoforge: their required libraries")
+    p.add_argument("--server", choices=["horizon", "vanilla"],
+                   help="join a local dedicated server (Horizon's, or your own 26.3 server.jar) instead of creating "
+                        "a world: startup.join_ms is connect to loaded")
+    p.add_argument("--server-build", help="--server horizon: the server's binary folder (default --build)")
+    p.add_argument("--server-bots", type=int, default=0,
+                   help="--server: this many horizon-bots walk around the spawn, and a 'crowd' scene flies over them")
+    p.add_argument("--bots-build", help="--server-bots: horizon-bots' folder (default --build)")
     p.add_argument("--table", nargs="+", metavar="LABEL", help="compare saved runs with matching recorded conditions, and exit")
     args = p.parse_args()
     if args.table:
@@ -983,11 +1191,20 @@ def main():
         args.label = size_label(label, args.width, args.height)
         for d in [int(x) for x in args.distances.split(",")]:
             runs = []
-            for _ in range(args.repeats):
-                load_before = load_average()
-                result = run(args, d)
-                result["load_before"], result["load_after"] = load_before, load_average()
-                runs.append(result)
+            with contextlib.ExitStack() as stack:
+                if args.server:
+                    args.server_build = args.server_build or args.build
+                    server = stack.enter_context(LocalServer(args, d))
+                    args.server_address = server.address
+                    args.extra_scenes = [server.crowd(args)] if args.server_bots else []
+                    if server.fresh:
+                        print(f"warm-up join of the new {args.server} server world (not measured)")
+                        run(args, d)
+                for _ in range(args.repeats):
+                    load_before = load_average()
+                    result = run(args, d)
+                    result["load_before"], result["load_after"] = load_before, load_average()
+                    runs.append(result)
             out = ROOT / "benchmarks/perf" / f"{args.label}-rd{d}.json"
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps(report(args, d, runs, app(args)), indent=1) + "\n")

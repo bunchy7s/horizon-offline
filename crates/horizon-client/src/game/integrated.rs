@@ -32,11 +32,18 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicI32, AtomicU16, AtomicU32, Ordering},
-        mpsc::{Receiver, Sender, channel, sync_channel},
+        mpsc::{Receiver, RecvTimeoutError, Sender, channel, sync_channel},
     },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+
+/// How long the window waits for the server thread to answer a `call`.
+const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// The error of a `call` without an answer: the server stopped, or it was
+/// busy past `CALL_TIMEOUT` (the log says which).
+pub(super) const NO_ANSWER: &str =
+    "the integrated server stopped or did not answer within 10 s (the game log says which)";
 
 /// `LevelLoadProgressTracker.EXPECTED_PLAYER_CHUNKS`: the 7x7 chunks around the spawn.
 const PLAYER_CHUNKS: usize = 49;
@@ -177,7 +184,9 @@ impl Integrated {
         Some(self.flags.published.load(Ordering::Relaxed)).filter(|&p| p != 0)
     }
     /// `executeBlocking`: run `f` on the server thread between two ticks and
-    /// wait for its answer; `None` once the server has stopped.
+    /// wait for its answer; `None` once the server has stopped, or when it has
+    /// not answered within `CALL_TIMEOUT` (`f` still runs there later). The log
+    /// tells the two apart.
     pub fn call<T: Send + 'static>(
         &self,
         f: impl FnOnce(&mut Game<'_>) -> T + Send + 'static,
@@ -188,7 +197,21 @@ impl Integrated {
                 let _ = tx.send(f(g));
             }))
             .ok()?;
-        rx.recv_timeout(Duration::from_secs(10)).ok()
+        match rx.recv_timeout(CALL_TIMEOUT) {
+            Ok(answer) => Some(answer),
+            Err(RecvTimeoutError::Timeout) => {
+                log::warn!(
+                    "Horizon: the server thread did not answer within {} s (running: {}, \
+                     autosaving: {}, smoothed tick {:.1} ms)",
+                    CALL_TIMEOUT.as_secs(),
+                    !self.stopped(),
+                    self.is_saving(),
+                    self.smoothed_tick_ms()
+                );
+                None
+            }
+            Err(RecvTimeoutError::Disconnected) => None,
+        }
     }
     /// `IntegratedServer.halt(true)`: returns once the world is saved and let go.
     pub fn stop(mut self) -> Result<()> {
@@ -692,12 +715,12 @@ impl Game<'_> {
         self.finish_open_world(opening.world?.finish()?)?;
         drop(open_step);
         if let Some(sync) = opening.sync {
-            sync.adopt(&self.pack_files());
+            startup::time("server.sync_adopt", || sync.adopt(&self.pack_files()));
         }
         let saved = Box::new(self.level.clone());
         // IntegratedServer runs the server mods; the window the client mods.
         self.mods.dev = self.options.dev_mods.clone();
-        self.start_mods();
+        startup::time("server.start_mods", || self.start_mods());
         // Math.max(2, options.renderDistance): past vanilla's 32 when the
         // window's render distance is (Horizon's options go to 64).
         let view_distance = self.settings.render_distance.max(2);

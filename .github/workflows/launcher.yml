@@ -15,6 +15,8 @@ name: launcher
 # under Rosetta 2 (#1161). With the repository variable MACOS_SIGN_IDENTITY set, Horizon.app and the .dmg are signed with
 # Developer ID, notarized and stapled, from the runner's signing keychain (packaging/macos/README.md);
 # unset (forks), they are signed ad hoc.
+# Windows ships the launcher's own binary twice: in the ZIP (what a launcher updates itself from) and as
+# horizon-launcher-setup.exe, which opens the per-user installer instead of Home (launcher/src/installer.rs).
 #   gh workflow run launcher --ref <branch>                    # dry run: builds everything, publishes nothing
 #   gh workflow run launcher --ref main -f dry_run=false -f force=true
 
@@ -26,6 +28,7 @@ on:
       - 'launcher/**'
       - 'crates/horizon-bench/**'
       - 'crates/horizon-friends/**'
+      - 'crates/horizon-mcp/**'
       - 'crates/horizon-mods/**'
       - 'crates/horizon-port-pack/**'
       - 'crates/horizon-prepare/**'
@@ -174,7 +177,7 @@ jobs:
         run: |
           if ! xcrun metal --version > /dev/null 2>&1; then
             echo "::notice::No Metal toolchain on this runner: GPUI compiles its shaders at run time"
-            echo "LAUNCHER_FEATURES=gpui/runtime_shaders" >> "$GITHUB_ENV"
+            echo "LAUNCHER_FEATURES=gpui_platform/runtime_shaders" >> "$GITHUB_ENV"
           fi
       # Every test target (the library, the binary, tests/), on each system the launcher ships for.
       - run: cargo test --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
@@ -240,6 +243,18 @@ jobs:
           # The client starts: --help prints before any window or GPU is needed.
           help() { "$client" --help > "$RUNNER_TEMP/help.txt" 2>&1 && head -3 "$RUNNER_TEMP/help.txt" && grep -q -- '--resources' "$RUNNER_TEMP/help.txt"; }
           soft help
+          # The per-user Windows setup: the same binary under the setup's name installs into a scratch
+          # folder, and the copy it installs uninstalls itself. HKCU of the runner only.
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            setup="$RUNNER_TEMP/setup-smoke"
+            cp "$launcher" "$RUNNER_TEMP/horizon-launcher-setup.exe"
+            "$RUNNER_TEMP/horizon-launcher-setup.exe" setup --quiet --dir "$setup"
+            installed="$setup/Horizon Launcher/horizon-launcher.exe"
+            [[ -f "$installed" ]] || { echo "::error::the setup copied no launcher"; exit 1; }
+            "$installed" uninstall --quiet
+            [[ ! -f "$installed" ]] || { echo "::error::uninstall left the launcher"; exit 1; }
+            rm -rf "$setup"
+          fi
           rm -rf "$HORIZON_LAUNCHER_HOME"
       - name: The signing keychain, unlocked
         if: runner.os == 'macOS' && vars.MACOS_SIGN_IDENTITY != ''
@@ -275,6 +290,12 @@ jobs:
             fi
           fi
           ls -l out
+      - name: Setup exe (Windows)
+        # The launcher's binary under another name: started with no arguments it shows the per-user
+        # installer instead of Home (launcher/src/installer.rs). Its name is what makes it the setup,
+        # so the ZIP's copy stays the launcher. Both go into the release's signed SHA256SUMS.
+        if: runner.os == 'Windows'
+        run: cp "$BIN/${{ matrix.binary }}" out/horizon-launcher-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}

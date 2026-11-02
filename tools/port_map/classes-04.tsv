@@ -151,19 +151,19 @@ PotDecorations.addSideDetailsToTooltip	port	crates/horizon-client/src/item_toolt
 PotDecorations.allBrick	skip:data		constant brick decoration set
 PotentSulfurBlockEntity.applyNauseaEffect	port	crates/horizon-client/src/game/potent_sulfur.rs::apply_nausea_effect_to_mob	ticked in #3516; `PotentSulfurBlockEntity.applyNauseaEffect` is cited at crates/horizon-client/src/game/potent_sulfur.rs:86
 PotentSulfurBlockEntity.canBeReachedByNoxiousGas	port	crates/horizon-client-render/src/potent_sulfur.rs::can_be_reached_by_noxious_gas	ticked in #3516; `PotentSulfurBlockEntity.canBeReachedByNoxiousGas` is cited at crates/horizon-client-render/src/potent_sulfur.rs:73
-PotentSulfurBlockEntity.findNoxiousGasSourceBlock	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.getNearbyLivingEntities	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.getUnobstructedBlockCount	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.findNoxiousGasSourceBlock	port	crates/horizon-client-render/src/potent_sulfur.rs::find_noxious_gas_source_block	the first block above the sulfur that the gas can leave through, capped at the geyser's reach
+PotentSulfurBlockEntity.getNearbyLivingEntities	inline	crates/horizon-client/src/game/potent_sulfur.rs::nearby_living_area	the source block's box grown 2.5 blocks sideways, which the nausea and launch tickers ask for entities in
+PotentSulfurBlockEntity.getUnobstructedBlockCount	port	crates/horizon-client-render/src/potent_sulfur.rs::unobstructed_block_count	how many blocks of the column above the source the gas is unobstructed through
 PotentSulfurBlockEntity.geyserPositional	port	crates/horizon-client/src/game/potent_sulfur.rs::geyser_positional	ticked in #3516; `PotentSulfurBlockEntity.geyserPositional` is cited at crates/horizon-client/src/game/potent_sulfur.rs:55
-PotentSulfurBlockEntity.haveLineOfSight	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.isGeyserPassableBlock	missing		minor: helper of the geyser, not ported
-PotentSulfurBlockEntity.loadAdditional	missing		minor: the eruption timer is not loaded; Horizon keeps only the countdown in NBT
-PotentSulfurBlockEntity.setLevel	missing		minor: the eruption timer is not started on load
+PotentSulfurBlockEntity.haveLineOfSight	port	crates/horizon-client-render/src/potent_sulfur.rs::have_line_of_sight	a clip over the collider shapes between the two points, water and passable blocks let through
+PotentSulfurBlockEntity.isGeyserPassableBlock	port	crates/horizon-client-render/src/potent_sulfur.rs::is_geyser_passable_block	air, water, or a block the gas passes through
+PotentSulfurBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	the countdown is read back, the only field vanilla's tag carries (eruptionTick is transient, and saveAdditional writes countdown alone)
+PotentSulfurBlockEntity.setLevel	inline	crates/horizon-client/src/game/potent_sulfur.rs::client_tick_potent_sulfur	the eruption tick is set to the level's game time while it is still -1, as setLevel does when the entity learns its level
 PotentSulfurBlockEntity.spawnGeyserParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_geyser_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnGeyserParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:380
 PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_noxious_gas_cloud_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:395
-RandomizableContainerBlockEntity.applyImplicitComponents	missing		minor: a chest item does not hand its loot table back to the block
+RandomizableContainerBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	the item's minecraft:container_loot hands the block its LootTable and LootTableSeed
 RandomizableContainerBlockEntity.canOpen	missing		unsure: minor: the spectator and loot-table open checks were not found
-RandomizableContainerBlockEntity.collectImplicitComponents	missing		minor: a container does not save its loot table onto the item it drops
+RandomizableContainerBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	the block's LootTable and LootTableSeed leave on the item as minecraft:container_loot
 RandomizableContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	gap: minor: the spectator and loot-table checks are not ported here
 SculkSensorBlockEntity.loadAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::load	
 SculkSensorBlockEntity.saveAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::to_nbt	
