@@ -2130,6 +2130,64 @@ renderer list is installed once alongside the mod list. `render_needs` collects 
 run on the render thread while the frame is built, before any deferred GPU submission.
 The renderer module re-exports the game's wgpu types.
 
+### The typed API from mixin code
+
+A helper is compiled inside its target, as a [Sponge Mixin](https://github.com/SpongePowered/Mixin/wiki) handler is merged
+into its target class, so it can use the typed API. On a `Game` method, bind the game and coerce it to `dyn Host`:
+
+```toml
+[[injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick_mobs"
+kind = "HEAD"
+helper = "count.rs"
+bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" }]
+```
+
+```rust
+let host: &mut dyn horizon_client::mod_api::Host = game;
+let old = crate::game::example::COUNTER.get(host, Holder::Level)?;
+crate::game::example::COUNTER.set(host, Holder::Level, old + 1)?;
+```
+
+`COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in the bundle's `[[module]]`
+and named by its full path (`crate::game::<module>::COUNTER`). `Game` is not an `AttachmentHost` itself, so the `dyn Host`
+coercion is the step that matters; any `Host` helper works on `host` too.
+
+On a `GameLevel` method that takes `&mut self` (`random_tick`, `tick_block`, `perform_bonemeal`, `is_bonemeal_success`),
+bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }` for attachments and
+`random()`. Scheduling and whole-level writes come only through the hook points' `LevelWriteHost`.
+
+A trait injection gives the mod's `[api]` crate the same `Host` at that method:
+
+```toml
+[[injection]]
+id = "count"
+target = "horizon_client::game::Game<'_>::tick_mobs"
+kind = "HEAD"
+trait_method = "count"
+bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut *self" }]
+```
+
+```rust
+fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
+    let _ = crate::game::example::COUNTER.get(&mut *event.host, Holder::Level);
+}
+```
+
+The target must be one horizon-mixins accepts: no macro sites in the body (its README lists the limits). `hook` and
+`hook_version` work in place of `target`.
+
+The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
+as they do in hooks.
+
+A catalog hook's trait method, event and return are part of its `hook_version` contract ([Named hook
+points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
+(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So an `[api]` package that uses only catalog
+hooks (trait methods, or injections by `hook`) and `Host` can declare `"hooks"`, the `NATIVE_HOOKS_API` it was made on.
+A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
+leaves `hooks` out.
+
 ### Adding a hook
 
 A new hook needs its fragment in `tools/native-hook-fragments/` with its `mod_api` entry (for example
@@ -2169,7 +2227,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     }),
     copy_on_death: false,
 };
-// Inside a server hook with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code ([the typed API from mixin code](#the-typed-api-from-mixin-code)), with `host: &mut dyn Host`:
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
