@@ -880,10 +880,33 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
     let mut host_traits = String::new();
     let mut host_impl = String::new();
     let mut names = HashSet::new();
-    for helper in catalog["helpers"]
+    let mut helpers = catalog["helpers"]
         .as_array()
         .ok_or("catalog helpers must be an array")?
+        .clone();
+    let mut fragments = fs::read_dir(root.join("tools/native-hook-fragments"))
+        .map_err(|e| e.to_string())?
+        .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    fragments.sort();
+    for path in fragments
+        .into_iter()
+        .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
     {
+        let fragment: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("{}: {e}", path.display()))?;
+        if let Some(pending) = fragment.get("helpers") {
+            helpers.extend(
+                pending
+                    .as_array()
+                    .ok_or("fragment helpers must be an array")?
+                    .iter()
+                    .cloned(),
+            );
+        }
+    }
+    for helper in &helpers {
         let name = helper["name"].as_str().ok_or("helper name missing")?;
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
@@ -1613,7 +1636,9 @@ mod tests {
         );
         std::fs::write(&fragment, shipped_fragment).unwrap();
         super::generate(&root, false).unwrap();
-        assert_eq!(std::fs::read_to_string(&hooks).unwrap(), shipped);
+        // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
+        let lf = |s: &str| s.replace("\r\n", "\n");
+        assert_eq!(lf(&std::fs::read_to_string(&hooks).unwrap()), lf(&shipped));
         for generated in [
             "crates/horizon-client/src/mod_api/generated.rs",
             "crates/horizon-client-render/src/gfx/native_render/generated.rs",

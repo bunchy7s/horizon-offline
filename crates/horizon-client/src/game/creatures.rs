@@ -3504,6 +3504,7 @@ impl Game<'_> {
         let mut deflections: Vec<[f64; 3]> = Vec::new();
         let mut arrow_events = Vec::new();
         let mut trails = Vec::new();
+        let mut bubble_tops = Vec::new();
         let mut keep_flags = vec![true; projectiles.len()];
         // The impacts the mods may cancel (`native_projectile_impact`), on a server.
         let hear = self.native_hears_impacts();
@@ -3626,7 +3627,7 @@ impl Game<'_> {
                 // ThrownEnderpearl.onAboveBubbleColumn / onInsideBubbleColumn.
                 if keep && hit == Hit::None && matches!(p.kind, ProjectileKind::EnderPearl) {
                     let (at, h) = (p.position, 0.125);
-                    horizon_client::motion::bubble_column_push(
+                    horizon_client::motion::bubble_column_push_over(
                         w.world,
                         w.registry,
                         w.facts,
@@ -3636,6 +3637,7 @@ impl Game<'_> {
                             Vec3::new(at.x + h, at.y + 2.0 * h, at.z + h),
                         ),
                         &mut p.velocity,
+                        |pos| bubble_tops.push(pos),
                     );
                 }
                 let events_from = arrow_events.len();
@@ -3719,6 +3721,9 @@ impl Game<'_> {
             );
         }
         self.smoke_trails(trails);
+        for pos in bubble_tops {
+            self.bubble_column_particles(pos);
+        }
         for at in deflections {
             self.audio
                 .play("minecraft:entity.breeze.deflect", Some(at), 1.0, 1.0);
@@ -4519,7 +4524,32 @@ impl Game<'_> {
                 {
                     m.damage_projectile(0.0, source, aim, [p.velocity.x, p.velocity.z]);
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() {
+                // To where the pearl started its last tick (oldPosition).
+                let mut to = p.previous;
+                let mut damage = 5.0;
+                let mut cancel = false;
+                // EntityTeleportEvent.EnderPearl: a server player's pearl.
+                if p.owner == Some(Who::Player)
+                    && let Some(from) = self.player.as_ref().map(|pl| pl.position)
+                    && let (Some(uuid), Some(name)) =
+                        (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut target = [to.x, to.y, to.z];
+                    self.native_ender_pearl_teleport(
+                        uuid,
+                        &name,
+                        p.id,
+                        [from.x, from.y, from.z],
+                        &mut target,
+                        &mut damage,
+                        &mut cancel,
+                    );
+                    // A target that is not a number keeps the pearl's.
+                    if target.iter().all(|v| v.is_finite()) {
+                        to = Vec3::new(target[0], target[1], target[2]);
+                    }
+                }
+                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
@@ -4530,8 +4560,6 @@ impl Game<'_> {
                         let from = pl.position;
                         self.spawn_mob("minecraft:endermite", [from.x, from.y, from.z], false);
                     }
-                    // To where the pearl started its last tick (oldPosition).
-                    let to = p.previous;
                     if let Some(pl) = self.player.as_mut() {
                         pl.position = to;
                         pl.velocity = Vec3::ZERO;
@@ -4539,7 +4567,9 @@ impl Game<'_> {
                         pl.teleported = true;
                     }
                     self.previous_position = to;
-                    self.hurt_player_by("minecraft:ender_pearl", 5.0);
+                    if damage > 0.0 {
+                        self.hurt_player_by("minecraft:ender_pearl", damage);
+                    }
                     self.audio.play(
                         "minecraft:entity.player.teleport",
                         Some([to.x, to.y, to.z]),
@@ -7147,6 +7177,8 @@ mod pearl_tests {
     /// box (#3072), not the block at its feet.
     #[test]
     fn a_pearl_feels_the_water_its_box_touches() {
+        // The throwable air drag is the float 0.99 widened to a double.
+        let air = f64::from(0.99f32);
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
             .join(horizon_core::VANILLA_VERSION);
@@ -7234,7 +7266,7 @@ mod pearl_tests {
         assert!(p.position.y > 4.9, "the pearl dipped: {p:?}");
         p.tick(&pw);
         assert!(
-            (p.velocity.x - 0.3 * 0.99 * 0.99).abs() < 1e-9,
+            (p.velocity.x - 0.3 * air * air).abs() < 1e-9,
             "a pearl above the surface slowed as in water: {p:?}"
         );
         // At the pool's edge: its feet over the dry block at x = 19, a side
@@ -7243,12 +7275,12 @@ mod pearl_tests {
         let mut p = pearl(19.95, 4.3, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "a pearl whose box is in the water kept the air drag: {p:?}"
         );
         // Thrown under water, a pearl moves with the air drag on its first
@@ -7256,12 +7288,12 @@ mod pearl_tests {
         let mut p = pearl(30.5, 4.2, Vec3::ZERO);
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air)).abs() < 1e-9,
             "the first tick under water has the air drag: {p:?}"
         );
         p.tick(&pw);
         assert!(
-            (p.velocity.y - (-0.03 * 0.99 - 0.03) * 0.8).abs() < 1e-9,
+            (p.velocity.y - (-0.03 * air - 0.03) * 0.8).abs() < 1e-9,
             "the second tick under water has the water drag: {p:?}"
         );
     }

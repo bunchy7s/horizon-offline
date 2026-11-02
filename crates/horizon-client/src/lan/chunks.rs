@@ -416,13 +416,29 @@ impl ChunkEncoder {
         biome_names: &[String],
         biome_registry: &[String],
     ) -> Self {
+        Self::with_signs(
+            states.into_iter().map(|(name, fluid)| (name, fluid, None)),
+            builtin,
+            biome_names,
+            biome_registry,
+        )
+    }
+
+    /// The encoder with each state's sign form from its template's class: mod
+    /// signs reuse vanilla's sign block entity types.
+    pub fn with_signs(
+        states: impl IntoIterator<Item = (Arc<str>, bool, Option<crate::blocks::SignForm>)>,
+        builtin: &Builtin,
+        biome_names: &[String],
+        biome_registry: &[String],
+    ) -> Self {
         let types = builtin.get("minecraft:block_entity_type");
         let blocks = builtin.get("minecraft:block");
         let mut flags = Vec::new();
         let mut entity_types = Vec::new();
         let mut mod_entities = Vec::new();
         let mut block_ids = Vec::new();
-        for (name, has_fluid) in states {
+        for (name, has_fluid, sign) in states {
             let air = matches!(
                 &*name,
                 "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air"
@@ -435,12 +451,13 @@ impl ChunkEncoder {
                 }
             }
             // A mod block's block entity type is named after the block
-            // (`mod_content`: registries.json).
-            let modded = !name.starts_with("minecraft:");
+            // (`mod_content`: registries.json), unless it is one of vanilla's.
+            let vanilla = sign.map(crate::blocks::SignForm::block_entity_type);
+            let modded = !name.starts_with("minecraft:") && vanilla.is_none();
             let t = if modded {
                 Some(&*name)
             } else {
-                block_entity_type(&name)
+                vanilla.or_else(|| block_entity_type(&name))
             }
             .and_then(|t| types.and_then(|ids| ids.id(t)))
             .unwrap_or(-1);
@@ -1465,6 +1482,100 @@ mod tests {
         encoder.mod_update_tag = None;
         let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
         assert_eq!(infos[0].tag, Tag::End);
+    }
+
+    /// A mod's sign is of vanilla's block entity type, as its block is on
+    /// `BlockEntityType.SIGN`'s list, and goes out with its text. Another mod
+    /// block's type stays its own, and a sign block entity on it stays out.
+    #[test]
+    fn a_mods_sign_goes_out_with_vanillas_type_and_its_text() {
+        use crate::blocks::SignForm;
+
+        let builtin = Builtin::parse(
+            r#"{"minecraft:block_entity_type": {"entries": {
+                "minecraft:sign": {"protocol_id": 7},
+                "minecraft:hanging_sign": {"protocol_id": 8},
+                "test:notice": {"protocol_id": 49},
+                "test:lantern": {"protocol_id": 50},
+                "test:casing": {"protocol_id": 51}}}}"#,
+        )
+        .unwrap();
+        let states = [
+            "minecraft:air",
+            "test:notice",
+            "test:lantern",
+            "test:casing",
+        ]
+        .map(|n| (Arc::<str>::from(n), false));
+        let states = states.map(|(name, fluid)| {
+            let form = match &*name {
+                "test:notice" => Some(SignForm {
+                    hanging: false,
+                    wall: false,
+                }),
+                "test:lantern" => Some(SignForm {
+                    hanging: true,
+                    wall: true,
+                }),
+                _ => None,
+            };
+            (name, fluid, form)
+        });
+        let encoder = ChunkEncoder::with_signs(states, &builtin, &[], &[]);
+        let (notice, lantern, casing) = ((1, MIN_Y + 2, 3), (5, MIN_Y + 2, 5), (9, MIN_Y + 2, 9));
+        let mut chunk = Chunk::empty(0, 0);
+        chunk.set(notice.0, notice.1, notice.2, 1);
+        chunk.set(lantern.0, lantern.1, lantern.2, 2);
+        chunk.set(casing.0, casing.1, casing.2, 3);
+        let mut sign = crate::signs::SignData::default();
+        sign.front.lines[0] = "Hello".into();
+        let hanging = crate::signs::SignData {
+            hanging: true,
+            ..Default::default()
+        };
+        let block_entities = HashMap::from([
+            (notice, BlockEntity::Sign(sign.clone())),
+            (lantern, BlockEntity::Sign(hanging.clone())),
+            (casing, BlockEntity::Sign(sign.clone())),
+        ]);
+        let infos = encoder.encode(&chunk, &block_entities).chunk.block_entities;
+        let sent = |kind: i32| infos.iter().find(|i| i.kind == kind).map(|i| &i.tag);
+        assert_eq!(sent(7), Some(&Tag::compound(sign.encode())));
+        assert_eq!(sent(8), Some(&Tag::compound(hanging.encode())));
+        assert_eq!(infos.len(), 2, "the casing is no sign: {infos:?}");
+        // The same encoder supplies the type and fresh tag for incremental
+        // BlockEntityData packets, even after the chunk's section was cached.
+        sign.back.lines[0] = "Back".into();
+        sign.front.color = 9;
+        sign.back.glowing = true;
+        sign.waxed = true;
+        let entity = BlockEntity::Sign(sign);
+        assert_eq!(encoder.entity_type(1), Some(7));
+        assert_eq!(encoder.entity_type(2), Some(8));
+        let tag = encoder.update_tag(notice, &entity).unwrap();
+        let mut nbt = match tag {
+            Tag::Compound(fields) => fields,
+            _ => panic!("sign update is not a compound"),
+        };
+        nbt.insert("id".into(), Tag::String("minecraft:sign".into()));
+        for (axis, value) in ["x", "y", "z"]
+            .into_iter()
+            .zip([notice.0, notice.1, notice.2])
+        {
+            nbt.insert(axis.into(), Tag::Int(value));
+        }
+        let (_, loaded) = crate::save::decode_block_entity(&Tag::Compound(nbt)).unwrap();
+        assert!(
+            matches!((&loaded, &entity), (BlockEntity::Sign(a), BlockEntity::Sign(b)) if a == b)
+        );
+        let changed = HashMap::from([(notice, entity)]);
+        for encoder in [encoder.detached(), encoder] {
+            let sent = encoder.encode(&chunk, &changed).chunk.block_entities;
+            assert_eq!(
+                sent.iter().find(|i| i.kind == 7).unwrap().tag,
+                encoder.update_tag(notice, &changed[&notice]).unwrap()
+            );
+        }
     }
 
     fn encoder() -> ChunkEncoder {

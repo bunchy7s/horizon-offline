@@ -132,13 +132,15 @@ pub enum Inside {
 /// (`from` to `to`; `original` the move it asked for, when the move was
 /// recorded; `velocity` already zeroed on the axes `Entity.move` collided on):
 /// the blocks it went through (`block` says what each is) push it and reset
-/// its fall. Returns whether a cobweb made it stuck.
+/// its fall. Returns whether a cobweb made it stuck, and adds to `surfaces` the
+/// column blocks it is at the top of (`Entity.sendBubbleColumnParticles`).
 pub fn apply_effects_from_blocks(
     from: Vec3,
     to: Vec3,
     original: Option<Vec3>,
     velocity: &mut Vec3,
     fall_distance: &mut f64,
+    surfaces: &mut Vec<BlockPos>,
     mut block: impl FnMut(BlockPos) -> Inside,
 ) -> bool {
     let mut stuck = false;
@@ -152,6 +154,9 @@ pub fn apply_effects_from_blocks(
         Inside::BubbleColumn(column) if intersects => {
             if column.push(velocity) {
                 *fall_distance = 0.0;
+            }
+            if column.surface {
+                surfaces.push(p);
             }
         }
         Inside::BubbleColumn(_) | Inside::Nothing => {}
@@ -302,13 +307,21 @@ mod tests {
         is_web: impl Fn(BlockPos) -> bool,
     ) -> bool {
         let (mut velocity, mut fall) = (Vec3::ZERO, 3.0);
-        let stuck = apply_effects_from_blocks(from, to, original, &mut velocity, &mut fall, |p| {
-            if is_web(p) {
-                Inside::Cobweb
-            } else {
-                Inside::Nothing
-            }
-        });
+        let stuck = apply_effects_from_blocks(
+            from,
+            to,
+            original,
+            &mut velocity,
+            &mut fall,
+            &mut Vec::new(),
+            |p| {
+                if is_web(p) {
+                    Inside::Cobweb
+                } else {
+                    Inside::Nothing
+                }
+            },
+        );
         assert_eq!(fall == 0.0, stuck);
         stuck
     }
@@ -357,13 +370,22 @@ mod tests {
             }),
             _ => Inside::Nothing,
         };
+        let tops = std::cell::RefCell::new(Vec::new());
         let step = |x: f64, from: f64, to: f64, vy: f64| {
+            tops.borrow_mut().clear();
             let (from, to) = (Vec3::new(x, from, 0.5), Vec3::new(x, to, 0.5));
             let mut velocity = Vec3::new(0.0, vy, 0.0);
             let mut fall = 2.0;
             let original = Some(to.subtract(from));
-            let stuck =
-                apply_effects_from_blocks(from, to, original, &mut velocity, &mut fall, block);
+            let stuck = apply_effects_from_blocks(
+                from,
+                to,
+                original,
+                &mut velocity,
+                &mut fall,
+                &mut tops.borrow_mut(),
+                block,
+            );
             assert!(!stuck);
             (velocity.y, fall)
         };
@@ -381,6 +403,10 @@ mod tests {
         let (vy, fall) = step(0.5, 11.0, 9.5, -1.5);
         assert!(near(vy, -1.5 + 0.1), "{vy}");
         assert_eq!(fall, 2.0);
+        // Only the surface block sends the splash and bubble particles.
+        assert_eq!(*tops.borrow(), [BlockPos::new(0, 9, 0)]);
+        step(0.5, 5.5, 5.46, -0.04);
+        assert!(tops.borrow().is_empty());
         // Magma drags down by 0.03, at most to -0.3 inside and -0.9 at the surface.
         assert!(near(step(3.5, 5.5, 5.4, -0.1).0, -0.16));
         assert!(near(step(3.5, 5.5, 5.4, -0.29).0, -0.3));
