@@ -18,21 +18,21 @@ ProfileResolver.Cached.fetchByName	port	crates/horizon-client/src/game/dedicated
 ServerOpList.getUserList	skip:ui		tab-completion names only (DeOpCommands suggestions); the console has no completion
 ServerOpList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the Opped reply and the permission push are in console_command's op arm
 ServerOpList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the Deopped reply, sync_ops and the kick are in console_command's deop arm
-ServerOpList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+ServerOpList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 ServerOpList.canBypassPlayerLimit	port	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	the bypasses_limit closure: an op entry with bypassesPlayerLimit; read by Shared::try_admit
 ServerOpListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::OpEntry::serialize	level and bypassesPlayerLimit keys
 SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/lan_actions.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
-StoredUserList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+StoredUserList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 StoredUserList.removeExpired	port	crates/horizon-server-files/src/user_lists.rs::UserList::get	expired entries are dropped on each get, as vanilla
 UserBanList.getUserList	skip:ui		tab-completion names only (PardonCommand suggestions)
 UserBanList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the banned notice and the kick are in console_command's ban arm
 UserBanList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the unbanned notice is in console_command's pardon arm
-UserBanList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserBanList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserBanListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::serialize	the player's name and the ban fields
 UserBanListEntry.getDisplayName	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the banlist arm prints the name; Horizon entries always carry one, so no Unknown-user fallback
 UserWhiteList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the allowlist notice is in console_whitelist's add arm
 UserWhiteList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the notice is in console_whitelist's remove arm
-UserWhiteList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserWhiteList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserWhiteList.getUserList	skip:ui		tab-completion names only (WhitelistCommand suggestions)
 NetworkDataOutputStream.writeString	inline	crates/horizon-server/src/query.rs::string	UTF-8 and a NUL; the rest of NetworkDataOutputStream is the GS4 query server (the short is little-endian: `u16::to_le_bytes`)
 PktUtils.stringFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the payload up to its first NUL; the rest of PktUtils is the GS4 query server
