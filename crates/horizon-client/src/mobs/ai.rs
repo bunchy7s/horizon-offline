@@ -549,6 +549,20 @@ pub fn is_monster(s: Species) -> bool {
     )
 }
 /// One full entity tick. Returns false when the mob is gone.
+/// `Mob.getTarget` / `Mob.setTarget` (`asValidTarget`): a player in creative
+/// or spectator mode is never a mob's target, however the target was set (an
+/// alert from another mob included). A `NeutralMob` angry at that player stops
+/// being angry (`NeutralMob.updatePersistentAnger`).
+fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
+    if m.ai.target == Some(Who::Player)
+        && w.player.as_ref().is_some_and(|p| p.creative || p.spectator)
+    {
+        m.ai.target = None;
+        if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
+            m.extra.anger = 0;
+        }
+    }
+}
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
@@ -577,6 +591,7 @@ pub fn tick(
     if m.ai.last_hurt_by_player > 0 {
         m.ai.last_hurt_by_player -= 1;
     }
+    drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, events);
     if m.removed {
