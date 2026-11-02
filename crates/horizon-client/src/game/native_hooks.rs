@@ -5709,6 +5709,24 @@ impl Game<'_> {
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, mod_api::mods(), stack, lines);
     }
+    /// Change a tooltip box's background and border gradient colors, as ARGB.
+    /// Stack is None for tooltips not associated with an item.
+    pub(super) fn native_tooltip_color(
+        &self,
+        stack: Option<&ItemStack>,
+        background: &mut u32,
+        border_top: &mut u32,
+        border_bottom: &mut u32,
+    ) {
+        mod_api::dispatch_tooltip_color(
+            self,
+            mod_api::mods(),
+            stack,
+            background,
+            border_top,
+            border_bottom,
+        );
+    }
     /// Client-side image component for this stack's tooltip. Answer its width/height
     /// in GUI pixels; finite positive dimensions reserve space after text and any
     /// vanilla bundle component. None keeps the vanilla tooltip unchanged.
