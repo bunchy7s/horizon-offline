@@ -836,6 +836,31 @@ def items_and_loot():
 
 def world_misc():
     return [
+        # BlockInput.place calculates neighbour shapes before setting the block,
+        # then reapplies only properties explicitly supplied by the command.
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        cmd('/setblock 4 219 4 minecraft:gold_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=bell]'),
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block strict'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        # Even an unchanged input state must be normalized before comparison.
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        # An unsupported shape falling back to air retains the requested block.
+        cmd('/setblock 6 220 4 minecraft:poppy'),
+        cmd('/execute if block 6 220 4 minecraft:poppy'),
         cmd('/setblock 1 210 1 minecraft:stone keep'),
         cmd('/setblock 1 210 1 minecraft:dirt keep'),
         cmd('/setblock 1 210 1 minecraft:dirt destroy'),
