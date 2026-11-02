@@ -1,15 +1,19 @@
 //! The Wardrobe's link to Horizon's cosmetics service ([docs/cosmetics.md](../../docs/cosmetics.md)):
-//! the catalogue, the account's own items, claiming the free set while it is open, and what each
-//! slot wears. Off with the cosmetics flag (`horizon_cosmetics::enabled`).
+//! the catalogue, the account's own items, claiming the founder set while it is open, what each
+//! slot wears and whether others see it. Off with the cosmetics flag (`horizon_cosmetics::enabled`).
+//!
+//! The last answers are kept on disk (`Saved`), so the Wardrobe shows the outfit offline and when
+//! the service fails, and a change made offline waits there until the service answers again.
 //!
 //! The service learns who the player is the way an online-mode server does: it hands out a
 //! one-time server id, the launcher tells Mojang's session server that the account joins it
 //! (`account::session::join_server`), and the service asks Mojang. The Minecraft token goes to
 //! Mojang only; the service gives back a session of its own, kept in memory here.
 use crate::i18n::tr;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Why a request to the service failed, in words for the player.
@@ -38,16 +42,22 @@ impl Error {
             }
             Self::Account(e) => tr(e).into(),
             Self::SignedOut => tr("Your Wardrobe session ended. Open the Wardrobe again.").into(),
-            Self::ClaimClosed => tr("The early-player set can't be claimed right now.").into(),
+            Self::ClaimClosed => tr("The founder set can't be claimed right now.").into(),
             Self::NotYours => tr("That item isn't in your Wardrobe.").into(),
             Self::Service(_) => {
                 tr("Horizon's cosmetics service had a problem. Try again later.").into()
             }
         }
     }
+
+    /// Whether the change that failed should wait and be sent again: the service wasn't
+    /// reached, or failed on its side.
+    pub fn retry_later(&self) -> bool {
+        matches!(self, Self::Offline | Self::Service(500..))
+    }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ClaimState {
     NotYet,
@@ -55,8 +65,9 @@ pub enum ClaimState {
     Closed,
 }
 
-/// The free early-player set: its items and when it can be claimed (Unix seconds, `[start, end)`).
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+/// The founder set: free to claim between `starts_at` and `ends_at` (Unix seconds, `[start,
+/// end)`), retired for good after.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Claim {
     pub state: ClaimState,
     pub items: Vec<String>,
@@ -67,13 +78,36 @@ pub struct Claim {
     pub claimed: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Entry {
     pub id: String,
     pub hash: String,
+    /// `head`, `back`, `shoulder`, `name_tag` (the game draws them) or `theme` (the launcher's).
     pub slot: String,
     /// The item's name per game language code (`en_us`, `fr_fr`...).
     pub names: BTreeMap<String, String>,
+    /// A launcher theme's colours (`slot` is `theme`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<Theme>,
+}
+
+/// A launcher theme: the sky's six stops, top to bottom (`#rrggbb`), and the accent's hue.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct Theme {
+    pub sky: [String; 6],
+    pub accent_hue: f32,
+}
+
+impl Theme {
+    /// The sky as `0xrrggbb`, or None if a stop isn't a colour.
+    pub fn sky(&self) -> Option<[u32; 6]> {
+        let mut out = [0; 6];
+        for (o, c) in out.iter_mut().zip(&self.sky) {
+            let hex = c.strip_prefix('#').filter(|h| h.len() == 6)?;
+            *o = u32::from_str_radix(hex, 16).ok()?;
+        }
+        Some(out)
+    }
 }
 
 impl Entry {
@@ -86,20 +120,104 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Catalogue {
     pub items: Vec<Entry>,
     pub claim: Claim,
 }
 
-/// The signed-in account's items: what it owns and what each slot wears.
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+/// The signed-in account's items: what it owns, what each slot wears, whether others see it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct Me {
     pub uuid: String,
     pub name: String,
     pub owned: Vec<String>,
     pub equipped: BTreeMap<String, String>,
+    /// "Show my cosmetics": off, other players see this account without them.
+    #[serde(default = "shown")]
+    pub visible: bool,
     pub claim: Claim,
+}
+
+fn shown() -> bool {
+    true
+}
+
+/// A change to the outfit, sent at once or, offline, kept until the service answers.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Change {
+    /// Wear `item` in `slot`, or nothing there.
+    Equip { slot: String, item: Option<String> },
+    /// "Show my cosmetics".
+    Visible(bool),
+}
+
+impl Me {
+    /// What the outfit looks like with `change` made, before the service confirms it.
+    pub fn apply(&mut self, change: &Change) {
+        match change {
+            Change::Equip {
+                slot,
+                item: Some(item),
+            } => {
+                self.equipped.insert(slot.clone(), item.clone());
+            }
+            Change::Equip { slot, item: None } => {
+                self.equipped.remove(slot);
+            }
+            Change::Visible(on) => self.visible = *on,
+        }
+    }
+}
+
+/// What the Wardrobe keeps on disk per account: the last catalogue and answer, and the changes
+/// still to send. No session or token is ever kept.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct Saved {
+    pub catalogue: Option<Catalogue>,
+    pub me: Option<Me>,
+    pub pending: Vec<Change>,
+}
+
+impl Saved {
+    /// `<dir>/<uuid>.json`.
+    pub fn path(dir: &Path, uuid: &str) -> PathBuf {
+        dir.join(format!("{uuid}.json"))
+    }
+
+    pub fn load(dir: &Path, uuid: &str) -> Self {
+        std::fs::read(Self::path(dir, uuid))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, dir: &Path, uuid: &str) -> std::io::Result<()> {
+        std::fs::create_dir_all(dir)?;
+        let path = Self::path(dir, uuid);
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec(self).map_err(std::io::Error::other)?,
+        )?;
+        std::fs::rename(tmp, path)
+    }
+
+    /// Make `change` here: the outfit shows it at once and it waits to be sent. A newer change of
+    /// the same slot (or of visibility) replaces an older one still waiting.
+    pub fn change(&mut self, change: Change) {
+        if let Some(me) = &mut self.me {
+            me.apply(&change);
+        }
+        let same = |c: &Change| match (c, &change) {
+            (Change::Equip { slot: a, .. }, Change::Equip { slot: b, .. }) => a == b,
+            (Change::Visible(_), Change::Visible(_)) => true,
+            _ => false,
+        };
+        self.pending.retain(|c| !same(c));
+        self.pending.push(change);
+    }
 }
 
 /// A session with the service: an opaque token, good for the time it said.
@@ -147,6 +265,10 @@ impl Service {
 
     /// One item's file, checked against the format's limits.
     pub fn item(&self, entry: &Entry) -> Result<horizon_cosmetics::Item, Error> {
+        horizon_cosmetics::Item::parse(&self.item_bytes(entry)?).map_err(|_| Error::Service(200))
+    }
+
+    fn item_bytes(&self, entry: &Entry) -> Result<Vec<u8>, Error> {
         let url = format!("{}/v1/items/{}?hash={}", self.base, entry.id, entry.hash);
         let response = match agent(&url).get(&url).call() {
             Ok(r) => r,
@@ -159,7 +281,7 @@ impl Service {
             &mut bytes,
         )
         .map_err(|_| Error::Offline)?;
-        horizon_cosmetics::Item::parse(&bytes).map_err(|_| Error::Service(200))
+        Ok(bytes)
     }
 
     /// Sign `name` in: `join` tells Mojang the account joins the server id the service chose
@@ -204,7 +326,7 @@ impl Service {
         parse(self.call("GET", "/v1/me", Some(session), None)?)
     }
 
-    /// Claim the early-player set: the account owns its items from then on.
+    /// Claim the founder set: the account owns its items from then on.
     pub fn claim(&self, session: &Session) -> Result<Me, Error> {
         parse(self.call("POST", "/v1/claim", Some(session), Some(json!({})))?)
     }
@@ -213,6 +335,54 @@ impl Service {
     pub fn equip(&self, session: &Session, slot: &str, item: Option<&str>) -> Result<Me, Error> {
         let body = json!({ "slot": slot, "item": item });
         parse(self.call("PUT", "/v1/equipped", Some(session), Some(body))?)
+    }
+
+    /// "Show my cosmetics": off, other players see this account without them.
+    pub fn set_visible(&self, session: &Session, visible: bool) -> Result<Me, Error> {
+        let body = json!({ "visible": visible });
+        parse(self.call("PUT", "/v1/visible", Some(session), Some(body))?)
+    }
+
+    /// Send the changes still waiting, oldest first. Each one the service takes, or refuses for
+    /// good (an item no longer owned), leaves `saved.pending`; the first that should be tried
+    /// again stops the rest and is the error. `saved.me` is the service's last answer, with what
+    /// still waits applied on top.
+    pub fn sync(&self, session: &Session, saved: &mut Saved) -> Result<(), Error> {
+        while let Some(change) = saved.pending.first().cloned() {
+            let sent = match &change {
+                Change::Equip { slot, item } => self.equip(session, slot, item.as_deref()),
+                Change::Visible(on) => self.set_visible(session, *on),
+            };
+            match sent {
+                Ok(me) => saved.me = Some(me),
+                Err(e) if e.retry_later() || e == Error::SignedOut => return Err(e),
+                Err(_) => {}
+            }
+            saved.pending.remove(0);
+        }
+        Ok(())
+    }
+
+    /// An item's file, from `cache` (`<id>-<hash>.json`, kept by hash: it never changes for one)
+    /// or the service, then kept there.
+    pub fn item_cached(
+        &self,
+        entry: &Entry,
+        cache: &Path,
+    ) -> Result<horizon_cosmetics::Item, Error> {
+        let path = cache.join(format!("{}-{}.json", entry.id, entry.hash));
+        if let Some(item) = std::fs::read(&path)
+            .ok()
+            .and_then(|b| horizon_cosmetics::Item::parse(&b).ok())
+        {
+            return Ok(item);
+        }
+        let bytes = self.item_bytes(entry)?;
+        let item = horizon_cosmetics::Item::parse(&bytes).map_err(|_| Error::Service(200))?;
+        if std::fs::create_dir_all(cache).is_ok() {
+            let _ = std::fs::write(&path, &bytes);
+        }
+        Ok(item)
     }
 
     fn call(

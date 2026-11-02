@@ -16,22 +16,30 @@ struct Mock {
     joined: Vec<String>,
     /// Every request: method, path, Authorization header, body.
     log: Vec<(String, String, String, String)>,
+    /// The service fails on its side (503) for the account's changes.
+    down: bool,
+    /// "Show my cosmetics", as the service keeps it.
+    visible: bool,
 }
 
 fn me(claim: &str, owned: Value, equipped: Value) -> Value {
     json!({
-        "uuid": UUID, "name": "Notch", "owned": owned, "equipped": equipped,
+        "uuid": UUID, "name": "Notch", "owned": owned, "equipped": equipped, "visible": true,
         "claim": {"state": claim, "items": ["hat", "owl"], "starts_at": 100, "ends_at": 200, "claimed": owned != json!([])},
     })
 }
 
-fn route(m: &Mock, method: &str, path: &str, auth: &str, body: &str) -> (u16, Value) {
+fn route(m: &mut Mock, method: &str, path: &str, auth: &str, body: &str) -> (u16, Value) {
     let signed_in = auth == "Bearer svc-session";
     match (method, path) {
         ("GET", "/v1/catalogue") => (
             200,
             json!({
-                "items": [{"id": "hat", "hash": "ab12", "slot": "head", "names": {"en_us": "Hat", "fr_fr": "Chapeau"}}],
+                "items": [
+                    {"id": "hat", "hash": "ab12", "slot": "head", "names": {"en_us": "Hat", "fr_fr": "Chapeau"}},
+                    {"id": "dawn", "hash": "cd34", "slot": "theme", "names": {"en_us": "Dawn"},
+                     "theme": {"sky": ["#0b1030", "#1d2a63", "#3d4c94", "#7f78c0", "#e2a0b0", "#ffd6a0"], "accent_hue": 344}},
+                ],
                 "claim": {"state": m.claim, "items": ["hat"], "starts_at": null, "ends_at": null},
             }),
         ),
@@ -47,8 +55,16 @@ fn route(m: &Mock, method: &str, path: &str, auth: &str, body: &str) -> (u16, Va
                 json!({"session": "svc-session", "uuid": UUID, "name": v["name"], "expires_in": m.expires_in}),
             )
         }
-        (_, "/v1/me" | "/v1/claim" | "/v1/equipped") if !signed_in => {
+        (_, "/v1/me" | "/v1/claim" | "/v1/equipped" | "/v1/visible") if !signed_in => {
             (401, json!({"error": "no_session"}))
+        }
+        ("PUT", "/v1/equipped" | "/v1/visible") if m.down => (503, json!({"error": "down"})),
+        ("PUT", "/v1/visible") => {
+            let v: Value = serde_json::from_str(body).unwrap();
+            m.visible = v["visible"].as_bool().unwrap();
+            let mut me = me(m.claim, json!(["hat"]), json!({}));
+            me["visible"] = json!(m.visible);
+            (200, me)
         }
         ("GET", "/v1/me") => (200, me(m.claim, json!([]), json!({}))),
         ("POST", "/v1/claim") if m.claim != "open" => (403, json!({"error": "claim_closed"})),
@@ -114,7 +130,7 @@ fn serve(f: impl FnOnce(&mut Mock)) -> (Arc<Mutex<Mock>>, Service) {
                 let mut m = shared.lock().unwrap();
                 m.log
                     .push((method.clone(), path.clone(), auth.clone(), body.clone()));
-                route(&m, &method, &path, &auth, &body)
+                route(&mut m, &method, &path, &auth, &body)
             };
             let text = reply.to_string();
             let _ = write!(
@@ -208,4 +224,111 @@ fn an_ended_session_is_not_sent_and_offline_says_so() {
     // Nothing listens on port 9.
     let offline = Service::at("http://127.0.0.1:9");
     assert_eq!(offline.catalogue().unwrap_err(), Error::Offline);
+}
+
+#[test]
+fn a_launcher_theme_carries_its_sky() {
+    let (_, service) = serve(|_| {});
+    let catalogue = service.catalogue().unwrap();
+    let dawn = catalogue.items.iter().find(|e| e.slot == "theme").unwrap();
+    let sky = dawn.theme.as_ref().unwrap().sky().unwrap();
+    assert_eq!((sky[0], sky[5]), (0x0b1030, 0xffd6a0));
+    assert!(catalogue.items[0].theme.is_none());
+}
+
+#[test]
+fn changes_made_offline_wait_on_disk_and_go_out_in_order() {
+    let dir = scratch("queue");
+    let (m, service) = serve(|m| m.down = true);
+    let session = sign_in(&m, &service);
+    let mut saved = Saved {
+        me: Some(service.me(&session).unwrap()),
+        ..Default::default()
+    };
+    // Two changes of the head and one of visibility: the newer head replaces the older.
+    let hat = |item: Option<&str>| Change::Equip {
+        slot: "head".into(),
+        item: item.map(Into::into),
+    };
+    saved.change(hat(Some("crown")));
+    saved.change(Change::Visible(false));
+    saved.change(hat(Some("hat")));
+    assert_eq!(saved.pending, [Change::Visible(false), hat(Some("hat"))]);
+    let me = saved.me.as_ref().unwrap();
+    assert_eq!((me.equipped["head"].as_str(), me.visible), ("hat", false));
+    // The service fails: nothing leaves the queue, and it survives a restart.
+    assert_eq!(service.sync(&session, &mut saved), Err(Error::Service(503)));
+    assert_eq!(saved.pending.len(), 2);
+    saved.save(&dir, UUID).unwrap();
+    let mut saved = Saved::load(&dir, UUID);
+    assert_eq!(saved.pending.len(), 2);
+    // Back: both go out, oldest first, and the service's answer replaces the guess.
+    m.lock().unwrap().down = false;
+    service.sync(&session, &mut saved).unwrap();
+    assert!(saved.pending.is_empty());
+    assert!(!m.lock().unwrap().visible);
+    let me = saved.me.as_ref().unwrap();
+    assert_eq!(me.equipped["head"], "hat");
+    let sent: Vec<String> = m
+        .lock()
+        .unwrap()
+        .log
+        .iter()
+        .filter(|(k, ..)| k == "PUT")
+        .map(|(_, p, ..)| p.clone())
+        .collect();
+    // The failed sync stopped at the first change; the second sent both.
+    assert_eq!(sent, ["/v1/visible", "/v1/visible", "/v1/equipped"]);
+    // An item no longer owned is refused for good: dropped, not retried.
+    saved.change(hat(Some("crown")));
+    service.sync(&session, &mut saved).unwrap();
+    assert!(saved.pending.is_empty());
+}
+
+#[test]
+fn an_item_file_is_kept_by_its_hash() {
+    let dir = scratch("items");
+    let entry = Entry {
+        id: "hat".into(),
+        hash: "ab12".into(),
+        slot: "head".into(),
+        names: BTreeMap::new(),
+        theme: None,
+    };
+    let file = format!(
+        r#"{{"format": 1, "id": "hat", "slot": "head", "bone": "head", "texture": {{"png": "{}"}}, "parts": []}}"#,
+        png_8x8()
+    );
+    std::fs::write(dir.join("hat-ab12.json"), &file).unwrap();
+    // Offline, the kept file is read; another hash would need the service.
+    let offline = Service::at("http://127.0.0.1:9");
+    assert_eq!(offline.item_cached(&entry, &dir).unwrap().id, "hat");
+    let newer = Entry {
+        hash: "ef56".into(),
+        ..entry
+    };
+    assert_eq!(
+        offline.item_cached(&newer, &dir).unwrap_err(),
+        Error::Offline
+    );
+}
+
+/// An 8×8 transparent PNG, base64.
+fn png_8x8() -> String {
+    use base64::Engine;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::new(8, 8)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
+}
+
+fn scratch(name: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "horizon-launcher-wardrobe-{name}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
 }

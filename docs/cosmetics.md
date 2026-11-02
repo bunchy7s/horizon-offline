@@ -115,14 +115,24 @@ from any angle.
 ## The Wardrobe's account check (`launcher/src/wardrobe.rs`)
 
 The launcher talks to the same service for the player's own items: the catalogue, what the account
-owns, claiming the early-player set while its window is open, and what each slot wears.
+owns, claiming the founder set while its window is open, what each slot wears and whether other
+players see it.
 
 - **Who the player is**: the service hands out a one-time server id (`POST /v1/auth/start`), the
   launcher tells Mojang's session server that the account joins it
   (`account::session::join_server`, the call a client makes before joining an online-mode server),
   and the service asks Mojang (`hasJoined`) before it answers `POST /v1/auth/finish` with a
   session of its own. The Minecraft token goes to Mojang only; the service never sees it.
-- **Then**: `GET /v1/me`, `POST /v1/claim`, `PUT /v1/equipped {"slot", "item"}` with that session
-  (`Authorization: Bearer`), kept in memory for the time the service gave, less a minute.
-- **The early-player set** is free and can be claimed only between the window's start and end;
-  outside it the service refuses and the launcher says so.
+- **Then**: `GET /v1/me`, `POST /v1/claim`, `PUT /v1/equipped {"slot", "item"}` and
+  `PUT /v1/visible {"visible"}` ("Show my cosmetics": off, `/v1/worn` leaves the player out) with
+  that session (`Authorization: Bearer`), kept in memory for the time the service gave, less a
+  minute.
+- **The founder set** is free and can be claimed only between the window's start and end; after
+  that it is retired for good and never offered again. Players who claimed it keep it.
+- **Launcher themes** (`"slot": "theme"`) have no item file: the catalogue carries their six sky
+  stops and accent hue, and the game never asks for them.
+- **Offline**: the last catalogue and answer, and the changes not sent yet, are kept per account
+  in the launcher's data folder (`wardrobe/<uuid>.json`; never a session or token), item files
+  under their hash. A change shows at once; the ones the service couldn't take (offline, or a
+  failure on its side) are sent in order when it answers again, and a newer change of the same
+  slot replaces a waiting one.
