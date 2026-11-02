@@ -3288,6 +3288,12 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, primary, secondary);
     }
+    /// A server player has slept for 100 ticks in a bed and now counts as
+    /// deeply asleep for the night-skip check. Helpers looking the guest up
+    /// through `self.lan` may find nothing during its tick. @API:player_deep_sleep@.
+    pub(super) fn native_player_deep_sleep(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

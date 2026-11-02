@@ -3721,7 +3721,10 @@ impl Game<'_> {
     /// sleeper who died or whose bed is gone.
     fn guest_sleep_tick(&mut self, host: &mut LanHost, gi: usize) {
         let g = &mut host.hub.guests[gi];
+        let was_deep = g.sleep_timer >= 100;
         g.sleep_timer = super::tick_sleep_timer(g.sleep_timer, g.bed.is_some());
+        let deep_sleep = !was_deep && g.sleep_timer >= 100 && g.bed.is_some();
+        let identity = deep_sleep.then(|| (g.uuid, g.name.clone()));
         if let Some(head) = g.bed {
             let block = self.world.block(head[0], head[1], head[2]);
             let bed = self.res.facts().get(block).name.ends_with("_bed");
@@ -3734,6 +3737,9 @@ impl Game<'_> {
                     m.pitch = 0.0;
                 }
             }
+        }
+        if let Some((player, name)) = identity {
+            self.native_player_deep_sleep(player, &name);
         }
     }
 
