@@ -60,7 +60,7 @@ impl Launcher {
                 })
                 .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
                     this.settings.accent = accent;
-                    this.settings.save();
+                    this.save_settings();
                     this.theme = this.settings_theme(window);
                     cx.notify();
                 })),
@@ -154,13 +154,19 @@ impl Launcher {
             }))
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.finish_hue()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                    this.finish_hue();
+                    cx.notify();
+                }),
             )
             // `on_mouse_up` fires only while the strip is hovered, so a drag released off it would
             // keep its accent in memory and never write it.
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, _| this.finish_hue()),
+                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                    this.finish_hue();
+                    cx.notify();
+                }),
             )
     }
 
@@ -168,7 +174,7 @@ impl Launcher {
     fn finish_hue(&mut self) {
         if self.hue_dragging {
             self.hue_dragging = false;
-            self.settings.save();
+            self.save_settings();
         }
     }
 
@@ -215,7 +221,7 @@ impl Launcher {
         match themes::keep_background(&backend::data_dir(), path) {
             Ok(name) => {
                 self.settings.background = Some(name);
-                self.settings.save();
+                self.save_settings();
                 self.background_error = None;
             }
             Err(e) => self.background_error = Some(e),
@@ -242,7 +248,7 @@ impl Launcher {
                 button("background-reset", "Landscape", Kind::Ghost, &t).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
                         this.settings.background = None;
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     },
                 )),

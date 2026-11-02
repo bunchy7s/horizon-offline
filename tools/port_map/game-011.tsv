@@ -42,9 +42,9 @@ Donkey.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	a 
 Donkey.getBreedOffspring	inline	crates/horizon-client/src/game/creatures.rs::Game::breed	donkey with horse gives a mule, donkey with donkey a donkey; attributes from both parents
 Horse.randomizeAttributes	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::horse	health, speed and jump strength
 Horse.setVariantAndMarkings	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	coat and markings drawn at spawn; breeding mixes them in creatures.rs Game::breed
-Horse.setVariant	missing		minor: only reached by the horse/variant item component, which Horizon does not read
-Horse.get	missing		minor: the horse/variant component is never reported
-Horse.applyImplicitComponent	missing		minor: a horse/variant component on a spawn egg or item is ignored
+Horse.setVariant	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:horse/variant` name sets the coat colour (`setTypeVariant(id & 0xFF | getTypeVariant() & -256)`), the markings the spawn picked stay
+Horse.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_component	horse/variant component
+Horse.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:horse/variant` name of an egg or item sets the coat colour and leaves the markings
 Horse.playGallopSound	port	crates/horizon-client/src/mobs/equine.rs::play_step	
 Horse.mobInteract	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	gap: player: an untamed horse with a non-food item in hand is mounted instead of rearing angrily, a full health tame horse with food in hand is mounted instead of ignoring the click, and a golden dandelion on a foal does nothing
 Horse.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	horse or donkey partner, both tame, adult, not ridden and at full health
@@ -56,8 +56,8 @@ Llama.addAdditionalSaveData	port	crates/horizon-client/src/mobs/llama.rs::to_nbt
 Llama.readAdditionalSaveData	port	crates/horizon-client/src/mobs/llama.rs::from_nbt	
 Llama.registerGoals	port	crates/horizon-client/src/mobs/llama.rs::register	goals and targets as vanilla, path length 40
 Llama.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	strength and variant entries
-Llama.get	missing		minor: the llama/variant component is never reported
-Llama.applyImplicitComponent	missing		minor: a llama/variant component on an item is ignored
+Llama.get	port	crates/horizon-client/src/mobs/finalize.rs::species_variant_component	llama/variant component, a trader llama too
+Llama.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the `minecraft:llama/variant` name sets the variant; a trader llama inherits the llama's arm
 Llama.playChestEquipsSound	inline	crates/horizon-client/src/game/llamas.rs::Game::interact_llama	entity.llama.chest when a chest is added
 Llama.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	any llama or trader llama, both tame, adult, not ridden and at full health
 Llama.causeFallDamage	inline	crates/horizon-client/src/mobs/living.rs::Mob::cause_fall_damage_at	no thud for a llama (equine::is_equine without llama::is_llama), the fall passed on like a horse's; gap: minor: the llama's own damage uses its safe distance of 6

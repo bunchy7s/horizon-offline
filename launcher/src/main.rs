@@ -243,6 +243,8 @@ struct Launcher {
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
     settings: Settings,
+    /// The last failed settings write, kept across page changes until a save succeeds.
+    settings_save_error: Option<String>,
     /// The Discord, sponsor and website links: built in until links.json on main has been read.
     links: backend::Links,
     preparing: bool,
@@ -413,7 +415,7 @@ impl Launcher {
                 s.partner_seen_secs += 10;
                 if s.partner_seen_secs % 60 == 0 || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
                 {
-                    s.save();
+                    this.save_settings();
                     cx.notify();
                 }
                 true
@@ -511,6 +513,7 @@ impl Launcher {
             proxy_focused: false,
             proxy_focus: cx.focus_handle(),
             settings,
+            settings_save_error: None,
             links: backend::Links::default(),
             preparing: false,
             prepare_log: VecDeque::new(),
@@ -634,6 +637,53 @@ impl Launcher {
         telemetry::watch_playing(this.tx.clone());
         telemetry::watch_official(this.tx.clone());
         this
+    }
+
+    /// Keeps the current choices in memory if writing fails; every page offers the same retry.
+    fn save_settings(&mut self) -> bool {
+        self.settings_save_error = self.settings.save().err();
+        self.settings_save_error.is_none()
+    }
+
+    fn settings_save_notice(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let error = self.settings_save_error.as_ref()?;
+        let t = self.theme;
+        Some(
+            div()
+                .flex_none()
+                .px(px(theme::PAGE_GUTTER))
+                .py(px(12.))
+                .child(
+                    crate::plate::plate(&t.night)
+                        .flex()
+                        .items_center()
+                        .gap(px(16.))
+                        .p(px(16.))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    shell::text(theme::night::UI, t.danger)
+                                        .child(tr("Settings were not saved.")),
+                                )
+                                .child(
+                                    shell::text(theme::night::CAPTION, t.ink_soft).child(trf(
+                                        "Your changes are still in this window. Retry to save them. {error}",
+                                        &[("error", error)],
+                                    )),
+                                ),
+                        )
+                        .child(
+                            button("settings-save-retry", "Retry", Kind::Secondary, &t)
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.save_settings();
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+        )
     }
 
     fn go(&mut self, page: Page) {
@@ -1030,12 +1080,14 @@ impl Launcher {
                             if as_update.is_none_or(|(_, select)| select) {
                                 self.settings.selected = Some(tag);
                             }
-                            self.settings.save();
-                            // After the save: the selected version is never pruned.
-                            let tx = self.tx.clone();
-                            std::thread::spawn(move || {
-                                let _ = tx.send(Msg::Pruned(backend::prune_old_versions()));
-                            });
+                            // Pruning reads settings from disk: protect the selection only once
+                            // it has been saved there. A failed save leaves all versions in place.
+                            if self.save_settings() {
+                                let tx = self.tx.clone();
+                                std::thread::spawn(move || {
+                                    let _ = tx.send(Msg::Pruned(backend::prune_old_versions()));
+                                });
+                            }
                         }
                         Err(e) => self.install_error = Some((tag, e)),
                     }
@@ -1043,8 +1095,12 @@ impl Launcher {
                 Msg::Removed(tag, result) => {
                     self.removing.retain(|t| *t != tag);
                     self.installed = backend::installed();
-                    self.settings.selected =
-                        selection_after_removal(&self.installed, Settings::load().selected);
+                    let selected = if self.settings_save_error.is_some() {
+                        self.settings.selected.take()
+                    } else {
+                        Settings::load().selected
+                    };
+                    self.settings.selected = selection_after_removal(&self.installed, selected);
                     if let Err(e) = result {
                         self.install_error = Some((tag, e));
                     }
@@ -1242,7 +1298,7 @@ impl Launcher {
                     self.client_error = None;
                     if !self.settings.owner_notice_seen {
                         self.settings.owner_notice_seen = true;
-                        self.settings.save();
+                        self.save_settings();
                     }
                 }
                 changed = true;
@@ -1642,7 +1698,7 @@ impl Launcher {
                 if let Some(path) = paths.pop() {
                     let _ = this.update(cx, |this, cx| {
                         this.settings.minecraft_dir = Some(path);
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     });
                 }
@@ -2615,7 +2671,7 @@ impl Launcher {
                 let hide = partner::hide_button("partner-hide", &t).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
                         this.settings.partner_hidden = true;
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     },
                 ));
@@ -3263,7 +3319,7 @@ impl Launcher {
         let toggle = switch("auto-install", self.settings.auto_install(), &t).on_click(
             cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.settings.install_new_versions = Some(!this.settings.auto_install());
-                this.settings.save();
+                this.save_settings();
                 if this.settings.auto_install() {
                     this.install_update();
                 }
@@ -3273,14 +3329,14 @@ impl Launcher {
         let prune = switch("auto-prune", self.settings.auto_prune(), &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.prune_old_versions = Some(!this.settings.auto_prune());
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));
         let opening = switch("opening", !self.settings.skip_opening, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.skip_opening = !this.settings.skip_opening;
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));
@@ -3289,7 +3345,7 @@ impl Launcher {
             cx.listener(|this, _: &ClickEvent, _, cx| {
                 let on = !this.settings.desktop_entry();
                 this.settings.desktop_entry = Some(on);
-                this.settings.save();
+                this.save_settings();
                 let _ = if on {
                     horizon_launcher::desktop::install(backend::exe_path()).map(|_| ())
                 } else {
@@ -3390,7 +3446,7 @@ impl Launcher {
                 move |choice, window, cx| {
                     let _ = this.update(cx, |this, cx| {
                         this.settings.appearance = choice;
-                        this.settings.save();
+                        this.save_settings();
                         titlebar::apply_appearance(window, choice);
                         this.theme = this.settings_theme(window);
                         cx.notify();
@@ -3655,7 +3711,7 @@ impl Launcher {
                     line_edit::Key::Escape => window.blur(cx),
                     line_edit::Key::Edited => {
                         this.settings.game_args = this.args_input.text().to_string();
-                        this.settings.save();
+                        this.save_settings();
                     }
                     _ => {}
                 }
@@ -3747,7 +3803,7 @@ impl Launcher {
     fn save_proxy(&mut self) {
         let value = self.proxy_input.text().trim().to_owned();
         self.settings.proxy = (!value.is_empty()).then_some(value);
-        self.settings.save();
+        self.save_settings();
         horizon_launcher::proxy::announce(self.settings.proxy.clone());
     }
 
@@ -4054,7 +4110,7 @@ impl Launcher {
                     button(format!("use-{tag}"), "Use", Kind::Ghost, &t).on_click(cx.listener(
                         move |this, _: &ClickEvent, _, cx| {
                             this.settings.selected = Some(t1.clone());
-                            this.settings.save();
+                            this.save_settings();
                             cx.notify();
                         },
                     )),
@@ -4831,6 +4887,7 @@ impl Render for Launcher {
             .bg(t.side)
             .child(sky)
             .children(titlebar::render(&t, window))
+            .children(self.settings_save_notice(cx))
             .child(root.flex_1().min_h_0())
             .children(titlebar::resize_handles(window))
     }
