@@ -1837,6 +1837,8 @@ impl Game<'_> {
                 continue;
             }
             let at = m.position;
+            let entity_id = m.id;
+            let kind = m.kind.id.clone();
             let sound_at = Some([at.x, at.y, at.z]);
             match m.species() {
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
@@ -1955,6 +1957,12 @@ impl Game<'_> {
                 }
                 _ => continue,
             }
+            self.native_block_shear_entity(
+                self.dim.id(),
+                [target.0, target.1, target.2],
+                entity_id,
+                &kind,
+            );
             self.post_block_game_event(
                 "minecraft:shear",
                 [target.0, target.1, target.2],

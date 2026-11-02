@@ -3006,6 +3006,18 @@ impl Game<'_> {
     ) {
         let _ = (player, name, state, cancel);
     }
+    /// A dispenser sheared `entity` of kind `kind` at the block in front of
+    /// its own block at `pos`, after the shearing effects. Server-side.
+    /// @API:native_block_shear_entity@.
+    pub(super) fn native_block_shear_entity(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        entity: u32,
+        kind: &str,
+    ) {
+        let _ = (dimension, pos, entity, kind);
+    }
     /// A dispenser equipped `item` on the first eligible `target` in front
     /// of its block at `pos`. `target` is `player`, `mob` or `armor_stand`.
     /// The equip, item consumption, sound and game event have completed.
