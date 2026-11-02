@@ -215,13 +215,17 @@ impl Game<'_> {
     /// `AbstractFurnaceBlockEntity.serverTick` of the furnace at `pos`, and
     /// its block's `lit` following it.
     fn tick_furnace(&mut self, pos: Pos) -> Result<()> {
+        // What the hooks need from before the tick, without cloning stacks: the
+        // fuel's id only while the furnace is out (it can light this tick), the
+        // input's id (a last item is gone after it smelts) and the result count.
         let before = match self.world.block_entities.get(&pos) {
             Some(BlockEntity::Furnace(f)) => (
-                f.lit_remaining,
                 f.cooking_timer,
-                f.items[1].clone(),
-                f.items[0].clone(),
-                f.items[2].clone(),
+                (f.lit_remaining == 0)
+                    .then(|| f.items[1].as_ref().map(|s| s.item.clone()))
+                    .flatten(),
+                f.items[0].as_ref().map(|s| s.item.clone()),
+                f.items[2].as_ref().map_or(0, |s| s.count),
             ),
             _ => return Ok(()),
         };
@@ -236,16 +240,14 @@ impl Game<'_> {
                 self.res.providers(),
                 &mut drops,
             );
-            let burning = (before.0 == 0 && f.lit_remaining > 0)
-                .then(|| before.2.as_ref().map(|fuel| fuel.item.to_string()))
-                .flatten();
+            let burning = before.1.filter(|_| f.lit_remaining > 0);
             let smelted = f.items[2]
                 .as_ref()
-                .filter(|after| after.count > before.4.as_ref().map_or(0, |before| before.count))
-                .map(|after| (before.3.clone(), after.item.to_string()));
-            let started = before.1 == 0 && f.cooking_timer > 0;
+                .filter(|after| after.count > before.3)
+                .map(|after| (before.2.clone(), after.item.clone()));
+            let started = before.0 == 0 && f.cooking_timer > 0;
             let smelting = started
-                .then(|| f.items[0].as_ref().map(|item| item.item.to_string()))
+                .then(|| f.items[0].as_ref().map(|item| item.item.clone()))
                 .flatten();
             (lit, burning, smelted, smelting)
         };
@@ -256,7 +258,7 @@ impl Game<'_> {
             self.native_furnace_burn([pos.0, pos.1, pos.2], &fuel);
         }
         if let Some((Some(item), result)) = smelted {
-            self.native_furnace_smelt([pos.0, pos.1, pos.2], &item.item, &result);
+            self.native_furnace_smelt([pos.0, pos.1, pos.2], &item, &result);
         }
         for stack in drops {
             self.campfire_drop(pos, stack);
