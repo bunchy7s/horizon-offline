@@ -3783,6 +3783,16 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, result);
     }
+    /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
+    pub(super) fn native_trade_select(
+        &mut self,
+        player: u128,
+        name: &str,
+        villager: Option<u32>,
+        index: usize,
+    ) {
+        let _ = (player, name, villager, index);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
