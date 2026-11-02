@@ -39,7 +39,7 @@ pub fn named_color(name: &str) -> Option<u32> {
     COLORS.iter().find(|c| c.1 == name).map(|c| c.2)
 }
 
-/// Click actions carried by locally constructed text components.
+/// Click actions carried by text components.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClickEvent {
     /// `ClickEvent.OpenUrl`: an http or https link.
@@ -53,6 +53,11 @@ pub enum ClickEvent {
     /// `ClickEvent.ShowDialog`: a `minecraft:dialog` registry id, or the
     /// dialog itself as the component carried it.
     ShowDialog(horizon_world::nbt::Tag),
+    /// `ClickEvent.Custom`: a server-defined action with an optional NBT payload.
+    Custom {
+        id: String,
+        payload: Option<horizon_world::nbt::Tag>,
+    },
     /// A local file to open with the system handler.
     /// Only allow this in locally constructed messages, never server/LAN text.
     OpenFile(String),
@@ -539,7 +544,7 @@ const STYLE_KEYS: [&str; 11] = [
     "insertion",
     "font",
 ];
-/// Style.Serializer: the fields a style sets.
+/// `Style.Serializer`: the fields a style sets.
 fn style_json(style: &Style) -> Vec<(String, Value)> {
     let mut out = Vec::new();
     if let Some(c) = style.color {
@@ -581,6 +586,13 @@ fn style_json(style: &Style) -> Vec<(String, Value)> {
                 "action": "show_dialog",
                 "dialog": crate::scoreboard::tag_to_json(dialog),
             }),
+            ClickEvent::Custom { id, payload } => {
+                let mut event = json!({ "action": "custom", "id": id });
+                if let Some(payload) = payload {
+                    event["payload"] = crate::scoreboard::tag_to_json(payload);
+                }
+                event
+            }
             ClickEvent::OpenFile(path) => json!({ "action": "open_file", "path": path }),
         };
         out.push(("click_event".to_owned(), event));

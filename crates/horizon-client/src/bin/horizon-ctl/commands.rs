@@ -204,6 +204,9 @@ pub const COMMANDS: &[Cmd] = &[
     cmd!("events", Observe, "events [--since SEQ]", "what happened since SEQ, oldest first: screens, chat, deaths, respawns, items gained or lost, dimensions, worlds",
         "Every event has seq and tick; pass the reply's last as --since next time. The game keeps the newest 256.",
         ["horizon-ctl events", "horizon-ctl events --since 42"], &[flag("since", Ty::Int, "only events after this seq")], mcp: true, local: false),
+    cmd!("input-log", Observe, "input-log [--since SEQ] [--limit N] [--origin user|agent|game]", "recent input and who caused it: a person, an agent or the game",
+        "Every event has seq, tick and origin. `user` is the window's own keyboard, mouse or pad; `agent` is the control socket (this tool); `game` is input the game made up. A `user-input` event in `events` means a person stepped in while an agent was driving. The game keeps the newest 512.",
+        ["horizon-ctl input-log", "horizon-ctl input-log --origin user --limit 20", "horizon-ctl input-log --since 120"], &[flag("since", Ty::Int, "only events after this seq"), flag("limit", Ty::Int, "newest N events"), flag("origin", Ty::Enum(&["user", "agent", "game"]), "user, agent or game")], mcp: true, local: false),
     cmd!("wait-ready", Session, "wait-ready [SECONDS]", "wait until the player has spawned and no chunks are pending",
         "Polls status every 250 ms; replies with the status, or an error after SECONDS (default 120).",
         ["horizon-ctl wait-ready 300"], &[opt("seconds", Ty::Num, "how long to wait (default 120)")], mcp: true, local: true),
@@ -454,6 +457,23 @@ pub const COMMANDS: &[Cmd] = &[
     cmd!("fly", Scripting, "fly X1 Y1 Z1 X2 Y2 Z2 SECONDS [PITCH [raw]]", "fly the camera along a line, then reply with the frame summary",
         "The reply's tick_ms and tick_ms_max are the world's smoothed tick time over the flight (the server thread's when single player runs on one). With raw, the reply also lists every frame time in milliseconds (frame_ms).",
         ["horizon-ctl fly 0 100 0 500 100 0 20"], &[], mcp: false, local: false),
+    // Repro recordings
+    cmd!("record-start", Scripting, "record-start [NAME] [--no-world]", "record input, state and the world for a bug repro",
+        "Writes recordings/<stamp>-NAME/: inputs.jsonl (who caused each input: user, agent or game), state.jsonl (the player and world every second), events.jsonl and, in single player, a copy of the world. The recording starts from a fresh save. Replies once the world copy is done.",
+        ["horizon-ctl record-start repro-bug", "horizon-ctl record-start --no-world"], &[opt("name", Ty::Str, "folder name after the timestamp (default session)"), flag("no-world", Ty::Bool, "do not copy the world (a server session)")], mcp: true, local: false),
+    cmd!("record-stop", Scripting, "record-stop [--export]", "stop the recording (and write the repro zip)",
+        "Without --export only the recording folder is closed; repro-export zips it later. With --export the reply carries the zip path.",
+        ["horizon-ctl record-stop", "horizon-ctl record-stop --export"], &[flag("export", Ty::Bool, "write the repro bundle too")], mcp: true, local: false),
+    cmd!("record-status", Scripting, "record-status", "the running recording and replay, if any", "",
+        ["horizon-ctl record-status"], &[], mcp: true, local: false),
+    cmd!("record-list", Scripting, "record-list", "the recordings and repro bundles on disk", "", ["horizon-ctl record-list"], &[], mcp: true, local: false),
+    cmd!("record-replay", Scripting, "record-replay NAME [--stop] [--in-place] [--keep-world] [--timeout S]", "replay a recording, best effort",
+        "Loads the recording's world copy into saves/, opens it and feeds the recorded input back at its ticks. Only input and movement commands replay (never world, network or account ones). --in-place feeds the input into the world already open (a server recording needs it); --keep-world leaves the copied world behind when it ends. --stop ends a running replay. Same build and machine only; state.jsonl is the oracle, not a promise.",
+        ["horizon-ctl record-replay repro-bug", "horizon-ctl record-replay repro-bug --stop", "horizon-ctl record-replay server-fight --in-place"],
+        &[opt("name", Ty::Str, "recording from record-list"), flag("stop", Ty::Bool, "stop the running replay"), flag("in-place", Ty::Bool, "feed the open world instead of opening the copy"), flag("keep-world", Ty::Bool, "leave the copied world in saves/"), flag("timeout", Ty::Int, "give up after this many seconds (default 300)")], mcp: true, local: false),
+    cmd!("repro-export", Scripting, "repro-export [NAME] [PATH] [--no-world]", "zip a recording with the logs, crash report and status",
+        "Writes repro/<stamp>-NAME.zip: the recording, logs/latest.log, the newest crash report, a status.json and a README. The player attaches it to the bug report; nothing is uploaded. Stops a running recording first.",
+        ["horizon-ctl repro-export", "horizon-ctl repro-export repro-bug out.zip"], &[opt("name", Ty::Str, "recording from record-list (default the newest)"), opt("path", Ty::Str, "where to write the zip"), flag("no-world", Ty::Bool, "leave the world out")], mcp: true, local: false),
 ];
 
 pub fn find(name: &str) -> Option<&'static Cmd> {

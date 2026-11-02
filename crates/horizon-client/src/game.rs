@@ -142,6 +142,7 @@ mod hand;
 mod headless;
 mod ime;
 mod initial_spawn;
+mod input_trace;
 mod integrated;
 mod interactions;
 mod item_draw;
@@ -206,6 +207,7 @@ mod native_explosions;
 mod native_falling;
 mod native_hooks;
 mod native_inventories;
+mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
 mod native_menus;
@@ -217,6 +219,7 @@ mod native_net;
 mod native_panel;
 mod native_panel_recipes;
 mod native_projectiles;
+mod native_quick_move;
 mod native_recipes;
 mod native_server;
 mod native_shaders;
@@ -269,6 +272,7 @@ mod remote_stations;
 mod remote_vehicles;
 mod render_control;
 mod render_tick;
+mod repro;
 mod respawn_anchor;
 mod saves_control;
 mod saving;
@@ -338,6 +342,10 @@ use horizon_client::{
     assets::{Assets, RenderAssets},
     audio::Audio,
     biome::Biomes,
+    block_entity_render::{
+        self, BlockEntityRenderer, CacheOptions, Scene as BlockEntityScene, StaticCacheFrameStats,
+        StaticSectionSnapshot,
+    },
     blocks::{BlockFacts, Fluid},
     clock::FixedStep,
     collisions,
@@ -362,6 +370,7 @@ use horizon_client::{
     particles::Particle,
     save::{Level, Persistent, SaveDir},
     settings::Settings,
+    spans,
     sprint::Keys,
     streaming::{Streaming, WorkerContext},
     testgen::TestTerrain,
@@ -393,6 +402,7 @@ pub use native_claimed_items::{NativeHeldItem, NativeHit, NativeModEvent};
 pub use native_data_maps::NativeDataMapType;
 pub use native_falling::NativeFalling;
 pub use native_hooks::{NativeClock, NativeShake};
+pub use native_item_energy::ItemEnergyBuffer;
 pub use native_mob_draw::{NativeMobRender, NativePlayerRender};
 pub use native_server::NativeExperienceOrb;
 pub use native_world_columns::NativeColumnBlocks;
@@ -855,6 +865,16 @@ struct Hit {
     face: [i32; 3],
     point: [f64; 3],
 }
+impl Hit {
+    /// The block the clicked face leads to (`pos.relative(direction)`).
+    fn beside(&self) -> [i32; 3] {
+        [
+            self.pos[0] + self.face[0],
+            self.pos[1] + self.face[1],
+            self.pos[2] + self.face[2],
+        ]
+    }
+}
 /// What a falling block's tick did (`FallingBlockEntity.tick`).
 enum FallStep {
     Falling,
@@ -894,6 +914,7 @@ struct InteractTarget {
 /// The client world as seen by the vanilla block-behaviour library.
 struct GameLevel<'w> {
     world: &'w mut World,
+    redstone_experiments: bool,
     facts: &'w BlockFacts,
     collision: &'w BlockCollisionRegistry<'w>,
     events: &'w mut Vec<LevelEvent>,
@@ -1169,6 +1190,9 @@ impl GameLevel<'_> {
     }
 }
 impl LevelAccess for GameLevel<'_> {
+    fn redstone_experiments(&self) -> bool {
+        self.redstone_experiments
+    }
     fn allow_hopper_pickup_item(&self, pos: BlockPos, item: &str, count: u32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
@@ -1921,7 +1945,7 @@ struct WorldRest {
     mob_types: HashMap<String, Arc<MobType>>,
     mob_data: horizon_client::mobs::MobData,
     providers: Providers,
-    block_entity_render: horizon_client::block_entity_render::BlockEntityRenderer,
+    block_entity_render: BlockEntityRenderer,
     animate: horizon_client::animate_tick::AnimateTables,
     fog: horizon_client::fog::FogTables,
     music: horizon_client::music::MusicTables,
@@ -1988,7 +2012,7 @@ impl Resources {
     fn providers(&self) -> &Providers {
         &self.rest().providers
     }
-    fn block_entity_render(&self) -> &horizon_client::block_entity_render::BlockEntityRenderer {
+    fn block_entity_render(&self) -> &BlockEntityRenderer {
         &self.rest().block_entity_render
     }
     fn animate(&self) -> &horizon_client::animate_tick::AnimateTables {
@@ -2908,6 +2932,10 @@ struct Game<'a> {
     ui_wait: ui_control::UiWait,
     /// What happened, for `events` and `wait-for` (game/events.rs).
     events: events::Events,
+    /// Who caused each input event: a person, an agent or the game (game/input_trace.rs).
+    input_trace: input_trace::InputTrace,
+    /// A repro recording, export or replay (game/repro.rs).
+    repro: repro::Repro,
     /// The overworld's last `sky_darken` and its inputs (time, rain, thunder).
     sky_darken_memo: std::cell::Cell<Option<((i64, u32, u32), i32)>>,
     /// The last water plane `water_plane` found, kept while none is in reach.
@@ -3873,6 +3901,8 @@ impl Game<'_> {
             previous: p,
             velocity: Vec3::new(velocity[0], velocity[1], velocity[2]),
             on_ground: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay,
             bob_offset: bob,
@@ -4376,6 +4406,11 @@ impl Game<'_> {
         };
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
+            redstone_experiments: self
+                .level
+                .enabled_features
+                .iter()
+                .any(|feature| feature == "minecraft:redstone_experiments"),
             cart_boxes,
             item_frames: &self.item_frames,
             carts: &self.carts,
@@ -6582,6 +6617,7 @@ impl Game<'_> {
                 Some(BlockEntity::StructureBlock(_)) => self.structure_block_placed(key),
                 Some(BlockEntity::JigsawBlock(_)) => self.jigsaw_block_placed(key),
                 Some(BlockEntity::TestBlock(_)) => self.test_block_placed(key),
+                Some(BlockEntity::Jukebox(_)) => self.jukebox_placed(target, &stack),
                 Some(BlockEntity::Sign(sign)) if !sign.waxed => self.open_sign_editor(key, true),
                 _ => {}
             }
@@ -7296,6 +7332,7 @@ impl Game<'_> {
             None => 0.0,
         };
         self.ticks += 1;
+        self.repro_tick();
         // An in-frame LAN host's player has the entity id its guests see it by.
         if !self.serving()
             && let (Some(host), Some(p)) = (&self.lan, self.player.as_mut())
@@ -7750,7 +7787,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
             horizon_client::spans::time("tick_item_frames", || self.tick_item_frames());
-            horizon_client::spans::time("tick_armor_stands", || self.tick_armor_stands());
+            horizon_client::spans::time("tick_armor_stands", || self.tick_armor_stands())?;
             horizon_client::spans::time("tick_cushions", || self.tick_cushions());
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
@@ -9174,6 +9211,10 @@ impl Game<'_> {
         }
     }
     fn craft_result(&self) -> Option<ItemStack> {
+        // A server's result slot is the server's (`CraftingMenu.slotChangedCraftingGrid`).
+        if let Some(r) = &self.remote {
+            return r.craft_result.clone();
+        }
         self.craft_recipe().map(|(_, result)| result)
     }
     /// The recipe id and result of the crafting grid.
@@ -10829,15 +10870,24 @@ impl Game<'_> {
         camera: glam::DVec3,
         alpha: f64,
         mut out: Vec<Vertex>,
-    ) -> Vec<Vertex> {
+    ) -> (
+        Vec<Vertex>,
+        Arc<[StaticSectionSnapshot]>,
+        Vec<[i32; 3]>,
+        StaticCacheFrameStats,
+    ) {
         // Its steps as spans (HORIZON_SPIKES): each lap names the step that just ended.
         let mut laps = horizon_client::spans::laps();
+        let mut static_block_entities = std::sync::Arc::from([]);
+        let mut visible_static_block_entity_sections = Vec::new();
+        let mut static_block_entity_stats = StaticCacheFrameStats::default();
         self.entity_spans.borrow_mut().clear();
         self.entity_motion.borrow_mut().clear();
         // LevelExtractor.extract: the transient blocks queued since the last frame.
         self.drain_transient_block_queue();
         self.prepare_entity_culling(camera);
         self.prepare_trims();
+        self.begin_skinning();
         self.mark_entity(out.len(), "minecraft:entity_flame");
         // One scan for both passes that draw them (block entities below and the
         // overlay near the end of this function).
@@ -11053,7 +11103,7 @@ impl Game<'_> {
         if let Some(r) = &self.renderer {
             let lid = |p: [i32; 3]| self.chest_lid(p, alpha as f32);
             let anim = |p: [i32; 3]| self.block_anim(p, alpha as f32);
-            let scene = horizon_client::block_entity_render::Scene {
+            let scene = BlockEntityScene {
                 camera,
                 orientation: self.camera_orientation(),
                 anim: &anim,
@@ -11064,6 +11114,8 @@ impl Game<'_> {
                 world: &self.world,
                 sprites: &self.gui.atlas.sprites,
                 emissive: &self.gui.atlas.emissive,
+                translucent_sprites: &self.gui.atlas.translucent,
+                atlas_revision: self.gui.atlas.revision,
                 nether: self.dim == Dim::Nether,
                 lid: &lid,
                 sign: &|p| match self.world.block_entities.get(&(p[0], p[1], p[2])) {
@@ -11090,6 +11142,9 @@ impl Game<'_> {
                         | "minecraft:test_instance_block"
                 )
             };
+            let long_range = |state: u32| {
+                &*self.res.facts().get(BlockStateId(state)).name == "minecraft:end_gateway"
+            };
             let in_view = |p: &[i32; 3]| {
                 view.is_none_or(|v| {
                     let o = (glam::DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))
@@ -11098,32 +11153,90 @@ impl Game<'_> {
                     v.intersects(o - glam::Vec3::ONE, o + glam::Vec3::splat(2.0))
                 })
             };
-            let visible =
-                r.visible_block_entities(self.settings.chunk_fade)
-                    .filter(|(p, state)| {
-                        self.res.block_entity_render().renders(*state)
-                            && (off_screen(*state) || in_view(p))
-                    });
-            if self.entity_culler.is_some()
-                || self.async_entity_culler.is_some()
-                || self.pack_ids.is_some()
+            let visible = r
+                .visible_block_entities_in_frustum(
+                    self.settings.chunk_fade,
+                    camera,
+                    view,
+                    &off_screen,
+                    long_range,
+                )
+                .filter(|(block, section_inside)| {
+                    let (pos, state) = **block;
+                    self.res.block_entity_render().renders(state)
+                        && (off_screen(state) || *section_inside || in_view(&pos))
+                })
+                .map(|(block, _)| block);
+            let block_entity_cache = CacheOptions {
+                shulker_boxes: self.settings.horizon.cache_shulker_boxes,
+                signs: self.settings.horizon.cache_signs,
+                decorated_pots: self.settings.horizon.cache_decorated_pots,
+                bells: self.settings.horizon.cache_bells,
+                chests: self.settings.horizon.cache_chests,
+                banners: self.settings.horizon.cache_banners,
+                copper_golem_statues: self.settings.horizon.cache_copper_golem_statues,
+            };
+            // Entity occlusion is for ordinary entity meshes. Block entities
+            // already have section and per-block frustum culling; routing them
+            // through the per-vertex occlusion callback both repeats that work
+            // and disables their per-section GPU cache. Shader packs still need
+            // per-entity span marks, so they keep the callback path.
+            if self.pack_ids.is_some() {
+                let section_revision = |pos| r.block_entity_section_revision(pos);
+                static_block_entity_stats = self
+                    .res
+                    .block_entity_render()
+                    .render_with_cache_options_and_callbacks(
+                        &scene,
+                        visible,
+                        block_entity_cache,
+                        r.block_entity_revision(),
+                        Some(&section_revision),
+                        &mut out,
+                        |_, state, start| self.mark_block_entity(start, state),
+                        |_, _, _, _| {},
+                    );
+            } else if (self.entity_culler.is_some() || self.async_entity_culler.is_some())
+                && !block_entity_cache.any_model_cache()
             {
+                // Entity Culling on and no model cache: a block entity hidden
+                // behind a wall stays culled, as it was before the caches.
                 for block in visible {
                     let start = out.len();
-                    self.mark_block_entity(start, block.1);
                     self.res
                         .block_entity_render()
                         .render(&scene, std::iter::once(block), &mut out);
-                    if !off_screen(block.1)
-                        && (self.entity_culler.is_some() || self.async_entity_culler.is_some())
-                    {
+                    if !off_screen(block.1) {
                         self.cull_entity_vertices(&mut out, start);
                     }
                 }
             } else {
-                self.res
+                let cache_candidates = r
+                    .visible_block_entities_in_frustum(
+                        self.settings.chunk_fade,
+                        camera,
+                        None,
+                        |_| false,
+                        |_| false,
+                    )
+                    .filter(|(block, _)| self.res.block_entity_render().renders(block.1))
+                    .map(|(block, _)| block);
+                (
+                    static_block_entities,
+                    visible_static_block_entity_sections,
+                    static_block_entity_stats,
+                ) = self
+                    .res
                     .block_entity_render()
-                    .render(&scene, visible, &mut out);
+                    .render_with_gpu_cache_options(
+                        &scene,
+                        visible,
+                        cache_candidates,
+                        block_entity_cache,
+                        r.block_entity_revision(),
+                        |pos| r.block_entity_section_revision(pos),
+                        &mut out,
+                    );
             }
             // Mod block entities: their mods draw them (`native_block_entity_submit`),
             // culled by the bounds they give.
@@ -11326,7 +11439,12 @@ impl Game<'_> {
         laps.lap("eg_cracks");
         self.finish_async_entity_culling();
         laps.lap("eg_culling_finish");
-        out
+        (
+            out,
+            static_block_entities,
+            visible_static_block_entity_sections,
+            static_block_entity_stats,
+        )
     }
 
     /// `LevelRenderer.destroyBlockProgress`: a player's crack on a block (0..=9), or none
@@ -12542,6 +12660,8 @@ impl Game<'_> {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
+        // A repro recording is finished and bundled before the process may go away.
+        self.repro_on_exit();
         if self.title.is_some() || self.saved_for_exit {
             return Ok(());
         }
@@ -12568,6 +12688,9 @@ impl Game<'_> {
         Ok(())
     }
     fn close_world(&mut self) -> Result<()> {
+        // A recording cannot cross into another world, and a replay feeding the
+        // title screen is nonsense.
+        self.repro_world_closed();
         self.clear_waypoints();
         self.post_effects.clear();
         self.spectated_post_effect = None;
@@ -12844,24 +12967,29 @@ impl Game<'_> {
         }
     }
     /// `BucketItem.use`'s place position: a water bucket fills the clicked
-    /// block itself when that block is a liquid container (a waterloggable
-    /// stair, slab, fence, ...); every other bucket empties into the block the
-    /// clicked face leads to. `SolidBucketItem` places like a block item, into
-    /// a replaceable clicked block.
+    /// block itself when that block can hold it (`canBlockContainFluid`: a
+    /// waterloggable stair, slab, fence, ..., but not a double slab, kelp or
+    /// seagrass); every other bucket empties into the block the clicked face
+    /// leads to. `SolidBucketItem` places like a block item, into a
+    /// replaceable clicked block.
     pub(super) fn bucket_target(&self, content: BucketContent, hit: &Hit) -> [i32; 3] {
         let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
+        let behaviours = self.res.behaviours();
         if content == BucketContent::Powder {
             if self.res.facts().get(clicked).replaceable {
                 return hit.pos;
             }
-        } else if content.is_water() && self.res.behaviours().is_liquid_container(clicked) {
+        } else if content.is_water()
+            && behaviours.is_liquid_container(clicked)
+            && behaviours.can_place_liquid(
+                clicked,
+                horizon_world::fluid::FluidKind::Water,
+                self.creative,
+            )
+        {
             return hit.pos;
         }
-        [
-            hit.pos[0] + hit.face[0],
-            hit.pos[1] + hit.face[1],
-            hit.pos[2] + hit.face[2],
-        ]
+        hit.beside()
     }
     /// The cauldron at `pos`, and whether water is above it
     /// (`CauldronInteractions.isUnderWater`).
@@ -13313,18 +13441,24 @@ impl Game<'_> {
                 return Ok(UseResult::Fail);
             }
             let pos = BlockPos::new(target[0], target[1], target[2]);
-            // `Player.isShiftKeyDown`: only air takes a fluid under Shift.
+            let [x, y, z] = hit.beside();
+            let beside = Some(BlockPos::new(x, y, z));
+            // `Player.isShiftKeyDown`: a block that refuses the fluid (any
+            // non-air block under Shift) passes it to the block beside, where
+            // Shift no longer counts.
             let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
             let creative = self.creative;
             let emptied = self.with_level(|b, level, ticks| {
-                b.bucket_empty(level, ticks, pos, content, sound, sneaking, creative)
+                b.bucket_empty(
+                    level, ticks, pos, beside, content, sound, sneaking, creative,
+                )
             });
             self.process_level_events()?;
-            if !emptied {
+            let Some(emptied) = emptied else {
                 return Ok(UseResult::Fail);
-            }
+            };
             if self.dim == Dim::Nether && content.is_water() {
-                self.evaporation_smoke(target);
+                self.evaporation_smoke([emptied.x, emptied.y, emptied.z]);
             }
             // `BucketItem.emptyContents` uses `playSound(player, …)`: the
             // actor's client already played the empty / evaporate sound from
@@ -14135,7 +14269,7 @@ impl Game<'_> {
             self.submit_item_world(
                 &state,
                 m,
-                horizon_client::block_entity_render::vertex_light(light),
+                block_entity_render::vertex_light(light),
                 &mut out,
             );
         }
@@ -14667,7 +14801,14 @@ impl Game<'_> {
         if self.enough_slept() {
             if self.ui.rules.bool("advance_time") {
                 let t = self.world.day_time;
-                let target = t + 24000 - t.rem_euclid(24000);
+                let mut target = t + 24000 - t.rem_euclid(24000);
+                // SleepFinishedTimeEvent: the mods may move the wake-up time,
+                // never before now (`setTimeAddition` refuses a lower one).
+                let mut asked = target;
+                self.native_sleep_finished_time(self.dim.id(), t, &mut asked);
+                if asked >= t {
+                    target = asked;
+                }
                 let mut cancel = false;
                 self.native_time_skip(self.dim.id(), t, target, "sleep", &mut cancel);
                 if !cancel {
@@ -15610,7 +15751,7 @@ impl Game<'_> {
         lines.extend(g.lines);
         let on_top = g.on_top;
         let colored_lights = if self.title.is_none() {
-            self.native_frame_visuals(camera, &mut lines)
+            self.native_frame_visuals(camera, alpha, &mut lines)
         } else {
             Vec::new()
         };
@@ -15750,13 +15891,21 @@ impl Game<'_> {
         // Keep the buffer local while builders need mutable access to the game.
         let mut entities = std::mem::take(&mut self.entity_vertices);
         entities.clear();
+        let mut static_block_entities = std::sync::Arc::from([]);
+        let mut visible_static_block_entity_sections = Vec::new();
+        let mut static_block_entity_stats = StaticCacheFrameStats::default();
         self.see_through_vertices.clear();
         self.glowing_vertices.get_mut().clear();
         self.shadow_only_vertices.get_mut().clear();
         if !title {
-            entities = horizon_client::spans::time("entity_geometry", || {
-                self.entity_geometry(camera, alpha, entities)
-            });
+            let (built, static_sections, visible_static_sections, static_stats) =
+                spans::time("entity_geometry", || {
+                    self.entity_geometry(camera, alpha, entities)
+                });
+            entities = built;
+            static_block_entities = static_sections;
+            visible_static_block_entity_sections = visible_static_sections;
+            static_block_entity_stats = static_stats;
         }
         let bolts = if title {
             Vec::new()
@@ -15919,6 +16068,9 @@ impl Game<'_> {
                 color: sky.cloud_color,
             }),
             entities: &entities,
+            static_block_entities: &static_block_entities,
+            visible_static_block_entity_sections: &visible_static_block_entity_sections,
+            static_block_entity_stats,
             entity_motion: &entity_motion,
             entity_spans: &entity_spans,
             skin: skin.pending().then_some(&skin),
@@ -16854,7 +17006,7 @@ impl ApplicationHandler for Game<'_> {
         } else {
             None
         };
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, input_trace::InputOrigin::User);
         if let Some((event, modifiers)) = key {
             self.native_input_key(&event, modifiers);
         }
@@ -16871,6 +17023,10 @@ impl ApplicationHandler for Game<'_> {
             && let DeviceEvent::MouseMotion { delta: (x, y) } = event
         {
             // MouseHandler.onMove with the pointer grabbed; applied once per frame.
+            self.note_input(
+                input_trace::InputOrigin::User,
+                input_trace::TraceKind::Motion { x, y },
+            );
             self.mouse.on_move(0.0, 0.0, x, y, true, true);
             self.last_input = Instant::now();
         }
@@ -16896,6 +17052,7 @@ impl Game<'_> {
         event_loop: &dyn EventLoopCtl,
         id: WindowId,
         mut event: WindowEvent,
+        origin: input_trace::InputOrigin,
     ) {
         // A headless game has no window: its events (the frame, the control socket's input)
         // carry `WindowId::dummy()`.
@@ -16918,6 +17075,9 @@ impl Game<'_> {
         {
             *button = MouseButton::Right;
         }
+        // Who caused it, before the event is handled: the trace wants the
+        // window's own keys, never the ones the socket made up.
+        self.trace_window_event(origin, &event);
         if let WindowEvent::KeyboardInput { event, .. } = &event
             && let PhysicalKey::Code(key) = event.physical_key
         {
@@ -18212,6 +18372,8 @@ impl Game<'_> {
                                 ms(ticked.elapsed().saturating_sub(r.last_wait + render)),
                                 ms(render),
                             ]);
+                            self.frame_stats
+                                .record_block_entities(r.static_block_entity_frame_stats());
                         }
                         self.frame_stats.record_gpu(&r.gpu_times);
                         r.gpu_times.clear();
@@ -18273,6 +18435,14 @@ impl Game<'_> {
                             self.perf.title_shown();
                         } else if self.screen == Screen::Playing && self.player.is_some() {
                             self.perf.frame(elapsed.as_secs_f32() * 1000.0);
+                            if startup::filling() {
+                                let mut fill: Vec<(&'static str, usize)> =
+                                    self.streaming.stages().to_vec();
+                                fill.push(("resident", self.world.chunks.len()));
+                                fill.push(("uploads", self.pending_uploads.len()));
+                                fill.push(("backlog", self.remote_backlog()));
+                                startup::counters("world.fill", &fill);
+                            }
                             if startup::on() {
                                 startup::view_filled(
                                     self.world.chunks.len(),
@@ -18388,13 +18558,23 @@ impl Game<'_> {
                 // Offscreen frames don't wait for the window to be drawn: an
                 // occluded window (a locked macOS session) gets no redraws.
                 let id = w.id();
-                self.handle_window_event(event_loop, id, WindowEvent::RedrawRequested);
+                self.handle_window_event(
+                    event_loop,
+                    id,
+                    WindowEvent::RedrawRequested,
+                    input_trace::InputOrigin::Game,
+                );
             } else {
                 w.request_redraw();
             }
         } else if self.options.headless {
             // The headless loop paces the frames itself (`run_headless`).
-            self.handle_window_event(event_loop, WindowId::dummy(), WindowEvent::RedrawRequested);
+            self.handle_window_event(
+                event_loop,
+                WindowId::dummy(),
+                WindowEvent::RedrawRequested,
+                input_trace::InputOrigin::Game,
+            );
             return;
         }
         // A window the compositor hides gets no `RedrawRequested` at all, so
@@ -18827,6 +19007,8 @@ impl<'a> Game<'a> {
             flight: None,
             ui_wait: Default::default(),
             events: Default::default(),
+            input_trace: Default::default(),
+            repro: Default::default(),
             agent: agent::Agent::default(),
             view_frustum: None,
             entity_culler: None,
@@ -19994,10 +20176,7 @@ fn load_world_rest(
         if !draws {
             return Ok(Default::default());
         }
-        let mut renderer =
-            horizon_client::block_entity_render::BlockEntityRenderer::load_with_visibility(
-                root, registry, visibility,
-            )?;
+        let mut renderer = BlockEntityRenderer::load_with_visibility(root, registry, visibility)?;
         renderer.add_mod_signs(facts, registry);
         Ok(renderer)
     };
@@ -20305,6 +20484,9 @@ fn loading_frame(hud: &HudBatch) -> Frame<'_> {
         glint_ticks: 0.0,
         nether_lighting: false,
         entities: &[],
+        static_block_entities: &[],
+        visible_static_block_entity_sections: &[],
+        static_block_entity_stats: Default::default(),
         entity_motion: &[],
         entity_spans: &[],
         skin: None,

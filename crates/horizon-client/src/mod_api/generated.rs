@@ -1199,11 +1199,12 @@ pub trait Hooks: Send + Sync {
     /// with those of `horizon-client/src/game/native_hooks.rs`): `components` holds
     /// `item`'s default components in `items.json`'s form (`"minecraft:max_stack_size": 16`,
     /// `"minecraft:food": {"nutrition": 4, "saturation": 2.4}`); insert or replace one to
-    /// set it, remove it to take it away (a stack size outside 1 to 99 is brought back
-    /// into it). Asked for every item each time the game reads
-    /// the defaults, from any thread, several times as resources load and again when a
-    /// world's data packs load: answer the same each time. Client and server each ask
-    /// their own mods, as NeoForge does, so both sides need the mod.
+    /// set it, remove it to take it away (a stack size outside 1 to `i32::MAX` is
+    /// brought back into it, and one that is not a number leaves the data pack's
+    /// own). Asked for every item each time the game reads the defaults, from any
+    /// thread, several times as resources load and again when a world's data packs
+    /// load: answer the same each time. Client and server each ask their own mods,
+    /// as NeoForge does, so both sides need the mod.
     /// 79.
     ///
     /// Every mod gets `event.components` in order and may add, change or remove components.
@@ -2953,6 +2954,26 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
+    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
+    /// its capacity and the most one insert and one extract move. A capacity
+    /// under 1 leaves the buffer out, and the limits are clamped to
+    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
+    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
+    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
+    /// is kept in the stack's `minecraft:custom_data`, as the int
+    /// `horizon_energy`. API @API:item_energy_buffer@.
+    ///
+    /// Return `Some` to set `buffer`; the first mod returning `Some` wins.
+    fn item_energy_buffer(
+        &self,
+        host: &dyn Host,
+        event: &mut ItemEnergyBufferEvent<'_>,
+    ) -> Option<ItemEnergyBuffer> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// A dropped item entity was successfully added to the server level.
     /// @API:native_item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
@@ -2974,6 +2995,36 @@ pub trait Hooks: Send + Sync {
     ///
     /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
     fn lightning_strike(&self, host: &mut dyn Host, event: &mut LightningStrikeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A player shift-clicked slot `slot` of the menu of the mod block
+    /// entity at `pos` (`AbstractContainerMenu.quickMoveStack`, the method a
+    /// Java menu overrides), on the server, before the game's own routing:
+    /// move the stack where your block wants it. `slot` is the menu's index:
+    /// below `container_slots` it is the block's own slot (`entity.items`),
+    /// from there on the player's inventory (27 main slots, then the hotbar).
+    /// `stack` is a copy of what the slot holds; take what you move out of
+    /// it (put it in `entity.items`, or in another block with
+    /// `native_insert_item`) and set `handled`: the slot then holds what is
+    /// left of `stack` (whatever you wrote to that slot of `entity.items`),
+    /// the game's routing is skipped, and the player's client gets the menu
+    /// again. Left unhandled, `entity.items` goes back to what it held and
+    /// the game moves the stack as for any container; a later mod sees what
+    /// an earlier one did to `stack`.
+    /// For a mod container on a vanilla menu type and on a mod menu type,
+    /// the left or right button, a slot that holds something and that the
+    /// mod's screen shows; not for a spectator or a dead player, a menu no
+    /// longer valid, nor during a drag.
+    /// Asked once per click, where vanilla asks `quickMoveStack` again while
+    /// it keeps moving the same item. The player's state is swapped in, so
+    /// `native_acting_player` names them; `entity` is out of the world
+    /// during the call, as in `native_menu_button`.
+    /// API @API:menu_quick_move@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `handled`, and later mods are skipped.
+    fn menu_quick_move(&self, host: &mut dyn Host, event: &mut MenuQuickMoveEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -3934,6 +3985,24 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Enough players have slept through the night in level `dimension`
+    /// and the clock is about to move to the morning (NeoForge's
+    /// `SleepFinishedTimeEvent`, vanilla's `ServerLevel.tick` when it moves
+    /// the clock to `wake_up_from_sleep`): `new_time` comes in as the next
+    /// morning's day time and may be changed to wake everyone at another
+    /// time. A time before `current` (the day time now) is refused, as
+    /// `setTimeAddition` refuses one, and the morning stays. Unlike
+    /// NeoForge, which refuses a bad value as it is set, the check runs once
+    /// after every mod, so a later mod sees the value an earlier one left.
+    /// On the server, only when the `advance_time` rule is on;
+    /// `native_time_skip` then hears the jump to the time chosen here and
+    /// may still cancel it. The players wake and the weather resets as
+    /// usual either way.
+    /// API @API:sleep_finished_time@.
+    fn sleep_finished_time(&self, host: &mut dyn Host, event: &mut SleepFinishedTimeEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A sponge at `pos` absorbed water and became wet. Server-side.
     /// @API:native_sponge_absorb@.
     fn sponge_absorb(&self, level: &dyn LevelHost, event: &mut SpongeAbsorbEvent) {
@@ -3975,6 +4044,20 @@ pub trait Hooks: Send + Sync {
     }
     /// A server player selected trade `index` from `villager` in the trading menu. @API:native_trade_select@.
     fn trade_select(&self, host: &mut dyn Host, event: &mut TradeSelectEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server player traded with a villager or a wandering trader
+    /// (NeoForge's `TradeWithVillagerEvent`, at vanilla's
+    /// `MerchantResultSlot.onTake` once the offer is taken): `merchant` is
+    /// the trader's entity id and `kind` its type (`minecraft:villager`,
+    /// `minecraft:wandering_trader`), `offer` the trade as it is after this
+    /// one (its `uses` counted, `result` what the player got). Once per
+    /// trade, so a shift-click that trades several times is heard for each,
+    /// after the trade's statistic and `villager_trade` trigger. Listen
+    /// only: the trade is made. The player's state is swapped in
+    /// (`native_acting_player`). API @API:trade_with_villager@.
+    fn trade_with_villager(&self, host: &mut dyn Host, event: &mut TradeWithVillagerEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -9773,6 +9856,28 @@ pub fn dispatch_item_crafted(
         mod_hook.item_crafted(host, &mut event);
     }
 }
+/// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemEnergyBufferEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_energy_buffer(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    buffer: &mut Option<ItemEnergyBuffer>,
+) {
+    if buffer.is_some() {
+        return;
+    }
+    let mut event = ItemEnergyBufferEvent { item };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.item_energy_buffer(host, &mut event) {
+            *buffer = Some(replacement);
+            break;
+        }
+    }
+}
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemSpawnEvent<'a> {
@@ -9845,6 +9950,42 @@ pub fn dispatch_lightning_strike(
     for mod_hook in mods {
         if matches!(mod_hook.lightning_strike(host, &mut event), Flow::Cancel) {
             *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::menu_quick_move`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MenuQuickMoveEvent<'a> {
+    pub pos: [i32; 3],
+    pub entity: &'a mut ModBlockEntity,
+    pub container_slots: usize,
+    pub slot: usize,
+    pub stack: &'a mut ItemStack,
+}
+pub fn dispatch_menu_quick_move(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    pos: [i32; 3],
+    entity: &mut ModBlockEntity,
+    container_slots: usize,
+    slot: usize,
+    stack: &mut ItemStack,
+    handled: &mut bool,
+) {
+    if *handled {
+        return;
+    }
+    let mut event = MenuQuickMoveEvent {
+        pos,
+        entity,
+        container_slots,
+        slot,
+        stack,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.menu_quick_move(host, &mut event), Flow::Cancel) {
+            *handled = true;
             break;
         }
     }
@@ -11896,6 +12037,30 @@ pub fn dispatch_sculk_bloom(
         mod_hook.sculk_bloom(host, &mut event);
     }
 }
+/// What [`Hooks::sleep_finished_time`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct SleepFinishedTimeEvent<'a> {
+    pub dimension: &'a str,
+    pub current: i64,
+    pub new_time: i64,
+}
+pub fn dispatch_sleep_finished_time(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    current: i64,
+    new_time: &mut i64,
+) {
+    let mut event = SleepFinishedTimeEvent {
+        dimension,
+        current,
+        new_time: *new_time,
+    };
+    for mod_hook in mods {
+        mod_hook.sleep_finished_time(host, &mut event);
+    }
+    *new_time = event.new_time;
+}
 /// What [`Hooks::sponge_absorb`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct SpongeAbsorbEvent {
@@ -12049,6 +12214,29 @@ pub fn dispatch_trade_select(
     };
     for mod_hook in mods {
         mod_hook.trade_select(host, &mut event);
+    }
+}
+/// What [`Hooks::trade_with_villager`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TradeWithVillagerEvent<'a> {
+    pub merchant: u32,
+    pub kind: &'a str,
+    pub offer: &'a MerchantOffer,
+}
+pub fn dispatch_trade_with_villager(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    merchant: u32,
+    kind: &str,
+    offer: &MerchantOffer,
+) {
+    let mut event = TradeWithVillagerEvent {
+        merchant,
+        kind,
+        offer,
+    };
+    for mod_hook in mods {
+        mod_hook.trade_with_villager(host, &mut event);
     }
 }
 /// What [`Hooks::vault_change_state`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
