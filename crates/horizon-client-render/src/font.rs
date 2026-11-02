@@ -1406,6 +1406,32 @@ mod tests {
         assert!(!font.take_patches().is_empty());
     }
 
+    /// `FontSet.computeGlyphInfo`: a provider glyph with an advance outside
+    /// 0..32 is skipped, so the next provider that has the character is used.
+    #[test]
+    fn a_fishy_advance_falls_through_to_the_next_provider() {
+        // 64 opaque columns: the first provider's 'a' would advance 65, past
+        // the 32 vanilla allows, so the narrow provider's 'a' is the one used.
+        let wide = png(64, 8, |_, _| true);
+        let narrow = png(16, 8, |x, _| x < 2);
+        let def = br#"{"providers":[{"type":"bitmap","file":"minecraft:font/wide.png","ascent":7,"chars":["a"]},{"type":"bitmap","file":"minecraft:font/narrow.png","ascent":7,"chars":["a"]}]}"#;
+        let root = root(
+            "fishy",
+            &[
+                ("assets/minecraft/font/default.json", def),
+                ("assets/minecraft/textures/font/wide.png", &wide),
+                ("assets/minecraft/textures/font/narrow.png", &narrow),
+            ],
+        );
+        let font = load(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(font.glyph('a').advance, 3.0, "the narrow provider wins");
+        assert_eq!(font.advance('a', &Style::default()), 3.0);
+        // Obfuscated text picks a glyph by its own advance: nothing is 65 wide.
+        let obfuscated = font.random_glyph(&Style::default(), 65.0);
+        assert_eq!(obfuscated.advance, 6.0, "the missing glyph");
+    }
+
     /// StringDecomposer.iterateFormatted: a `§` that ends a part stops that
     /// part only; the next part is still measured and can break.
     #[test]
