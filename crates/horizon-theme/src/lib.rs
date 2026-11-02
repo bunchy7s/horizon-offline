@@ -12,6 +12,7 @@ use std::time::Duration;
 
 pub const FONT: &str = "Geist";
 pub const MONO: &str = "Geist Mono";
+pub mod glass;
 pub mod night;
 
 /// The launcher's and the website's display face (headings, navigation, buttons, badges only):
@@ -35,6 +36,71 @@ pub mod fonts {
     pub const BRICOLAGE_BOLD: &[u8] = include_bytes!("../fonts/BricolageGrotesque-Bold.ttf");
     pub const BRICOLAGE_DISPLAY_BOLD: &[u8] =
         include_bytes!("../fonts/BricolageGrotesqueDisplay-Bold.ttf");
+    /// The glass look's headings ([`crate::glass`]): SemiBold at optical sizes 56 and 28.
+    pub const BRICOLAGE_DISPLAY_SEMIBOLD: &[u8] =
+        include_bytes!("../fonts/BricolageGrotesqueDisplay-SemiBold.ttf");
+    pub const BRICOLAGE_HEADING_SEMIBOLD: &[u8] =
+        include_bytes!("../fonts/BricolageGrotesqueHeading-SemiBold.ttf");
+}
+
+/// The glass look's icons: Hugeicons' free set (MIT, `icons/glass/LICENSE-hugeicons.txt`), the
+/// ones the mockup uses, 24 unit outlines stroked 1.6 in `currentColor`, by Hugeicons' name
+/// (`"folder-01"`, `"more-vertical"`…).
+pub mod glass_icons {
+    macro_rules! icons {
+        ($($name:literal),* $(,)?) => {
+            /// Every icon, `(name, svg)`.
+            pub const ALL: &[(&str, &[u8])] = &[
+                $(($name, include_bytes!(concat!("../icons/glass/", $name, ".svg")))),*
+            ];
+        };
+    }
+    icons!(
+        "ai-chat-02",
+        "arrow-down-01",
+        "arrow-right-01",
+        "cancel-01",
+        "color-picker",
+        "computer",
+        "computer-terminal-01",
+        "copy-01",
+        "dashboard-square-01",
+        "delete-02",
+        "discord",
+        "download-04",
+        "earth",
+        "favourite",
+        "folder-01",
+        "game-controller-01",
+        "globe-02",
+        "image-01",
+        "information-circle",
+        "link-01",
+        "minus-sign",
+        "more-horizontal",
+        "more-vertical",
+        "package-01",
+        "pencil-edit-02",
+        "play",
+        "plus-sign",
+        "puzzle",
+        "refresh",
+        "search-01",
+        "sliders-horizontal",
+        "stop",
+        "tick-02",
+        "upload-04",
+        "user",
+        "user-add-01",
+        "user-multiple-02",
+        "view",
+        "view-off-slash",
+    );
+
+    /// The icon called `name`, if there is one.
+    pub fn get(name: &str) -> Option<&'static [u8]> {
+        ALL.iter().find(|(n, _)| *n == name).map(|(_, svg)| *svg)
+    }
 }
 
 /// The launcher's pixel icons: Pixelarticons (MIT, `icons/pixel/LICENSE-pixelarticons.txt`), 24
@@ -560,6 +626,8 @@ pub fn css() -> String {
         );
         // The launcher's night look, for pages that wear it.
         s.push_str(&if p.dark { night::NIGHT } else { night::DAWN }.css());
+        // The launcher's glass look, the same in both appearances.
+        s.push_str(&glass::Glass::default_look().css());
     };
     s.push_str(
         "/* Generated from crates/horizon-theme by `cargo run -p xtask -- tokens`; do not edit.\n   \

@@ -606,9 +606,8 @@ pub fn mob_to_nbt(
             map.insert("HasRightHorn".into(), Tag::Byte(i8::from(!right)));
         }
         "minecraft:creeper" => {
-            for (key, value) in [("Fuse", Tag::Short(30)), ("ExplosionRadius", Tag::Byte(3))] {
-                map.entry(key.into()).or_insert(value);
-            }
+            map.insert("Fuse".into(), Tag::Short(m.max_swell as i16));
+            map.entry("ExplosionRadius".into()).or_insert(Tag::Byte(3));
             map.insert("powered".into(), Tag::Byte(i8::from(m.extra.charged)));
             map.insert("ignited".into(), Tag::Byte(i8::from(m.extra.flag)));
         }
@@ -1420,6 +1419,20 @@ pub fn mob_from_nbt(
                     crate::mobs::finalize::Attr::MovementSpeed,
                     v,
                 ),
+                // A saved base other than the type's default is the
+                // attribute's base, which `/attribute ... base get` reads.
+                "minecraft:max_health"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::MaxHealth,
+                        v,
+                    )
+                }
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
                 "minecraft:movement_speed" => m.attrs.speed = v,
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
@@ -1573,6 +1586,7 @@ pub fn mob_from_nbt(
         m.extra.charged = flag(tag, "powered");
         // Creeper.readAdditionalSaveData: `ignited` lights the fuse.
         m.extra.flag = flag(tag, "ignited");
+        m.max_swell = number(tag.get("Fuse")).unwrap_or(30) as i16 as i32;
     }
     if matches!(
         m.species(),
@@ -3394,6 +3408,62 @@ mod tnt_power_tests {
 mod tests {
     use super::*;
     use crate::items::ItemStack;
+
+    fn fused_creeper(fuse: Option<i16>) -> (Mob, Tag) {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let ty = Arc::make_mut(&mut kind);
+        ty.id = "minecraft:creeper".into();
+        ty.species = crate::mobs::Species::Creeper;
+        let types = [("minecraft:creeper".into(), kind)].into();
+        let mut tag = Tag::compound([
+            ("id", string("minecraft:creeper")),
+            ("Pos", doubles(&[4.5, 220.0, 4.5])),
+            ("ignited", Tag::Byte(1)),
+            ("NoAI", Tag::Byte(1)),
+            ("NoGravity", Tag::Byte(1)),
+        ]);
+        if let (Some(fuse), Tag::Compound(c)) = (fuse, &mut tag) {
+            c.insert("Fuse".into(), Tag::Short(fuse));
+        }
+        (mob_from_nbt(&tag, &types, 1, None).unwrap(), tag)
+    }
+
+    #[test]
+    fn creeper_fuse_nbt_controls_explosion_tick_and_saves_runtime_value() {
+        for (fuse, boundary) in [
+            (Some(1), 1),
+            (None, 30),
+            (Some(40), 40),
+            (Some(0), 1),
+            (Some(-1), 1),
+        ] {
+            let (mut mob, raw) = fused_creeper(fuse);
+            let mut events = Vec::new();
+            for tick in 1..=boundary {
+                crate::mobs::hostile::creeper_tick(&mut mob, &mut events);
+                assert_eq!(mob.removed, tick == boundary, "Fuse={fuse:?}, tick={tick}");
+            }
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|e| matches!(e, crate::mobs::MobEvent::Explode(..)))
+                    .count(),
+                1
+            );
+            mob.max_swell = 7;
+            let saved = mob_to_nbt(&mob, [0; 4], Some(&raw), None);
+            assert_eq!(saved.get("Fuse"), Some(&Tag::Short(7)));
+        }
+    }
+
+    #[test]
+    fn creeper_fall_swell_uses_custom_fuse_without_a_zero_floor() {
+        for (fuse, expected) in [(Some(1), -4), (None, 25), (Some(40), 35)] {
+            let (mut mob, _) = fused_creeper(fuse);
+            mob.cause_fall_damage_from(100.0, 0.0, &mut Vec::new());
+            assert_eq!(mob.swell, expected, "Fuse={fuse:?}");
+        }
+    }
 
     #[test]
     fn mob_loading_accepts_default_namespace_and_preserves_custom_namespaces() {

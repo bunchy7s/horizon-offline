@@ -14,6 +14,7 @@ use super::{
     entity::{Entity, EntityHandle, with_entity, with_entity_mut},
 };
 use horizon_client::collisions::{EntityCollisions, SceneCollisions, with_piston_noclip};
+use horizon_client::motion::MotionWorld;
 use horizon_core::geometry::{Aabb, Axis, Direction, ShapeOp, Vec3, border::BorderGeometry};
 use horizon_core::position::BlockPos;
 use horizon_world::{
@@ -80,25 +81,20 @@ impl Game<'_> {
 
     /// One box's push, a body at a time. The move resolves as a piston's does
     /// (`Entity.move` stops at the blocks and the world border), without a
-    /// piston's per-tick travel limit or its noclip.
+    /// piston's per-tick travel limit or its noclip. The local player takes the
+    /// client's own move instead (`shulker_push_player`).
     fn push_for_shulker(&mut self, pos: [i32; 3], facing: u8, lid: [f64; 6], steps: &StepHeights) {
-        let direction = Direction::ALL[usize::from(facing) % Direction::ALL.len()];
-        let [x, y, z] = direction.normal();
-        let movement = Vec3::new(
-            (lid[3] - lid[0] + 0.01) * f64::from(x),
-            (lid[4] - lid[1] + 0.01) * f64::from(y),
-            (lid[5] - lid[2] + 0.01) * f64::from(z),
-        );
-        let area = Aabb::new(
-            Vec3::new(lid[0], lid[1], lid[2]),
-            Vec3::new(lid[3], lid[4], lid[5]),
-        );
+        let (movement, area) = shulker_lid(facing, lid);
         let at = BlockPos::new(pos[0], pos[1], pos[2]);
         self.push_targets().for_each(|target| {
             let Some(body) = self.push_body(target, at, steps) else {
                 return;
             };
             if !body.bounds.intersects(area) {
+                return;
+            }
+            if target == Target::Player {
+                self.shulker_push_player(movement);
                 return;
             }
             let Ok(moved) = pushed_movement(
@@ -111,6 +107,7 @@ impl Game<'_> {
                 [body.position.x, body.position.z],
                 body.bounds,
                 movement,
+                // `Entity.move(MoverType.SHULKER_BOX, ...)`: steps and reads the ground flag,
                 body.step_height,
                 body.on_ground,
             ) else {
@@ -120,6 +117,43 @@ impl Game<'_> {
                 self.apply_push(target, moved);
             }
         });
+    }
+
+    /// `ShulkerBoxBlockEntity.moveCollidedEntities` for the player this game
+    /// moves itself: the lid's pushes, applied to its own body. A client owns
+    /// its player's position (the server thread's guest included), so the push
+    /// is the client's own `Entity.move(MoverType.SHULKER_BOX, …)`.
+    pub(super) fn push_shulker_local(&mut self, pushes: Vec<ShulkerPush>) {
+        for (_, facing, lid) in pushes {
+            let (movement, area) = shulker_lid(facing, lid);
+            let Some(player) = self.player.as_ref() else {
+                return;
+            };
+            if player.spectator || !player.bounds().intersects(area) {
+                continue;
+            }
+            self.shulker_push_player(movement);
+        }
+    }
+
+    /// `Entity.move(MoverType.SHULKER_BOX, …)` for the local player: an
+    /// ordinary move, so the collision scan steps it and its end writes the
+    /// ground state (`Entity.setOnGroundWithMovement`). A lid lifting the body
+    /// off the ground leaves it airborne, and the next tick's gravity lands it
+    /// on the lid instead of a stale ground flag holding it in place.
+    fn shulker_push_player(&mut self, movement: Vec3) {
+        let entities = self.player_entity_collisions();
+        if let Some(player) = self.player.as_mut() {
+            let _ = MotionWorld {
+                entities: &entities,
+                player,
+                scene: &mut self.world,
+                assets: &self.pack.assets,
+                collision_binding: self.collision,
+                resources: self.motion,
+            }
+            .shulker_box_push(movement);
+        }
     }
 
     fn push_for_piston(
@@ -532,6 +566,25 @@ impl Game<'_> {
             }
         }
     }
+}
+
+/// The lid's push: the swept box in world space (`Shulker.
+/// getProgressDeltaAabb`) and the movement out along the facing, the box's own
+/// size plus 0.01 (`ShulkerBoxBlockEntity.moveCollidedEntities`).
+fn shulker_lid(facing: u8, lid: [f64; 6]) -> (Vec3, Aabb) {
+    let direction = Direction::ALL[usize::from(facing) % Direction::ALL.len()];
+    let [x, y, z] = direction.normal();
+    (
+        Vec3::new(
+            (lid[3] - lid[0] + 0.01) * f64::from(x),
+            (lid[4] - lid[1] + 0.01) * f64::from(y),
+            (lid[5] - lid[2] + 0.01) * f64::from(z),
+        ),
+        Aabb::new(
+            Vec3::new(lid[0], lid[1], lid[2]),
+            Vec3::new(lid[3], lid[4], lid[5]),
+        ),
+    )
 }
 
 /// `Entity.move(MoverType.PISTON, movement)` for a pushed body: the movement
