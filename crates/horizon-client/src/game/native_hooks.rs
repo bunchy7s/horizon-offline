@@ -3254,6 +3254,13 @@ impl Game<'_> {
         let _ = (player, name, pos, locked);
     }
 
+    /// A server player reset their attack strength by swinging (`handlePunch`).
+    /// The swing and reset have already happened. The player's state is not
+    /// swapped in, and helpers looking them up through `self.lan` may find
+    /// nothing during a guest packet. Server-side. @API:player_attack_cooldown_reset@.
+    pub(super) fn native_player_attack_cooldown_reset(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

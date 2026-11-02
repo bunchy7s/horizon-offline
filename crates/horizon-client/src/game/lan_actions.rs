@@ -1860,10 +1860,15 @@ impl Game<'_> {
             // click on nothing), seen by the players around, and the attack
             // strength starts again.
             S::Punch(_) => {
+                let (player, name) = {
+                    let g = &host.hub.guests[gi];
+                    (g.uuid, g.name.clone())
+                };
                 self.as_guest(host, conn, |g| {
                     g.swing_hand(Hand::Main, SwingAnimation::DEFAULT);
                     g.reset_attack_strength();
                 });
+                self.native_player_attack_cooldown_reset(player, &name);
             }
             S::UseItemOn(p) => {
                 host.hub.ack(conn, p.sequence);
