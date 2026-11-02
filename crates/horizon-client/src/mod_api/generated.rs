@@ -4508,6 +4508,19 @@ pub trait Hooks: Send + Sync {
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
         let _ = event;
     }
+    /// A player is tuning a note block. Change `new_note` (0 through 24), or
+    /// cancel to keep the old note and prevent playback. API @API:native_note_block_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn note_block_change(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut NoteBlockChangeEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
 }
 /// What [`Hooks::frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -13794,4 +13807,32 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
+}
+/// What [`Hooks::note_block_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct NoteBlockChangeEvent<'a> {
+    pub context: &'a NativeNoteBlockChange<'a>,
+    pub new_note: i32,
+}
+pub fn dispatch_note_block_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    context: &NativeNoteBlockChange<'_>,
+    new_note: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = NoteBlockChangeEvent {
+        context,
+        new_note: *new_note,
+    };
+    for mod_hook in super::entered(mods, "note_block_change") {
+        if matches!(mod_hook.note_block_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *new_note = event.new_note;
 }

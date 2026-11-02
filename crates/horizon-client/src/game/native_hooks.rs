@@ -881,8 +881,8 @@ use super::{
     native_panel_recipes::RecipePage,
 };
 use horizon_client::mod_api::{
-    self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    ServerTickPhase, WorldPhase,
+    self, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeNoteBlockChange,
+    NativeServerPlayer, ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -1170,6 +1170,18 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_block_burn(self, mod_api::mods(), dimension, pos, cancel);
+    }
+
+    /// A player is tuning a note block. Change `new_note` (0 through 24), or
+    /// cancel to keep the old note and prevent playback. API @API:native_note_block_change@.
+    #[inline(always)]
+    pub(super) fn native_note_block_change(
+        &self,
+        context: &NativeNoteBlockChange<'_>,
+        new_note: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_note_block_change(self, mod_api::mods(), context, new_note, cancel);
     }
 
     /// On an authoritative server, a note block at `pos` is about to sound.

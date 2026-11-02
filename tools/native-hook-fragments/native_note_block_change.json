@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "note_block_change",
+      "target": "horizon_client::game::native_hooks::GameLevel<'_>::native_note_block_change",
+      "neoforge": "NoteBlockEvent.Change",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": { "contract": "cancel", "out": "cancel" }
+    }
+  ],
+  "rust_summary": "A player tunes a note block (`native_note_block_change`).",
+  "doc_summary": "A player tunes a note block: `native_note_block_change(context, new_note, cancel)`. Bundles need \"hooks\": @API:native_note_block_change@."
+}

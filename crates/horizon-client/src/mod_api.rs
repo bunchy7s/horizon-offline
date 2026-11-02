@@ -58,6 +58,16 @@ pub use winit;
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
 pub type NativeDispensed = (Option<ItemStack>, i32);
 
+/// Context for a player tuning a note block.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeNoteBlockChange<'a> {
+    pub dimension: LevelDimension,
+    pub pos: BlockPos,
+    pub instrument: &'a str,
+    /// The note before tuning, in the range 0 through 24.
+    pub old_note: i32,
+}
+
 /// What dropped the items heard by the `loot_drops` hook.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]

@@ -356,6 +356,16 @@ pub trait LevelAccess {
     fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
         true
     }
+    /// Returns the new note, or None to cancel tuning.
+    fn note_block_change(
+        &self,
+        _pos: BlockPos,
+        _instrument: &str,
+        _old: i32,
+        new: i32,
+    ) -> Option<i32> {
+        Some(new)
+    }
     fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
         true
     }
