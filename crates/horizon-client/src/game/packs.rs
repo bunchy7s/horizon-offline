@@ -461,10 +461,10 @@ pub(super) fn stage_pack(
     progress.set(1);
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
+    let mod_image = !horizon_client::mod_api::mods().is_empty();
     // The sound events, the GUI sprites' metadata and the language are read here too, not in
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
-        let mod_image = !horizon_client::mod_api::mods().is_empty();
         let atlas = s.spawn(|| {
             HudAtlas::build_over_with_image(&root, vanilla_root, mod_image)
                 .map_err(|e| e.to_string())
