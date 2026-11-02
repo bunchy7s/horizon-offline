@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "anvil_craft_post",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_anvil_craft_post",
+      "side": "server",
+      "neoforge": "AnvilCraftEvent.Post",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A player finished taking an anvil's result (`native_anvil_craft_post`).",
+  "doc_summary": "A player took an anvil's result: `native_anvil_craft_post(player, name, pos, craft)` (NeoForge's `AnvilCraftEvent.Post`) is heard after the levels, the inputs and the anvil wear are done, so a broken anvil is already air. `craft` holds the inputs and the result as they were before. Not heard when `native_anvil_craft_pre` cancelled. Bundles need \"hooks\": @API:native_anvil_craft_post@."
+}

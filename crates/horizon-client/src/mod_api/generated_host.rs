@@ -1181,4 +1181,13 @@ pub trait Host {
         let _ = size;
         unimplemented!("Host::item_stack")
     }
+    /// The instance (game) folder, which its players share: `saves/`,
+    /// `resourcepacks/`, `shaderpacks/` and `horizon-mods/` are in it, and the
+    /// title's screens create worlds and read packs there. A world's own
+    /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
+    /// The folder the game runs in (`--player-dir` moves a player's options
+    /// and servers only, not the instance). Nothing is created. API @API:native_instance_dir@.
+    fn instance_dir(&self) -> PathBuf {
+        unimplemented!("Host::instance_dir")
+    }
 }
