@@ -1,0 +1,14 @@
+{
+  "hooks": [
+    {
+      "name": "resource_pack_status",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_resource_pack_status",
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a server player's answer to a resource pack (`native_resource_pack_status`).",
+  "doc_summary": "a resource pack answer: `native_resource_pack_status(player, name, status)` is heard when a server player's client answers a resource pack in play (`status` is `ServerboundResourcePackPacket.Action`'s number: 0 loaded, 1 declined, 2 failed download, 3 accepted, 4 downloaded, 5 invalid URL, 6 failed reload, 7 discarded), with their state swapped in. The pack offered during the configuration is answered before the player has joined and is not heard. Bundles that use it need `\"hooks\": @API:native_resource_pack_status@`."
+}

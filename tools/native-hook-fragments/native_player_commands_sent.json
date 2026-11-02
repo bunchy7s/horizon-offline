@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_commands_sent",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_commands_sent",
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "names"
+      }
+    }
+  ],
+  "rust_summary": "the root commands a player's command tree holds (`native_player_commands_sent`).",
+  "doc_summary": "the command tree a server sends a player: `native_player_commands_sent(player, name, names)` is heard when a player joins and when their permission level changes, with the root command names their client would get. For a player already on their state is swapped in. A mod removes names and that client's tree is sent without them (its chat box neither completes nor colours them); a typed command still runs, `native_player_command` stops it. Bundles that use it need `\"hooks\": @API:native_player_commands_sent@`."
+}

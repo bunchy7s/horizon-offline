@@ -5,13 +5,13 @@ ContainerEventHandler.mouseScrolled	port	crates/horizon-client-render/src/pack_s
 ContainerEventHandler.keyPressed	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::shortcut	gap: minor: only Ctrl+A/C/V/X here; Backspace is PackScreen::erase
 ContainerEventHandler.keyReleased	skip:other		no widget in the pack screen acts on key release
 ContainerEventHandler.charTyped	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::type_text	typed text goes to the search box when it has focus
-ContainerEventHandler.preeditUpdated	missing		minor: no IME composition (preedit) anywhere in Horizon
-ContainerEventHandler.getBorderForArrowNavigation	missing		minor: arrow keys do not move focus; pack screen focus is set by clicks (PackScreen::set_focus)
-ContainerEventHandler.getCurrentFocusPath	missing		minor: no focus path; PackScreen::focus is read only inside the screen
-ContainerEventHandler.nextFocusPath	missing		minor: Tab and arrow keys do not move focus between search, lists and buttons
-ContainerEventHandler.handleTabNavigation	missing		minor: Tab does not move focus (same gap as nextFocusPath)
-ContainerEventHandler.handleArrowNavigation	missing		minor: arrow keys do not move focus (same gap)
-ContainerEventHandler.nextFocusPathVaguelyInDirection	missing		minor: no directional focus search (same gap)
+ContainerEventHandler.preeditUpdated	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the focused field's composition text
+ContainerEventHandler.getBorderForArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::edge	the screen border an arrow key is measured against
+ContainerEventHandler.getCurrentFocusPath	inline	crates/horizon-client/src/game/key_focus.rs::drawn_targets	the drawn targets of the open screen are the focus path, resolved per screen
+ContainerEventHandler.nextFocusPath	port	crates/horizon-client/src/game/key_focus.rs::nav_of + act	a nav key moves focus to the next drawn target, with the screen context deciding what passes on
+ContainerEventHandler.handleTabNavigation	port	crates/horizon-client/src/game/key_focus.rs::tab_order + tab_step	Tab and Shift+Tab step through the focusable targets in drawing order
+ContainerEventHandler.handleArrowNavigation	port	crates/horizon-client/src/game/key_focus.rs::act	the four directions pick the nearest target that way
+ContainerEventHandler.nextFocusPathVaguelyInDirection	inline	crates/horizon-client/src/game/key_focus.rs::act	the same directional search, without vanilla's vague fallback
 SpectatorGui.extractPage	port	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	the nine-slot page with its frame and selection
 SpectatorGui.extractSlot	inline	crates/horizon-client/src/spectator_menu.rs::SpectatorGui::hotbar	icon and key label drawn in the hotbar loop
 MenuTabBar.extractWidgetRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	header separators and tab row drawn inside draw_create
@@ -51,10 +51,10 @@ FriendToast.showFriendRequestSent	skip:service		friend toasts: social, Horizon h
 FriendToast.showFriendRequestReceived	skip:service		friend toasts: social, Horizon has no friends system
 FriendToast.showFriendRequestAccepted	skip:service		friend toasts: social, Horizon has no friends system
 FriendToast.showFriendAdded	skip:service		friend toasts: social, Horizon has no friends system
-NowPlayingToast.extractToast	missing		player: no Now Playing toast is drawn; with Music Toast on (default Never) the song name never shows
-NowPlayingToast.tickMusicNotes	missing		player: the music notes beside the Now Playing toast are never drawn
-NowPlayingToast.showToast	missing		player: nothing shows the toast when a song starts (same gap as extractToast)
-NowPlayingToast.update	missing		player: the toast is never shown, so it never times out (same gap)
+NowPlayingToast.extractToast	port	crates/horizon-client/src/toasts.rs::draw_now_playing	the background, the music notes and the song's name on the top row
+NowPlayingToast.tickMusicNotes	port	crates/horizon-client/src/toasts.rs::MusicNotes::tick	the notes change colour every 25 ms while a song plays
+NowPlayingToast.showToast	port	crates/horizon-client/src/toasts.rs::NowPlayingToast::show	slide in and count down over 5000 ms times the notification time
+NowPlayingToast.update	port	crates/horizon-client/src/toasts.rs::NowPlayingToast::update	the slide, the hide when the song ends and the notes ticking
 RecipeToast.update	port	crates/horizon-client/src/game/advancements.rs::Toast::wants_show	recipe toast visibility; the cycling index is Toast::displayed_recipe
 RecipeToast.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	recipe branch: station at 0.6 scale over the cycling result
 SystemToast.height	missing		minor: no multi-line height; a system toast always takes one 32 px slot
@@ -62,13 +62,13 @@ SystemToast.extractRenderState	port	crates/horizon-client/src/toasts.rs::SystemT
 SystemToast.extractTextLines	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	text lines drawn in draw
 SystemToast.recalculateWidth	inline	crates/horizon-client/src/toasts.rs::SystemToast::draw	width from the widest line, at least 160, plus 30
 SystemToast.onFileDropFailure	missing		minor: Horizon takes no dropped files, so this toast never shows
-SystemToast.onChunkLoadFailure	missing		minor: no chunk load-failure toast; failures only log
-SystemToast.onChunkSaveFailure	missing		minor: failed chunk saves only log (save.rs warn); no toast
+SystemToast.onChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::load_failure_toast	the chunk.toast.loadFailure toast with its check-log line
+SystemToast.onChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs::save_failure_toast	the chunk.toast.saveFailure toast with its check-log line
 ToastManager.findFreeSlotsIndex	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toasts	gap: minor: one 32 px slot per toast; no search for consecutive slots
 ToastManager.getToast	inline	crates/horizon-client/src/game/recipe_book.rs::Game::recipe_toast	only the recipe toast lookup (find is_recipe); system toasts are kept by their owners
 ToastManager.showNowPlayingToast	port	crates/horizon-client/src/music.rs::MusicManager::show_now_playing_toast_if_needed	gap: player: the request goes to toast_requests and nothing draws it
-ToastManager.initializeMusicToast	missing		player: with Music Toast set to Pause or Pause and Toast (default Never) the Now Playing toast is never created
-ToastManager.setMusicToastDisplayState	missing		player: the Music Toast setting does nothing in Horizon (same gap)
+ToastManager.initializeMusicToast	inline	crates/horizon-client/src/game/music.rs::Game::set_music_toast_state	the toast is created from the Music Toast setting instead of at start-up
+ToastManager.setMusicToastDisplayState	port	crates/horizon-client/src/game/music.rs::Game::set_music_toast_state	Never drops it; Pause keeps it for a song; Pause and Toast shows it at once while music is audible
 ToastManager.ToastInstance.resetToast	port	crates/horizon-client/src/toasts.rs::SystemToast::reset	gap: minor: text and display timer restart; the slide-in does not
 ToastManager.ToastInstance.calculateVisiblePortion	port	crates/horizon-client/src/toasts.rs::Slide::update	600 ms, squared ease in and out
 ToastManager.ToastInstance.extractRenderState	port	crates/horizon-client/src/game/advancements.rs::Game::draw_toast	slide x and slot y; system toasts slide in SystemToast::draw
