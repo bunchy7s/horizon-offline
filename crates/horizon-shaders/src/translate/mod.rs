@@ -30,6 +30,7 @@ use crate::Preprocessed;
 mod atomic_vectors;
 mod geometry;
 mod image_parameters;
+mod interface_blocks;
 mod ordering;
 mod rewrite;
 mod scan;
@@ -237,6 +238,13 @@ fn translate(
     } else {
         GBUFFERS_MATRICES.to_owned()
     };
+    // Interface blocks travel as plain varyings (`interface_blocks`).
+    let flat = |pp: &Preprocessed| {
+        interface_blocks::flatten(&pp.code).map(|code| Preprocessed { code, ..pp.clone() })
+    };
+    let (vertex_flat, fragment_flat) = (flat(vertex), flat(fragment));
+    let vertex = vertex_flat.as_ref().unwrap_or(vertex);
+    let fragment = fragment_flat.as_ref().unwrap_or(fragment);
     let mut v = Stage::scan(vertex, ShaderStage::Vertex);
     let mut f = Stage::scan(fragment, ShaderStage::Fragment);
     v.gbuffers = gbuffers.is_some();
@@ -1823,6 +1831,41 @@ mod tests {
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// Interface blocks between the stages may give members their own interpolation (GLSL 4.60,
+    /// 4.3.9; Shrimple's gbuffers programs): a `flat` member arrives flat.
+    #[test]
+    fn interface_block_members_keep_their_qualifiers() {
+        let vsh = "#version 330 compatibility\nout VertexData {\n    flat int id;\n    vec2 uv;\n} vOut;\n\
+                   void main() { gl_Position = ftransform(); vOut.id = 3; vOut.uv = vec2(0.5); }\n";
+        let fsh = "#version 330 compatibility\nin VertexData {\n    flat int id;\n    vec2 uv;\n} vIn;\n\
+                   void main() { gl_FragData[0] = vec4(float(vIn.id), vIn.uv, 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", vsh), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let entry = &p.fragment.entry_points[0].function;
+        let mut flats = 0;
+        for arg in &entry.arguments {
+            let bindings: Vec<&naga::Binding> = match &p.fragment.types[arg.ty].inner {
+                naga::TypeInner::Struct { members, .. } => {
+                    members.iter().filter_map(|m| m.binding.as_ref()).collect()
+                }
+                _ => arg.binding.iter().collect(),
+            };
+            for b in bindings {
+                if let naga::Binding::Location {
+                    interpolation: Some(naga::Interpolation::Flat),
+                    ..
+                } = b
+                {
+                    flats += 1;
+                }
+            }
+        }
+        assert_eq!(flats, 1, "one flat input, `id`");
     }
 
     /// `if (c) return; else ...` keeps its `else`: the statements the translation guards with
