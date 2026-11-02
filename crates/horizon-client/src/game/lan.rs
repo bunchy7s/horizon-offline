@@ -2386,6 +2386,9 @@ impl Game<'_> {
         };
         self.guest_attachments
             .insert(g.uuid, std::mem::take(&mut g.attachments));
+        // PlayerEvent.LoadFromFile: the player's data is read and applied,
+        // the player not yet placed.
+        self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
         if !known || force {
             g.game_mode = default_mode;
         }

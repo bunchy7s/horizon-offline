@@ -1390,6 +1390,12 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before the new player is placed, once each, on a server. The uuid stays the same, so `player` names the old and the
   new player alike; no player's state is swapped in, so the helpers that look a player up may find nothing. It cannot
   stop anything.
+- **`native_player_load_from_file(player, name, directory)`**: a joining player's saved state was read and applied
+  (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`), before they are placed in a level: once for each
+  join on a server, for an integrated server's owner (loaded from the file `level.dat` names, else their own) as for
+  anyone else. `directory` is the world's `players/data` folder; read your own file there, named `<uuid>.<suffix>`. It
+  is heard whether or not the player was in the world before (a new player has no file). No player's state is swapped
+  in. It cannot change or stop anything.
 - **`native_player_commands_sent(player, name, names)`**: the command tree a player is sent, when they join and when
   their level changes (`/op`, `/deop`, the LAN settings). `names` are the root commands their client would get, vanilla's
   they may use and the mods'; remove a name and that client's tree lacks it, so its chat box neither completes nor

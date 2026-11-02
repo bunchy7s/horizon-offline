@@ -15,11 +15,13 @@ use std::{
     sync::Arc,
 };
 
+/// `PlayerDataStorage`'s player directory (`players/data`).
+pub fn directory(world: &Path) -> PathBuf {
+    world.join("players").join("data")
+}
+
 pub fn path(world: &Path, uuid: u128) -> PathBuf {
-    world
-        .join("players")
-        .join("data")
-        .join(format!("{}.dat", uuid_string(uuid)))
+    directory(world).join(format!("{}.dat", uuid_string(uuid)))
 }
 
 /// `UUIDUtil.uuidToIntArray`.
