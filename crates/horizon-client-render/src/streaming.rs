@@ -185,6 +185,13 @@ pub trait LodSampler: Send {
     fn reduced_column(&mut self, x: i32, z: i32, _width: i32) -> crate::lod::Column {
         self.column(x, z)
     }
+    /// Whether a column since the last call was left empty because its data
+    /// is still on its way (a BlueMap tile downloading, nothing coarser to
+    /// stand in): that sample isn't drawn, what it would replace is
+    /// (`Lod::finish_any_sample`), and it is taken again later.
+    fn waited(&mut self) -> bool {
+        false
+    }
     /// `side` x `side` columns from (`x`, `z`), `stride` blocks apart; none
     /// when sampling failed and should be tried again later.
     fn grid(&mut self, x: i32, z: i32, stride: i32, side: usize) -> Vec<crate::lod::Column> {
@@ -203,6 +210,11 @@ pub trait LodSampler: Send {
 }
 pub trait LodSource: Send + Sync {
     fn sampler(self: Arc<Self>) -> Box<dyn LodSampler>;
+    /// Whether its samplers' `observed` chunks become its own (a server's
+    /// kept terrain): tiles sampled without one are sampled again.
+    fn keeps_observed(&self) -> bool {
+        false
+    }
 }
 struct GeneratorSampler<G: ChunkGenerator> {
     generator: Arc<G>,
