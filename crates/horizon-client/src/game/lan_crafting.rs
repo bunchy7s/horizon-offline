@@ -343,6 +343,17 @@ impl Game<'_> {
         let count = |s: Option<&ItemStack>| s.map_or(0, |s| s.count);
         if furnace && count(menu.slot(2)) < count(items[2].as_ref()) {
             let at = host.hub.guests[gi].position;
+            let guest = &host.hub.guests[gi];
+            let output = items[2].as_ref();
+            if let Some(output) = output {
+                self.native_furnace_extract(
+                    guest.uuid,
+                    &guest.name,
+                    [pos.0, pos.1, pos.2],
+                    &output.item,
+                    output.count - count(menu.slot(2)),
+                );
+            }
             self.award_furnace_recipes(pos, at);
         }
         // Slot.setChanged on a changed container slot: BlockEntity.setChanged,
