@@ -154,7 +154,9 @@ def main():
               'real block states placed; collisions through CollisionGetter.getCollisions/BlockCollisions with the '
               'player\'s EntityCollisionContext and real collision shapes, jump boost from a real MobEffectInstance. '
               'Rust runs MotionWorld::update_auto_jump over the client\'s loaded resources, collision registry and '
-              'block-collision scan. Entity collisions (none in the scene) and the riding/minecart paths are not exercised.'))
+              'block-collision scan. Riders are compared through canAutoJump with the case\'s passenger flag (the movement '
+              'world drives an unmounted player); entity collisions (none in the scene), the minecart paths and '
+              'vehicle movement are not exercised.'))
     print(f'{len(fixtures):,} auto-jump cases ({jumps:,} jumps) match the pinned client: {report}', flush=True)
 
 
