@@ -1461,6 +1461,7 @@ dependencies = [
  "horizon-threads",
  "horizon-world",
  "log",
+ "lz4_flex",
  "miniz_oxide 0.8.9",
  "naga",
  "png",

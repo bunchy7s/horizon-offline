@@ -1392,15 +1392,7 @@ impl Game<'_> {
                 }
                 let (col, row) = (code % 16, code / 16);
                 let (cx, cy) = (px + col * cell, py + row * cell);
-                let mut used = 0;
-                for dx in (0..cell).rev() {
-                    if (0..cell).any(|dy| {
-                        atlas.pixels[(((cy + dy) * atlas.width + cx + dx) * 4 + 3) as usize] != 0
-                    }) {
-                        used = dx + 1;
-                        break;
-                    }
-                }
+                let used = u32::from(atlas.galactic_widths[code as usize]);
                 let advance = (used as f32 * 8.0 / cell as f32 + 0.5).floor() + 1.0;
                 if cursor + advance - x > max {
                     break;
