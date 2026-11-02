@@ -2399,6 +2399,7 @@ struct Game<'a> {
     /// `horizon-ctl gpu-passes`: time Horizon's own passes on the GPU with F3 shut.
     gpu_passes: bool,
     screen: Screen,
+    observed_screen: Option<native_hooks::ObservedScreen>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
@@ -13597,6 +13598,29 @@ impl Game<'_> {
             if canceled {
                 continue;
             }
+            let (mut x, mut y, mut z, mut pitch, mut yaw, mut roll, mut pose_scale) =
+                (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            self.native_render_hand_pose(
+                hand,
+                item.as_ref(),
+                a,
+                attack,
+                inverse_height,
+                &mut x,
+                &mut y,
+                &mut z,
+                &mut pitch,
+                &mut yaw,
+                &mut roll,
+                &mut pose_scale,
+            );
+            // No mod moved the hand (always so without one): no matrices to build.
+            let pose = [x, y, z, pitch, yaw, roll, pose_scale];
+            let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
+                to_world
+            } else {
+                to_world * native_hooks::hand_pose_matrix(pose)
+            };
             // The main hand on its arm, the off hand on the other one.
             let left = self.settings.main_hand_left != (hand == Hand::Off);
             let Some(stack) = item else {
@@ -14324,7 +14348,7 @@ impl Game<'_> {
         let lines = vec![(horizon_client::text::Text::literal(text), u32::MAX)];
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
     /// `CreativeModeInventoryScreen.getTooltipFromContainerItem`: the lines
@@ -15023,6 +15047,7 @@ impl Game<'_> {
         if self.renderer.as_mut().is_some_and(|r| r.display_changed()) {
             self.apply_ui_settings();
         }
+        self.observe_screen();
         // Minecraft.doWorldLoad: the LevelLoadingScreen while single player's
         // server starts, with the server's chunk map and progress.
         if let Some(starting) = &self.integrated_starting {
@@ -18324,6 +18349,7 @@ impl<'a> Game<'a> {
             debug: false,
             gpu_passes: false,
             screen: Screen::Playing,
+            observed_screen: None,
             window: None,
             renderer: None,
             last_device_recovery: None,
