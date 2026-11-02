@@ -24,8 +24,8 @@ Util.getRegisteredName	skip:debug		registry key text for logs and debug output (
 Util.allOf	skip:java		predicate combinator
 Util.anyOf	skip:java		predicate combinator
 Util.growByHalf	skip:java		array growth; Rust Vec grows itself
-Util.findNextInIterable	missing		player: an op with a debug stick in creative right-clicks and no block state property cycles to the next value; Horizon has no DebugStickItem behaviour (only datafix and item model names)
-Util.findPreviousInIterable	missing		player: the same debug stick sneak-click does not cycle a property backwards; Horizon has no DebugStickItem behaviour
+Util.findNextInIterable	port	crates/horizon-client/src/game/debug_stick.rs::Game::debug_stick_interact	the debug stick cycles a property forward, and backward while sneaking
+Util.findPreviousInIterable	port	crates/horizon-client/src/game/debug_stick.rs::Game::debug_stick_interact	same function: relative_index walks the value list backward on sneak
 Util.makeEnumMap	skip:java		EnumMap builder
 Util.mapValues	skip:java		map stream helper
 Util.sequence	skip:java		future combinator
@@ -43,7 +43,7 @@ Util.safeMoveFile	port	crates/horizon-world/src/datafix/files.rs::move_file	gap:
 Util.safeReplaceOrMoveFile	port	crates/horizon-client/src/save.rs::write_dat	gap: minor: no retries and no rollback to the backup when the new file cannot be renamed in; the old file is moved to a *_old name
 Util.offsetByCodepoints	inline	crates/horizon-client-render/src/screen_draw.rs::TextField::key	gap: minor: arrow keys move one character only (no count argument, no surrogate pairs); ctrl-arrows use ui word_position
 Util.startTimerHackThread	skip:other		JVM Windows timer-resolution thread; Rust timers do not need it
-Util.copyBetweenDirs	missing		player: the create-world screen has no Data Packs step, so packs a player would pick are never copied into the new world (title/create_world.rs:289 says it has no data pack screen yet)
+Util.copyBetweenDirs	inline	crates/horizon-client-render/src/datapack.rs::install	Create World's picks are copied into <world>/datapacks one by one, each pack's folder or zip (datapack.rs::copy)
 Util.sanitizeName	skip:other		builds the texture cache path of a world icon; Horizon reads icon.png straight from the save folder (title.rs)
 Util.memoize	skip:java		memoizing function wrapper
 Util.blockUntilDone	skip:java		waits on executor futures during startup (game test server)
@@ -75,7 +75,7 @@ TrackingDebugSynchronizer.SourceSynchronizer	skip:debug		F3 debug value sync; Ho
 TrackingDebugSynchronizer.ValueSource	skip:debug		F3 debug value polling; Horizon has none
 TrackingDebugSynchronizer.VillageSectionSynchronizer	skip:debug		F3 village section debug renderer data; Horizon has none
 AbstractSampleLogger.logFullSample	port	crates/horizon-client/src/debug_chart.rs::SampleLogger::log_full	keeps the last 240 samples, oldest dropped
-AbstractSampleLogger.logPartialSample	missing		minor: no per-dimension partial writes (no callers in 26.3); SampleLogger::log_full takes the four values whole
+AbstractSampleLogger.logPartialSample	inline	crates/horizon-client/src/debug_chart.rs::log_tick	one tick sample's four slots are filled at once and pushed by log_full: full tick, tick method, scheduled tasks, idle
 AbstractSampleLogger.resetSample	skip:other		resets the working sample buffer; Horizon passes each full sample, nothing to reset
 LocalSampleLogger.useSample	port	crates/horizon-client/src/debug_chart.rs::SampleLogger::log_full	copies the working sample into the 240-entry ring
 RemoteSampleLogger.useSample	skip:debug		sends chart samples to debug subscribers; Horizon has no debug subscriptions

@@ -237,38 +237,6 @@ impl Game<'_> {
         let (at, top) = (p.position, p.bounds().max_position().y);
         water || self.in_rain(at, top)
     }
-    /// The living entities a spinning player can touch this tick, for
-    /// `LivingEntity.checkAutoSpinAttack` (none when not spinning).
-    pub(super) fn spin_targets(&self) -> Vec<(u32, Aabb)> {
-        let Some(p) = self
-            .player
-            .as_ref()
-            .filter(|p| p.auto_spin_attack_ticks > 0)
-        else {
-            return Vec::new();
-        };
-        // A spin moves a few blocks a tick at most.
-        let near = p.bounds().inflate(Vec3::new(16.0, 16.0, 16.0));
-        self.mobs
-            .iter()
-            .filter(|m| m.alive() && m.bounds().intersects(near))
-            .map(|m| (m.id, m.bounds()))
-            .collect()
-    }
-    /// `Player.doAutoAttackOnTouch`: the touched entity takes `Player.attack`
-    /// with the spin's damage; once the spin is over its damage is cleared.
-    pub(super) fn end_spin_attack(&mut self, hit: Option<u32>) {
-        if let Some(id) = hit
-            && let Some(index) = self.mobs.iter().position(|m| m.id == id)
-        {
-            self.attack_mob(index);
-        }
-        if let Some(p) = self.player.as_mut()
-            && p.auto_spin_attack_ticks <= 0
-        {
-            p.auto_spin_attack_dmg = 0.0;
-        }
-    }
     /// The `summon_entity` and `play_sound` effects of `channeling.json`: in a
     /// thunderstorm (`weather_check`) a spot that sees the sky (`can_see_sky`)
     /// gets a lightning bolt and the thunder sound.

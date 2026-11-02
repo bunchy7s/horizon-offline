@@ -1,8 +1,8 @@
 RemotePlayer.shouldRenderAtSqrDistance	port	crates/horizon-client/src/game/entity_culling.rs::entity_view_scale	every entity's draw distance is scaled by the view scale and the limit, remote players included
-RemotePlayer.aiStep	missing		unsure: remote players are drawn from Mob records in game/remote.rs; no per-tick motion lerp or push step found
+RemotePlayer.aiStep	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_entities	gap: minor: the head yaws over its lerp steps; the smoothed delta movement and the push step are not ported
 RemotePlayer.lerpMotion	missing		unsure: no lerp of received remote-player motion found in game/remote.rs
 Hotbar.storeFrom	port	crates/horizon-client/src/game/creative_hotbar.rs::Game::hotbar_load_or_save	save copies the nine slots into the hotbar.nbt row
-Hotbar.isEmpty	port	crates/horizon-client/src/game/creative_hotbar.rs	the empty creative hotbar row carries the inventory.hotbarInfo hint
+Hotbar.isEmpty	inline	crates/horizon-client/src/game/creative_hotbar.rs::Game::refresh_saved_hotbars	the empty creative hotbar row carries the inventory.hotbarInfo hint
 ClientMetricsSamplersProvider.registerStaticSamplers	skip:debug		F3 metrics samplers
 ClientMetricsSamplersProvider.samplers	skip:debug		F3 metrics samplers
 QuickPlay.connect	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: no Realms variant and no latest-world fallback
@@ -30,12 +30,12 @@ IntegratedServer.getPersonalGameMode	port	crates/horizon-client/src/game/integra
 IntegratedServer.updateGameModeBasedOnPermission	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	gap: player: a guest already in the world keeps their mode when force-gamemode or the default mode changes; only a join applies it
 IntegratedServer.updatePermissions	port	crates/horizon-client/src/lan/hub.rs::Hub::resend_commands	permission level and commands sent to every guest
 IntegratedServer.setDefaultGameType	port	crates/horizon-client/src/game/lan.rs::Game::set_default_game_mode	
-IntegratedServer.isSingleplayerOwner	port	crates/horizon-client/src/game/integrated.rs: host.hub.singleplayer_owner	the owner is kept by uuid on the hub and read back in commands and LAN actions
-IntegratedServer.getScaledTrackingDistance	missing		player: the Entity Distance option is not applied to what a LAN host tracks
+IntegratedServer.isSingleplayerOwner	port	crates/horizon-client/src/lan/hub.rs::Hub::player_info	the owner is kept by uuid on the hub, and player_info marks the guest it names
+IntegratedServer.getScaledTrackingDistance	inline	crates/horizon-client/src/game/lan.rs::Game::tick_lan	the Entity Distance option becomes the hub's entity range percent for an integrated or LAN host
 IntegratedServer.getForcedGameType	inline	crates/horizon-client/src/game/lan.rs::Game::lan_guest_joined	forced mode is sent when a guest joins
 IntegratedServer.selectLevelLoadFocusPos	missing		unsure: no load focus at the owner's saved position found in game/integrated.rs open_integrated
 IntegratedServer.reportChunkLoadFailure	port	crates/horizon-client/src/chunk_io.rs::load_failed	a failed load sets low_disk_space, which is warnOnLowDiskSpace plus reportChunkLoadFailure
-IntegratedServer.reportChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs	the same low_disk_space flag is raised by the save side
+IntegratedServer.reportChunkSaveFailure	port	crates/horizon-client/src/chunk_io.rs::Pending::save_failed	the same low_disk_space flag is raised by the save side
 LanServerDetection.LanServerDetector.run	port	crates/horizon-client/src/lan/discovery.rs::listen	receive loop for LAN announcements
 LanServerDetection.LanServerList.takeDirtyServers	skip:java		dirty flag; Scanner::games returns a copy on each call
 LanServerPinger.run	port	crates/horizon-client/src/lan/discovery.rs::Pinger::start	announce loop on a thread until dropped
@@ -67,7 +67,7 @@ SoundBufferLibrary.enumerate	port	crates/horizon-client-render/src/audio.rs::Aud
 SoundBufferLibrary.DebugOutput.Counter.accountBuffer	inline	crates/horizon-client-render/src/audio.rs::Audio::census	counts buffers and sizes
 SoundEngine.reload	port	crates/horizon-client-render/src/audio.rs::Audio::reload	stops sounds and reads the new resource root
 SoundEngine.loadLibrary	port	crates/horizon-client-render/src/audio.rs::Audio::with_output	opens the output device
-SoundEngine.shouldChangeDevice	missing		player: when the output device is lost or the system default changes, vanilla reopens sound output; Horizon's Audio has no device watch
+SoundEngine.shouldChangeDevice	port	crates/horizon-client-render/src/audio.rs::Audio::tick	the device list is watched once a second and the output reopened when the default or the chosen device changes
 SoundEngine.notifyListeners	port	crates/horizon-client-render/src/sound_engine.rs::SoundEngine::notify	subtitle and listener notification with range
 SoundEngine.updateSource	port	crates/horizon-client-render/src/audio.rs::Audio::set_listener	listener position and orientation
 SoundEngineExecutor.createThread	skip:other		sound thread creation; Horizon's audio runs on the cpal callback
@@ -78,28 +78,28 @@ SoundManager.apply	port	crates/horizon-client-render/src/audio.rs::Audio::reload
 SoundManager.validateSoundResource	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	file existence check through the exists closure
 SoundManager.Preparations.handleRegistration	port	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::add_file	replace flag and sound entries
 SoundManager.Preparations.apply	inline	crates/horizon-client-render/src/sound_events.rs::SoundRegistry::load	registry replaced with the prepared one
-SoundPreviewHandler.preview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::preview	
+SoundPreviewHandler.preview	port	crates/horizon-client-render/src/audio.rs::preview	the pack screen's sound preview
 SoundPreviewHandler.stopOtherCategoryPreview	port	crates/horizon-client-render/src/sound_preview.rs::SoundPreview::stop_other_category_preview	
 WeighedSoundEvents.preloadIfRequired	skip:java		preload is a cache; Horizon decodes on demand
-CraftPlanksTutorialStep.tick	missing		player: a new survival world shows no craft-planks tutorial toast; Horizon has no tutorial steps (tutorialStep is only stored in options)
-CraftPlanksTutorialStep.hasCraftedPlanksPreviously	missing		minor: part of the craft-planks tutorial
-FindTreeTutorialStepInstance.tick	missing		player: no find-a-tree tutorial toast
-FindTreeTutorialStepInstance.onLookAt	missing		minor: part of the find-a-tree tutorial
-FindTreeTutorialStepInstance.hasPunchedTreesPreviously	missing		minor: part of the find-a-tree tutorial
-MovementTutorialStepInstance.tick	missing		player: no move and look tutorial toasts
-MovementTutorialStepInstance.clear	missing		minor: part of the movement tutorial
-MovementTutorialStepInstance.onInput	missing		minor: part of the movement tutorial
-MovementTutorialStepInstance.onMouse	missing		minor: part of the movement tutorial
-OpenInventoryTutorialStep.tick	missing		player: no open-inventory tutorial toast
-PunchTreeTutorialStepInstance.tick	missing		player: no punch-a-tree tutorial toast
-PunchTreeTutorialStepInstance.onDestroyBlock	missing		minor: part of the punch-a-tree tutorial
-Tutorial.onLookAt	missing		minor: tutorial driver; no tutorial exists
-Tutorial.onDestroyBlock	missing		minor: tutorial driver; no tutorial exists
-Tutorial.stop	missing		minor: tutorial driver; no tutorial exists
-Tutorial.start	missing		minor: tutorial driver; no tutorial exists
-Tutorial.tick	missing		player: the tutorial driver that shows the first toasts is absent
-Tutorial.setStep	missing		minor: tutorial driver; no tutorial exists
-Tutorial.isSurvival	missing		minor: only the tutorial asks whether the player is in survival
+CraftPlanksTutorialStep.tick	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::tick	the CraftPlanks arm: a plank already held or crafted on the first tick ends the step; its toast is Tutorial::hint
+CraftPlanksTutorialStep.hasCraftedPlanksPreviously	inline	crates/horizon-client/src/game/tutorial.rs::Game::tick_tutorial	Previous::crafted_plank: a planks item with a count in the player's minecraft:crafted stats
+FindTreeTutorialStepInstance.tick	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::tick	the FindTree arm: a tree item held or a tree already mined moves the step on to craft planks; its toast is Tutorial::hint
+FindTreeTutorialStepInstance.onLookAt	port	crates/horizon-client/src/game/tutorial.rs::Tutorial::look_at_tree	looking at a block in completes_find_tree_tutorial moves the step on to punch tree
+FindTreeTutorialStepInstance.hasPunchedTreesPreviously	inline	crates/horizon-client/src/game/tutorial.rs::Game::tick_tutorial	Previous::mined_tree: a block in completes_find_tree_tutorial with a count in the minecraft:mined stats
+MovementTutorialStepInstance.tick	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::tick	the Movement arm: 40 ticks moved and 40 ticks looked, then find-tree in survival and none in creative; the toasts are Tutorial::hint
+MovementTutorialStepInstance.clear	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::set_step	a new step starts from Tutorial::new, which zeroes the movement counters
+MovementTutorialStepInstance.onInput	port	crates/horizon-client/src/game/tutorial.rs::Tutorial::input	a movement key held in the world marks the player as moved
+MovementTutorialStepInstance.onMouse	port	crates/horizon-client/src/game/tutorial.rs::Tutorial::mouse	a mouse delta over 0.01 marks the player as turned
+OpenInventoryTutorialStep.tick	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::tick	the OpenInventory arm stops outside survival; the step itself ends in Tutorial::open_inventory, its toast is Tutorial::hint
+PunchTreeTutorialStepInstance.tick	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::tick	the PunchTree arm: the break progress and the reset count of bad breaks feed the hint
+PunchTreeTutorialStepInstance.onDestroyBlock	port	crates/horizon-client/src/game/tutorial.rs::Tutorial::destroy	a log's break progress is kept and a finished break moves on to open inventory; anything else resets it
+Tutorial.onLookAt	inline	crates/horizon-client/src/game/tutorial.rs::Game::tick_tutorial	the pick's block is tested against completes_find_tree_tutorial, then Tutorial::look_at_tree
+Tutorial.onDestroyBlock	port	crates/horizon-client/src/game/tutorial.rs::Game::tutorial_destroy	the broken block's log tag and break progress go to Tutorial::destroy
+Tutorial.stop	inline	crates/horizon-client/src/game/tutorial.rs::Tutorial::set_step	the step becomes None, which shows no hint
+Tutorial.start	inline	crates/horizon-client/src/game/tutorial.rs::Game::reset_tutorial	a Tutorial built from the persisted tutorialStep option
+Tutorial.tick	port	crates/horizon-client/src/game/tutorial.rs::Game::tick_tutorial	the step's tick, the movement input, and the look-at pick, once per tick in the world
+Tutorial.setStep	port	crates/horizon-client/src/game/tutorial.rs::Tutorial::set_step	the step with a fresh state; Game::persist_tutorial_step writes it to options.txt
+Tutorial.isSurvival	inline	crates/horizon-client/src/game/tutorial.rs::Game::tick_tutorial	the game mode is read there and passed to Tutorial::tick, which stops the step outside survival
 TutorialSteps.getByName	port	crates/horizon-client-render/src/options_file.rs::OptionsFile::try_apply	tutorialStep name read from options
 ClientWaypointManager.updateWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::apply	updates a tracked waypoint by id
 ClientWaypointManager.forEachWaypoint	port	crates/horizon-client/src/locator_bar.rs::ClientWaypoints::draw	drawn farthest first

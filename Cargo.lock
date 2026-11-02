@@ -1399,6 +1399,7 @@ dependencies = [
  "horizon-friends",
  "horizon-hdr",
  "horizon-items",
+ "horizon-mcp",
  "horizon-mods",
  "horizon-narrator",
  "horizon-optifine",
@@ -1544,6 +1545,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [
@@ -1575,6 +1583,7 @@ name = "horizon-optifine"
 version = "0.1.0"
 dependencies = [
  "horizon-bench",
+ "horizon-core",
  "log",
  "regex",
 ]
@@ -1647,6 +1656,7 @@ dependencies = [
  "horizon-bench",
  "horizon-chat-filter",
  "horizon-core",
+ "horizon-mcp",
  "horizon-release-sign",
  "horizon-server-files",
  "libc",

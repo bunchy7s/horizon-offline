@@ -699,6 +699,35 @@ fn rolls_user_splash(text: &str, seed: u64, date: (u32, u32)) -> bool {
         .is_ok_and(|size| size > 0 && LegacyRandom::new(seed as i64).next_int_bound(size) == Ok(42))
 }
 
+impl Mode {
+    /// The id native mods see for this screen (`NativeScreenView.id`, the
+    /// screen hooks): one per variant, a hook's contract, so it stays the
+    /// same from release to release. A new variant must add one.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Main => "title",
+            Self::Select { .. } => "world_select",
+            Self::Create { .. } => "world_create",
+            Self::CreateFlat { .. } => "world_create_flat",
+            Self::CreateBuffet { .. } => "world_create_buffet",
+            Self::Edit { .. } => "world_edit",
+            Self::Backup { .. } => "world_backup",
+            Self::BackupBeforeUpgrade { .. } => "world_backup_confirm",
+            Self::OptimizeConfirm { .. } => "world_optimize_confirm",
+            Self::Optimize { .. } => "world_optimize",
+            Self::LowDiskSpace { .. } => "low_disk_space",
+            Self::Delete { .. } => "world_delete",
+            Self::Recover { .. } => "world_recover",
+            Self::Recovered { .. } => "world_recovered",
+            Self::Error { .. } => "error",
+            Self::Multiplayer(screen) => screen.id(),
+            Self::MultiplayerWarning { .. } => "multiplayer_warning",
+            Self::Onboarding(_) => "onboarding",
+            Self::BanNotice(_) => "ban_notice",
+        }
+    }
+}
+
 impl Title {
     /// Names the player for the `<NAME> IS YOU` splash; `name` is only asked for when that splash was rolled.
     pub fn with_user(mut self, name: impl FnOnce() -> String) -> Self {
@@ -3207,6 +3236,45 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         let lines = atlas.font.split(&Text::translate(key, &[]), 170.0);
         crate::ui::tooltip(batch, atlas, &lines, cursor);
     }
+    /// `TabManager.setCurrentTab`: the screen shows `tab`, whose own fields
+    /// take no focus, and whether the open tab changed (the click sound).
+    fn select_create_tab(&mut self, tab: usize) -> bool {
+        let Mode::Create { focus, options, .. } = &mut self.mode else {
+            return false;
+        };
+        let changed = options.tab != tab;
+        if changed {
+            options.tab = tab;
+            *focus = 2;
+        }
+        changed
+    }
+    /// `TabNavigationBar.keyPressed`: with Ctrl held, a digit picks a tab and
+    /// Tab steps to the next one, or to the previous with Shift. `None` for a
+    /// key the bar leaves alone, so a digit still reaches the field; otherwise
+    /// whether to play the click sound, as a tab that changed does.
+    pub fn tab_bar_key(
+        &mut self,
+        key: winit::keyboard::KeyCode,
+        ctrl: bool,
+        shift: bool,
+    ) -> Option<bool> {
+        // The rules and the experiments take the keys, and so does the read
+        // that prepares the world.
+        if !ctrl
+            || self.preparing
+            || self.rules.get_mut().is_some()
+            || self.experiments.get_mut().is_some()
+            || self.confirm_experiments.get_mut().is_some()
+        {
+            return None;
+        }
+        let Mode::Create { options, .. } = &self.mode else {
+            return None;
+        };
+        let next = create_world::next_tab_index(options.tab, key, shift)?;
+        Some(self.select_create_tab(next.min(create_world::tab_count() - 1)))
+    }
     /// The action and whether to play `AbstractWidget.playButtonClickSound`.
     /// Navigation buttons can return `Action::None` while still sounding.
     pub fn click(&mut self, x: f32, y: f32, size: (f32, f32)) -> (Action, bool) {
@@ -3221,15 +3289,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         }
         let (w, h) = (size.0.ceil(), size.1.ceil());
         // MenuTabBar: a new tab clears the focus and clicks.
-        if let Mode::Create { focus, options, .. } = &mut self.mode
-            && let Some(tab) = create_world::tab_at(w, (x, y))
+        if let Some(tab) = create_world::tab_at(w, (x, y))
+            && matches!(self.mode, Mode::Create { .. })
         {
-            let changed = options.tab != tab;
-            if changed {
-                options.tab = tab;
-                *focus = 2;
-            }
-            return (Action::None, changed);
+            return (Action::None, self.select_create_tab(tab));
         }
         // The SafetyScreen's box toggles where it was last drawn.
         if let Mode::MultiplayerWarning { check } = &mut self.mode {
@@ -3446,11 +3509,12 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                             return Action::None;
                         };
                         self.create_return_to_main = false;
-                        let options = WorldOptions::of_world(
+                        let mut options = WorldOptions::of_world(
                             &level,
                             world.commands,
                             &self.saves.join(&world.folder),
                         );
+                        options.restore_feature_packs(&self.resources, &level);
                         self.mode = Mode::Create {
                             name: level.name,
                             seed: level.seed.to_string(),
@@ -3575,7 +3639,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
             }
             // CreateWorldScreen.openGameRulesScreen over a copy of the rules.
             (Mode::Create { options, .. }, Some(29)) => {
-                *self.rules.get_mut() = Some(RulesScreen::for_creation(&options.rules));
+                let rules = options
+                    .rules
+                    .copy_with_features(&options.enabled_features(&self.resources));
+                *self.rules.get_mut() = Some(RulesScreen::for_creation(&rules));
                 Action::None
             }
             // CreateBuffetWorldScreen for the single-biome preset.
@@ -4303,6 +4370,9 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
     fn close_rules(&mut self, exit: Exit) {
         *self.rules.get_mut() = None;
         if let (Exit::Apply(changes), Mode::Create { options, .. }) = (exit, &mut self.mode) {
+            options.rules = options
+                .rules
+                .copy_with_features(&options.enabled_features(&self.resources));
             for (name, value) in changes {
                 options.rules.set(name, value);
             }

@@ -3,10 +3,11 @@
 //! `AllowlistService`, `BanlistService`, `IpBanlistService` and `OperatorService` on the running server's lists. Players are found as
 //! `MinecraftPlayerListService.getUser` finds them, each change is logged as `JsonRpcLogger` logs it, and the
 //! players a change shuts out are disconnected. The supervisor answers with the lists, from their files.
-use super::{GAME_MODES, ServerState, log};
+use super::{GAME_MODES, ServerState, auto_save, log, set_auto_save};
 use crate::game::Game;
 use horizon_client::{
     command::vanilla::DIFFICULTIES,
+    gamerules::{self, Value as GameRuleValue},
     server::{
         profiles,
         user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -29,6 +30,15 @@ struct Op {
     bypass: Option<bool>,
 }
 
+/// A `GameRuleUpdate` as `TYPED_CODEC` writes it: the rule's id, its type and its value.
+fn typed_rule(rule: &gamerules::Rule, value: GameRuleValue) -> Value {
+    let (kind, value) = match value {
+        GameRuleValue::Bool(b) => ("boolean", json!(b)),
+        GameRuleValue::Int(i) => ("integer", json!(i)),
+    };
+    json!({ "key": format!("minecraft:{}", rule.name), "type": kind, "value": value })
+}
+
 /// `NameAndId`'s record `toString`, as vanilla's log lines show it.
 fn shown(user: &NameAndId) -> String {
     format!(
@@ -49,6 +59,63 @@ impl Game<'_> {
         let entries = body["entries"].as_array().cloned().unwrap_or_default();
         let lists = state.lists.clone();
         match body["method"].as_str().unwrap_or_default() {
+            // `GameRulesService.get`: every rule the server has, with its type and current value.
+            "gamerules" => {
+                let rules = &self.ui.rules;
+                let all: Vec<Value> = rules
+                    .available_rules()
+                    .map(|r| typed_rule(r, rules.get(r.name).unwrap_or(r.default)))
+                    .collect();
+                return json!({ "value": all });
+            }
+            // `GameRulesService.update`: the rule is set only when its value changes, and logged.
+            "gamerules/update" => {
+                let update = &body["value"];
+                let Some(rule) = update["key"]
+                    .as_str()
+                    .and_then(gamerules::rule)
+                    .filter(|r| self.ui.rules.get(r.name).is_some())
+                else {
+                    return json!({ "invalid": format!("Unknown game rule: {}", update["key"]) });
+                };
+                let wanted = &update["value"];
+                let value = match (rule.default, wanted) {
+                    (GameRuleValue::Bool(_), Value::Bool(b)) => Some(GameRuleValue::Bool(*b)),
+                    (GameRuleValue::Int(_), n) => n
+                        .as_i64()
+                        .and_then(|n| i32::try_from(n).ok())
+                        .filter(|n| (rule.min..=rule.max).contains(n))
+                        .map(GameRuleValue::Int),
+                    _ => None,
+                };
+                let Some(value) = value else {
+                    return json!({ "invalid": format!("Invalid value {wanted} for game rule {}", rule.name) });
+                };
+                let current = self.ui.rules.get(rule.name).unwrap_or(rule.default);
+                if current != value {
+                    rpc(format!(
+                        "Game rule '{}' updated from '{current}' to '{value}'",
+                        rule.name
+                    ));
+                    self.set_game_rule(rule, value);
+                }
+                return json!({ "value": typed_rule(rule, value) });
+            }
+            "serversettings/autosave" => {
+                return json!({ "value": auto_save(state) });
+            }
+            "serversettings/autosave/set" => {
+                let Some(enabled) = body["value"].as_bool() else {
+                    return json!({ "error": "autosave must be a boolean" });
+                };
+                rpc(format!(
+                    "Update autosave from {} to {}",
+                    auto_save(state),
+                    enabled
+                ));
+                set_auto_save(state, enabled);
+                return json!({ "value": auto_save(state) });
+            }
             "serversettings/motd" => {
                 return json!({
                     "value": self.lan.as_ref().map(|lan| lan.hub.lan.shared.motd()).unwrap_or_default()
@@ -88,6 +155,62 @@ impl Game<'_> {
                 state.game_mode = index as i32;
                 self.set_default_game_mode(state.game_mode);
                 return json!({ "value": GAME_MODES[state.game_mode as usize] });
+            }
+            "serversettings/force_game_mode" => {
+                return json!({ "value": state.force_game_mode });
+            }
+            "serversettings/force_game_mode/set" => {
+                let Some(force) = body["value"].as_bool() else {
+                    return json!({ "error": "force game mode must be a boolean" });
+                };
+                rpc(format!(
+                    "Update force game mode from {} to {}",
+                    state.force_game_mode, force
+                ));
+                self.store_property("force-gamemode", force.to_string());
+                state.force_game_mode = force;
+                self.set_force_game_mode(force);
+                return json!({ "value": state.force_game_mode });
+            }
+            "serversettings/use_allowlist" => {
+                return json!({
+                    "value": lists.lock().unwrap().use_whitelist
+                });
+            }
+            "serversettings/use_allowlist/set" => {
+                let Some(use_allowlist) = body["value"].as_bool() else {
+                    return json!({ "error": "using allowlist must be a boolean" });
+                };
+                let current = lists.lock().unwrap().use_whitelist;
+                rpc(format!(
+                    "Update using allowlist from {} to {}",
+                    current, use_allowlist
+                ));
+                self.set_using_whitelist(&lists, use_allowlist);
+                self.kick_unlisted_players(&lists);
+                return json!({
+                    "value": lists.lock().unwrap().use_whitelist
+                });
+            }
+            "serversettings/enforce_allowlist" => {
+                return json!({
+                    "value": lists.lock().unwrap().enforce_whitelist
+                });
+            }
+            "serversettings/enforce_allowlist/set" => {
+                let Some(enforce) = body["value"].as_bool() else {
+                    return json!({ "error": "enforce allowlist must be a boolean" });
+                };
+                let current = lists.lock().unwrap().enforce_whitelist;
+                rpc(format!(
+                    "Update enforce allowlist from {} to {}",
+                    current, enforce
+                ));
+                self.set_enforce_whitelist(&lists, enforce);
+                self.kick_unlisted_players(&lists);
+                return json!({
+                    "value": lists.lock().unwrap().enforce_whitelist
+                });
             }
             "serversettings/difficulty" => {
                 return json!({ "value": DIFFICULTIES[self.level.difficulty_id() as usize] });
@@ -419,4 +542,23 @@ fn management_ip_ban(entry: &Value, ip: String) -> IpBan {
         entry["expires"].as_i64(),
         reason,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_game_rule_is_written_as_vanillas_typed_codec_does() {
+        let pvp = gamerules::rule("pvp").unwrap();
+        assert_eq!(
+            typed_rule(pvp, GameRuleValue::Bool(false)),
+            json!({ "key": "minecraft:pvp", "type": "boolean", "value": false })
+        );
+        let tick = gamerules::rule("minecraft:random_tick_speed").unwrap();
+        assert_eq!(
+            typed_rule(tick, GameRuleValue::Int(3)),
+            json!({ "key": "minecraft:random_tick_speed", "type": "integer", "value": 3 })
+        );
+    }
 }

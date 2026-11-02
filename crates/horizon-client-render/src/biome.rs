@@ -5,7 +5,6 @@ use horizon_core::{noise::SimplexNoise, position::BlockPos, random::LegacyRandom
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs,
     path::Path,
     sync::Arc,
 };
@@ -171,7 +170,9 @@ fn color(v: &Value) -> Option<u32> {
 }
 fn colormap(root: &Path, name: &str) -> Result<Vec<u32>> {
     let path = root.join(format!("assets/minecraft/textures/colormap/{name}.png"));
-    let mut decoder = png::Decoder::new(std::io::BufReader::new(fs::File::open(path)?));
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(horizon_core::prepared_files::read(
+        &path,
+    )?));
     decoder.ignore_checksums(true);
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info()?;
@@ -277,21 +278,22 @@ impl Biomes {
             dry: colormap(root, "dry_foliage")?,
         };
         let mut list = Vec::new();
-        let mut names: Vec<_> = fs::read_dir(root.join("data/minecraft/worldgen/biome"))?
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        // The folder's own files (not its subfolders'), by file name: through `json_folder`,
+        // from the prepared data file when there is one.
+        let folder = horizon_world::json_folder::read(&root.join("data/minecraft/worldgen/biome"))?;
+        let mut files: Vec<_> = folder
+            .files
+            .iter()
+            .filter(|f| !f.name.contains('/'))
             .collect();
-        names.sort();
-        for path in names {
-            let name = format!(
-                "minecraft:{}",
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .ok_or("bad biome")?
-            );
-            let v: Value = serde_json::from_slice(&fs::read(&path)?)?;
-            list.push(BiomeInfo::from_json(name, &v, &maps));
+        files.sort_by_cached_key(|f| format!("{}.json", f.name));
+        for file in files {
+            let v: Value = serde_json::from_slice(file.bytes()?)?;
+            list.push(BiomeInfo::from_json(
+                format!("minecraft:{}", file.name),
+                &v,
+                &maps,
+            ));
         }
         let index = list
             .iter()

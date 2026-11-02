@@ -43,6 +43,8 @@ pub struct EntityMemory {
     /// Entities a native mod kept out of the level (`native_entity_join_level`),
     /// counted so `/summon` can fail as vanilla's refused add does.
     pub(super) joins_canceled: u32,
+    /// The highest entity id `native_entity_join_level` has been told of.
+    pub(super) joined_mark: u32,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -342,6 +344,8 @@ impl Game<'_> {
                 let from_disk = !take_fresh(&mut tag);
                 // An End gateway's traveller never left the level: nothing joins.
                 let moved = take_moved(&mut tag);
+                // Whatever was added since the last tick joins before this one.
+                self.native_joins_flush(false, 0);
                 let kind = entity_nbt::kind(&tag).unwrap_or_default();
                 let uuid = entity_nbt::uuid(&tag);
                 if uuid.is_some_and(|u| self.restored_vehicle(u).is_some()) {
@@ -358,6 +362,8 @@ impl Game<'_> {
                         | "minecraft:snowball"
                         | "minecraft:egg"
                         | "minecraft:ender_pearl"
+                        | "minecraft:splash_potion"
+                        | "minecraft:lingering_potion"
                         | "minecraft:falling_block"
                         | "minecraft:firework_rocket"
                         | "minecraft:trident"
@@ -377,37 +383,19 @@ impl Game<'_> {
                         if let Some(e) =
                             entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob)
                         {
-                            let (id, p) = (e.id, e.position);
                             self.remember(e.id, uuid, tag);
                             self.dropped.push(e);
-                            if !moved
-                                && !self.native_entity_joins(
-                                    id,
-                                    "minecraft:item",
-                                    [p.x, p.y, p.z],
-                                    from_disk,
-                                )
-                            {
-                                self.dropped.pop();
-                                self.forget_entity(id);
-                            }
                         }
                     }
                     "minecraft:experience_orb" => {
                         for mut orb in entity_nbt::orbs_from_nbt(&tag) {
                             self.next_entity += 1;
                             orb.id = self.next_entity;
-                            let (id, p) = (orb.id, orb.position);
+                            let id = orb.id;
                             // An orb that came through a portal keeps its cooldown.
                             self.restore_portal_cooldown(id, &tag);
                             self.orbs.push(orb);
                             self.remember_tags(id, &tag);
-                            let kind = "minecraft:experience_orb";
-                            if !moved
-                                && !self.native_entity_joins(id, kind, [p.x, p.y, p.z], from_disk)
-                            {
-                                self.orbs.pop();
-                            }
                         }
                     }
                     "minecraft:arrow" => {
@@ -534,6 +522,9 @@ impl Game<'_> {
                                 on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
                                 owner: None,
                                 guest: None,
+                                // PrimedTnt.readAdditionalSaveData: 4 by default,
+                                // kept to 0..128.
+                                power: entity_nbt::tnt_power(&tag),
                             });
                             // `Entity.load`: the `PortalCooldown` of one that just came through.
                             self.remember(id, uuid, tag);
@@ -666,6 +657,13 @@ impl Game<'_> {
                     }
                     _ => self.persist.unknown.entry(key).or_default().push(tag),
                 }
+                // PersistentEntitySectionManager.addEntity: every kind that
+                // just joined tells the mods; a moved one does not join.
+                if moved {
+                    self.native_joins_skip();
+                } else {
+                    self.native_joins_flush(from_disk, 0);
+                }
             }
             self.native_entities_load(self.dim.id(), [key.0, key.1], count);
         }
@@ -768,7 +766,7 @@ impl Game<'_> {
     }
     /// The mobs riding entity `id` under `tag`'s `Passengers`, after the
     /// passengers it kept from loading.
-    fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
+    pub(super) fn put_mob_passengers(&mut self, tag: &mut Tag, id: u32) {
         let riders: Vec<usize> = (0..self.mobs.len())
             .filter(|&j| self.mobs[j].extra.mount == Some(id) && self.mobs[j].alive())
             .collect();
@@ -1151,166 +1149,19 @@ impl Game<'_> {
     ) -> Vec<((i32, i32), Vec<Tag>)> {
         let mut out: HashMap<(i32, i32), Vec<Tag>> =
             keys.iter().map(|k| (*k, Vec::new())).collect();
-        // A rider is saved inside its root vehicle, in the root's chunk; a
-        // boat's passengers inside the boat.
-        let mobs: Vec<usize> = (0..self.mobs.len())
-            .filter(|&i| {
-                self.mob_root(i) == i
-                    && self.mobs[i].extra.mount.is_none_or(|v| {
-                        self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
-                    })
-                    && keys.contains(&chunk_of(self.mobs[i].position))
-                    && self.mobs[i].alive()
-                    && !self.mobs[i].removed
-            })
-            .collect();
-        for i in mobs {
-            let tag = self.mob_tree_nbt(i);
-            out.entry(chunk_of(self.mobs[i].position))
-                .or_default()
-                .push(tag);
-        }
-        let items: Vec<usize> = (0..self.dropped.len())
-            .filter(|&i| keys.contains(&chunk_of(self.dropped[i].position)))
-            .collect();
-        for i in items {
-            let id = self.dropped[i].id;
-            let uuid = self.uuid_for(id);
-            let tag =
-                entity_nbt::item_entity_to_nbt(&self.dropped[i], uuid, self.persist.raw.get(&id));
-            out.entry(chunk_of(self.dropped[i].position))
-                .or_default()
-                .push(tag);
-        }
-        let anon = |persist: &EntityMemory, kind: &str, at: Vec3| {
-            persist
-                .anon
-                .get(&anon_key(kind, at))
-                .map(|(_, uuid, raw)| (uuid.unwrap_or_else(random_uuid), Some(raw.clone())))
-                .unwrap_or_else(|| (random_uuid(), None))
-        };
-        for o in &self.orbs {
-            if keys.contains(&chunk_of(o.position)) {
-                let (uuid, raw) = anon(&self.persist, "minecraft:experience_orb", o.position);
-                out.entry(chunk_of(o.position)).or_default().push(with_raw(
-                    with_raw(entity_nbt::orb_to_nbt(o, uuid), raw.as_ref()),
-                    self.persist.raw.get(&o.id),
-                ));
-            }
-        }
-        for p in &self.creatures.projectiles {
-            if !keys.contains(&chunk_of(p.position)) || !entity_nbt::saved_with_chunk(p) {
-                continue;
-            }
-            let owner = p.owner_uuid;
-            let (uuid, raw) = anon(&self.persist, p.kind.id(), p.position);
-            let in_block = p
-                .arrow
-                .as_ref()
-                .and_then(|a| a.last_state)
-                .map(|s| self.state_to_nbt(s));
-            let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
-                .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
-                .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()));
-            if let Some(tag) = tag {
-                let tag = with_raw(tag, self.persist.raw.get(&p.id));
-                out.entry(chunk_of(p.position)).or_default().push(tag);
-            }
-        }
-        for f in &self.falling {
-            if keys.contains(&chunk_of(f.position)) {
-                let (uuid, raw) = match &f.saved {
-                    Some(saved) => (saved.0, Some(saved.1.clone())),
-                    None => anon(&self.persist, "minecraft:falling_block", f.position),
-                };
-                let tag = entity_nbt::falling_block_to_nbt(
-                    self.state_to_nbt(f.state),
-                    f.position,
-                    f.velocity,
-                    f.age,
-                    f.drop_item,
-                    f.damage,
-                    f.fall_distance,
-                    uuid,
-                );
-                let mut tag = with_raw(tag, raw.as_ref());
-                if let Tag::Compound(fields) = &mut tag {
-                    fields.insert("PortalCooldown".into(), Tag::Int(f.portal.cooldown));
-                }
-                out.entry(chunk_of(f.position)).or_default().push(tag);
-            }
-        }
-        for i in 0..self.rockets.len() {
-            if keys.contains(&chunk_of(self.rockets[i].position)) {
-                let (id, at) = (self.rockets[i].id, self.rockets[i].position);
-                let uuid = self.uuid_for(id);
-                let tag =
-                    self.rockets[i].to_nbt(uuid, self.level.player_uuid, self.persist.raw.get(&id));
-                out.entry(chunk_of(at)).or_default().push(tag);
-            }
-        }
-        for t in &self.tridents {
-            if keys.contains(&chunk_of(t.position)) {
-                let (uuid, raw) = anon(&self.persist, "minecraft:trident", t.position);
-                out.entry(chunk_of(t.position))
-                    .or_default()
-                    .push(t.to_nbt(uuid, raw.as_ref()));
-            }
-        }
-        for i in 0..self.tnts.len() {
-            let t = &self.tnts[i];
-            if keys.contains(&chunk_of(t.position)) {
-                let (id, at) = (t.id, t.position);
-                let uuid = self.uuid_for(id);
-                let t = &self.tnts[i];
-                let tag = entity_nbt::tnt_to_nbt(
-                    t.position,
-                    t.velocity,
-                    t.on_ground,
-                    t.fuse,
-                    uuid,
-                    self.persist.raw.get(&id),
-                );
-                out.entry(chunk_of(at)).or_default().push(tag);
-            }
-        }
-        let boats: Vec<usize> = (0..self.boats.len())
-            .filter(|&i| keys.contains(&chunk_of(self.boats[i].position)))
-            .collect();
-        for i in boats {
-            let b = &self.boats[i];
-            let (id, at) = (b.id, b.position);
-            let uuid = self
-                .persist
-                .uuids
-                .get(&id)
-                .copied()
-                .unwrap_or_else(random_uuid);
-            let mut tag = entity_nbt::boat_to_nbt(
-                &b.entity_type(),
-                b.position,
-                b.velocity,
-                b.yaw,
-                uuid,
-                self.persist.raw.get(&id),
-                b.chest.then_some(&b.items[..]),
-            );
-            self.put_mob_passengers(&mut tag, id);
-            // AbstractBoat.addAdditionalSaveData: the lead's holder.
-            self.write_boat_leash(&mut tag, i);
-            out.entry(chunk_of(at)).or_default().push(tag);
-        }
+        // Every kind in `entity_lists!` saves itself (`Entity::save_nbt`).
+        self.save_every_entity(keys, &mut out);
         if let Some(d) = &self.dragon
             && keys.contains(&chunk_of(d.position))
         {
-            let (uuid, raw) = anon(&self.persist, "minecraft:ender_dragon", d.position);
+            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:ender_dragon", d.position);
             out.entry(chunk_of(d.position))
                 .or_default()
                 .push(d.to_nbt(uuid, raw.as_ref()));
         }
         for c in &self.crystals {
             if keys.contains(&chunk_of(c.position)) {
-                let (uuid, raw) = anon(&self.persist, "minecraft:end_crystal", c.position);
+                let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:end_crystal", c.position);
                 out.entry(chunk_of(c.position))
                     .or_default()
                     .push(c.to_nbt(uuid, raw.as_ref()));
@@ -1327,34 +1178,6 @@ impl Game<'_> {
                     s.raw.as_deref(),
                 );
                 out.entry(chunk_of(at)).or_default().push(tag);
-            }
-        }
-        let carts: Vec<usize> = (0..self.carts.len())
-            .filter(|&i| keys.contains(&chunk_of(self.carts[i].position)))
-            .collect();
-        for i in carts {
-            let id = self.carts[i].id;
-            let at = self.carts[i].position;
-            let uuid = self
-                .persist
-                .uuids
-                .get(&id)
-                .copied()
-                .unwrap_or_else(random_uuid);
-            let mut tag = self.carts[i].to_nbt(uuid, self.persist.raw.get(&id));
-            self.put_mob_passengers(&mut tag, id);
-            out.entry(chunk_of(at)).or_default().push(tag);
-        }
-        for a in &self.armor_stands {
-            if keys.contains(&chunk_of(a.position)) {
-                let uuid = self
-                    .persist
-                    .uuids
-                    .get(&a.id)
-                    .copied()
-                    .unwrap_or_else(random_uuid);
-                let tag = entity_nbt::armor_stand_to_nbt(a, uuid, self.persist.raw.get(&a.id));
-                out.entry(chunk_of(a.position)).or_default().push(tag);
             }
         }
         for f in &self.item_frames {
@@ -1503,6 +1326,7 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
+            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1520,6 +1344,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
+            self.native_mobs_left_since(&mobs_before);
             self.native_items_left_since(&items_before);
             self.native_orbs_left_since(&orbs_before);
             // the ones saved with the chunk go with it (a trident too, unsaved).
@@ -1621,15 +1446,227 @@ impl Game<'_> {
             self.native_entities_unload(self.dim.id(), [chunk.0, chunk.1], count);
         }
     }
-    /// Leaving a dimension: its entities are saved with it.
-    pub(super) fn save_dimension_entities(&mut self) -> Result<()> {
-        self.spawn_loaded_entities();
-        let keys: HashSet<(i32, i32)> = self.world.chunks.keys().copied().collect();
-        let chunks = self.entity_chunks(&keys, true);
-        self.persist = EntityMemory::default();
-        self.save.save_entities(chunks)
+}
+impl Game<'_> {
+    /// `Entity::save_nbt` for a mob: a rider is saved inside its root vehicle,
+    /// in the root's chunk; a boat's or cart's passengers inside the vehicle.
+    pub(super) fn save_mob(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let m = &self.mobs[i];
+        let saves = self.mob_root(i) == i
+            && m.extra.mount.is_none_or(|v| {
+                self.boats.iter().all(|b| b.id != v) && self.carts.iter().all(|c| c.id != v)
+            })
+            && keys.contains(&chunk_of(m.position))
+            && m.alive()
+            && !m.removed;
+        saves.then(|| (chunk_of(self.mobs[i].position), self.mob_tree_nbt(i)))
+    }
+    pub(super) fn save_item(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let at = self.dropped[i].position;
+        keys.contains(&chunk_of(at)).then(|| {
+            let id = self.dropped[i].id;
+            let uuid = self.uuid_for(id);
+            let tag =
+                entity_nbt::item_entity_to_nbt(&self.dropped[i], uuid, self.persist.raw.get(&id));
+            (chunk_of(at), tag)
+        })
+    }
+    pub(super) fn save_orb(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let o = &self.orbs[i];
+        keys.contains(&chunk_of(o.position)).then(|| {
+            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:experience_orb", o.position);
+            let tag = with_raw(
+                with_raw(entity_nbt::orb_to_nbt(o, uuid), raw.as_ref()),
+                self.persist.raw.get(&o.id),
+            );
+            (chunk_of(o.position), tag)
+        })
+    }
+    pub(super) fn save_projectile(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let p = &self.creatures.projectiles[i];
+        if !keys.contains(&chunk_of(p.position)) || !entity_nbt::saved_with_chunk(p) {
+            return None;
+        }
+        let owner = p.owner_uuid;
+        let (uuid, raw) = anon_uuid_raw(&self.persist, p.kind.id(), p.position);
+        let in_block = p
+            .arrow
+            .as_ref()
+            .and_then(|a| a.last_state)
+            .map(|s| self.state_to_nbt(s));
+        let tag = entity_nbt::arrow_to_nbt(p, uuid, owner, in_block, raw.as_ref())
+            .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
+            .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))?;
+        Some((
+            chunk_of(p.position),
+            with_raw(tag, self.persist.raw.get(&p.id)),
+        ))
+    }
+    pub(super) fn save_falling(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let f = &self.falling[i];
+        if !keys.contains(&chunk_of(f.position)) {
+            return None;
+        }
+        let (uuid, raw) = match &f.saved {
+            Some(saved) => (saved.0, Some(saved.1.clone())),
+            None => anon_uuid_raw(&self.persist, "minecraft:falling_block", f.position),
+        };
+        let tag = entity_nbt::falling_block_to_nbt(
+            self.state_to_nbt(f.state),
+            f.position,
+            f.velocity,
+            f.age,
+            f.drop_item,
+            f.damage,
+            f.fall_distance,
+            uuid,
+        );
+        let mut tag = with_raw(tag, raw.as_ref());
+        if let Tag::Compound(fields) = &mut tag {
+            fields.insert("PortalCooldown".into(), Tag::Int(f.portal.cooldown));
+        }
+        Some((chunk_of(f.position), tag))
+    }
+    pub(super) fn save_rocket(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let (id, at) = (self.rockets[i].id, self.rockets[i].position);
+        keys.contains(&chunk_of(at)).then(|| {
+            let uuid = self.uuid_for(id);
+            let tag =
+                self.rockets[i].to_nbt(uuid, self.level.player_uuid, self.persist.raw.get(&id));
+            (chunk_of(at), tag)
+        })
+    }
+    pub(super) fn save_trident(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let t = &self.tridents[i];
+        keys.contains(&chunk_of(t.position)).then(|| {
+            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:trident", t.position);
+            (chunk_of(t.position), t.to_nbt(uuid, raw.as_ref()))
+        })
+    }
+    pub(super) fn save_tnt(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let (id, at) = (self.tnts[i].id, self.tnts[i].position);
+        keys.contains(&chunk_of(at)).then(|| {
+            let uuid = self.uuid_for(id);
+            let t = &self.tnts[i];
+            let tag = entity_nbt::tnt_to_nbt(
+                t.position,
+                t.velocity,
+                t.on_ground,
+                t.fuse,
+                t.power,
+                uuid,
+                self.persist.raw.get(&id),
+            );
+            (chunk_of(at), tag)
+        })
+    }
+    pub(super) fn save_boat(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let b = &self.boats[i];
+        let (id, at) = (b.id, b.position);
+        if !keys.contains(&chunk_of(at)) {
+            return None;
+        }
+        let uuid = self.saved_uuid_or_random(id);
+        let mut tag = entity_nbt::boat_to_nbt(
+            &b.entity_type(),
+            b.position,
+            b.velocity,
+            b.yaw,
+            uuid,
+            self.persist.raw.get(&id),
+            b.chest.then_some(&b.items[..]),
+        );
+        self.put_mob_passengers(&mut tag, id);
+        // AbstractBoat.addAdditionalSaveData: the lead's holder.
+        self.write_boat_leash(&mut tag, i);
+        Some((chunk_of(at), tag))
+    }
+    pub(super) fn save_cart(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let (id, at) = (self.carts[i].id, self.carts[i].position);
+        if !keys.contains(&chunk_of(at)) {
+            return None;
+        }
+        let uuid = self.saved_uuid_or_random(id);
+        let mut tag = self.carts[i].to_nbt(uuid, self.persist.raw.get(&id));
+        self.put_mob_passengers(&mut tag, id);
+        Some((chunk_of(at), tag))
+    }
+    pub(super) fn save_armor_stand(
+        &mut self,
+        i: usize,
+        keys: &HashSet<ChunkKey>,
+    ) -> Option<(ChunkKey, Tag)> {
+        let a = &self.armor_stands[i];
+        keys.contains(&chunk_of(a.position)).then(|| {
+            let uuid = self.saved_uuid_or_random(a.id);
+            let tag = entity_nbt::armor_stand_to_nbt(a, uuid, self.persist.raw.get(&a.id));
+            (chunk_of(a.position), tag)
+        })
+    }
+    /// The UUID kept for `id`, or a new one that is not remembered (what a
+    /// saved vehicle or stand gets when it never had one).
+    fn saved_uuid_or_random(&self, id: u32) -> [i32; 4] {
+        self.persist
+            .uuids
+            .get(&id)
+            .copied()
+            .unwrap_or_else(random_uuid)
     }
 }
+
+/// A chunk's key, as `chunk_of` gives it.
+pub(super) type ChunkKey = (i32, i32);
+
+/// The saved UUID and raw compound kept for an entity without an id, found by
+/// kind and position; a new UUID when none was kept.
+fn anon_uuid_raw(persist: &EntityMemory, kind: &str, at: Vec3) -> ([i32; 4], Option<Tag>) {
+    persist
+        .anon
+        .get(&anon_key(kind, at))
+        .map(|(_, uuid, raw)| (uuid.unwrap_or_else(random_uuid), Some(raw.clone())))
+        .unwrap_or_else(|| (random_uuid(), None))
+}
+
 /// Only a mob is finalized; another entity drops the request.
 fn strip_finalize(tag: &mut Tag) {
     if let Tag::Compound(c) = tag {

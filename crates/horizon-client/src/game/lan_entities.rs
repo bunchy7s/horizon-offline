@@ -40,16 +40,20 @@ fn state(id: u32, kind: &str, position: [f64; 3], yaw: f32, on_ground: bool) -> 
         head_yaw: 0.0,
         on_ground,
         velocity: [0.0; 3],
+        minecart_steps: None,
         data: 0,
         meta: Vec::new(),
         defaults: Vec::new(),
         equipment: Vec::new(),
         attributes: Vec::new(),
         precise: false,
+        vertical_collision: false,
+        horizontal_collision: false,
         needs_sync: false,
         leash: None,
         spectator: false,
         watching: false,
+        hidden: None,
     }
 }
 
@@ -127,14 +131,9 @@ impl Game<'_> {
         }
     }
 
-    /// Who rides what (`Entity.getPassengers`): mobs on mobs, and the
-    /// host in its boat or minecart.
-    pub(super) fn lan_riding(
-        &self,
-        host_entity: Option<i32>,
-        guests: &[(u32, i32)],
-        riding: &mut Riding,
-    ) {
+    /// Who rides what (`Entity.getPassengers`): the players in their vehicles and
+    /// mobs on mobs.
+    pub(super) fn lan_riding(&self, guests: &[(u32, i32)], riding: &mut Riding) {
         riding.clear();
         // The server's players in their boats and minecarts.
         for &(vehicle, guest) in guests {
@@ -145,18 +144,15 @@ impl Game<'_> {
                 riding.add(vehicle as i32, m.id as i32);
             }
         }
-        if let (Some(host), Some(vehicle)) = (host_entity, self.riding) {
-            riding.add(vehicle as i32, host);
-        }
     }
 
     /// Boats, minecarts, armor stands, item frames, paintings and the
     /// entities kept unsimulated, as guests track them.
     pub(super) fn lan_object_states(
-        &self,
-        host_entity: Option<i32>,
+        &mut self,
         hub: &mut Hub,
         out: &mut States,
+        drain_minecart_steps: bool,
     ) {
         let guests: Vec<(u128, i32)> = hub
             .guests
@@ -168,7 +164,7 @@ impl Game<'_> {
             let p = b.position;
             let mut e = state(b.id, &b.entity_type(), [p.x, p.y, p.z], b.yaw, b.on_ground);
             // Leashable.setLeashedTo / dropLeash: who holds the boat's lead.
-            e.leash = self.boat_leash_link(b, host_entity, &guests);
+            e.leash = self.boat_leash_link(b, &guests);
             e.velocity = [b.velocity.x, b.velocity.y, b.velocity.z];
             e.meta = vehicle_meta(b.hurt_time, b.hurt_dir, b.damage);
             // AbstractBoat.DATA_ID_PADDLE_LEFT and DATA_ID_PADDLE_RIGHT.
@@ -191,10 +187,21 @@ impl Game<'_> {
             e.defaults.push((13, serializer::INT, Value::Int(0)));
             out.push(e);
         }
-        for c in &self.carts {
+        let improvements = self.minecart_improvements();
+        for c in &mut self.carts {
             let p = c.position;
             let mut e = state(c.id, c.kind.id(), [p.x, p.y, p.z], c.yaw, c.on_ground());
+            e.pitch = c.pitch;
             e.velocity = [c.velocity.x, c.velocity.y, c.velocity.z];
+            if improvements {
+                // Joining another dimension only takes a spawn snapshot; its
+                // regular tracking tick still owns the unsent steps.
+                e.minecart_steps = Some(if drain_minecart_steps {
+                    std::mem::take(&mut c.lerp_steps)
+                } else {
+                    Vec::new()
+                });
+            }
             e.meta = vehicle_meta(c.hurt_time, c.hurt_dir, c.damage);
             match c.kind {
                 // MinecartFurnace.DATA_ID_FUEL.
@@ -394,7 +401,7 @@ impl Game<'_> {
             ));
             out.push(e);
         }
-        self.lan_projectile_states(host_entity, hub, out);
+        self.lan_projectile_states(hub, out);
         for o in &self.others {
             let p = o.position;
             let mut e = state(o.id, &o.kind, [p.x, p.y, p.z], o.yaw, false);
@@ -534,11 +541,10 @@ impl Game<'_> {
 
     /// Primed TNT, falling blocks, projectiles, tridents, firework rockets and
     /// end crystals, as guests track them.
-    fn lan_projectile_states(&self, host_entity: Option<i32>, hub: &mut Hub, out: &mut States) {
+    fn lan_projectile_states(&self, hub: &mut Hub, out: &mut States) {
         let owner = |who: Option<horizon_client::mobs::Who>| match who {
             Some(horizon_client::mobs::Who::Mob(id)) => id as i32,
-            Some(horizon_client::mobs::Who::Player) => host_entity.unwrap_or(0),
-            None => 0,
+            Some(horizon_client::mobs::Who::Player) | None => 0,
         };
         let at = |p: horizon_core::geometry::Vec3| [p.x, p.y, p.z];
         for f in &self.fangs.list {
@@ -623,6 +629,17 @@ impl Game<'_> {
                 K::WitherSkull { dangerous: true } => {
                     e.meta.push((8, serializer::BOOLEAN, Value::Bool(true)));
                 }
+                // ThrowableItemProjectile.DATA_ITEM_STACK: the potion's
+                // `potion_contents`, whose effects the guest's splash and
+                // whose colour its drawing need. A plain splash potion is the
+                // client's default and is not sent.
+                K::Potion(stack, _) if stack.extra.is_some() || stack.count != 1 => {
+                    e.meta.push((
+                        8,
+                        serializer::ITEM_STACK,
+                        Value::Item(hub.stack(&Some((**stack).clone()))),
+                    ));
+                }
                 _ => {}
             }
             out.push(e);
@@ -695,7 +712,7 @@ impl Game<'_> {
                     .iter()
                     .find(|g| g.conn == conn)
                     .map(|g| g.entity_id),
-                None => host_entity,
+                None => None,
             };
             if r.attached
                 && let Some(player) = boosted

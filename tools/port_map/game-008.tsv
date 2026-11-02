@@ -3,7 +3,7 @@ HarvestFarmland.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B
 HarvestFarmland.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears look and walk target, worked = 0, next_ok = now + 40
 InsideBrownianWalk.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InsideBrownianWalk arm: shuffled 3x3x3 cells, first one without sky view that is solid; a solid-block test stands in for loadedAndEntityCanStandOn
 InteractWith.of	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InteractWith arm for villager, breeding villager and cat targets (range 8, speed 0.5, stop distance 2); piglins and piglin brutes use goals instead
-InteractWithDoor.create	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::InteractWithDoor (copper golem), villager_brain.rs::B::try_start (villager)	gap: piglins have no door behaviour yet (the probe has no piglin brain); a golem does not look for another golem coming through the door
+InteractWithDoor.create	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::trigger, crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the copper golem's trigger arm and the villager's try_start; gap: piglins have no door behaviour yet (the probe has no piglin brain); a golem does not look for another golem coming through the door
 InteractWithDoor.areOtherMobsComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	villagers within 2 blocks of the door whose path has the door as previous or next node
 InteractWithDoor.isMobComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	read from the other villager's Seen.path_nodes
 InteractWithDoor.isDoorTooFarAway	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	3 block test; no dimension compare needed
@@ -20,7 +20,7 @@ JumpOnBed.tiredOfWalking	inline	crates/horizon-client/src/mobs/villager_brain.rs
 JumpOnBed.tiredOfJumping	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	folded into the still-using test
 LocateHidingPlace.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	LocateHidingPlace arm: a home POI within close+1 and near, else a shuffled one within the radius, else the home memory; sets the hiding place and walks there when far
 LongJumpMidJump.stop	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::end	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
-LongJumpToPreferredBlock.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start (wanting_preferred)	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToPreferredBlock.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain); wanting_preferred marks the preferred-block jump
 LongJumpToPreferredBlock.getJumpCandidate	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::candidate	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
 LongJumpToRandomPos.defaultAcceptableLandingSpot	inline	crates/horizon-client/src/mobs/frog.rs::default_acceptable_landing	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
 LongJumpToRandomPos.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::can_use	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
@@ -35,7 +35,7 @@ LookAndFollowTradingPlayerSink.followPlayer	port	crates/horizon-client/src/mobs/
 LookAtTargetSink.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the look target must still be visible; the sniffer, warden and breeze brains have the same arm
 LookAtTargetSink.tick	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	look_at the target position
 MeleeAttack.create	inline	crates/horizon-client/src/mobs/monster_brain.rs::B::try_start	creaking arm (target in reach and visible, attack cooldown); the warden and axolotl brains have their own; gap: minor: piglins, piglin brutes, hoglins and zoglins attack through the MeleeAttack goal in goals.rs, whose chase and cooldown rhythm differ from the brain behaviour
-Mount.create	missing		player: a baby piglin never walks to and climbs onto a baby hoglin (PiglinAi's ride target); no brain or goal sends a mob to mount another, jockeys only come from spawning
+Mount.create	port	crates/horizon-client/src/mobs/piglin.rs::mount	with no walk under way and a RIDE_TARGET the baby piglin boards a ride target closer than a block (StartRiding), else looks at it and paths to its block at the mounting speed; the walk ends at its block and re-aims when the block moved 2 or more
 MoveToSkySeeingSpot.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	MoveToSkySeeingSpot arm: only when the villager cannot see the sky and has no walk target
 MoveToSkySeeingSpot.getOutdoorPosition	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	ten random spots within 10, 3 and 10 blocks, the first with no blocks above (no_blocks_above)
 MoveToTargetSink.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	MoveToTargetSink arm: retry cooldown, reached, compute_path; the sniffer, ghastling, golem, breeze, creaking and warden brains carry the same arm
@@ -43,9 +43,9 @@ MoveToTargetSink.canStillUse	inline	crates/horizon-client/src/mobs/villager_brai
 MoveToTargetSink.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the arm sets the PATH memory and starts the navigation as it starts
 MoveToTargetSink.isWalkTargetSpectator	missing		minor: a walk target on a player in spectator mode is not dropped
 PlayTagWithOtherKids.chaseKid	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	PlayTag arm sets interaction, look and walk target (speed 0.6, close 1)
-PlayTagWithOtherKids.findSomeoneBeingChased	missing		minor: a kid always chases the first friend it sees instead of joining a chase of a kid that has 1 to 5 chasers (Seen.interaction_target is recorded but unused)
-PlayTagWithOtherKids.checkHowManyChasersEachFriendHas	missing		minor: no chaser counts; see findSomeoneBeingChased
-PlayTagWithOtherKids.isFriendChasingMe	missing		player: a kid that is being chased never runs off to a spot in the village, so the tag game is only chasing
+PlayTagWithOtherKids.findSomeoneBeingChased	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the kid chased by the fewest chasers, one to five, else any friend; what a friend chases is its INTERACTION_TARGETrded but unused)
+PlayTagWithOtherKids.checkHowManyChasersEachFriendHas	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the chaser count per chased kid that picks the target
+PlayTagWithOtherKids.isFriendChasingMe	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the chased kid runs to a random spot inside the village (land_random_pos, 10 tries, one section from the village)
 PoiCompetitorScan.selectWinner	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	PoiCompetitorScan arm: higher xp keeps the site, a tie goes to the later villager; gap: minor: only this villager's own site is erased, a losing neighbour loses its site in its own scan
 PoiCompetitorScan.competesForSameJobsite	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	same job site and profession; the profession is compared with this villager's, not with the site's POI type
 PrepareRamNearestTarget.start	port	crates/horizon-client/src/mobs/goat.rs::Ram::start	picks the nearest allowed target and chooses a ramming spot
@@ -66,36 +66,36 @@ SetWalkTargetFromBlockMemory.create	port	crates/horizon-client/src/mobs/villager
 SetWalkTargetFromLookTarget.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	WalkToLookTarget arm; the sniffer, ghastling and breeze brains have the same
 ShowTradesToPlayer.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	ShowTrades arm: still near the player, look time left and an interaction target
 ShowTradesToPlayer.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	looks at the player, look time 40
-ShowTradesToPlayer.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears the interaction target; the held item is never touched because no offer is ever shown
-ShowTradesToPlayer.findItemsToDisplay	missing		player: a villager facing a player who holds an item matching one of its trade costs never holds up the matching offer, and the look time never extends to 900 ticks
-ShowTradesToPlayer.updateDisplayItems	missing		minor: the offer list matched against the player's item, part of findItemsToDisplay
-ShowTradesToPlayer.playerItemStackMatchesCostOfOffer	missing		minor: cost match of findItemsToDisplay
+ShowTradesToPlayer.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears the interaction target and the held item (clearHeldItem), and the player's item it compared against
+ShowTradesToPlayer.findItemsToDisplay	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the offers the player's held item pays for; a match raises the look time to 900 and puts the result in the villager's hand
+ShowTradesToPlayer.updateDisplayItems	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	rebuilt when the player's held item changes, skipping an offer that is out of stock
+ShowTradesToPlayer.playerItemStackMatchesCostOfOffer	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the held item against an offer's cost A or cost B
 ShowTradesToPlayer.lookAtTarget	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the arm sets the look target to the player on start and each tick
-ShowTradesToPlayer.displayCyclingItems	missing		player: with several matching offers the villager would swap the item in its hand every 40 ticks; it never holds anything
+ShowTradesToPlayer.displayCyclingItems	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	with two or more matching offers the held item moves on every 40 ticks, wrapping round
 ShufflingList.add	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	the idle RunOne list is built with its weights (stroll 2, do nothing 1); the other brains list weights where their packages are built
 ShufflingList.WeightedEntry.setRandom	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	the RunOne arm draws -pow(random, 1/weight) per entry and sorts; the villager, animal and monster brains do the same in their gates
 SleepInBed.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	SleepInBed arm: not riding, 100 ticks since waking, bed within 2 blocks and free
 SleepInBed.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	rest activity, above the bed by 0.4 and within 1.14 of it
 SleepInBed.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	wakes the villager and sets next_ok = now + 40
-SpearApproach.ableToAttack	missing		minor: part of the missing spear approach of PiglinAi
-SpearApproach.checkExtraStartConditions	missing		player: a piglin holding a golden spear (about 1 in 20 adult piglins) just walks up and melees; vanilla first closes in on the target to 10 blocks while holding the spear
-SpearApproach.start	missing		minor: sets the approach status of the missing spear routine
-SpearApproach.canStillUse	missing		minor: part of the missing spear approach
-SpearApproach.farEnough	missing		minor: part of the missing spear approach
-SpearApproach.tick	missing		minor: part of the missing spear approach
-SpearAttack.ableToAttack	missing		minor: part of the missing spear charge of PiglinAi
-SpearAttack.getKineticWeaponUseDuration	missing		minor: part of the missing spear charge
-SpearAttack.checkExtraStartConditions	missing		minor: part of the missing spear charge
-SpearAttack.start	missing		player: a piglin holding a golden spear (about 1 in 20 adult piglins) just walks up and melees; vanilla raises the spear (startUsingItem) and charges at the target
-SpearAttack.canStillUse	missing		minor: part of the missing spear charge
-SpearAttack.tick	missing		player: a piglin holding a golden spear (about 1 in 20 adult piglins) just walks up and melees; vanilla charges along a line, then repositions 6 to 7 blocks away and charges again; no mob uses a spear's kinetic attack here
-SpearAttack.stop	missing		minor: part of the missing spear charge
-SpearRetreat.ableToAttack	missing		minor: part of the missing spear retreat
-SpearRetreat.checkExtraStartConditions	missing		player: a piglin holding a golden spear (about 1 in 20 adult piglins) just walks up and melees; vanilla backs off 9 to 11 blocks after a charge
-SpearRetreat.start	missing		minor: part of the missing spear retreat
-SpearRetreat.canStillUse	missing		minor: part of the missing spear retreat
-SpearRetreat.tick	missing		minor: part of the missing spear retreat
-SpearRetreat.stop	missing		minor: part of the missing spear retreat
+SpearApproach.ableToAttack	inline	crates/horizon-client/src/mobs/spear_use.rs::able_to_attack	a target and a kinetic weapon in the main hand, shared with SpearUseGoal
+SpearApproach.checkExtraStartConditions	port	crates/horizon-client/src/mobs/spear_use.rs::approach_check_extra_start_conditions	able to attack and not using an item
+SpearApproach.start	port	crates/horizon-client/src/mobs/spear_use.rs::approach_start	aggressive, SPEAR_STATUS = APPROACH
+SpearApproach.canStillUse	port	crates/horizon-client/src/mobs/spear_use.rs::approach_can_still_use	able to attack and farther from the target than the 10 block approach distance
+SpearApproach.farEnough	inline	crates/horizon-client/src/mobs/spear_use.rs::approach_can_still_use	the distance beyond APPROACH_DISTANCE_SQ, folded into the still-using test
+SpearApproach.tick	port	crates/horizon-client/src/mobs/spear_use.rs::approach_tick	look at the target and walk to it at the repositioning speed
+SpearAttack.ableToAttack	inline	crates/horizon-client/src/mobs/spear_use.rs::able_to_attack	a target and a kinetic weapon in the main hand, shared with SpearUseGoal
+SpearAttack.getKineticWeaponUseDuration	port	crates/horizon-client/src/mobs/spear_use.rs::attack_kinetic_weapon_use_duration	the main hand weapon's damage use duration
+SpearAttack.checkExtraStartConditions	port	crates/horizon-client/src/mobs/spear_use.rs::attack_check_extra_start_conditions	status CHARGING, able to attack and not using an item
+SpearAttack.start	port	crates/horizon-client/src/mobs/spear_use.rs::attack_start	aggressive, the charge lasts the use duration and startUsingItem raises the spear
+SpearAttack.canStillUse	port	crates/horizon-client/src/mobs/spear_use.rs::attack_can_still_use	charge time left and able to attack
+SpearAttack.tick	port	crates/horizon-client/src/mobs/spear_use.rs::attack_tick	count the charge down, run at the target, then reposition to a spot 6 to 7 blocks past it and charge again
+SpearAttack.stop	port	crates/horizon-client/src/mobs/spear_use.rs::attack_stop	walk ends, spear down, status RETREAT
+SpearRetreat.ableToAttack	inline	crates/horizon-client/src/mobs/spear_use.rs::able_to_attack	a target and a kinetic weapon in the main hand, shared with SpearUseGoal
+SpearRetreat.checkExtraStartConditions	port	crates/horizon-client/src/mobs/spear_use.rs::retreat_check_extra_start_conditions	status RETREAT and a spot 9 to 11 blocks off the target (2 more on a mount) becomes SPEAR_FLEEING_POSITION
+SpearRetreat.start	port	crates/horizon-client/src/mobs/spear_use.rs::retreat_start	aggressive, fleeing time 0
+SpearRetreat.canStillUse	port	crates/horizon-client/src/mobs/spear_use.rs::retreat_can_still_use	under 100 ticks (the behaviour timeout), a spot to back off to, a walk going on and able to attack
+SpearRetreat.tick	port	crates/horizon-client/src/mobs/spear_use.rs::retreat_tick	look at the target, count the time and walk to the fleeing spot
+SpearRetreat.stop	port	crates/horizon-client/src/mobs/spear_use.rs::retreat_stop	walk ends, spear down, status cleared so the approach starts over
 StartAttacking.create	inline	crates/horizon-client/src/mobs/monster_brain.rs::B::try_start	StartAttacking arm (nearest attackable, last attacker, active creaking's player); piglins and hoglins choose targets with NearestTarget goals
 StartCelebratingIfTargetDead.create	port	crates/horizon-client/src/mobs/piglin.rs::celebrate	gap: minor: the forgive_dead_players game rule is not read (a dead player target is always dropped, which is the default)
 StayCloseToTarget.create	port	crates/horizon-client/src/mobs/allay.rs::StayClose::can_use	gap: minor: starts when the deposit is more than 4 blocks away instead of 16, so an allay hovers closer to its player than vanilla
@@ -141,7 +141,7 @@ TransportItemsBetweenContainers.TransportItemTarget.tryCreatePossibleTarget	inli
 TransportItemsBetweenContainers.TransportItemTarget.getBlockEntityContainer	port	crates/horizon-client/src/mobs/transport_items.rs::container	gap: minor: a cat sitting on the chest does not block it, only a redstone conductor above does
 TriggerGate.triggerGate	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	TriggerGate arm: shuffle by weight, then each trigger until one fires; the piglin's idle gate is part of its goals
 TryFindLand.create	inline	crates/horizon-client/src/mobs/goals.rs::Stroll::can_use	gap: minor: a frog in water strolls to a random land spot within 15 blocks (water-avoiding stroll, every tick) instead of the nearest standable block within 6 to 8 with a 60 tick cooldown, at speed 1.0 not 1.5
-TryFindLand.canStandOn	missing		minor: no scan for the nearest solid land next to water; see TryFindLand.create
-TryFindLandNearLiquid.create	missing		minor: only runs in the frog's lay-spawn activity, which needs a pregnant frog (see TryLaySpawnOnFluidNearLand)
+TryFindLand.canStandOn	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn::land_near_water	an empty collision shape at the cell and a non-empty block below (a solid test stands in for isFaceSturdy(UP))
+TryFindLandNearLiquid.create	port	crates/horizon-client/src/mobs/frog.rs::LaySpawn::find	the 8 block manhattan scan for land beside water, its 40 tick retry and the walk target on the spot found
 TryFindLiquid.create	port	crates/horizon-client/src/mobs/animal_brain.rs::axolotl_action	FindLiquid arm: nearest water within 6, speed 0.15, re-run every 40 ticks
-TryLaySpawnOnFluidNearLand.create	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn	goal stand-in for the frog brain (no tick parity: the probe has no frog brain): feeding, pregnancy, walk to land beside water, frogspawn
+TryLaySpawnOnFluidNearLand.create	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn::can_use	goal stand-in for the frog brain (no tick parity: the probe has no frog brain): feeding, pregnancy, walk to land beside water, frogspawn

@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         mpsc::{Receiver, Sender, channel},
     },
     thread::JoinHandle,
@@ -48,6 +48,8 @@ pub enum Event {
     ModNet,
     /// The server samples far terrain for this client (`lod_net`).
     FarTerrain(crate::lod_net::Offer),
+    /// ClientConfigurationPacketListenerImpl.handleEnabledFeatures.
+    Features(Vec<String>),
     /// Configuration finished: the play state begins with these registries.
     Joined {
         registries: Arc<Dynamic>,
@@ -513,6 +515,23 @@ impl Reason {
     }
 }
 
+/// `ConnectScreen.connect`'s log line, as vanilla writes it from its "Server Connector #N" thread:
+/// the address as the player gave it, and the port (25565 when none was given), before any SRV
+/// lookup. Other launchers read the last one from `latest.log` to offer the server again.
+fn connecting_line(host: &str, port: u16) -> String {
+    format!("Connecting to {host}, {port}")
+}
+fn log_connecting(host: &str, port: u16) {
+    // ConnectScreen.UNIQUE_THREAD_ID: the first connector is #1.
+    static CONNECTORS: AtomicU32 = AtomicU32::new(0);
+    let n = CONNECTORS.fetch_add(1, Ordering::Relaxed) + 1;
+    crate::logging::write_as(
+        &format!("Server Connector #{n}"),
+        log::Level::Info,
+        &connecting_line(host, port),
+    );
+}
+
 /// `Connection$1.initChannel`: a client socket's pipeline starts with
 /// `ReadTimeoutHandler(30)`. A server sends a keep-alive every 15 s, so one
 /// that sends nothing for 30 s has frozen or dropped off the network.
@@ -596,6 +615,7 @@ fn run(
                     ));
                 };
                 status(send, &tr(lang, "connect.connecting"));
+                log_connecting(&target.0, target.1);
                 target
             }
         };
@@ -890,6 +910,17 @@ fn configure(
                     data: hash.to_vec(),
                 }))?;
             }
+            // The server names its mods; the answer is ours, and the server judges.
+            cfg::Clientbound::CustomPayload(p)
+                if p.channel == horizon_protocol::mod_list::CHANNEL =>
+            {
+                reply(cfg::Serverbound::CustomPayload(cfg::CustomPayload {
+                    channel: horizon_protocol::mod_list::CHANNEL.into(),
+                    data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
+                        &horizon_protocol::mod_list::local(),
+                    )),
+                }))?;
+            }
             cfg::Clientbound::CustomPayload(p) => receive_brand(&p, send),
             cfg::Clientbound::Ping(p) => reply(cfg::Serverbound::Pong(p))?,
             // Know no packs: the server then sends every registry entry in full.
@@ -897,6 +928,9 @@ fn configure(
                 reply(cfg::Serverbound::SelectKnownPacks(cfg::SelectKnownPacks {
                     packs: vec![],
                 }))?
+            }
+            cfg::Clientbound::UpdateEnabledFeatures(p) => {
+                let _ = send.send(Event::Features(p.features));
             }
             cfg::Clientbound::RegistryData(r) => registries.add(r),
             cfg::Clientbound::UpdateTags(t) => registries.add_tags(&t),
@@ -1158,6 +1192,24 @@ fn continues_after_failed_join(lan: bool, signed_in: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Launchers find the last server joined in `latest.log` by vanilla's line.
+    #[test]
+    fn the_connecting_line_is_vanillas() {
+        let line = |address: &str| {
+            let (host, port) = parse_address(address).unwrap();
+            connecting_line(&host, port)
+        };
+        assert_eq!(
+            line("play.example.net"),
+            "Connecting to play.example.net, 25565"
+        );
+        assert_eq!(
+            line("play.example.net:25577"),
+            "Connecting to play.example.net, 25577"
+        );
+        assert_eq!(line("[::1]:25566"), "Connecting to ::1, 25566");
+    }
 
     #[test]
     fn direct_login_keeps_the_hostname_in_the_handshake() {

@@ -460,6 +460,64 @@ impl Game<'_> {
             &mut sink,
         );
     }
+    /// [`Self::submit_item_lit`] of `state` under each of `poses` on the GPU path: the mark
+    /// before its draws and their bounds, or `None` (nothing drawn) when the state cannot
+    /// take it.
+    pub(super) fn submit_item_skinned(
+        &self,
+        state: &ItemRenderState,
+        poses: &[glam::Mat4],
+        light: u32,
+        lights: (glam::Vec3, glam::Vec3),
+    ) -> Option<((usize, usize, u32), Option<(glam::Vec3, glam::Vec3)>)> {
+        let mut models = self.skin_models.borrow_mut();
+        let mut frame = self.skin_frame.borrow_mut();
+        let mark = frame.mark();
+        let mut skin = horizon_client::mobs::skin::Skin {
+            models: &mut models,
+            frame: &mut frame,
+            bounds: None,
+        };
+        let sink = (
+            item_hdr_light(state, light),
+            (state.hdr_light == 0).then_some(lights),
+            state.hdr_tier,
+        );
+        for &pose in poses {
+            let renderer = &self.pack.item_renderer;
+            if !state.submit_skinned(renderer, &self.gui.atlas.sprites, pose, sink, &mut skin) {
+                // Decided before any draw, the same for every pose.
+                return None;
+            }
+        }
+        Some((mark, skin.bounds))
+    }
+    /// [`Self::submit_item_world`] of `state` under `pose` on the GPU path, its draws counted
+    /// with an entity's (`skinned`: its mark and bounds, `cull_skinned`'s); false, with
+    /// nothing drawn, when the state cannot take it.
+    pub(super) fn skin_item_into(
+        &self,
+        state: &ItemRenderState,
+        pose: glam::Mat4,
+        light: u32,
+        skinned: &mut super::creatures::Skinned,
+    ) -> bool {
+        let lights = diffuse_lights(self.dim == Dim::Nether);
+        let Some((mark, bounds)) = self.submit_item_skinned(state, &[pose], light, lights) else {
+            return false;
+        };
+        *skinned = Some(match skinned.take() {
+            Some((first, before)) => (
+                first,
+                match (before, bounds) {
+                    (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+                    (one, other) => one.or(other),
+                },
+            ),
+            None => (mark, bounds),
+        });
+        true
+    }
     /// `ItemEntityRenderer.submit` for every dropped item.
     pub(super) fn dropped_item_geometry(
         &self,
@@ -488,6 +546,8 @@ impl Game<'_> {
         // position. A pickup particle is not an entity and keeps 64 blocks.
         let range =
             super::entity_culling::default_range(glam::DVec3::splat(0.25), self.view_scale());
+        let skinning = self.skinning();
+        let lights = diffuse_lights(self.dim == Dim::Nether);
         for (item, at, partial, entity) in live.chain(taken) {
             let entity_start = out.len();
             self.mark_motion(entity_start, (2 << 32) | u64::from(item.id));
@@ -538,19 +598,27 @@ impl Game<'_> {
             );
             let seed = i64::from(self.pack.item_renderer.item_id(&item.stack.item))
                 + i64::from(item.stack.damage);
-            for copy in item_render::cluster_poses(
+            let copies = item_render::cluster_poses(
                 &state,
                 pose,
                 item_render::rendered_amount(item.stack.count),
                 seed,
-            ) {
-                self.submit_item_world(&state, copy, vertex_light(packed), out);
+            );
+            let glowing = self.entity_glowing(item.id);
+            // Posed on the GPU when every layer can be (the outline reads the CPU's vertices).
+            let skinned = (skinning && !glowing)
+                .then(|| self.submit_item_skinned(&state, &copies, vertex_light(packed), lights))
+                .flatten();
+            if skinned.is_none() {
+                for &copy in &copies {
+                    self.submit_item_world(&state, copy, vertex_light(packed), out);
+                }
             }
-            if self.entity_glowing(item.id) {
+            if glowing {
                 let rgb = super::glowing::team_color(self.mob_team(item.id));
                 self.mark_outline(&out[entity_start..], rgb);
             } else {
-                self.cull_entity_vertices(out, entity_start);
+                self.cull_skinned(out, entity_start, skinned);
             }
         }
     }

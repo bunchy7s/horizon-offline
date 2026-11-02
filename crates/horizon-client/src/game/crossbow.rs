@@ -119,7 +119,11 @@ impl Game<'_> {
         };
         let mut projectile = vanilla.clone();
         // A client predicting its own use has the profile it logged in with.
-        let player = match self.remote.as_ref().filter(|_| self.lan_acting_uuid.is_none()) {
+        let player = match self
+            .remote
+            .as_ref()
+            .filter(|_| self.lan_acting_uuid.is_none())
+        {
             Some(r) => r.profile(),
             None => horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
         };

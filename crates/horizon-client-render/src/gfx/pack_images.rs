@@ -273,16 +273,20 @@ const ZEROS: u64 = 4 << 20;
 pub(super) struct Buffers {
     pub(super) layout: wgpu::BindGroupLayout,
     objects: BTreeMap<u32, BufferObject>,
+    /// The fewest bytes each one's shaders bind it as (`Post::buffer_minimums`).
+    minimums: BTreeMap<u32, u64>,
     pub(super) group: Option<wgpu::BindGroup>,
     buffers: Vec<wgpu::Buffer>,
     made_for: [u32; 2],
 }
 
 impl Buffers {
-    /// The layout of `objects`, bound in `stages`.
+    /// The layout of `objects`, bound in `stages`; each buffer is at least its entry in
+    /// `minimums` long.
     pub(super) fn new(
         device: &wgpu::Device,
         objects: BTreeMap<u32, BufferObject>,
+        minimums: BTreeMap<u32, u64>,
         stages: wgpu::ShaderStages,
     ) -> Self {
         let entries: Vec<_> = objects
@@ -305,6 +309,7 @@ impl Buffers {
         Self {
             layout,
             objects,
+            minimums,
             group: None,
             buffers: Vec::new(),
             made_for: [0; 2],
@@ -330,7 +335,8 @@ impl Buffers {
             .objects
             .iter()
             .map(|(binding, o)| {
-                let wanted = o.size(size).next_multiple_of(4);
+                let least = self.minimums.get(binding).copied().unwrap_or(0);
+                let wanted = buffer_size(*o, size, least);
                 if wanted > largest {
                     log::warn!(
                         "shader pack: bufferObject.{binding} wants {wanted} bytes, this device \
@@ -366,6 +372,13 @@ impl Buffers {
     pub(super) fn has(&self, binding: u32) -> bool {
         self.objects.contains_key(&binding)
     }
+}
+
+/// The bytes a storage buffer is made with for a render size of `render`: what the pack
+/// declares, or more when a shader binds it as a larger block (`least`), which wgpu needs where
+/// OpenGL binds the smaller buffer; a multiple of 4.
+fn buffer_size(object: BufferObject, render: [u32; 2], least: u64) -> u64 {
+    object.size(render).max(least).next_multiple_of(4)
 }
 
 /// A debug readback of one of the pack's images (`HORIZON_SHADER_PACK_DUMP=<name>`): every 60
@@ -456,5 +469,29 @@ impl Dump {
         );
         let dims = [size.width, size.height, size.depth_or_array_layers];
         self.pending = Some((buffer, texel, dims, row));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A buffer the pack declares smaller than a shader's block grows to the block (40 bytes
+    /// bound as a 48-byte block failed wgpu's validation, #7178); a larger one keeps its size.
+    #[test]
+    fn a_buffer_is_at_least_its_shaders_block() {
+        assert_eq!(buffer_size(BufferObject::Bytes(40), [1, 1], 48), 48);
+        assert_eq!(
+            buffer_size(BufferObject::Bytes(40980), [1, 1], 40992),
+            40992
+        );
+        assert_eq!(buffer_size(BufferObject::Bytes(100), [1, 1], 48), 100);
+        assert_eq!(buffer_size(BufferObject::Bytes(41), [1, 1], 0), 44);
+        let per_pixel = BufferObject::PerPixel {
+            bytes: 4,
+            scale: [0.5, 0.5],
+        };
+        assert_eq!(buffer_size(per_pixel, [10, 10], 64), 100);
+        assert_eq!(buffer_size(per_pixel, [4, 4], 64), 64);
     }
 }

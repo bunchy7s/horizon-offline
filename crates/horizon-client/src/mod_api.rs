@@ -16,10 +16,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
-    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
-    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake,
+    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
+    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
+    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
+    NativePlayerRender, NativeShake,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
@@ -27,7 +27,9 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
+pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
 pub use horizon_core::{
@@ -49,7 +51,8 @@ pub use horizon_world::{
 pub use serde_json;
 use serde_json::{Map, Value};
 use std::time::Duration;
-pub use winit::event::KeyEvent;
+/// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
+pub use winit;
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
@@ -107,7 +110,10 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`.
+    /// `slots`. The title's own screens report theirs (API @API:native_instance_dir@): `title`,
+    /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
+    /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
+    /// and no slots.
     pub id: &'static str,
     /// The type id of the menu the server opened for this screen
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id; a mount's
@@ -185,6 +191,9 @@ pub struct NativeScreen {
     /// The mod draws the title and the "Inventory" label itself
     /// (`native_screen_draw`); Horizon leaves them out.
     pub own_labels: bool,
+    /// The mod draws its own background (`native_screen_draw`), so Horizon
+    /// leaves out the plain panel and the slot frames.
+    pub own_background: bool,
 }
 
 /// A native mod as Options > Mods lists it (`native_mods`).
@@ -450,6 +459,25 @@ pub trait LevelTicksHost: LevelHost {
 pub trait LevelWriteHost: LevelTicksHost + LevelRandomHost {
     /// Change a block property through `native_set_block_property`.
     fn set_block_property(&mut self, pos: [i32; 3], key: &str, value: &str, flags: i32) -> bool;
+    /// Play a sound for nearby players through `native_play_sound`.
+    fn play_sound(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: usize,
+        volume: f32,
+        pitch: f32,
+    ) -> bool;
+    /// `ServerLevel.sendParticles` through `native_send_particles`.
+    fn send_particles(
+        &mut self,
+        options: &ParticleOptions,
+        state: Option<BlockStateId>,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool;
 }
 
 macro_rules! level_attachment_host {
@@ -467,3 +495,101 @@ mod generated;
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A double with the three `Host` methods the probe calls.
+    struct Reader {
+        block: &'static str,
+        lines: Vec<Text>,
+    }
+
+    impl Host for Reader {
+        fn block(&self, _pos: [i32; 3]) -> String {
+            self.block.to_string()
+        }
+        fn acting_player(&self) -> Option<NativeServerPlayer> {
+            Some(NativeServerPlayer {
+                uuid: 7,
+                name: "Probe".to_string(),
+                permission: 0,
+                dimension: "minecraft:overworld".to_string(),
+                position: [0.0; 3],
+                game_mode: 0,
+                health: 20.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            })
+        }
+        fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
+            self.lines.push(line);
+            true
+        }
+    }
+
+    /// Claims a use on stone, after telling the player what the block is.
+    struct Probe;
+
+    impl Hooks for Probe {
+        fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            let block = host.block(event.pos);
+            let player = host.acting_player().expect("a player acts");
+            host.action_bar(player.uuid, Text::literal(block.clone()));
+            if block == "minecraft:stone" {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    /// Asks the host to tell a player without anyone having implemented it.
+    struct Chatty;
+
+    impl Hooks for Chatty {
+        fn use_item_on(&self, host: &mut dyn Host, _event: &mut UseItemOnEvent<'_>) -> Flow {
+            host.tell(7, Text::literal("hello"));
+            Flow::Continue
+        }
+    }
+
+    fn stick() -> ItemStack {
+        ItemStack {
+            item: Arc::from("minecraft:stick"),
+            count: 1,
+            damage: 0,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn a_test_host_implements_only_what_its_hook_calls() {
+        let mods = [Box::new(Probe) as Box<dyn Hooks>];
+        let stack = stick();
+        for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
+            let mut host = Reader {
+                block,
+                lines: Vec::new(),
+            };
+            let mut claimed = false;
+            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            assert_eq!(claimed, expected, "{block}");
+            let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
+            assert_eq!(told, [block], "{block}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Host::tell")]
+    fn an_unexpected_host_call_names_the_method() {
+        let mods = [Box::new(Chatty) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut claimed = false;
+        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+    }
+}

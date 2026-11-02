@@ -15,7 +15,6 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use horizon_world::registry::BlockStateId;
 
 /// `MaceItem.SMASH_ATTACK_FALL_THRESHOLD`.
 const FALL_THRESHOLD: f64 = 1.5;
@@ -241,7 +240,7 @@ impl Game<'_> {
             self.mace_hurt_enemy(index);
         }
         if weapon.is_some() {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack(index);
         // MaceItem.postHurtEnemy
@@ -324,7 +323,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:player");
         // MaceItem.postHurtEnemy
@@ -353,7 +352,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:armor_stand");
         // MaceItem.postHurtEnemy
@@ -584,31 +583,6 @@ impl Game<'_> {
             _ => None,
         };
         self.sweep_other_players(sweep);
-    }
-    /// `ServerPlayer.checkFallDamage` after a smash on a grounded target:
-    /// the landing block's particles, 50 for every block fallen (200 at most).
-    pub(super) fn smash_landing_particles(
-        &mut self,
-        state: BlockStateId,
-        pos: BlockPos,
-        fall_distance: f64,
-    ) {
-        let Some((sprite, tint)) = self.particle_sprite(state, [pos.x, pos.y, pos.z]) else {
-            return;
-        };
-        let count = (50.0 * fall_distance).clamp(0.0, 200.0) as u32;
-        let spread = f64::from(0.3f32);
-        self.particles.send_particles(
-            &ParticleOptions::block(ParticleType::Block, sprite, tint),
-            [
-                f64::from(pos.x) + 0.5,
-                f64::from(pos.y) + 1.0,
-                f64::from(pos.z) + 0.5,
-            ],
-            [spread; 3],
-            f64::from(0.15f32),
-            count,
-        );
     }
     /// Level event 2013 (`ParticleUtils.spawnSmashAttackParticles`): dust
     /// pillars of the block at `pos`, a cluster over it and a ring 3.5 out.

@@ -763,10 +763,10 @@ impl Game<'_> {
         let mut i = 0;
         while i < self.dropped.len() {
             let item = &self.dropped[i];
-            // `ItemEntity.tick` moves 1 of 4 ticks while resting (age was
-            // counted already); `checkInsideBlocks` only follows a move.
+            // `ItemEntity.tick` moves 1 of 4 ticks while resting;
+            // `checkInsideBlocks` only follows a move.
             let moved = item.position != item.previous
-                || (item.age.wrapping_sub(1).wrapping_add(item.id)).is_multiple_of(4);
+                || item.ticks.wrapping_add(item.id).is_multiple_of(4);
             if !moved || item.stack.count == 0 {
                 i += 1;
                 continue;
@@ -1438,6 +1438,8 @@ mod item_column_tests {
             previous: at,
             velocity: Vec3::ZERO,
             on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
             age: 0,
             pickup_delay: 0,
             bob_offset: 0.0,

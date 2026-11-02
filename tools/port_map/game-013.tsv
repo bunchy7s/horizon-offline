@@ -19,7 +19,7 @@ AbstractNautilus.getEquipSound	port	crates/horizon-client/src/mobs/nautilus.rs::
 AbstractNautilus.createInventory	skip:other		getInventoryColumns is 0, so the container has no slots; saddle and armour are equipment slots
 AbstractNautilus.openCustomInventoryScreen	port	crates/horizon-client/src/game/mount_menu.rs::has_mount_menu	shift-use on a tame nautilus and the inventory key while riding open the saddle/armour screen
 AbstractNautilus.getSlot	skip:other		slots 500 and up address the container, which has no slots; every other slot is an equipment slot
-AbstractNautilus.isAggravated	missing		minor: only feeds canBeLeashed; a charging or angry nautilus can still be leashed (leash.rs::can_be_leashed has no nautilus arm)
+AbstractNautilus.isAggravated	port	crates/horizon-client/src/mobs/nautilus.rs::aggravated	the anger clock (its target is last_hurt_by) or a live attack target stand in for the brain's ANGRY_AT and ATTACK_TARGET memories; can_be_leashed in leash.rs asks it for nautilus and zombie nautilus
 Nautilus.customServerAiStep	inline	crates/horizon-client/src/mobs/nautilus.rs::register	the goal list replaces the brain and its fight or idle switch; the cooldowns tick in ai_step
 Nautilus.getAmbientSound	port	crates/horizon-client/src/mobs/nautilus.rs::sounds	by age and by under water or on land
 Nautilus.getHurtSound	port	crates/horizon-client/src/mobs/nautilus.rs::sounds	by age and by under water or on land
@@ -32,7 +32,7 @@ NautilusAi.initFightActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::
 NautilusAi.isHostileTarget	inline	crates/horizon-client/src/mobs/nautilus.rs::find_target	a pufferfish in water (the nautilus_hostiles tag holds only the pufferfish)
 ZombieNautilus.defineSynchedData	skip:other		synched variant id; Horizon keeps the variant in extra.variant and reads it from the server's data in remote_mob_data.rs
 ZombieNautilus.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
-ZombieNautilus.applyImplicitComponent	missing		minor: a spawn egg's zombie_nautilus_variant component is not applied (only bucketed mobs read item components)
+ZombieNautilus.applyImplicitComponent	inline	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the minecraft:zombie_nautilus/variant component of a spawn egg or bucket; no sound variant
 ZombieNautilus.finalizeSpawn	port	crates/horizon-client/src/mobs/nautilus.rs::finalize	warm variant in warm oceans (coral), temperate elsewhere
 ZombieNautilusAi.initCoreActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	zombie arm: no panic; the cooldown counters tick in ai_step
 ZombieNautilusAi.initIdleActivity	inline	crates/horizon-client/src/mobs/nautilus.rs::register	zombie arm: tempt 0.9, swim stroll 1.0, target pick in find_target; no breeding
@@ -113,9 +113,9 @@ Rabbit.checkRabbitSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs:
 Rabbit.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: no rabbit arm, the lead attaches at the full eye height instead of 0.6 times it
 Rabbit.shouldPlayIdleAnimation	inline	crates/horizon-client/src/mobs/rabbit.rs::base_tick	idle timeout over, not leashed, not no-AI
 Rabbit.RabbitAvoidEntityGoal.canUse	port	crates/horizon-client/src/mobs/rabbit.rs::register	flees players (8), wolves (10) and monsters (4) unless it is the killer rabbit
-Rabbit.RaidGardenGoal.canUse	missing		player: rabbits never walk to ripe carrot crops to eat them; no MoreCarrotTicks clock
-Rabbit.RaidGardenGoal.tick	missing		player: a rabbit never eats carrots, so ripe carrots are never knocked back or destroyed by rabbits
-Rabbit.RaidGardenGoal.isValidTarget	missing		player: part of the missing carrot raid (a ripe carrot on a crop-supporting block)
+Rabbit.RaidGardenGoal.canUse	port	crates/horizon-client/src/mobs/rabbit.rs::RaidGarden::can_use	a MoveToBlockGoal (0.7, 16) over ripe carrots, delayed 200 to 400 ticks; no raid while mob griefing is off or while moreCarrotTicks is still positive
+Rabbit.RaidGardenGoal.tick	port	crates/horizon-client/src/mobs/rabbit.rs::RaidGarden::tick	looks at the crop, one age off the carrot (air at age 0), then 40 moreCarrotTicks and a 10-tick delay
+Rabbit.RaidGardenGoal.isValidTarget	port	crates/horizon-client/src/mobs/rabbit.rs::raid_target	a crop-supporting block under a carrot at its maximum age, while the rabbit wants more food and found none
 Sheep.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	Species::Sheep arm: float, panic, breed, tempt, follow parent, eat block, stroll, look
 Sheep.aiStep	inline	crates/horizon-client/src/mobs/ai.rs::species_ai_step	the eat animation counter (anim_ticks) counts down each tick
 Sheep.handleEntityEvent	port	crates/horizon-client/src/mobs/sync.rs::entity_event	ticked in #3512; `Sheep.handleEntityEvent` is cited at crates/horizon-client/src/mobs/sync.rs:132 (in a comment, so `where` names the enclosing fn)
@@ -124,7 +124,7 @@ Sheep.getHeadEatAngleScale	inline	crates/horizon-client/src/mobs/anim.rs::setup	
 Sheep.mobInteract	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	shears drop the shearing loot and set sheared; a dye recolours an unsheared sheep
 Sheep.setColor	skip:other		stores the 4-bit wool colour in extra.color
 Sheep.get	skip:other		reads the colour as a data component for predicates; Horizon has no entity component view
-Sheep.applyImplicitComponent	missing		minor: a spawn egg's sheep colour component is not applied (only bucketed mobs read item components)
+Sheep.applyImplicitComponent	inline	crates/horizon-client/src/entity_nbt.rs::apply_item_components	the minecraft:sheep/color component, a dye id
 Sheep.isSheared	skip:other		reads extra.sheared
 Sheep.setSheared	skip:other		writes extra.sheared (shear, regrow and nbt set it directly)
 Sheep.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: player: a lamb always takes the first parent's wool colour; vanilla mixes the two (red and blue give purple)

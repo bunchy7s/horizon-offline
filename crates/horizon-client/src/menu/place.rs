@@ -580,9 +580,7 @@ impl Menu {
                 count: 0,
                 ..stack.clone()
             });
-            let room = super::CONTAINER_MAX
-                .min(Self::max_stack(env, cell))
-                .saturating_sub(cell.count);
+            let room = Self::max_stack(env, cell).saturating_sub(cell.count);
             let add = stack.count.min(room);
             cell.count += add;
             stack.count -= add;

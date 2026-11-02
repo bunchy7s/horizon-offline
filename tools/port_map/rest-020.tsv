@@ -3,7 +3,7 @@ PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load
 PlayerList.save	port	crates/horizon-client/src/game/lan.rs::Game::save_guest	player file, advancements and statistics of a guest
 PlayerList.disconnectAllPlayersWithProfile	port	crates/horizon-client/src/lan/hub.rs::Hub::poll	kicks every connection of the uuid on NetEvent::Duplicate; the refusal of a second login is Shared::try_admit (lan/mod.rs)
 PlayerList.broadcastSystemToTeam	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message_to	
-PlayerList.broadcastSystemToAllExceptTeam	missing		player: when a dead player's team hides death messages from its own team, players outside the team should read the death in chat; Horizon sends it to nobody
+PlayerList.broadcastSystemToAllExceptTeam	port	crates/horizon-client-core/src/scoreboard.rs::death_message_reaches	HideForOwnTeam sends the death message to everyone outside the dying player's team, checked before the LAN hub broadcasts it and before the local chat line
 PlayerList.getPlayerNamesArray	skip:server		the GS4 query reply's player list; RCON and query server code; Horizon has no RCON or GS4 query port
 PlayerList.op	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the op arm: list add, reply, and sync_ops (permission level push to the hub)
 PlayerList.deop	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the deop arm: list remove, reply, sync_ops and kick_unlisted_players
