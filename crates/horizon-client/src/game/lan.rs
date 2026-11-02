@@ -1695,6 +1695,15 @@ impl Game<'_> {
         }
     }
 
+    /// Apply the default mode to connected players when forcing it is enabled.
+    pub(super) fn set_force_game_mode(&mut self, force: bool) {
+        if let Some(host) = self.lan.as_mut() {
+            host.settings.force_game_mode = force;
+            host.hub.config.force_game_mode = force;
+            enforce_guest_game_mode(host, &self.world, self.collision);
+        }
+    }
+
     /// New command access and game mode forcing settings of the open world.
     pub(super) fn lan_apply_settings(&mut self, guest_commands: bool, force: bool) {
         if let Some(server) = &self.integrated {
@@ -1706,11 +1715,9 @@ impl Game<'_> {
         let effective = guest_commands && (!self.serving() || self.allow_commands());
         if let Some(host) = self.lan.as_mut() {
             host.settings.guest_commands = guest_commands;
-            host.settings.force_game_mode = force;
             host.hub.config.guest_commands = effective;
-            host.hub.config.force_game_mode = force;
-            enforce_guest_game_mode(host, &self.world, self.collision);
         }
+        self.set_force_game_mode(force);
         self.resend_commands_filtered();
     }
 
