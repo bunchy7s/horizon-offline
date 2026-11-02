@@ -54,8 +54,8 @@ MushroomCowMushroomLayer.submitMushroomBlock	port	crates/horizon-client/src/game
 PandaHoldsItemLayer.submit	port	crates/horizon-client/src/mobs/panda.rs::item_offset	item in the mouth of a sitting panda, with the eating bob
 ParrotOnShoulderLayer.submit	port	crates/horizon-client/src/mobs/render.rs::shoulder_parrot	
 ParrotOnShoulderLayer.submitOnShoulder	missing		player: a parrot on a player's shoulder is not drawn (see ParrotOnShoulderLayer.submit)
-PlayerItemInHandLayer.submitArmWithItem	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry	gap: player: the spyglass raised to the eye is not drawn (see renderItemHeldToEye)
-PlayerItemInHandLayer.renderItemHeldToEye	missing		player: another player using a spyglass does not hold it at the eye in third person; Horizon has no held-on-head state
+PlayerItemInHandLayer.submitArmWithItem	port	crates/horizon-client/src/game/mob_blocks.rs::Game::held_item_geometry
+PlayerItemInHandLayer.renderItemHeldToEye	port	crates/horizon-client/src/mobs/render.rs::held_to_eye_matrix
 RenderLayer.coloredCutoutModelCopyLayerRender	port	crates/horizon-client/src/mobs/render.rs::render_visible	coloured cutout layers drawn in render_visible
 RenderLayer.renderColoredCutoutModel	port	crates/horizon-client/src/mobs/render.rs::render_visible	coloured cutout layers drawn in render_visible
 RopesLayer.submit	missing		player: a harnessed happy ghast that holds a leash shows no rope model on its body
