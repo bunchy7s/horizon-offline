@@ -118,8 +118,18 @@ impl Game<'_> {
             None => self.creative.then(|| ItemStack::new(ARROW, 1)),
         };
         let mut projectile = vanilla.clone();
-        let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
-        let name = self.acting_player_name().to_owned();
+        // A client predicting its own use has the profile it logged in with.
+        let own = self
+            .remote
+            .as_ref()
+            .filter(|_| self.lan_acting_uuid.is_none())
+            .map(|r| (r.profile, r.profile_name.clone()));
+        let (player, name) = own.unwrap_or_else(|| {
+            (
+                horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+                self.acting_player_name().to_owned(),
+            )
+        });
         self.native_living_get_projectile(
             Some(player),
             &name,
@@ -144,22 +154,27 @@ impl Game<'_> {
         let Some(ammo) = projectile.filter(|ammo| *ammo != vanilla && is_arrow(ammo)) else {
             return;
         };
+        Self::arrow_from_ammo(&ammo, arrow);
+    }
+    /// `ProjectileUtil.getMobArrow`: `arrow` carries `ammo`'s item and effect.
+    pub(super) fn arrow_from_ammo(ammo: &ItemStack, arrow: &mut Projectile) {
         if let ProjectileKind::Arrow { effect, .. } = &mut arrow.kind {
             if &*ammo.item == "minecraft:spectral_arrow" {
                 *effect = Some(("minecraft:glowing", 200));
             } else if effect.is_none()
-                && let Some(tipped) = super::dispenser::tipped_effect(&ammo)
+                && let Some(tipped) = super::dispenser::tipped_effect(ammo)
             {
                 // Stray.getArrow and Bogged.getArrow add their effect to the tipped arrow.
                 *effect = Some(tipped);
             }
         }
         if let Some(a) = arrow.arrow.as_mut() {
-            a.set_item(&horizon_client::arrows::drawn_ammo(&ammo, false));
+            a.set_item(&horizon_client::arrows::drawn_ammo(ammo, false));
         }
     }
     /// `CrossbowItem.onUseTick`'s `getProjectile` for a mob that finished
-    /// charging `weapon` (pillagers and piglins: `Monster.getProjectile`).
+    /// charging `weapon` (pillagers and piglins: `Monster.getProjectile`). The
+    /// replaced ammunition is what the crossbow holds; none leaves it uncharged.
     pub(super) fn mob_crossbow_ammo(&mut self, mob: u32, weapon: &ItemStack) {
         let Some(shooter) = self.mobs.iter().find(|m| m.id == mob) else {
             return;
@@ -167,6 +182,18 @@ impl Game<'_> {
         let kind = shooter.kind.id.clone();
         let mut projectile = Some(ItemStack::new(ARROW, 1));
         self.native_living_get_projectile(None, "", Some(mob), &kind, weapon, &mut projectile);
+        let Some(shooter) = self.mobs.iter_mut().find(|m| m.id == mob) else {
+            return;
+        };
+        let Some(mut crossbow) = shooter.extra.main_hand_stack().cloned() else {
+            return;
+        };
+        crossbow.data_mut().charged = projectile
+            .iter()
+            .map(|ammo| horizon_client::arrows::drawn_ammo(ammo, false))
+            .collect();
+        crossbow.tidy();
+        shooter.extra.set_main_hand_stack(Some(crossbow));
     }
     /// `CrossbowItem.use`: shoot when charged, else start charging.
     pub(super) fn use_crossbow(&mut self, stack: &ItemStack) -> bool {
