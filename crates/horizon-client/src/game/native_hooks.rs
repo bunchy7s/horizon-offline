@@ -3135,6 +3135,11 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_player_toggle_flight(self, mod_api::mods(), player, name, flying, cancel);
     }
+    /// A guest's client changed sneaking in its player input packet, after the hub applied the new state.
+    /// The guest's state is swapped in. Server-side. @API:player_toggle_sneak@.
+    pub(super) fn native_player_toggle_sneak(&mut self, player: u128, name: &str, sneaking: bool) {
+        let _ = (player, name, sneaking);
+    }
     /// A player finished editing a sign: `ServerGamePacketListenerImpl.updateSignText`
     /// has taken their update packet and every check has passed (they were
     /// editing that sign, within reach, the sign is not waxed, the chat filter

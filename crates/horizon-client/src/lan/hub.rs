@@ -177,6 +177,8 @@ pub enum HostEvent {
         open: bool,
         filtering: bool,
     },
+    /// A guest changed sneaking in a player input packet, already applied.
+    Sneak { conn: u32, sneaking: bool },
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -3050,7 +3052,11 @@ impl Hub {
                     let g = &mut self.guests[i];
                     g.input = p.flags;
                     if g.client_loaded() {
-                        g.sneaking = p.flags & 32 != 0;
+                        let sneaking = p.flags & 32 != 0;
+                        if g.sneaking != sneaking {
+                            g.sneaking = sneaking;
+                            events.push(HostEvent::Sneak { conn, sneaking });
+                        }
                     }
                     // handlePlayerInput only records keys and updates crouching.
                     // Sprinting persists after the sprint key is released (or

@@ -2019,6 +2019,14 @@ impl Game<'_> {
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(&mut host, conn, flying);
                 }
+                HostEvent::Sneak { conn, sneaking } => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_toggle_sneak(uuid, &name, sneaking);
+                        });
+                    }
+                }
                 HostEvent::MainHandChanged(conn, left) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());
