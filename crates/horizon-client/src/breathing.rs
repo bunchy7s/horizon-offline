@@ -36,7 +36,7 @@ pub fn native_living_breathe(
     consume: &mut i32,
     refill: &mut i32,
 ) {
-    let _ = (entity, kind, can_breathe, consume, refill);
+    crate::native_client_hooks::living_breathe(entity, kind, can_breathe, consume, refill);
 }
 
 /// `vanilla`'s breathing after the mods have had their say.

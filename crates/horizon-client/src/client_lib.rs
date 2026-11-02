@@ -89,6 +89,7 @@ pub mod mod_content;
 pub mod motion;
 pub mod multiplayer;
 pub mod music;
+pub mod native_client_hooks;
 pub mod native_data;
 pub mod net;
 pub mod nether_portal;

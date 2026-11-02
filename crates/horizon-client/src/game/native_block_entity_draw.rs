@@ -43,7 +43,6 @@ fn in_frustum(frustum: Option<&impl Cull>, origin: Vec3, bounds: [f32; 6]) -> bo
 /// partial tick, game time and light, and the pose stack the helpers draw
 /// under (`native_draw_quad`, `native_draw_cube`, `native_draw_block`).
 // Native mods read and drive it; nothing in Horizon does.
-#[allow(dead_code)]
 pub struct BlockEntityDraw {
     /// The frame's partial tick, 0 to 1 (`BlockEntityRenderState`).
     pub partial: f32,
@@ -174,7 +173,6 @@ impl BlockEntityDraw {
 /// One face of a `native_draw_cube` box: its sprite (`mymod:entity/cog`,
 /// `mymod:block/casing`) and its UVs in texels of 16 per side, as a model
 /// face's `uv` (none takes the box's own, as a model's default).
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub struct CubeFace<'a> {
     pub sprite: &'a str,

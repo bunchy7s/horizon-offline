@@ -73,7 +73,7 @@ pub fn native_loot_function(
     ctx: &NativeLootContext<'_>,
     stack: &mut LootStack,
 ) {
-    let _ = (kind, data, ctx, stack);
+    crate::native_load_hooks::loot_function(kind, data, ctx, stack);
 }
 
 /// A loot condition of a mod's own kind: the entry named a `type` in a
@@ -87,7 +87,7 @@ pub fn native_loot_condition(
     ctx: &NativeLootContext<'_>,
     holds: &mut bool,
 ) {
-    let _ = (kind, data, ctx, holds);
+    crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
 }
 
 /// The tool a loot context names: its item id and enchantments.
