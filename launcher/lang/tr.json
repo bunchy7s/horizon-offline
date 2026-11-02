@@ -795,5 +795,15 @@
   "{path} is not a folder to build into.": "{path} derleme yapılacak klasör değil.",
   "Could not copy the build: {error}": "Build kopyalanamadı: {error}",
   "Could not move the build to {path}: {error}": "Build {path} konumuna taşınamadı: {error}",
-  "Native mods can use your microphone for voice chat when you enable it.": "Yerel modlar, bunu etkinleştirdiğinizde sesli sohbet için mikrofonunuzu kullanabilir."
+  "Native mods can use your microphone for voice chat when you enable it.": "Yerel modlar, bunu etkinleştirdiğinizde sesli sohbet için mikrofonunuzu kullanabilir.",
+  "Import a game build…": "Oyun derlemesini içe aktar…",
+  "Importing…": "İçe aktarılıyor…",
+  "Imported builds": "İçe aktarılan derlemeler",
+  "Unsigned: you picked these programs yourself, and Horizon can't check where they came from. Updates never replace them.": "İmzasız: bu programları kendiniz seçtiniz ve Horizon nereden geldiklerini doğrulayamaz. Güncellemeler bunların yerini asla almaz.",
+  "Game files from {base}": "Oyun dosyaları: {base}",
+  "Imported · {date}": "İçe aktarıldı · {date}",
+  "{file} is not a Horizon game for this computer.": "{file}, bu bilgisayar için bir Horizon oyunu değil.",
+  "Install a release or Nightly first: an imported build plays with its game files.": "Önce bir sürüm veya Nightly yükleyin: içe aktarılan derleme onun oyun dosyalarını kullanır.",
+  "{file} holds no {program}.": "{file} içinde {program} yok.",
+  "Could not import the build: {error}": "Derleme içe aktarılamadı: {error}"
 }
