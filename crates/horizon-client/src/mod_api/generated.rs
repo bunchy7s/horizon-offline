@@ -2953,6 +2953,26 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Item `item` (`mod_id:name`) holds energy (`Capabilities.Energy.ITEM`):
+    /// set `buffer` when the item is yours, as `SimpleEnergyHandler` is built:
+    /// its capacity and the most one insert and one extract move. A capacity
+    /// under 1 leaves the buffer out, and the limits are clamped to
+    /// 0..=capacity; vanilla's items have none. Asked at each call of the item
+    /// energy helpers (`native_item_energy`, `native_item_energy_insert`,
+    /// `native_item_energy_extract`, in `native_item_energy.rs`). The amount
+    /// is kept in the stack's `minecraft:custom_data`, as the int
+    /// `horizon_energy`. API @API:item_energy_buffer@.
+    ///
+    /// Return `Some` to set `buffer`; the first mod returning `Some` wins.
+    fn item_energy_buffer(
+        &self,
+        host: &dyn Host,
+        event: &mut ItemEnergyBufferEvent<'_>,
+    ) -> Option<ItemEnergyBuffer> {
+        let _ = host;
+        let _ = event;
+        None
+    }
     /// A dropped item entity was successfully added to the server level.
     /// @API:native_item_spawn@.
     fn item_spawn(&self, host: &mut dyn Host, event: &mut ItemSpawnEvent<'_>) {
@@ -9771,6 +9791,28 @@ pub fn dispatch_item_crafted(
     };
     for mod_hook in mods {
         mod_hook.item_crafted(host, &mut event);
+    }
+}
+/// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemEnergyBufferEvent<'a> {
+    pub item: &'a str,
+}
+pub fn dispatch_item_energy_buffer(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    item: &str,
+    buffer: &mut Option<ItemEnergyBuffer>,
+) {
+    if buffer.is_some() {
+        return;
+    }
+    let mut event = ItemEnergyBufferEvent { item };
+    for mod_hook in mods {
+        if let Some(replacement) = mod_hook.item_energy_buffer(host, &mut event) {
+            *buffer = Some(replacement);
+            break;
+        }
     }
 }
 /// What [`Hooks::item_spawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
