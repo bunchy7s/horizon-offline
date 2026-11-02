@@ -1469,6 +1469,7 @@ impl Game<'_> {
         let _ = self.in_target_level(t, |g| g.teleport_to_in_level(t, pos, rotation));
     }
     fn teleport_to_in_level(&mut self, t: Target, pos: [f64; 3], rotation: Option<[f32; 2]>) {
+        let from = self.target_position(t);
         let v = Vec3::new(pos[0], pos[1], pos[2]);
         match t {
             Target::Guest(_) => {
@@ -1623,6 +1624,12 @@ impl Game<'_> {
             }
             // Wall-mounted entities do not move.
             Target::Frame(_) | Target::Painting(_) => {}
+        }
+        if self.options.dedicated.is_some()
+            && let (Some(entity), Some(from), Some(to)) =
+                (self.network_entity_id(t), from, self.target_position(t))
+        {
+            self.native_entity_teleport(self.dim.id(), entity as u32, from, to);
         }
     }
     /// Teleport the local player into the command source's dimension. Unlike
@@ -1897,8 +1904,12 @@ impl Game<'_> {
                 if total == t {
                     return Err(err("commands.time.set.already_at_time", &[&clock, &t]));
                 }
-                self.world.day_time = t;
-                self.ui.clock.partial = 0.0;
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, t, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = t;
+                    self.ui.clock.partial = 0.0;
+                }
                 self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &t]));
                 Ok(t as i32)
             }
@@ -1918,8 +1929,13 @@ impl Game<'_> {
                         &[&clock, &marker],
                     ));
                 }
-                self.world.day_time = m.resolve(total);
-                self.ui.clock.partial = 0.0;
+                let target = m.resolve(total);
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, target, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = target;
+                    self.ui.clock.partial = 0.0;
+                }
                 self.feedback(Text::tr(
                     "commands.time.set.time_marker",
                     &[&clock, &marker],
@@ -1928,7 +1944,12 @@ impl Game<'_> {
             }
             "time.add" => {
                 let t = i64::from(Self::int(ctx, "time").unwrap_or(0));
-                self.world.day_time = (total + t).max(0);
+                let target = (total + t).max(0);
+                let mut cancel = false;
+                self.native_time_skip(self.dim.id(), total, target, "command", &mut cancel);
+                if !cancel {
+                    self.world.day_time = target;
+                }
                 let now = self.world.day_time;
                 self.feedback(Text::tr("commands.time.set.absolute", &[&clock, &now]));
                 Ok((now % i64::from(i32::MAX)) as i32)
@@ -2012,12 +2033,10 @@ impl Game<'_> {
         let sample = |min: i32, max: i32, r: &mut horizon_core::random::LegacyRandom| {
             min + r.next_int_bound(max - min + 1).unwrap_or(0)
         };
-        let w = &mut self.world.weather;
-        let r = &mut self.world.random;
         let (key, clear, time, raining, thundering) = if ctx.has("clear") {
             (
                 "commands.weather.set.clear",
-                duration.unwrap_or_else(|| sample(12_000, 180_000, r)),
+                duration.unwrap_or_else(|| sample(12_000, 180_000, &mut self.world.random)),
                 0,
                 false,
                 false,
@@ -2026,7 +2045,7 @@ impl Game<'_> {
             (
                 "commands.weather.set.rain",
                 0,
-                duration.unwrap_or_else(|| sample(12_000, 24_000, r)),
+                duration.unwrap_or_else(|| sample(12_000, 24_000, &mut self.world.random)),
                 true,
                 false,
             )
@@ -2034,17 +2053,46 @@ impl Game<'_> {
             (
                 "commands.weather.set.thunder",
                 0,
-                duration.unwrap_or_else(|| sample(3_600, 15_600, r)),
+                duration.unwrap_or_else(|| sample(3_600, 15_600, &mut self.world.random)),
                 true,
                 true,
             )
         };
-        // ServerLevel.setWeatherParameters.
-        w.clear_time = clear;
-        w.rain_time = time;
-        w.thunder_time = time;
-        w.raining = raining;
-        w.thundering = thundering;
+        let previous = (
+            self.world.weather.clear_time,
+            self.world.weather.rain_time,
+            self.world.weather.thunder_time,
+            self.world.weather.raining,
+            self.world.weather.thundering,
+        );
+        let mut cancel = false;
+        self.native_weather_change(self.dim.id(), raining, thundering, &mut cancel);
+        let old_thundering = self.world.weather.thundering;
+        let old_thunder_time = self.world.weather.thunder_time;
+        let mut cancel_thunder = false;
+        self.native_thunder_change(self.dim.id(), thundering, &mut cancel_thunder);
+        if cancel {
+            let w = &mut self.world.weather;
+            (
+                w.clear_time,
+                w.rain_time,
+                w.thunder_time,
+                w.raining,
+                w.thundering,
+            ) = previous;
+        } else {
+            // ServerLevel.setWeatherParameters.
+            let w = &mut self.world.weather;
+            w.clear_time = clear;
+            w.rain_time = time;
+            w.thunder_time = time;
+            w.raining = raining;
+            w.thundering = thundering;
+            if cancel_thunder {
+                w.thunder_time = old_thunder_time;
+                w.thundering = old_thundering;
+            }
+        }
         self.feedback(Text::translate(key, &[]));
         Ok(duration.unwrap_or(-1))
     }
@@ -2244,6 +2292,14 @@ impl Game<'_> {
                     name = Text::translate("entity.minecraft.experience_orb", &[]);
                 }
                 "lightning_bolt" => {
+                    let block = [
+                        pos[0].floor() as i32,
+                        pos[1].floor() as i32,
+                        pos[2].floor() as i32,
+                    ];
+                    if !self.lightning_strike_allowed(self.lan_acting_uuid, block, "command") {
+                        return Err(err("commands.summon.failed", &[]));
+                    }
                     self.spawn_bolt(pos, false);
                     name = Text::translate("entity.minecraft.lightning_bolt", &[]);
                 }
@@ -3072,6 +3128,20 @@ impl Game<'_> {
         let level = self.dim;
         for &t in &targets {
             self.for_player(t, |g| {
+                let mut cancel = false;
+                if let (Some(player), Some(name)) = (g.lan_acting_uuid, g.lan_acting_name.clone()) {
+                    g.native_player_spawn_point_set(
+                        player,
+                        &name,
+                        level.id(),
+                        pos,
+                        "command",
+                        &mut cancel,
+                    );
+                }
+                if cancel {
+                    return;
+                }
                 if level == Dim::Overworld {
                     g.spawn = Some(Vec3::new(
                         f64::from(pos[0]) + 0.5,
@@ -3128,6 +3198,7 @@ impl Game<'_> {
         // LevelData.setRespawnData: the world's spawn (level.dat `spawn`).
         let old = self.level.world_spawn.replace(pos);
         self.level.world_spawn_angle = rot;
+        self.native_spawn_change(pos, rot);
         // A player whose fallback is the world spawn (no spawnpoint of its
         // own; a bed or an anchor that is gone falls back to it) respawns at
         // the new one.

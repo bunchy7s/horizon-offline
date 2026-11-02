@@ -549,6 +549,20 @@ pub fn is_monster(s: Species) -> bool {
     )
 }
 /// One full entity tick. Returns false when the mob is gone.
+/// `Mob.getTarget` / `Mob.setTarget` (`asValidTarget`): a player in creative
+/// or spectator mode is never a mob's target, however the target was set (an
+/// alert from another mob included). A `NeutralMob` angry at that player stops
+/// being angry (`NeutralMob.updatePersistentAnger`).
+fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
+    if m.ai.target == Some(Who::Player)
+        && w.player.as_ref().is_some_and(|p| p.creative || p.spectator)
+    {
+        m.ai.target = None;
+        if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
+            m.extra.anger = 0;
+        }
+    }
+}
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
@@ -577,6 +591,7 @@ pub fn tick(
     if m.ai.last_hurt_by_player > 0 {
         m.ai.last_hurt_by_player -= 1;
     }
+    drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, events);
     if m.removed {
@@ -1812,12 +1827,11 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     let d = m.distance_sqr(p);
     let persistent = m.persistent || requires_custom_persistence(m);
     // removeWhenFarAway: animals, villagers, golems, patrols and raiders,
-    // zombie villagers being cured and ridden mobs stay.
+    // zombie villagers being cured and ridden mobs stay, bar the two felines.
     let creature = m.kind.category == "creature";
+    let feline_goes = feline_removed_when_far(m.species(), m.extra.tame || m.extra.trusting, m.age);
     let removable = !(never_removed_when_far(m.species())
-        || creature && m.kind.flags.animal && !m.extra.jockey && m.species() != Species::Ocelot
-        // Ocelot.removeWhenFarAway: `!isTrusting() && tickCount > 2400`.
-        || m.species() == Species::Ocelot && (m.extra.trusting || m.age <= 2400)
+        || creature && m.kind.flags.animal && !m.extra.jockey && !feline_goes
         || super::raider::keeps_alive(m, d)
         || super::zombie_villager::keeps_alive(m)
         || super::riders::keeps_alive(m));
@@ -1842,6 +1856,13 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
         m.ai.no_action_time = 0;
     }
     true
+}
+/// `Cat.removeWhenFarAway` and `Ocelot.removeWhenFarAway`: an untamed cat or an
+/// untrusting ocelot is removed once it is older than 2400 ticks. That is
+/// `Entity.tickCount`, not `AgeableMob.age`, which only counts a baby up to
+/// adulthood. `Animal.removeWhenFarAway` keeps every other animal.
+fn feline_removed_when_far(s: Species, tamed: bool, ticks: u32) -> bool {
+    matches!(s, Species::Cat | Species::Ocelot) && !tamed && ticks > 2400
 }
 /// The types whose `removeWhenFarAway` is always false (`Villager`,
 /// `WanderingTrader`, `AbstractGolem`: iron, snow and copper golems and
@@ -2770,6 +2791,23 @@ mod despawn_tests {
         }
         for s in [Species::Zombie, Species::ZombieVillager, Species::Pillager] {
             assert!(!never_removed_when_far(s), "{s:?}");
+        }
+    }
+
+    /// `Cat.removeWhenFarAway` (`!isTame() && tickCount > 2400`) and
+    /// `Ocelot.removeWhenFarAway` (`!isTrusting() && tickCount > 2400`): the two
+    /// animals vanilla lets go, on `Entity.tickCount` and never on
+    /// `AgeableMob.age`, which an adult keeps at 0.
+    #[test]
+    fn an_untamed_feline_goes_once_it_is_old() {
+        for s in [Species::Cat, Species::Ocelot] {
+            assert!(!feline_removed_when_far(s, false, 2400), "{s:?}");
+            assert!(feline_removed_when_far(s, false, 2401), "{s:?}");
+            assert!(!feline_removed_when_far(s, true, 12000), "{s:?}");
+        }
+        // Animal.removeWhenFarAway: every other animal stays at any age.
+        for s in [Species::Cow, Species::Sheep, Species::Wolf] {
+            assert!(!feline_removed_when_far(s, false, 12000), "{s:?}");
         }
     }
 }

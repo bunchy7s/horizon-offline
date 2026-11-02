@@ -83,6 +83,11 @@
   "Classic arms": "Обычные руки",
   "Versions": "Версии",
   "Release build: slower to build, slightly faster game": "Release-сборка: дольше собирается, игра немного быстрее",
+  "Performance build": "Производительная сборка",
+  "Dev build": "Dev-сборка",
+  "Release build": "Release-сборка",
+  "The everyday build for playing with mods": "Повседневная сборка для игры с модами",
+  "For developing a mod: about 6× faster to rebuild a mod edit, game logic up to about twice as slow": "Для разработки мода: правки мода пересобираются примерно в 6 раз быстрее, игровая логика работает до двух раз медленнее",
   "Horizon mods": "Моды Horizon",
   "Friends over the internet · Tailscale": "Друзья через интернет · Tailscale",
   "Landscape": "Пейзаж",
@@ -790,5 +795,15 @@
   "{path} is not a folder to build into.": "{path} не является папкой для сборки.",
   "Could not copy the build: {error}": "Не удалось скопировать сборку: {error}",
   "Could not move the build to {path}: {error}": "Не удалось переместить сборку в {path}: {error}",
-  "Native mods can use your microphone for voice chat when you enable it.": "Нативные моды могут использовать ваш микрофон для голосового чата, когда вы это включите."
+  "Native mods can use your microphone for voice chat when you enable it.": "Нативные моды могут использовать ваш микрофон для голосового чата, когда вы это включите.",
+  "Import a game build…": "Импортировать сборку игры…",
+  "Importing…": "Импорт…",
+  "Imported builds": "Импортированные сборки",
+  "Unsigned: you picked these programs yourself, and Horizon can't check where they came from. Updates never replace them.": "Без подписи: вы сами выбрали эти программы, и Horizon не может проверить, откуда они. Обновления никогда их не заменяют.",
+  "Game files from {base}": "Файлы игры из {base}",
+  "Imported · {date}": "Импортировано · {date}",
+  "{file} is not a Horizon game for this computer.": "{file} — не игра Horizon для этого компьютера.",
+  "Install a release or Nightly first: an imported build plays with its game files.": "Сначала установите релиз или Nightly: импортированная сборка использует его файлы игры.",
+  "{file} holds no {program}.": "В {file} нет {program}.",
+  "Could not import the build: {error}": "Не удалось импортировать сборку: {error}"
 }

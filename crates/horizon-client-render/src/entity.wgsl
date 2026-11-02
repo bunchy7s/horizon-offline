@@ -351,7 +351,9 @@ fn shadow_color(in: Out) -> vec4<f32> {
     if in.tier == 0u {
         return vec4(0.0, 0.0, 0.0, hdr_scene_alpha(mix(in.scene, globals.hdr_light.y, fogged)));
     }
-    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, brightness(texel.rgb * in.color.rgb) * (1.0 - fogged)));
+    // A layer that fades (the warden's) shines by what's left of it.
+    let y = brightness(texel.rgb * in.color.rgb) * in.color.a * (1.0 - fogged);
+    return vec4(0.0, 0.0, 0.0, hdr_mark(in.tier, y));
 }
 fn brightness(c: vec3<f32>) -> f32 {
     let l = pow(max(c, vec3(0.0)), vec3(2.2));

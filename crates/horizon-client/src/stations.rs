@@ -100,22 +100,36 @@ pub fn enchant_offers(
         }
     }
     for i in 0..3 {
-        if offers.costs[i] > 0 {
-            // getEnchantmentList reseeds the menu random; the clue draws continue from it.
-            let mut list_random = LegacyRandom::new(i64::from(seed.wrapping_add(i as i32)));
-            let pool = e.tag("minecraft:in_enchanting_table").to_vec();
-            let mut list = e.select(items, &mut list_random, &stack.item, offers.costs[i], &pool);
-            if &*stack.item == "minecraft:book" && list.len() > 1 {
-                let r = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
-                list.remove(r);
-            }
-            if !list.is_empty() {
-                let pick = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
-                offers.clues[i] = Some(list[pick].clone());
-            }
-        }
+        offers.clues[i] = enchant_clue(e, items, seed, i, offers.costs[i], stack);
     }
     offers
+}
+/// `EnchantmentMenu.slotsChanged`'s clue for offer `slot` at `cost`: one
+/// enchantment of the list that cost would give, or None for no offer.
+pub fn enchant_clue(
+    e: &Enchantments,
+    items: &Items,
+    seed: i32,
+    slot: usize,
+    cost: i32,
+    stack: &ItemStack,
+) -> Option<(Arc<str>, u32)> {
+    if cost <= 0 {
+        return None;
+    }
+    // getEnchantmentList reseeds the menu random; the clue draws continue from it.
+    let mut list_random = LegacyRandom::new(i64::from(seed.wrapping_add(slot as i32)));
+    let pool = e.tag("minecraft:in_enchanting_table").to_vec();
+    let mut list = e.select(items, &mut list_random, &stack.item, cost, &pool);
+    if &*stack.item == "minecraft:book" && list.len() > 1 {
+        let r = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
+        list.remove(r);
+    }
+    if list.is_empty() {
+        return None;
+    }
+    let pick = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
+    Some(list[pick].clone())
 }
 /// `EnchantmentMenu.clickMenuButton` result: the enchanted item, or None.
 pub fn apply_enchantment(

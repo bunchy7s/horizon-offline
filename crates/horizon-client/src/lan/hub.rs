@@ -164,6 +164,10 @@ pub enum HostEvent {
     /// A guest left (state to save, entities to drop).
     Left(Box<Guest>),
     Packet(u32, Box<S>),
+    /// A guest changed the dominant hand in their client options.
+    MainHandChanged(u32, bool),
+    /// A guest changed their client language option.
+    LocaleChanged(u32, String),
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -1814,14 +1818,20 @@ impl Hub {
             })
             .collect();
         let uses = &mut columns.uses;
+        let chunks = &columns.chunks;
         for (i, taken, far, batch) in batches {
             let g = &mut self.guests[i];
             let size = batch.len();
+            // The single-player window shares the sections it is sent (handoff.rs).
+            let memory = g.address == super::conn::MEMORY_ADDRESS;
             if size > 0 {
                 g.batch_quota -= size as f32;
                 g.send(&C::ChunkBatchStart(horizon_protocol::packets::Empty));
                 g.sender.send_many(batch.into_iter().map(|body| match body {
                     Body::Level(j) => {
+                        if memory {
+                            super::handoff::offer(chunks[j]);
+                        }
                         uses[j] -= 1;
                         if uses[j] == 0 {
                             std::mem::take(&mut encoded[j])
@@ -2986,11 +2996,19 @@ impl Hub {
                 }
                 S::ClientInformation(info) => {
                     let g = &mut self.guests[i];
+                    let old_main_hand = g.info.main_hand;
+                    let old_language = g.info.language.clone();
                     // PlayerModelPart.HAT (bit 6): the tab list shows the hat layer.
                     let was_hat = g.info.model_customisation & 0x40 != 0;
                     g.view_distance =
                         i32::from(info.view_distance).clamp(2, self.config.view_distance);
                     g.info = info;
+                    if g.info.main_hand != old_main_hand {
+                        events.push(HostEvent::MainHandChanged(conn, g.info.main_hand == 0));
+                    }
+                    if g.info.language != old_language {
+                        events.push(HostEvent::LocaleChanged(conn, g.info.language.clone()));
+                    }
                     g.center = None;
                     let hat = g.info.model_customisation & 0x40 != 0;
                     let uuid = g.uuid;

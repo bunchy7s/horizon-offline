@@ -287,6 +287,12 @@ impl Game<'_> {
         gm.merchant.session = session;
         if !traded.is_empty() {
             // The guest's own statistic and advancements.
+            if let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) {
+                let g = &host.hub.guests[gi];
+                if let Some(entity_id) = gm.merchant.mob {
+                    self.native_player_trade(g.uuid, &g.name, entity_id);
+                }
+            }
             self.as_guest(host, conn, |g| g.merchant_traded(gm.merchant.mob, &traded));
         }
         self.drop_guest_items(host, gi, dropped);
@@ -321,9 +327,20 @@ impl Game<'_> {
         let Ok(index) = usize::try_from(index) else {
             return;
         };
-        self.lan_merchant_op(host, conn, None, |menu, env| {
+        let Some(guest) = host.hub.guests.iter().find(|g| g.conn == conn) else {
+            return;
+        };
+        let (uuid, name) = (guest.uuid, guest.name.clone());
+        if self.lan_merchant_op(host, conn, None, |menu, env| {
             menu.merchant_select(env, index)
-        });
+        }) {
+            let villager = host
+                .play
+                .get(&conn)
+                .and_then(|p| p.merchant.as_ref())
+                .and_then(|m| m.merchant.mob);
+            self.native_trade_select(uuid, &name, villager, index);
+        }
     }
     /// The guest closed the trading window (or it is closed for them):
     /// MerchantMenu.removed, then the villager gets its state back.
