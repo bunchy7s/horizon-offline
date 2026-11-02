@@ -445,6 +445,12 @@ def cases(facts, count, seed):
             yield case
             continue
         if rng.random() < 0.08:
+            switch_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
             jukebox_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
