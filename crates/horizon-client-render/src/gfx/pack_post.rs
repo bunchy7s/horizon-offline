@@ -4198,8 +4198,12 @@ mod tests {
             ],
             buffers: Vec::new(),
         };
-        let buffers =
-            pack_images::Buffers::new(&device, Default::default(), wgpu::ShaderStages::FRAGMENT);
+        let buffers = pack_images::Buffers::new(
+            &device,
+            Default::default(),
+            Default::default(),
+            wgpu::ShaderStages::FRAGMENT,
+        );
         let stand_ins = std::cell::RefCell::new(Vec::new());
         let pack = Resources {
             textures: &[],
