@@ -484,7 +484,10 @@ mod tests {
     fn head_rotlerp_steps_are_bounded() {
         let (mut yaw, mut pitch) = (30.0_f32, 0.0_f32);
         for _ in 0..100 {
-            let (ny, np) = (head_rotlerp(yaw, -170.0, 10.0), head_rotlerp(pitch, -80.0, 40.0));
+            let (ny, np) = (
+                head_rotlerp(yaw, -170.0, 10.0),
+                head_rotlerp(pitch, -80.0, 40.0),
+            );
             assert!((ny - yaw).abs() <= 10.0 && (np - pitch).abs() <= 40.0);
             (yaw, pitch) = (ny, np);
         }
