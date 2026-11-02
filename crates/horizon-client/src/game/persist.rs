@@ -45,6 +45,10 @@ pub struct EntityMemory {
     pub(super) joins_canceled: u32,
     /// The highest entity id `native_entity_join_level` has been told of.
     pub(super) joined_mark: u32,
+    /// The entities mods were told of and that have not left since: id (in
+    /// increasing order), type, and whether the last leave sweep saw it.
+    /// Only filled while a mod is loaded.
+    pub(super) live: Vec<(u32, String, bool)>,
 }
 
 /// The key that marks a compound queued with the chunk loads as a fresh add
@@ -1326,7 +1330,6 @@ impl Game<'_> {
                 })
                 .map(|i| self.mobs[i].id)
                 .collect();
-            let mobs_before = self.mob_ids();
             self.mobs.retain(|m| {
                 let keep = !leaving.contains(&m.id);
                 if !keep {
@@ -1334,7 +1337,6 @@ impl Game<'_> {
                 }
                 keep
             });
-            let (items_before, orbs_before) = (self.dropped_ids(), self.orb_ids());
             self.dropped.retain(|e| {
                 let keep = !gone(e.position);
                 if !keep {
@@ -1344,9 +1346,7 @@ impl Game<'_> {
             });
             self.orbs.retain(|o| !gone(o.position));
             // Unloaded with their chunk: PersistentEntitySectionManager.stopTracking.
-            self.native_mobs_left_since(&mobs_before);
-            self.native_items_left_since(&items_before);
-            self.native_orbs_left_since(&orbs_before);
+            self.native_leaves_flush();
             // the ones saved with the chunk go with it (a trident too, unsaved).
             self.creatures.projectiles.retain(|p| {
                 let leaves = entity_nbt::saved_with_chunk(p) || p.arrow.is_some();

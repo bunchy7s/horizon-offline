@@ -879,7 +879,9 @@ impl Game<'_> {
         let target = self.spawn_entity_from_nbt(tag);
         self.native_mobs_joined(from, false);
         // A mod kept the entity out: tryAddFreshEntityWithPassengers is false.
-        if target.is_none() && self.persist.joins_canceled != canceled {
+        if self.persist.joins_canceled != canceled
+            && target.is_none_or(|t| self.target_position(t).is_none())
+        {
             return Err(err("commands.summon.failed.uuid", &[]));
         }
         Ok(target)
