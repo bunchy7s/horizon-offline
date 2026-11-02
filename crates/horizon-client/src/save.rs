@@ -2100,8 +2100,8 @@ fn compress_records(
             .map(|tag| ChunkRecord::from_nbt(&tag, Compression::Zlib, timestamp, Limits::saved()))
             .transpose()
     };
-    let helpers = std::thread::available_parallelism()
-        .map_or(1, |n| n.get().div_ceil(2))
+    let helpers = horizon_threads::worker_count()
+        .div_ceil(2)
         .min(records.len() / CHUNKS_PER_HELPER);
     if helpers <= 1 {
         return records.iter().map(|(_, r)| compress(r)).collect();
