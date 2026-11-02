@@ -292,6 +292,35 @@ def statue_case(rng, states, case):
     case['use_item'] = use
 
 
+def timed_case(rng, states, case):
+    """A repeater, a comparator or a daylight detector clicked with an empty hand, none of which may
+    be turned where `Player.getAbilities().mayBuild` is false (`RepeaterBlock.useWithoutItem`,
+    `ComparatorBlock.useWithoutItem`, `DaylightDetectorBlock.useWithoutItem` all answer PASS there).
+    A repeater cycles its `delay` through 1 to 4 with `setBlockAndUpdate` and nothing else; a
+    comparator cycles `mode` between `compare` and `subtract` with a `block.comparator.click` at
+    volume 0.3 and pitch 0.55 for `subtract` / 0.5 for `compare`, writes the state with flags 2 and
+    refreshes its output; a daylight detector cycles `inverted`, writes the state, sends
+    `block_change` and recomputes the `power` it emits."""
+    name = rng.choice(['repeater'] * 2 + ['comparator'] * 2 + ['daylight_detector'])
+    props = {'facing': rng.choice(['north', 'south', 'west', 'east'])}
+    if name == 'repeater':
+        props.update(delay=str(rng.randrange(1, 5)), locked=rng.choice(['true', 'false']))
+    elif name == 'comparator':
+        props.update(mode=rng.choice(['compare', 'subtract']))
+    else:
+        props.pop('facing')
+        props.update(inverted=rng.choice(['true', 'false']), power=str(rng.randrange(16)))
+    cells = [[0, 0, 0, states.get(name, **props)],
+             [0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'grass_block']))]]
+    if name != 'daylight_detector' and rng.random() < 0.5:
+        # Something for the diode to read, on the side it faces.
+        face = {'north': (0, 0, -1), 'south': (0, 0, 1), 'west': (-1, 0, 0), 'east': (1, 0, 0)}[props['facing']]
+        cells.append([*face, states.get(rng.choice(['redstone_wire', 'lever', 'stone', 'redstone_block']))])
+    case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
+                        'food': 20, 'face': rng.choice(['up', 'up', 'north', 'south', 'west', 'east'])}
+    case['cells'] = cells
+
+
 # Entities a block may be placed into (`Entity.blocksBuilding`), and blocks to place.
 BLOCKERS = ['skeleton', 'zombie', 'pig', 'chicken', 'cow', 'armor_stand', 'slime', 'bat']
 PLACED = ['obsidian', 'stone', 'oak_slab', 'oak_fence', 'white_carpet', 'torch', 'glass', 'oak_trapdoor', 'snow']
