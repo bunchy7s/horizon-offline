@@ -42,6 +42,7 @@ use horizon_protocol::{
     text::{Language, plain},
 };
 use horizon_world::{
+    attachments::{Attachments, Holder},
     level::InteractionResult,
     nbt::Tag,
     registry::BlockStateId,
@@ -455,6 +456,8 @@ pub(super) struct Remote {
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
     pub mod_net: bool,
+    /// The synced attachments the server sent, by holder.
+    pub attachments: HashMap<Holder, Attachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -981,6 +984,7 @@ impl Game<'_> {
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
+            attachments: HashMap::new(),
             far_terrain: None,
             builtin,
             status: lang
@@ -1887,6 +1891,7 @@ impl Game<'_> {
                     self.score.board = Default::default();
                     self.clear_waypoints();
                     if let Some(r) = self.remote.as_mut() {
+                        r.attachments.clear();
                         r.players.clear();
                         r.tab_players.clear();
                         r.listed.clear();
@@ -2229,6 +2234,13 @@ impl Game<'_> {
         self.world
             .block_entities
             .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.retain(|holder, _| match *holder {
+                Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
+                Holder::BlockEntity([x, _, z]) => !gone.contains(&(x >> 4, z >> 4)),
+                _ => true,
+            });
+        }
         gone.clear();
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
@@ -2360,7 +2372,9 @@ impl Game<'_> {
         }
     }
     /// Keep the renderable block entities (chests, furnaces) in step with blocks.
-    /// `previous`: the block's state before, when it changed.
+    /// `previous`: the block's state before, when it changed. A column sent again has
+    /// none, and keeps its block entities' synced attachments: the server does not send
+    /// them again (`remote_chunk` drops those of block entities the column lost).
     pub(super) fn sync_block_entity(
         &mut self,
         pos: (i32, i32, i32),
@@ -2378,12 +2392,24 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
+                    if previous.is_some() {
+                        self.forget_block_entity_attachments(pos);
+                    }
                     self.world.block_entities.insert(pos, entity);
                 }
             }
             None => {
+                if previous.is_some() {
+                    self.forget_block_entity_attachments(pos);
+                }
                 self.world.block_entities.remove(&pos);
             }
+        }
+    }
+    /// The server's synced attachments of a block entity that goes with it.
+    fn forget_block_entity_attachments(&mut self, (x, y, z): (i32, i32, i32)) {
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.remove(&Holder::BlockEntity([x, y, z]));
         }
     }
     /// ClientLevel.setServerVerifiedBlockState: a block the client predicted keeps its
@@ -2984,6 +3010,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            // The synced attachments of a holder the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
+                self.remote_attachment_sync(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
@@ -3001,6 +3031,7 @@ impl Game<'_> {
                 // replaces ServerReconfigScreen.
                 if let Some(r) = self.remote.as_mut() {
                     r.reconfiguring = None;
+                    r.attachments.clear();
                 }
                 // handleLogin makes a new MultiPlayerGameMode (carried index 0) and a
                 // new LocalPlayer (slot 0, no effects, riding nothing: the server
@@ -3042,6 +3073,11 @@ impl Game<'_> {
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
+                // The server sends the level, chunks and entities again.
+                if let Some(r) = self.remote.as_mut() {
+                    r.attachments
+                        .retain(|holder, _| matches!(holder, Holder::Player(_)));
+                }
                 self.using = None;
                 self.end_mod_use();
                 // After a death (no KEEP_ENTITY_DATA) the new LocalPlayer
@@ -3283,9 +3319,12 @@ impl Game<'_> {
             C::RemoveEntities(p) => {
                 for id in p.ids {
                     if let Some(r) = self.remote.as_mut() {
-                        r.level_players.remove(&id);
+                        if let Some(uuid) = r.level_players.remove(&id) {
+                            r.attachments.remove(&Holder::Player(uuid));
+                        }
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
+                        r.attachments.remove(&Holder::Entity(id as u32));
                     }
                     self.remove_entity(id);
                 }
@@ -4635,6 +4674,7 @@ impl Game<'_> {
                         r.chat_validators.remove(&u);
                         r.skin_textures.remove(&u);
                         r.listed.remove(&u);
+                        r.attachments.remove(&Holder::Player(u));
                     }
                 }
             }

@@ -761,8 +761,7 @@ impl Game<'_> {
                             if (effect == "instant_damage") != inverted {
                                 m.damage((6 << amp.min(30)) as f32, Damage::of(DamageKind::Magic));
                             } else {
-                                m.health =
-                                    (m.health + (4 << amp.min(30)) as f32).min(m.attrs.max_health);
+                                m.heal((4 << amp.min(30)) as f32);
                             }
                         }
                         _ => {
@@ -780,6 +779,23 @@ impl Game<'_> {
         }
     }
     pub(super) fn apply_effect_action(&mut self, action: EffectAction) {
+        let action = match action {
+            EffectAction::Heal(mut amount) => {
+                if let Some(player) = self.player.as_ref() {
+                    let mut cancel = false;
+                    horizon_client::hunger::native_living_heal(
+                        player.entity_id as u32,
+                        &mut amount,
+                        &mut cancel,
+                    );
+                    if cancel {
+                        return;
+                    }
+                }
+                EffectAction::Heal(amount)
+            }
+            action => action,
+        };
         let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
@@ -1382,7 +1398,7 @@ impl Game<'_> {
                                 let harm = m.potion_harm(amount(6));
                                 m.hurt(harm, Some(at), &mut self.world.random);
                             } else {
-                                m.health = (m.health + amount(4)).min(m.kind.max_health);
+                                m.heal(amount(4));
                             }
                         }
                         _ => {
@@ -1725,8 +1741,7 @@ impl Game<'_> {
                     let harm = m.potion_harm((intensity * f64::from(6 << amp) + 0.5) as i32 as f32);
                     m.hurt(harm, Some([at.x, at.y, at.z]), &mut self.world.random);
                 } else {
-                    m.health = (m.health + (intensity * f64::from(4 << amp) + 0.5) as i32 as f32)
-                        .min(m.kind.max_health);
+                    m.heal((intensity * f64::from(4 << amp) + 0.5) as i32 as f32);
                 }
             }
         }

@@ -518,9 +518,9 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     so a change by the console, a command in the game or the protocol itself is told alike (`clear` once per
     entry); the event stream carries them as `operators_added`, `bans_removed`... too;
   - game rules: `gamerules` lists every rule the game has as a typed rule (`{key, type, value}`), `gamerules/update`
-    sets one (checked against its type and bounds, logged and set only when the value changes) and
-    `notification/gamerules/updated` follows every change, by that method or by `/gamerule`
-    (`Game::set_game_rule`);
+    sets one (checked against its type and bounds with vanilla's error texts, and set, logged and told on every
+    update, as vanilla's does) and `notification/gamerules/updated` follows every change, by that method or by
+    `/gamerule` (`Game::set_game_rule`); the parity script compares both servers on all of it;
   - `server/activity`: a login attempt (the game records `login_activity` in its login gate, as
     `ServerActivityMonitor.reportLoginActivity` is called when a login starts), told at most once in thirty
     seconds and lost otherwise, as the monitor clears its flag whatever it did; and `server/status`, the

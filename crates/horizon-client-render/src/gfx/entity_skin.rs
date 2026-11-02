@@ -66,15 +66,26 @@ pub struct SkinJob {
     pub overlay: u32,
     /// 1 when the overlay is the armour glint: the model UV rides in `glint_uv`.
     pub glint: u32,
-    /// 1 for an item model's quads (`item_render::WorldSink`): the colour by the
-    /// face's axis rides in the part's first 6 normal words ([`SkinPart::item`]),
-    /// shaded on the CPU, and the normal is `mesher::CULL_BACK`.
-    pub item: u32,
+    /// How the vertices are finished: [`SkinJob::MODEL`], [`SkinJob::ITEM`] or
+    /// [`SkinJob::FLAT`].
+    pub mode: u32,
     /// 1 for a model whose render type culls back faces (`mobs::Polygon::cull_back`):
     /// the normal's w is `mesher::SHADED_CULL_W` instead of -127.
     pub cull: u32,
     /// Always 0: the shader reads it as a zero it cannot fold away.
     pub spare: u32,
+}
+
+impl SkinJob {
+    /// A model's polygons: the face normal posed, the job's colour.
+    pub const MODEL: u32 = 0;
+    /// An item model's quads (`item_render::WorldSink`): the colour by the face's
+    /// axis rides in the part's first 6 normal words ([`SkinPart::item`]), shaded on
+    /// the CPU, and the normal is `mesher::CULL_BACK`.
+    pub const ITEM: u32 = 1;
+    /// A model's polygons with no normal at all (all four bytes 0): the eyes render
+    /// type's layers, which entity.wgsl leaves unshaded.
+    pub const FLAT: u32 = 2;
 }
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 44);
@@ -375,9 +386,11 @@ pub fn expand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
                 (v.uv[0] + job.scroll) % 1.0
             };
             let r = job.rect;
-            let (color, normal) = if job.item != 0 {
+            let (color, normal) = if job.mode == SkinJob::ITEM {
                 let color = part.normal[v.axis as usize].to_bits();
                 (color, crate::mesher::CULL_BACK)
+            } else if job.mode == SkinJob::FLAT {
+                (job.color, [0; 4])
             } else {
                 let w = if job.cull != 0 {
                     crate::mesher::SHADED_CULL_W
@@ -524,11 +537,26 @@ mod tests {
                     rect: [0.5, 0.25, 0.5625, 0.3125],
                     light: 0xa0_30,
                     overlay: 2 << 16,
-                    item: 1,
+                    mode: SkinJob::ITEM,
+                    ..Default::default()
+                },
+                // An eyes layer: no normal, even over a culled model's encoding; the
+                // tier and OIT tag ride in the overlay word.
+                SkinJob {
+                    first: 24,
+                    count: 24,
+                    part: 1,
+                    dst: 96,
+                    rect: [0.125, 0.75, 0.25, 0.875],
+                    color: 0x80ff_ffff,
+                    light: 0xf0f0,
+                    overlay: crate::gfx::OIT_ENTITY | 3 << 16 | 7,
+                    mode: SkinJob::FLAT,
+                    cull: 1,
                     ..Default::default()
                 },
             ],
-            vertices: 96,
+            vertices: 120,
         };
         let expected = expand(&model, &frame);
         // The posed vertices land after 5 others, which they leave alone.

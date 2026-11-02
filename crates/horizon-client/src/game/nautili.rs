@@ -101,7 +101,7 @@ impl Game<'_> {
                 // feed(player, hand, stack, 2, 1).
                 let sound = nautilus::eat_sound(m);
                 let m = &mut self.mobs[index];
-                m.health = (m.health + 2.0).min(m.attrs.max_health);
+                m.heal(2.0);
                 self.use_nautilus_food(item);
                 self.nautilus_sound(index, sound);
                 return true;
