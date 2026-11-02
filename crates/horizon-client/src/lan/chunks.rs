@@ -374,7 +374,7 @@ struct WarmPool {
 fn warm_pool() -> Option<&'static WarmPool> {
     static POOL: OnceLock<Option<Arc<WarmPool>>> = OnceLock::new();
     POOL.get_or_init(|| {
-        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()) - 1;
+        let threads = horizon_threads::worker_count() - 1;
         let pool = Arc::new(WarmPool {
             job: Default::default(),
             ready: Default::default(),
