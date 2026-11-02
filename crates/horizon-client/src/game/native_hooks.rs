@@ -5105,7 +5105,7 @@ impl Game<'_> {
         name: &str,
         directory: &std::path::Path,
     ) {
-        let _ = (player, name, directory);
+        mod_api::dispatch_player_save_to_file(self, mod_api::mods(), player, name, directory);
     }
     /// A player was loaded from the world's save (NeoForge's
     /// `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`): their `.dat`
@@ -5121,7 +5121,7 @@ impl Game<'_> {
         name: &str,
         directory: &std::path::Path,
     ) {
-        let _ = (player, name, directory);
+        mod_api::dispatch_player_load_from_file(self, mod_api::mods(), player, name, directory);
     }
     /// A player's data was copied to their new player (NeoForge's
     /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
@@ -5131,7 +5131,7 @@ impl Game<'_> {
     /// placed, on a server, with no player's state swapped in. Not
     /// cancellable.
     pub(super) fn native_player_clone(&mut self, player: u128, name: &str, was_death: bool) {
-        let _ = (player, name, was_death);
+        mod_api::dispatch_player_clone(self, mod_api::mods(), player, name, was_death);
     }
     /// The number of players with the mod container at `pos` of `dimension`
     /// open went from `previous` to `viewers` (vanilla's
