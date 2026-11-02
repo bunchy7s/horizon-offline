@@ -21,6 +21,8 @@ mod github_mods_page;
 mod glass;
 mod glass_home;
 mod glass_home_lists;
+mod glass_home_mods;
+mod glass_home_packs;
 mod glass_home_tabs;
 mod glass_ui;
 mod home;
@@ -307,6 +309,8 @@ struct Launcher {
     friend_code: line_edit::LineEdit,
     friend_focused: bool,
     friend_focus: FocusHandle,
+    /// The window's width at the last frame: Home's head lays out by it, as the mockup's `xl`.
+    window_width: f32,
     joining: Option<String>,
     /// Where the next start goes at once: `--world <folder>` or `--server <address>`.
     quick_play: Option<(&'static str, String)>,
@@ -575,6 +579,7 @@ impl Launcher {
             play_when_prepared: None,
             friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
             friend_focused: false,
+            window_width: 0.,
             friend_focus: cx.focus_handle(),
             joining: None,
             quick_play: None,
@@ -4752,6 +4757,7 @@ impl Render for Launcher {
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         let size = window.viewport_size();
+        self.window_width = f32::from(size.width);
         let content = match self.page {
             Page::Play => self.play_page(cx),
             Page::Versions => self.versions_page(cx),

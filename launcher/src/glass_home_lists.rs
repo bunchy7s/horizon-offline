@@ -12,7 +12,7 @@ use std::path::Path;
 use worlds_page::{ago, Action};
 
 /// A listener of the launcher's, boxed so a helper can return it.
-type Listener<E> = Box<dyn Fn(&E, &mut Window, &mut App)>;
+pub(super) type Listener<E> = Box<dyn Fn(&E, &mut Window, &mut App)>;
 
 /// The 36 px picture at a row's start (`PixelIcon` at 36), round at `round(36 · 0.26)`.
 const PICTURE: f32 = 36.;
@@ -20,7 +20,11 @@ const PICTURE_RADIUS: f32 = 9.;
 
 impl Launcher {
     /// Records whether the pointer is over the row `key`; the row then shows its actions.
-    fn list_hover_listener(&self, key: SharedString, cx: &mut Context<Self>) -> Listener<bool> {
+    pub(super) fn list_hover_listener(
+        &self,
+        key: SharedString,
+        cx: &mut Context<Self>,
+    ) -> Listener<bool> {
         Box::new(cx.listener(move |this, hovered: &bool, _, cx| {
             if *hovered {
                 this.list_hover = Some(key.clone());
@@ -409,7 +413,7 @@ fn toggle_add(cx: &mut Context<Launcher>) -> Listener<ClickEvent> {
 }
 
 /// A row's 36 px picture, or a plain tile with `fallback`'s icon.
-fn picture(image: Option<gpui::ImageSource>, fallback: &'static str) -> AnyElement {
+pub(super) fn picture(image: Option<gpui::ImageSource>, fallback: &'static str) -> AnyElement {
     match image {
         Some(image) => gpui::img(image)
             .relative()
@@ -432,7 +436,7 @@ fn picture(image: Option<gpui::ImageSource>, fallback: &'static str) -> AnyEleme
 }
 
 /// Why an action failed, in the menu's Delete red, over the list.
-fn danger_line(message: String) -> Div {
+pub(super) fn danger_line(message: String) -> Div {
     div().px(px(12.)).pb(px(8.)).child(
         ui::text(13., FontWeight::NORMAL, ink::FULL)
             .text_color(ui::color(horizon_theme::glass::DANGER))
@@ -442,7 +446,7 @@ fn danger_line(message: String) -> Div {
 
 /// A destructive button's second step (the menu's "Click again to delete"): its red text on
 /// red at 12 % under the pointer.
-fn danger_button(id: SharedString, label: SharedString) -> Stateful<Div> {
+pub(super) fn danger_button(id: SharedString, label: SharedString) -> Stateful<Div> {
     div()
         .id(id)
         .flex()

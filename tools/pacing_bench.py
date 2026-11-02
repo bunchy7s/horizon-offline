@@ -27,6 +27,15 @@ p99/p99.9, the worst frame, frames over 33 ms) in the situations where players s
     fluids     water, then lava, poured down a 16-block slope, 15 s each
     fire       fire lit at 5 places on a 25x25 grove's canopy of leaves over logs, 25 s
     pistons    an observer clock driving 20 pistons, 15 s
+    end        the overworld -> the End -> overworld twice (/execute in ... run tp), 8 s recorded after each
+    weather    rain, thunder, a lightning bolt, then clear, 4 s recorded after each: first-use costs
+    particles  53 particle kinds, 60 of each (/particle ... force), 0.6 s recorded after each
+    post       a glowing mob, then spectating a creeper, a spider, an enderman and a cave spider (their
+               post chains), 2 s recorded after each
+
+First-use costs (pipelines compiled in the frame) block the render thread in the driver's or the OS's
+shader compiler: the frame's wall time grows, its CPU time hardly. The driver's shader cache hides them
+after the first run on a machine: give the game a resources folder whose shaders differ to see them cold.
 
 One game per render distance, from a fresh world (seed 1234, creative), driven over horizon-ctl.
 The game runs with HORIZON_SPIKES so each slow frame logs its timed spans; the report keeps the
@@ -57,10 +66,18 @@ except ImportError:
 
 WORK = lab.ROOT / ".local/pacing-bench"
 SCENARIOS = ["fly16", "ocean", "fly64", "elytra", "teleport", "nether", "portal", "inventory", "mobs", "items",
-             "block_entities", "screens", "reload", "tnt", "fill", "fluids", "fire", "pistons", "join"]
+             "block_entities", "screens", "reload", "tnt", "fill", "fluids", "fire", "pistons", "join",
+             "end", "weather", "particles", "post"]
 WORLD_CHANGES = ["tnt", "fill", "fluids", "fire", "pistons"]
 
 # First sight: what each kind of thing costs the first frame it is on screen.
+PARTICLES = ["flame", "smoke", "large_smoke", "heart", "crit", "enchanted_hit", "enchant", "portal", "end_rod",
+             "explosion", "explosion_emitter", "firework", "bubble", "splash", "rain", "dripping_water", "falling_lava",
+             "cloud", "poof", "soul_fire_flame", "soul", "ash", "white_ash", "spore_blossom_air", "cherry_leaves",
+             "glow", "wax_on", "electric_spark", "scrape", "sculk_soul", "sonic_boom", "note", "happy_villager",
+             "angry_villager", "totem_of_undying", "witch", "dragon_breath", "squid_ink", "glow_squid_ink", "nautilus",
+             "dolphin", "campfire_cosy_smoke", "lava", "snowflake", "trial_spawner_detection", "vault_connection",
+             "gust", "small_gust", "infested", "item_slime", "item_snowball", "white_smoke", "egg_crack"]
 MOBS = ["zombie", "skeleton", "creeper", "spider", "enderman", "cow", "pig", "sheep", "chicken", "horse", "donkey",
         "villager", "iron_golem", "wolf", "cat", "fox", "bee", "axolotl", "frog", "allay", "warden", "wither",
         "ghast", "blaze", "piglin", "hoglin", "strider", "shulker", "guardian", "elder_guardian", "squid",
@@ -166,6 +183,46 @@ def scenario(name, control, distance):
                                ("the_nether", (-300, 100, 200)), ("overworld", (-2400, 150, 1600))]:
             # Through chat, as a player types it: `command` waits on the server thread in the frame.
             add(record(control, lambda: control(f"chat /execute in minecraft:{dim} run tp @s {x} {y} {z}"), 8))
+    elif name == "end":
+        # Before `portal` this trip makes it fail (#7702): run `portal` first.
+        for dim, (x, y, z) in [("the_end", (100, 80, 0)), ("overworld", (900, 150, -900)),
+                               ("the_end", (-300, 80, 400)), ("overworld", (-1200, 150, 900))]:
+            add(record(control, lambda: control(f"chat /execute in minecraft:{dim} run tp @s {x} {y} {z}"), 8),
+                f"{dim} {x}")
+    elif name == "weather":
+        x, y, z = 4000, 150, 4000
+        control(f"command execute in minecraft:overworld run tp @s {x} {y} {z}")
+        control(f"fly {x} {y} {z} {x} {y} {z} 0.1 10")
+        pb.wait_loaded(control, lambda p: True, 300, pb.view_chunks(distance))
+        time.sleep(2)
+        for step, command in [("rain", "weather rain"), ("thunder", "weather thunder"),
+                              ("lightning", f"summon minecraft:lightning_bolt {x + 8} {y - 20} {z + 8}"),
+                              ("clear", "weather clear")]:
+            add(record(control, lambda: control(f"chat /{command}"), 4), step)
+    elif name == "post":
+        x, y, z = 5600, 200, 5600
+        control(f"command execute in minecraft:overworld run tp @s {x} {y} {z} 0 10")
+        control(f"fly {x} {y} {z} {x} {y} {z} 0.1 10")
+        pb.wait_loaded(control, lambda p: True, 300, pb.view_chunks(distance))
+        time.sleep(2)
+        for i, mob in enumerate(["creeper", "spider", "enderman", "cave_spider"]):
+            control(f"chat /summon minecraft:{mob} {x + 3 * i} {y} {z + 6} {{NoAI:1b,NoGravity:1b,Tags:[\"p{i}\"]}}")
+        time.sleep(1)
+        add(record(control, lambda: control("chat /effect give @e[tag=p0] minecraft:glowing 60"), 2), "glowing")
+        add(record(control, lambda: control("chat /gamemode spectator"), 2), "spectator")
+        for i, mob in enumerate(["creeper", "spider", "enderman", "cave_spider"]):
+            add(record(control, lambda: control(f"chat /spectate @e[tag=p{i},limit=1]"), 2), f"spectate {mob}")
+        add(record(control, lambda: control("chat /spectate"), 2), "stop")
+        control("chat /gamemode creative")
+    elif name == "particles":
+        x, y, z = 5000, 200, 5000
+        control(f"command execute in minecraft:overworld run tp @s {x} {y} {z} 0 10")
+        control(f"fly {x} {y} {z} {x} {y} {z} 0.1 10")
+        pb.wait_loaded(control, lambda p: True, 300, pb.view_chunks(distance))
+        time.sleep(2)
+        for kind in PARTICLES:
+            add(record(control, lambda: control(f"chat /particle minecraft:{kind} {x} {y} {z + 5} 1 1 1 0.05 60 force"),
+                       0.6), kind)
     elif name == "portal":
         # A creative player crosses a portal after one tick in it (Player.getPortalWaitTime).
         for x, y, z in [(1200, 120, -1200), (-1800, 120, 600)]:
