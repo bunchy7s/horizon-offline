@@ -4025,6 +4025,18 @@ impl Game<'_> {
         let _ = (entity, kind, pos, from, to);
     }
 
+    /// A bee entered the hive at `pos` and was stored there.
+    /// @API:native_entity_enter_block@.
+    pub(super) fn native_entity_enter_block(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        pos: [i32; 3],
+        block: &str,
+    ) {
+        let _ = (entity, kind, pos, block);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
