@@ -5843,8 +5843,8 @@ def check_boat_shoved(host, guest, out):
 
 
 def check_minecarts(host, guest, out):
-    """#1222: the host and the guest each get into a minecart on rails with a right click, sneak out
-    beside it, and break it with their fists."""
+    """#1222, #5812: the host and the guest each get into a minecart on rails with a right click, sneak out
+    beside it, and break it with their fists; also check opening a chest minecart's container."""
     result = {}
     spots = apart(host, guest)
     for label, player in (('host', host), ('guest', guest)):
@@ -5866,7 +5866,19 @@ def check_minecarts(host, guest, out):
             player.wait(5)
             break_vehicle(player, cart['id'], 'minecart')
             result[label] = {'cart': cart['id'], 'out_at': [round(v, 2) for v in out_at], 'broken': True}
+
+            player('command', command=f'summon minecraft:chest_minecart {cx + 0.5} {y} {z + 0.5}')
+            player.wait(10)
+            player.raw('look-at', f'{cx + 0.5:.2f}', f'{y + 0.3:.2f}', f'{z + 0.5:.2f}')
+            player.raw('mouse', 'right', 'click')
+            player.raw('wait-for', 'screen', 'container', '--timeout', 10)
+            items, size = container_items(player)
+            assert size == 27, f'the {label} opened chest minecart with {size} slots, expected 27'
+            player.raw('key', 'esc', 'tap')
+            player.wait(10)
+            player('command', command=f'kill @e[type=minecraft:chest_minecart,x={cx},y={y},z={z},distance=..8]')
         finally:
+            player('command', command=f'kill @e[type=minecraft:chest_minecart,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'kill @e[type=minecraft:minecart,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'kill @e[type=minecraft:item,x={cx},y={y},z={z},distance=..8]')
             player('command', command=f'fill {cx} {y} {z} {cx} {y} {z + 4} minecraft:air')
