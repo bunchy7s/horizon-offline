@@ -551,37 +551,52 @@ pub(crate) const MAX_TAG_BLOCKS: usize = 1 << 20;
 /// families. A five-way facing or two-axis property is a different property and
 /// is intentionally left unchanged. Unrelated properties retain their values.
 fn rotation_table(registry: &BlockRegistry) -> Result<Rotations, String> {
-    let mut values = BTreeMap::<(String, String), BTreeSet<String>>::new();
+    let mut values = BTreeMap::<(&str, &str), BTreeSet<&str>>::new();
     for index in 0..registry.len() {
         let state = registry.state(BlockStateId(index as u32)).unwrap();
         for name in ["axis", "facing"] {
             if let Some(value) = state.properties.get(name) {
                 values
-                    .entry((state.name.clone(), name.into()))
+                    .entry((state.name.as_str(), name))
                     .or_default()
-                    .insert(value.clone());
+                    .insert(value.as_str());
             }
         }
     }
-    let axis = ["x", "y", "z"].map(str::to_owned).into_iter().collect();
-    let facing = DIRECTIONS.map(str::to_owned).into_iter().collect();
-    let horizontal = DIRECTIONS[2..].iter().map(|s| (*s).to_owned()).collect();
+    let axis: BTreeSet<&str> = ["x", "y", "z"].into_iter().collect();
+    let facing: BTreeSet<&str> = DIRECTIONS.into_iter().collect();
+    let horizontal: BTreeSet<&str> = DIRECTIONS[2..].iter().copied().collect();
     let mut result = Vec::with_capacity(registry.len());
     for index in 0..registry.len() {
-        let state = registry.state(BlockStateId(index as u32)).unwrap();
-        let full_axis = values.get(&(state.name.clone(), "axis".into())) == Some(&axis);
-        let directions = values.get(&(state.name.clone(), "facing".into()));
-        let mut rotated = [BlockStateId(index as u32); 6];
+        let id = BlockStateId(index as u32);
+        let state = registry.state(id).unwrap();
+        let full_axis = values.get(&(state.name.as_str(), "axis")) == Some(&axis);
+        let directions = values.get(&(state.name.as_str(), "facing"));
+        let mut rotated = [id; 6];
+        // Most states have neither family: every rotation is the state itself.
+        if !full_axis && directions != Some(&facing) && directions != Some(&horizontal) {
+            result.push(rotated);
+            continue;
+        }
         for (direction, name) in DIRECTIONS.iter().enumerate() {
-            let mut value = state.clone();
-            if full_axis {
-                value.properties.insert(
-                    "axis".into(),
-                    ["y", "y", "z", "z", "x", "x"][direction].into(),
-                );
+            let axis_value = full_axis.then_some(["y", "y", "z", "z", "x", "x"][direction]);
+            let facing_value = (directions == Some(&facing)
+                || (direction >= 2 && directions == Some(&horizontal)))
+            .then_some(*name);
+            // A rotation that sets what the state already has is the state.
+            let unchanged = axis_value
+                .is_none_or(|v| state.properties.get("axis").map(String::as_str) == Some(v))
+                && facing_value
+                    .is_none_or(|v| state.properties.get("facing").map(String::as_str) == Some(v));
+            if unchanged {
+                continue;
             }
-            if directions == Some(&facing) || (direction >= 2 && directions == Some(&horizontal)) {
-                value.properties.insert("facing".into(), (*name).into());
+            let mut value = state.clone();
+            if let Some(v) = axis_value {
+                value.properties.insert("axis".into(), v.into());
+            }
+            if let Some(v) = facing_value {
+                value.properties.insert("facing".into(), v.into());
             }
             rotated[direction] = registry
                 .id(&value)
@@ -590,4 +605,91 @@ fn rotation_table(registry: &BlockRegistry) -> Result<Rotations, String> {
         result.push(rotated);
     }
     Ok(Arc::new(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nbt::Tag;
+
+    /// air, stone, oak_log axis x/y/z, furnace facing the four horizontal
+    /// ways, observer facing all six with `powered` false then true, and a
+    /// hopper's five-way facing.
+    fn registry() -> BlockRegistry {
+        let state = |id: &str, props: &[(&str, &str)]| {
+            let mut entries = vec![("id", Tag::String(id.into()))];
+            if !props.is_empty() {
+                entries.push((
+                    "properties",
+                    Tag::compound(
+                        props
+                            .iter()
+                            .map(|(k, v)| (*k, Tag::String((*v).into())))
+                            .collect::<Vec<_>>(),
+                    ),
+                ));
+            }
+            Tag::compound(entries)
+        };
+        let mut states = vec![state("minecraft:air", &[]), state("minecraft:stone", &[])];
+        for axis in ["x", "y", "z"] {
+            states.push(state("minecraft:oak_log", &[("axis", axis)]));
+        }
+        for facing in ["north", "south", "west", "east"] {
+            states.push(state("minecraft:furnace", &[("facing", facing)]));
+        }
+        for powered in ["false", "true"] {
+            for facing in DIRECTIONS {
+                states.push(state(
+                    "minecraft:observer",
+                    &[("facing", facing), ("powered", powered)],
+                ));
+            }
+        }
+        for facing in ["down", "north", "south", "west", "east"] {
+            states.push(state("minecraft:hopper", &[("facing", facing)]));
+        }
+        BlockRegistry::from_nbt(&Tag::compound([
+            ("DataVersion", Tag::Int(crate::DATA_VERSION)),
+            ("states", Tag::List(states)),
+            (
+                "defaults",
+                Tag::compound([
+                    ("minecraft:air", Tag::Int(0)),
+                    ("minecraft:stone", Tag::Int(1)),
+                    ("minecraft:oak_log", Tag::Int(3)),
+                    ("minecraft:furnace", Tag::Int(5)),
+                    ("minecraft:observer", Tag::Int(9)),
+                    ("minecraft:hopper", Tag::Int(21)),
+                ]),
+            ),
+        ]))
+        .unwrap()
+    }
+
+    /// Rotations follow the direction (down, up, north, south, west, east):
+    /// a full axis turns, horizontal facing turns only for the four sides,
+    /// full facing turns all six ways keeping its other properties, and a
+    /// five-way facing or a block without these properties stays as it is.
+    #[test]
+    fn rotations_turn_axis_and_facing_families_only() {
+        let registry = registry();
+        let table = rotation_table(&registry).unwrap();
+        let ids = |state: u32| table[state as usize].map(|id| id.0);
+        assert_eq!(ids(1), [1; 6], "stone");
+        assert_eq!(ids(3), [3, 3, 4, 4, 2, 2], "oak_log axis=y");
+        assert_eq!(ids(2), [3, 3, 4, 4, 2, 2], "oak_log axis=x");
+        assert_eq!(ids(6), [6, 6, 5, 6, 7, 8], "furnace facing=south");
+        assert_eq!(
+            ids(16),
+            [15, 16, 17, 18, 19, 20],
+            "observer powered=true facing=up"
+        );
+        assert_eq!(
+            ids(9),
+            [9, 10, 11, 12, 13, 14],
+            "observer powered=false facing=down"
+        );
+        assert_eq!(ids(22), [22; 6], "hopper facing=north");
+    }
 }
