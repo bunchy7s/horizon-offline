@@ -54,6 +54,24 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+type BuiltinCache = Vec<(std::path::PathBuf, Arc<Builtin>)>;
+static BUILTIN: std::sync::Mutex<BuiltinCache> = std::sync::Mutex::new(Vec::new());
+
+/// The prepared resources' `registries.json`, parsed once per root: the
+/// file never changes while the game runs, and parsing it took about 3 ms
+/// of the frame that joins a server (or opens a single-player world).
+/// `None` when it is missing or invalid (not cached: a fixed install can
+/// join again).
+pub(super) fn builtin_registries(root: &std::path::Path) -> Option<Arc<Builtin>> {
+    let mut cache = BUILTIN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, builtin)) = cache.iter().find(|(cached, _)| cached == root) {
+        return Some(builtin.clone());
+    }
+    let builtin = Arc::new(Builtin::find(root).and_then(|p| Builtin::load(&p).ok())?);
+    cache.push((root.to_owned(), builtin.clone()));
+    Some(builtin)
+}
+
 /// `ChatType`'s two decorations: how a message shows in the chat, and what
 /// the narrator says of it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -808,9 +826,7 @@ impl Game<'_> {
         // world's packed table must not name its ids.
         self.world_biomes = None;
         let root = self.options.resources.clone();
-        let builtin = Builtin::find(&root)
-            .and_then(|p| Builtin::load(&p).ok())
-            .ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
+        let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
         let lang = Arc::new(horizon_client::net::load_language(&root));
         // Options.createInformation: what the server learns about this player,
         // sent again when one of those options changes.
@@ -960,7 +976,7 @@ impl Game<'_> {
             quiet_commands: false,
             mod_net: false,
             far_terrain: None,
-            builtin: Arc::new(builtin),
+            builtin,
             status: lang
                 .get("connect.connecting")
                 .cloned()
