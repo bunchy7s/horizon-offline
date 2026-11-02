@@ -126,7 +126,7 @@ BannerBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_e
 BannerBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	banner patterns and name to item components
 BaseContainerBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::items	container slots from the saved list
 BaseContainerBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	container NBT in its saved form
-BaseContainerBlockEntity.sendChestLockedNotifications	missing		minor: a chest with a Lock tag should refuse to open with a message. Horizon has no Lock check; chest_menu_blocked (game/storage.rs) only looks at the block above.
+BaseContainerBlockEntity.sendChestLockedNotifications	port	crates/horizon-client-render/src/containers.rs::locked_message	the container.isLocked action-bar text, naming the container by its display name; the menu path in game/lan_actions.rs refuses a container whose Lock the held item does not open, sends this and plays block.chest.locked
 BaseContainerBlockEntity.isEmpty	port	crates/horizon-client/src/game/machines.rs::Containers::is_empty	
 BaseContainerBlockEntity.removeItem	port	crates/horizon-client/src/game/machines.rs::Game::take_one	gap: minor: takes one item, not a chosen count.
 BaseContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	opens the container's screen
