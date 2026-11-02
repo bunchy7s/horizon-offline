@@ -146,6 +146,7 @@ impl Game<'_> {
         }) else {
             return;
         };
+        self.native_entity_unleash(id, &kind);
         if used
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
@@ -336,7 +337,7 @@ impl Game<'_> {
         }
         false
     }
-    /// `LeadItem.useOn` and `LeashFenceKnotEntity.interact` on a fence.
+    /// `LeadItem.useOn` on the fence the crosshair hits.
     pub(super) fn interact_knot(&mut self) -> bool {
         let Some(hit) = self.pick() else {
             return false;
@@ -354,7 +355,15 @@ impl Game<'_> {
         {
             return false;
         }
-        let knot_pos = hit.pos;
+        // `FenceBlock.useWithoutItem` / `LeadItem.useOn` only tie the player's own mobs
+        // (`LeadItem.bindPlayerMobs`). A client whose crosshair met the knot sends Interact with
+        // the knot's id instead. Taking a mob back here would undo a tie: the client sends the
+        // click once for each hand.
+        self.use_knot(hit.pos, false)
+    }
+    /// A click at the fence at `knot_pos`: `knot_hit` for `LeashFenceKnotEntity.interact`,
+    /// otherwise `LeadItem.useOn`. Returns whether it was used.
+    pub(super) fn use_knot(&mut self, knot_pos: [i32; 3], knot_hit: bool) -> bool {
         let knot = leash::knot_state(knot_pos).center;
         let center = glam::DVec3::new(knot.x, knot.y, knot.z);
         let at = [center.x, center.y, center.z];
@@ -362,27 +371,6 @@ impl Game<'_> {
             .filter(|&i| self.mobs[i].extra.leash == Some(Holder::Knot(knot_pos)))
             .collect();
         let existing_boats = self.boats_on(Holder::Knot(knot_pos));
-        // `LeashFenceKnotEntity.interact` runs only when the ray meets the knot
-        // before the post: the knot's box (`recalculateBoundingBox`, 0.375 wide,
-        // y + 0.375 to y + 0.875) is wider than the post, so a hit point on the
-        // post inside that box went through the knot first. Any other click on
-        // the fence is `FenceBlock.useWithoutItem` / `LeadItem.useOn`, which only
-        // ties the player's own mobs (`LeadItem.bindPlayerMobs`).
-        let knot_hit = !(existing.is_empty() && existing_boats.is_empty()) && {
-            let box_ = leash::knot_state(knot_pos);
-            let half = box_.width / 2.0 + 1.0e-6;
-            (hit.point[0] - box_.position.x).abs() <= half
-                && (hit.point[2] - box_.position.z).abs() <= half
-                && hit.point[1] >= box_.position.y - 1.0e-6
-                && hit.point[1] <= box_.position.y + box_.height + 1.0e-6
-                // The knot is an entity: a hit on it counts only within the
-                // entity interaction range (`filterHitResult`), shorter than
-                // the block range the fence was hit at.
-                && self.eye_position().is_some_and(|eye| {
-                    let d = [0, 1, 2].map(|i| hit.point[i] - eye[i]);
-                    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= self.entity_reach * self.entity_reach
-                })
-        };
         let held_item = self.held().map(|s| s.item.to_string());
         let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft);
         // Shears snip every lead on the knot.

@@ -50,7 +50,7 @@ MerchantScreen.extractButtonArrows	inline	crates/horizon-client/src/game/trading
 MerchantScreen.extractAndDecorateCostA	inline	crates/horizon-client/src/game/trading.rs::Game::draw_merchant	discount: base count struck through, new count drawn (merchant.rs cost_a)
 MerchantScreen.mouseScrolled	port	crates/horizon-client/src/game/trading.rs::Game::merchant_scroll	gap: minor: one offer per wheel step; vanilla uses the float scroll amount
 MerchantScreen.mouseDragged	port	crates/horizon-client/src/game/trading.rs::Game::merchant_drag	the scroller takes presses only past seven offers and picks the nearest one
-MerchantScreen.mouseClicked	port	crates/horizon-client/src/game/trading.rs::Game::merchant_click	gap: player: clicking the scroller does not start a drag (see mouseDragged); the offer buttons work
+MerchantScreen.mouseClicked	port	crates/horizon-client/src/game/trading.rs::Game::merchant_click	a press inside the scroller's 139-px track starts the drag (dragging set, merchant_drag follows the pointer), only past seven offers; otherwise the offer buttons are hit-tested
 MerchantScreen.TradeOfferButton.extractToolTip	inline	crates/horizon-client/src/game/trading.rs::Game::draw_merchant	item tooltip for cost A, cost B or the result under the hovered offer
 MinecartCommandBlockEditScreen.populateAndSendPacket	port	crates/horizon-client/src/game/command_minecarts.rs::Game::open_cart_command_block	a game master's interact opens the editor on the cart's BaseCommandBlock, and the edit is written back to the cart
 PageButton.extractContents	inline	crates/horizon-client/src/game/books.rs::Game::draw_book	page arrows with their hover sprites (page_buttons)
@@ -76,4 +76,4 @@ TestBlockEditScreen	home	crates/horizon-client/src/game/block_editor.rs
 TestInstanceBlockEditScreen	home	crates/horizon-client/src/game/block_editor.rs	
 BelowOrAboveWidgetTooltipPositioner.positionTooltip	port	crates/horizon-client-render/src/ui.rs::menu_tooltip_position	the tooltip under the widget, over it when it does not fit, with vanilla's margins and overlaps
 ClientActivePlayersTooltip.getWidth	port	crates/horizon-client/src/multiplayer.rs::player_list	the sample's names are the tooltip's lines; its width comes from them (the status tooltip's own sizing)
-ClientActivePlayersTooltip.extractImage	port	crates/horizon-client/src/multiplayer.rs::player_list	each sample name styled by its § codes, then and_more for the players the sample leaves out
+ClientActivePlayersTooltip.extractImage	inline	crates/horizon-client/src/multiplayer.rs::player_list	the sample names, styled by their § codes, become the tooltip's text lines, then and_more for the players the sample leaves out; gap: player: no player face is drawn beside each name (vanilla draws a 10x10 face per entry through PlayerFaceExtractor), so the tooltip is text only

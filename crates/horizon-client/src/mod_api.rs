@@ -6,7 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
-pub use crate::camera::CameraEntity;
+pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
 pub use crate::crafting::{CustomRecipe, Ingredient};
@@ -53,6 +53,24 @@ use serde_json::{Map, Value};
 use std::time::Duration;
 /// The window events `input_key` hands over (`winit::event::KeyEvent`) and their key types.
 pub use winit;
+
+/// Camera values from the most recently extracted world frame.
+#[derive(Clone, Debug)]
+pub struct NativeCamera {
+    pub position: [f64; 3],
+    pub eye_height: f32,
+    pub partial_tick: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    /// Camera-relative view matrix in column-major order.
+    pub view: [f32; 16],
+    /// Reversed-Z projection matrix in column-major order.
+    pub projection: [f32; 16],
+    pub dimension: String,
+}
 
 /// A dispenser hook's answer: the slot's remainder (None empties it) and the
 /// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
@@ -110,7 +128,10 @@ pub struct NativeScreenView<'a> {
     /// on it. Every container, station and mod window draws on the inventory
     /// screen and so reports `inventory`: tell them apart by `menu` and
     /// `title` (both None on a window the client opened itself) and by
-    /// `slots`.
+    /// `slots`. The title's own screens report theirs (API 326): `title`,
+    /// `world_select`, `world_create`, `world_create_flat`, `world_edit`,
+    /// `multiplayer`, `add_server`, `direct_connect`…, with no menu, no title
+    /// and no slots.
     pub id: &'static str,
     /// The type id of the menu the server opened for this screen
     /// (`minecraft:generic_9x3`, `minecraft:furnace`, a mod's own id; a mount's
@@ -400,6 +421,51 @@ pub fn mods() -> &'static [Box<dyn Hooks>] {
     MODS.get().map_or(&[], |mods| mods.as_ref())
 }
 
+/// The bundles' `[mod] id`s, one a [`mods`] entry in the same order.
+static MOD_IDS: OnceLock<&'static [&'static str]> = OnceLock::new();
+
+/// Names the entries of [`mods`] by their bundles' `[mod] id`s, so a panic in a hook names its mod.
+/// The launcher's generated executable calls it before `entry::main_with`.
+pub fn name_mods(ids: &'static [&'static str]) {
+    if MOD_IDS.set(ids).is_err() {
+        log::warn!("Trait mods already named; ignoring the second list");
+    }
+}
+
+/// `mods` in order, each marked as running `hook` until the next one is (or the loop ends), so a
+/// panic in it names the mod. The generated dispatch loops over it.
+fn entered<'a>(mods: &'a [Box<dyn Hooks>], hook: &'static str) -> Entered<'a> {
+    Entered {
+        mods: mods.iter().enumerate(),
+        hook,
+        guard: None,
+    }
+}
+
+struct Entered<'a> {
+    mods: std::iter::Enumerate<std::slice::Iter<'a, Box<dyn Hooks>>>,
+    hook: &'static str,
+    guard: Option<crate::crash::NativeModGuard>,
+}
+
+impl<'a> Iterator for Entered<'a> {
+    type Item = &'a Box<dyn Hooks>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // The last mod's mark goes first, so the next one's puts back what was there before.
+        drop(self.guard.take());
+        let (index, hooks) = self.mods.next()?;
+        self.guard = Some(crate::crash::enter_native_mod(
+            crate::crash::NativeModCall {
+                id: MOD_IDS.get().and_then(|ids| ids.get(index)).copied(),
+                index,
+                hook: self.hook,
+            },
+        ));
+        Some(hooks)
+    }
+}
+
 /// Whether a mod claims a cancellable hook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Flow {
@@ -492,3 +558,143 @@ mod generated;
 pub use generated::Hooks;
 #[doc(hidden)]
 pub use generated::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct Quiet;
+    impl Hooks for Quiet {}
+
+    struct Broken;
+    impl Hooks for Broken {
+        fn component_types(&self, _event: &mut ComponentTypesEvent<'_>) {
+            panic!("a broken mod");
+        }
+    }
+
+    /// A double with the three `Host` methods the probe calls.
+    struct Reader {
+        block: &'static str,
+        lines: Vec<Text>,
+    }
+
+    impl Host for Reader {
+        fn block(&self, _pos: [i32; 3]) -> String {
+            self.block.to_string()
+        }
+        fn acting_player(&self) -> Option<NativeServerPlayer> {
+            Some(NativeServerPlayer {
+                uuid: 7,
+                name: "Probe".to_string(),
+                permission: 0,
+                dimension: "minecraft:overworld".to_string(),
+                position: [0.0; 3],
+                game_mode: 0,
+                health: 20.0,
+                yaw: 0.0,
+                pitch: 0.0,
+            })
+        }
+        fn action_bar(&mut self, _uuid: u128, line: Text) -> bool {
+            self.lines.push(line);
+            true
+        }
+    }
+
+    /// Claims a use on stone, after telling the player what the block is.
+    struct Probe;
+
+    impl Hooks for Probe {
+        fn use_item_on(&self, host: &mut dyn Host, event: &mut UseItemOnEvent<'_>) -> Flow {
+            let block = host.block(event.pos);
+            let player = host.acting_player().expect("a player acts");
+            host.action_bar(player.uuid, Text::literal(block.clone()));
+            if block == "minecraft:stone" {
+                Flow::Cancel
+            } else {
+                Flow::Continue
+            }
+        }
+    }
+
+    /// Asks the host to tell a player without anyone having implemented it.
+    struct Chatty;
+
+    impl Hooks for Chatty {
+        fn use_item_on(&self, host: &mut dyn Host, _event: &mut UseItemOnEvent<'_>) -> Flow {
+            host.tell(7, Text::literal("hello"));
+            Flow::Continue
+        }
+    }
+
+    fn stick() -> ItemStack {
+        ItemStack {
+            item: Arc::from("minecraft:stick"),
+            count: 1,
+            damage: 0,
+            extra: None,
+        }
+    }
+
+    #[test]
+    fn a_panic_in_a_hook_names_the_mod_and_the_hook() {
+        name_mods(&["quiet", "broken"]);
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Quiet), Box::new(Broken)];
+        let caught = Arc::new(Mutex::new(Vec::new()));
+        let sink = caught.clone();
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let error = crate::crash::panic_report(info, "client").error;
+            if error.contains("a broken mod") {
+                sink.lock().unwrap().push(error);
+            }
+        }));
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dispatch_component_types(&mods, &mut Vec::new())
+        }));
+        // Once the dispatch has unwound, the thread is in no mod.
+        let _ = std::panic::catch_unwind(|| panic!("a broken mod's caller"));
+        std::panic::set_hook(previous);
+        // The game stops as before: the panic goes on to the dispatch's caller.
+        assert!(unwound.is_err());
+        let errors = caught.lock().unwrap();
+        assert_eq!(errors.len(), 2);
+        assert!(
+            errors[0].ends_with("\nin native mod broken, hook component_types"),
+            "{}",
+            errors[0]
+        );
+        assert!(!errors[1].contains("in native mod"), "{}", errors[1]);
+    }
+
+    #[test]
+    fn a_test_host_implements_only_what_its_hook_calls() {
+        let mods = [Box::new(Probe) as Box<dyn Hooks>];
+        let stack = stick();
+        for (block, expected) in [("minecraft:stone", true), ("minecraft:dirt", false)] {
+            let mut host = Reader {
+                block,
+                lines: Vec::new(),
+            };
+            let mut claimed = false;
+            dispatch_use_item_on(&mut host, &mods, &stack, [1, 2, 3], [0, 1, 0], &mut claimed);
+            assert_eq!(claimed, expected, "{block}");
+            let told: Vec<String> = host.lines.iter().map(Text::plain).collect();
+            assert_eq!(told, [block], "{block}");
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Host::tell")]
+    fn an_unexpected_host_call_names_the_method() {
+        let mods = [Box::new(Chatty) as Box<dyn Hooks>];
+        let mut host = Reader {
+            block: "minecraft:stone",
+            lines: Vec::new(),
+        };
+        let mut claimed = false;
+        dispatch_use_item_on(&mut host, &mods, &stick(), [0; 3], [0, 1, 0], &mut claimed);
+    }
+}

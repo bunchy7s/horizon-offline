@@ -138,7 +138,7 @@ SequencedPriorityIterator.switchCacheToNextHighestPrioQueue	inline	crates/horizo
 SignatureValidator.verifySignature	port	crates/horizon-protocol/src/rsa.rs::RsaPublicKey::verify	
 Signer.from	port	crates/horizon-protocol/src/rsa.rs::RsaPrivateKey::sign	SHA256withRSA, checked with the public key before it is sent
 SimpleBitStorage.<init>	port	crates/horizon-core/src/paletted.rs::pack_words	packs palette ids into longs, values never spanning a long
-SimpleBitStorage.cellIndex	port	crates/horizon-core/src/paletted.rs::locate	the word index of an entry
+SimpleBitStorage.cellIndex	port	crates/horizon-core/src/storage.rs::locate	the word and bit shift of an entry
 SimpleBitStorage.getAndSet	port	crates/horizon-core/src/paletted.rs::PalettedContainer::set	gap: minor: also grows the palette; the raw word write is write
 SimpleBitStorage.set	port	crates/horizon-core/src/paletted.rs::write	raw word write; no palette growth
 SimpleBitStorage.fill	port	crates/horizon-core/src/paletted.rs::PalettedContainer::new	gap: minor: builds a single-value container instead of overwriting each word

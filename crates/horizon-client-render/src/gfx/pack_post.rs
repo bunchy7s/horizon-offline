@@ -207,6 +207,9 @@ enum Image {
     /// The copy of a buffer or a pack image taken before a dispatch, which its loads read.
     ColorBefore(usize),
     CustomBefore(usize),
+    /// An image no `image.*` gives: its stand-in of the declared format and dimension
+    /// (`pack_images::StandIn`).
+    StandIn(wgpu::TextureFormat, wgpu::TextureViewDimension),
 }
 
 impl Image {
@@ -423,7 +426,8 @@ pub(super) struct World<'a> {
     pub lightmap: wgpu::TextureView,
     /// Terrain's geometry, when the pack draws it.
     pub terrain: Option<Geometry<'a>>,
-    /// `mc_Entity` of each block sprite layer: (id, 1 for fluids or -1) pairs.
+    /// Of each block sprite layer, `mc_Entity` (id, then 1 for fluids or -1) and `at_midBlock.w`
+    /// (its block's light): three values a layer.
     pub block_ids: &'a [i32],
     /// The atlas of the sun and moon's sprites.
     pub celestial: Option<wgpu::TextureView>,
@@ -569,6 +573,8 @@ pub struct PackPost {
     gpu: Gpu,
     /// Zeros to clear images by copying, where the device has no `clear_texture`.
     zeros: Option<wgpu::Buffer>,
+    /// What the images no `image.*` gives bind.
+    stand_ins: Vec<pack_images::StandIn>,
     dump: Option<pack_images::Dump>,
     buffers: pack_images::Buffers,
     textures: Vec<pack_textures::PackTexture>,
@@ -937,10 +943,11 @@ pub(super) struct ShadowView {
     pub unculled: Option<f32>,
 }
 
-/// Set 3 of flat terrain, read by the vertex stage: `mc_Entity`'s table (-1 pairs when empty)
-/// and, per arena page, the page's vertices (a vertex reads its quad's corners for its normal).
+/// Set 3 of flat terrain, read by the vertex stage: the sprite layers' table (`mc_Entity`'s id
+/// and fluid, `at_midBlock.w`; -1, -1, 0 when empty) and, per arena page, the page's vertices
+/// (a vertex reads its quad's corners for its normal).
 fn block_ids(device: &wgpu::Device, table: &[i32]) -> (wgpu::BindGroupLayout, wgpu::Buffer) {
-    let empty = [-1, -1];
+    let empty = [-1, -1, 0];
     let table = if table.is_empty() { &empty[..] } else { table };
     let buffer = wgpu::util::DeviceExt::create_buffer_init(
         device,
@@ -994,6 +1001,8 @@ struct Resources<'a> {
     gpu: Gpu,
     /// The buffers whose format can be bound as an image.
     storable: u16,
+    /// The formats and dimensions of the images no `image.*` gives, for their stand-ins.
+    stand_ins: &'a std::cell::RefCell<Vec<(wgpu::TextureFormat, wgpu::TextureViewDimension)>>,
 }
 
 /// A program's bind group layout (its uniform block, samplers and images) and how each sampler
@@ -1189,6 +1198,27 @@ fn bindings(
             .and_then(|n| n.parse::<usize>().ok())
             .filter(|&n| n < BUFFERS && !group.shadow());
         let own = pack.images.iter().position(|c| c.def.name == i.name);
+        let Some(format) = image_format(&i.format) else {
+            notes.push(format!("{name}: `{}` has format {}", i.name, i.format));
+            return None;
+        };
+        let dimension = if i.ty.ends_with("3D") {
+            wgpu::TextureViewDimension::D3
+        } else {
+            wgpu::TextureViewDimension::D2
+        };
+        // An image no `image.*` gives reads zero, also after the program stored into it
+        // (Iris 1.11.7, observed with a probe pack).
+        let stand_in = |of: &str, notes: &mut Vec<String>| {
+            notes.push(format!(
+                "{name}: image `{of}` has no `image.{of}`; it reads zero"
+            ));
+            let mut stand_ins = pack.stand_ins.borrow_mut();
+            if !stand_ins.contains(&(format, dimension)) {
+                stand_ins.push((format, dimension));
+            }
+            (Image::StandIn(format, dimension), format)
+        };
         let (target, actual) = match (buffer, own) {
             (_, Some(k)) => (Image::Custom(k), pack.images[k].format),
             (Some(b), None) => (Image::Color(b), formats[b]),
@@ -1202,20 +1232,10 @@ fn bindings(
                 match (buffer, pack.images.iter().position(|c| c.def.name == of)) {
                     (_, Some(k)) => (Image::CustomBefore(k), pack.images[k].format),
                     (Some(b), None) => (Image::ColorBefore(b), formats[b]),
-                    (None, None) => {
-                        notes.push(format!("{name}: image `{of}` is not provided yet"));
-                        return None;
-                    }
+                    (None, None) => stand_in(of, notes),
                 }
             }
-            (None, None) => {
-                notes.push(format!("{name}: image `{}` is not provided yet", i.name));
-                return None;
-            }
-        };
-        let Some(format) = image_format(&i.format) else {
-            notes.push(format!("{name}: `{}` has format {}", i.name, i.format));
-            return None;
+            (None, None) => stand_in(&i.name, notes),
         };
         if actual != format {
             notes.push(format!(
@@ -1229,11 +1249,6 @@ fn bindings(
             "readonly" => wgpu::StorageTextureAccess::ReadOnly,
             "atomic" => wgpu::StorageTextureAccess::Atomic,
             _ => wgpu::StorageTextureAccess::ReadWrite,
-        };
-        let dimension = if i.ty.ends_with("3D") {
-            wgpu::TextureViewDimension::D3
-        } else {
-            wgpu::TextureViewDimension::D2
         };
         if let Image::Color(b) | Image::ColorBefore(b) = target
             && pack.storable & 1 << b == 0
@@ -1686,6 +1701,8 @@ impl PackPost {
         screen: wgpu::TextureFormat,
         world: World<'_>,
     ) -> Self {
+        // What the pack's shaders need of its storage buffers, before its parts move out.
+        let minimums = post.buffer_minimums();
         let features = device.features();
         let formats: [wgpu::TextureFormat; BUFFERS] =
             std::array::from_fn(|i| texture_format(post.config.buffers[i].format, features));
@@ -1769,7 +1786,7 @@ impl PackPost {
         if gpu.storage_stages().is_empty() {
             objects.clear();
         }
-        let buffers = pack_images::Buffers::new(device, objects, gpu.storage_stages());
+        let buffers = pack_images::Buffers::new(device, objects, minimums, gpu.storage_stages());
         let storable = (0..BUFFERS)
             .filter(|&i| gpu.storable(adapter, formats[i], features))
             .fold(0u16, |m, i| m | 1 << i);
@@ -1788,6 +1805,7 @@ impl PackPost {
                 }],
             })
         });
+        let stand_ins = std::cell::RefCell::new(Vec::new());
         let pack = Resources {
             textures: &textures,
             images: &images,
@@ -1796,6 +1814,7 @@ impl PackPost {
             indices: indices.as_ref(),
             gpu,
             storable,
+            stand_ins: &stand_ins,
         };
         let mut build = |mut p: horizon_shaders::PostProgram, geometry: Option<&Geometry<'_>>| {
             let in_shadow = p.group.shadow();
@@ -2043,6 +2062,7 @@ impl PackPost {
             .filter(|p| !skip.split(',').any(|s| s == p.name))
             .filter_map(|p| build(p, None))
             .collect();
+        let stand_ins = pack_images::stand_ins(device, stand_ins.take());
         if let Some(t) = &terrain {
             notes.push(format!("terrain draws with {}", t.name));
         }
@@ -2360,6 +2380,7 @@ impl PackPost {
             shadow_culling: post.shadow_culling,
             gpu,
             zeros: None,
+            stand_ins,
             dump: pack_images::Dump::new(),
             dummy_3d: device
                 .create_texture(&wgpu::TextureDescriptor {
@@ -2455,6 +2476,13 @@ impl PackPost {
         out: [u32; 2],
     ) -> wgpu::BindGroup {
         pack_images::copy(encoder, &self.images, pass.image_copies);
+        for &(_, image) in &pass.images {
+            if let Image::StandIn(format, dimension) = image
+                && let Some(s) = pack_images::stand_in(&self.stand_ins, format, dimension)
+            {
+                s.clear(encoder);
+            }
+        }
         if let Some(targets) = &self.targets {
             for i in (0..BUFFERS).filter(|i| pass.copies & 1 << i != 0) {
                 if let (Some(t), Some(copy)) = (&targets.color[i], &targets.scratch[i]) {
@@ -2627,6 +2655,10 @@ impl PackPost {
                     Image::Custom(k) => self.images[k].view.as_ref().unwrap_or(&self.dummy),
                     Image::ColorBefore(i) => targets.scratch[i].as_ref().unwrap_or(&self.dummy),
                     Image::CustomBefore(k) => self.images[k].before.as_ref().unwrap_or(&self.dummy),
+                    Image::StandIn(format, dimension) => {
+                        pack_images::stand_in(&self.stand_ins, format, dimension)
+                            .map_or(&self.dummy, |s| &s.view)
+                    }
                 };
                 entries.push(wgpu::BindGroupEntry {
                     binding,
@@ -4131,6 +4163,114 @@ mod tests {
         // The device still makes things, and its errors still come back.
         assert!(buffer(wgpu::BufferUsages::UNIFORM).is_ok());
         assert!(buffer(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::MAP_WRITE).is_err());
+    }
+
+    /// Iris 1.11.7 runs a program whose image no `image.*` gives, and its loads read zero
+    /// (observed with a probe pack). Its pass is kept, the image bound to a stand-in of its
+    /// declared format, zero again before each pass even after one stored into it.
+    #[test]
+    fn an_image_without_an_entry_reads_zero() {
+        use wgpu::TextureViewDimension as D;
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let image = |name: &str, ty: &str, format: &str, binding| horizon_shaders::Image {
+            name: name.into(),
+            ty: ty.into(),
+            format: format.into(),
+            access: String::new(),
+            binding,
+            before: None,
+        };
+        let interface = horizon_shaders::Interface {
+            uniform_size: 48,
+            uniforms: Vec::new(),
+            samplers: Vec::new(),
+            outputs: vec![0],
+            draw: false,
+            images: vec![
+                image("mask", "uimage3D", "r32ui", 1),
+                image("other", "uimage3D", "r32ui", 2),
+                image("flat", "image2D", "rgba8", 3),
+            ],
+            buffers: Vec::new(),
+        };
+        let buffers = pack_images::Buffers::new(
+            &device,
+            Default::default(),
+            Default::default(),
+            wgpu::ShaderStages::FRAGMENT,
+        );
+        let stand_ins = std::cell::RefCell::new(Vec::new());
+        let pack = Resources {
+            textures: &[],
+            images: &[],
+            left_out: &[],
+            buffers: &buffers,
+            indices: None,
+            gpu: Gpu::of(&adapter, device.features()),
+            storable: 0,
+            stand_ins: &stand_ins,
+        };
+        let mut notes = Vec::new();
+        let (.., images) = bindings(
+            device.features(),
+            &interface,
+            "composite",
+            Group::Composite,
+            &[0],
+            None,
+            &[T::Rgba8Unorm; BUFFERS],
+            None,
+            &mut notes,
+            &pack,
+        )
+        .expect("the pass is kept");
+        assert!(
+            images
+                == [
+                    (1, Image::StandIn(T::R32Uint, D::D3)),
+                    (2, Image::StandIn(T::R32Uint, D::D3)),
+                    (3, Image::StandIn(T::Rgba8Unorm, D::D2)),
+                ]
+        );
+        assert_eq!(notes.len(), 3, "{notes:?}");
+        // One stand-in for each format and dimension.
+        let made = pack_images::stand_ins(&device, stand_ins.take());
+        assert_eq!(made.len(), 2);
+        let mask = pack_images::stand_in(&made, T::R32Uint, D::D3).expect("made");
+        let texture = mask.view.texture();
+        queue.write_texture(
+            texture.as_image_copy(),
+            &7u32.to_le_bytes(),
+            wgpu::TexelCopyBufferLayout::default(),
+            texture.size(),
+        );
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        mask.clear(&mut encoder);
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout::default(),
+            },
+            texture.size(),
+        );
+        queue.submit([encoder.finish()]);
+        read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert_eq!(&read.slice(..).get_mapped_range().unwrap()[..], &[0; 4]);
     }
 
     #[test]

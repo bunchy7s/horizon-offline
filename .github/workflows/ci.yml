@@ -96,8 +96,9 @@ jobs:
         run: |
           cargo +stable test --workspace --lib --bins --tests
           # The full content-root tests (#[ignore]d: minutes each on a laptop). The same build as above; they need the
-          # prepared vanilla data, so without it they pass at once.
-          cargo +stable test --workspace --lib mod_content::tests:: -- --ignored
+          # prepared vanilla data, so without it they pass at once. Keep the target selection identical to avoid
+          # recompiling the workspace with a different dependency graph.
+          cargo +stable test --workspace --lib --bins --tests mod_content::tests:: -- --ignored
           cargo +stable test --workspace --doc
   # The launcher is its own workspace (launcher/Cargo.toml), so verify's cargo runs never build it. A pull request that
   # changes it or a crate it builds is checked here, and so is every push to main: two pull requests can each pass

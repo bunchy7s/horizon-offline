@@ -83,6 +83,7 @@ mod conv;
 mod dcomp;
 mod descriptor;
 mod device;
+pub mod disk_cache;
 mod device_creation;
 mod instance;
 mod pipeline_desc;
@@ -1353,6 +1354,16 @@ pub(super) enum CompiledShader {
 }
 
 impl CompiledShader {
+    /// The bytecode, as [`disk_cache`] keeps it.
+    fn bytes(&self) -> &[u8] {
+        let code = self.create_native_shader();
+        if code.BytecodeLength == 0 {
+            return &[];
+        }
+        // SAFETY: the blob or vector `code` points into lives as long as `self`.
+        unsafe { core::slice::from_raw_parts(code.pShaderBytecode.cast(), code.BytecodeLength) }
+    }
+
     fn create_native_shader(&self) -> Direct3D12::D3D12_SHADER_BYTECODE {
         match self {
             CompiledShader::Dxc(shader) => Direct3D12::D3D12_SHADER_BYTECODE {

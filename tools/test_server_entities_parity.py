@@ -9,7 +9,7 @@ set rolling along the rail), boats and a raft (one falling onto the ground), arm
 arms, wearing a helmet, one falling), a chicken jockey, a slime, a pig whose scale `/attribute` sets, item
 frames (one holding a turned diamond), paintings, primed TNT (one falling), a floating falling block, sand
 falling into a cobweb, sand that falls onto a torch and breaks into an item (added after the tick's tracking pass in
-Horizon), an arrow that lands and an end crystal. The client records for 20 seconds, the ticks
+Horizon), an arrow that lands, a burning arrow and an end crystal. The client records for 20 seconds, the ticks
 running for 200 more after 3, what ClientPacketListener would make of the packets (EntityTranscript): each
 entity's spawn
 packet (position, rotations, data, motion), the entity data it was paired with and all it was sent since, its
@@ -93,6 +93,8 @@ SCENE = [
     'setblock 6 -60 -4 minecraft:torch',
     'setblock 6 -55 -4 minecraft:sand',
     'summon minecraft:arrow 0.5 -55 -1.5 {Motion:[0.3d,0d,0d]}',
+    # A burning arrow (a Flame bow's): its shared flag of fire (Entity.DATA_SHARED_FLAGS_ID) reaches the client.
+    'summon minecraft:arrow 0.5 -55 2.5 {Motion:[0.3d,0d,0d],Fire:2000s}',
     'summon minecraft:end_crystal -6.5 -60 6.5 {ShowBottom:0b}',
 ]
 
@@ -207,7 +209,7 @@ def main():
         entities=len(vanilla), output_sha256=lab.digest(build / 'horizon.txt', 'sha256'),
         scope='Minecarts (one rolling), boats (one falling), armor stands, a chicken jockey, a slime, a pig with a '
               'scale, item frames, paintings, primed TNT, falling blocks (one held by a cobweb, one breaking into an '
-              'item on a torch), an arrow and an end crystal '
+              'item on a torch), arrows (one burning) and an end crystal '
               'tracked to a vanilla-codec client by a dedicated server: spawn packets, entity data, equipment, '
               'attributes, passengers and the positions the syncs leave them at.'))
     print(f'server entities: {len(vanilla)} entities identical')

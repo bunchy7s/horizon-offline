@@ -1304,6 +1304,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config);
+        hub.sync_attachments = !crate::mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -1417,10 +1418,14 @@ impl Game<'_> {
         guest: &mut horizon_client::lan::guest::Guest,
     ) {
         self.guest_attachments_into(guest);
-        if guest.placed && host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
-            playerdata::save_owner(guest, &mut self.level, &self.world_root);
-        } else if guest.placed {
-            playerdata::save(guest, &self.world_root);
+        if guest.placed {
+            if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
+                playerdata::save_owner(guest, &mut self.level, &self.world_root);
+            } else {
+                playerdata::save(guest, &self.world_root);
+            }
+            let directory = playerdata::directory(&self.world_root);
+            self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
         }
         self.save_guest_records(host, guest);
     }
@@ -1616,35 +1621,28 @@ impl Game<'_> {
         host.play.entry(conn).or_default().stats = stats;
     }
     /// The integrated server's owner into the world's player, for `Level::write`.
-    pub(super) fn store_owner(&mut self) {
-        let Some(uuid) = self
-            .lan
-            .as_ref()
-            .and_then(|h| h.owner.as_ref())
-            .map(|o| o.uuid)
-        else {
-            return;
-        };
-        let Some((riding, dim, others)) = self.lan.as_ref().and_then(|h| {
+    /// Returns the owner's uuid and name when they were stored.
+    pub(super) fn store_owner(&mut self) -> Option<(u128, String)> {
+        let uuid = self.lan.as_ref().and_then(|h| h.owner.as_ref())?.uuid;
+        let (riding, dim, others) = self.lan.as_ref().and_then(|h| {
             let g = h.hub.guests.iter().find(|g| g.uuid == uuid && g.placed)?;
             let others = self.ridden_by_others(&h.hub.guests, &g.dimension, Some(uuid), true);
             Some((g.vehicle, g.dimension.clone(), others))
-        }) else {
-            return;
-        };
+        })?;
         // The vehicle the owner rides (`ServerPlayer.saveParentVehicle`).
         let vehicle = self
             .parent_vehicle_in(None, &dim, riding, &others, false)
             .map(|(tag, _)| tag);
-        let Some(host) = &self.lan else {
-            return;
-        };
+        let host = self.lan.as_ref()?;
+        let mut stored = None;
         if let Some(g) = host.hub.guests.iter().find(|g| g.uuid == uuid && g.placed) {
             playerdata::store(g, &mut self.level, vehicle);
             self.save_guest_records(host, g);
+            stored = Some(g.name.clone());
         } else if let Some(saved) = host.owner.as_ref().and_then(|o| o.saved.as_ref()) {
             self.level.position = saved.position;
         }
+        stored.map(|name| (uuid, name))
     }
 
     /// The world's default game mode (`defaultgamemode`).
@@ -1948,6 +1946,47 @@ impl Game<'_> {
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(&mut host, conn, flying);
                 }
+                HostEvent::Sneak { conn, sneaking } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_toggle_sneak(uuid, &name, sneaking);
+                        });
+                    }
+                }
+                HostEvent::Kicked {
+                    conn,
+                    player,
+                    name,
+                    reason,
+                } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    // The same poll can have removed the guest (their `Left`): the mods hear the
+                    // kick anyway, without the guest's state swapped in.
+                    if host.hub.guest(conn).is_some() {
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_kicked(player, &name, &reason);
+                        });
+                    } else {
+                        self.native_player_kicked(player, &name, &reason);
+                    }
+                }
+                HostEvent::Input { conn, flags } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_input(uuid, &name, flags);
+                        });
+                    }
+                }
                 HostEvent::MainHandChanged(conn, left) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());
@@ -1958,6 +1997,25 @@ impl Game<'_> {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());
                         self.native_player_locale_change(uuid, &name, &locale);
+                    }
+                }
+                HostEvent::PlayerLoaded(conn) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_client_loaded_world(uuid, &name);
+                    }
+                }
+                HostEvent::RecipeBookSettings {
+                    conn,
+                    book,
+                    open,
+                    filtering,
+                } => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_recipe_book_settings_change(
+                            uuid, &name, book, open, filtering,
+                        );
                     }
                 }
                 HostEvent::Packet(conn, packet) => {
@@ -2011,6 +2069,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
+            host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 host.hub.poll(&mut ctx)
@@ -2261,6 +2320,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
+                host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)
@@ -2350,6 +2410,7 @@ impl Game<'_> {
         self.lan_sync_border(&mut host);
         host.hub.anticheat_ping();
         drop(holding);
+        self.flush_attachment_sync(&mut host);
         self.flush_native_net(&mut host);
         self.flush_far_terrain(&mut host);
         lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
@@ -2385,6 +2446,9 @@ impl Game<'_> {
         };
         self.guest_attachments
             .insert(g.uuid, std::mem::take(&mut g.attachments));
+        // PlayerEvent.LoadFromFile: the player's data is read and applied,
+        // the player not yet placed.
+        self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
         if !known || force {
             g.game_mode = default_mode;
         }
