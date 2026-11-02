@@ -873,6 +873,8 @@ impl Game<'_> {
     pub(super) fn tick_creatures(&mut self) -> Result<()> {
         self.attack_ticks = self.attack_ticks.saturating_add(1);
         self.tick_leads();
+        // Vanilla's spawning and raids run before ChunkMap.tick.
+        let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
         if self.ui.rules.bool("spawn_mobs") {
@@ -882,6 +884,7 @@ impl Game<'_> {
             self.tick_village_siege();
         }
         self.tick_raids();
+        self.lan_synced_since(from);
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();
@@ -1783,6 +1786,19 @@ impl Game<'_> {
             );
         }
     }
+    /// A mob's projectile enters the level.
+    fn launch_mob_projectile(&mut self, mut p: Projectile) {
+        self.next_entity += 1;
+        p.id = self.next_entity;
+        let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
+        // LlamaSpit.recreateFromPacket: the spit's burst on the client.
+        if p.kind == ProjectileKind::LlamaSpit {
+            let v = p.velocity;
+            self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+        }
+        self.add_projectile(p);
+        self.projectile_event("minecraft:projectile_shoot", owner, at);
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
             match e {
@@ -2074,6 +2090,23 @@ impl Game<'_> {
                 } => {
                     self.mob_hits_mob(target, amount, source);
                 }
+                MobEvent::AttackMobWithEffect {
+                    target,
+                    amount,
+                    source,
+                    effect,
+                    ticks,
+                    amplifier,
+                } => {
+                    // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
+                    // effect sits inside the branch where the hit landed, and
+                    // `LivingEntity.addEffect` takes a mob as well as a player.
+                    if self.mob_hits_mob(target, amount, source)
+                        && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
+                    {
+                        t.add_effect(effect, ticks, amplifier);
+                    }
+                }
                 MobEvent::CubeHurtPlayer { cube, amount, from } => {
                     // AbstractCubeMob.dealDamage: the attack sound (and its
                     // two pitch draws, made even for a silent cube, whose
@@ -2271,17 +2304,40 @@ impl Game<'_> {
                         }
                     }
                 }
-                MobEvent::Projectile(mut p) => {
-                    self.next_entity += 1;
-                    p.id = self.next_entity;
-                    let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
-                    // LlamaSpit.recreateFromPacket: the spit's burst on the client.
-                    if p.kind == ProjectileKind::LlamaSpit {
-                        let v = p.velocity;
-                        self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+                MobEvent::Projectile(p) => self.launch_mob_projectile(p),
+                MobEvent::BowShot {
+                    mob,
+                    weapon,
+                    mut arrow,
+                } => {
+                    self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    self.launch_mob_projectile(arrow);
+                }
+                MobEvent::CrossbowShot { ammo, mut arrow } => {
+                    if &*ammo.item == "minecraft:firework_rocket" {
+                        // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
+                        let mut at = arrow.position;
+                        at.y -= f64::from(0.15f32) - 0.1;
+                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                    } else {
+                        Self::arrow_from_ammo(&ammo, &mut arrow);
+                        self.launch_mob_projectile(arrow);
                     }
-                    self.add_projectile(p);
-                    self.projectile_event("minecraft:projectile_shoot", owner, at);
+                }
+                MobEvent::CrossbowLoad {
+                    mob,
+                    weapon,
+                    at,
+                    pitch,
+                } => {
+                    if self.mob_crossbow_ammo(mob, &weapon) {
+                        self.audio.play(
+                            "minecraft:item.crossbow.loading_end",
+                            Some(at),
+                            1.0,
+                            pitch,
+                        );
+                    }
                 }
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;
@@ -6326,7 +6382,7 @@ impl Game<'_> {
             Some(stored) => {
                 let mut models = self.skin_models.borrow_mut();
                 models.begin(&mut self.skin_frame.borrow_mut(), stored);
-                models.eyes = renderer.is_some_and(|r| r.skins_eyes());
+                models.tagged = renderer.is_some_and(|r| r.skins_tagged());
             }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
@@ -6533,11 +6589,7 @@ impl Game<'_> {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
                 horizon_client::mobs::render::render_skinned(
                     mob,
                     alpha as f32,

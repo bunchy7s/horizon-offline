@@ -7,7 +7,7 @@ use horizon_launcher::screenshots::{self, Shot};
 use std::path::PathBuf;
 
 /// Thumbnails shown before "Show all".
-const FIRST: usize = 8;
+pub(super) const FIRST: usize = 8;
 const THUMB_W: f32 = 196.;
 const THUMB_H: f32 = THUMB_W * 9. / 16.;
 
@@ -16,12 +16,12 @@ pub(super) struct Screenshots {
     home: Option<PathBuf>,
     pub(super) list: Vec<Shot>,
     fresh: bool,
-    all: bool,
+    pub(super) all: bool,
     /// The picture open in the viewer, by its place in `list`.
-    viewing: Option<usize>,
-    confirm_delete: bool,
+    pub(super) viewing: Option<usize>,
+    pub(super) confirm_delete: bool,
     /// What the last action did, or why it failed.
-    note: Option<Result<String, String>>,
+    pub(super) note: Option<Result<String, String>>,
 }
 
 impl Screenshots {
@@ -32,7 +32,7 @@ impl Screenshots {
 }
 
 impl Launcher {
-    fn load_screenshots(&mut self, home: PathBuf) {
+    pub(super) fn load_screenshots(&mut self, home: PathBuf) {
         if self.screenshots.home.as_ref() != Some(&home) {
             self.screenshots = Screenshots {
                 home: Some(home.clone()),
