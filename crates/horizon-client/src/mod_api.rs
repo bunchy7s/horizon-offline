@@ -16,10 +16,10 @@ pub use crate::first_person::Hand;
 pub use crate::fog::{FogData, FogType};
 pub use crate::game::native_block_entity_draw::{BlockEntityDraw, CubeFace};
 pub use crate::game::{
-    NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks, NativeDataMapType,
-    NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem, NativeHit,
-    NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent, NativePlayerRender,
-    NativeShake,
+    ItemEnergyBuffer, NativeBlockEdit, NativeBlockRun, NativeClock, NativeColumnBlocks,
+    NativeDataMapType, NativeExperienceOrb, NativeFalling, NativeHeightmap, NativeHeldItem,
+    NativeHit, NativeMapDecoration, NativeMapInfo, NativeMobRender, NativeModEvent,
+    NativePlayerRender, NativeShake,
 };
 pub use crate::gfx::native_render::{
     RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
@@ -27,6 +27,7 @@ pub use crate::gfx::native_render::{
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
+pub use crate::merchant::MerchantOffer;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::text::Text;
 pub use horizon_assets::item_model::DisplayContext;
@@ -185,6 +186,9 @@ pub struct NativeScreen {
     /// The mod draws the title and the "Inventory" label itself
     /// (`native_screen_draw`); Horizon leaves them out.
     pub own_labels: bool,
+    /// The mod draws its own background (`native_screen_draw`), so Horizon
+    /// leaves out the plain panel and the slot frames.
+    pub own_background: bool,
 }
 
 /// A native mod as Options > Mods lists it (`native_mods`).

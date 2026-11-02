@@ -25,7 +25,7 @@ CraftingTableBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.r
 CreakingHeartBlock.getTicker	port	crates/horizon-world/src/level/creaking.rs::Sim::heart_tick	scheduled heart tick; the uprooted check is done inside heart_update_state
 CreakingHeartBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::step	ticked in #3516; `CreakingHeartBlock.animateTick` is cited at crates/horizon-client/src/animate_tick.rs:104
 CreakingHeartBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	CreakingHeart arm schedules the 1-tick heart update then the default shape
-CreakingHeartBlock.isSurroundedByLogs	missing		player: the six-side pale oak log check only gates the idle creak sound in animateTick
+CreakingHeartBlock.isSurroundedByLogs	port	crates/horizon-client/src/mobs/creaking_heart.rs::has_required_logs	the six sides must be pale oak logs; a heart without them spawns no creaking
 CreakingHeartBlock.createBlockStateDefinition	skip:data		axis, creaking_heart_state and natural properties come from the block state tables
 CreakingHeartBlock.tryAwardExperience	inline	crates/horizon-client/src/game/creaking.rs::Game::creaking_heart_broken	natural heart drops 20-24 xp orbs when broken by a player outside creative and spectator
 CreakingHeartBlock.getAnalogOutputSignal	port	crates/horizon-client/src/mobs/creaking_heart.rs::output_signal	gap: minor: distance-based signal, no explicit uprooted check; a heart with no creaking or protector gives 0

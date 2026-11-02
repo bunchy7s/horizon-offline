@@ -141,6 +141,11 @@ pub(super) struct Minecart {
     pub loot: Option<horizon_client::save::RolledLoot>,
     /// `Entity.firstTick`: not ticked yet (saved as `HasTicked`).
     pub first_tick: bool,
+    /// `Entity.isInWater` (`wasTouchingWater`): `AbstractMinecart.tick`
+    /// updates it after the move (`updateFluidInteraction`), so the move
+    /// goes by where the cart was a tick before, and a new cart's first
+    /// move is a dry one.
+    pub in_water: bool,
     /// Command block minecarts: the cart's `BaseCommandBlock` (command,
     /// success count, last output, output tracking). The block-only flags of
     /// `CommandBlock` stay unset.
@@ -161,8 +166,9 @@ pub(super) struct Minecart {
     pub synced_command: String,
     pub synced_output: String,
 }
-pub(super) const WIDTH: f64 = 0.98;
-pub(super) const HEIGHT: f64 = 0.7;
+/// `EntityType.MINECART`'s `sized(0.98F, 0.7F)`: float dimensions, widened.
+pub(super) const WIDTH: f64 = 0.98_f32 as f64;
+pub(super) const HEIGHT: f64 = 0.7_f32 as f64;
 /// AbstractMinecart.getDefaultDisplayOffset, in sixteenths of a block.
 fn display_offset(kind: CartKind) -> f64 {
     if kind == CartKind::Hopper { 1.0 } else { 6.0 }
@@ -338,6 +344,7 @@ impl Minecart {
             enabled: true,
             loot: None,
             first_tick: true,
+            in_water: false,
             command: horizon_client::command_block::CommandBlock::default(),
             tick_count: 0,
             last_activated: 0,
@@ -433,14 +440,10 @@ impl Game<'_> {
             .get(self.world.block(x, y, z))
             .full_collision
     }
-    fn cart_in_water(&self, c: &Minecart) -> bool {
-        let p = c.position;
-        let f = self.res.facts().get(self.world.block(
-            p.x.floor() as i32,
-            (p.y + 0.1).floor() as i32,
-            p.z.floor() as i32,
-        ));
-        f.fluid == Fluid::Water
+    /// Whether the cart's box touches water where it is now
+    /// (`EntityFluidInteraction.update`).
+    fn touches_water(&self, c: &Minecart) -> bool {
+        self.bounds_in_water(c.bounds())
     }
     /// `OldMinecartBehavior.getPos`: the point on the rail under (x, y, z).
     fn rail_pos(&self, x: f64, y: f64, z: f64) -> Option<[f64; 3]> {
@@ -573,10 +576,11 @@ impl Game<'_> {
             if (moved.y - delta.y).abs() > 1.0e-7 {
                 c.velocity.y = 0.0;
             }
-            // Entity.checkFallDamage: the move's drop counts (not in water),
+            // Entity.checkFallDamage: the move's drop counts (not in water, as of
+            // the tick before: `isInWater` is `wasTouchingWater`),
             // and a landing hands the whole fall to causeFallDamage, which
             // sets a TNT minecart off at (fall / 10) squared.
-            if moved.y < 0.0 && !self.cart_in_water(c) {
+            if moved.y < 0.0 && !c.in_water {
                 c.fall_distance -= f64::from(moved.y as f32);
             }
             if c.on_ground {
@@ -591,24 +595,18 @@ impl Game<'_> {
         }
     }
     fn max_speed(&self, c: &Minecart) -> f64 {
-        let base = if self.cart_in_water(c) { 0.2 } else { 0.4 };
+        let base = if c.in_water { 0.2 } else { 0.4 };
         if c.kind == CartKind::Furnace {
-            base * if self.cart_in_water(c) { 0.75 } else { 0.5 }
+            base * if c.in_water { 0.75 } else { 0.5 }
         } else {
             base
         }
     }
     /// `applyNaturalSlowdown` (with `MinecartFurnace`'s push); `factor` is
     /// `getSlowdownFactor`: 0.997 riding, the empty cart's own by behavior.
-    fn natural_slowdown(
-        &self,
-        c: &mut Minecart,
-        ridden: bool,
-        factor: f64,
-        water_drag: f64,
-    ) -> Vec3 {
+    fn natural_slowdown(&self, c: &mut Minecart, ridden: bool, factor: f64) -> Vec3 {
         let mut v = c.velocity;
-        let water = self.cart_in_water(c);
+        let water = c.in_water;
         if c.kind == CartKind::Furnace {
             if c.push.length_squared() > 1.0e-7 {
                 c.push = push_along(c.push, v);
@@ -623,7 +621,9 @@ impl Game<'_> {
         let f = if ridden { 0.997 } else { factor };
         let mut out = Vec3::new(v.x * f, 0.0, v.z * f);
         if water {
-            out = Vec3::new(out.x * water_drag, 0.0, out.z * water_drag);
+            // scale(0.95F): the float widened.
+            let drag = f64::from(0.95_f32);
+            out = Vec3::new(out.x * drag, 0.0, out.z * drag);
         }
         out
     }
@@ -650,7 +650,7 @@ impl Game<'_> {
             power = rail.powered;
             halt = !power;
         }
-        let slide = if self.cart_in_water(c) {
+        let slide = if c.in_water {
             0.0078125 * 0.2
         } else {
             0.0078125
@@ -720,7 +720,7 @@ impl Game<'_> {
         } else if e1[1] != 0 && at(e1, c) {
             c.position.y += f64::from(e1[1]);
         }
-        c.velocity = self.natural_slowdown(c, ridden, 0.96, 0.95);
+        c.velocity = self.natural_slowdown(c, ridden, 0.96);
         if let (Some(new), Some(old)) =
             (self.rail_pos(c.position.x, c.position.y, c.position.z), old)
         {
@@ -773,8 +773,7 @@ impl Game<'_> {
     /// `NewMinecartBehavior.getMaxSpeed`: the game rule over water's half,
     /// every cart alike (the old behavior's furnace bonus is its own).
     fn max_speed_new(&self, c: &Minecart) -> f64 {
-        f64::from(self.ui.rules.int("max_minecart_speed"))
-            * if self.cart_in_water(c) { 0.5 } else { 1.0 }
+        f64::from(self.ui.rules.int("max_minecart_speed")) * if c.in_water { 0.5 } else { 1.0 }
             / 20.0
     }
     /// `AbstractMinecart.getRedstoneDirection` (over the old port's
@@ -941,8 +940,8 @@ impl Game<'_> {
             // calculateSlopeSpeed (once per tick): the slide grows with the
             // speed, so a descending cart keeps its pace.
             if !slope_done {
-                let slide = 0.0078125_f64.max(initial_h * 0.02)
-                    * if self.cart_in_water(c) { 0.2 } else { 1.0 };
+                let slide =
+                    0.0078125_f64.max(initial_h * 0.02) * if c.in_water { 0.2 } else { 1.0 };
                 let before = v.horizontal_distance_squared();
                 match rail.shape {
                     Shape::AscendingEast => v.x -= slide,
@@ -984,7 +983,7 @@ impl Game<'_> {
             // applyNaturalSlowdown and the speed cap (first iteration).
             if first {
                 c.velocity = v;
-                v = self.natural_slowdown(c, ridden, 0.975, f64::from(0.95_f32));
+                v = self.natural_slowdown(c, ridden, 0.975);
                 if v.length_squared() > 0.0 {
                     let speed = v.length().min(self.max_speed_new(c));
                     v = v.normalize().scale(speed);
@@ -1133,10 +1132,12 @@ impl Game<'_> {
         // unlike the rail paths, which re-apply the track's velocity.
         c.collision_speed = 0.0;
         if !c.on_ground {
+            // scale(getAirDrag()): 0.95F, widened.
+            let drag = f64::from(0.95_f32);
             c.velocity = Vec3::new(
-                c.velocity.x * 0.95,
-                c.velocity.y * 0.95,
-                c.velocity.z * 0.95,
+                c.velocity.x * drag,
+                c.velocity.y * drag,
+                c.velocity.z * drag,
             );
         }
     }
@@ -1160,7 +1161,7 @@ impl Game<'_> {
         }
         // applyGravity
         if !c.no_gravity {
-            c.velocity.y -= if self.cart_in_water(c) { 0.005 } else { 0.04 };
+            c.velocity.y -= if c.in_water { 0.005 } else { 0.04 };
         }
         let pos = self.rail_block(c.position);
         if self.minecart_improvements() {
@@ -1194,6 +1195,8 @@ impl Game<'_> {
             }
             c.yaw %= 360.0;
         }
+        // updateFluidInteraction, after the move.
+        c.in_water = self.touches_water(c);
         // Variants.
         match c.kind {
             CartKind::Furnace => {
@@ -2433,6 +2436,8 @@ impl Game<'_> {
             world: &self.world,
             sprites: &self.gui.atlas.sprites,
             emissive: &self.gui.atlas.emissive,
+            translucent_sprites: &self.gui.atlas.translucent,
+            atlas_revision: self.gui.atlas.revision,
             nether: self.dim == super::Dim::Nether,
             lid: &lid,
             sign: &|_| None,

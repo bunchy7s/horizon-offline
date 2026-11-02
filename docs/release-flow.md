@@ -393,6 +393,9 @@ and by hand; pushes to `launcher` and `launcher-*` branches only build.
   launcher's tests, checks its libraries, and installs the latest game release with the new launcher.
 - Published with `--latest=false`: the repository's latest release stays a game release. Notes list the pull
   requests under New and Fixed; Kira posts launcher releases without pinging.
+- Windows also publishes `horizon-launcher-setup.exe`, the launcher's binary under another name: with no
+  arguments it opens the per-user setup (`launcher/src/installer.rs`) instead of Home, and
+  `horizon-launcher.exe uninstall` removes it again. Both files are in the release's signed `SHA256SUMS`.
 
 Making a launcher release GitHub's latest instead would break servers: every `horizon-server` already installed,
 `install.sh` and `install.ps1` ask for `releases/latest` and expect the game's archives there, and a server that

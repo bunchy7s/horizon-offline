@@ -136,7 +136,7 @@ LocalPlayer.shouldStopRunSprinting	port	crates/horizon-client/src/sprint.rs::Con
 LocalPlayer.shouldStopSwimSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::should_stop	
 LocalPlayer.tickDeath	missing		minor: unsure: the dead local player is not removed after 20 ticks; the death screen flow covers it
 LocalPlayer.rideTick	missing		minor: unsure: no code found that feeds movement keys into a boat's paddling
-LocalPlayer.isHorizontalCollisionMinor	missing		player: sprinting into a wall at an angle stops the sprint (motion.rs minor_horizontal_collision is a stub returning false)
+LocalPlayer.isHorizontalCollisionMinor	port	crates/horizon-client/src/motion.rs::EntityMoveWorld::minor_horizontal_collision	the sprint keeps when a move hits a wall at under 8 degrees
 LocalPlayer.isMoving	inline	crates/horizon-client/src/auto_jump.rs::can_auto_jump	
 LocalPlayer.isSprintingPossible	port	crates/horizon-client/src/sprint.rs::Conditions::possible	
 LocalPlayer.canStartSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::can_start	gap: player: slow_item is never set, so eating does not block starting a sprint

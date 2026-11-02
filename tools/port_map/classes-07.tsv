@@ -186,4 +186,4 @@ CollectingNeighborUpdater.MultiNeighborUpdate.forEachUpdatedPos	inline	crates/ho
 CollectingNeighborUpdater.MultiNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Multi arm
 CollectingNeighborUpdater.ShapeUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Shape arm
 CollectingNeighborUpdater.SimpleNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Simple arm
-ExperimentalRedstoneUtils.initialOrientation	skip:other		returns null unless the Redstone Experiments feature flag is on; Horizon has no such flag
+ExperimentalRedstoneUtils.initialOrientation	port	crates/horizon-world/src/level/orientation.rs::Sim::initial_orientation	world feature flag gates the random orientation, then up and front transforms

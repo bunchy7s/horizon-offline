@@ -38,6 +38,7 @@ pub mod extras;
 pub mod fast_hash;
 pub mod fog;
 pub mod font;
+pub mod fusion;
 pub mod gfx;
 pub mod graphics;
 pub mod graphics_style;

@@ -1025,6 +1025,8 @@ mod tests {
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct Corners;
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        pub(super) struct ItemEnergyBuffer;
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
@@ -1043,6 +1045,7 @@ mod tests {
         pub(super) struct NativeScreen;
         pub(super) struct ModBlockEntity;
         pub(super) struct ModContainer;
+        pub(super) struct MerchantOffer;
         pub(super) struct ModFluidTanks;
         pub(super) struct ModEnergyBuffer;
         pub(super) struct LootStack;
