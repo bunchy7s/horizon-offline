@@ -789,25 +789,23 @@ impl Mob {
                 self.ai.steps.next_step = self.next_step();
             } else if self.fluids.in_water {
                 self.ai.steps.next_step = self.next_step();
-                // Entity.waterSwimSound
+                // Entity.waterSwimSound, and SkeletonHorse.playSwimSound's
+                // mapping of the volume it works out.
                 let v = self.velocity;
-                let volume = 1.0_f32.min(
+                let speed =
                     (v.x * v.x * f64::from(0.2_f32) + v.y * v.y + v.z * v.z * f64::from(0.2_f32))
-                        .sqrt() as f32
-                        * 0.35,
-                );
+                        .sqrt() as f32;
+                let volume = super::equine::swim_volume(self, 1.0_f32.min(speed * 0.35));
                 if !super::ai::movement_sounds(self) {
                     return;
                 }
                 let pitch = 1.0 + (self.random.next_float() - self.random.next_float()) * 0.4;
+                // Entity.playSwimSound asks getSwimSound for its sound even
+                // when the mob is silent, and a skeleton horse counts there.
+                let sound = super::ai::swim_sound(self);
                 if !self.silent {
                     let at = [self.position.x, self.position.y, self.position.z];
-                    events.push(MobEvent::Sound(
-                        super::ai::swim_sound(self),
-                        at,
-                        volume,
-                        pitch,
-                    ));
+                    events.push(MobEvent::Sound(sound, at, volume, pitch));
                 }
             }
         } else if w.facts.is_air(state)

@@ -224,4 +224,29 @@ impl horizon_client::mod_api::LevelWriteHost for LevelTicks<'_, &mut super::Game
         self.level
             .native_set_block_property(self.ticks, pos, key, value, flags)
     }
+
+    fn play_sound(
+        &mut self,
+        sound: &str,
+        at: [f64; 3],
+        source: usize,
+        volume: f32,
+        pitch: f32,
+    ) -> bool {
+        self.level
+            .native_play_sound(sound, at, source, volume, pitch)
+    }
+
+    fn send_particles(
+        &mut self,
+        options: &horizon_client::mod_api::ParticleOptions,
+        state: Option<BlockStateId>,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: i32,
+    ) -> bool {
+        self.level
+            .native_send_particles(options, state, at, spread, speed, count)
+    }
 }

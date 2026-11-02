@@ -264,6 +264,9 @@ impl Game<'_> {
             let hover = active && (ui::hovered(self.cursor, x, y, bw, 20.0) || is_focused);
             let label = match (id, &additions) {
                 (14, Some((label, _))) => label.clone(),
+                _ if self.options.split_guest && key == "menu.disconnect" => {
+                    Text::translate("horizon.split.leave", &[])
+                }
                 _ => Text::translate(key, &[]),
             };
             ui::button(batch, atlas, x, y, bw, 20.0, &label, active, hover);
