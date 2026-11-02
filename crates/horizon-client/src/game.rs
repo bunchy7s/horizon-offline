@@ -2355,6 +2355,9 @@ struct Game<'a> {
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: horizon_client::widgets::Cursor,
     captured: bool,
+    /// Native grab mode used by winit. Linux window managers can drop the
+    /// grab without a focus event, leaving `captured` true but stale.
+    capture_mode: Option<CursorGrabMode>,
     /// The window held the pointer when it lost focus: the system lets a
     /// grabbed pointer go with the focus, and a window that comes back still
     /// wanting it takes it again (`MouseHandler.grabMouse`, whose grab
@@ -7749,6 +7752,7 @@ impl Game<'_> {
         // Splitscreen: another player has the pointer; this one's menus leave it alone.
         if !self.keyboard_mouse {
             self.captured = false;
+            self.capture_mode = None;
             return;
         }
         if capture && !self.captured && !cfg!(target_os = "macos") {
@@ -7779,6 +7783,7 @@ impl Game<'_> {
                 self.mouse.set_ignore_first_move();
             }
             self.captured = capture;
+            self.capture_mode = None;
         } else if capture {
             self.mouse.set_ignore_first_move();
             // macOS warps by re-associating the mouse with the pointer,
@@ -7794,10 +7799,14 @@ impl Game<'_> {
             if self.focused {
                 warp(window);
             }
-            self.captured = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
+            self.capture_mode = if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                Some(CursorGrabMode::Locked)
+            } else if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                Some(CursorGrabMode::Confined)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             // Windows already warped above, inside the clip's own position.
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             if self.captured && self.focused {
@@ -7821,6 +7830,7 @@ impl Game<'_> {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
             }
             self.captured = false;
+            self.capture_mode = None;
         }
         // MouseHandler.grabMouse and releaseMouse: the mouse position is
         // the window's centre whenever the pointer's grab state changes, so
@@ -7835,6 +7845,33 @@ impl Game<'_> {
             self.cursor = pos;
         }
         if !self.options.offscreen || self.split_window {
+            window.set_cursor_visible(!self.captured);
+        }
+    }
+    /// A Linux window manager can release the native pointer grab while the
+    /// window remains focused. Reapply the recorded mode on the next gameplay
+    /// click or wheel event, without warping the pointer or consuming input.
+    fn reassert_pointer_capture(&mut self) {
+        #[cfg(target_os = "linux")]
+        if self.screen == Screen::Playing
+            && self.focused
+            && self.captured
+            && !self.options.offscreen
+            && let (Some(window), Some(mode)) = (&self.window, self.capture_mode)
+        {
+            let other = match mode {
+                CursorGrabMode::Locked => CursorGrabMode::Confined,
+                CursorGrabMode::Confined => CursorGrabMode::Locked,
+                CursorGrabMode::None => return,
+            };
+            self.capture_mode = if window.set_cursor_grab(mode).is_ok() {
+                Some(mode)
+            } else if window.set_cursor_grab(other).is_ok() {
+                Some(other)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             window.set_cursor_visible(!self.captured);
         }
     }
@@ -16775,6 +16812,14 @@ impl Game<'_> {
         ) {
             self.last_input = Instant::now();
         }
+        if !self.pad_synthetic_input()
+            && matches!(
+                event,
+                WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
+            )
+        {
+            self.reassert_pointer_capture();
+        }
         // The real mouse takes the pointer back from the keyboard's focus.
         self.key_focus_mouse(event_loop, &event);
         // The screen's narration hears of the input before the screen takes
@@ -18303,6 +18348,7 @@ impl<'a> Game<'a> {
             cursor: (0.0, 0.0),
             cursor_icon: horizon_client::widgets::Cursor::Arrow,
             captured: false,
+            capture_mode: None,
             regrab_on_refocus: false,
             keyboard_mouse: true,
             split_window: false,
