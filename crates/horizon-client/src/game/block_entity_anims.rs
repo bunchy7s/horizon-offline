@@ -28,6 +28,33 @@ use horizon_world::nbt::Tag;
 /// The handle of the local player among a bell's gathered entities.
 const PLAYER: u64 = u64::MAX;
 
+/// `ContainerOpenersCounter.getEntitiesWithContainerOpen` as Horizon can
+/// answer it: of the containers players have open at this moment, the ones at
+/// `key` (`ChestBlockEntity$1.isOwnContainer` compares the menu's container
+/// with the block entity, and a double chest counts for both halves).
+pub(super) fn openers_at(open: &[(i32, i32, i32)], key: (i32, i32, i32)) -> i32 {
+    open.iter().filter(|&&at| at == key).count() as i32
+}
+
+/// `ContainerOpenersCounter.recheckOpeners`: the opener count a recount finds
+/// at `key`, and the count it replaces. The entry is dropped at zero, as
+/// `Game::count_opener` does when the last opener leaves, so the next opener to
+/// arrive counts from zero.
+pub(super) fn recheck_opener_count(
+    counts: &mut std::collections::HashMap<(i32, i32, i32), i32>,
+    open: &[(i32, i32, i32)],
+    key: (i32, i32, i32),
+) -> (i32, i32) {
+    let previous = counts.get(&key).copied().unwrap_or(0);
+    let count = openers_at(open, key);
+    if count == 0 {
+        counts.remove(&key);
+    } else if count != previous {
+        counts.insert(key, count);
+    }
+    (previous, count)
+}
+
 impl Game<'_> {
     /// `BlockEntity.triggerEvent(a, b)` on the client copy of the block entity at `pos`.
     pub(super) fn block_entity_event(&mut self, pos: [i32; 3], a: i32, b: i32) {
@@ -176,6 +203,13 @@ impl Game<'_> {
         let after = *count;
         if after == 0 {
             self.lid_openers.remove(&key);
+        }
+        // `ContainerOpenersCounter.incrementOpeners`: the first opener
+        // schedules the five-tick recheck of who still has the container open
+        // (`scheduleRecheck`, `CHECK_TICK_DELAY`).
+        if open && before == 0 {
+            let pos = BlockPos::new(key.0, key.1, key.2);
+            self.with_level(|b, level, ticks| b.schedule_tick(level, ticks, pos, 5));
         }
         (before, after)
     }
@@ -831,3 +865,4 @@ impl Game<'_> {
         Some(skin.fallback.to_owned())
     }
 }
+
