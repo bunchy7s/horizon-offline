@@ -1460,7 +1460,6 @@ impl Game<'_> {
         self.save.save_entities(chunks)
     }
 }
-/// Only a mob is finalized; another entity drops the request.
 impl Game<'_> {
     /// `Entity::save_nbt` for a mob: a rider is saved inside its root vehicle,
     /// in the root's chunk; a boat's or cart's passengers inside the vehicle.
@@ -1681,6 +1680,7 @@ fn anon_uuid_raw(persist: &EntityMemory, kind: &str, at: Vec3) -> ([i32; 4], Opt
         .unwrap_or_else(|| (random_uuid(), None))
 }
 
+/// Only a mob is finalized; another entity drops the request.
 fn strip_finalize(tag: &mut Tag) {
     if let Tag::Compound(c) = tag {
         c.remove(&"horizon:finalize".into());
