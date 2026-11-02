@@ -3899,6 +3899,12 @@ impl Game<'_> {
         let _ = (raid, pos, wave, raiders);
     }
 
+    /// A raid at `pos` changed to `state` (`triggered`, `victory`, `loss` or
+    /// `stopped`). @API:native_raid_state_change@.
+    pub(super) fn native_raid_state_change(&mut self, raid: i32, pos: [i32; 3], state: &str) {
+        let _ = (raid, pos, state);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
