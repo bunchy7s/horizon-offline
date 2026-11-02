@@ -32,6 +32,15 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
             Ok(json!(true))
         }
         "server/system_message" => game.system_message(argument),
+        "serversettings/autosave" => game.autosave(client, None),
+        "serversettings/autosave/set" => game.autosave(
+            client,
+            Some(
+                argument
+                    .as_bool()
+                    .ok_or_else(|| invalid_params(format!("Not a boolean: {argument}")))?,
+            ),
+        ),
         "serversettings/motd" => game.motd(client, None),
         "serversettings/motd/set" => game.motd(
             client,
@@ -353,6 +362,21 @@ impl Game<'_> {
                 toml::Value::Boolean(value),
             )
             .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
+    /// `MinecraftServerSettingsServiceImpl.isAutoSave`: read the game's live save flag.
+    /// `MinecraftServerSettingsServiceImpl.setAutoSave`: update that flag and return its new value.
+    fn autosave(&self, client: u32, value: Option<bool>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/autosave" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/autosave/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
         }
         Ok(reply["value"].clone())
     }

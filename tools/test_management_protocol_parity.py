@@ -16,8 +16,9 @@ sent the same things over TLS, and every answer is compared exactly:
   vanilla's data generator), `server/status`, the four lists, `players`, kicking nobody, `server/save` and
   `server/system_message` with no one online, the four lists changed (`add`, `remove`, `set`,
   `clear`; with no profile service, players named resolve to offline players on both), the live server
-  message, difficulty, default and forced game mode read and changed (including saved properties), and
-  allowlist use and enforcement read and changed (including saved properties and restart), and
+  message, difficulty, default and forced game mode read and changed (including saved properties), autosave
+  read and changed (including its reset after restart), allowlist use and enforcement read and changed
+  (including saved properties and restart), and
   `server/stop`;
 - the TLS version each server agrees on.
 
@@ -149,24 +150,33 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":61,"method":"minecraft:serversettings/force_game_mode"}',
     '{"jsonrpc":"2.0","id":62,"method":"minecraft:serversettings/force_game_mode/set","params":["yes"]}',
     '{"jsonrpc":"2.0","id":63,"method":"minecraft:serversettings/force_game_mode"}',
-    '{"jsonrpc":"2.0","id":65,"method":"minecraft:serversettings/use_allowlist"}',
-    '{"jsonrpc":"2.0","id":66,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
-    '{"jsonrpc":"2.0","id":67,"method":"minecraft:serversettings/use_allowlist"}',
-    '{"jsonrpc":"2.0","id":68,"method":"minecraft:serversettings/use_allowlist/set","params":[false]}',
-    '{"jsonrpc":"2.0","id":69,"method":"minecraft:serversettings/use_allowlist"}',
-    '{"jsonrpc":"2.0","id":70,"method":"minecraft:serversettings/use_allowlist/set","params":["yes"]}',
-    '{"jsonrpc":"2.0","id":71,"method":"minecraft:serversettings/use_allowlist"}',
-    '{"jsonrpc":"2.0","id":72,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
-    '{"jsonrpc":"2.0","id":73,"method":"minecraft:serversettings/use_allowlist"}',
-    '{"jsonrpc":"2.0","id":74,"method":"minecraft:serversettings/enforce_allowlist"}',
-    '{"jsonrpc":"2.0","id":75,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
-    '{"jsonrpc":"2.0","id":76,"method":"minecraft:serversettings/enforce_allowlist"}',
-    '{"jsonrpc":"2.0","id":77,"method":"minecraft:serversettings/enforce_allowlist/set","params":[false]}',
-    '{"jsonrpc":"2.0","id":78,"method":"minecraft:serversettings/enforce_allowlist"}',
-    '{"jsonrpc":"2.0","id":79,"method":"minecraft:serversettings/enforce_allowlist/set","params":["yes"]}',
-    '{"jsonrpc":"2.0","id":80,"method":"minecraft:serversettings/enforce_allowlist"}',
-    '{"jsonrpc":"2.0","id":81,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
-    '{"jsonrpc":"2.0","id":82,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":65,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":66,"method":"minecraft:serversettings/autosave/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":67,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":68,"method":"minecraft:serversettings/autosave/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":69,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":70,"method":"minecraft:serversettings/autosave/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":71,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":72,"method":"minecraft:serversettings/autosave/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":73,"method":"minecraft:serversettings/autosave"}',
+    '{"jsonrpc":"2.0","id":75,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":76,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":77,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":78,"method":"minecraft:serversettings/use_allowlist/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":79,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":80,"method":"minecraft:serversettings/use_allowlist/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":81,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":82,"method":"minecraft:serversettings/use_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":83,"method":"minecraft:serversettings/use_allowlist"}',
+    '{"jsonrpc":"2.0","id":84,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":85,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":86,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":87,"method":"minecraft:serversettings/enforce_allowlist/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":88,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":89,"method":"minecraft:serversettings/enforce_allowlist/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":90,"method":"minecraft:serversettings/enforce_allowlist"}',
+    '{"jsonrpc":"2.0","id":91,"method":"minecraft:serversettings/enforce_allowlist/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":92,"method":"minecraft:serversettings/enforce_allowlist"}',
 ]
 
 
@@ -421,13 +431,19 @@ def main():
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_force_game_mode'] = reply
-                    ws.send('{"jsonrpc":"2.0","id":83,"method":"minecraft:serversettings/use_allowlist"}')
+                    ws.send('{"jsonrpc":"2.0","id":74,"method":"minecraft:serversettings/autosave"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_autosave'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":93,"method":"minecraft:serversettings/use_allowlist"}')
                     while True:
                         reply = normal(ws.receive(timeout=60))
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_use_allowlist'] = reply
-                    ws.send('{"jsonrpc":"2.0","id":84,"method":"minecraft:serversettings/enforce_allowlist"}')
+                    ws.send('{"jsonrpc":"2.0","id":94,"method":"minecraft:serversettings/enforce_allowlist"}')
                     while True:
                         reply = normal(ws.receive(timeout=60))
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
@@ -468,11 +484,14 @@ def main():
         if vanilla['restarted_force_game_mode'] != horizon['restarted_force_game_mode'] or \
                 vanilla['restarted_force_game_mode'] != {'jsonrpc': '2.0', 'id': 64, 'result': True}:
             failures.append(f"restarted forced game mode: vanilla {vanilla['restarted_force_game_mode']!r}, Horizon {horizon['restarted_force_game_mode']!r}")
+        if vanilla['restarted_autosave'] != horizon['restarted_autosave'] or \
+                vanilla['restarted_autosave'] != {'jsonrpc': '2.0', 'id': 74, 'result': True}:
+            failures.append(f"restarted autosave: vanilla {vanilla['restarted_autosave']!r}, Horizon {horizon['restarted_autosave']!r}")
         if vanilla['restarted_use_allowlist'] != horizon['restarted_use_allowlist'] or \
-                vanilla['restarted_use_allowlist'] != {'jsonrpc': '2.0', 'id': 83, 'result': True}:
+                vanilla['restarted_use_allowlist'] != {'jsonrpc': '2.0', 'id': 93, 'result': True}:
             failures.append(f"restarted allowlist use: vanilla {vanilla['restarted_use_allowlist']!r}, Horizon {horizon['restarted_use_allowlist']!r}")
         if vanilla['restarted_enforce_allowlist'] != horizon['restarted_enforce_allowlist'] or \
-                vanilla['restarted_enforce_allowlist'] != {'jsonrpc': '2.0', 'id': 84, 'result': True}:
+                vanilla['restarted_enforce_allowlist'] != {'jsonrpc': '2.0', 'id': 94, 'result': True}:
             failures.append(f"restarted allowlist enforcement: vanilla {vanilla['restarted_enforce_allowlist']!r}, Horizon {horizon['restarted_enforce_allowlist']!r}")
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
         if failures:

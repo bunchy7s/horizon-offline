@@ -66,7 +66,7 @@ impl Game<'_> {
         {
             // addBook: one book goes in (a creative player keeps theirs).
             let book = book.clone();
-            self.stats.add("used", &book.item, 1);
+            self.award_stat("used", &book.item, 1);
             let sound = if &*book.item == "minecraft:enchanted_book" {
                 "minecraft:block.chiseled_bookshelf.insert.enchanted"
             } else {
