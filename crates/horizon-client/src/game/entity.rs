@@ -12,7 +12,7 @@ use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
-use horizon_client::mobs::Mob;
+use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
@@ -32,6 +32,29 @@ pub(super) trait Entity {
         0.0
     }
     fn is_alive(&self) -> bool {
+        true
+    }
+    /// `Entity.isRemoved`.
+    fn is_removed(&self) -> bool {
+        false
+    }
+    /// `instanceof LivingEntity`.
+    fn is_living(&self) -> bool {
+        false
+    }
+    /// `Entity.isIgnoringBlockTriggers`.
+    fn is_ignoring_block_triggers(&self) -> bool {
+        false
+    }
+    /// Whether it presses plates and tripwires: `getEntitiesOfClass` skips
+    /// removed entities, and the block's predicate skips the ones above.
+    fn triggers_blocks(&self) -> bool {
+        !self.is_removed() && !self.is_ignoring_block_triggers()
+    }
+    /// Whether `tick_blocks` sends the blocks in its box to `entityInside`
+    /// (`applyEffectsFromBlocks`). A kind that function sweeps another way, or
+    /// whose tick skips that step, says no.
+    fn sweeps_blocks_inside(&self) -> bool {
         true
     }
     /// `Entity.isSupportedBy`.
@@ -76,24 +99,31 @@ macro_rules! entity_lists {
     ($then:ident, $($args:tt)*) => {
         $crate::game::entity::$then! {
             ($($args)*)
-            Mob: mobs,
-            Item: dropped,
-            Boat: boats,
-            Cart: carts,
-            ArmorStand: armor_stands,
-            Tnt: tnts,
-            Falling: falling,
-            Orb: orbs,
-            Projectile: creatures.projectiles,
-            Rocket: rockets,
-            Trident: tridents,
+            Mob(Mob) mobs: mobs,
+            Item(ItemEntity) dropped: dropped,
+            Boat(Boat) boats: boats,
+            Cart(Minecart) carts: carts,
+            ArmorStand(ArmorStand) armor_stands: armor_stands,
+            Tnt(PrimedTnt) tnts: tnts,
+            Falling(FallingBlock) falling: falling,
+            Orb(ExperienceOrb) orbs: orbs,
+            Projectile(Projectile) projectiles: creatures.projectiles,
+            Rocket(Rocket) rockets: rockets,
+            Trident(ThrownTrident) tridents: tridents,
         }
     };
 }
 pub(crate) use entity_lists;
 
 macro_rules! define_entity_handles {
-    (() $($kind:ident: $($list:ident).+,)*) => {
+    (() $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        /// Every list, borrowed apart from the rest of `Game`, for
+        /// [`for_each_entity`] while the world is borrowed mutably.
+        #[derive(Clone, Copy)]
+        pub(super) struct EntityLists<'w> {
+            $(pub(super) $field: &'w [$ty],)*
+        }
+
         /// One entity, by list and index.
         #[derive(Clone, Copy, Hash, PartialEq, Eq)]
         pub(super) enum EntityHandle {
@@ -126,7 +156,7 @@ pub(crate) use entity_borrow;
 
 macro_rules! match_entity {
     (($borrow:ident, $entity:ident, $game:expr, $handle:expr, $body:expr)
-     $($kind:ident: $($list:ident).+,)*) => {
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         match $handle {
             $($crate::game::entity::EntityHandle::$kind(i) => {
                 let $entity = $crate::game::entity::entity_borrow!($borrow, $game$(.$list)+[i]);
@@ -145,6 +175,42 @@ macro_rules! with_entity {
     };
 }
 pub(super) use with_entity;
+
+macro_rules! borrow_lists {
+    (($game:expr) $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $crate::game::entity::EntityLists {
+            $($field: &$game$(.$list)+,)*
+        }
+    };
+}
+pub(crate) use borrow_lists;
+
+/// `$game`'s [`EntityLists`]; a macro so the borrow stays field by field.
+macro_rules! entity_lists_of {
+    ($game:expr) => {
+        $crate::game::entity::entity_lists!(borrow_lists, $game)
+    };
+}
+pub(super) use entity_lists_of;
+
+macro_rules! walk_lists {
+    (($lists:expr, $entity:ident, $body:block)
+     $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
+        $(for $entity in $lists.$field $body)*
+    };
+}
+pub(crate) use walk_lists;
+
+/// Runs `$body` for every entity, with `$entity` as a reference to its own
+/// type: one loop per list, each compiled for its kind, so nothing allocates
+/// or goes through a vtable and a check a kind answers with a constant folds
+/// away. A kind added to `entity_lists!` joins every walk.
+macro_rules! for_each_entity {
+    ($lists:expr, $entity:ident => $body:block) => {
+        $crate::game::entity::entity_lists!(walk_lists, $lists, $entity, $body)
+    };
+}
+pub(super) use for_each_entity;
 
 /// [`with_entity`], with the entity mutable.
 macro_rules! with_entity_mut {
@@ -167,6 +233,16 @@ impl Entity for Mob {
     }
     fn is_alive(&self) -> bool {
         !self.removed && self.alive()
+    }
+    fn is_removed(&self) -> bool {
+        self.removed
+    }
+    fn is_living(&self) -> bool {
+        true
+    }
+    /// `Bat.isIgnoringBlockTriggers`.
+    fn is_ignoring_block_triggers(&self) -> bool {
+        self.species() == Species::Bat
     }
     fn is_supported_by(&self, pos: BlockPos) -> bool {
         self.supporting == Some([pos.x, pos.y, pos.z])
@@ -231,6 +307,10 @@ impl Entity for Minecart {
     fn on_ground(&self) -> bool {
         self.on_ground
     }
+    /// `tick_blocks` sweeps minecarts along with the players.
+    fn sweeps_blocks_inside(&self) -> bool {
+        false
+    }
 }
 
 impl Entity for ArmorStand {
@@ -240,6 +320,13 @@ impl Entity for ArmorStand {
     }
     fn on_ground(&self) -> bool {
         self.on_ground
+    }
+    fn is_living(&self) -> bool {
+        true
+    }
+    /// `ArmorStand.isIgnoringBlockTriggers`.
+    fn is_ignoring_block_triggers(&self) -> bool {
+        self.marker
     }
     /// `ArmorStand.getPistonPushReaction`: a marker is ignored.
     fn get_piston_push_reaction(&self) -> PushReaction {
@@ -294,6 +381,10 @@ impl Entity for Rocket {
     fn bounds(&self) -> Aabb {
         Rocket::bounds(self)
     }
+    /// `FireworkRocketEntity.tick`: boosting a player skips the step.
+    fn sweeps_blocks_inside(&self) -> bool {
+        !self.attached
+    }
 }
 
 impl Entity for ThrownTrident {
@@ -304,5 +395,9 @@ impl Entity for ThrownTrident {
             Vec3::new(p.x - 0.25, p.y, p.z - 0.25),
             Vec3::new(p.x + 0.25, p.y + 0.5, p.z + 0.25),
         )
+    }
+    /// `GameLevel::tick_blocks` sweeps tridents itself.
+    fn sweeps_blocks_inside(&self) -> bool {
+        false
     }
 }
