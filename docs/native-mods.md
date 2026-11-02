@@ -2145,20 +2145,26 @@ bindings = [{ name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *s
 ```
 
 ```rust
-let host: &mut dyn horizon_client::mod_api::Host = game;
-let old = crate::game::example::COUNTER.get(host, Holder::Level)?;
-crate::game::example::COUNTER.set(host, Holder::Level, old + 1)?;
+fn count(game: &mut crate::game::Game<'_>) {
+    let host: &mut dyn horizon_client::mod_api::Host = game;
+    let holder = horizon_client::mod_api::Holder::Level;
+    if let Ok(old) = crate::game::example::COUNTER.get(&mut *host, holder) {
+        let _ = crate::game::example::COUNTER.set(host, holder, old + 1);
+    }
+}
 ```
 
 `COUNTER` is the `AttachmentType<i32>` of [Server attachments](#server-attachments), kept in the bundle's `[[module]]`
 and named by its full path (`crate::game::<module>::COUNTER`). `Game` is not an `AttachmentHost` itself, so the `dyn Host`
 coercion is the step that matters; any `Host` helper works on `host` too.
 
-On a `GameLevel` method that takes `&mut self` (`random_tick`, `tick_block`, `perform_bonemeal`, `is_bonemeal_success`),
-bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }` for attachments and
-`random()`. Scheduling and whole-level writes come only through the hook points' `LevelWriteHost`.
+On a `GameLevel` method that takes `&mut self` (`native_random_tick`, `native_tick_block`, `native_perform_bonemeal`,
+`native_is_bonemeal_success`), bind `{ name = "level", ty = "&mut dyn crate::mod_api::LevelRandomHost", value = "&mut *self" }`
+for attachments and `random()`. Scheduling and `set_block_property` stay on the `LevelTicksHost` and `LevelWriteHost` the
+hook points pass; `is_bonemeal_success` gets only a `LevelRandomHost`.
 
-A trait injection gives the mod's `[api]` crate the same `Host` at that method:
+A trait injection gives the mod's `[api]` crate the same `Host` at that method. The `[api]` crate is separate from
+horizon-client and a `[[module]]` is `pub(crate)`, so it keeps its own attachment static:
 
 ```toml
 [[injection]]
@@ -2171,20 +2177,21 @@ bindings = [{ name = "host", ty = "&mut dyn crate::mod_api::Host", value = "&mut
 
 ```rust
 fn inject_example_count(&self, event: &mut InjectExampleCountEvent<'_>) {
-    let _ = crate::game::example::COUNTER.get(&mut *event.host, Holder::Level);
+    let _ = COUNTER.get(&mut *event.host, Holder::Level);
 }
 ```
 
-The target must be one horizon-mixins accepts: no macro sites in the body (its README lists the limits). `hook` and
-`hook_version` work in place of `target`.
+The `[api]` crate reads `event.host` at any `Game` method horizon-mixins can inject into at HEAD (its README lists the
+limits). `hook` and `hook_version` work in place of `target`.
 
 The helper runs in every `Game` that calls its target, and attachments answer `MissingHolder` outside the server's game,
 as they do in hooks.
 
 A catalog hook's trait method, event and return are part of its `hook_version` contract ([Named hook
 points](#named-hook-points), [Mods on the hook points](#mods-on-the-hook-points)). Later Horizons only add event fields
-(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So an `[api]` package that uses only catalog
-hooks (trait methods, or injections by `hook`) and `Host` can declare `"hooks"`, the `NATIVE_HOOKS_API` it was made on.
+(`#[non_exhaustive]`), trait methods with default bodies, and `Host` methods. So a mod whose `[api]` package uses only catalog
+hooks (trait methods, or injections by `hook`) and `Host` can set `"hooks"` in its `.hnmod`'s `horizon-native.json` to the
+`NATIVE_HOOKS_API` it was made on.
 A raw `target` like `tick_mobs` is not a hook point and may change in any commit: such a mod pins `horizon_revision` and
 leaves `hooks` out.
 
@@ -2227,11 +2234,13 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
     }),
     copy_on_death: false,
 };
-// Inside a server hook, or mixin code ([the typed API from mixin code](#the-typed-api-from-mixin-code)), with `host: &mut dyn Host`:
+// Inside a server hook, or mixin code, with `host: &mut dyn Host`:
 let old = COUNTER.get(host, Holder::Chunk([0, 0]))?;
 COUNTER.set(host, Holder::Chunk([0, 0]), old + 1)?;
 Ok::<(), AttachmentError>(())
 ```
+
+For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
 `Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
