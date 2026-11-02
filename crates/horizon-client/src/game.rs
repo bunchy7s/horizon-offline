@@ -7330,6 +7330,7 @@ impl Game<'_> {
             // What the blocks spawned (a dispensed minecart, a lit TNT, a
             // placed boat) joins before the entities tick.
             self.native_joins_flush(false, 0);
+            self.lan_mark_synced();
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7344,7 +7345,9 @@ impl Game<'_> {
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
             self.tick_vehicle_watch();
+            let from = self.lan_synced_from();
             horizon_client::spans::time("tick_thunder", || self.tick_thunder());
+            self.lan_synced_since(from);
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
             self.tick_lodestone_compasses();
@@ -7439,6 +7442,9 @@ impl Game<'_> {
         {
             self.use_with_hand()?;
             self.use_delay = 4;
+        }
+        if running {
+            horizon_client::spans::time("lan_note_joined", || self.lan_note_joined());
         }
         Ok(())
     }

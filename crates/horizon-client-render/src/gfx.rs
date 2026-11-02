@@ -8903,6 +8903,7 @@ impl Renderer {
                 camera: frame.camera,
                 entities: frame.entities,
                 spans: frame.entity_spans,
+                motion: frame.entity_motion,
                 atlas: self.hud.atlas_texture.as_ref(),
                 quad_indices: &self.indices,
                 block_sprites: native_render::BlockSpriteArrays {

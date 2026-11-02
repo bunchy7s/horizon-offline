@@ -2493,6 +2493,25 @@ impl Game<'_> {
     pub(super) fn native_camera_shake(&self, partial: f32, shake: &mut NativeShake) {
         mod_api::dispatch_camera_shake(self, mod_api::mods(), partial, shake);
     }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    pub(super) fn native_render_name_tag(
+        &self,
+        entity_id: u32,
+        kind: &str,
+        vanilla_visible: bool,
+        visible: &mut bool,
+        text: &mut Option<String>,
+    ) {
+        mod_api::dispatch_render_name_tag(
+            self,
+            mod_api::mods(),
+            entity_id,
+            kind,
+            vanilla_visible,
+            visible,
+            text,
+        );
+    }
     /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
     /// Equip progress is the inverse arm height, including the item's swap animation scale.
     /// Cancel skips that hand's default geometry, including its map and arm geometry.
