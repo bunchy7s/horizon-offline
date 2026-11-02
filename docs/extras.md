@@ -220,6 +220,21 @@ say **Leave** for disconnecting. `HORIZON_SPLIT_STATS=1` logs every 5 s where a 
 goes (each player's turn and render, the presents, the GPU wait) and each player's frame rate.
 Joining P1 on an external server follows separately.
 
+### Music page (`musicOff`, none off by default)
+- Options > Music & Sounds > **Music...** lists the game's built-in tracks by
+  situation (menu, overworld, creative, underwater, the End, boss, credits),
+  read from the loaded `sounds.json` (`SoundRegistry::tracks`).
+- **Left click** a track plays it now: it takes the music manager's slot, and the
+  situation's own music waits until it ends.
+- **On/Off** at the right of a row takes a track out of every pool it plays in, so
+  a situation with all its tracks off plays nothing. Every track is on by default,
+  so vanilla's random selection is unchanged; the off ones are `musicOff` in
+  `horizon-extras.txt`.
+- The pools are filtered where they are picked (`sound_except` in
+  `sound_events.rs`), the manager is `music.rs`, and the page is in `options_ui.rs`.
+- Tracks only a single biome's pool names (the mangrove or deep-dark pieces) are
+  not rows of their own yet.
+
 ## Shared rules
 
 - All extras are hidden with F1 and drawn in the HUD layer: under screens, over

@@ -34,6 +34,11 @@ fn percent(caption: &str, value: f32) -> Text {
 fn on_off(v: bool) -> Text {
     tr(if v { "options.on" } else { "options.off" })
 }
+/// A music track's name as its row shows it: the file, without its folder
+/// (`minecraft:music/game/calm1` -> `calm1`; the group names the situation).
+fn track_name(id: &str) -> &str {
+    id.rsplit('/').next().unwrap_or(id)
+}
 fn chat_px(caption: &str, px: f32) -> Text {
     Text::translate(
         "options.pixel_value",
@@ -1266,6 +1271,9 @@ pub enum Page {
     SplitProfiles,
     /// Splitscreen: the monitor map and draft window arrangement.
     SplitSetup,
+    /// The built-in music tracks, by situation: play one, turn any off
+    /// (vanilla's `minecraft:audio/background_music` pools).
+    Music,
 }
 #[derive(Clone, Debug, PartialEq)]
 enum Act {
@@ -1312,6 +1320,10 @@ enum Act {
     ToggleRecording,
     /// AI Agent: write the repro bundle now.
     ExportRepro,
+    /// The Music page: play this track of this event now.
+    PlayMusicTrack(String, String),
+    /// The Music page: turn this track off, or back on.
+    MusicTrackOn(String, bool),
 }
 enum WKind {
     Button {
@@ -1446,6 +1458,21 @@ pub enum Event {
     /// The narrator option changed (after its `Changed`): the option's
     /// `onValueUpdate`, `GameNarrator.updateNarratorStatus`.
     Narrator,
+    /// The Music page opened: fill `music_groups` from the sound registry
+    /// (the game owns it).
+    ListMusicTracks,
+    /// A Music page row: play this track of this event now.
+    PlayMusicTrack(String, String),
+}
+/// One situation's built-in tracks, for the Music page.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MusicGroup {
+    /// The heading the page shows ("Overworld").
+    pub label: &'static str,
+    /// The music event the tracks belong to (`minecraft:music.game`).
+    pub event: String,
+    /// The sound ids, in `sounds.json` order.
+    pub tracks: Vec<String>,
 }
 /// `SliderableValueSet.applyValueImmediately`: these apply 600 ms after
 /// the last change (`OptionInstanceSliderButton.delayedApplyAt`).
@@ -1527,6 +1554,8 @@ pub struct OptionsUi {
     pub agent_status: Vec<String>,
     /// A repro recording is running: the AI Agent page's button says stop.
     pub agent_recording: bool,
+    /// The Music page's groups (set by the game when it opens the page).
+    pub music_groups: Vec<MusicGroup>,
     /// Keyboard focus: the interactive target currently focused.
     focus: Option<FocusId>,
     /// The focus came from keyboard or pad navigation, so the mouse wheel steps it
@@ -1587,6 +1616,7 @@ impl Default for OptionsUi {
             split_setup: Default::default(),
             agent_status: Vec::new(),
             agent_recording: false,
+            music_groups: Vec::new(),
             focus: None,
             focus_from_keyboard: false,
             can_change_value: false,
@@ -1658,6 +1688,7 @@ fn horizon_page_tooltip(page: Page) -> Option<&'static str> {
         Page::ShaderPacks => "horizon.pages.shader_packs.tooltip",
         Page::Mods => "horizon.pages.mods.tooltip",
         Page::SplitSetup => "horizon.pages.split_setup.tooltip",
+        Page::Music => "horizon.pages.music.tooltip",
         _ => return None,
     })
 }
@@ -2196,6 +2227,7 @@ impl OptionsUi {
             Page::Agent => "horizon.pages.agent",
             Page::SplitProfiles => "horizon.pages.split_profiles",
             Page::SplitSetup => "horizon.pages.split_setup",
+            Page::Music => "horizon.pages.music",
         }
     }
     fn scrollbar_x(&self, width: f32) -> f32 {
@@ -2488,6 +2520,47 @@ impl OptionsUi {
                 rows.extend(pairs(&[Opt::ShowSubtitles, Opt::DirectionalAudio]));
                 rows.extend(pairs(&[Opt::MusicFrequency, Opt::MusicToast]));
                 rows.push(Row::Big(Opt::SoundDevice));
+                // Horizon's own music page: the built-in tracks, by situation.
+                rows.push(Row::Buttons(
+                    button(
+                        0.0,
+                        0.0,
+                        310.0,
+                        tr("horizon.pages.open.music"),
+                        Act::Push(Page::Music),
+                    ),
+                    None,
+                ));
+                rows
+            }
+            Page::Music => {
+                if self.music_groups.is_empty() {
+                    return vec![Row::Header("horizon.pages.music.empty")];
+                }
+                let mut rows = Vec::new();
+                for group in &self.music_groups {
+                    rows.push(Row::Header(group.label));
+                    for track in &group.tracks {
+                        // Left: the track, played now. Right: whether its pool
+                        // still picks it (vanilla until one is turned off).
+                        let on = !s.extras.music_off.iter().any(|off| off == track);
+                        let play = button(
+                            0.0,
+                            0.0,
+                            150.0,
+                            Text::literal(track_name(track).to_owned()),
+                            Act::PlayMusicTrack(group.event.clone(), track.clone()),
+                        );
+                        let toggle = button(
+                            0.0,
+                            0.0,
+                            150.0,
+                            on_off(on),
+                            Act::MusicTrackOn(track.clone(), on),
+                        );
+                        rows.push(Row::Buttons(play, Some(toggle)));
+                    }
+                }
                 rows
             }
             Page::Skin => {
@@ -3975,6 +4048,9 @@ impl OptionsUi {
                             if p == Page::ShaderPacks {
                                 events.push(Event::ListShaderPacks);
                             }
+                            if p == Page::Music {
+                                events.push(Event::ListMusicTracks);
+                            }
                             self.push(p)
                         }
                         Act::Done => events.extend(self.back(s)),
@@ -3988,6 +4064,18 @@ impl OptionsUi {
                                 item.cycle(&mut s.extras, right);
                                 events.push(Event::Changed);
                             }
+                        }
+                        Act::PlayMusicTrack(event, track) => {
+                            events.push(Event::PlayMusicTrack(event, track));
+                        }
+                        Act::MusicTrackOn(track, was_on) => {
+                            s.extras
+                                .music_off
+                                .retain(|off| off.as_str() != track.as_str());
+                            if was_on {
+                                s.extras.music_off.push(track);
+                            }
+                            events.push(Event::Changed);
                         }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::ResetKey(name) => {
@@ -4909,6 +4997,9 @@ impl OptionsUi {
                             if p == Page::ShaderPacks {
                                 events.push(Event::ListShaderPacks);
                             }
+                            if p == Page::Music {
+                                events.push(Event::ListMusicTracks);
+                            }
                             self.push(p);
                         }
                         Act::Done => {
@@ -4927,6 +5018,18 @@ impl OptionsUi {
                                 item.cycle(&mut s.extras, shift);
                                 events.push(Event::Changed);
                             }
+                        }
+                        Act::PlayMusicTrack(event, track) => {
+                            events.push(Event::PlayMusicTrack(event, track));
+                        }
+                        Act::MusicTrackOn(track, was_on) => {
+                            s.extras
+                                .music_off
+                                .retain(|off| off.as_str() != track.as_str());
+                            if was_on {
+                                s.extras.music_off.push(track);
+                            }
+                            events.push(Event::Changed);
                         }
                         Act::Key(name) => self.selected_key = Some(name),
                         Act::ResetKey(name) => {
@@ -7476,5 +7579,84 @@ mod tests {
             events.contains(&Event::ButtonClick),
             "Enter on FocusId::Act must emit Event::ButtonClick"
         );
+    }
+
+    #[test]
+    fn music_and_sounds_opens_the_music_page() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Sound);
+        // The button is the last row: scroll the list to its end first.
+        ui.scroll(&s, size, -1000.0);
+        let (widgets, ..) = ui.layout(&s, size.0, size.1);
+        let open = widgets
+            .into_iter()
+            .find(
+                |w| matches!(&w.kind, WKind::Button { act, .. } if *act == Act::Push(Page::Music)),
+            )
+            .expect("Music... on the Music & Sounds page");
+        let events = ui.click(
+            &mut s,
+            &atlas,
+            open.x + open.w / 2.0,
+            open.y + open.h / 2.0,
+            size,
+            [854, 480],
+            false,
+            false,
+        );
+        assert_eq!(ui.page(), Page::Music);
+        assert!(events.contains(&Event::ListMusicTracks));
+    }
+
+    #[test]
+    fn the_music_page_plays_a_track_now_and_turns_tracks_off() {
+        let atlas = atlas();
+        let size = (960.0, 540.0);
+        let mut s = Settings::default();
+        let mut ui = OptionsUi {
+            music_groups: vec![MusicGroup {
+                label: "Overworld",
+                event: "minecraft:music.game".into(),
+                tracks: vec![
+                    "minecraft:music/game/calm1".into(),
+                    "minecraft:music/game/haggstrom".into(),
+                ],
+            }],
+            ..OptionsUi::default()
+        };
+        ui.show(Page::Music);
+        let at = |ui: &mut OptionsUi, s: &Settings, want: &Act| {
+            let (widgets, ..) = ui.layout(s, size.0, size.1);
+            let w = widgets
+                .into_iter()
+                .find(|w| matches!(&w.kind, WKind::Button { act, .. } if act == want))
+                .expect("button");
+            (w.x + w.w / 2.0, w.y + w.h / 2.0)
+        };
+        // The left of a row plays that track now.
+        let calm1 = "minecraft:music/game/calm1";
+        let (x, y) = at(
+            &mut ui,
+            &s,
+            &Act::PlayMusicTrack("minecraft:music.game".into(), calm1.into()),
+        );
+        let events = ui.click(&mut s, &atlas, x, y, size, [854, 480], false, false);
+        assert!(events.contains(&Event::PlayMusicTrack(
+            "minecraft:music.game".into(),
+            calm1.into()
+        )));
+        // The right of a row turns it off, and the game saves that on `Changed`.
+        let (x, y) = at(&mut ui, &s, &Act::MusicTrackOn(calm1.into(), true));
+        let events = ui.click(&mut s, &atlas, x, y, size, [854, 480], false, false);
+        assert!(events.contains(&Event::Changed));
+        assert_eq!(s.extras.music_off, [calm1.to_owned()]);
+        // And back on.
+        let (x, y) = at(&mut ui, &s, &Act::MusicTrackOn(calm1.into(), false));
+        let events = ui.click(&mut s, &atlas, x, y, size, [854, 480], false, false);
+        assert!(events.contains(&Event::Changed));
+        assert!(s.extras.music_off.is_empty());
     }
 }

@@ -3,6 +3,7 @@
 //! and `minecraft:audio/music_volume` environment attributes of dimension
 //! types and biomes (a biome value overrides its dimension's).
 use crate::sound_engine::{InstanceId, MUSIC, PlayResult, SoundEngine, SoundInstance, Sounds};
+use crate::sound_events::Sentinel;
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{collections::HashMap, fs, path::Path};
@@ -51,6 +52,19 @@ impl Music {
     /// `Musics.GAME`.
     pub fn game() -> Self {
         Self::new("minecraft:music.game", 12000, 24000, false)
+    }
+    /// The built-in situations the Music page lists, in its order: the label
+    /// the page's group shows and the music that situation plays.
+    pub fn builtin() -> [(&'static str, Music); 7] {
+        [
+            ("Menu", Self::menu()),
+            ("Overworld", Self::game()),
+            ("Creative", Self::creative()),
+            ("Underwater", Self::under_water()),
+            ("The End", Self::end()),
+            ("Boss", Self::end_boss()),
+            ("Credits", Self::credits()),
+        ]
     }
     /// `Music.CODEC`.
     fn parse(v: &Value) -> Option<Self> {
@@ -342,6 +356,12 @@ pub struct MusicManager {
     current_gain: f32,
     next_song_delay: i32,
     toast_shown: bool,
+    /// The built-in tracks the Music page turned off (sound ids): every pool
+    /// picks around them.
+    off: Vec<String>,
+    /// `current` was started by the Music page's "play now", not by the
+    /// situation: its own music waits for it to end.
+    forced: bool,
     pub frequency: MusicFrequency,
     /// `ToastManager.showNowPlayingToast` (true) / `hideNowPlayingToast`
     /// (false) calls since the last drain.
@@ -361,6 +381,8 @@ impl MusicManager {
             current_gain: 1.0,
             next_song_delay: 100,
             toast_shown: false,
+            off: Vec::new(),
+            forced: false,
             frequency: MusicFrequency::Default,
             toast_requests: Vec::new(),
         }
@@ -390,6 +412,16 @@ impl MusicManager {
             sounds.release(old);
         }
         self.current = id;
+        if id.is_none() {
+            self.forced = false;
+        }
+    }
+    /// The tracks the Music page turned off: each pool picks around them, so a
+    /// situation whose tracks are all off plays nothing.
+    pub fn set_off(&mut self, tracks: &[String]) {
+        if self.off != tracks {
+            self.off = tracks.to_vec();
+        }
     }
     /// `MusicManager.tick` with `Minecraft.getMusicVolume` and
     /// `getSituationalMusic`; `loading` is a `LevelLoadingScreen`.
@@ -416,7 +448,10 @@ impl MusicManager {
                 .engine()
                 .instance(current)
                 .map(|i| i.identifier.clone());
-            if music.replace_current_music && playing.as_deref() != Some(music.sound.as_str()) {
+            if music.replace_current_music
+                && !self.forced
+                && playing.as_deref() != Some(music.sound.as_str())
+            {
                 sounds.stop_instance(current);
                 self.next_song_delay = next_int(&mut self.random, 0, music.min_delay / 2);
             }
@@ -436,11 +471,63 @@ impl MusicManager {
             }
         }
     }
-    /// `MusicManager.startPlaying`.
+    /// `MusicManager.startPlaying`, with the Music page's off tracks left out
+    /// of the pool.
     pub fn start_playing(&mut self, music: &Music, sounds: &mut impl Sounds) {
-        let instance = SoundInstance::for_music(&music.sound, SoundEngine::unseeded());
+        self.start_playing_with(music, None, sounds);
+    }
+    /// Play one track of `event` now (a Music page row): it takes the
+    /// manager's slot, and the situation's own music waits until it ends.
+    /// False when the event has no such track.
+    pub fn play_track(&mut self, event: &str, track: &str, sounds: &mut impl Sounds) -> bool {
+        let music = Music::new(event, 0, 0, true);
+        self.start_playing_with(&music, Some(track), sounds)
+    }
+    /// `MusicManager.startPlaying`, choosing the concrete sound with `only`
+    /// (that track alone) or else `off` left out.
+    fn start_playing_with(
+        &mut self,
+        music: &Music,
+        only: Option<&str>,
+        sounds: &mut impl Sounds,
+    ) -> bool {
+        let mut instance = SoundInstance::for_music(&music.sound, SoundEngine::unseeded());
+        // The event's own random picks the track, as `resolve` would.
+        let mut random = instance.random.clone();
+        let sound = sounds
+            .engine()
+            .registry
+            .sound_except(&music.sound, &mut random, &|id| match only {
+                Some(track) => id != track,
+                // A row's On/Off is per track, everywhere it plays.
+                None => self.off.iter().any(|off| off == id),
+            });
+        instance.random = random;
+        let Some(sound) = sound.filter(|s| s.sentinel == Sentinel::None) else {
+            // Nothing left to play (every track of the situation is off, or
+            // the event is unknown): retry after a normal delay, so turning
+            // a track back on is heard without reloading the music.
+            if only.is_none() {
+                self.next_song_delay = self
+                    .frequency
+                    .next_song_delay(Some(music), &mut self.random);
+            }
+            return false;
+        };
+        // The manager resolved the sound itself; `resolve` keeps it (`getOrResolve`).
+        instance.sound = Some(sound);
+        instance.event = Some(None);
+        // "Play now" takes the manager's slot: the track already playing stops
+        // (a situation's own track is replaced by `set_current` below).
+        if only.is_some()
+            && let Some(current) = self.current
+        {
+            sounds.stop_instance(current);
+            self.set_current(None, sounds);
+        }
         let (id, result) = sounds.play_instance(instance, true);
         self.set_current(Some(id), sounds);
+        self.forced = only.is_some();
         match result {
             PlayResult::Started => {
                 self.toast_requests.push(true);
@@ -450,6 +537,7 @@ impl MusicManager {
             PlayResult::NotStarted => {}
         }
         self.next_song_delay = i32::MAX;
+        true
     }
     /// `MusicManager.showNowPlayingToastIfNeeded`.
     pub fn show_now_playing_toast_if_needed(&mut self) {
@@ -710,5 +798,142 @@ mod tests {
         assert_eq!(bg.select(true, true).unwrap().sound, "c");
         assert_eq!(bg.select(true, false).unwrap().sound, "b");
         assert_eq!(bg.select(false, false).unwrap().sound, "a");
+    }
+
+    /// The overworld pool, two tracks, and a menu track.
+    fn two_tracks() -> SoundEngine {
+        let mut registry = SoundRegistry::default();
+        registry.add_file(
+            "minecraft",
+            br#"{"music.game": {"sounds": [
+                    {"name": "music/game/one", "stream": true},
+                    {"name": "music/game/two", "stream": true}]},
+                 "music.menu": {"sounds": [{"name": "music/menu/one", "stream": true}]}}"#,
+            &|_, _| true,
+        );
+        SoundEngine::new(registry)
+    }
+    fn played(m: &MusicManager, engine: &SoundEngine) -> Option<String> {
+        let id = m.current_instance()?;
+        let sound = engine.instance(id)?.sound.clone()?;
+        Some(sound.location)
+    }
+
+    #[test]
+    fn a_track_turned_off_leaves_the_pool() {
+        let (mut engine, mut backend) = (two_tracks(), Null::default());
+        let mut m = MusicManager::new(11);
+        m.set_off(&["minecraft:music/game/one".to_owned()]);
+        m.start_playing(
+            &Music::game(),
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        assert_eq!(
+            played(&m, &engine).as_deref(),
+            Some("minecraft:music/game/two")
+        );
+        // `current` is the event, as `isPlayingMusic` reads it.
+        assert_eq!(m.current(&engine), Some("minecraft:music.game"));
+    }
+
+    #[test]
+    fn a_situation_with_every_track_off_plays_nothing_and_tries_later() {
+        let (mut engine, mut backend) = (two_tracks(), Null::default());
+        let mut m = MusicManager::new(12);
+        m.set_off(&[
+            "minecraft:music/game/one".to_owned(),
+            "minecraft:music/game/two".to_owned(),
+        ]);
+        m.start_playing(
+            &Music::game(),
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        assert!(m.current_instance().is_none());
+        // A retry after the usual delay, so turning one back on is heard.
+        assert!((12000..=24000).contains(&m.next_song_delay()));
+    }
+
+    #[test]
+    fn play_now_plays_that_track_and_the_situation_waits() {
+        let (mut engine, mut backend) = (two_tracks(), Null::default());
+        let mut m = MusicManager::new(13);
+        m.start_playing(
+            &Music::menu(),
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        let menu = m.current_instance().expect("menu music started");
+        // Even a track turned off plays when asked to, by hand, and it takes
+        // the slot from the track already playing.
+        m.set_off(&["minecraft:music/game/two".to_owned()]);
+        assert!(m.play_track(
+            "minecraft:music.game",
+            "minecraft:music/game/two",
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        ));
+        // The slot's old track is told to stop as soon as it is replaced.
+        assert_ne!(m.current_instance(), Some(menu), "the slot changed");
+        assert!(
+            backend.stopped.values().any(|stopped| *stopped),
+            "the old channel stopped"
+        );
+        assert_eq!(
+            played(&m, &engine).as_deref(),
+            Some("minecraft:music/game/two")
+        );
+        // Menu music replaces what plays; a "play now" track keeps its slot.
+        for _ in 0..3 {
+            m.tick(
+                Some(&Music::menu()),
+                1.0,
+                false,
+                &mut Bound {
+                    engine: &mut engine,
+                    backend: &mut backend,
+                },
+            );
+        }
+        assert_eq!(
+            played(&m, &engine).as_deref(),
+            Some("minecraft:music/game/two")
+        );
+        // Once it ends, the situation's own music takes over again.
+        engine.stop_all(&mut backend);
+        m.tick(
+            Some(&Music::menu()),
+            1.0,
+            false,
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        );
+        assert!(m.current_instance().is_none());
+    }
+
+    #[test]
+    fn play_now_of_a_track_the_event_lacks_plays_nothing() {
+        let (mut engine, mut backend) = (two_tracks(), Null::default());
+        let mut m = MusicManager::new(14);
+        assert!(!m.play_track(
+            "minecraft:music.game",
+            "minecraft:music/game/absent",
+            &mut Bound {
+                engine: &mut engine,
+                backend: &mut backend,
+            },
+        ));
+        assert!(m.current_instance().is_none());
     }
 }

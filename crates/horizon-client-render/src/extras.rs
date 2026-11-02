@@ -138,6 +138,10 @@ pub struct Extras {
     /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
     /// on by default as vanilla); off, the wheel only scrolls the list.
     pub wheel_cycles_settings: bool,
+    /// The built-in music tracks the Music page turned off (sound ids): they
+    /// leave every pool they play in (`musicOff`, empty by default: vanilla's
+    /// random selection).
+    pub music_off: Vec<String>,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -181,6 +185,7 @@ impl Default for Extras {
             splitscreen_three: 0,
             splitscreen_names: true,
             wheel_cycles_settings: true,
+            music_off: Vec::new(),
         }
     }
 }
@@ -266,6 +271,14 @@ impl Extras {
                 "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
                 "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
                 "wheelCyclesSettings" => e.wheel_cycles_settings = flag(e.wheel_cycles_settings),
+                "musicOff" => {
+                    e.music_off = value
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_owned)
+                        .collect()
+                }
                 _ => {}
             }
         }
@@ -273,7 +286,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -318,6 +331,7 @@ impl Extras {
             self.splitscreen_three,
             bool_text(self.splitscreen_names),
             bool_text(self.wheel_cycles_settings),
+            self.music_off.join(","),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -778,6 +792,10 @@ mod tests {
         assert_eq!(Item::Splitscreen.switch(&e), Some(true));
         Item::WheelCyclesSettings.cycle(&mut e, false);
         assert_eq!(Item::WheelCyclesSettings.switch(&e), Some(false));
+        e.music_off = vec![
+            "minecraft:music/game/calm1".into(),
+            "minecraft:music.menu".into(),
+        ];
         assert_eq!(Extras::parse(&e.serialize()), e);
     }
 

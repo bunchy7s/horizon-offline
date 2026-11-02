@@ -4,6 +4,7 @@ use super::Game;
 use horizon_client::{
     blocks::Fluid,
     music::{BackgroundMusic, Music, MusicFrequency, Situation},
+    options_ui::MusicGroup,
     sound_engine::{SoundEngine, SoundInstance, Sounds, TickContext},
 };
 
@@ -25,6 +26,8 @@ impl Game<'_> {
         if frequency != self.music.frequency {
             self.music.set_frequency(frequency, music.as_ref());
         }
+        // The Music page's off tracks leave every pool they play in.
+        self.music.set_off(&self.settings.extras.music_off);
         // LevelLoadingScreen: no new track before the player is in the world.
         let loading = self.title.is_none() && self.player.is_none() && self.win.is_none();
         self.music
@@ -46,6 +49,26 @@ impl Game<'_> {
                 }
             }
         }
+    }
+    /// The Music page's groups: each built-in situation's tracks, from the
+    /// sound registry (`sounds.json`).
+    pub(super) fn music_groups(&self) -> Vec<MusicGroup> {
+        let registry = &self.audio.engine.registry;
+        Music::builtin()
+            .into_iter()
+            .filter_map(|(label, music)| {
+                let tracks = registry.tracks(&music.sound);
+                (!tracks.is_empty()).then_some(MusicGroup {
+                    label,
+                    event: music.sound,
+                    tracks,
+                })
+            })
+            .collect()
+    }
+    /// A Music page row: play this track of `event` now.
+    pub(super) fn play_music_track(&mut self, event: &str, track: &str) {
+        self.music.play_track(event, track, &mut self.audio);
     }
     /// `Options.getFinalSoundSourceVolume(SoundSource.MUSIC)`.
     fn final_music_volume(&self) -> f32 {
