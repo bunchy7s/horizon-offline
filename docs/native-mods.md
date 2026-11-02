@@ -1603,6 +1603,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_world_border_bounds_change_finish()`**: a timed world border size change finished on the server, after the border reached its final size.
 - **`native_player_launch_projectile(player, name, item)`**: a server player launched a snowball, egg, ender pearl,
   potion or trident. It fires after the projectile is created and only for guest players in a LAN world.
+- **`native_item_despawn(entity, item, count, pos)`**: a dropped item entity reached its 6000-tick lifetime and is
+  about to be removed.
 - **`native_explosion_prime(center, radius)`**: a server explosion is about to begin at `center` with `radius`.
   It is listen-only, so the explosion proceeds as usual; it also fires on the single-player server.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and

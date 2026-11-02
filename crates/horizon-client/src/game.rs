@@ -4085,9 +4085,6 @@ impl Game<'_> {
         let ticking = self.entity_ticking_area();
         let mut removed = vec![false; items.len()];
         let mut cells = horizon_client::entities::ItemCells::new(&items);
-        let catalog = world_items!(self);
-        let max_stack =
-            |stack: &ItemStack| catalog.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
         // A LAN or server guest only shows the host's items.
         let merging = self.remote.is_none();
         let obstacles = horizon_client::entities::ObstacleGrid::new(self.item_entity_collisions());
@@ -4161,6 +4158,9 @@ impl Game<'_> {
                 && (alive || item.age == 6000 && item.position.y > -128.0)
                 && item.ticks.is_multiple_of(rate)
             {
+                let catalog = world_items!(self);
+                let max_stack =
+                    |stack: &ItemStack| catalog.get(&stack.item).map_or(64, |i| i.max_stack).max(1);
                 horizon_client::entities::merge_with_neighbours(
                     &mut items,
                     &mut removed,
@@ -4170,6 +4170,19 @@ impl Game<'_> {
                 );
             }
             let item = &mut items[i];
+            if (self.serving.is_some() || self.options.dedicated.is_some())
+                && !alive
+                && !removed[i]
+                && item.age == 6000
+                && item.position.y > -128.0
+            {
+                self.native_item_despawn(
+                    item.id,
+                    &item.stack.item,
+                    item.stack.count as i32,
+                    [item.position.x, item.position.y, item.position.z],
+                );
+            }
             if !alive || removed[i] {
                 removed[i] = true;
                 cells.remove(i, item.position);

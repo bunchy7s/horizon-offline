@@ -4832,6 +4832,17 @@ impl Game<'_> {
     pub(super) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32) {
         let _ = (center, radius);
     }
+    /// A dropped item entity reached its 6000-tick lifetime and is about to be
+    /// removed (Bukkit's `ItemDespawnEvent`). @API:native_item_despawn@.
+    pub(super) fn native_item_despawn(
+        &mut self,
+        entity: u32,
+        item: &str,
+        count: i32,
+        pos: [f64; 3],
+    ) {
+        let _ = (entity, item, count, pos);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
