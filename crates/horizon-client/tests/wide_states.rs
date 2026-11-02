@@ -2,6 +2,7 @@
 //! content mods can take the registry past 65,536 states. Its own test binary,
 //! since the palette width is set once for the whole process.
 
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::chunk::{Chunk, Section, block_strategy, set_block_states};
 
 #[test]

@@ -3,7 +3,9 @@
 use clap::{Parser, Subcommand};
 use horizon_launcher::account::{self, Accounts};
 use horizon_launcher::backend::{self, Release};
+use horizon_launcher::build_import;
 use horizon_launcher::github_mods;
+use horizon_launcher::i18n::{tr, trf};
 use horizon_launcher::instances;
 use horizon_launcher::loaders;
 use horizon_launcher::native_mods;
@@ -707,6 +709,20 @@ enum Cmd {
     Install { tag: String },
     /// Remove an installed version
     Remove { tag: String },
+    /// Install a game program you have, such as a horizon-client built on your fork's Actions,
+    /// as its own version on an installed release or Nightly's game files, and select it.
+    /// Nothing signed it: it runs with your rights, and updates never replace it
+    ImportBuild {
+        /// The program (horizon-client, horizon-client.exe on Windows), or a zip holding it
+        path: PathBuf,
+        /// The installed release or Nightly whose game files it plays with (default: the
+        /// selected one, else the newest)
+        #[arg(long)]
+        version: Option<String>,
+        /// You picked this build yourself and trust it with full access to this computer
+        #[arg(long)]
+        trust_unsigned: bool,
+    },
     /// Prepare a version's resources from your own Minecraft install, or from Mojang
     Prepare {
         /// The game folder of the official launcher, Prism Launcher, MultiMC, the Modrinth App,
@@ -768,6 +784,16 @@ enum Cmd {
         /// A mod folder (horizon-mixin.toml, or an unpacked .hnmod), or a folder of them
         /// (default: the native mods installed and turned on in the instance)
         folder: Option<PathBuf>,
+        /// Export mode: build a standalone dedicated-server engine into this folder instead of
+        /// an instance's build. Needs a mod FOLDER; no instance is read or changed, and no
+        /// launcher config is written
+        #[arg(
+            long = "server-output",
+            value_name = "DIR",
+            conflicts_with = "instance",
+            requires = "folder"
+        )]
+        server_output: Option<PathBuf>,
         /// The instance whose installed native mods to build, and which then plays the build
         /// (default: the selected one)
         #[arg(long)]
@@ -787,9 +813,10 @@ enum Cmd {
         /// Build mods made for different Horizon versions together anyway, on the newest of them
         #[arg(long)]
         allow_version_mismatch: bool,
-        /// The Cargo profile: fast (the default: incremental, quick to rebuild) or release
-        /// (thin LTO: slower to build, slightly faster game). Default: the native-profile setting
-        #[arg(long, value_parser = ["fast", "release"])]
+        /// The build profile: performance (the default: incremental, quick to rebuild), dev (quickest
+        /// to rebuild a mod, slow game) or release (thin LTO: slowest to build, slightly faster
+        /// game). Default: the native-profile setting
+        #[arg(long, value_parser = ["performance", "dev", "release"])]
         profile: Option<String>,
     },
     /// Show a release's patch notes (default: the newest)
@@ -809,8 +836,9 @@ enum Cmd {
     /// ("default" removes it), while-playing stay|minimize|hide (what the window does while the game runs), language
     /// system|en|fr|ru|de|zh|es|uk|pl (the window's language; system follows the computer's), accent
     /// violet|blue|teal|green|amber|red|pink, background PATH (a picture behind Home; "default"
-    /// shows Horizon's landscape), native-profile fast|release (the Cargo profile native mods
-    /// build with: fast is incremental, release is slower to build and slightly faster to play)
+    /// shows Horizon's landscape), native-profile performance|dev|release (the profile native
+    /// mods build with: performance is incremental, dev rebuilds a mod quickest for a slow game,
+    /// release is slowest to build and slightly faster to play)
     Settings {
         #[arg(value_parser = SETTING_KEYS)]
         key: Option<String>,
@@ -1035,11 +1063,15 @@ fn set_setting(s: &mut backend::Settings, key: &str, value: &str) -> Result<(), 
             }
         }
         "native-profile" => {
-            s.native_release = match value {
-                "fast" | "default" => false,
-                "release" => true,
-                _ => return Err(format!("{value}: say fast or release")),
-            }
+            // "default", as for the other settings, goes back to `performance`.
+            s.native_profile = match value {
+                "default" => None,
+                _ => Some(
+                    native_mods::Profile::parse(value)
+                        .ok_or_else(|| format!("{value}: say performance, dev or release"))?,
+                ),
+            };
+            s.native_release = false;
         }
         "proxy" => {
             if value == "default" || value.is_empty() {
@@ -1072,7 +1104,7 @@ fn settings_json(s: &backend::Settings) -> serde_json::Value {
         "language": s.language.map_or("system", |l| l.code()),
         "accent": s.accent.name(),
         "background": horizon_launcher::themes::background(&backend::data_dir(), s.background.as_deref()),
-        "native_profile": native_mods::Profile::from_setting(s.native_release).name(),
+        "native_profile": native_mods::Profile::chosen(s).name(),
         "no_ai": backend::no_ai(),
     })
 }
@@ -1220,6 +1252,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         }
         Cmd::NativeBuild {
             folder,
+            server_output,
             instance,
             version,
             update,
@@ -1233,10 +1266,53 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let started = std::time::Instant::now();
             let profile = match profile.as_deref().and_then(native_mods::Profile::parse) {
                 Some(profile) => profile,
-                None => {
-                    native_mods::Profile::from_setting(backend::Settings::load().native_release)
-                }
+                None => native_mods::Profile::chosen(&backend::Settings::load()),
             };
+            let steps = |step: native_mods::Step| {
+                let secs = started.elapsed().as_secs();
+                eprintln!("[{:>2}:{:02}] {}", secs / 60, secs % 60, step.label())
+            };
+            if let Some(output) = server_output {
+                // Export mode: a standalone server engine in `output`. No instance is read
+                // or changed, and no launcher config is written; `folder` is required (clap).
+                let folder = folder.unwrap();
+                let base = match &version {
+                    Some(v) => backend::resolve_version(Some(v))?,
+                    // The instance's version is never looked at here: the newest installed
+                    // release or Nightly, or that one with `--update` (never a native build).
+                    None => native_mods::base_for(None, &backend::installed(), update)
+                        .ok_or_else(|| tr("No version is installed yet."))?,
+                };
+                let built = native_mods::build_server(
+                    &base,
+                    &folder,
+                    &output,
+                    allow_version_mismatch,
+                    profile,
+                    steps,
+                )
+                .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
+                    true => trf(
+                        "{error} They often still build: pass --allow-version-mismatch to try.",
+                        &[("error", e.as_str())],
+                    ),
+                    false => e,
+                })?;
+                let built = std::path::absolute(&built).unwrap_or(built);
+                let path = built.display().to_string();
+                println!(
+                    "{}",
+                    trf("Built the server engine: {path}", &[("path", &path)])
+                );
+                println!(
+                    "{}",
+                    tr(
+                        "Point the server at it: set engine.path to this file in the server's \
+                        server.toml (docs/hosting.md); the launcher writes nothing itself."
+                    )
+                );
+                return Ok(());
+            }
             let target = match &instance {
                 Some(name) => instances::find(name)?,
                 None => instances::selected(),
@@ -1259,10 +1335,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
                 &target,
                 allow_version_mismatch,
                 profile,
-                |step| {
-                    let secs = started.elapsed().as_secs();
-                    eprintln!("[{:>2}:{:02}] {}", secs / 60, secs % 60, step.label())
-                },
+                steps,
             )
             .map_err(|e| match e.starts_with(native_mods::MISMATCH) {
                 true => {
@@ -1278,6 +1351,24 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::Remove { tag } => {
             backend::remove_version(&tag)?;
             println!("Removed {tag}.");
+        }
+        Cmd::ImportBuild {
+            path,
+            version,
+            trust_unsigned,
+        } => {
+            if !trust_unsigned {
+                return Err("An imported build is unsigned: Horizon can't check where it came from. If you trust it, pass --trust-unsigned.".into());
+            }
+            let tag = build_import::import(&path, version.as_deref())?;
+            let prepared = backend::is_prepared(&tag);
+            if as_json {
+                json(serde_json::json!({ "imported": tag, "prepared": prepared }));
+            } else if prepared {
+                println!("Imported {tag} and selected it. It is prepared already, from another installed version.");
+            } else {
+                println!("Imported {tag} and selected it. Prepare it next: horizon-launcher prepare --version {tag}");
+            }
         }
         Cmd::Prepare {
             minecraft,
@@ -1508,7 +1599,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             if let Some(key) = key {
                 let value = value.ok_or("settings KEY VALUE: the value is missing")?;
                 set_setting(&mut settings, &key, &value)?;
-                settings.save();
+                settings.save()?;
                 horizon_launcher::proxy::announce(settings.proxy.clone());
             }
             let all = settings_json(&settings);
@@ -1524,7 +1615,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
             let mut settings = backend::Settings::load();
             if let Some(line) = args {
                 settings.game_args = line;
-                settings.save();
+                settings.save()?;
             }
             let line = settings.game_args;
             if as_json {
@@ -1586,7 +1677,7 @@ fn execute(command: Cmd, as_json: bool) -> Result<(), String> {
         Cmd::DesktopEntry { remove } => {
             let mut settings = backend::Settings::load();
             settings.desktop_entry = Some(!remove);
-            settings.save();
+            settings.save()?;
             if remove {
                 horizon_launcher::desktop::remove()?;
                 println!("Removed Horizon from the applications menu.");
@@ -2182,7 +2273,15 @@ fn github_native(
             .collect::<Result<Vec<_>, _>>()
     });
     github_mods::discard(found);
-    for o in done? {
+    let done = done?;
+    // The window's trust notice, once. Nothing is turned on: native mods are always on.
+    let mut settings = backend::Settings::load();
+    if !settings.native_mods_noticed {
+        eprintln!("{}", native_status::NOTICE);
+        settings.native_mods_noticed = true;
+        settings.save()?;
+    }
+    for o in done {
         println!(
             "Installed {} {} from GitHub ({}), sha256 {}.",
             o.id,
@@ -2191,14 +2290,10 @@ fn github_native(
             o.sha256
         );
     }
-    // The window's trust notice, once. Nothing is turned on: native mods are always on.
-    let mut settings = backend::Settings::load();
-    if !settings.native_mods_noticed {
-        eprintln!("{}", native_status::NOTICE);
-        settings.native_mods_noticed = true;
-        settings.save();
-    }
     println!("Build it next: horizon-launcher native-build --trust-native-code");
+    println!(
+        "Developing a mod? horizon-launcher settings native-profile dev (or native-build --profile dev): a mod edit rebuilds about 6× faster, while game logic runs up to about twice as slow. Use it while developing, not for playing."
+    );
     Ok(())
 }
 
@@ -2481,6 +2576,14 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 Some(target) => java_instance::install(&*source, target, &p, &home, &line)?,
                 None => installed::install(&*source, &p, everything, &home, &line)?,
             };
+            // The first native mod: the window's trust notice, once.
+            let mut settings = backend::Settings::load();
+            let native = done.iter().any(|e| native_status::is_native_file(&e.file));
+            if native && !settings.native_mods_noticed {
+                eprintln!("{}", native_status::NOTICE);
+                settings.native_mods_noticed = true;
+                settings.save()?;
+            }
             if as_json {
                 json(done.iter().map(entry_json).collect());
             }
@@ -2489,14 +2592,6 @@ fn mods(action: ModsCmd, as_json: bool) -> Result<(), String> {
                 for s in &e.skipped {
                     println!("  not ported: {s}");
                 }
-            }
-            // The first native mod: the window's trust notice, once.
-            let mut settings = backend::Settings::load();
-            let native = done.iter().any(|e| native_status::is_native_file(&e.file));
-            if native && !settings.native_mods_noticed {
-                eprintln!("{}", native_status::NOTICE);
-                settings.native_mods_noticed = true;
-                settings.save();
             }
         }
         ModsCmd::Update { project, check, .. } => {
@@ -3688,5 +3783,115 @@ mod tests {
             Cli::try_parse_from(["horizon-launcher", "mods", "check", "x", "--instance", "A"])
                 .is_err()
         );
+    }
+
+    #[test]
+    fn native_build_export_mode_needs_a_folder_and_refuses_an_instance() {
+        let parse = |args: &[&str]| {
+            Cli::try_parse_from(
+                [
+                    &["horizon-launcher", "native-build", "--trust-native-code"],
+                    args,
+                ]
+                .concat(),
+            )
+        };
+        // Export mode: a mod folder and an output folder.
+        match parse(&["mods", "--server-output", "engine-out"])
+            .unwrap()
+            .command
+        {
+            Some(Cmd::NativeBuild {
+                folder,
+                server_output,
+                instance,
+                version,
+                update,
+                profile,
+                ..
+            }) => {
+                assert_eq!(folder.as_deref(), Some(Path::new("mods")));
+                assert_eq!(server_output.as_deref(), Some(Path::new("engine-out")));
+                assert_eq!(instance, None);
+                assert_eq!(version, None);
+                assert!(!update);
+                assert_eq!(profile, None);
+            }
+            _ => panic!("expected native-build"),
+        }
+        // The mod folder is explicit in export mode: no default from an instance.
+        assert!(parse(&["--server-output", "engine-out"]).is_err());
+        // Export mode never touches an instance.
+        assert!(parse(&["mods", "--server-output", "engine-out", "--instance", "A"]).is_err());
+        // The options export mode keeps: an explicit version, the profile, mismatch; a version
+        // and --update refuse each other, as in the game mode.
+        match parse(&[
+            "mods",
+            "--server-output",
+            "engine-out",
+            "--version",
+            "v2026.10.13",
+            "--allow-version-mismatch",
+            "--profile",
+            "release",
+        ])
+        .unwrap()
+        .command
+        {
+            Some(Cmd::NativeBuild {
+                version,
+                update,
+                allow_version_mismatch,
+                profile,
+                ..
+            }) => {
+                assert_eq!(version.as_deref(), Some("v2026.10.13"));
+                assert!(!update);
+                assert!(allow_version_mismatch);
+                assert_eq!(profile.as_deref(), Some("release"));
+            }
+            _ => panic!("expected native-build"),
+        }
+        // --update on its own: the newest installed release or Nightly, never a native build.
+        match parse(&["mods", "--server-output", "engine-out", "--update"])
+            .unwrap()
+            .command
+        {
+            Some(Cmd::NativeBuild { update, .. }) => assert!(update),
+            _ => panic!("expected native-build"),
+        }
+        // A version refuses --update, as in the game mode.
+        assert!(parse(&[
+            "mods",
+            "--server-output",
+            "engine-out",
+            "--version",
+            "v2026.10.13",
+            "--update"
+        ])
+        .is_err());
+        // The game mode is unchanged: an instance build without --server-output.
+        assert!(matches!(
+            parse(&["--instance", "A"]).unwrap().command,
+            Some(Cmd::NativeBuild { instance: Some(i), server_output: None, .. }) if i == "A"
+        ));
+    }
+
+    #[test]
+    fn export_mode_base_is_an_installed_release_not_a_native_build() {
+        // The export mode picks the newest installed release or Nightly, never a native build
+        // (`native-*`), and `--update` changes nothing when it already is the newest.
+        let installed = vec![
+            "v2026.10.13".to_string(),
+            "v2026.09.01".to_string(),
+            "native-2b03c1".to_string(),
+        ];
+        for update in [false, true] {
+            assert_eq!(
+                native_mods::base_for(None, &installed, update).as_deref(),
+                Some("v2026.10.13")
+            );
+        }
+        assert_eq!(native_mods::base_for(None, &[], false), None);
     }
 }

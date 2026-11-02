@@ -32,6 +32,9 @@ pub struct WorldOptions {
     pub commands: Option<bool>,
     /// The world preset the world is created with.
     pub world_type: crate::save::WorldPreset,
+    /// The biome the single-biome preset fixes (`CreateBuffetWorldScreen`'s
+    /// choice), `minecraft:plains` until another is picked.
+    pub single_biome: String,
     /// CreateFlatWorldScreen's layers and biome, kept with the world type.
     pub flat_settings: Option<super::flat::FlatSettings>,
     pub structures: bool,
@@ -52,6 +55,7 @@ impl Default for WorldOptions {
             difficulty: 2,
             commands: None,
             world_type: crate::save::WorldPreset::Normal,
+            single_biome: "minecraft:plains".into(),
             flat_settings: None,
             structures: true,
             bonus_chest: false,
@@ -78,16 +82,79 @@ impl WorldOptions {
                 .unwrap_or(2),
             commands: Some(commands),
             world_type: generation.preset,
+            single_biome: fixed_biome(dir).unwrap_or_else(|| "minecraft:plains".into()),
             flat_settings: (generation.preset == crate::save::WorldPreset::Flat)
                 .then(|| super::flat::FlatSettings::from_world(dir))
                 .flatten(),
             structures: generation.structures,
             bonus_chest: generation.bonus_chest,
-            rules: crate::gamerules::GameRules::load(dir),
+            rules: crate::gamerules::GameRules::load_with_features(dir, &level.enabled_features),
             data_packs,
             pack_dir,
             ..Self::default()
         }
+    }
+    /// Re-Create's repository enables the original world's feature packs.
+    pub(super) fn restore_feature_packs(
+        &mut self,
+        resources: &std::path::Path,
+        level: &crate::save::Level,
+    ) {
+        let packs = self.available_packs(resources);
+        if let Some((enabled, disabled)) = &level.data_packs {
+            let mut selected: Vec<_> = enabled
+                .iter()
+                .filter(|id| id.as_str() == "vanilla" || packs.iter().any(|p| &p.id == *id))
+                .cloned()
+                .collect();
+            for id in &self.data_packs {
+                if !selected.contains(id) && !disabled.contains(id) {
+                    selected.push(id.clone());
+                }
+            }
+            self.data_packs = selected;
+        }
+        let provided: Vec<_> = packs
+            .iter()
+            .filter(|p| self.data_packs.contains(&p.id))
+            .flat_map(|p| p.features())
+            .collect();
+        let mut missing: Vec<_> = level
+            .enabled_features
+            .iter()
+            .filter(|f| f.as_str() != "minecraft:vanilla" && !provided.contains(f))
+            .cloned()
+            .collect();
+        for pack in packs.iter().filter(|p| !p.id.starts_with("file/")) {
+            let required = pack.features();
+            if required.iter().any(|f| missing.contains(f))
+                && required.iter().all(|f| level.enabled_features.contains(f))
+                && !self.data_packs.contains(&pack.id)
+            {
+                self.data_packs.push(pack.id.clone());
+                missing.retain(|f| !required.contains(f));
+            }
+        }
+    }
+    fn available_packs(&self, resources: &std::path::Path) -> Vec<crate::datapack::DataPack> {
+        let mut packs = crate::datapack::feature_packs(resources);
+        if let Some(dir) = &self.pack_dir {
+            packs.extend(crate::datapack::discover_folder(dir));
+        }
+        packs
+    }
+    /// WorldDataConfiguration's selected feature packs over vanilla's flags.
+    pub fn enabled_features(&self, resources: &std::path::Path) -> Vec<String> {
+        let mut features = vec!["minecraft:vanilla".to_owned()];
+        features.extend(
+            self.available_packs(resources)
+                .iter()
+                .filter(|pack| self.data_packs.contains(&pack.id))
+                .flat_map(|pack| pack.features()),
+        );
+        features.sort();
+        features.dedup();
+        features
     }
     /// `getDifficulty`: Hardcore is always Hard.
     pub fn difficulty(&self) -> usize {
@@ -107,6 +174,13 @@ impl WorldOptions {
             structures: self.structures,
             bonus_chest: self.bonus_chest(),
         }
+    }
+    /// The biome the single-biome preset fixes, as
+    /// `write_world_gen_settings_with` takes it; none for another preset,
+    /// which has no fixed biome to honour.
+    pub fn single_biome(&self) -> Option<&str> {
+        (self.world_type == crate::save::WorldPreset::SingleBiomeSurface)
+            .then_some(self.single_biome.as_str())
     }
     /// The custom layers, as `write_world_gen_settings_with` takes them.
     pub fn flat_settings(&self) -> Option<horizon_world::nbt::Tag> {
@@ -144,12 +218,27 @@ impl WorldOptions {
                     // setWorldType starts the generator from the flat preset.
                     self.flat_settings = Some(super::flat::FlatSettings::default());
                 }
+                // ...and its dimensions replace the ones the preset before it
+                // had, so a fixed biome the player chose starts over at the
+                // single-biome preset's own.
+                self.single_biome = "minecraft:plains".into();
             }
             27 => self.structures = !self.structures,
             28 => self.bonus_chest = !self.bonus_chest,
             _ => {}
         }
     }
+}
+
+/// The biome a saved world's fixed biome source names
+/// (`CreateBuffetWorldScreen`'s initial selection).
+fn fixed_biome(dir: &std::path::Path) -> Option<String> {
+    let settings = crate::save::world_gen_settings(dir)?;
+    let generator = settings
+        .get("dimensions")?
+        .get("minecraft:overworld")?
+        .get("generator")?;
+    crate::save::text(generator.get("biome_source")?.get("biome"))
 }
 
 /// `Mth.roundToward`: up to a multiple of `step`.
@@ -170,6 +259,48 @@ pub(super) fn tab_at(w: f32, (x, y): (f32, f32)) -> Option<usize> {
     ((0.0..TAB_BAR).contains(&y) && x >= x0)
         .then(|| ((x - x0) / width) as usize)
         .filter(|i| *i < TABS.len())
+}
+/// `TabNavigationBar.tabs.size()`: the last tab Ctrl+0 and Ctrl+4..9 land on.
+pub(super) fn tab_count() -> usize {
+    TABS.len()
+}
+/// `InputConstants.Key.getNumericKeyValue`: the digit a key stands for, on the
+/// number row or the keypad, and 0 for the `0` key. `None` for every other key.
+fn numeric_key(key: winit::keyboard::KeyCode) -> Option<u8> {
+    use winit::keyboard::KeyCode;
+    Some(match key {
+        KeyCode::Digit0 | KeyCode::Numpad0 => 0,
+        KeyCode::Digit1 | KeyCode::Numpad1 => 1,
+        KeyCode::Digit2 | KeyCode::Numpad2 => 2,
+        KeyCode::Digit3 | KeyCode::Numpad3 => 3,
+        KeyCode::Digit4 | KeyCode::Numpad4 => 4,
+        KeyCode::Digit5 | KeyCode::Numpad5 => 5,
+        KeyCode::Digit6 | KeyCode::Numpad6 => 6,
+        KeyCode::Digit7 | KeyCode::Numpad7 => 7,
+        KeyCode::Digit8 | KeyCode::Numpad8 => 8,
+        KeyCode::Digit9 | KeyCode::Numpad9 => 9,
+        _ => return None,
+    })
+}
+/// `TabNavigationBar.getNextTabIndex`: the tab Ctrl plus `key` asks for, before
+/// `Mth.clamp` to the tabs there are. A digit is `floorMod(key - 1, 10)`, so
+/// Ctrl+1 is the first tab and Ctrl+0 the tenth; Tab steps one tab forward,
+/// or back with Shift, wrapping. Every Create World tab is active, so the
+/// walk never has to skip one. `None` where the key is neither a digit nor
+/// Tab, which the bar ignores and the screen reads itself.
+pub(super) fn next_tab_index(
+    tab: usize,
+    key: winit::keyboard::KeyCode,
+    shift: bool,
+) -> Option<usize> {
+    if let Some(digit) = numeric_key(key) {
+        return Some((i32::from(digit) - 1).rem_euclid(10) as usize);
+    }
+    if key != winit::keyboard::KeyCode::Tab {
+        return None;
+    }
+    let next = tab as i32 + if shift { -1 } else { 1 };
+    Some(next.rem_euclid(TABS.len() as i32) as usize)
 }
 /// GridLayoutTab.doLayout: the open tab's grid, aligned at (0.5, 1/6) in the
 /// area between the tab bar and the footer.
@@ -280,13 +411,18 @@ pub(super) fn buttons(w: f32, h: f32, creative: bool, o: &WorldOptions) -> Vec<B
                 true,
                 25,
             ),
-            // CreateFlatWorldScreen: only a flat generator has a preset editor.
+            // PresetEditor.EDITORS: flat worlds have CreateFlatWorldScreen, the
+            // single-biome preset CreateBuffetWorldScreen; the other presets
+            // have no editor, so the button is disabled for them.
             b(
                 gx + 160.0,
                 gy,
                 150.0,
                 tr("selectWorld.customizeType"),
-                o.world_type == crate::save::WorldPreset::Flat,
+                matches!(
+                    o.world_type,
+                    crate::save::WorldPreset::Flat | crate::save::WorldPreset::SingleBiomeSurface
+                ),
                 26,
             ),
             // SwitchGrid: 44-wide value-only buttons at the grid's right.
@@ -503,15 +639,14 @@ impl Title {
                     u32::MAX,
                 );
             }
-            // The label sits 3 pixels lower on unselected tabs.
-            let top = if selected { 0.0 } else { 3.0 };
-            batch.text_styled(
+            ui::menu_tab_label(
+                batch,
                 atlas,
                 &label,
-                x + (tw / 2.0).floor() - (lw / 2.0).floor(),
-                ((top + TAB_BAR - 9.0) / 2.0).floor() + 1.0,
-                u32::MAX,
+                (x, 0.0, tw, TAB_BAR),
+                selected,
                 true,
+                crate::hud_overlays::now_ms(),
             );
         }
         let (gx, gy) = grid(w, h, o.tab);

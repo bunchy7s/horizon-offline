@@ -1,8 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "a client mod's view and its own items (`native_raycast`, `native_view_hit`,\n`native_claim_items`, `native_poll`).",
-  "doc_summary": "a client mod's view and items: `native_raycast(distance)` and `native_view_hit()` (the first block along the view, up to 1024 blocks, across the distant terrain past the loaded chunks), and `native_claim_items(mod_id, ids)`: a right-click with one of those items is the mod's alone, the server never hears of it, and `native_poll(mod_id)` gives `UseStart` and `UseStop` with the stack (its custom name and data as SNBT) and the ticks it was held. Bundles need `\"hooks\": @API:native_claimed_items@`.",
-  "comments": [
-    "crates/horizon-client/src/game/native_claimed_items.rs"
-  ]
-}

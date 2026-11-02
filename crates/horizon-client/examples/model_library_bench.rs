@@ -2,6 +2,7 @@
 //! for live requested heap bytes; leave it unset for latency measurements.
 //! cargo run --profile fast -p horizon-client --example model_library_bench -- ROOT [--parity]
 //! Run fresh processes, warm up twice, then compare multiple alternating baseline/candidate runs.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{assets::Assets, item_render::ItemRenderer};
 use std::{
     alloc::{GlobalAlloc, Layout, System},

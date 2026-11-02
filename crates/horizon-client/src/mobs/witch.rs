@@ -19,7 +19,9 @@ pub fn register(m: &mut Mob) {
     g.add(2, Stroll::avoiding_water(1.0));
     g.add(3, LookAtPlayer::new(8.0));
     g.add(3, RandomLookAround::default());
-    m.ai.targets.add(1, HurtByTarget::new());
+    // HurtByTargetGoal(this, Raider.class): a witch ignores the raider that
+    // hit it, so raid friendly fire never turns the raid on itself.
+    m.ai.targets.add(1, hurt_by());
     m.ai.targets.add(2, HealRaiders::default());
     // NearestAttackableWitchTargetGoal: only while not healing raiders.
     m.ai.targets.add(
@@ -29,6 +31,10 @@ pub fn register(m: &mut Mob) {
             .gate(|m, _| m.extra.counter2 <= 0)
             .named("NearestAttackableWitchTargetGoal"),
     );
+}
+/// `Witch.registerGoals`' `HurtByTargetGoal(this, Raider.class)`.
+fn hurt_by() -> HurtByTarget {
+    HurtByTarget::new().ignoring(&super::raider::RAIDERS)
 }
 /// `NearestHealableRaiderTargetGoal`: in a raid, target another raider to
 /// heal, then wait 10 seconds (the cooldown lives in `extra.counter2`).
@@ -198,30 +204,29 @@ fn witch_attack(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
         Who::Player => cx.w.player.as_ref().is_some_and(|p| p.has_effect(effect)),
         Who::Mob(id) => cx.w.seen(id).is_some_and(|s| s.has_effect(effect)),
     };
-    let (effect, ticks, amplifier) = if heals {
+    // The potion it throws: `PotionContents.createItemStack(Items.SPLASH_POTION,
+    // potion)` for the one `Witch.performRangedAttack` picks.
+    let potion = if heals {
         m.ai.target = None;
         if health <= 4.0 {
-            ("minecraft:instant_health", 1, 0)
+            "minecraft:healing"
         } else {
-            ("minecraft:regeneration", 900, 0)
+            "minecraft:regeneration"
         }
     } else if dist >= 8.0 && !has("slowness") {
-        ("minecraft:slowness", 1800, 0)
+        "minecraft:slowness"
     } else if health >= 8.0 && !has("poison") {
-        ("minecraft:poison", 900, 0)
+        "minecraft:poison"
     } else if dist <= 3.0 && !has("weakness") && m.random.next_float() < 0.25 {
-        ("minecraft:weakness", 1800, 0)
+        "minecraft:weakness"
     } else {
-        ("minecraft:instant_damage", 1, 0)
+        "minecraft:harming"
     };
     let start = Vec3::new(m.position.x, m.eye_y() - 0.1, m.position.z);
     let mut p = Projectile::new(
-        ProjectileKind::Potion {
-            effect,
-            ticks,
-            amplifier,
-            color: 0,
-        },
+        ProjectileKind::potion(
+            crate::items::ItemStack::new("minecraft:splash_potion", 1).with_potion(potion),
+        ),
         start,
         Some(Who::Mob(m.id)),
     );
@@ -282,7 +287,7 @@ fn drink(m: &mut Mob, cx_events: &mut Vec<MobEvent>, target_far: bool) {
                     "minecraft:fire_resistance" => {
                         m.add_effect("minecraft:fire_resistance", 3600, 0)
                     }
-                    "minecraft:healing" => m.health = (m.health + 4.0).min(m.attrs.max_health),
+                    "minecraft:healing" => m.heal(4.0),
                     "minecraft:swiftness" => m.add_effect("minecraft:speed", 3600, 0),
                     _ => {}
                 }
@@ -360,4 +365,43 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
         n[3] = -0.9;
     }
     let _ = Species::Witch;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Witch.registerGoals` passes `Raider.class` to `HurtByTargetGoal`, so a
+    /// raider that hits a witch is not taken as its target. The list is the
+    /// `Raider` class and nothing else: a vex is not a raider.
+    #[test]
+    fn a_witch_ignores_the_raider_that_hit_it() {
+        let goal = hurt_by();
+        assert_eq!(
+            goal.ignore,
+            vec![
+                Species::Pillager,
+                Species::Vindicator,
+                Species::Evoker,
+                Species::Illusioner,
+                Species::Witch,
+                Species::Ravager,
+            ]
+        );
+        assert!(!goal.ignore.contains(&Species::Vex));
+        assert!(!goal.ignore.contains(&Species::Zombie));
+    }
+
+    /// The hoisted list is exactly the set `is_raider` answers yes for.
+    #[test]
+    fn the_raider_list_is_the_raider_class() {
+        for def in crate::mobs::species::ALL {
+            assert_eq!(
+                crate::mobs::raider::is_raider(def.species),
+                super::super::raider::RAIDERS.contains(&def.species),
+                "{:?}",
+                def.species
+            );
+        }
+    }
 }

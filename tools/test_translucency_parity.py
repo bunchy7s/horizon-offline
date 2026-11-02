@@ -52,7 +52,7 @@ def main():
          lab.ROOT / 'mods/horizon/src/test/java/dev/horizonlab/parity/VanillaTranslucencyOracle.java'], 'compile-java')
     vanilla, rust = build / 'vanilla.jsonl', build / 'rust.jsonl'
     run(['java', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaTranslucencyOracle', inputs, vanilla], 'vanilla')
-    run(['cargo', 'run', '--quiet', '--locked', '--profile', args.profile, '-p', 'horizon-client', '--example', 'client_probe', '--', 'translucency_fixture', inputs, rust], 'rust')
+    run(['cargo', 'run', '--quiet', '--locked', '--profile', args.profile, '-p', 'horizon-client-lib', '--example', 'client_probe', '--', 'translucency_fixture', inputs, rust], 'rust')
     expected = [json.loads(line) for line in vanilla.read_text().splitlines()]
     actual = [json.loads(line) for line in rust.read_text().splitlines()]
     assert len(expected) == len(actual), 'case count differs'

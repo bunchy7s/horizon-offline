@@ -1,7 +1,0 @@
-{
-  "hooks": [
-    {"name": "server_data_loaded", "target": "horizon_client::game::native_hooks::Game<'_>::native_server_data_loaded"}
-  ],
-  "rust_summary": "the server's data tables are built (`native_server_data_loaded`, `TagsUpdatedEvent` with\n`SERVER_DATA_LOAD`): a world's first open and every `/reload`, told apart by `reload`.",
-  "doc_summary": "`native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it. Bundles need \"hooks\": @API:server_data_loaded@."
-}

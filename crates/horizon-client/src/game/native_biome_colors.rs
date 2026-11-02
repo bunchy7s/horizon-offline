@@ -15,7 +15,7 @@ impl Game<'_> {
     /// terrain with them (`LevelRenderer.allChanged`, as changing Biome Blend
     /// does). Call it when your colours change (a new season, a new day of a
     /// slow fade) and once when the player joins, not every frame: a rebuild
-    /// takes the workers a few seconds. API @API:biome_colors@.
+    /// takes the workers a few seconds. API 107.
     pub(super) fn native_refresh_biome_colors(&mut self) {
         let base = self.res.biomes().clone();
         let biomes = base

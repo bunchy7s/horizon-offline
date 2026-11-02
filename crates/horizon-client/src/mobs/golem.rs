@@ -17,7 +17,7 @@ use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
 /// `Enemy` monsters an iron golem goes after (never creepers).
-fn golem_prey(s: &super::Seen) -> bool {
+pub(super) fn golem_prey(s: &super::Seen) -> bool {
     s.hostile && s.species != Species::Creeper
 }
 /// `IronGolem.registerGoals`, without `ResetUniversalAngerTargetGoal` (that
@@ -30,6 +30,7 @@ pub fn register_iron(m: &mut Mob) {
         MoveTowardsTarget {
             speed: 0.9,
             within: 32.0,
+            wanted: [0.0; 3],
         },
     );
     let mut back = Stroll::new(0.6)
@@ -237,6 +238,8 @@ impl Goal for DefendVillage {
 struct MoveTowardsTarget {
     speed: f64,
     within: f64,
+    /// The spot `canUse` picked, which `start` walks to.
+    wanted: [f64; 3],
 }
 impl Goal for MoveTowardsTarget {
     goal_clone!();
@@ -250,12 +253,23 @@ impl Goal for MoveTowardsTarget {
         if m.distance_sqr(t.position) > self.within * self.within {
             return false;
         }
-        m.nav_move_to_entity(
+        // MoveTowardsTargetGoal.canUse: a spot up to 16 blocks out and 7 up or
+        // down, within a quarter turn of the target's own position.
+        let Some(p) = m.default_random_pos_towards(
             cx.w,
+            16,
+            7,
             [t.position.x, t.position.y, t.position.z],
-            0,
-            self.speed,
-        )
+            std::f64::consts::FRAC_PI_2,
+        ) else {
+            return false;
+        };
+        self.wanted = p;
+        true
+    }
+    fn start(&mut self, m: &mut Mob, cx: &mut Cx) {
+        // MoveTowardsTargetGoal.start: `PathNavigation.moveTo(x, y, z, speed)`.
+        m.nav_move_to(cx.w, self.wanted, self.speed);
     }
     fn can_continue(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         !m.ai.nav.is_done()
@@ -526,6 +540,7 @@ pub fn snow_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         );
         if here.name.as_ref() == "minecraft:air" && below.full_collision && !ice {
             events.push(MobEvent::SetBlockName {
+                mob: Some(m.id),
                 pos: [xx, y, zz],
                 name: "minecraft:snow",
                 effect: false,
@@ -546,6 +561,77 @@ mod tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = species;
         Mob::new(id, Arc::new(kind), at, 0.0)
+    }
+
+    /// `MoveTowardsTargetGoal.canUse` picks a random spot within 16 blocks and
+    /// 7 up or down toward the target and keeps it for `start`, so the golem
+    /// walks to that spot rather than straight at the entity.
+    #[test]
+    fn an_iron_golem_walks_to_a_spot_near_its_target() {
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for cx in -2..2 {
+                for cz in -2..2 {
+                    world.chunks.insert(
+                        (cx, cz),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(cx, cz)),
+                    );
+                }
+            }
+            for x in -24..24 {
+                for z in -24..24 {
+                    for y in 60..=63 {
+                        world.set(x, y, z, stone).unwrap();
+                    }
+                }
+            }
+        };
+        crate::mobs::world::with_built_test_world(&[], build, |w, _| {
+            let mut w = w.clone();
+            w.player = Some(test_player(Vec3::new(8.5, 64.0, 0.5)));
+            // The spot is drawn at random, and a flat world only offers a few
+            // heights: the seed follows the mob's id, so try the ids in turn
+            // (vanilla gives the pick ten candidates before giving up).
+            let mut found = None;
+            for id in 1..400 {
+                let mut m = mob(id, Species::IronGolem, Vec3::new(0.5, 64.0, 0.5));
+                m.ai.target = Some(Who::Player);
+                let mut goal = MoveTowardsTarget {
+                    speed: 0.9,
+                    within: 32.0,
+                    wanted: [0.0; 3],
+                };
+                let mut events = Vec::new();
+                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut cx = Cx {
+                    w: &w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                if goal.can_use(&mut m, &mut cx) {
+                    found = Some((m, goal));
+                    break;
+                }
+            }
+            let (m, goal) = found.expect("a spot among ten candidates");
+            let wanted = goal.wanted;
+            let (dx, dz) = (wanted[0] - m.position.x, wanted[2] - m.position.z);
+            assert!((dx * dx + dz * dz).sqrt() <= 16.0, "within 16 blocks");
+            assert!(
+                (wanted[1] - m.position.y).abs() <= 7.0,
+                "within 7 up or down"
+            );
+            // `DefaultRandomPos.getPosTowards` only accepts a spot within a
+            // quarter turn of the target, so the horizontal step to the spot
+            // is at most 90 degrees off the step to the target.
+            let to_target = (8.5 - m.position.x, 0.5 - m.position.z);
+            let to_spot = (wanted[0] - m.position.x, wanted[2] - m.position.z);
+            assert!(
+                to_target.0 * to_spot.0 + to_target.1 * to_spot.1 >= 0.0,
+                "the spot is toward the target"
+            );
+        });
     }
 
     /// `IronGolem.canAttack` refuses creepers, and `HurtByTargetGoal.canUse`

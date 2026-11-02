@@ -1,5 +1,6 @@
 //! Compare the read + Value parse stages in BlockFacts::load and Assets::load.
 //! Usage: json_load_bench RESOURCE_ROOT [REPETITIONS]; see tools/json_load_fixtures.py.
+extern crate horizon_client_lib as horizon_client;
 use serde_json::Value;
 use std::{
     fs::{self, File},

@@ -22,6 +22,10 @@ const MATERIALS: usize = 10;
 pub const OIT_ENTITY: u32 = 1 << 24;
 /// `RenderPipelines.DRAGON_RAYS`: untextured colour, additive with depth writes.
 pub const DRAGON_RAYS_OVERLAY: u32 = 37;
+/// `RenderPipelines.ENTITY_CUTOUT_DISSOLVE` (the dying dragon): a pixel is dropped where the
+/// vertex alpha is below the mask's, whose atlas UV rides in `Vertex::glint_uv`; the rest is
+/// drawn opaque. No overlay.
+pub const DISSOLVE_OVERLAY: u32 = 38;
 /// Tags quads as drawn by a render type vanilla gives an `OitPipelineSet`
 /// (`OIT_ENTITY`): improved transparency draws them in its stages.
 pub fn mark_oit(quads: &mut [Vertex]) {

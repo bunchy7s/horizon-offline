@@ -1,6 +1,6 @@
 //! The game's side of the Launch API (docs/api/launch.md): the options another launcher may pass,
 //! `--launch-api`'s reply, the exit codes, and docs/api/launch-reference.md, generated from them.
-//! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api`.
+//! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api`.
 
 /// The Launch API's version (docs/api/stability.md): an addition makes the next patch.
 pub const VERSION: &str = "0.1.0";
@@ -155,7 +155,7 @@ pub fn markdown() -> String {
     let w = &mut out;
     let _ = writeln!(
         w,
-        "<!-- Generated from crates/horizon-client/src/game/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api -->"
+        "<!-- Generated from crates/horizon-client/src/game/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api -->"
     );
     let _ = writeln!(w, "# Launch API reference\n");
     let _ = writeln!(
@@ -265,7 +265,7 @@ mod tests {
             .replace("\r\n", "\n");
         assert!(
             have == want,
-            "docs/api/launch-reference.md is out of date: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api"
+            "docs/api/launch-reference.md is out of date: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api"
         );
     }
 }

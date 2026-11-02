@@ -24,8 +24,10 @@ import net.minecraft.client.gui.screens.packs.PackSelectionScreen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.locale.Language;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.network.chat.FormattedText;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.PackLocationInfo;
 import net.minecraft.server.packs.PackSelectionConfig;
@@ -49,7 +51,10 @@ import org.joml.Matrix3x2fStack;
  * as Gui.setScreen does: the old screen loses focus, the new one is
  * initialised or repositioned). The screen shown at the end is drawn
  * (Screen.extractRenderState: its widgets, then the tooltip) and every
- * GuiGraphicsExtractor call is recorded.
+ * GuiGraphicsExtractor call is recorded. The case's language ("lang", over
+ * en_us, from the prepared assets) and clock ("now", Util.getMillis) are set
+ * first: a button label wider than its button scrolls with the clock
+ * (ActiveTextCollector.defaultScrollingHelper), drawn with a scissor of its own.
  *
  * Input lines: case JSON. Output lines: {screen, draws} or {error}.
  */
@@ -57,6 +62,8 @@ public final class VanillaPackScreenOracle {
     static Object unsafe;
     static Method allocate;
     static Font font;
+    static Path assets;
+    static final Map<String, Language> LANGUAGES = new HashMap<>();
 
     @SuppressWarnings("unchecked")
     static <T> T alloc(Class<T> type) throws Exception {
@@ -175,7 +182,12 @@ public final class VanillaPackScreenOracle {
                 @Override public void defaultParameters(Parameters p) { parameters = p; }
                 @Override public void accept(TextAlignment alignment, int anchorX, int y, Parameters p, FormattedCharSequence text) {
                     int left = alignment.calculateLeft(anchorX, font, text);
+                    // A scrolling label's own scissor (defaultScrollingHelper's withScissor),
+                    // recorded around it as Horizon draws it.
+                    var scissor = p.scissor();
+                    if (scissor != null) self.enableScissor(scissor.left(), scissor.top(), scissor.right(), scissor.bottom());
                     if (net.minecraft.util.ARGB.as8BitChannel(p.opacity()) != 0) self.text(text, left, y, net.minecraft.util.ARGB.white(p.opacity()), true);
+                    if (scissor != null) self.disableScissor();
                 }
                 @Override public void acceptScrolling(Component m, int cx, int l, int r, int t, int b, Parameters p) {
                     defaultScrollingHelper(m, cx, l, r, t, b, font.width(m), 9, p);
@@ -292,8 +304,32 @@ public final class VanillaPackScreenOracle {
         return new Pack(location, null, metadata, config);
     }
 
+    /** ClientLanguage.loadFrom of en_us and then `code`, from the prepared assets. */
+    static Language language(String code) {
+        if (code.equals(Language.DEFAULT)) return Language.DEFAULT_INSTANCE;
+        return LANGUAGES.computeIfAbsent(code, k -> {
+            Map<String, String> map = new HashMap<>();
+            for (String c : List.of(Language.DEFAULT, k)) {
+                try (var in = Files.newInputStream(assets.resolve("minecraft/lang/" + c + ".json"))) {
+                    Language.loadFromJson(in, map::put);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            }
+            return new Language() {
+                @Override public String getOrDefault(String id, String fallback) { return map.getOrDefault(id, fallback); }
+                @Override public boolean has(String id) { return map.containsKey(id); }
+                @Override public boolean isDefaultRightToLeft() { return false; }
+                @Override public FormattedCharSequence getVisualOrder(FormattedText text) { return Language.DEFAULT_INSTANCE.getVisualOrder(text); }
+            };
+        });
+    }
+
     static JsonObject run(JsonObject c, Minecraft mc, StubGui gui) throws Exception {
         int width = c.get("width").getAsInt(), height = c.get("height").getAsInt();
+        Language.inject(language(c.has("lang") ? c.get("lang").getAsString() : Language.DEFAULT));
+        long now = c.has("now") ? c.get("now").getAsLong() : 0L;
+        Util.setTimeSource(() -> now * 1_000_000L);
         gui.width = width;
         gui.height = height;
         gui.current = null;
@@ -370,7 +406,8 @@ public final class VanillaPackScreenOracle {
         unsafeField.setAccessible(true);
         unsafe = unsafeField.get(null);
         allocate = unsafe.getClass().getMethod("allocateInstance", Class.class);
-        font = ParityFont.createDefault(ParityFont.resources(Path.of(args[2])));
+        assets = Path.of(args[2]);
+        font = ParityFont.createDefault(ParityFont.resources(assets));
         Minecraft mc = alloc(Minecraft.class);
         put(mc, Minecraft.class, "font", font);
         put(mc, Minecraft.class, "lastInputType", InputType.MOUSE);

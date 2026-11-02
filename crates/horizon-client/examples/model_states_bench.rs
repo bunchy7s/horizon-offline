@@ -1,5 +1,6 @@
 //! Compare the old two-parse loading path with catalog construction from shared facts.
 //! Run: cargo run -p horizon-client --profile fast --example model_states_bench -- 15
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{Result, models::StateModels, sprites::Sprites};
 use horizon_core::position::BlockPos;
 use horizon_world::{

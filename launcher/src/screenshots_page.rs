@@ -129,13 +129,13 @@ impl Launcher {
             FIRST
         };
         let folder = screenshots::folder(&home);
-        let mut buttons = div().flex().items_center().gap(px(6.));
+        let mut buttons = div().flex().items_center().gap(px(8.));
         if list.len() > FIRST {
             let label = match self.screenshots.all {
                 true => tr("Show fewer").to_string(),
                 false => trf("Show all {count}", &[("count", &list.len().to_string())]),
             };
-            buttons = buttons.child(button("screenshots-all", label, Kind::Ghost, &t).on_click(
+            buttons = buttons.child(tab_action("screenshots-all", label, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.screenshots.all = !this.screenshots.all;
                     cx.notify();
@@ -143,7 +143,7 @@ impl Launcher {
             ));
         }
         buttons = buttons.child(
-            button("screenshots-folder", "Open folder", Kind::Ghost, &t)
+            tab_action("screenshots-folder", "Open folder", &t)
                 .on_click(move |_, _, cx| cx.open_with_system(&folder)),
         );
         let grid = div().flex().flex_wrap().gap(px(10.)).children(

@@ -130,8 +130,13 @@ impl Game<'_> {
         let Some(BlockEntity::Beacon(mut b)) = self.world.block_entities.take(&key) else {
             return;
         };
+        let previous = b.levels;
         self.tick_beacon(key, &mut b, false);
+        let current = b.levels;
         self.world.block_entities.put(key, BlockEntity::Beacon(b));
+        if (previous == 0) != (current == 0) {
+            self.native_beacon_state_change(self.dim.id(), [key.0, key.1, key.2], current > 0);
+        }
     }
     /// `ClientLevel.tickBlockEntities` for beacons: a server's chunk data
     /// carries no beam sections, so the client builds them too; effects,

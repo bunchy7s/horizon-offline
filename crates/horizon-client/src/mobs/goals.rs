@@ -689,6 +689,11 @@ impl Mob {
     /// `IronGolem.canAttack`'s refusal of creepers. The callers check that
     /// the target is alive and can be seen as an enemy.
     pub fn spares_target(&self, w: &MobWorld, who: Who) -> bool {
+        // Dolphin.canAttack: a baby dolphin attacks nobody, so whatever hurt it
+        // is never taken as its target.
+        if self.species() == Species::Dolphin && self.is_baby() {
+            return true;
+        }
         match who {
             Who::Player => self.spares_players(w),
             Who::Mob(id) => {
@@ -2590,19 +2595,28 @@ impl Goal for EatBlock {
                 m.position.z.floor() as i32,
             );
             let here = cx.w.block_name(x, y, z).to_owned();
+            // EatBlockGoal.tick: both halves of the world change sit behind
+            // MOB_GRIEFING (`ifeq 89`, `ifeq 182` in the bytecode); `Mob.ate`
+            // runs either way, so a sheep still sheds its wool and ages up.
             if cx.w.has_tag("minecraft:edible_for_sheep", &here) {
-                cx.events.push(MobEvent::BreakBlock {
-                    pos: [x, y, z],
-                    drop: false,
-                });
+                if cx.w.mob_griefing {
+                    cx.events.push(MobEvent::BreakBlock {
+                        pos: [x, y, z],
+                        drop: false,
+                    });
+                }
                 super::ai::ate(m);
             } else if cx.w.block_name(x, y - 1, z) == "minecraft:grass_block" {
-                cx.events.push(MobEvent::SetBlockName {
-                    pos: [x, y - 1, z],
-                    name: "minecraft:dirt",
-                    effect: true,
-                    flags: horizon_world::level::flags::UPDATE_CLIENTS,
-                });
+                // The particles and the dirt `setBlock` are the same gate.
+                if cx.w.mob_griefing {
+                    cx.events.push(MobEvent::SetBlockName {
+                        mob: Some(m.id),
+                        pos: [x, y - 1, z],
+                        name: "minecraft:dirt",
+                        effect: true,
+                        flags: horizon_world::level::flags::UPDATE_CLIENTS,
+                    });
+                }
                 super::ai::ate(m);
             }
         }
@@ -2818,6 +2832,114 @@ impl MoveToBlock {
             self.reached = true;
             self.try_ticks -= 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod eat_block_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world_rules;
+
+    /// A sheep on a wide grass shelf, ticked long enough for its `EatBlockGoal`
+    /// (1 in 1000 a tick) to fire several times: every event it pushed, with
+    /// the `mob_griefing` game rule at `griefing`. `tufts` puts short grass at
+    /// the sheep's own feet, so the goal takes the `destroyBlock` half; without
+    /// it the sheep stands on the grass and takes the grass-to-dirt half.
+    fn sheep_events(griefing: bool, tufts: bool) -> Option<Vec<MobEvent>> {
+        let mut out = None;
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            let grass = registry.default_state("minecraft:grass_block").unwrap();
+            let tuft = registry.default_state("minecraft:short_grass").unwrap();
+            for cx in -1..1 {
+                for cz in -1..1 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -8..=8 {
+                for z in -8..=8 {
+                    world.set(x, 63, z, grass).unwrap();
+                    if tufts {
+                        world.set(x, 64, z, tuft).unwrap();
+                    }
+                }
+            }
+        };
+        with_built_test_world_rules(&[], griefing, build, |w, types| {
+            let kind = Arc::new(types.types["minecraft:sheep"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            let mut random = LegacyRandom::new(0);
+            let mut events = Vec::new();
+            for _ in 0..6000 {
+                crate::mobs::ai::tick(&mut m, w, &mut random, &mut events);
+            }
+            out = Some(events);
+        });
+        out
+    }
+
+    /// `EatBlockGoal.tick` puts the `levelEvent` + `setBlock` behind
+    /// `MOB_GRIEFING` and leaves `Mob.ate` outside it, so with the rule off the
+    /// goal still runs (`EntityEvent` 10) and still shears the coat, and the
+    /// grass stays.
+    #[test]
+    fn the_eat_goal_turns_grass_to_dirt_only_with_mob_griefing() {
+        let Some(on) = sheep_events(true, false) else {
+            return;
+        };
+        let Some(off) = sheep_events(false, false) else {
+            return;
+        };
+        let dirt = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, MobEvent::SetBlockName { name, .. } if *name == "minecraft:dirt"))
+                .count()
+        };
+        let ate = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, MobEvent::EntityEvent { event: 10, .. }))
+                .count()
+        };
+        assert!(dirt(&on) > 0, "mob_griefing on: {}", dirt(&on));
+        assert_eq!(dirt(&off), 0, "mob_griefing off must leave the grass alone");
+        assert!(ate(&off) > 0, "the goal still runs with the rule off");
+    }
+
+    /// The edible half of the same gate (`ifeq 89` skips
+    /// `Level.destroyBlock(pos, false)`): short grass at the sheep's feet
+    /// disappears with the rule on and stays with it off, while the goal eats
+    /// either way.
+    #[test]
+    fn the_eat_goal_breaks_short_grass_only_with_mob_griefing() {
+        let Some(on) = sheep_events(true, true) else {
+            return;
+        };
+        let Some(off) = sheep_events(false, true) else {
+            return;
+        };
+        let bitten = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, MobEvent::BreakBlock { drop: false, .. }))
+                .count()
+        };
+        let ate = |events: &[MobEvent]| {
+            events
+                .iter()
+                .filter(|e| matches!(e, MobEvent::EntityEvent { event: 10, .. }))
+                .count()
+        };
+        assert!(bitten(&on) > 0, "mob_griefing on: {}", bitten(&on));
+        assert_eq!(
+            bitten(&off),
+            0,
+            "mob_griefing off must leave the tufts alone"
+        );
+        assert!(ate(&off) > 0, "the goal still runs with the rule off");
     }
 }
 

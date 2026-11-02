@@ -5,6 +5,8 @@
 
 A survival dedicated server in a flat world, a world border 20 blocks wide around 0 0 (no damage):
 - handleAttack: a player outside the world border isn't hit, from 3 blocks away; a pair inside it fights;
+- Player.onAttack: players hitting a boat without swinging: the attack itself starts the strength again,
+  so of eight hits in a row the last seven are weak and the boat stands (24 in a row still break one);
 - handleSetCarriedItem: hotbar slot 12 is refused, and the console says "<name> tried to set an invalid
   carried item";
 - handleChangeGameMode: a player without the permission asks for creative; the console says
@@ -52,6 +54,14 @@ GROUND = -60
 BEACON = (2, GROUND, 0)
 SECONDS = 14
 SPEED = 0  # minecraft:speed in the mob_effect registry
+# Two boats, each with its own UUID and its own bot (P0, Q0) 2 blocks north of it, which hits it this
+# many times in one go, without swinging. A bare hand hits for 0.2 + s^2 * 0.8 at strength s; a boat
+# takes ten times that, breaks past 40 and loses 1 a tick. The server takes one of a player's attacks a
+# tick, so after the first hit (10) the others come a tick apart: at strength 0.3 (2.72) when each hit
+# resets it, at full strength (10) when only a swing would. Q reaches about 22 with the reset, and
+# without it breaks on its fifth hit; P breaks either way (on its 19th hit with the reset), which shows
+# the hits land.
+BOATS = {'P': ((5.5, GROUND, 2.5), 10, 24), 'Q': ((5.5, GROUND, -3.5), 11, 8)}
 
 
 class Failed(Exception):
@@ -75,6 +85,11 @@ def varint(n):
             return out + bytes([n])
         out += bytes([n & 0x7F | 0x80])
         n >>= 7
+
+
+def boat_uuid(n):
+    """The UUID `{UUID:[I;0,0,0,n]}` gives an entity, as a selector writes it."""
+    return f'00000000-0000-0000-0000-{n:012x}'
 
 
 def block_pos(x, y, z):
@@ -107,21 +122,34 @@ def run(bins, folder, out):
     props = dict(PROPERTIES, **{'server-port': str(port)})
     (folder / 'server.properties').write_text(''.join(f'{k}={v}\n' for k, v in props.items()))
     (folder / 'eula.txt').write_text('eula=true\n')
+    # Vanilla's rules only: Horizon's anticheat would drop the attacks the boats take without a swing.
+    (folder / 'server.toml').write_text('[anticheat]\nenabled = false\n')
     command = [bins / f'horizon-client{EXE}', '--resources', lab.RESOURCES, '--dedicated', '--nogui']
     server = Server(command, folder, out / 'server.log')
     try:
         server.wait_for(DONE, 300)
         for line in ('setworldspawn 0 -60 0', 'gamerule respawn_radius 0', 'worldborder center 0 0',
                      'worldborder set 20', 'worldborder damage amount 0',
-                     'setblock {} {} {} minecraft:beacon'.format(*BEACON)):
+                     'setblock {} {} {} minecraft:beacon'.format(*BEACON),
+                     # The boats' chunks, so the boats are there before the bots come and after
+                     # they leave.
+                     'forceload add 0 -16 15 15'):
             server.console(line)
-        with ThreadPoolExecutor(5) as pool:
+        for tag, ((x, y, z), n, _) in BOATS.items():
+            server.console(f'summon minecraft:oak_boat {x} {y} {z} {{UUID:[I;0,0,0,{n}]}}')
+            server.console(f'execute if entity {boat_uuid(n)} run say boat {tag} is here')
+            server.wait_for(rf'boat {tag} is here', 20)
+        with ThreadPoolExecutor(7) as pool:
             # (victim, attacker): outside the border, then a pair inside it.
             pairs = [(pool.submit(bot, bins, port, out, f'V{i}', 'stand'),
                       pool.submit(bot, bins, port, out, f'A{i}', 'stand', '--attack', f'V{i}0',
                                   '--attack-after', '6'))
                      for i in range(2)]
             rules = pool.submit(bot, bins, port, out, 'R', 'idle', '--raw', raw)
+            boats = {tag: pool.submit(bot, bins, port, out, tag, 'stand', '--attack',
+                                      ','.join([boat_uuid(n)] * hits), '--no-swing', '--attack-after', '11',
+                                      '--attack-rounds', '1')
+                     for tag, (_, n, hits) in BOATS.items()}
             # Side by side first, so each attacker sees its victim (and its entity id), then apart.
             for i in range(2):
                 for name in (f'V{i}0', f'A{i}0'):
@@ -129,6 +157,9 @@ def run(bins, folder, out):
                 z = 5.5 * (1 if i else -1)
                 server.console(f'tp V{i}0 0.5 {GROUND} {z}')
                 server.console(f'tp A{i}0 1.5 {GROUND} {z}')
+            for tag, ((x, y, z), _, _) in BOATS.items():
+                server.wait_for(rf'{tag}0 joined the game', 60)
+                server.console(f'tp {tag}0 {x} {y} {z - 2}')
             time.sleep(2)
             server.console(f'tp V00 12.5 {GROUND} -5.5')
             server.console(f'tp A00 9.5 {GROUND} -5.5')
@@ -136,6 +167,11 @@ def run(bins, folder, out):
             server.console(f'tp A10 -0.5 {GROUND} 5.5')
             results = [(v.result(), a.result()) for v, a in pairs]
             rule_bot = rules.result()
+            boat_bots = {tag: f.result() for tag, f in boats.items()}
+        for tag, (_, n, _) in BOATS.items():
+            server.console(f'execute if entity {boat_uuid(n)} run say boat {tag} stands')
+            server.console(f'execute unless entity {boat_uuid(n)} run say boat {tag} broke')
+            server.wait_for(rf'boat {tag} (stands|broke)', 20)
         lines = server.since(0)
     finally:
         server.stop()
@@ -150,6 +186,18 @@ def run(bins, folder, out):
             failed.append(f'{line}: the bots never fought ({attacker["error"]}, {victim["error"]})')
         elif hit != hits:
             failed.append(f'{line}: expected {"a hit" if hits else "no hit"}')
+    stands = {tag: any(f'boat {tag} stands' in l for l in lines) for tag in BOATS}
+    for tag, (_, _, hits) in BOATS.items():
+        b = boat_bots[tag]
+        line = (f'boat {tag}, {hits} hits in a row without a swing: {b["attacks"]} attacks, '
+                f'{"stands" if stands[tag] else "broke"}')
+        print(line)
+        if b['attacks'] != hits or b['error']:
+            failed.append(f'{line}: its bot sent {b["attacks"]} of its {hits} hits ({b["error"]})')
+    if stands['P']:
+        failed.append('boat P should break: the hits never landed')
+    elif not stands['Q']:
+        failed.append('boat Q should stand: its hits never started the attack strength again')
     for want in ('R0 tried to set an invalid carried item',
                  'Player R0 tried to change game mode to Creative Mode without required permissions',
                  'Player R0 tried to set invalid beacon effects'):
@@ -179,7 +227,7 @@ def main():
             run(bins, Path(scratch) / 'server', out)
         except (Failed, RuntimeError) as e:
             sys.exit(f'server_packet_rules_e2e failed (logs in {out}):\n{e}')
-    print('server_packet_rules_e2e: the border, carried item, game mode and beacon rules hold')
+    print('server_packet_rules_e2e: the border, attack strength, carried item, game mode and beacon rules hold')
 
 
 if __name__ == '__main__':

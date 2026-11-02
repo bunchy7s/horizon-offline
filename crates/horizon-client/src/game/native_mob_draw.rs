@@ -3,7 +3,10 @@
 //! it cancels) gets the mob's render state and a [`BlockEntityDraw`] posed at
 //! its feet and turned with its body, so a mod draws a model of its own with
 //! the helpers block entities draw with (`native_draw_cube`,
-//! `native_draw_quad`, `native_draw_block`, `native_draw_item`).
+//! `native_draw_quad`, `native_draw_block`, `native_draw_item`). A player
+//! has `native_player_submit` (`RenderPlayerEvent.Pre`), and every mob and
+//! player in view gets `native_mob_layer` after its vanilla model
+//! (`EntityRenderersEvent.AddLayers`), in the same frame.
 
 use super::{Dim, Game, native_block_entity_draw::BlockEntityDraw};
 use glam::{DVec3, Mat4};
@@ -17,7 +20,6 @@ use horizon_client::{
 /// `LivingEntityRenderState`: what a model reads to pose and animate itself.
 /// Angles are in degrees, interpolated to the frame's partial tick.
 // Native mods read it; nothing in Horizon does.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct NativeMobRender<'a> {
     /// The mob's network id, as the mob helpers and mod messages name it.
@@ -77,6 +79,17 @@ impl<'a> NativeMobRender<'a> {
     }
 }
 
+/// Which player a [`NativeMobRender`] is, for `native_player_submit` and
+/// `native_mob_layer`.
+// Native mods read it; nothing in Horizon does.
+#[derive(Clone, Copy, Debug)]
+pub struct NativePlayerRender<'a> {
+    /// The player's profile name.
+    pub name: &'a str,
+    /// Whether it is the player of this window, drawn in third person.
+    pub local: bool,
+}
+
 /// The pose a mod's mob model starts from: at the feet, `at` (relative to the
 /// camera), turned with the body so +z is the way it faces, +x its left and +y
 /// up, in blocks.
@@ -97,6 +110,69 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) -> bool {
+        self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
+            let mut drawn = false;
+            self.native_mob_submit(render, draw, &mut drawn);
+            drawn
+        })
+    }
+    /// `native_player_submit` for the player `mob` (`who` says which): true
+    /// when a mod drew it and the vanilla model, armour, held items, cape and
+    /// other layers are left out.
+    pub(super) fn mod_player_geometry(
+        &self,
+        mob: &Mob,
+        who: NativePlayerRender<'_>,
+        partial: f32,
+        camera: DVec3,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) -> bool {
+        // Posing a player for the mods costs, each frame: only when one listens.
+        let mut listened = false;
+        self.native_player_render_listened(&mut listened);
+        if !listened {
+            return false;
+        }
+        self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
+            let mut drawn = false;
+            self.native_player_submit(render, &who, draw, &mut drawn);
+            drawn
+        })
+    }
+    /// `native_mob_layer` for `mob` (`who` set for a player): what a mod adds
+    /// is kept, drawn after the vanilla model and its layers.
+    pub(super) fn mod_mob_layer_geometry(
+        &self,
+        mob: &Mob,
+        who: Option<NativePlayerRender<'_>>,
+        partial: f32,
+        camera: DVec3,
+        light: u32,
+        out: &mut Vec<Vertex>,
+    ) {
+        // Every mob in view each frame: only when a mod listens.
+        let mut listened = false;
+        self.native_player_render_listened(&mut listened);
+        if !listened {
+            return;
+        }
+        self.mod_entity_draw(mob, partial, camera, light, out, |render, draw| {
+            self.native_mob_layer(render, who.as_ref(), draw);
+            true
+        });
+    }
+    /// Gives `hook` the frame of `mob` and a draw posed at its feet; what it
+    /// added to `out` stays when it answers true.
+    fn mod_entity_draw(
+        &self,
+        mob: &Mob,
+        partial: f32,
+        camera: DVec3,
+        light: u32,
+        out: &mut Vec<Vertex>,
+        hook: impl FnOnce(&NativeMobRender<'_>, &mut BlockEntityDraw) -> bool,
+    ) -> bool {
         let render = NativeMobRender::of(mob, partial);
         let a = f64::from(partial);
         let feet = mob.previous.lerp(mob.position, a);
@@ -111,13 +187,12 @@ impl Game<'_> {
             diffuse_lights(self.dim == Dim::Nether),
             std::mem::take(out),
         );
-        let mut drawn = false;
-        self.native_mob_submit(&render, &mut draw, &mut drawn);
+        let keep = hook(&render, &mut draw);
         *out = draw.into_vertices();
-        if !drawn {
+        if !keep {
             out.truncate(start);
         }
-        drawn
+        keep
     }
 }
 

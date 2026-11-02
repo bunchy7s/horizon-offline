@@ -1,8 +1,0 @@
-{
-  "hooks": [
-    {"name": "datapack_sync", "target": "horizon_client::game::native_hooks::Game<'_>::native_datapack_sync", "neoforge": "OnDatapackSyncEvent", "side": "server"},
-    {"name": "recipes_received", "target": "horizon_client::game::native_hooks::Game<'_>::native_recipes_received", "neoforge": "RecipesReceivedEvent", "side": "client"}
-  ],
-  "rust_summary": "a server's recipes sent to its Horizon clients: the server's mods name the recipe types\n(`native_datapack_sync`, `OnDatapackSyncEvent.sendRecipes`) and the client hears they arrived\n(`native_recipes_received`, `RecipesReceivedEvent`).",
-  "doc_summary": "a server's recipes reach its Horizon clients, as NeoForge's `OnDatapackSyncEvent.sendRecipes` and `RecipesReceivedEvent`: on the server, `native_datapack_sync(recipe_types)` takes the recipe types (`minecraft:smelting`, `mymod:crusher`) a mod's client half needs, asked once per load, the same types for every player (NeoForge asks per joining player); Horizon sends their final recipes (data packs merged, load conditions held) to every Horizon client when it joins and after each `/reload`, in payloads within the clientbound cap, and nothing to a vanilla client. On the client the recipe helpers (`native_recipes`, `native_recipes_of_type`) then give the server's recipes of those types in place of the window's own, single player included, and `native_recipes_received(recipe_types)` says they came. No type asked: nothing is sent and nothing changes; none asked after a load that asked some: the clients go back to their own recipes and `native_recipes_received` comes with no types. Bundles need \"hooks\": @API:recipe_sync@."
-}

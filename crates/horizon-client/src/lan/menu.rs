@@ -40,10 +40,9 @@ pub struct Menu {
     /// Container slots the menu does not have: a mod's screen hides them, so
     /// no click or quick move reaches them (`Slot` positions are the screen's).
     pub hidden: Vec<usize>,
-    /// A mod menu type's take-only slots (`FurnaceResultSlot.mayPlace`).
-    pub results: Vec<usize>,
-    /// A mod menu type's data slot count (`addDataSlots`); None for vanilla's.
-    pub data_slots: Option<usize>,
+    /// A content mod's menu type: its data slot count. Its clicks run on the
+    /// vanilla menu engine (`menu::Kind::Mod`), not here.
+    pub mod_type: Option<&'static crate::containers::ModMenuType>,
 }
 
 /// What a guest did with a native mod's menu (`Slots::Native`), for the game
@@ -192,8 +191,6 @@ pub struct View<'a> {
     pub shulker: bool,
     /// Container slots that do not exist in this menu (see [`Menu::hidden`]).
     pub hidden: &'a [usize],
-    /// Container slots nothing is put into (see [`Menu::results`]).
-    pub results: &'a [usize],
 }
 
 impl View<'_> {
@@ -242,11 +239,7 @@ impl View<'_> {
         {
             return false;
         }
-        self.enabled(i) && !self.result(i)
-    }
-    /// A take-only container slot of a mod menu type.
-    fn result(&self, i: usize) -> bool {
-        self.container.is_some() && self.results.contains(&i)
+        self.enabled(i)
     }
     fn slot_max(&self, i: usize, stack: &ItemStack, rules: &dyn Rules) -> u32 {
         if self.container.is_none() && (5..=8).contains(&i) {
@@ -285,9 +278,7 @@ fn move_to(
         if stack.count == 0 {
             break;
         }
-        // A quick move tops up no result slot either, as a furnace's never
-        // aims at its result (`AbstractFurnaceMenu.quickMoveStack`).
-        if !view.enabled(i) || view.result(i) {
+        if !view.enabled(i) {
             continue;
         }
         if let Some(mut existing) = view.get(i)
@@ -837,7 +828,6 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
-            results: &[],
         };
         view.guest.carried = Some(ItemStack::new("minecraft:bundle", 1));
         // Left click with the bundle: the stone goes in.
@@ -875,7 +865,7 @@ mod tests {
     /// menu reads and writes only its count, the rest stay saved.
     #[test]
     fn mod_menu_shows_only_its_container_slots() {
-        use crate::containers::{ModBlockEntity, ModContainer};
+        use crate::containers::{ModBlockEntityFields, ModContainer};
         let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
         let container = ModContainer {
             slots: 5,
@@ -890,11 +880,14 @@ mod tests {
         let k = (0, 64, 0);
         world.block_entities.insert(
             k,
-            BlockEntity::Mod(Box::new(ModBlockEntity {
-                id: "gtmod:machine".into(),
-                items,
-                ..Default::default()
-            })),
+            BlockEntity::Mod(Box::new(
+                ModBlockEntityFields {
+                    id: "gtmod:machine".into(),
+                    items,
+                    ..Default::default()
+                }
+                .into(),
+            )),
         );
         let mut g = guest();
         let slots = Slots::Block(k);
@@ -911,7 +904,6 @@ mod tests {
                 container: Some(&mut read),
                 shulker: false,
                 hidden: &[],
-                results: &[],
             };
             click(&mut view, &mut drag, 5 + 27, 0, input::QUICK_MOVE, &rules);
             assert_eq!(view.get(0).map(|s| s.item), Some("minecraft:dirt".into()));
@@ -949,7 +941,6 @@ mod tests {
             container: Some(&mut container),
             shulker: false,
             hidden: &hidden,
-            results: &[],
         };
         // The hotbar's first slot (menu slot 3 + 27) lands in the one slot shown.
         click(&mut view, &mut drag, 3 + 27, 0, input::QUICK_MOVE, &rules);
@@ -958,40 +949,6 @@ mod tests {
         // Nothing leaves a hidden slot either.
         click(&mut view, &mut drag, 2, 0, input::QUICK_MOVE, &rules);
         assert_eq!(view.get(2).map(|s| s.item), Some("minecraft:stone".into()));
-    }
-
-    /// A mod menu type's result slot takes nothing in, a click or a
-    /// shift-click alike, even onto the same item, and gives what it holds
-    /// onto the same carried item (`AbstractContainerMenu.doClick`).
-    #[test]
-    fn a_result_slot_is_take_only() {
-        let Some(rules) = rules() else {
-            return;
-        };
-        let mut g = guest();
-        let mut container = vec![None, Some(ItemStack::new("minecraft:iron_ingot", 1))];
-        g.inventory[0] = Some(ItemStack::new("minecraft:iron_ingot", 3));
-        g.carried = Some(ItemStack::new("minecraft:iron_ingot", 2));
-        let results = [1];
-        let mut drag = None;
-        let mut view = View {
-            guest: &mut g,
-            container: Some(&mut container),
-            shulker: false,
-            hidden: &[],
-            results: &results,
-        };
-        // The hotbar's first slot (menu slot 2 + 27) goes to slot 0, not onto the result.
-        click(&mut view, &mut drag, 2 + 27, 0, input::QUICK_MOVE, &rules);
-        assert_eq!(view.get(0).map(|s| s.count), Some(3));
-        assert_eq!(view.get(1).map(|s| s.count), Some(1));
-        // The carried ingots take the result's one instead of going in.
-        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
-        assert_eq!(view.get(1), None);
-        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(3));
-        // Nor does an empty result take any.
-        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
-        assert_eq!(view.get(1), None);
     }
 
     struct SwapRules;
@@ -1005,59 +962,6 @@ mod tests {
         fn armor_index(&self, _: &str) -> Option<usize> {
             None
         }
-    }
-
-    /// A result slot takes nothing from a swap, F or a drag, but gives to a
-    /// swap into an empty hand and to a double click's collect
-    /// (`canTakeItemForPickAll` is true for it, as for a furnace's result).
-    #[test]
-    fn a_result_slot_takes_no_swap_or_drag() {
-        let rules = SwapRules;
-        let mut g = guest();
-        let ingots = |n| Some(ItemStack::new("minecraft:iron_ingot", n));
-        let mut container = vec![None, ingots(2), None];
-        g.inventory[0] = Some(ItemStack::new("minecraft:stone", 1));
-        g.offhand = Some(ItemStack::new("minecraft:stone", 1));
-        let results = [1];
-        let mut drag = None;
-        let mut view = View {
-            guest: &mut g,
-            container: Some(&mut container),
-            shulker: false,
-            hidden: &[],
-            results: &results,
-        };
-        // A hotbar key and F over the result: the stone goes nowhere.
-        click(&mut view, &mut drag, 1, 0, input::SWAP, &rules);
-        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
-        assert_eq!(view.get(1), ingots(2));
-        assert!(view.guest.offhand.is_some() && view.guest.inventory[0].is_some());
-        // F with an empty off hand takes the ingots out.
-        view.guest.offhand = None;
-        click(&mut view, &mut drag, 1, 40, input::SWAP, &rules);
-        assert_eq!((view.get(1), view.guest.offhand.clone()), (None, ingots(2)));
-        // A drag over slots 0 to 2 passes the result by.
-        view.guest.carried = Some(ItemStack::new("minecraft:dirt", 4));
-        for (slot, button) in [(-999, 0), (0, 1), (1, 1), (2, 1), (-999, 2)] {
-            click(
-                &mut view,
-                &mut drag,
-                slot,
-                button,
-                input::QUICK_CRAFT,
-                &rules,
-            );
-        }
-        let count = |s: Option<ItemStack>| s.map(|s| s.count);
-        assert_eq!(
-            [view.get(0), view.get(1), view.get(2)].map(count),
-            [Some(2), None, Some(2)]
-        );
-        // A double click collects from it.
-        view.set(1, ingots(3));
-        view.guest.carried = ingots(1);
-        click(&mut view, &mut drag, 0, 0, input::PICKUP_ALL, &rules);
-        assert_eq!((view.get(1), view.guest.carried.clone()), (None, ingots(4)));
     }
 
     /// F (SWAP button 40) over a chest or the inventory below it swaps with
@@ -1074,7 +978,6 @@ mod tests {
             container: Some(&mut chest),
             shulker: false,
             hidden: &[],
-            results: &[],
         };
         click(&mut view, &mut drag, 0, 40, input::SWAP, &rules);
         assert_eq!(
@@ -1120,7 +1023,6 @@ mod tests {
                 container: Some(&mut container),
                 shulker,
                 hidden: &[],
-                results: &[],
             };
             // Carried onto an empty slot, shift-clicked from the hotbar
             // (menu slot 27 + 27) and swapped in with the number key 1.

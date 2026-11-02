@@ -10,6 +10,8 @@
 
 use glam::{DMat4, DVec3, Mat4, Vec2};
 
+/// The least a world is scaled to when memory runs out.
+const MIN_SCALE: f32 = 0.25;
 /// The TAA history format: 8 bits would band as frames accumulate.
 const HISTORY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
@@ -299,6 +301,16 @@ impl Post {
         Mat4::from_translation(jitter.extend(0.0))
     }
 
+    /// This frame's jitter in rendered pixels, y down (FSR's `jitterOffset`); zero
+    /// without TAA.
+    pub fn jitter_pixels(&self) -> [f32; 2] {
+        let Some(size) = self.size().filter(|_| self.taa_on) else {
+            return [0.0; 2];
+        };
+        let j = self.taa_this_frame.jitter;
+        [j[0] * size[0] as f32 * 0.5, -j[1] * size[1] as f32 * 0.5]
+    }
+
     /// The world's colour and depth targets this frame, or `None` to draw
     /// it straight to the screen.
     /// `always`: a target even at scale 1 without anti-aliasing (a shader pack reads it).
@@ -312,12 +324,65 @@ impl Post {
             self.target = None;
             return None;
         }
-        let (size, output) = self.sizes(window);
-        let history_size = self.taa_on.then_some(output);
-        if self
-            .target
+        // The old target goes first: a slider drag would otherwise hold the old and the new
+        // targets together, and the sum is what runs a small GPU out of memory.
+        loop {
+            let (size, output) = self.sizes(window);
+            let history_size = self.taa_on.then_some(output);
+            if self
+                .target
+                .as_ref()
+                .is_some_and(|t| t.size == size && t.taa.as_ref().map(|h| h.size) == history_size)
+            {
+                break;
+            }
+            self.target = None;
+            // Errors raised are fatal, so catch an out-of-memory one and scale down. A texture
+            // that failed is invalid, so its view fails validation too: catch that as well.
+            let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+            let target = self.build_target(device, size, history_size);
+            let error = pollster::block_on(memory.pop()).or(pollster::block_on(validation.pop()));
+            if error.is_none() {
+                // New textures: no history yet.
+                self.taa_this_frame.jitter[2] = 1.0;
+                self.target = Some(target);
+                break;
+            }
+            drop(target);
+            if self.scale <= MIN_SCALE {
+                log::warn!(
+                    "Horizon renderer: no video memory for the scaled world at {size:?} ({}); drawing at the window's size",
+                    error.map_or_else(String::new, |e| e.to_string())
+                );
+                self.scale = 1.0;
+                self.target = None;
+                return None;
+            }
+            let reduced = (self.scale * 0.75).max(MIN_SCALE);
+            log::warn!(
+                "Horizon renderer: out of video memory for the scaled world at {size:?}; resolution scale {:.2} -> {reduced:.2} ({})",
+                self.scale,
+                error.map_or_else(String::new, |e| e.to_string())
+            );
+            self.scale = reduced;
+            if self.scale == 1.0 && !self.antialias && !self.taa_on && !always {
+                return None;
+            }
+        }
+        self.target
             .as_ref()
-            .is_none_or(|t| t.size != size || t.taa.as_ref().map(|h| h.size) != history_size)
+            .map(|t| (t.color.clone(), t.depth.clone()))
+    }
+
+    /// The world's colour and depth targets at `size`, and TAA's history when `history_size`
+    /// is set.
+    fn build_target(
+        &self,
+        device: &wgpu::Device,
+        size: [u32; 2],
+        history_size: Option<[u32; 2]>,
+    ) -> WorldTarget {
         {
             let make_tex = |label, size: [u32; 2], format, usage| {
                 device.create_texture(&wgpu::TextureDescriptor {
@@ -393,19 +458,14 @@ impl Post {
                     show,
                 })
             });
-            // New textures: no history yet.
-            self.taa_this_frame.jitter[2] = 1.0;
-            self.target = Some(WorldTarget {
+            WorldTarget {
                 size,
                 color,
                 depth,
                 group,
                 taa,
-            });
+            }
         }
-        self.target
-            .as_ref()
-            .map(|t| (t.color.clone(), t.depth.clone()))
     }
 
     /// The size of the world's own target, when it has one.
@@ -507,7 +567,12 @@ impl Post {
 
 /// This frame's clip space to the previous frame's, for camera-relative projections:
 /// a point `camera - previous_camera` further from the previous camera than from this one.
-fn reprojection(previous: DMat4, previous_camera: DVec3, current: DMat4, camera: DVec3) -> DMat4 {
+pub(super) fn reprojection(
+    previous: DMat4,
+    previous_camera: DVec3,
+    current: DMat4,
+    camera: DVec3,
+) -> DMat4 {
     previous * DMat4::from_translation(camera - previous_camera) * current.inverse()
 }
 
@@ -553,8 +618,7 @@ mod tests {
     }
 
     fn test_device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
+        let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }

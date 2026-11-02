@@ -541,16 +541,19 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let mut verts = Vec::new();
-        horizon_client::mobs::render::render_with(
-            &m,
-            1.0,
-            camera,
-            &lookup,
-            240 | 240 << 8,
-            self.res.mob_data(),
-            &[],
-            &mut verts,
-        );
+        // A screen preview: custom entity model animations see is_in_gui = 1.
+        horizon_client::mobs::cem_anim::in_gui(|| {
+            horizon_client::mobs::render::render_with(
+                &m,
+                1.0,
+                camera,
+                &lookup,
+                240 | 240 << 8,
+                self.res.mob_data(),
+                &[],
+                &mut verts,
+            );
+        });
         let height = m.kind.height as f32;
         let gui = glam::Mat4::from_translation(glam::Vec3::new(cx, cy, 0.0))
             * glam::Mat4::from_scale(glam::Vec3::new(size, size, -size))

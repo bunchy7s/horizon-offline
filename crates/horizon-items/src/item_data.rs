@@ -78,6 +78,10 @@ impl Wire {
     pub fn new(decoded: ItemStack, patch: Arc<[u8]>) -> Self {
         Self(Some(Arc::new((decoded, patch))))
     }
+    /// The server's patch, whether or not the stack changed since.
+    pub fn patch(&self) -> Option<&[u8]> {
+        self.0.as_deref().map(|(_, patch)| &**patch)
+    }
 }
 impl PartialEq for Wire {
     fn eq(&self, _: &Self) -> bool {
@@ -437,6 +441,8 @@ fn string(t: &Tag) -> Option<String> {
         _ => None,
     }
 }
+/// The persistent `ItemEnchantments` codec uses integer levels in 1..=255.
+/// `TagValueInput.read` keeps the partial map when an entry fails decoding.
 fn read_levels(t: Option<&Tag>) -> Levels {
     let Some(Tag::Compound(map)) = t else {
         return Vec::new();
@@ -449,8 +455,12 @@ fn read_levels(t: Option<&Tag>) -> Levels {
     // The keys are enchantment Identifiers: `knockback` is `minecraft:knockback`.
     map.iter()
         .filter_map(|(k, v)| {
+            let level = horizon_world::datafix::dynamic::as_number(v)?.int_value();
+            if !(1..=255).contains(&level) {
+                return None;
+            }
             let id = horizon_world::datafix::dynamic::namespaced(&k.to_string_lossy());
-            Some((Arc::from(id), int(v)?.clamp(1, 255) as u32))
+            Some((Arc::from(id), level as u32))
         })
         .collect()
 }
@@ -1116,6 +1126,30 @@ mod tests {
         };
         assert_eq!(stack.enchantment_level("minecraft:knockback"), 2);
         assert_eq!(stack.enchantment_level("minecraft:sharpness"), 1);
+    }
+
+    #[test]
+    fn invalid_enchantment_levels_leave_the_other_entries_intact() {
+        for component in ["minecraft:enchantments", "minecraft:stored_enchantments"] {
+            for level in [-1, 0, 256, i32::MAX] {
+                let components = Tag::compound([
+                    ("minecraft:damage", Tag::Int(12)),
+                    (
+                        component,
+                        Tag::compound([("looting", Tag::Int(level)), ("sharpness", Tag::Int(3))]),
+                    ),
+                ]);
+                let (damage, extra) = decode_components(Some(&components));
+                let data = extra.unwrap();
+                let levels = if component == "minecraft:enchantments" {
+                    data.enchantments
+                } else {
+                    data.stored_enchantments
+                };
+                assert_eq!(damage, 12);
+                assert_eq!(levels, vec![(Arc::from("minecraft:sharpness"), 3)]);
+            }
+        }
     }
 
     #[test]

@@ -15,8 +15,8 @@ use horizon_client::{
         properties::{GAME_MODES, ServerProperties, SystemEntropy},
         user_cache::UserCache,
         user_lists::{
-            BanEntry, BanList, IpBanList, NameAndId, OpEntry, OpList, WhiteEntry, WhiteList,
-            format_date,
+            BanEntry, BanList, Change, IpBanList, NameAndId, OpEntry, OpList, WhiteEntry,
+            WhiteList, format_date,
         },
     },
     text::Text,
@@ -257,6 +257,16 @@ fn forwarding_secret(online: bool) -> Result<Option<Vec<u8>>> {
     Ok(Some(secret))
 }
 
+/// `MinecraftServer.runServer`'s overload warning for a server `behind` its
+/// schedule, in milliseconds and in ticks of `tick`.
+fn overload_warning(behind: Duration, tick: Duration) -> String {
+    format!(
+        "Can't keep up! Is the server overloaded? Running {}ms or {} ticks behind",
+        behind.as_millis(),
+        behind.as_nanos() / tick.as_nanos().max(1)
+    )
+}
+
 /// Log4j's console pattern: `[HH:mm:ss] [thread/LEVEL]: message`.
 pub(super) fn log(level: &str, message: &str) {
     log_from("Server thread", level, message);
@@ -398,6 +408,19 @@ pub(super) fn preflight(options: &mut Options) -> Result<bool> {
     Ok(true)
 }
 
+/// The event a change of a list is (`operators_added`, `bans_removed`...), and the entry it is about.
+fn listed<E>(list: &str, change: Change<E>) -> (String, E) {
+    match change {
+        Change::Added(e) => (format!("{list}_added"), e),
+        Change::Removed(e) => (format!("{list}_removed"), e),
+    }
+}
+
+/// What a ban says besides who it is for: the reason and the source, and when it ends (milliseconds, or none).
+fn ban_fields<T>(ban: &BanEntry<T>) -> serde_json::Value {
+    serde_json::json!({ "reason": ban.reason, "source": ban.source, "expires": ban.expires })
+}
+
 /// The operator, whitelist and ban lists (DedicatedPlayerList), shared with
 /// the connection threads that check logins.
 pub(super) struct Lists {
@@ -421,6 +444,30 @@ impl Lists {
             enforce_whitelist: false,
             op_level: 4,
         };
+        // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
+        l.ops.watch(|change| {
+            let (kind, e) = listed("operators", change);
+            events::record(
+                &kind,
+                &e.user.name,
+                e.user.id,
+                serde_json::json!({ "level": e.level, "bypassesPlayerLimit": e.bypasses_player_limit }),
+            );
+        });
+        l.white.watch(|change| {
+            let (kind, e) = listed("allowlist", change);
+            events::record(&kind, &e.user.name, e.user.id, serde_json::json!({}));
+        });
+        l.bans.watch(|change| {
+            let (kind, e) = listed("bans", change);
+            events::record(&kind, &e.user.name, e.user.id, ban_fields(&e));
+        });
+        l.ip_bans.watch(|change| {
+            let (kind, e) = listed("ip_bans", change);
+            let mut fields = ban_fields(&e);
+            fields["ip"] = e.user.clone().into();
+            events::record_server(&kind, fields);
+        });
         // DedicatedPlayerList's constructor order and its LOGGER.warn lines.
         let warn = |what: &str, r: std::result::Result<(), String>| {
             if let Err(e) = r {
@@ -502,6 +549,13 @@ const LEGACY_PRESET_NAMES: [(&str, horizon_client::save::WorldPreset); 2] = [
 
 /// server.properties' line for `server.toml`'s `max_view_distance` (horizon-server writes it).
 const FAR_PROPERTY: &str = "horizon-max-view-distance";
+/// A dedicated server logs a tick slower than this, in milliseconds, with
+/// its spans, unless `HORIZON_SPIKES` names another threshold: five ticks'
+/// worth, a stall players feel as rubber-banding.
+pub(super) const SLOW_TICK_MS: f32 = 250.0;
+/// `MinecraftServer.OVERLOADED_WARNING_INTERVAL_NANOS` plus 100 ticks: the
+/// "Can't keep up!" warning comes at most this often.
+const OVERLOAD_WARNING_INTERVAL: Duration = Duration::from_secs(15);
 /// server.properties' line for `server.toml`'s `admin_feedback_to_ops` (horizon-server writes it).
 const ADMIN_FEEDBACK_PROPERTY: &str = "horizon-admin-feedback-to-ops";
 
@@ -561,7 +615,9 @@ impl Game<'_> {
             structures: props.generate_structures,
             bonus_chest: false,
         };
-        horizon_client::save::write_world_gen_settings_with(dir, props.seed, options, settings)
+        horizon_client::save::write_world_gen_settings_with(
+            dir, props.seed, options, settings, None,
+        )
     }
 }
 
@@ -607,6 +663,8 @@ struct ServerState {
     paused: bool,
     /// `broadcast-console-to-ops`.
     broadcast_console: bool,
+    /// `broadcast-rcon-to-ops` (`MinecraftServer.shouldRconBroadcast`).
+    broadcast_rcon: bool,
     /// `op-permission-level`: what `/op` grants (operatorUserPermissions).
     op_level: i32,
     /// `horizon-report`: the ticks being recorded.
@@ -614,6 +672,22 @@ struct ServerState {
     /// View and simulation distance, and the player limit, for the report.
     view: (u32, u32),
     max_players: usize,
+    /// The mutable `gamemode` server property (`DedicatedServer.gameMode`).
+    game_mode: i32,
+    /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
+    force_game_mode: bool,
+}
+
+/// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
+fn auto_save(state: &ServerState) -> bool {
+    state.autosave
+}
+
+/// `MinecraftServer.setAutoSave`: enable or disable periodic saves and report whether it changed.
+fn set_auto_save(state: &mut ServerState, enabled: bool) -> bool {
+    let changed = state.autosave != enabled;
+    state.autosave = enabled;
+    changed
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -816,6 +890,9 @@ impl Game<'_> {
         self.settle_spawn()?;
         let gate_lists = lists.clone();
         let gate: LoginGate = Arc::new(move |address, uuid, name| {
+            // `ServerActivityMonitor.reportLoginActivity`: a login attempt, however it ends. The management
+            // protocol's `server/activity` notification is rate limited from these.
+            events::record_server("login_activity", serde_json::json!({}));
             let user = NameAndId {
                 id: uuid,
                 name: name.to_owned(),
@@ -908,7 +985,6 @@ impl Game<'_> {
             levels: self.level_shapes,
             seed: self.level.seed,
             max_players: props.max_players.max(0) as usize,
-            dedicated: true,
             integrated: false,
         };
         let settings = LanSettings {
@@ -919,7 +995,7 @@ impl Game<'_> {
         if let Some(sync) = sync {
             sync.adopt(&self.pack_files());
         }
-        if let Err(e) = self.lan_host(settings, net, config, None) {
+        if let Err(e) = self.lan_host(settings, net, config) {
             log("WARN", "**** FAILED TO BIND TO PORT!");
             log("WARN", &format!("The exception was: {e}"));
             log("WARN", "Perhaps a server is already running on that port?");
@@ -979,7 +1055,10 @@ impl Game<'_> {
             ticks: Default::default(),
             paused: false,
             broadcast_console: props.broadcast_console_to_ops,
+            broadcast_rcon: props.broadcast_rcon_to_ops,
             op_level: props.op_permission_level,
+            game_mode: props.game_mode,
+            force_game_mode: props.force_game_mode,
             report: None,
             view: (
                 props.view_distance.clamp(2, 32) as u32,
@@ -995,6 +1074,7 @@ impl Game<'_> {
         self.fns.permission = Some(props.function_permission_level.clamp(0, 4) as u8);
         let watchdog = Watchdog::start(props.max_tick_time);
         let mut braked = Instant::now();
+        let mut overload_warned: Option<Instant> = None;
         while !state.stop {
             let tick_start = Instant::now();
             if let Some(watchdog) = &watchdog {
@@ -1035,8 +1115,12 @@ impl Game<'_> {
                 self.save_game()?;
             }
             if !paused && !state.autosave {
-                // `save-off`: the periodic save inside the tick is skipped.
-                self.ticks = self.ticks.max(1);
+                // `MinecraftServer.autoSave` keeps its schedule while every level's
+                // `noSave` flag is set, but writes nothing. The tick below counts down
+                // once, so reset one tick early when this save would have been due.
+                if self.ticks_until_autosave <= 1 {
+                    self.ticks_until_autosave = self.next_autosave_interval() + 1;
+                }
             }
             // MinecraftServer.tickServer: while paused only the connections run.
             // `MinecraftServer.runServer` catches what the tick throws, writes the crash
@@ -1084,7 +1168,17 @@ impl Game<'_> {
                 far.brake(mspt, host.hub.config.view_distance);
             }
             state.ticked(Instant::now());
-            self.wait_for_next_server_tick(&mut next, paused);
+            // MinecraftServer.runServer: a server more than a second's ticks
+            // behind skips them and says so, at most every 15 seconds.
+            if let Some(behind) = self.wait_for_next_server_tick(&mut next, paused)
+                && overload_warned.is_none_or(|at| at.elapsed() >= OVERLOAD_WARNING_INTERVAL)
+            {
+                overload_warned = Some(Instant::now());
+                log(
+                    "WARN",
+                    &overload_warning(behind, self.clock.tick_duration()),
+                );
+            }
         }
         if let Some(watchdog) = &watchdog {
             watchdog.running.store(false, Ordering::Relaxed);
@@ -1200,7 +1294,7 @@ impl Game<'_> {
             .iter()
             .map(|e| (e.user.id, e.level as u8))
             .collect();
-        host.hub.resend_commands();
+        self.resend_commands_filtered();
     }
 
     /// A player on the server, by name.
@@ -1258,7 +1352,20 @@ impl Game<'_> {
 
     /// One console line, then the operators' share of its feedback.
     fn console_line(&mut self, state: &mut ServerState, line: &str) {
-        self.console_broadcast = Some(state.broadcast_console);
+        self.console_line_telling(state, line, state.broadcast_console);
+    }
+
+    /// One console line run as `RconConsoleSource` runs an RCON command: the same console at level 4,
+    /// its source named `Rcon`, and the operators told when `broadcast-rcon-to-ops` is on.
+    fn rcon_line(&mut self, state: &mut ServerState, line: &str) {
+        self.rcon_source = true;
+        self.console_line_telling(state, line, state.broadcast_rcon);
+        self.rcon_source = false;
+    }
+
+    /// `console_line` with `inform` as `CommandSource.shouldInformAdmins`.
+    fn console_line_telling(&mut self, state: &mut ServerState, line: &str, inform: bool) {
+        self.console_broadcast = Some(inform);
         self.console_command(state, line);
         self.console_broadcast = None;
         if let Some(mut host) = self.lan.take() {
@@ -1321,19 +1428,17 @@ impl Game<'_> {
                 }
             }
             "save-off" => {
-                if state.autosave {
-                    state.autosave = false;
+                if set_auto_save(state, false) {
                     self.console_reply(Text::translate("commands.save.disabled", &[]));
                 } else {
                     self.console_reply(Text::translate("commands.save.alreadyOff", &[]));
                 }
             }
             "save-on" => {
-                if state.autosave {
-                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
-                } else {
-                    state.autosave = true;
+                if set_auto_save(state, true) {
                     self.console_reply(Text::translate("commands.save.enabled", &[]));
+                } else {
+                    self.console_reply(Text::translate("commands.save.alreadyOn", &[]));
                 }
             }
             "list" => {
@@ -1408,13 +1513,17 @@ impl Game<'_> {
             }
             "whitelist" => self.console_whitelist(state, &rest),
             // The chat filter's (game/chat_filter.rs), on servers that filter.
-            "unmute"
-                if rest.len() == 1 && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
+            command
+                if super::chat_filter::MUTE_COMMANDS.contains(&command)
+                    && self.lan.as_ref().is_some_and(|h| h.hub.chat_filter_on()) =>
             {
                 if let Some(mut host) = self.lan.take() {
-                    let reply = self.unmute(&mut host, rest[0], "Server");
+                    let words: Vec<&str> = [command].into_iter().chain(rest).collect();
+                    let replies = self.mute_command(&mut host, &words, "Server");
                     self.lan = Some(host);
-                    self.console_reply(lit(&reply));
+                    for reply in replies {
+                        self.console_reply(lit(&reply));
+                    }
                 }
             }
             "ban" if !rest.is_empty() => {
@@ -1604,9 +1713,16 @@ impl Game<'_> {
                 // SayCommand from the console: an unsigned system chat
                 // message of type say_command, logged as not secure.
                 let message = rest.join(" ");
-                log("INFO", &format!("[Not Secure] [Server] {message}"));
+                // An RCON client's `say` is `[Rcon] message`, and its reply stays empty: the line is
+                // the console's own log, not a message to the source.
+                let name = if self.rcon_source { "Rcon" } else { "Server" };
+                let held = self.rcon_source.then(|| CAPTURE.take());
+                log("INFO", &format!("[Not Secure] [{name}] {message}"));
+                if let Some(held) = held {
+                    CAPTURE.set(held);
+                }
                 if let Some(h) = &self.lan {
-                    h.hub.say("Server", &message);
+                    h.hub.say(name, &message);
                 }
             }
             _ => {
@@ -1629,7 +1745,7 @@ impl Game<'_> {
         match rest {
             ["on"] | ["off"] => {
                 let on = rest[0] == "on";
-                let mut l = state.lists.lock().unwrap();
+                let l = state.lists.lock().unwrap();
                 let turned_on = on && !l.use_whitelist;
                 let key = match (on, l.use_whitelist) {
                     (true, true) => "commands.whitelist.alreadyOn",
@@ -1637,9 +1753,8 @@ impl Game<'_> {
                     (false, false) => "commands.whitelist.alreadyOff",
                     (false, true) => "commands.whitelist.disabled",
                 };
-                l.use_whitelist = on;
                 drop(l);
-                self.store_property("white-list", on.to_string());
+                self.set_using_whitelist(&state.lists, on);
                 self.console_reply(Text::translate(key, &[]));
                 if turned_on {
                     let lists = state.lists.clone();
@@ -1707,8 +1822,33 @@ impl Game<'_> {
     /// `DedicatedServer.setUsingWhitelist`: the flag, and `white-list` in
     /// server.properties.
     pub(super) fn set_using_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
-        lists.lock().unwrap().use_whitelist = on;
+        let changed = {
+            let mut lists = lists.lock().unwrap();
+            let changed = lists.use_whitelist != on;
+            lists.use_whitelist = on;
+            changed
+        };
         self.store_property("white-list", on.to_string());
+        if changed {
+            self.native_whitelist_state_update(on);
+        }
+    }
+
+    /// `DedicatedServer.setMaxPlayers`: the live login limit, and `max-players` in
+    /// server.properties.
+    fn set_max_players(&mut self, state: &mut ServerState, max_players: usize) {
+        state.max_players = max_players;
+        if let Some(lan) = &self.lan {
+            lan.hub.lan.shared.set_max_players(max_players);
+        }
+        self.store_property("max-players", max_players.to_string());
+    }
+
+    /// `DedicatedServer.setEnforceWhitelist`: the flag, and `enforce-whitelist` in
+    /// server.properties.
+    pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
+        lists.lock().unwrap().enforce_whitelist = on;
+        self.store_property("enforce-whitelist", on.to_string());
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.
@@ -1950,13 +2090,23 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{capture_log, log, log_from, panic_message};
+    use super::{capture_log, log, log_from, overload_warning, panic_message};
     use std::{
         fs,
         io::{self, BufRead, BufReader, Read, Write},
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
+    #[test]
+    fn the_overload_warning_reads_as_vanilla_s() {
+        let tick = std::time::Duration::from_millis(50);
+        assert_eq!(
+            overload_warning(std::time::Duration::from_millis(13_027), tick),
+            "Can't keep up! Is the server overloaded? Running 13027ms or 260 ticks behind"
+        );
+    }
 
     /// A `panic!("literal")` carries a `&str`, a formatted one a `String`; anything else is
     /// named as unknown, so the crash line is never empty.

@@ -1,5 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "menus of content mods' own menu types for mod containers (the `menu` of a\n`ModContainer` may name one).",
-  "doc_summary": "menus of content mods' own menu types (vanilla's `MenuType`): a mod container's `menu` may name a menu type its content mod declares in `data/<id>/horizon/menu/` with as many slots ([mods.md](mods.md#menu-types)). It opens when the block is used, its data slots are the block entity's `data`, and a Horizon client shows it through the mod's `native_screen`. Bundles that use it need `\"hooks\": @API:mod_menu_types@`."
-}

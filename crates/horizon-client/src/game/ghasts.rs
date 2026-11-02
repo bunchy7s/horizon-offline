@@ -90,6 +90,9 @@ impl Game<'_> {
         if harnessed && !sneaking {
             // doPlayerRide.
             let id = self.mobs[index].id;
+            if !self.native_may_board(id) {
+                return true;
+            }
             self.break_leash(id, true, false);
             let was_empty = self.mobs[index].rider.is_none();
             // addPassenger: the rider is not standing on top, so no still

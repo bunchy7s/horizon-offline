@@ -1,0 +1,227 @@
+[package]
+name = "horizon-client-lib"
+autobins = false
+autoexamples = false
+autotests = false
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version = "1.90"
+description = "Reusable client systems, control tool and parity probes"
+
+[lib]
+path = "../horizon-client/src/client_lib.rs"
+
+[dependencies]
+horizon-assets = { path = "../horizon-assets" }
+horizon-client-core = { path = "../horizon-client-core" }
+horizon-client-input = { path = "../horizon-client-input" }
+horizon-client-render = { path = "../horizon-client-render" }
+horizon-command = { path = "../horizon-command" }
+horizon-items = { path = "../horizon-items" }
+horizon-core = { path = "../horizon-core" }
+# `horizon-ctl mcp`: the Model Context Protocol, shared with the launcher and the server.
+horizon-mcp = { path = "../horizon-mcp" }
+# The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
+horizon-optifine = { path = "../horizon-optifine" }
+horizon-threads = { path = "../horizon-threads" }
+horizon-hdr = { path = "../horizon-hdr" }
+horizon-world = { path = "../horizon-world" }
+horizon-protocol = { path = "../horizon-protocol" }
+# server.properties, eula.txt and the user lists, shared with horizon-server.
+horizon-server-files = { path = "../horizon-server-files" }
+# The dedicated server's anticheat, off unless server.toml's [anticheat] turns it on (docs/anticheat.md).
+horizon-anticheat = { path = "../horizon-anticheat" }
+# The dedicated server's chat filter: [chat_filter], the slur list, mutes (docs/chat-filter.md).
+horizon-chat-filter = { path = "../horizon-chat-filter" }
+# Shader packs: reading them and turning their GLSL into naga modules.
+horizon-shaders = { path = "../horizon-shaders" }
+# Horizon's own shader packs: the format, the stages and the check (docs/shaders.md).
+horizon-shader-api = { path = "../horizon-shader-api" }
+horizon-friends = { path = "../horizon-friends" }
+# The narrator (GameNarrator): text-to-speech of chat, system messages and screens.
+horizon-narrator = { path = "../horizon-narrator" }
+# Horizon mods: sandboxed WebAssembly components, off unless installed and turned on (docs/mods.md).
+# Their runtime is the `mods` feature.
+horizon-mods = { path = "../horizon-mods", default-features = false, features = ["index"] }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "metal", "wgsl", "naga-ir"] }
+winit = "0.30.13"
+pollster = "0.4"
+bytemuck = { version = "1.24", features = ["derive"] }
+glam = "0.30"
+png = "0.18"
+sha2 = "0.10.9"
+# Server resource packs are checked and cached by their SHA-1, as vanilla does.
+sha1 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["raw_value"] }
+# hlsl-out: the gfx.rs tests translate every shader as wgpu's DirectX 12 backend does. A normal feature,
+# not a dev-dependency's, so builds, tests and examples share one build of naga, wgpu and this crate.
+naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out"] }
+miniz_oxide = "0.8"
+ab_glyph = "0.2.32"
+log = "0.4"
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
+horizon-theme = { path = "../horizon-theme" }
+# Opt-in data collection: the game keeps, the launcher sends (docs/telemetry.md); `live` is
+# the anonymous "I'm playing" ping the game sends itself (`heartbeat.rs`).
+horizon-telemetry = { path = "../horizon-telemetry", default-features = false, features = ["live"] }
+horizon-bench = { path = "../horizon-bench" }
+zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
+# Controllers (evdev + libudev on Linux, IOKit on macOS, Windows.Gaming.Input); the `controllers` feature.
+gilrs = { version = "0.11", optional = true }
+# The DualSense's rumble, adaptive triggers and lights over HID (gilrs only reads it).
+horizon-dualsense = { path = "../horizon-dualsense", optional = true }
+# HTTPS to the Minecraft services (online-mode session join).
+ureq = { version = "2", default-features = false, features = ["tls"] }
+unicode-bidi = "0.3.18"
+# `LevelStorageAccess.estimateDiskSpace`: usable disk space, without unsafe code on Windows.
+fs4 = { version = "1.1.0", default-features = false, features = ["sync"] }
+
+[target.'cfg(unix)'.dependencies]
+# The server thread's CPU time per tick (`HORIZON_SPIKES`, spans.rs).
+rustix = { version = "1", default-features = false, features = ["std", "time", "process", "fs"] }
+
+[target.'cfg(windows)'.dependencies]
+# Use the registered URI handler without routing links through Explorer/cmd.
+open = { version = "5.4.5", features = ["shellexecute-on-windows"] }
+# DirectX 12, where Vulkan has no adapter or device, or by choice (`graphicsApi`, graphics.rs).
+# Shaders compile with FXC (d3dcompiler_47.dll, part of Windows), or DXC when dxcompiler.dll is
+# on the PATH.
+wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Splitscreen: a window filling a monitor goes over its menu bar (game/split/windows.rs
+# `above_menu_bar`); all already in the tree through winit and wgpu.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow", "NSScreen"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSString"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+# OpenGL (WGL on Windows, EGL on Linux), the last fallback, for GPUs with no Vulkan or
+# DirectX 12 driver (`graphicsApi`, graphics.rs).
+wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+
+[features]
+default = ["audio", "controllers"]
+# Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
+# Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
+audio = ["horizon-client-render/audio"]
+# Controllers: gilrs, and the DualSense's own output. Without it only `horizon-ctl pad`'s virtual pad.
+controllers = ["dep:gilrs", "dep:horizon-dualsense", "horizon-client-input/controllers"]
+# Records the call sites of mob random draws (`mob_ai_probe` traces).
+rng-trace = ["horizon-core/rng-trace"]
+# Compatibility with earlier experiment commands: main already uses mimalloc.
+windows-mimalloc = []
+# Opt-in Windows heap experiment; see docs/windows-allocators.md.
+windows-segment-heap = []
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+horizon-client-render = { path = "../horizon-client-render", features = ["test-support"] }
+horizon-items = { path = "../horizon-items", features = ["test-support"] }
+# Every WGSL shader translated as wgpu's DirectX 12 backend does (gfx.rs tests).
+naga = { version = "30.0.1", features = ["wgsl-in", "hlsl-out", "msl-out", "spv-out"] }
+
+[[bin]]
+name = "horizon-ctl"
+path = "../horizon-client/src/bin/horizon-ctl/main.rs"
+
+[[example]]
+name = "chunk_load_bench"
+path = "../horizon-client/examples/chunk_load_bench.rs"
+
+[[example]]
+name = "gen_light_bench"
+path = "../horizon-client/examples/gen_light_bench.rs"
+
+[[example]]
+name = "gameplay_decode_profile"
+path = "../horizon-client/examples/gameplay_decode_profile.rs"
+
+[[example]]
+name = "json_load_bench"
+path = "../horizon-client/examples/json_load_bench.rs"
+
+[[example]]
+name = "mod_port_probe"
+path = "../horizon-client/examples/mod_port_probe.rs"
+
+[[example]]
+name = "model_library_bench"
+path = "../horizon-client/examples/model_library_bench.rs"
+
+[[example]]
+name = "model_states_bench"
+path = "../horizon-client/examples/model_states_bench.rs"
+
+[[example]]
+name = "old_world_fixture"
+path = "../horizon-client/examples/old_world_fixture.rs"
+
+[[example]]
+name = "portal_scan_bench"
+path = "../horizon-client/examples/portal_scan_bench.rs"
+
+[[example]]
+name = "random_tick_eligibility_bench"
+path = "../horizon-client/examples/random_tick_eligibility_bench.rs"
+
+[[example]]
+name = "resource_memory"
+path = "../horizon-client/examples/resource_memory.rs"
+
+[[example]]
+name = "save_batch_bench"
+path = "../horizon-client/examples/save_batch_bench.rs"
+
+[[example]]
+name = "shared_json_startup_profile"
+path = "../horizon-client/examples/shared_json_startup_profile.rs"
+
+[[example]]
+name = "sprite_cache_parity"
+path = "../horizon-client/examples/sprite_cache_parity.rs"
+
+[[example]]
+name = "client_probe"
+path = "../horizon-client/examples/probe/main.rs"
+
+[[test]]
+name = "custom_component_api"
+path = "../horizon-client/tests/custom_component_api.rs"
+
+[[test]]
+name = "custom_component_unregistered"
+path = "../horizon-client/tests/custom_component_unregistered.rs"
+
+[[test]]
+name = "custom_component_wire"
+path = "../horizon-client/tests/custom_component_wire.rs"
+
+[[test]]
+name = "forced_chunks"
+path = "../horizon-client/tests/forced_chunks.rs"
+
+[[test]]
+name = "generation_saves"
+path = "../horizon-client/tests/generation_saves.rs"
+
+[[test]]
+name = "lan_bot"
+path = "../horizon-client/tests/lan_bot.rs"
+
+[[test]]
+name = "streaming_meshes"
+path = "../horizon-client/tests/streaming_meshes.rs"
+
+[[test]]
+name = "tall_column"
+path = "../horizon-client/tests/tall_column.rs"
+
+[[test]]
+name = "wide_states"
+path = "../horizon-client/tests/wide_states.rs"

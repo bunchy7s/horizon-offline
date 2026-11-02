@@ -16,7 +16,10 @@ ServerScoreboard.stopTrackingObjective	inline	crates/horizon-client/src/lan/scor
 ServerScoreboard.getObjectiveDisplaySlotCount	inline	crates/horizon-client/src/lan/scoreboard.rs::View::of	tracked set = objectives in any display slot
 ServerScoreboard.updatePlayerWaypoint	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	team change remakes the player's waypoint connections, found by the per-tick diff
 ServerScoreboard.updateTeamWaypoints	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::tick_level	every player on a changed team, via the per-tick diff
+ServerScoreboard.load	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::unpack	the saved data's Objectives, Scores, DisplaySlots and Teams read back
+ServerScoreboard.store	port	crates/horizon-client-core/src/scoreboard.rs::Scoreboard::pack	ScoreboardSaveData.Packed's fields, those equal to their codec default left out
 ServerTickRateManager.updateJoiningPlayer	port	crates/horizon-client/src/lan/hub.rs::Hub::send_level_info	sends ticking state and step to the joining guest
+ServerTickRateManager.updateStepTicks	inline	crates/horizon-client/src/lan/hub.rs::Hub::sync_ticking	a step's revision change broadcasts TickingStep, and the same fn sends the ticking state when the rate or the freeze changed
 SuppressedExceptionCollector.addEntry	skip:server		feeds the system report's suppressed-exception section; no player-facing behaviour
 SuppressedExceptionCollector.dump	skip:server		system report section only
 WorldLoader.PackConfig.createResourceManager	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	discovers packs and rebuilds the data store; no resource manager object
@@ -60,10 +63,10 @@ AttributeCommand.setAttributeBase	port	crates/horizon-client/src/game/commands/w
 AttributeCommand.resetAttributeBase	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	base reset arm
 AttributeCommand.addModifier	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	modifier add arm, already-present error
 AttributeCommand.removeModifier	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_attribute	modifier remove arm
-BanIpCommands.register	missing		minor: /ban-ip is not in the command tree; Horizon has no ban list
-BanIpCommands.banIpOrName	missing		minor: operator ban-by-IP or name; no ban list in Horizon
-BanListCommands.register	missing		minor: /banlist is not in the command tree; Horizon has no ban list
-BanPlayerCommands.register	missing		minor: /ban is not in the command tree; Horizon has no ban list
+BanIpCommands.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"ban-ip" and "pardon-ip" are dispatched to cmd_ip_bans on a dedicated server (dedicated_lists is vanilla's DEDICATED selection); lan/command_order.rs lists them
+BanIpCommands.banIpOrName	port	crates/horizon-client/src/game/commands/profiles.rs::Game::cmd_ip_bans	an address, or a name resolved through the guests' own addresses, goes in the ip ban list with its source and reason; a target that is neither gets commands.banip.invalid
+BanListCommands.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"banlist", "banlist.ips" and "banlist.players" are dispatched to cmd_banlist on a dedicated server
+BanPlayerCommands.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"ban" reaches the ban arm of cmd_profiles on a dedicated server: the profile joins the ban list, commands.ban.success is said, and it is kicked
 BossBarCommands.register	port	crates/horizon-command/src/tree_misc.rs::bossbar	bossbar syntax tree
 BossBarCommands.getValue	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.get value arm
 BossBarCommands.getMax	port	crates/horizon-client/src/game/bossbars.rs::Game::bossbar_command	bossbar.get max arm
@@ -98,11 +101,11 @@ CommandResponseTracker.MessagesWithArgs.throwIfZero	skip:java		zero-target error
 ComputeCommand.computeAsFloat	port	crates/horizon-client/src/game/commands/compute.rs::Game::cmd_compute	float value, floor(value * scale), exact and inexact feedback
 ComputeCommand.throwInvalidValue	inline	crates/horizon-client/src/game/commands/compute.rs::Game::cmd_compute	invalid-value message closure inside cmd_compute
 DamageCommand.register	port	crates/horizon-command/src/tree_world.rs::damage	damage syntax tree
-DataPackCommand.createPack	missing		minor: /datapack create is in the tree but writes no pack folder or pack.mcmeta
+DataPackCommand.createPack	port	crates/horizon-client/src/game/functions.rs::Game::create_pack	the name is checked as a path segment, then pack.mcmeta with the pack format, data/ and the folder are written under the world's datapacks/
 DataPackCommand.enablePack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	datapack.enable arm; apply_pack_change reloads
 DataPackCommand.disablePack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	disable branch; apply_pack_change reloads
 DataPackCommand.getPack	port	crates/horizon-client/src/game/functions.rs::Game::cmd_datapack	unknown, already enabled or disabled, and feature checks
-DeOpCommands.register	missing		minor: /deop is not in the in-game tree; op lists are edited by the standalone server CLI
+DeOpCommands.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"deop" reaches the deop arm of cmd_profiles on a dedicated server: the op entry goes, commands.deop.success is said, and a player left unlisted is kicked
 DebugCommand.start	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug	profiler start, already-running error
 DebugCommand.stop	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug	profiler stop, ticks and tps
 DebugCommand.TraceCustomExecutor.runGuarded	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_debug_function	trace file under debug/ with one line per call
@@ -121,7 +124,7 @@ DebugConfigCommand.showDialog	skip:debug		/debugconfig, a developer tool
 DebugMobSpawningCommand.register	skip:debug		/debugmobspawning, a developer tool
 DebugPathCommand.register	skip:debug		/debugpath, a developer tool
 DebugPathCommand.fillBlocks	skip:debug		/debugpath, a developer tool
-DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: unsure: calls set_default_game_mode (lan.rs), which also sets the host's creative flag; vanilla only changes the default for new players
+DefaultGameModeCommands.setMode	port	crates/horizon-client/src/game/commands.rs::Game::execute_command	gap: the defaultgamemode arm goes through set_default_game_mode (lan.rs:1645), which sets the world's default and, when the world forces a mode, puts the guests in it (as vanilla's setMode does), but also flips the host's own creative flag (level.creative = mode == 1)
 DialogCommand.showDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: open_dialog only sets the host's dialog state; other targets are counted but never sent the dialog
 DialogCommand.clearDialog	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_dialog	gap: player: close_dialog only closes the host's dialog; guests get no clear packet
 DifficultyCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	difficulty syntax (vanilla.rs line 284)
@@ -134,7 +137,7 @@ EnchantCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	e
 net/minecraft/server/commands/ExecuteCommand#wrapStores	port	crates/horizon-command/src/tree_execute.rs::store	execute store syntax
 net/minecraft/server/commands/ExecuteCommand#storeValue	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	score and bossbar store targets
 net/minecraft/server/commands/ExecuteCommand#storeData	port	crates/horizon-client/src/game/commands/execute.rs::Game::store_value	data target store with int, float, short, long, double tags
-net/minecraft/server/commands/ExecuteCommand#isChunkLoaded	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_matches	gap: unsure: tests the streaming lit set; vanilla needs ENTITY_TICKING status and loaded entities
+net/minecraft/server/commands/ExecuteCommand#isChunkLoaded	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_matches	gap: the loaded arm tests a chunk present with light (streaming.is_lit) and has no entity check, where vanilla wants the chunk at ENTITY_TICKING and level.areEntitiesLoaded
 net/minecraft/server/commands/ExecuteCommand#countItems	port	crates/horizon-client/src/game/commands/items.rs::Game::condition_items	item count predicate
 net/minecraft/server/commands/ExecuteCommand#checkScore	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_score	score comparison, both score holders
 net/minecraft/server/commands/ExecuteCommand#checkStopwatch	port	crates/horizon-client/src/game/commands/execute.rs::Game::condition_stopwatch	stopwatch range check

@@ -9,7 +9,9 @@ icons), an initial selection, a GUI size, in a world or not, and what the
 player does: clicks on the lists (an entry's icon arrows, an entry, a
 header, the scroll bar, empty space), on the search box, typing and erasing
 in it, the mouse wheel over the lists, and the ConfirmScreen an incompatible
-pack opens (yes, no, or left open). The Java oracle
+pack opens (yes, no, or left open). A fifth of the cases are in another
+language, most of them one whose "Open Pack Folder" is wider than its button
+(#6129), at a fixed clock: that label scrolls (defaultScrollingHelper). The Java oracle
 (VanillaPackScreenOracle) runs a real PackSelectionScreen through these and
 records every GuiGraphicsExtractor call of the screen shown at the end
 (widgets, list backgrounds, scissor, separators, scroll bars, entries with
@@ -42,6 +44,10 @@ WORDS = ['Faithful', 'pack', 'textures', 'the', 'default', 'look', 'of', 'Minecr
          'Programmer', 'Art', 'resolution', 'a', 'very', 'loooooooooooooooooooooongword', '§4red', '§lbold§r', '1.21', '!',
          'Stay', 'True', 'é', 'Ünïcödé']
 COLORS = ['red', 'gold', 'aqua', 'gray', '#12AB34', 'dark_purple', 'yellow']
+# Languages whose pack.openFolder is wider than the 146 px inside its button
+# (#6129, from 170 px in isv and mk_mk down to 150 in ca_es and tl_ph), and two
+# whose label fits.
+LANGS = ['af_za', 'isv', 'mk_mk', 'vp_vl', 'io_en', 'oc_fr', 'ca_es', 'tl_ph', 'fr_fr', 'de_de']
 
 
 def words(rng, lo, hi):
@@ -69,6 +75,8 @@ def component(rng, lo, hi):
 
 def cases(count):
     rng = random.Random(0x50534352)
+    # A generator of its own for 'lang' and 'now': every other field of every case stays as it was.
+    clock = random.Random(0x4C414E47)
     out = []
     for n in range(count):
         width, height = rng.choice([(320, 240), (427, 240), (480, 270), (640, 360), (854, 480), (400, 160), (570, 320)])
@@ -122,7 +130,10 @@ def cases(count):
         out.append({'width': width, 'height': height, 'inWorld': rng.random() < 0.3, 'packs': packs, 'selected': selected,
                     'actions': actions, 'mouse': list(mouse), 'blink': rng.choice([0, 100, 400, 650]),
                     # Create World's Data Packs screen is the same screen under its own title.
-                    'title': 'dataPack.title' if n % 4 == 3 else 'resourcePack.title'})
+                    'title': 'dataPack.title' if n % 4 == 3 else 'resourcePack.title',
+                    'lang': clock.choice(LANGS) if clock.random() < 0.2 else 'en_us',
+                    # Util.getMillis: 0, a scroll period or two, or days of uptime.
+                    'now': clock.choice([0, clock.randrange(0, 30_000), clock.randrange(0, 2**31)])})
     return out
 
 
@@ -152,8 +163,8 @@ def main():
     run(['java', '-Xmx1G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaPackScreenOracle',
          inputs, build / 'vanilla.jsonl', lab.RESOURCES / 'assets'], 'vanilla')
     lib.cargo_example('horizon-client', 'pack_screen_fixture', lib.RESOURCES, inputs, build / 'rust.jsonl')
-    vanilla = [json.loads(l) for l in (build / 'vanilla.jsonl').read_text().splitlines()]
-    rust = [json.loads(l) for l in (build / 'rust.jsonl').read_text().splitlines()]
+    vanilla = [json.loads(l) for l in (build / 'vanilla.jsonl').read_text(encoding='utf-8').splitlines()]
+    rust = [json.loads(l) for l in (build / 'rust.jsonl').read_text(encoding='utf-8').splitlines()]
     assert len(vanilla) == len(rust) == len(chosen), (len(vanilla), len(rust), len(chosen))
     errors = [v['error'] for v in vanilla if 'error' in v]
     bad = []
@@ -164,7 +175,7 @@ def main():
     for e in sorted(set(errors))[:5]:
         print('ORACLE ERROR', e[:1500])
     for c, v, r in bad[:args.detail]:
-        brief = {k: c[k] for k in ('title', 'width', 'height', 'inWorld', 'selected', 'actions', 'mouse', 'blink')}
+        brief = {k: c[k] for k in ('title', 'width', 'height', 'inWorld', 'selected', 'actions', 'mouse', 'blink', 'lang', 'now')}
         print('MISMATCH', json.dumps(brief)[:1500])
         if v.get('screen') != r.get('screen'):
             print(f'   screen: vanilla {v.get("screen")} | horizon {r.get("screen")}')

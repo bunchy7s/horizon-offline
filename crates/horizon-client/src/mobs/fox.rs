@@ -1,10 +1,12 @@
 //! Foxes (`net.minecraft.world.entity.animal.fox.Fox`): the goal list, the
 //! flags byte (sleeping, sitting, crouching, interested, pouncing,
 //! faceplanted), stalking and pouncing, napping in the shade by day, seeking
-//! shelter, perching, eating berries and the food held in the mouth.
+//! shelter, perching, eating berries and the food held in the mouth (with the
+//! item's on-consumed effects: a chorus fruit teleports it).
 //! Strolling through villages and defending trusted players are not ported yet.
 //! The goal that walks to a dropped item is here; the game side takes the
-//! items (`Fox.pickUpItem`, `game/foxes.rs`).
+//! items (`Fox.pickUpItem`, `game/foxes.rs`). A totem in the mouth is a
+//! `death_protection` item like any other held one (`Mob::damage`).
 use super::{
     Mob, MobEvent, MobWorld, Seen, Species,
     goals::{
@@ -13,13 +15,16 @@ use super::{
         Prey, Stroll, goal_clone, hide_pos, reduced,
     },
     living::wrap,
+    riders,
 };
 use horizon_core::{
     geometry::{Axis, Vec3},
     jmath,
     random::RandomSource,
 };
+use horizon_items::items::ConsumeEffect;
 use horizon_world::registry::BlockStateId;
+use horizon_world::teleport_consume::TeleportConsume;
 
 // Fox.DATA_FLAGS_ID, kept in `extra.ints[0]` (and sent to clients as is).
 pub const SITTING: i32 = 1;
@@ -251,7 +256,9 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         let eaten = m.extra.ints[TICKS_SINCE_EATEN];
         if eaten > 600 {
-            // ItemStack.finishUsingItem: the food is gone, a use remainder stays.
+            // ItemStack.finishUsingItem: the consumable's on-consumed effects
+            // run (a chorus fruit teleports it), then a use remainder stays.
+            consume(w, m, events, &item);
             m.extra.set_main_hand(
                 w.items
                     .and_then(|i| i.items.get(&item))
@@ -307,6 +314,118 @@ fn eats(w: &MobWorld, item: &str) -> bool {
     w.items
         .and_then(|i| i.items.get(item))
         .is_some_and(|i| i.food.is_some() && i.consumable.is_some())
+}
+
+/// `Consumable.onConsume`'s `on_consume_effects` when a fox finishes an item
+/// (`Item.finishUsingItem`): the teleport that a chorus fruit gives it.
+fn consume(w: &MobWorld, m: &mut Mob, events: &mut Vec<MobEvent>, item: &str) {
+    let Some(consumable) = w
+        .items
+        .and_then(|i| i.items.get(item))
+        .and_then(|i| i.consumable.as_ref())
+    else {
+        return;
+    };
+    for effect in &consumable.effects {
+        if let ConsumeEffect::TeleportRandomly(teleport) = effect {
+            teleport_randomly(w, m, events, teleport);
+        }
+    }
+}
+
+/// `TeleportRandomlyConsumeEffect.apply` for a fox: 16 draws of a point in a
+/// cube of `diameter` around it, the first it can stand at takes it, with the
+/// fox's own teleport sound and the portal trail (level event 2017).
+fn teleport_randomly(
+    w: &MobWorld,
+    m: &mut Mob,
+    events: &mut Vec<MobEvent>,
+    teleport: &TeleportConsume,
+) {
+    let origin = m.position;
+    let diameter = f64::from(teleport.diameter);
+    // `Mth.clamp(y, level.getMinY(), getMinY() + logicalHeight - 1)`.
+    let low = f64::from(w.world.bottom_y());
+    let high = low + f64::from(w.world.shape.logical_height) - 1.0;
+    for _ in 0..16 {
+        let x = origin.x + (m.random.next_double() - 0.5) * diameter;
+        let y = (origin.y + (m.random.next_double() - 0.5) * diameter).clamp(low, high);
+        let z = origin.z + (m.random.next_double() - 0.5) * diameter;
+        if m.extra.passenger {
+            riders::stop_riding(m, None);
+        }
+        let old = m.position;
+        if !random_teleport(w, m, Vec3::new(x, y, z)) {
+            continue;
+        }
+        // `SoundEvents.FOX_TELEPORT`, else the chorus fruit's own; the sound
+        // plays at the point reached.
+        events.push(MobEvent::Sound(
+            "entity.fox.teleport",
+            [m.position.x, m.position.y, m.position.z],
+            1.0,
+            1.0,
+        ));
+        if teleport.directional_particles {
+            let at = |p: Vec3| [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+            let (from, to) = (at(old), at(m.position));
+            // `BlockPos` offset clamped to a byte per axis, packed as vanilla does.
+            let axis = |a: i32, b: i32| (b - a).clamp(-127, 127) + 127;
+            events.push(MobEvent::LevelEvent {
+                id: 2017,
+                pos: from,
+                data: (axis(from[0], to[0]) << 16)
+                    | (axis(from[1], to[1]) << 8)
+                    | axis(from[2], to[2]),
+            });
+        }
+        m.fall_distance = 0.0;
+        return;
+    }
+}
+
+/// `Entity.randomTeleport`: the drawn point drops to the first
+/// motion-blocking ground below it and takes the fox only if its box there
+/// is free and holds no liquid, on a block the consume effect allows.
+/// Otherwise the fox stays where it was.
+fn random_teleport(w: &MobWorld, m: &mut Mob, to: Vec3) -> bool {
+    let (x, z) = (to.x, to.z);
+    let (bx, bz) = (x.floor() as i32, z.floor() as i32);
+    if !w.world.loaded(bx, bz) {
+        return false;
+    }
+    // `while (!foundGround && pos.getY() > level().getMinY())`: every step
+    // down that is not ground lowers the landing height by one.
+    let mut y = to.y;
+    let mut by = to.y.floor() as i32;
+    let mut ground = false;
+    while by > w.world.bottom_y() {
+        by -= 1;
+        if w.facts.get(w.world.block(bx, by, bz)).full_collision {
+            ground = true;
+            break;
+        }
+        y -= 1.0;
+    }
+    if !ground {
+        return false;
+    }
+    // `level().noCollision(this) && !level().containsAnyLiquid(getBoundingBox())
+    // && !getBlockState(blockPosition()).is(CONSUMABLE_DOES_NOT_TELEPORT_TO)`.
+    let at = Vec3::new(x, y, z);
+    let bounds = m.bounds_at(at);
+    let landing = w.block_name(x.floor() as i32, y.floor() as i32, z.floor() as i32);
+    if !w.no_collision(bounds)
+        || w.contains_any_liquid(bounds)
+        || w.has_tag("minecraft:consumable_does_not_teleport_to", landing)
+    {
+        return false;
+    }
+    m.position = at;
+    m.previous = at;
+    m.velocity = Vec3::ZERO;
+    m.ai.nav.stop();
+    true
 }
 
 /// `Fox.FoxBehaviorGoal.hasShelter`: out of the sky's sight and not a bad spot.
@@ -839,6 +958,7 @@ impl EatBerries {
             }
             if count > 0 {
                 cx.events.push(MobEvent::DropItem {
+                    mob: m.id,
                     item: "minecraft:sweet_berries".into(),
                     count: count as u32,
                     at,
@@ -856,6 +976,7 @@ impl EatBerries {
         } else {
             // CaveVines.use: one glow berry, the vine goes back to bare.
             cx.events.push(MobEvent::DropItem {
+                mob: m.id,
                 item: "minecraft:glow_berries".into(),
                 count: 1,
                 at,
@@ -1097,5 +1218,80 @@ mod pickup_tests {
             f.extra.ints[TICKS_SINCE_EATEN], 0,
             "taking an item restarts the clock"
         );
+    }
+}
+
+#[cfg(test)]
+mod consume_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world;
+
+    /// `Item.finishUsingItem` → `Consumable.onConsume`: a fox that finishes a
+    /// chorus fruit takes `TeleportRandomlyConsumeEffect`'s teleport, with its
+    /// own sound and the portal trail (level event 2017).
+    #[test]
+    fn a_chorus_fruit_carries_the_fox_to_free_ground() {
+        let ran = with_built_test_world(
+            &[],
+            |world, registry| {
+                for (cx, cz) in [
+                    (-1, -1),
+                    (-1, 0),
+                    (-1, 1),
+                    (0, -1),
+                    (0, 0),
+                    (0, 1),
+                    (1, -1),
+                    (1, 0),
+                    (1, 1),
+                ] {
+                    world.chunks.insert(
+                        (cx, cz),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(cx, cz)),
+                    );
+                }
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                for x in -16..32 {
+                    for z in -16..32 {
+                        world.set(x, 0, z, stone).unwrap();
+                    }
+                }
+            },
+            |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:fox"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 1.0, 0.5), 0.0);
+                m.on_ground = true;
+                m.extra.set_main_hand(Some("minecraft:chorus_fruit".into()));
+                // Past the 600 ticks `Fox.aiStep` waits before it finishes the item.
+                m.extra.ints[TICKS_SINCE_EATEN] = 601;
+                let mut events = Vec::new();
+                ai_step(&mut m, w, &mut events);
+                assert_ne!(m.position, Vec3::new(0.5, 1.0, 0.5), "the fruit moved it");
+                // `Entity.randomTeleport` drops the drawn height by one per
+                // step until the block below it is ground: just above the stone.
+                assert!(
+                    (1.0..2.0).contains(&m.position.y),
+                    "it stands on the stone floor, got {}",
+                    m.position.y
+                );
+                assert_eq!(m.extra.main_hand, None, "the fruit was eaten");
+                assert_eq!(m.extra.ints[TICKS_SINCE_EATEN], 0);
+                assert!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::Sound("entity.fox.teleport", ..))),
+                    "the fox's teleport sound: {events:?}"
+                );
+                assert!(
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::LevelEvent { id: 2017, .. })),
+                    "the portal trail: {events:?}"
+                );
+            },
+        );
+        // Without the vanilla data under .local/horizon-client (CI's unit
+        // tests) there is no fox to feed: the test has nothing to check.
+        let _ = ran;
     }
 }

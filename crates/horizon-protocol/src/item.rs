@@ -37,6 +37,8 @@ pub mod component {
     pub const ENCHANTMENT_GLINT_OVERRIDE: i32 = 21;
     /// `AttackRange`: six floats, in the record's field order.
     pub const ATTACK_RANGE: i32 = 30;
+    pub const EQUIPPABLE: i32 = 32;
+    pub const GLIDER: i32 = 34;
     pub const STORED_ENCHANTMENTS: i32 = 45;
     pub const PROFILE: i32 = 72;
     pub const BANNER_PATTERNS: i32 = 74;

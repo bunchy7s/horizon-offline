@@ -328,7 +328,7 @@ impl Game<'_> {
         event: WindowEvent,
     ) {
         let was = std::mem::replace(&mut self.pad.menu.synthetic, true);
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, super::input_trace::InputOrigin::Game);
         self.pad.menu.synthetic = was;
     }
 
@@ -412,6 +412,26 @@ impl Game<'_> {
                 self.settings.controller.bind(action, Some(button));
             }
             return self.handle_option_events(vec![Event::Changed]);
+        }
+        // Splitscreen Setup: A picks up the focused player's tile, then left/right (or LB/RB)
+        // cycle where it goes, A drops it, B puts it back (`split_ui`).
+        if self.screen == Screen::Options && self.ui.options.page() == Page::SplitSetup {
+            let setup = &mut self.ui.options.split_setup;
+            if setup.pad_button(button) {
+                // Dropped or put back: the focus follows the player to its tile.
+                if let Some(rect) = setup.take_refocus() {
+                    let kind = Kind::Button;
+                    self.pad_focus_on(event_loop, Target { rect, kind });
+                }
+                return Ok(());
+            }
+            if button == Button::South
+                && self.pad_focusing()
+                && let Some(focus) = self.pad.menu.focus
+                && self.ui.options.split_setup.pad_pick_up(focus.center())
+            {
+                return Ok(());
+            }
         }
         // The on-screen keyboard takes every button while it is open.
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
@@ -521,6 +541,14 @@ impl Game<'_> {
     fn pad_step(&mut self, event_loop: &dyn EventLoopCtl, button: Button) {
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
             keyboard.step(button);
+            return;
+        }
+        // Splitscreen Setup with a player held: the stick cycles it as the D-pad does.
+        if self.screen == Screen::Options
+            && self.ui.options.page() == Page::SplitSetup
+            && self.ui.options.split_setup.holding()
+        {
+            self.ui.options.split_setup.pad_button(button);
             return;
         }
         if self.pad_focus_mode() {
@@ -1017,7 +1045,8 @@ impl Game<'_> {
     /// (`Screen.keyPressed`): Tab, Shift+Tab and the arrows move the focus,
     /// Enter, Space and keypad Enter press the focused widget; the focused
     /// widget's own keys come first (a text field's caret, a slider's
-    /// value). Whether the key was used; when not, the screen has it.
+    /// value). Whether the key was used; when not, the screen has it (a
+    /// container also has Tab and the arrows once they moved the focus).
     pub(super) fn key_focus_key(&mut self, event_loop: &dyn EventLoopCtl, key: KeyCode) -> bool {
         let Some(nav) = key_focus::nav_of(key, self.has_shift_down()) else {
             return false;
@@ -1102,7 +1131,9 @@ impl Game<'_> {
                 InputType::KeyboardArrow
             });
         }
-        true
+        let container =
+            self.title.is_none() && matches!(self.screen, Screen::Inventory | Screen::Creative);
+        !key_focus::passes_on(act, container)
     }
 
     /// Which screen is open, as far as the keyboard's focus cares.
@@ -1119,7 +1150,7 @@ impl Game<'_> {
             .hash(&mut hasher);
         (self.sign_edit.is_some(), self.book.is_some()).hash(&mut hasher);
         (
-            self.link_prompt.is_some(),
+            self.link_prompt.is_some() || self.command_prompt.is_some(),
             self.server_packs.prompt.is_some(),
         )
             .hash(&mut hasher);

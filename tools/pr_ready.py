@@ -70,10 +70,19 @@ ln -sfn "$state/parity-runner" .local/parity-runner && ln -sfn "$state/parity-ta
 }
 ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", "clippy.toml"}
 LAUNCHER_FEATURES = """export features=""
-if [ "$(uname)" = Darwin ] && ! xcrun metal --version > /dev/null 2>&1; then features="--features gpui/runtime_shaders"; fi
+if [ "$(uname)" = Darwin ] && ! xcrun metal --version > /dev/null 2>&1; then features="--features gpui_platform/runtime_shaders"; fi
 in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev/null && command -v nix-shell > /dev/null; then
   nix-shell shell.nix --run "$1"; else bash -c "$1"; fi; }"""
 
+
+# What `cargo run -p xtask -- mod-api` reads: the catalog, the hook points and helpers (every file of
+# the game), the mod API's own types, and the free hook points of other crates.
+MOD_API_INPUTS = (
+    "xtask/", "native-hooks.json", "crates/horizon-client/src/game/",
+    "crates/horizon-client/src/mod_api", "crates/horizon-world/src/loot.rs",
+    "crates/horizon-world/src/item_defaults.rs",
+    "crates/horizon-client-render/src/gfx/native_render",
+)
 
 def is_doc(path):
     return path.endswith(".md")
@@ -96,6 +105,13 @@ def touched_crates(paths, packages):
     crates = set()
     for path in paths:
         if is_doc(path):
+            continue
+        if "horizon-client-lib" in packages and path.startswith("crates/horizon-client/"):
+            relative = path.removeprefix("crates/horizon-client/")
+            gameplay = relative in {"Cargo.toml", "build.rs", "windows-segment-heap.manifest",
+                                    "src/lib.rs", "src/main.rs", "src/entry.rs", "src/game.rs", "tests/launch_api.rs"} \
+                or relative.startswith("src/game/")
+            crates.add("horizon-client" if gameplay else "horizon-client-lib")
             continue
         owners = [name for name, directory in packages.items() if path.startswith(directory.rstrip("/") + "/")]
         if owners:
@@ -328,7 +344,7 @@ def mod_features(crates):
 # they are #[ignore]d and run here only when one of these changes.
 CONTENT_ROOT = ("crates/horizon-client/src/mod_content", "crates/horizon-client-render/src/assets.rs", "crates/horizon-items/",
                 "crates/horizon-mods/", "crates/horizon-assets/")
-CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client --lib mod_content::tests:: -- --ignored"
+CONTENT_ROOT_TESTS = "cargo test --locked -p horizon-client-lib --lib mod_content::tests:: -- --ignored"
 
 
 def plan(args, base, changed, crates_of, libraries, dependencies):
@@ -367,6 +383,9 @@ def plan(args, base, changed, crates_of, libraries, dependencies):
         Step("content root tests", CONTENT_ROOT_TESTS, summary=tests_passed,
              skip=None if crates is None or any(p.startswith(CONTENT_ROOT) for p in changed)
              else "content root untouched"),
+        Step("mod API up to date", "cargo test --locked -p xtask mod_api",
+             skip=None if any(p.startswith(MOD_API_INPUTS) for p in changed)
+             else "native hooks untouched"),
         Step("tokens.css up to date", "cargo test --locked -p horizon-theme --lib tokens_css_is_up_to_date",
              skip=None if any(p.startswith(("crates/horizon-theme/", "xtask/")) for p in changed)
              else "theme untouched"),
@@ -464,7 +483,7 @@ def run_windows(steps, verbose):
             command = shlex.split(CI_CLIPPY)  # the server build's clippy runs in CI (Linux)
         elif step.name.startswith("tests"):
             command = shlex.split(step.command)
-        elif step.name == "tokens.css up to date":
+        elif step.name in ("tokens.css up to date", "mod API up to date"):
             command = shlex.split(step.command)
         elif step.name == "launcher rustfmt":
             command = ["cargo", "fmt", "--check"]

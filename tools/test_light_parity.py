@@ -91,7 +91,7 @@ def main():
     if not (dimension / 'region').is_dir():
         dimension = run / 'world'
     for extra in (['--chunks', '0', '0', '2', '3'], ['--incremental', '100']):
-        status = subprocess.run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client',
+        status = subprocess.run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client-lib',
                                  '--example', 'client_probe', '--', 'light_parity', str(RESOURCES), str(dimension), *extra],
                                 cwd=ROOT).returncode
         if status:

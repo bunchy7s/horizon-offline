@@ -7,6 +7,11 @@
 use crate::gamepad::{Button, GlyphStyle};
 use crate::ui_theme::{self, Face, Ui, color};
 
+/// A label of the keyboard: the language table's, or the English text.
+fn tr(key: &str, english: &str) -> String {
+    crate::lang::get_or(key, english)
+}
+
 /// What a key press does to the focused field.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Output {
@@ -312,12 +317,12 @@ impl Keyboard {
                 let label = match key {
                     Key::Char(ch) => self.letter(*ch),
                     Key::Shift if self.caps => "CAPS".into(),
-                    Key::Shift => "Shift".into(),
+                    Key::Shift => tr("horizon.osk.shift", "Shift"),
                     Key::Layer if self.symbols => "abc".into(),
                     Key::Layer => "&123".into(),
-                    Key::Space => "Space".into(),
-                    Key::Backspace => "Delete".into(),
-                    Key::Done => "Done".into(),
+                    Key::Space => tr("horizon.osk.space", "Space"),
+                    Key::Backspace => tr("horizon.osk.delete", "Delete"),
+                    Key::Done => tr("gui.done", "Done"),
                 };
                 let lw = ui.measure(Face::Medium, ui_theme::BODY, &label);
                 ui.text_line(
@@ -332,13 +337,13 @@ impl Keyboard {
             }
         }
         let hints = [
-            (Button::South, "Type"),
-            (Button::West, "Delete"),
-            (Button::North, "Space"),
-            (Button::LeftTrigger, "Shift"),
-            (Button::RightBumper, "Symbols"),
-            (Button::Start, "Done"),
-            (Button::East, "Close"),
+            (Button::South, tr("horizon.osk.type", "Type")),
+            (Button::West, tr("horizon.osk.delete", "Delete")),
+            (Button::North, tr("horizon.osk.space", "Space")),
+            (Button::LeftTrigger, tr("horizon.osk.shift", "Shift")),
+            (Button::RightBumper, tr("horizon.osk.symbols", "Symbols")),
+            (Button::Start, tr("gui.done", "Done")),
+            (Button::East, tr("horizon.osk.close", "Close")),
         ];
         let line: Vec<String> = hints
             .iter()

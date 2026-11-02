@@ -7,7 +7,7 @@
 //! `native_exchange_items` swaps two players' stacks in one step, checked
 //! first, so a trade built on these menus never moves an item before both
 //! sides are settled.
-use super::Game;
+use super::{Game, lan::LanHost};
 use horizon_client::{
     items::ItemStack,
     lan::{data::component_nbt, menu::NativeMenuEvent},
@@ -31,7 +31,7 @@ pub(crate) fn native_menu_inventory_slot(size: usize, slot: i32) -> Option<usize
 /// Adds every stack of `gets` to the 36 slots of `inventory`, onto matching
 /// stacks first, then into empty slots, hotbar first; false when one doesn't
 /// fit whole. `max` is an item's stack size.
-fn fit(
+pub(super) fn fit(
     inventory: &mut [Option<ItemStack>],
     gets: &[ItemStack],
     max: &impl Fn(&ItemStack) -> u32,
@@ -216,8 +216,156 @@ impl Game<'_> {
     }
 }
 
+/// A menu a player has open, as the mods last heard it
+/// (`native_player_container_open`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct HeardMenu {
+    /// The window id the player's client knows it by.
+    window: i32,
+    /// The menu type's name; a mount's inventory has none in vanilla.
+    menu: String,
+    /// The block the menu is of.
+    pos: Option<[i32; 3]>,
+}
+
+/// What a mount's inventory is called, as vanilla's `HorseInventoryMenu` has
+/// no menu type.
+const MOUNT_MENU: &str = "horizon:mount_inventory";
+
+/// The menu `conn` has open, whichever way the game keeps it: a block's
+/// container, a trade, a crafting table, a workstation, a lectern or a
+/// mount's inventory. Not the player's own inventory menu.
+fn open_menu_of(host: &LanHost, conn: u32) -> Option<(i32, &str, Option<[i32; 3]>)> {
+    let g = host.hub.guest(conn)?;
+    let play = host.play.get(&conn);
+    if let Some(m) = &g.menu {
+        let menu = host.hub.registry_name("minecraft:menu", m.kind)?;
+        // A vehicle's menu is keyed by a stand-in, not a block.
+        let pos = m
+            .pos
+            .filter(|p| p.1 != horizon_client::lan::menu::VEHICLE_KEY_Y)
+            .map(|p| [p.0, p.1, p.2]);
+        return Some((m.window, menu, pos));
+    }
+    let play = play?;
+    let (window, menu, pos) = if let Some(gm) = &play.merchant {
+        (gm.window, "minecraft:merchant", None)
+    } else if let Some((window, _, _, pos)) = &play.crafting.table {
+        (*window, "minecraft:crafting", Some(*pos))
+    } else if let Some(st) = &play.station {
+        (
+            st.window,
+            super::lan_stations::menu_of(st.kind)?.0,
+            Some(st.pos),
+        )
+    } else if let Some(l) = &play.lectern {
+        (
+            l.window,
+            "minecraft:lectern",
+            Some([l.key.0, l.key.1, l.key.2]),
+        )
+    } else if let Some(m) = &play.mount_window {
+        (m.window, MOUNT_MENU, None)
+    } else {
+        return None;
+    };
+    Some((window, menu, pos))
+}
+
 /// Where the game calls the menu hook points.
 impl Game<'_> {
+    /// The mods hear the menus the players here opened or closed since the
+    /// last tick (`PlayerContainerEvent`), in that order for a menu another
+    /// replaced: what each player has open is compared with what the mods last
+    /// heard. A menu opened and closed again inside one tick is not heard.
+    pub(super) fn tick_player_menus(&mut self, host: &mut LanHost) {
+        let conns: Vec<u32> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| host.hub.here(g))
+            .map(|g| g.conn)
+            .collect();
+        for conn in conns {
+            // `AbstractContainerScreen.tick` closes the container once the player is no longer
+            // alive, so a death closes the menu now (the lid falls, the mods hear Close), not at
+            // the respawn.
+            let dead = host.hub.guest(conn).is_some_and(|g| g.dead);
+            if dead && host.hub.guest(conn).is_some_and(|g| g.menu.is_some()) {
+                self.guest_container_closed(host, conn);
+                host.hub.close_container(conn);
+            }
+            // Compared as borrowed: nothing is built each tick while it stays open.
+            let now = if dead { None } else { open_menu_of(host, conn) };
+            let heard = host.play.get(&conn).and_then(|p| p.menu_heard.as_ref());
+            if now == heard.map(|h| (h.window, h.menu.as_str(), h.pos)) {
+                continue;
+            }
+            let now = now.map(|(window, menu, pos)| HeardMenu {
+                window,
+                menu: menu.to_owned(),
+                pos,
+            });
+            let heard = host.play.get(&conn).and_then(|p| p.menu_heard.clone());
+            // Remembered first: a hook can run commands that close menus.
+            if let Some(p) = host.play.get_mut(&conn) {
+                p.menu_heard.clone_from(&now);
+            }
+            if let Some(old) = heard {
+                self.player_menu_closed(host, conn, old);
+            }
+            if let Some(new) = now {
+                self.player_menu_opened(host, conn, new);
+            }
+        }
+    }
+
+    /// `conn`'s menu closes with the guest in the level in place
+    /// (`ServerPlayer.doCloseContainer`): the mods hear it, if they heard it
+    /// open.
+    pub(super) fn player_menu_closing(&mut self, host: &mut LanHost, conn: u32) {
+        let heard = host.play.get_mut(&conn).and_then(|p| p.menu_heard.take());
+        if let Some(old) = heard {
+            self.player_menu_closed(host, conn, old);
+        }
+    }
+
+    fn player_menu_opened(&mut self, host: &mut LanHost, conn: u32, menu: HeardMenu) {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return;
+        };
+        let dimension = self.dim.id();
+        self.player_hook(host, conn, move |g| {
+            g.native_player_container_open(uuid, &name, dimension, &menu.menu, menu.pos);
+        });
+    }
+
+    fn player_menu_closed(&mut self, host: &mut LanHost, conn: u32, menu: HeardMenu) {
+        let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone())) else {
+            return;
+        };
+        let dimension = self.dim.id();
+        self.player_hook(host, conn, move |g| {
+            g.native_player_container_close(uuid, &name, dimension, &menu.menu, menu.pos);
+        });
+    }
+
+    /// Runs a player hook with the guest's state in place, or as it is when
+    /// the guest has no body to swap in.
+    fn player_hook(&mut self, host: &mut LanHost, conn: u32, f: impl FnOnce(&mut Self)) {
+        let mut f = Some(f);
+        if self.lan_acting != Some(conn) {
+            self.as_guest(host, conn, |g| {
+                if let Some(f) = f.take() {
+                    f(g);
+                }
+            });
+        }
+        if let Some(f) = f {
+            f(self);
+        }
+    }
+
     /// The clicks on and closings of native menus the hub collected, each
     /// told to the mods with the hub back in `self.lan`, no player's state
     /// swapped in.

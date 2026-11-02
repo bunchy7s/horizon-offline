@@ -1,3 +1,4 @@
+extern crate horizon_client_lib as horizon_client;
 use horizon_protocol::{
     buf::{Codec, Reader, Writer},
     item::Slot,

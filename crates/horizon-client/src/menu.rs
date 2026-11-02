@@ -122,6 +122,8 @@ pub enum Kind {
     /// `CreativeModeInventoryScreen.ItemPickerMenu`: an item tab's 45
     /// display slots, then the hotbar.
     ItemPicker,
+    /// A content mod's menu type: its slots, then the inventory.
+    Mod(&'static crate::containers::ModMenuType),
 }
 
 impl Kind {
@@ -218,6 +220,12 @@ enum Role {
     /// An `ArmorSlot` of a mount for this `EquipmentSlot` ("saddle" or
     /// "body"): `isEquippableInSlot` for `Menu::mount`, one item.
     MountEquip(&'static str),
+    /// A mod menu type's slot.
+    Mod,
+    /// A mod menu type's result (`results`): players only take from it.
+    ModResult,
+    /// A slot the mod's screen leaves out: no click reaches it.
+    Hidden,
 }
 
 #[derive(Clone, Copy)]
@@ -289,6 +297,9 @@ pub struct Menu {
     /// Recipes whose result was taken (`awardUsedRecipes`) and the stacks that
     /// went into each, for the caller.
     pub crafted: Vec<(String, Vec<Option<ItemStack>>)>,
+    /// A crafting grid's result taken (`ResultSlot.onTake`): the recipe and
+    /// the stack taken, for the caller (`native_item_crafted`).
+    pub item_crafted: Vec<(String, ItemStack)>,
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
@@ -313,6 +324,14 @@ pub struct Menu {
     /// a level) runs the rest of its `onTake` (the anvil's wear and level
     /// event 1030 or 1029, the smithing table's 1044).
     pub combined: bool,
+    /// The caller fires `AnvilCraftEvent.Pre` for a taken anvil result: its
+    /// `onTake` waits in `anvil_craft` for the caller to run `anvil_take`, or
+    /// to refuse the take with `anvil_cancel` (from an `anvil_undo` made
+    /// before the click).
+    pub anvil_hook: bool,
+    /// The anvil result taken while `anvil_hook` is set, as it was before
+    /// crafting.
+    pub anvil_craft: Option<AnvilCraft>,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
     /// `access.execute`).
@@ -336,6 +355,26 @@ pub struct Anvil {
     pub repair_count: u32,
     /// `onlyRenaming`.
     pub only_renaming: bool,
+}
+
+/// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
+/// taken, before the crafting changed anything.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilCraft {
+    pub left: Option<ItemStack>,
+    pub right: Option<ItemStack>,
+    pub output: ItemStack,
+}
+
+/// An anvil menu before a click, for `Menu::anvil_cancel`: the anvil's three
+/// slots and cost, the player's slots and the cursor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilUndo {
+    inputs: Vec<Option<ItemStack>>,
+    result: Option<ItemStack>,
+    cost: i32,
+    player: Vec<Option<ItemStack>>,
+    carried: Option<ItemStack>,
 }
 
 /// `StonecutterMenu`'s state besides its slots and `selectedRecipeIndex`.
@@ -374,6 +413,28 @@ fn tidy(slot: &mut Option<ItemStack>) {
     if slot.as_ref().is_some_and(|s| s.count == 0) {
         *slot = None;
     }
+}
+
+/// Hook point for native mods (docs/native-mods.md, listed in `native-hooks.json`
+/// with the game's): container slot `slot` of the content mod menu type `menu`
+/// (`data/<id>/horizon/menu/`) is asked whether it takes `stack`
+/// (`Slot.mayPlace`) and how many of it it holds (`Slot.getMaxStackSize`).
+/// `may_place` and `max_stack` hold the type's own answer (false on one of its
+/// `results`, true elsewhere, and 99): change them for your own menu types.
+/// `max_stack` is kept to 1 to 99,
+/// and the item's own stack size still caps it. Asked on the server, for each
+/// click, drag and shift-click that puts an item in a slot, several times for
+/// one shift-click: answer from `stack` alone, and fast. API
+/// 130.
+#[inline(always)]
+pub fn native_menu_slot_rules(
+    menu: &str,
+    slot: usize,
+    stack: &ItemStack,
+    may_place: &mut bool,
+    max_stack: &mut u32,
+) {
+    crate::native_client_hooks::menu_slot_rules(menu, slot, stack, may_place, max_stack);
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -459,6 +520,18 @@ impl Menu {
             Kind::Shulker => {
                 containers[MAIN] = vec![None; 27];
                 slots.extend(main(27, Role::Shulker));
+                player(&mut slots);
+            }
+            Kind::Mod(t) => {
+                containers[MAIN] = vec![None; t.slots];
+                slots.extend((0..t.slots).map(|index| Slot {
+                    container: MAIN,
+                    index,
+                    role: match t.results.contains(&index) {
+                        true => Role::ModResult,
+                        false => Role::Mod,
+                    },
+                }));
                 player(&mut slots);
             }
             Kind::Crafter | Kind::CrafterBlock => {
@@ -687,6 +760,7 @@ impl Menu {
             sounds: Vec::new(),
             player_sounds: Vec::new(),
             crafted: Vec::new(),
+            item_crafted: Vec::new(),
             brewed: Vec::new(),
             equipped: Vec::new(),
             merchant: None,
@@ -696,6 +770,8 @@ impl Menu {
             level_change: 0,
             anvil: Anvil::default(),
             combined: false,
+            anvil_hook: false,
+            anvil_craft: None,
             enchant_changed: false,
             enchant_button: None,
             may_build: true,
@@ -778,6 +854,13 @@ impl Menu {
             return;
         }
         self.data[id] = value;
+    }
+
+    /// Container slot `slot` of a mod menu type is left out by its screen.
+    pub fn hide_slot(&mut self, slot: usize) {
+        if matches!(self.kind, Kind::Mod(_)) && slot < self.slots.len() - 36 {
+            self.slots[slot].role = Role::Hidden;
+        }
     }
 
     /// `CrafterBlockEntity.setSlotState` (the slot state packet): only an
@@ -1255,6 +1338,8 @@ impl Menu {
                         .is_some_and(|m| i.equip_allowed.as_ref().is_none_or(|a| a.contains(m)))
             }),
             Role::Shulker => fits_inside_container_items(stack),
+            Role::Mod | Role::ModResult => self.mod_slot(s, stack).0,
+            Role::Hidden => false,
             Role::Fuel => Self::is_fuel(env, stack) || Self::is_bucket(stack),
             Role::Output | Role::CraftResult | Role::Inert => false,
             Role::CrafterIn => self.data.get(self.slots[s].index) != Some(&1),
@@ -1309,7 +1394,7 @@ impl Menu {
 
     fn may_pickup(&self, env: &Env, s: usize) -> bool {
         match self.slots[s].role {
-            Role::Inert => false,
+            Role::Inert | Role::Hidden => false,
             // AnvilMenu.mayPickup: the levels to pay, and a price.
             Role::CombineResult if self.kind == Kind::Anvil => {
                 (self.creative || self.levels >= self.data[0]) && self.data[0] > 0
@@ -1390,6 +1475,20 @@ impl Menu {
         partial
     }
 
+    /// A mod menu type's slot `s`: whether it takes `stack` (`Slot.mayPlace`:
+    /// anything but on a result) and how many it holds (`Slot.getMaxStackSize`),
+    /// then as the mods' hook says.
+    fn mod_slot(&self, s: usize, stack: &ItemStack) -> (bool, u32) {
+        let Kind::Mod(t) = self.kind else {
+            return (false, 0);
+        };
+        let mut may_place = self.slots[s].role == Role::Mod;
+        let mut max_stack = CONTAINER_MAX;
+        let index = self.slots[s].index;
+        native_menu_slot_rules(t.id, index, stack, &mut may_place, &mut max_stack);
+        (may_place, max_stack.clamp(1, CONTAINER_MAX))
+    }
+
     /// `Slot.getMaxStackSize(stack)`.
     fn slot_max(&self, env: &Env, s: usize, stack: &ItemStack) -> u32 {
         let own = match self.slots[s].role {
@@ -1401,7 +1500,10 @@ impl Menu {
             // The lectern's bookAccess holds one.
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
             Role::Fuel if Self::is_bucket(stack) => return 1,
-            _ => CONTAINER_MAX,
+            Role::Mod | Role::ModResult => self.mod_slot(s, stack).1,
+            // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
+            // item reaches; a native mod's item may, and its own size is the cap.
+            _ => u32::MAX,
         };
         own.min(Self::max_stack(env, stack))
     }
@@ -1419,7 +1521,7 @@ impl Menu {
         if (slot.container == MAIN || slot.role == Role::LoomResult)
             && let Some(st) = stack.as_mut()
         {
-            st.count = st.count.min(CONTAINER_MAX.min(Self::max_stack(env, st)));
+            st.count = st.count.min(Self::max_stack(env, st));
             // The beacon's container holds one item (getMaxStackSize 1).
             if self.kind == Kind::Beacon {
                 st.count = st.count.min(1);
@@ -1522,8 +1624,33 @@ impl Menu {
         out
     }
 
+    /// The anvil menu as it is before a click that may take its result.
+    pub fn anvil_undo(&self) -> AnvilUndo {
+        AnvilUndo {
+            inputs: self.containers[MAIN].clone(),
+            result: self.containers[RESULT][0].clone(),
+            cost: self.data[0],
+            player: self.containers[PLAYER].clone(),
+            carried: self.carried.clone(),
+        }
+    }
+
+    /// Refuses a take that `anvil_hook` deferred (a cancelled
+    /// `AnvilCraftEvent.Pre`): the result goes back in its slot and the
+    /// inputs, cost, inventory and cursor are as `undo` held them, so nothing
+    /// the click did (cursor, shift-click, swap, drop) is left.
+    pub fn anvil_cancel(&mut self, undo: AnvilUndo) {
+        self.containers[MAIN] = undo.inputs;
+        self.containers[RESULT][0] = undo.result;
+        self.data[0] = undo.cost;
+        self.containers[PLAYER] = undo.player;
+        self.carried = undo.carried;
+        self.anvil_craft = None;
+        self.dropped.clear();
+    }
+
     /// `AnvilMenu.onTake`: the levels, the material used up, then the input.
-    fn anvil_take(&mut self, env: &Env) {
+    pub fn anvil_take(&mut self, env: &Env) {
         let cost = self.data[0];
         if !self.creative {
             // Player.giveExperienceLevels(-cost).
@@ -1608,6 +1735,14 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult && self.kind == Kind::Anvil {
+            if self.anvil_hook {
+                self.anvil_craft = Some(AnvilCraft {
+                    left: self.containers[MAIN][0].clone(),
+                    right: self.containers[MAIN][1].clone(),
+                    output: taken.clone(),
+                });
+                return;
+            }
             self.anvil_take(env);
             return;
         }
@@ -1666,6 +1801,8 @@ impl Menu {
         let grid = self.containers[GRID].clone();
         if let Some((id, _)) = env.recipes.find(&grid, n) {
             self.crafted.push((format!("minecraft:{id}"), grid.clone()));
+            self.item_crafted
+                .push((format!("minecraft:{id}"), taken.clone()));
         }
         let remaining = env
             .recipes
@@ -1801,7 +1938,7 @@ impl Menu {
                 inv[i].as_ref().is_some_and(|have| {
                     have.same_item_same_components(stack)
                         && Self::stackable(env, have)
-                        && have.count < CONTAINER_MAX.min(Self::max_stack(env, have))
+                        && have.count < Self::max_stack(env, have)
                 })
             })
     }
@@ -1819,7 +1956,7 @@ impl Menu {
             empty.count = 0;
             empty
         });
-        let room = CONTAINER_MAX.min(Self::max_stack(env, cell)) - cell.count;
+        let room = Self::max_stack(env, cell).saturating_sub(cell.count);
         let add = stack.count.min(room);
         cell.count += add;
         tidy(&mut self.containers[PLAYER][slot]);
@@ -1909,8 +2046,16 @@ impl Menu {
                 if stack.count == 0 {
                     break;
                 }
+                // A mod menu's result (unless a mod's hook opens it) and a
+                // hidden slot get no top-up either, as a furnace's quick move
+                // never aims at its result.
+                let refuses = match self.slots[dest].role {
+                    Role::Hidden => true,
+                    Role::ModResult => !self.mod_slot(dest, stack).0,
+                    _ => false,
+                };
                 let max = match self.slot(dest) {
-                    Some(target) if target.same_item_same_components(stack) => {
+                    Some(target) if !refuses && target.same_item_same_components(stack) => {
                         self.slot_max(env, dest, target)
                     }
                     _ => continue,
@@ -1981,6 +2126,18 @@ impl Menu {
                         return None;
                     }
                 } else if !self.move_to(env, &mut stack, 0, 5, false) {
+                    return None;
+                }
+            }
+            // ChestMenu.quickMoveStack over the mod's slots.
+            Kind::Mod(t) => {
+                check_count = false;
+                let n = t.slots;
+                if index < n {
+                    if !self.move_to(env, &mut stack, n, total, true) {
+                        return None;
+                    }
+                } else if !self.move_to(env, &mut stack, 0, n, false) {
                     return None;
                 }
             }
@@ -2451,6 +2608,12 @@ impl Menu {
         }
     }
 
+    /// Whether a drag (quick craft) is in progress (`quickcraftStatus != 0`):
+    /// the next click other than a quick craft only ends it.
+    pub fn quick_crafting(&self) -> bool {
+        self.quick_status != 0
+    }
+
     fn reset_quick_craft(&mut self) {
         self.quick_status = 0;
         self.quick_slots.clear();
@@ -2545,6 +2708,10 @@ impl Menu {
         }
         if self.quick_status != 0 {
             self.reset_quick_craft();
+            return Ok(());
+        }
+        // A slot the mod's screen leaves out takes no click.
+        if in_range(slot_index) && self.slots[slot_index as usize].role == Role::Hidden {
             return Ok(());
         }
         if matches!(input, Input::Pickup | Input::QuickMove) && (button == 0 || button == 1) {
@@ -3202,6 +3369,25 @@ pub(crate) mod tests {
         });
     }
 
+    /// A crafting grid's result taken is recorded for `native_item_crafted`:
+    /// the recipe the grid matched and the stack the player took.
+    #[test]
+    fn taking_a_crafting_result_records_the_crafted_stack() {
+        with_menu(Kind::Crafting, |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 1, stack("oak_log", 1));
+            menu.settle(env);
+            menu.click(env, 0, 0, Input::Pickup).unwrap();
+            assert_eq!(
+                menu.item_crafted,
+                vec![(
+                    "minecraft:oak_planks".to_owned(),
+                    stack("oak_planks", 4).unwrap()
+                )]
+            );
+        });
+    }
+
     #[test]
     fn quick_move_landing_routes_plain_containers() {
         for (kind, size) in [
@@ -3345,6 +3531,189 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn installed_slot_rules_change_mod_menu_placement() {
+        let installed =
+            crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+                menu_slot_rules: |menu, slot, _, may_place, max_stack| {
+                    if menu == "test:rules" && slot == 0 {
+                        *may_place = false;
+                        *max_stack = 7;
+                    }
+                },
+                living_heal: |_, _, _| {},
+                living_breathe: |_, _, _, _, _| {},
+                living_drown: |_, _, _, _, _, _| {},
+                living_fall: |_, _, _, _, _| {},
+                living_jump: |_, _| {},
+                ingredient: |_, _, _| {},
+            });
+        assert!(installed.is_ok());
+        let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
+            id: "test:rules",
+            slots: 1,
+            data_slots: 0,
+            results: vec![],
+        })));
+        let menu = Menu::new(kind);
+        let stack = ItemStack::new("minecraft:stone", 1);
+        assert_eq!(menu.mod_slot(0, &stack), (false, 7));
+    }
+
+    /// A cancelled `AnvilCraftEvent.Pre` refuses the take: the result sits in
+    /// its slot, both inputs and the cost are as they were, and neither the
+    /// cursor nor the inventory holds the item (no dupe).
+    #[test]
+    fn a_cancelled_anvil_craft_leaves_the_menu_as_it_was() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-anvil-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Banners::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        // Both a pick-up onto the cursor and a shift-click into the inventory.
+        for input in [Input::Pickup, Input::QuickMove] {
+            let mut menu = Menu::new(Kind::Anvil);
+            menu.creative = false;
+            menu.levels = 10;
+            menu.anvil_hook = true;
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            menu.set_slot(env, 1, stack("iron_ingot", 2));
+            menu.set_slot(env, 2, stack("iron_sword", 1));
+            menu.data[0] = 3;
+            let before = (
+                menu.slot(0).cloned(),
+                menu.slot(1).cloned(),
+                menu.slot(2).cloned(),
+            );
+            let undo = menu.anvil_undo();
+            menu.click(env, 2, 0, input).unwrap();
+            // The take waits for the mods, and the click moved the result.
+            let craft = menu.anvil_craft.take().expect("the take is deferred");
+            assert_eq!(craft.output, before.2.clone().unwrap());
+            assert_eq!(menu.slot(2), None);
+            assert_eq!(menu.data[0], 3);
+            menu.anvil_craft = Some(craft);
+            menu.anvil_cancel(undo);
+            assert_eq!(
+                (
+                    menu.slot(0).cloned(),
+                    menu.slot(1).cloned(),
+                    menu.slot(2).cloned()
+                ),
+                before
+            );
+            assert_eq!(menu.data[0], 3);
+            assert_eq!(menu.level_change, 0);
+            assert_eq!(menu.carried, None);
+            assert!((0..36).all(|i| menu.player_item(i).is_none()));
+            assert!(menu.anvil_craft.is_none() && menu.dropped.is_empty());
+        }
+    }
+
+    /// A mod menu type: three slots, then a result (slot 3).
+    fn mod_menu() -> Kind {
+        Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
+            id: "test:press",
+            slots: 4,
+            data_slots: 0,
+            results: vec![3],
+        })))
+    }
+
+    /// A mod menu type's result takes nothing in by a click, a drag, a swap
+    /// or a shift-click (`Slot.mayPlace`), not even a top-up of its own item,
+    /// and gives what it holds. A slot its screen leaves out takes no click.
+    #[test]
+    fn a_mod_menu_result_is_take_only() {
+        // No game data: an item table of no items, each stacking to 64.
+        let root = std::env::temp_dir().join(format!("horizon-mod-menu-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Banners::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        let menu = &mut Menu::new(mod_menu());
+        {
+            menu.creative = false;
+            let n = |s: Option<&ItemStack>| s.map(|s| s.count);
+            // 0..4 the mod's, 4..31 inventory, 31..40 hotbar.
+            menu.carried = stack("stick", 4);
+            menu.click(env, 3, 0, Input::Pickup).unwrap();
+            menu.click(env, 0, 0, Input::Pickup).unwrap();
+            assert_eq!((n(menu.slot(3)), n(menu.slot(0))), (None, Some(4)));
+            // The carried ingots take the result's one instead of going in.
+            menu.put(env, 3, stack("iron_ingot", 1));
+            menu.carried = stack("iron_ingot", 2);
+            menu.click(env, 3, 0, Input::Pickup).unwrap();
+            assert_eq!((n(menu.slot(3)), n(menu.carried.as_ref())), (None, Some(3)));
+            // A drag over 1 to 3 passes the result by.
+            menu.carried = stack("dirt", 4);
+            for (slot, button) in [(-999, 0), (1, 1), (2, 1), (3, 1), (-999, 2)] {
+                menu.click(env, slot, button, Input::QuickCraft).unwrap();
+            }
+            let held = |m: &Menu| [0, 1, 2, 3].map(|s| n(m.slot(s)));
+            assert_eq!(held(menu), [Some(4), Some(2), Some(2), None]);
+            // A shift-click from the hotbar tops up no result, and a hotbar
+            // key puts nothing in it but takes from it into an empty slot.
+            menu.put(env, 3, stack("iron_ingot", 1));
+            menu.set_player_item(0, stack("iron_ingot", 3));
+            menu.click(env, 31, 0, Input::QuickMove).unwrap();
+            menu.click(env, 3, 0, Input::Swap).unwrap();
+            assert_eq!(
+                (n(menu.slot(3)), n(menu.player_item(0))),
+                (Some(1), Some(3))
+            );
+            menu.click(env, 3, 1, Input::Swap).unwrap();
+            assert_eq!((n(menu.slot(3)), n(menu.player_item(1))), (None, Some(1)));
+            // F takes it into an empty off hand, and a double click collects from it.
+            menu.put(env, 3, stack("iron_ingot", 2));
+            menu.click(env, 3, 40, Input::Swap).unwrap();
+            assert_eq!((n(menu.slot(3)), n(menu.player_item(40))), (None, Some(2)));
+            menu.put(env, 3, stack("iron_ingot", 2));
+            menu.set_player_item(0, None);
+            menu.set_player_item(1, None);
+            menu.carried = stack("iron_ingot", 1);
+            menu.click(env, 4, 0, Input::PickupAll).unwrap();
+            assert_eq!((n(menu.slot(3)), n(menu.carried.as_ref())), (None, Some(3)));
+            // A hidden slot takes neither a click nor a shift-click.
+            menu.set_player_item(0, stack("iron_ingot", 3));
+            menu.put(env, 0, None);
+            menu.hide_slot(0);
+            menu.carried = stack("stone", 1);
+            menu.click(env, 0, 0, Input::Pickup).unwrap();
+            menu.click(env, 31, 0, Input::QuickMove).unwrap();
+            assert_eq!((n(menu.slot(0)), n(menu.player_item(0))), (None, Some(3)));
+        }
+    }
+
+    #[test]
     fn a_quick_craft_drag_previews_each_slot_and_the_rest_in_hand() {
         with_menu(Kind::Inventory, |env, menu| {
             // 9 + 36 player slots: 9 is the first main inventory slot.
@@ -3434,6 +3803,27 @@ pub(crate) mod tests {
             assert_eq!(menu.slot(1).map(|s| s.count), Some(32));
             assert_eq!(menu.carried, None);
             assert_eq!(menu.quick_status, 0);
+        });
+    }
+
+    /// #6907: a drag in progress is seen from outside the menu, and a
+    /// quick move during it only ends the drag (`doClick`'s resetQuickCraft).
+    #[test]
+    fn a_quick_move_during_a_drag_only_ends_it() {
+        with_menu(Kind::Chest(3), |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 27, stack("dirt", 10));
+            menu.carried = stack("cobblestone", 64);
+            assert!(!menu.quick_crafting());
+            // Start a left drag, then drag across chest slot 0.
+            menu.click(env, -999, 0, Input::QuickCraft).unwrap();
+            menu.click(env, 0, 1, Input::QuickCraft).unwrap();
+            assert!(menu.quick_crafting());
+            // A shift-click now moves nothing and ends the drag.
+            menu.click(env, 27, 0, Input::QuickMove).unwrap();
+            assert!(!menu.quick_crafting());
+            assert_eq!(menu.slot(27).map(|s| s.count), Some(10));
+            assert_eq!(menu.slot(0), None);
         });
     }
 

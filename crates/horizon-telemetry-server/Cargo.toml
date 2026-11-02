@@ -19,6 +19,8 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ruzstd = "0.9"
+# The export answers gzip (pure Rust; ureq already pulls it in).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 # Opens the hub's bug reports as GitHub issues (blocking, run off the async workers; rustls).
 ureq = { version = "2.12", features = ["json"] }
 

@@ -12,13 +12,14 @@ not run; then reads the settings and changes the difficulty live, and backs up, 
 and runs the same moderation from the `horizon-server` CLI.
 The API listens on the address and with the token server.toml's [api] fixes, as a moderation bot's would.
 An event stream (server-sent events) opened before the bots join must see them join, Kim0's chat (sent as a raw
-chat packet) and the chat filter's refusal of the next one (`chat_filtered`, no `chat`), Lou0's death, the kick and the leaves, typed, with the same events polled as JSON. Last,
+chat packet) and the chat filter's refusal of the next one (`chat_filtered`, no `chat`), then the console mutes,
+lists and unmutes them by hand (`mute`, `tempmute`, `mutelist`, `unmute`), Lou0's death, the kick and the leaves, typed, with the same events polled as JSON. Last,
 `horizon-server mcp` bans and pardons, reads events and refuses an unconfirmed stop, and `horizon-server
 console` attaches through a pipe, runs two commands and shows what they log.
 
 Everything runs in a fresh temporary folder with fresh HORIZON_HOME and XDG folders and no audio. Logs go
 to --out. Build first:
-    cargo build --profile fast -p horizon-client --bins -p horizon-bots -p horizon-server
+    cargo build --profile fast -p horizon-client -p horizon-client-lib --bins -p horizon-bots -p horizon-server
 """
 import argparse
 import http.client
@@ -160,6 +161,23 @@ def scenario(bins, folder, server, port):
         check(log.exists() and 'Kim0' in log.read_text() and FILTERED in log.read_text(),
               'logs/chat-filter.log keeps the refused text')
         server.wait_for(r"\[chat-filter\] Refused Kim0's chat \(hit 1: refused\)", 30)
+
+        # An operator's mutes, from the console, kept with the filter's in chat-filter-mutes.json.
+        def command(line, expect):
+            out = api('POST', '/api/v1/command', {'line': line})['output']
+            check(any(expect in o for o in out), f'{line}: "{expect}" ({out})')
+        command('mute Lou0 spamming', 'Muted Lou0 until unmuted: spamming')
+        command('tempmute Kim0 2h', 'Muted Kim0 for 2 hours')
+        command('tempmute Kim0 soon', "soon isn't a duration: 10m, 2h, 1d")
+        command('mutelist', 'There are 2 mute(s):')
+        command('mutelist', 'Lou0 was muted by Server until unmuted: spamming')
+        command('mutelist', 'Kim0 was muted by Server for 2 more hours')
+        mutes = json.loads((folder / 'chat-filter-mutes.json').read_text())['mutes']
+        check([(m['name'], m['by'], m['until'] is None) for m in mutes] == [('Kim0', 'Server', False), ('Lou0', 'Server', True)],
+              f'chat-filter-mutes.json has both mutes ({mutes})')
+        command('unmute Lou0', 'Unmuted Lou0')
+        command('unmute Kim0', 'Unmuted Kim0')
+        command('mutelist', 'There are no mutes')
         players = api('GET', '/api/v1/players')
         check(players['max_players'] == 20 and players['ops'] == [] and players['bans'] == [],
               f'players: 20 slots, no operators, no bans ({players})')

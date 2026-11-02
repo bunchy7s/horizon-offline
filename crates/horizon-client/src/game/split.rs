@@ -16,10 +16,10 @@
 //! data (`Resources`, the packs), one audio output and P1's server. Not one game process per
 //! player: that needs GPU textures, input and audio shared across processes.
 //!
-//! Controllers: P1's is the first used in a menu (or alone). In P1's world another controller
-//! pressing a button is offered to join, on every view (A joins, B says no); a controller that
-//! disconnects leaves its player waiting, its view dimmed, until it comes back or another takes
-//! over (`pads`).
+//! Controllers: P1's is the first used in a menu. In P1's world a controller it isn't using
+//! pressing a button is offered to join, on every view (A joins, Y gives it to P1, B says no); a
+//! controller that disconnects leaves its player waiting, its view dimmed, until it comes back
+//! or another takes over (`pads`).
 //!
 //! Horizon Settings > Splitscreen... enables joining (off by default).
 //! `HORIZON_SPLIT=N` (testing) enables it too, and
@@ -32,7 +32,7 @@ use super::{
     start_game,
 };
 use horizon_client::gamepad::Button;
-use horizon_client::split_layout::{self as layout, MAX_PLAYERS, Placement, View};
+use horizon_client::split_layout::{self as layout, MAX_PLAYERS, Placement, Spot, View};
 use horizon_client::{Result, gfx::compositor::Compositor, widgets};
 use std::{
     cell::RefCell,
@@ -49,9 +49,11 @@ use winit::{
     window::WindowId,
 };
 
+mod frames;
 mod hud;
 mod pads;
 mod players;
+mod setup;
 mod windows;
 
 pub(super) use hud::Hud;
@@ -81,14 +83,6 @@ impl Game<'_> {
 
 const WINDOW_1: &str = "Window 1";
 const NEW_WINDOW: &str = "New window";
-
-/// A place offered while picking a profile.
-#[derive(Clone, PartialEq)]
-enum Spot {
-    Window(u8),
-    New,
-    Fill(String),
-}
 
 struct Guest<'a> {
     game: Box<Game<'a>>,
@@ -125,15 +119,18 @@ pub(super) struct Split<'a> {
     p1_window: u8,
     /// Seats in the order their views fill a shared window.
     order: Vec<usize>,
+    /// Seats represented by the open Setup draft, to detect join/leave changes.
+    setup_seats: Vec<usize>,
     /// Whether Window 1 is shown (hidden while nobody plays in it): set once per change, since
     /// Wayland can't say whether a window is visible.
     window1_shown: bool,
     /// Where each numbered window was when it closed, to open there again (this session).
     window_rects: std::collections::HashMap<u8, (LogicalPosition<f64>, LogicalSize<f64>)>,
-    /// The monitors with their names, left to right, and the one Window 1 is on: read once a
-    /// frame (`refresh_monitors`).
+    /// The monitors with their names, left to right, and the one Window 1 is on: read while
+    /// splitscreen is on, once a second (`refresh_monitors`), and when it last read them.
     screens: Vec<(String, MonitorHandle)>,
     main_screen: Option<String>,
+    screens_read: Option<Instant>,
     /// `HORIZON_SPLIT_WINDOWS`: each seat's window, `1`, `2`... or `m<monitor>`.
     window_plan: Vec<String>,
     /// The views the players were last fitted to.
@@ -148,9 +145,17 @@ pub(super) struct Split<'a> {
     /// Whose game runs now (0 = P1), and P1's buttons while another's does.
     turn: usize,
     host_widgets: widgets::Saved,
+    /// `HORIZON_SPLIT_STATS`: when the frame times were last printed.
+    stats: Option<Instant>,
+    /// For the readout: where a frame's wall time goes (the turns with their renders, presents,
+    /// the GPU wait, outside `about_to_wait`), summed since the last print, and when this frame
+    /// started.
+    spent: [Duration; 4],
+    spent_frames: u32,
+    frame_started: Option<Instant>,
     /// The controllers while several play (`pads`), and P1's.
     pads: PadRouter,
-    p1_pad: Option<PadId>,
+    p1_pad: pads::P1Pad<PadId>,
     /// Pads whose buttons still count as the press that gave them: released first.
     fresh: Vec<PadId>,
     /// Controllers offered to join, each since when: several may join at once.
@@ -178,10 +183,12 @@ impl<'a> Split<'a> {
             }],
             p1_window: 1,
             order: Vec::new(),
+            setup_seats: Vec::new(),
             window1_shown: true,
             window_rects: Default::default(),
             screens: Vec::new(),
             main_screen: None,
+            screens_read: None,
             window_plan: std::env::var("HORIZON_SPLIT_WINDOWS")
                 .map(|w| w.split(',').map(|s| s.trim().to_owned()).collect())
                 .unwrap_or_default(),
@@ -193,8 +200,12 @@ impl<'a> Split<'a> {
             res: None,
             turn: 0,
             host_widgets: Default::default(),
+            stats: std::env::var_os("HORIZON_SPLIT_STATS").map(|_| Instant::now()),
+            spent: Default::default(),
+            spent_frames: 0,
+            frame_started: None,
             pads: Default::default(),
-            p1_pad: None,
+            p1_pad: Default::default(),
             fresh: Vec::new(),
             offers: Vec::new(),
             lost: Vec::new(),
@@ -408,6 +419,7 @@ impl<'a> Split<'a> {
             }
         };
         self.host.renderer = Some(renderer);
+        self.host.split_window = !self.host.options.offscreen;
         self.host.options.offscreen = true;
         self.host.options.paced_by_split = true;
         // The new renderer takes the old one's present mode, settings and all: P1's again.
@@ -435,6 +447,7 @@ impl<'a> Split<'a> {
         }
         self.applied.clear();
         self.order.clear();
+        self.setup_seats.clear();
         if !watching {
             self.stop_routing();
         }
@@ -477,6 +490,7 @@ impl<'a> Split<'a> {
         drop(old);
         self.host.renderer = Some(renderer);
         self.host.options.offscreen = false;
+        self.host.split_window = false;
         self.host.options.paced_by_split = false;
         // Alone again: the pointer is P1's, its view the whole window.
         self.focus = 0;
@@ -504,7 +518,10 @@ impl<'a> Split<'a> {
         for pad in pad_joins {
             match self.join(Some(pad), None) {
                 Ok(()) => changed = true,
-                Err(e) => log::warn!("Horizon: splitscreen: a player could not join: {e}"),
+                Err(e) => {
+                    self.restore_given_up_pad(pad);
+                    log::warn!("Horizon: splitscreen: a player could not join: {e}");
+                }
             }
         }
         if self.in_world() && self.test_players > 0 {
@@ -529,7 +546,8 @@ impl<'a> Split<'a> {
 
     /// Each window shows its players' frames, then the GPU wait, once, for all of them. Only
     /// the game's window waits for the display (vsync): windows each waiting would divide the rate.
-    fn present(&mut self) {
+    /// When the windows had presented (before the GPU wait), for the frame-time readout.
+    fn present(&mut self) -> Instant {
         let views = self.views();
         let renderers: Vec<_> = std::iter::once(&self.host.renderer)
             .chain(self.guests.iter().map(|g| &g.game.renderer))
@@ -546,6 +564,7 @@ impl<'a> Split<'a> {
             surface.compositor.set_vsync(vsync && k == paced);
             surface.compositor.present(&frames);
         }
+        let presented = Instant::now();
         // One player's CPU work overlapped the GPU drawing another's.
         let renderers = std::iter::once(&mut self.host.renderer)
             .chain(self.guests.iter_mut().map(|g| &mut g.game.renderer));
@@ -553,6 +572,7 @@ impl<'a> Split<'a> {
             renderer.paced_elsewhere = true;
             renderer.wait_in_flight();
         }
+        presented
     }
 }
 
@@ -692,9 +712,18 @@ impl ApplicationHandler for Split<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.refresh_monitors();
         let on = self.host.settings.extras.splitscreen || self.forced;
-        self.host.ui.options.split_joined = self.guests.iter().any(|g| g.name.is_some());
+        // Only splitscreen places windows on monitors. Listing them is a round trip to the
+        // window server (macOS: 0.1-0.3 ms, more on a busy machine), so not every frame.
+        if (on || !self.surfaces.is_empty())
+            && self
+                .screens_read
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+        {
+            self.screens_read = Some(Instant::now());
+            self.refresh_monitors();
+        }
+        self.host.split_hud.menu = self.guests.iter().any(|g| g.name.is_some());
         // Off, or the last other player gone: P1 draws on its window again.
         if !self.surfaces.is_empty()
             && (!on || self.guests.is_empty())
@@ -703,6 +732,7 @@ impl ApplicationHandler for Split<'_> {
             log::warn!("Horizon: splitscreen could not switch back: {e}");
         }
         if self.surfaces.is_empty() {
+            self.sync_setup();
             if !on {
                 self.stop_routing();
                 return self.host.about_to_wait(event_loop);
@@ -711,11 +741,11 @@ impl ApplicationHandler for Split<'_> {
             // output (rumble, triggers) through the split's reader for P1's turn.
             let pad_joins = self.route_pads(true);
             self.turn(0);
-            if let Some(id) = self.p1_pad {
+            if let Some(id) = self.p1_pad.owner {
                 self.pads.lend_output(&mut self.host.pad, id);
             }
             self.host.about_to_wait(event_loop);
-            if self.p1_pad.is_some() {
+            if self.p1_pad.owner.is_some() {
                 self.pads.reclaim_output(&mut self.host.pad);
             }
             if self.admit(event_loop, pad_joins) {
@@ -723,20 +753,30 @@ impl ApplicationHandler for Split<'_> {
             }
             return;
         }
+        let started = Instant::now();
+        if let Some(previous) = self.frame_started.replace(started) {
+            // What the last frame left after its own work: events, the limiter, the OS.
+            self.spent[3] += started.saturating_duration_since(previous);
+        }
         let pad_joins = self.route_pads(false);
         self.turn(0);
         self.host.about_to_wait(event_loop);
         let mut changed = self.drop_out() | self.admit(event_loop, pad_joins);
         self.sync_profiles();
         changed |= self.pick_profiles();
+        changed |= self.sync_setup();
         changed |= self.sync_surfaces(event_loop);
         if changed || self.views() != self.applied {
             self.relayout(event_loop);
         }
-        // Each player's badge: who it is, shown a moment when something changes for it.
+        // Each player's badge: who it is, always with Names on (P1's Setup), else a moment when
+        // something changes for it.
+        let names = self.host.settings.extras.splitscreen_names;
         self.host.split_hud.badge = Some("P1".into());
+        self.host.split_hud.names = names;
         for g in &mut self.guests {
             g.game.split_hud.badge = Some(g.name.clone().unwrap_or_else(|| "New player".into()));
+            g.game.split_hud.names = names;
         }
         let master = self.host.audio.master;
         for i in 0..self.guests.len() {
@@ -770,7 +810,19 @@ impl ApplicationHandler for Split<'_> {
             }
         }
         self.turn(0);
-        self.present();
+        let rendered = Instant::now();
+        let presented = self.present();
+        let waited = Instant::now();
+        for (k, d) in [rendered - started, presented - rendered, waited - presented]
+            .into_iter()
+            .enumerate()
+        {
+            self.spent[k] += d;
+        }
+        // The rest of the frame (the limiter, the OS) counts as outside, from `waited` on.
+        self.spent[3] = self.spent[3].saturating_sub(waited - started);
+        self.spent_frames += 1;
+        self.print_stats();
         // One pace for all: the fastest any player wants, so an idle one (vanilla's AFK limit)
         // can't slow the others. With vsync the display paces anything at or above its refresh
         // rate; the limiter on top would miss refreshes.

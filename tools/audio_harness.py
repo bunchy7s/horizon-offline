@@ -66,7 +66,7 @@ def run_harness(name, oracle, example, inputs_text, extra_sources=(), java_args=
     dependencies = os.pathsep.join(map(str, [jars['client'], *libraries]))
     run(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-sourcepath', lab.ROOT / 'mods/horizon/src/test/java',
          '-cp', dependencies, '-d', classes, oracle_path], 'compile-java')
-    run(['cargo', 'build', '--locked', '-p', 'horizon-client', '--example', 'client_probe'], 'compile-rust')
+    run(['cargo', 'build', '--locked', '-p', 'horizon-client-lib', '--example', 'client_probe'], 'compile-rust')
     metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'], cwd=lab.ROOT))
     binary = Path(metadata['target_directory']) / 'debug/examples' / ('client_probe.exe' if os.name == 'nt' else 'client_probe')
     run([binary, example, *rust_args, inputs, build / 'rust.txt'], 'rust')

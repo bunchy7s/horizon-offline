@@ -670,11 +670,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             }
             Class::Campfire => {
                 let water = self.fluid_at(pos).kind() == crate::fluid::FluidKind::Water;
-                let hay = table
-                    .block_by_name("minecraft:hay_block")
-                    .is_some_and(|hay| b.is_block(self.below_state(pos), hay));
+                let smoke = self.is_smoke_source(self.below_state(pos));
                 let state = table.set_bool(default, p.waterlogged, water);
-                let state = table.set_bool(state, p.signal_fire, hay);
+                let state = table.set_bool(state, p.signal_fire, smoke);
                 let state = table.set_bool(state, p.lit, !water);
                 Some(table.set_dir(state, p.facing, horizontal))
             }

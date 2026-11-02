@@ -36,6 +36,7 @@ pub(super) struct Hook {
     pub(super) previous: Vec3,
     velocity: Vec3,
     state: State,
+    tick_count: i32,
     life: i32,
     on_ground: bool,
     nibble: i32,
@@ -63,6 +64,67 @@ fn bounds(p: Vec3) -> Aabb {
         Vec3::new(p.x - h, p.y, p.z - h),
         Vec3::new(p.x + h, p.y + SIZE, p.z + h),
     )
+}
+fn segment_entry(start: Vec3, end: Vec3, bounds: Aabb) -> Option<f64> {
+    let min = bounds.min_position();
+    let max = bounds.max_position();
+    let start = [start.x, start.y, start.z];
+    let min = [min.x, min.y, min.z];
+    let max = [max.x, max.y, max.z];
+    if (0..3).all(|axis| start[axis] >= min[axis] && start[axis] < max[axis]) {
+        return None;
+    }
+    let delta = [end.x - start[0], end.y - start[1], end.z - start[2]];
+    let mut entry: f64 = 0.0;
+    let mut exit: f64 = 1.0;
+    for axis in 0..3 {
+        if delta[axis] == 0.0 {
+            if start[axis] < min[axis] || start[axis] > max[axis] {
+                return None;
+            }
+            continue;
+        }
+        let a = (min[axis] - start[axis]) / delta[axis];
+        let b = (max[axis] - start[axis]) / delta[axis];
+        entry = entry.max(a.min(b));
+        exit = exit.min(a.max(b));
+        if entry > exit {
+            return None;
+        }
+    }
+    (entry <= 1.0 && exit >= 0.0).then_some(entry)
+}
+/// `ProjectileUtil.computeMargin`: the fishing hook's target-box margin grows
+/// to 0.3 blocks over its first eight ticks.
+fn entity_hit_margin(tick_count: i32) -> f64 {
+    f64::from((tick_count - 2).clamp(0, 6)) / 20.0
+}
+fn first_entity_hit(
+    start: Vec3,
+    end: Vec3,
+    margin: f64,
+    targets: impl IntoIterator<Item = (u32, Aabb)>,
+) -> Option<u32> {
+    let mut hit = None;
+    let mut hit_at = f64::INFINITY;
+    for (id, target_bounds) in targets {
+        if let Some(at) = segment_entry(
+            start,
+            end,
+            target_bounds.inflate(Vec3::new(margin, margin, margin)),
+        ) && at < hit_at
+        {
+            hit = Some(id);
+            hit_at = at;
+        }
+    }
+    hit
+}
+fn pull_item(item: &mut horizon_client::entities::ItemEntity, delta: Vec3) {
+    item.velocity = item.velocity.add_vector(delta);
+    // The change is made outside ItemEntity::tick, so its velocity comparison
+    // cannot request the immediate motion update for tracking clients.
+    item.needs_sync = true;
 }
 impl Hook {
     pub(super) fn bounds(&self) -> Aabb {
@@ -97,6 +159,22 @@ impl Game<'_> {
     pub(super) fn use_fishing_rod(&mut self, stack: &ItemStack) -> bool {
         if &*stack.item != "minecraft:fishing_rod" {
             return false;
+        }
+        // The mods hear a server player's cast or reel-in first.
+        if self.player.is_some()
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let state = match &self.hook {
+                None => 0,
+                Some(h) if matches!(h.state, State::Hooked(_)) => 4,
+                Some(h) if h.nibble > 0 => 2,
+                Some(_) => 3,
+            };
+            let mut cancel = false;
+            self.native_player_fish(uuid, &name, state, &mut cancel);
+            if cancel {
+                return true;
+            }
         }
         let Some(p) = self.player.as_ref() else {
             return false;
@@ -154,6 +232,7 @@ impl Game<'_> {
                 previous: start,
                 velocity: v,
                 state: State::Flying,
+                tick_count: 0,
                 life: 0,
                 on_ground: false,
                 nibble: 0,
@@ -169,6 +248,19 @@ impl Game<'_> {
         }
         self.swing_arm();
         true
+    }
+    /// The boat the hook's owner rides (`Entity.isPassengerOfSameVehicle`).
+    fn own_vehicle(&self) -> Option<u32> {
+        match self.lan_acting {
+            None => self.riding,
+            Some(conn) => self.lan.as_ref().and_then(|h| {
+                h.hub
+                    .guests
+                    .iter()
+                    .find(|g| g.conn == conn)
+                    .and_then(|g| g.vehicle)
+            }),
+        }
     }
     /// `FishingHook.retrieve`: the rod damage it costs.
     fn retrieve_hook(&mut self, rod: &ItemStack) -> u32 {
@@ -192,8 +284,14 @@ impl Game<'_> {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 m.velocity = pulled(m.velocity);
             } else if let Some(item) = self.dropped.iter_mut().find(|i| i.id == id) {
-                item.velocity = pulled(item.velocity);
+                pull_item(item, Vec3::new(d.x * 0.1, d.y * 0.1, d.z * 0.1));
                 hooked_item = true;
+            } else if let Some(t) = self.tnts.iter_mut().find(|t| t.id != 0 && t.id == id) {
+                t.velocity = pulled(t.velocity);
+            } else if let Some(a) = self.armor_stands.iter_mut().find(|a| a.id == id) {
+                a.velocity = pulled(a.velocity);
+            } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
+                b.velocity = pulled(b.velocity);
             } else if self.creatures.hook_targets.iter().any(|t| t.id == id) {
                 // A player: the hub moves them when the tick ends.
                 self.creatures
@@ -245,7 +343,7 @@ impl Game<'_> {
                     .get("minecraft:fishes")
                     .is_some_and(|t| t.contains(stack.item.as_str()))
                 {
-                    self.stats.custom("fish_caught", 1);
+                    self.award_custom_stat("fish_caught", 1);
                 }
                 let mut item = ItemStack {
                     item: Arc::from(stack.item.as_str()),
@@ -419,6 +517,19 @@ impl Game<'_> {
                     }
                 }
             } else {
+                // The mods hear a server player's fish bite, and may call it
+                // off: the wait starts over.
+                if let (Some(uuid), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    let mut cancel = false;
+                    self.native_player_fish(uuid, &name, 1, &mut cancel);
+                    if cancel {
+                        h.time_until_lured = 0;
+                        h.time_until_hooked = 0;
+                        return;
+                    }
+                }
                 let pitch =
                     1.0 + (self.world.random.next_float() - self.world.random.next_float()) * 0.4;
                 self.audio.play(
@@ -518,6 +629,7 @@ impl Game<'_> {
         if !self.holds_rod() || d2 > 1024.0 {
             return;
         }
+        h.tick_count += 1;
         // The players it can catch, as they stand now (the host's own hook;
         // guests' hooks use the ones taken as their turns start).
         if self.lan_acting.is_none()
@@ -552,33 +664,67 @@ impl Game<'_> {
                     self.hook = Some(h);
                     return;
                 }
-                // checkCollision: hook the first living mob or other player it
-                // touches, or (via `canHitEntity`) a dropped item.
-                let bb = bounds(h.position);
-                let (lo, hi) = (bb.min_position(), bb.max_position());
-                let touches = |b: Aabb| {
-                    let (a, z) = (b.min_position(), b.max_position());
-                    a.x < hi.x && lo.x < z.x && a.y < hi.y && lo.y < z.y && a.z < hi.z && lo.z < z.z
-                };
-                let hit = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.alive() && touches(m.bounds()))
-                    .map(|m| m.id)
-                    .or_else(|| {
-                        let owner = self.lan_acting;
-                        self.creatures
-                            .hook_targets
-                            .iter()
-                            .find(|t| t.conn != owner && touches(t.bounds))
-                            .map(|t| t.id)
+                // checkCollision: find the first block and entity on the movement
+                // segment so a fast hook cannot tunnel or catch through a wall.
+                let to = h.position.add_vector(h.velocity);
+                let block_hit = {
+                    let mut scene = SceneCollisions {
+                        world: &self.world,
+                        binding: self.collision,
+                        subject: None,
+                    };
+                    traverse_blocks(h.position, to, 1024, |p: BlockPos| {
+                        let state = self.world.block(p.x, p.y, p.z);
+                        if self.res.facts().is_air(state) {
+                            return None;
+                        }
+                        let shape = self
+                            .collision
+                            .collision_shape(&mut scene, state, [p.x, p.y, p.z])
+                            .ok()?;
+                        shape.clip(h.position, to, p)
                     })
-                    .or_else(|| {
-                        self.dropped
-                            .iter()
-                            .find(|i| touches(i.bounds()))
-                            .map(|i| i.id)
-                    });
+                    .ok()
+                    .flatten()
+                };
+                let entity_end = block_hit.map_or(to, |hit| hit.location);
+                let owner = self.lan_acting;
+                let own_vehicle = self.own_vehicle();
+                let hit = first_entity_hit(
+                    h.position,
+                    entity_end,
+                    entity_hit_margin(h.tick_count),
+                    self.mobs
+                        .iter()
+                        .filter(|m| m.alive())
+                        .map(|m| (m.id, m.bounds()))
+                        .chain(
+                            self.creatures
+                                .hook_targets
+                                .iter()
+                                .filter(|t| t.conn != owner)
+                                .map(|t| (t.id, t.bounds)),
+                        )
+                        .chain(
+                            self.armor_stands
+                                .iter()
+                                .filter(|a| a.health > 0.0 && !a.marker)
+                                .map(|a| (a.id, a.bounds())),
+                        )
+                        .chain(
+                            self.boats
+                                .iter()
+                                .filter(|b| Some(b.id) != own_vehicle)
+                                .map(|b| (b.id, b.bounds())),
+                        )
+                        .chain(self.dropped.iter().map(|i| (i.id, i.bounds())))
+                        .chain(
+                            self.tnts
+                                .iter()
+                                .filter(|t| t.id != 0)
+                                .map(|t| (t.id, t.bounds())),
+                        ),
+                );
                 if let Some(id) = hit {
                     // Projectile.onHit on an entity: PROJECTILE_LAND.
                     self.projectile_event(
@@ -591,26 +737,7 @@ impl Game<'_> {
                     self.hook = Some(h);
                     return;
                 }
-                // checkCollision: the block the path hits before the move, then
-                // `onHitBlock`'s rebound.
-                let to = h.position.add_vector(h.velocity);
-                let mut scene = SceneCollisions {
-                    world: &self.world,
-                    binding: self.collision,
-                    subject: None,
-                };
-                let hit = traverse_blocks(h.position, to, 1024, |p: BlockPos| {
-                    let state = self.world.block(p.x, p.y, p.z);
-                    if self.res.facts().is_air(state) {
-                        return None;
-                    }
-                    let shape = self
-                        .collision
-                        .collision_shape(&mut scene, state, [p.x, p.y, p.z])
-                        .ok()?;
-                    shape.clip(h.position, to, p)
-                });
-                if let Some(hit) = hit.ok().flatten() {
+                if let Some(hit) = block_hit {
                     // Projectile.onHit on a block: PROJECTILE_LAND.
                     self.projectile_event(
                         "minecraft:projectile_land",
@@ -641,10 +768,28 @@ impl Game<'_> {
                             })
                     })
                     .or_else(|| {
+                        self.armor_stands.iter().find(|a| a.id == id).map(|a| {
+                            let b = a.bounds();
+                            (a.position, b.max_position().y - b.min_position().y)
+                        })
+                    })
+                    .or_else(|| {
+                        self.boats
+                            .iter()
+                            .find(|b| b.id == id)
+                            .map(|b| (b.position, super::boats::HEIGHT))
+                    })
+                    .or_else(|| {
                         self.dropped
                             .iter()
                             .find(|i| i.id == id)
                             .map(|i| (i.position, horizon_client::entities::ItemEntity::WIDTH))
+                    })
+                    .or_else(|| {
+                        self.tnts
+                            .iter()
+                            .find(|t| t.id != 0 && t.id == id)
+                            .map(|t| (t.position, super::tnt::PrimedTnt::SIZE))
                     });
                 match hooked {
                     Some((at, height)) => h.position = Vec3::new(at.x, at.y + height * 0.8, at.z),
@@ -712,17 +857,6 @@ impl Game<'_> {
     /// (`Projectile.canHitEntity`), the host and the guests in the level.
     pub(super) fn refresh_hook_targets(&mut self, host: &LanHost) {
         let mut targets = Vec::new();
-        if self.options.dedicated.is_none()
-            && !self.spectator()
-            && let Some(p) = self.player.as_ref()
-            && !p.health.dead_or_dying()
-        {
-            targets.push(HookTarget {
-                id: host.host_entity as u32,
-                conn: None,
-                bounds: p.bounds(),
-            });
-        }
         for g in &host.hub.guests {
             if host.hub.here(g) && g.loaded && !g.dead && !g.spectator() {
                 targets.push(HookTarget {
@@ -747,9 +881,7 @@ impl Game<'_> {
                     p.velocity = p.velocity.add_vector(delta);
                 }
             };
-            if id == host.host_entity as u32 {
-                push(self);
-            } else if let Some(conn) = host
+            if let Some(conn) = host
                 .hub
                 .guests
                 .iter()
@@ -1046,6 +1178,7 @@ impl Hook {
             previous: at,
             velocity: Vec3::ZERO,
             state: State::Flying,
+            tick_count: 0,
             life: 0,
             on_ground: false,
             nibble: 0,
@@ -1083,17 +1216,13 @@ impl Hook {
 }
 
 impl Game<'_> {
-    /// The hooks guests track: the host's and each guest's in the level.
+    /// The hooks guests track: each player's in the level.
     pub(super) fn lan_hook_states(
         &self,
-        host_entity: Option<i32>,
         play: &HashMap<u32, GuestPlay>,
         hub: &Hub,
         out: &mut States,
     ) {
-        if let (Some(h), Some(owner)) = (&self.hook, host_entity) {
-            h.track(owner, out);
-        }
         for g in hub.guests.iter().filter(|g| hub.here(g)) {
             if let Some(h) = play.get(&g.conn).and_then(|p| p.hook.as_ref()) {
                 h.track(g.entity_id, out);
@@ -1345,8 +1474,9 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::rebound;
-    use horizon_core::geometry::Vec3;
+    use super::{entity_hit_margin, first_entity_hit, pull_item, rebound};
+    use horizon_client::{entities::ItemEntity, items::ItemStack};
+    use horizon_core::geometry::{Aabb, Vec3};
 
     /// `HitResult.distanceTo` is squared: a hit 0.5 away rebounds at 0.25.
     #[test]
@@ -1354,5 +1484,87 @@ mod tests {
         let v = Vec3::new(0.0, 0.0, -2.0);
         let hit = Vec3::new(0.0, 0.0, -0.5);
         assert_eq!(rebound(v, hit, Vec3::ZERO), Vec3::new(0.0, 0.0, -0.25));
+    }
+
+    #[test]
+    fn reeling_an_item_requests_an_immediate_motion_update() {
+        let mut item = ItemEntity {
+            no_gravity: false,
+            health: 5,
+            fire_ticks: 0,
+            id: 1,
+            stack: ItemStack::new("minecraft:stone", 1),
+            thrower: None,
+            target: None,
+            position: Vec3::ZERO,
+            previous: Vec3::ZERO,
+            velocity: Vec3::new(0.2, 0.0, -0.1),
+            on_ground: true,
+            vertical_collision: false,
+            horizontal_collision: false,
+            age: 0,
+            pickup_delay: 0,
+            bob_offset: 0.0,
+            ticks: 0,
+            needs_sync: false,
+            stuck: Vec3::ZERO,
+        };
+
+        pull_item(&mut item, Vec3::new(0.5, 0.1, -0.2));
+
+        assert!((item.velocity.x - 0.7).abs() < 1.0e-12);
+        assert!((item.velocity.y - 0.1).abs() < 1.0e-12);
+        assert!((item.velocity.z + 0.3).abs() < 1.0e-12);
+        assert!(item.needs_sync);
+    }
+
+    #[test]
+    fn a_flying_hook_hits_a_small_target_between_ticks() {
+        let target = Aabb::new(Vec3::new(0.45, -0.1, -0.1), Vec3::new(0.7, 0.15, 0.1));
+
+        assert!(super::segment_entry(Vec3::ZERO, Vec3::new(0.8, 0.0, 0.0), target).is_some());
+        assert!(super::segment_entry(Vec3::ZERO, Vec3::new(0.4, 0.0, 0.0), target).is_none());
+    }
+
+    #[test]
+    fn a_flying_hook_uses_vanillas_growing_entity_hit_margin() {
+        let start = Vec3::ZERO;
+        let end = Vec3::new(1.0, 0.0, 0.0);
+        let target = Aabb::new(Vec3::new(0.5, 0.31, -0.1), Vec3::new(0.7, 0.5, 0.1));
+
+        assert_eq!(entity_hit_margin(2), 0.0);
+        assert_eq!(entity_hit_margin(8), 0.3);
+        assert_eq!(
+            first_entity_hit(start, end, entity_hit_margin(8), [(1, target)]),
+            None
+        );
+        let within_margin = Aabb::new(Vec3::new(0.5, 0.29, -0.1), Vec3::new(0.7, 0.5, 0.1));
+        assert_eq!(
+            first_entity_hit(start, end, entity_hit_margin(8), [(1, within_margin)]),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_flying_hook_does_not_hit_a_target_it_starts_inside() {
+        let target = Aabb::new(Vec3::new(-0.1, -0.1, -0.1), Vec3::new(0.7, 0.15, 0.1));
+
+        assert_eq!(
+            first_entity_hit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 0.0, [(1, target)]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_flying_hook_uses_the_first_target_along_its_path() {
+        let start = Vec3::ZERO;
+        let end = Vec3::new(1.0, 0.0, 0.0);
+        let near = Aabb::new(Vec3::new(0.45, -0.1, -0.1), Vec3::new(0.7, 0.15, 0.1));
+        let far = Aabb::new(Vec3::new(0.8, -0.1, -0.1), Vec3::new(0.95, 0.15, 0.1));
+
+        assert_eq!(
+            first_entity_hit(start, end, 0.0, [(2, far), (1, near)]),
+            Some(1)
+        );
     }
 }

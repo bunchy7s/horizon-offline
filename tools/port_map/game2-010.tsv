@@ -29,7 +29,7 @@ EnchantmentHelper.updateEnchantments	port	crates/horizon-items/src/item_data.rs:
 EnchantmentHelper.processAmmoUse	port	crates/horizon-client/src/game/enchant_effects.rs::Game::bow_enchantments	Infinity as a flag; the ammo count change is decided by the caller
 EnchantmentHelper.processBlockExperience	inline	crates/horizon-client/src/game.rs::Game::break_block_as_player	Silk Touch zeroes the XP at the call site; spawners keep it
 EnchantmentHelper.processMobExperience	skip:other		no enchantment in the data uses mob_experience, so the amount never changes
-EnchantmentHelper.createBook	missing		player: the creative menu has no enchanted book for each enchantment (CreativeModeTabs); creative.rs lists none
+EnchantmentHelper.createBook	inline	crates/horizon-client/src/creative.rs::from_json	the search tab comes from creative-inventory.json, whose export carries the 171 enchanted book stacks (vanilla CreativeModeTabs generates them)
 EnchantmentHelper.runIterationOnItem	port	crates/horizon-items/src/item_data.rs::ItemStack::enchantments	the (enchantment, level) iteration; callers loop over it
 EnchantmentHelper.runIterationOnEquipment	inline	crates/horizon-client/src/game/enchant_effects.rs::Game::apply_enchantment_attributes	gap: minor: worn armor only; hand slots are not read
 EnchantmentHelper.isImmuneToDamage	port	crates/horizon-client/src/game/enchant_effects.rs::Game::wears_burn_from_stepping_immunity	gap: minor: worn armor only; no requirements or damage source check
@@ -89,7 +89,7 @@ Level.addBlockEntityTicker	port	crates/horizon-client/src/game.rs::GameLevel::lo
 Level.guardEntityTick	skip:debug		crash-report wrapper around an entity tick
 Level.getBlockEntity	skip:other		bare block_entities map lookup at each caller; no port of its own
 Level.setBlockEntity	port	crates/horizon-client/src/game.rs::GameLevel::load_block_entity	
-Level.loadedAndEntityCanStandOnFace	missing		unsure: no face-sturdy test for placed hanging entities found
+Level.loadedAndEntityCanStandOnFace	inline	crates/horizon-client/src/mobs/shulker.rs::can_stay_at	the supporting block's face toward the shell is tested for sturdiness (`BlockState.entityCanStandOnFace`) before the opened shell's box; the chunk is loaded by construction where the sim asks
 Level.getWorldBorderAdjustedRespawnData	missing		unsure: respawn clamp to the world border not found
 Level.hasEntities	missing		unsure: no entity-in-box test found for this use
 Level.getClockTimeTicks	port	crates/horizon-client/src/game.rs::GameLevel::day_time	day time; no separate clock time
@@ -99,7 +99,7 @@ Level.setRainLevel	port	crates/horizon-client/src/game/remote.rs::Game::handle_p
 Level.fillReportDetails	skip:debug		crash-report details
 BlockGetter.getBlockEntity	skip:other		bare block_entities map lookup at each caller
 BlockGetter.isBlockInLine	skip:other		no caller in 26.3 code
-BlockGetter.clipWithInteractionOverride	missing		unsure: no interaction-shape override found for the pick ray; clip_ray not checked in depth
+BlockGetter.clipWithInteractionOverride	port	crates/horizon-world/src/world_ray.rs::clip_with_interaction	the block's interaction shape is clipped too, and when it lands nearer the hit takes its direction
 BlockGetter.traverseBlocks	port	crates/horizon-core/src/geometry/traversal.rs::traverse_blocks	
 BlockGetter.forEachBlockIntersectedBetween	port	crates/horizon-core/src/geometry/sweep.rs::sweep_intersected_blocks	
 BlockGetter.addCollisionsAlongTravel	inline	crates/horizon-client-render/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: the shape list along the path is built inside the resolver
@@ -112,13 +112,13 @@ ChunkPos.getRegionZ	port	crates/horizon-core/src/position.rs::ChunkPos::region
 ChunkPos.getBlockAt	skip:other		no caller in 26.3 code
 ChunkPos.contains	port	crates/horizon-core/src/position.rs::BlockPos::chunk	a block is in a chunk when its chunk() is that chunk
 ChunkPos.getChessboardDistance	inline	crates/horizon-client/src/ticket_levels.rs::compute	Chebyshev distance folded into the ticket level loop
-ChunkPos.distanceSquared	missing		unsure: caller not identified in 26.3 sources; no port located
+ChunkPos.distanceSquared	inline	crates/horizon-client/src/lan/hub.rs::requeue_ring	the pending chunk queue is sorted by the squared chunk distance, the only use vanilla makes of it (PlayerChunkSender.collectChunksToSend)
 CollisionGetter.isUnobstructed	port	crates/horizon-client/src/game.rs::GameLevel::is_unobstructed	the state-based overload
 CollisionGetter.noBorderCollision	port	crates/horizon-client-render/src/collisions.rs::EntityCollisions::movement_border	border shape when inside close to the border
 CollisionGetter.getPreMoveCollisions	inline	crates/horizon-client-render/src/collisions.rs::SceneCollisions::resolve_with_context	gap: minor: entity and block shapes are not returned as a list; the resolver takes them together
 CollisionGetter.getBlockAndLiquidCollisions	port	crates/horizon-client-render/src/collisions.rs::no_collision_or_liquid	gap: minor: a yes or no test, not the shape list
 CollisionGetter.getBlockCollisionsFromContext	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::collision_block	gap: minor: per-block shape; the box walk is not here
-CollisionGetter.clipIncludingBorder	missing		unsure: no world-border clamp of a ray found in clip_ray
+CollisionGetter.clipIncludingBorder	port	crates/horizon-client/src/projectiles.rs::clip_including_border	a ray that starts inside the world border and ends outside it stops on the border at WorldBorder.clampVec3ToBound of that point, facing the nearest direction of travel; the projectile clip in creatures.rs calls it around its block clip
 CollisionGetter.collidesWithSuffocatingBlock	port	crates/horizon-client-render/src/collisions.rs::SceneCollisions::is_suffocating	
 EntityGetter.getEntitiesOfClass	skip:other		class filter repeated at each caller over the entity lists; no shared lookup
 EntityGetter.getPlayerByUUID	skip:other		uuid find repeated at each caller (e.g. allays.rs)
@@ -132,7 +132,7 @@ LevelReader.getBlockStatesIfLoaded	port	crates/horizon-client-render/src/world.r
 LevelReader.getNoiseBiome	skip:other		no caller in 26.3 code
 LevelReader.getHeightmapPos	port	crates/horizon-client-render/src/world.rs::World::world_surface	gap: minor: the height only; the BlockPos is built by the caller
 LevelReader.getChunk	missing		unsure: same as Level.getChunk
-LevelReader.findBlocksInBoxByManhattanDistance	missing		unsure: no block search by Manhattan distance found in Horizon
+LevelReader.findBlocksInBoxByManhattanDistance	inline	crates/horizon-client/src/mobs/bee.rs::manhattan_box	the box in vanilla's order (`BlockPos.withinBoxByManhattanDistance`); the first-match search over it is inlined at each caller, e.g. Pollinate::find_flower for findNearbyFlower
 LevelWriter.destroyBlock	port	crates/horizon-world/src/level/update.rs::Sim::destroy_block	
 LocalMobCapCalculator.getPlayersNear	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::players_near	
 LocalMobCapCalculator.addMob	port	crates/horizon-client/src/mobs/spawn_selection.rs::SpawnState::add_local	

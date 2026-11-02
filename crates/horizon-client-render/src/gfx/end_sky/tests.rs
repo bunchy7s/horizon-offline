@@ -37,7 +37,7 @@ fn geometry_matches_pre_residency_vertex_snapshots() {
 }
 
 fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let instance = crate::gfx::test_gpu::instance();
     let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
     eprintln!("End sky test adapter: {:?}", adapter.get_info());
     pollster::block_on(adapter.request_device(&Default::default())).ok()

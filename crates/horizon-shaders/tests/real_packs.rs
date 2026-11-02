@@ -27,11 +27,11 @@ fn real_packs_read() {
     for f in found.iter().filter(|f| f.problem.is_none()) {
         let start = Instant::now();
         let pack = Pack::open(&f.path).unwrap();
-        let macros = Macros::standard();
-        let shaders = Properties::parse(
-            &pack.read_text("shaders.properties").unwrap_or_default(),
-            &horizon_shaders::with_options(&pack, &macros),
-        );
+        // The macros the game reads the pack's programs with: the standard set, the renderer's
+        // (at Mipmap Levels 4), then the features the pack turns on.
+        let mut macros = Macros::standard();
+        macros.define_renderer(4);
+        let (shaders, feature_notes) = horizon_shaders::read_properties(&pack, &mut macros);
         let ids: Vec<Properties> = ["block", "item", "entity", "dimension"]
             .iter()
             .filter_map(|n| pack.read_text(&format!("{n}.properties")))
@@ -191,11 +191,11 @@ fn real_packs_read() {
                     index: "uint(@)".into(),
                 }),
             };
-            let mut macros = Macros::standard();
+            let mut macros = macros.clone();
             if std::env::var_os("SUBGROUPS").is_some() {
                 macros.define("MC_GL_KHR_shader_subgroup_arithmetic", "");
             }
-            for note in macros.define_features(&shaders) {
+            for note in &feature_notes {
                 println!("    {note}");
             }
             let post = load_post(&pack, &folder, &shaders, &macros, &inputs);

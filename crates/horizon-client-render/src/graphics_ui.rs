@@ -6,8 +6,8 @@
 //! looks comes from `graphics_style`.
 use crate::{
     graphics::{
-        EntityCullingMode, FarDetail, GraphicsApi, LeafCullingMode, Overlay, Pacing, PresentMode,
-        Preset, Upscaling,
+        EntityCullingMode, FarDetail, FrameGeneration, GraphicsApi, LeafCullingMode, Overlay,
+        Pacing, PresentMode, Preset, Upscaling,
     },
     graphics_style::{self as style, Cost},
     hud::{HudAtlas, HudBatch},
@@ -62,9 +62,18 @@ pub enum H {
     Preset,
     LodDistance,
     FarDetail,
+    BlueMapAutoDetect,
+    BlueMapRadius,
     CaveCulling,
     EntityCulling,
     LeafCulling,
+    CacheShulkerBoxes,
+    CacheSigns,
+    CacheDecoratedPots,
+    CacheBells,
+    CacheChests,
+    CacheBanners,
+    CacheCopperGolemStatues,
     ChunkUpdates,
     UploadBudget,
     Sky,
@@ -80,6 +89,7 @@ pub enum H {
     Antialiasing,
     Upscaling,
     ScreenshotQuality,
+    FrameGeneration,
     Hdr,
     HdrBlackLevel,
     /// Binds `Graphics::hdr_key`.
@@ -92,6 +102,7 @@ pub enum H {
     BatteryMode,
     ShadowCache,
     GraphicsApi,
+    TranslucentBatching,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -156,6 +167,16 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             "Coarse distant terrain in local worlds. Integrated GPUs stop at 128 chunks.",
                         ),
                         h(H::FarDetail, Medium, far),
+                        h(
+                            H::BlueMapAutoDetect,
+                            None,
+                            "On servers, finds their BlueMap web map for far terrain. Next join.",
+                        ),
+                        h(
+                            H::BlueMapRadius,
+                            None,
+                            "How far around you BlueMap tiles are downloaded. Next join.",
+                        ),
                         v(
                             Opt::SimulationDistance,
                             Medium,
@@ -308,6 +329,11 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             None,
                             "F2 screenshots at this many times the game's resolution. Higher takes longer.",
                         ),
+                        h(
+                            H::FrameGeneration,
+                            Medium,
+                            "Shows a made-up frame between each two real ones: smoother, a little more lag.",
+                        ),
                     ],
                 ),
             ],
@@ -351,7 +377,7 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                         h(
                             H::EntityCulling,
                             None,
-                            "Hides models behind opaque blocks. Async checks off-thread; entities tick.",
+                            "Hides entities behind opaque blocks.",
                         ),
                         h(
                             H::LeafCulling,
@@ -362,6 +388,46 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             H::ShadowCache,
                             Saves,
                             "Reuses the pack shadow map when sun, view and world match. Off by default.",
+                        ),
+                    ],
+                ),
+                (
+                    "Block Entities",
+                    vec![
+                        h(
+                            H::CacheShulkerBoxes,
+                            Saves,
+                            "Reuses settled boxes; lid movement stays animated.",
+                        ),
+                        h(
+                            H::CacheSigns,
+                            Saves,
+                            "Reuses sign text until text, light, or font changes.",
+                        ),
+                        h(
+                            H::CacheDecoratedPots,
+                            Saves,
+                            "Reuses still pots; break wobble and sherd changes redraw.",
+                        ),
+                        h(
+                            H::CacheBells,
+                            Saves,
+                            "Reuses still bells; ringing stays animated.",
+                        ),
+                        h(
+                            H::CacheChests,
+                            Saves,
+                            "Reuses closed chests; moving lids stay animated.",
+                        ),
+                        h(
+                            H::CacheBanners,
+                            Saves,
+                            "Reuses poles; flags and pattern layers still update.",
+                        ),
+                        h(
+                            H::CacheCopperGolemStatues,
+                            Saves,
+                            "Reuses statue geometry until its block state changes.",
                         ),
                     ],
                 ),
@@ -395,6 +461,11 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
                             H::GraphicsApi,
                             None,
                             "Vulkan, then DirectX 12 (Windows) or OpenGL (Linux) where it fails. Next start.",
+                        ),
+                        h(
+                            H::TranslucentBatching,
+                            Saves,
+                            "Water and glass in one buffer: fewer draw calls, a bit more VRAM. Next start.",
                         ),
                     ],
                 ),
@@ -462,17 +533,25 @@ pub fn rows() -> Vec<(Page, Vec<(&'static str, Vec<Setting>)>)> {
             ],
         ),
     ];
-    // Only Windows and Linux have more than one graphics API.
+    // Only Windows and Linux have more than one graphics API, and translucent batching
+    // (Metal draws flat).
     if cfg!(target_os = "macos") {
         for (_, groups) in &mut pages {
             for (_, rows) in groups {
-                rows.retain(|r| r.item != Item::Horizon(H::GraphicsApi));
+                rows.retain(|r| {
+                    !matches!(
+                        r.item,
+                        Item::Horizon(H::GraphicsApi | H::TranslucentBatching)
+                    )
+                });
             }
         }
     }
     pages
 }
 
+/// BlueMap download radii, in chunks.
+const BLUE_MAP_RADII: [u32; 5] = [16, 32, 64, 128, 256];
 const UPLOAD_STEPS: [u32; 8] = [0, 256, 512, 1024, 2048, 4096, 8192, 16384];
 /// What the LOD Distance slider stops at, in chunks: off, then each doubling
 /// up to the whole world.
@@ -534,6 +613,11 @@ fn description(item: Item, s: &Settings, text: &'static str) -> &'static str {
         (Item::Horizon(H::HdrPeak | H::HdrPaperWhite), Setup::Automatic | Setup::Changed) => {
             "Set up for your display. Leave on Auto unless it looks wrong."
         }
+        (Item::Horizon(H::EntityCulling), _) => match s.horizon.entity_culling {
+            EntityCullingMode::Off => "No entity occlusion culling.",
+            EntityCullingMode::Synchronous => "CPU occlusion test runs this frame.",
+            EntityCullingMode::Asynchronous => "Occlusion checks run on a worker thread.",
+        },
         (Item::Horizon(H::LeafCulling), _) => match s.horizon.leaf_culling {
             LeafCullingMode::Off => "Every leaf face. Vanilla's fancy leaves.",
             LeafCullingMode::Solid => {
@@ -612,9 +696,23 @@ impl H {
                 n => labelled("LOD Distance", lang::tr("%s chunks", &[&n])),
             },
             H::FarDetail => labelled("Far Detail", g.far_detail.label()),
+            H::BlueMapAutoDetect => labelled("Find BlueMap", on_off(g.blue_map.auto_detect)),
+            H::BlueMapRadius => labelled(
+                "BlueMap Radius",
+                lang::tr("%s chunks", &[&g.blue_map.radius_chunks()]),
+            ),
             H::CaveCulling => labelled("Cave Culling", on_off(g.cave_culling)),
             H::EntityCulling => labelled("Entity Culling", g.entity_culling.label()),
             H::LeafCulling => labelled("Leaf Culling", g.leaf_culling.label()),
+            H::CacheShulkerBoxes => labelled("Shulker Boxes", on_off(g.cache_shulker_boxes)),
+            H::CacheSigns => labelled("Signs", on_off(g.cache_signs)),
+            H::CacheDecoratedPots => labelled("Decorated Pots", on_off(g.cache_decorated_pots)),
+            H::CacheBells => labelled("Bells", on_off(g.cache_bells)),
+            H::CacheChests => labelled("Chests", on_off(g.cache_chests)),
+            H::CacheBanners => labelled("Banners", on_off(g.cache_banners)),
+            H::CacheCopperGolemStatues => {
+                labelled("Copper Golem Statues", on_off(g.cache_copper_golem_statues))
+            }
             H::ChunkUpdates => match g.chunk_updates {
                 0 => labelled("Chunk Updates", "Unlimited"),
                 n => labelled("Chunk Updates", lang::tr("%s per frame", &[&n])),
@@ -659,6 +757,7 @@ impl H {
             H::ScreenshotQuality => {
                 labelled("Screenshot Quality", format!("{}x", g.screenshot_quality))
             }
+            H::FrameGeneration => labelled("Frame Generation", g.frame_generation.label()),
             H::Hdr => labelled("HDR", on_off(g.hdr)),
             H::HdrCalibrate => Text::literal(lang::get(match setup(s) {
                 Setup::Unknown => "Calibrate...",
@@ -668,32 +767,34 @@ impl H {
             H::HdrPaperWhite => match g.hdr_paper_white {
                 0 => labelled(
                     "Paper White",
-                    lang::tr("Auto (%s nits)", &[&g.paper_white_nits()]),
+                    lang::tr("Auto (%s)", &[&g.paper_white_nits()]),
                 ),
-                n => labelled("Paper White", lang::tr("%s nits", &[&n])),
+                n => labelled("Paper White", n.to_string()),
             },
             H::HdrPeak => match g.hdr_peak {
-                0 => labelled(
-                    "Peak Brightness",
-                    lang::tr("Auto (%s nits)", &[&g.peak_nits()]),
-                ),
-                n => labelled("Peak Brightness", lang::tr("%s nits", &[&n])),
+                0 => labelled("Peak Brightness", lang::tr("Auto (%s)", &[&g.peak_nits()])),
+                n => labelled("Peak Brightness", n.to_string()),
             },
-            H::HdrBlackLevel => labelled(
-                "Black Level",
-                lang::tr(
-                    "%s nits",
-                    &[&format!("{:.2}", g.hdr_black_level as f32 / 100.0)],
+            H::HdrBlackLevel => match g.hdr_black_level {
+                0 => labelled(
+                    "Black Level",
+                    lang::tr("Auto (%s)", &[&format!("{:.2}", g.black_level_nits())]),
                 ),
-            ),
+                n => labelled("Black Level", format!("{:.2}", n as f32 / 100.0)),
+            },
             H::HdrUiBrightness => labelled("UI Brightness", format!("{}%", g.hdr_ui_brightness)),
-            H::HdrKey => labelled(
-                "Shortcut",
-                crate::keybinds::display_name(&g.hdr_key).plain(),
-            ),
+            H::HdrKey => {
+                Text::translate("Shortcut: %s", &[crate::keybinds::display_name(&g.hdr_key)])
+            }
             H::BatteryMode => labelled("Battery Mode", on_off(g.battery)),
             H::ShadowCache => labelled("Shadow Cache", on_off(g.shadow_cache)),
             H::GraphicsApi => labelled("Graphics API", g.api.label()),
+            // Greyed out where the device can't (`Item::blocked`): Off, as it is there,
+            // while the saved value waits for a device that can.
+            H::TranslucentBatching => labelled(
+                "Translucent Batching",
+                on_off(g.translucent_batching && crate::graphics::translucent_batching_offered()),
+            ),
             H::Overlay => labelled(
                 "Performance Overlay",
                 match g.overlay {
@@ -746,12 +847,25 @@ impl H {
             H::FarDetail => {
                 g.far_detail = step(&[FarDetail::Full, FarDetail::Reduced], g.far_detail, back)
             }
+            H::BlueMapAutoDetect => g.blue_map.auto_detect = !g.blue_map.auto_detect,
+            H::BlueMapRadius => {
+                g.blue_map.radius = step(&BLUE_MAP_RADII, g.blue_map.radius_chunks(), back)
+            }
             H::CaveCulling => g.cave_culling = !g.cave_culling,
             H::EntityCulling => {
                 g.entity_culling = step(&EntityCullingMode::ALL, g.entity_culling, back)
             }
             H::LeafCulling => {
                 g.leaf_culling = step(&LeafCullingMode::ALL, g.leaf_culling, back);
+            }
+            H::CacheShulkerBoxes => g.cache_shulker_boxes = !g.cache_shulker_boxes,
+            H::CacheSigns => g.cache_signs = !g.cache_signs,
+            H::CacheDecoratedPots => g.cache_decorated_pots = !g.cache_decorated_pots,
+            H::CacheBells => g.cache_bells = !g.cache_bells,
+            H::CacheChests => g.cache_chests = !g.cache_chests,
+            H::CacheBanners => g.cache_banners = !g.cache_banners,
+            H::CacheCopperGolemStatues => {
+                g.cache_copper_golem_statues = !g.cache_copper_golem_statues
             }
             H::Sky => g.sky = !g.sky,
             H::Fog => g.fog = !g.fog,
@@ -782,10 +896,14 @@ impl H {
                     back,
                 )
             }
+            H::FrameGeneration => {
+                g.frame_generation = step(&FrameGeneration::ALL, g.frame_generation, back)
+            }
             H::Hdr => g.hdr = !g.hdr,
             H::BatteryMode => g.battery = !g.battery,
             H::ShadowCache => g.shadow_cache = !g.shadow_cache,
             H::GraphicsApi => g.api = step(GraphicsApi::choices(), g.api, back),
+            H::TranslucentBatching => g.translucent_batching = !g.translucent_batching,
             H::Pacing => {
                 g.pacing = match g.pacing {
                     Pacing::Efficient => Pacing::Precise,
@@ -816,7 +934,8 @@ impl Item {
     /// the display offers HDR output, whatever `horizon-graphics.txt` says (a copied game
     /// folder, a display swapped for an SDR one: the renderer leaves HDR off there, and
     /// the saved values wait for an HDR display), and its sliders do something only
-    /// while it is on.
+    /// while it is on; Translucent Batching switches only where the device can batch
+    /// (`graphics::translucent_batching_offered`), its saved value waiting for one that can.
     fn blocked(self, s: &Settings) -> Option<&'static str> {
         if !self.available() {
             return Some("This feature is not yet available in Horizon.");
@@ -839,14 +958,33 @@ impl Item {
                 | H::HdrPaperWhite
                 | H::HdrUiBrightness,
             ) if !s.horizon.hdr => Some("Turn HDR on to use it."),
+            Item::Horizon(H::TranslucentBatching)
+                if !crate::graphics::translucent_batching_offered() =>
+            {
+                Some("Your GPU or graphics API doesn't support it.")
+            }
             _ => None,
         }
+    }
+    /// A value stepped between `<` `>`: not a tick box, a slider or a press.
+    fn steps(self, s: &Settings) -> bool {
+        self.switch(s).is_none()
+            && self.slider(s).is_none()
+            && !matches!(self, Item::Horizon(H::HdrKey | H::HdrCalibrate))
     }
     /// On/off settings and their value.
     pub fn switch(self, s: &Settings) -> Option<bool> {
         let g = &s.horizon;
         Some(match self {
+            Item::Horizon(H::BlueMapAutoDetect) => g.blue_map.auto_detect,
             Item::Horizon(H::CaveCulling) => g.cave_culling,
+            Item::Horizon(H::CacheShulkerBoxes) => g.cache_shulker_boxes,
+            Item::Horizon(H::CacheSigns) => g.cache_signs,
+            Item::Horizon(H::CacheDecoratedPots) => g.cache_decorated_pots,
+            Item::Horizon(H::CacheBells) => g.cache_bells,
+            Item::Horizon(H::CacheChests) => g.cache_chests,
+            Item::Horizon(H::CacheBanners) => g.cache_banners,
+            Item::Horizon(H::CacheCopperGolemStatues) => g.cache_copper_golem_statues,
             Item::Horizon(H::Sky) => g.sky,
             Item::Horizon(H::Fog) => g.fog,
             Item::Horizon(H::Weather) => g.weather,
@@ -855,6 +993,7 @@ impl Item {
             Item::Horizon(H::Hdr) => g.hdr,
             Item::Horizon(H::BatteryMode) => g.battery,
             Item::Horizon(H::ShadowCache) => g.shadow_cache,
+            Item::Horizon(H::TranslucentBatching) => g.translucent_batching,
             Item::Vanilla(Opt::ViewBobbing) => s.view_bobbing,
             Item::Vanilla(Opt::Vsync) => s.vsync,
             Item::Vanilla(Opt::Fullscreen) => s.fullscreen,
@@ -909,14 +1048,18 @@ impl Item {
             self,
             Item::Horizon(
                 H::Preset
+                    | H::BlueMapAutoDetect
+                    | H::BlueMapRadius
                     | H::Overlay
                     | H::ScreenshotQuality
                     | H::Pacing
                     | H::PresentMode
                     | H::Workers
+                    | H::FrameGeneration
                     | H::BatteryMode
                     | H::ShadowCache
                     | H::GraphicsApi
+                    | H::TranslucentBatching
             ) | Item::Vanilla(
                 Opt::GuiScale
                     | Opt::Fullscreen
@@ -1111,10 +1254,12 @@ fn shown(item: Item, s: &Settings) -> bool {
 }
 /// A control's label as its name and its value ("Render Distance" and "12 chunks").
 fn parts(item: Item, s: &Settings, binding: bool) -> (String, Option<String>) {
-    // KeyBindsScreen: "> key <" while it waits.
-    if binding && item == Item::Horizon(H::HdrKey) {
+    // The shortcut's label is one translated "Shortcut: %s"; the row shows its key apart,
+    // as KeyBindsScreen does, "> key <" while it waits.
+    if item == Item::Horizon(H::HdrKey) {
         let key = crate::keybinds::display_name(&s.horizon.hdr_key).plain();
-        return (lang::get("Shortcut"), Some(format!("> {key} <")));
+        let key = if binding { format!("> {key} <") } else { key };
+        return (lang::get("Shortcut"), Some(key));
     }
     let label = item.label(s).plain();
     // `options.generic_value` ("%s: %s") joins vanilla's; Horizon's use ": " too.
@@ -1869,6 +2014,43 @@ impl GraphicsUi {
         self.scroll.release();
         self.dragging.take().is_some()
     }
+    /// The mouse wheel at the cursor. It scrolls the list, except that a hovered value
+    /// stepped by `<` `>` takes the step (`CycleButton.mouseScrolled`: up goes back)
+    /// while the "Scroll wheel changes settings" extra is on. A slider, a tick box and a
+    /// focused row don't take it, wherever the focus came from: the keyboard and a
+    /// controller step them with Left and Right.
+    pub fn wheel(
+        &mut self,
+        s: &mut Settings,
+        (w, h): (f32, f32),
+        (x, y): (f32, f32),
+        framebuffer: [i32; 2],
+        amount: f32,
+    ) -> Vec<Action> {
+        if amount != 0.0 && s.extras.wheel_cycles_settings {
+            let (cols, lines, _) = self.layout(s, w, h);
+            let hovered = (y >= cols.top && y < cols.bottom)
+                .then(|| {
+                    lines.iter().find_map(|line| {
+                        let setting = line.setting?;
+                        let ry = self.row_y(&cols, line);
+                        ui::hovered((x, y), cols.list_x, ry, cols.list_w, style::ROW)
+                            .then_some(setting.item)
+                    })
+                })
+                .flatten();
+            if let Some(item) = hovered
+                && item.steps(s)
+                && item.blocked(s).is_none()
+            {
+                item.cycle(s, amount > 0.0, framebuffer);
+                self.changed = true;
+                return vec![Action::ButtonClick, Action::Changed];
+            }
+        }
+        self.scroll(s, (w, h), amount);
+        Vec::new()
+    }
     /// The mouse wheel scrolls the list.
     pub fn scroll(&mut self, s: &Settings, (w, h): (f32, f32), amount: f32) {
         let (cols, _, content) = self.layout(s, w, h);
@@ -2066,6 +2248,8 @@ impl GraphicsUi {
                     self.pick(page, &lines, &cols, content);
                     vec![Action::ButtonClick]
                 }
+                // A row greyed out while focused does nothing, as a click on it doesn't.
+                Target::Item(item) if item.blocked(s).is_some() => Vec::new(),
                 Target::Item(item) if item.slider(s).is_some() => {
                     self.can_change_value = !self.can_change_value;
                     Vec::new()
@@ -2649,6 +2833,34 @@ mod tests {
     }
 
     #[test]
+    fn blue_map_settings_sit_with_far_terrain() {
+        let mut s = Settings::default();
+        let find = Item::Horizon(H::BlueMapAutoDetect);
+        let radius = Item::Horizon(H::BlueMapRadius);
+        let distance: Vec<Item> = rows()
+            .into_iter()
+            .flat_map(|(_, groups)| groups)
+            .find(|(name, _)| *name == "Distance")
+            .unwrap()
+            .1
+            .iter()
+            .map(|r| r.item)
+            .collect();
+        assert!(distance.contains(&find) && distance.contains(&radius));
+        assert!(distance.contains(&Item::Horizon(H::FarDetail)));
+        assert_eq!(find.switch(&s), Some(false), "off by default");
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 64 chunks");
+        find.cycle(&mut s, false, FB);
+        assert!(s.horizon.blue_map.auto_detect);
+        radius.cycle(&mut s, false, FB);
+        assert_eq!(s.horizon.blue_map.radius, 128);
+        radius.cycle(&mut s, true, FB);
+        radius.cycle(&mut s, true, FB);
+        assert_eq!(radius.label(&s).plain(), "BlueMap Radius: 32 chunks");
+        assert_eq!(s.horizon.preset, Preset::Custom);
+    }
+
+    #[test]
     fn presets_set_vanilla_and_horizon_options() {
         let mut s = Settings::default();
         Item::Horizon(H::Preset).cycle(&mut s, false, [854, 480]);
@@ -2746,6 +2958,57 @@ mod tests {
         assert_eq!(item.label(&s).plain(), "Entity Culling: Asynchronous");
     }
 
+    /// Translucent Batching: a switch on the Advanced page, on by default, no part of a
+    /// preset, and greyed out, reading Off, where the device can't batch.
+    #[test]
+    fn translucent_batching_is_an_advanced_switch_where_the_device_can() {
+        let item = Item::Horizon(H::TranslucentBatching);
+        let page = items()
+            .into_iter()
+            .find(|(_, i)| *i == item)
+            .map(|(p, _)| p);
+        if cfg!(target_os = "macos") {
+            // Metal draws flat: never offered, so not shown.
+            assert_eq!(page, None);
+            return;
+        }
+        assert_eq!(page, Some(Page::Advanced));
+        let mut s = Settings::default();
+        s.horizon.preset = Preset::Balanced;
+        assert_eq!(item.switch(&s), Some(true));
+        let mut ui = GraphicsUi::default();
+        // Where the device can't, the saved On reads Off, and neither a click nor Enter
+        // after it does anything: no sound, no change, no save.
+        crate::graphics::offer_translucent_batching(false);
+        assert!(item.blocked(&s).is_some());
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: Off");
+        let r = row(&mut ui, &s, item);
+        let point = (r[0] + 4.0, r[1] + 4.0);
+        assert!(press(&mut ui, &mut s, point).is_empty());
+        ui.focus = Some(Target::Item(item));
+        let enter = ui.key_modifiers(&mut s, K::Enter, None, false, SIZE, FB);
+        assert!(enter.0.is_empty());
+        assert!(s.horizon.translucent_batching);
+        // Where it can, a click switches it and keeps the preset.
+        crate::graphics::offer_translucent_batching(true);
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: On");
+        assert_eq!(
+            press(&mut ui, &mut s, point),
+            [Action::ButtonClick, Action::Changed]
+        );
+        assert!(!s.horizon.translucent_batching);
+        assert_eq!(item.label(&s).plain(), "Translucent Batching: Off");
+        assert_eq!(s.horizon.preset, Preset::Balanced);
+        // No preset sets it.
+        for on in [false, true] {
+            s.horizon.translucent_batching = on;
+            for preset in Preset::ALL {
+                crate::graphics::apply_preset(preset, &mut s);
+                assert_eq!(s.horizon.translucent_batching, on, "{preset:?}");
+            }
+        }
+    }
+
     #[test]
     fn leaf_culling_cycles_modes_beside_the_other_culling() {
         let mut s = Settings::default();
@@ -2774,6 +3037,36 @@ mod tests {
         for h in [H::CaveCulling, H::EntityCulling, H::LeafCulling] {
             assert!(block.contains(&Item::Horizon(h)), "{h:?}");
         }
+        // The block-entity caches are the group after it, in this order.
+        let groups: Vec<(&str, Vec<Item>)> = rows()
+            .into_iter()
+            .find(|(page, _)| *page == Page::Performance)
+            .unwrap()
+            .1
+            .into_iter()
+            .map(|(name, rows)| (name, rows.iter().map(|r| r.item).collect()))
+            .collect();
+        let at = groups
+            .iter()
+            .position(|(name, _)| *name == "Culling")
+            .unwrap();
+        assert_eq!(
+            groups[at + 1],
+            (
+                "Block Entities",
+                [
+                    H::CacheShulkerBoxes,
+                    H::CacheSigns,
+                    H::CacheDecoratedPots,
+                    H::CacheBells,
+                    H::CacheChests,
+                    H::CacheBanners,
+                    H::CacheCopperGolemStatues,
+                ]
+                .map(Item::Horizon)
+                .to_vec()
+            )
+        );
 
         // The description names what the picked mode does.
         for mode in LeafCullingMode::ALL {
@@ -2848,6 +3141,115 @@ mod tests {
                     "{h:?} step backward from {i}"
                 );
             }
+        }
+    }
+    /// Horizon's graphics captions are English sentences that the language table keys by
+    /// themselves, so a caption, description or value that is not in `en_us.json` shows in
+    /// English in every language. Every text the screen shows, with each setting cycled
+    /// through its values (#1927).
+    #[test]
+    fn every_graphics_text_is_in_the_language_table() {
+        let (_, missed) = lang::scoped(lang::Language::load(&[], "de_de"), || {
+            for hdr in [false, true] {
+                let mut s = Settings::default();
+                s.horizon.hdr = hdr;
+                s.horizon.taa = true;
+                for _ in 0..8 {
+                    for (page, groups) in rows() {
+                        lang::get(page.name());
+                        lang::get(page.about());
+                        for (group, rows) in groups {
+                            lang::get(group);
+                            for row in rows {
+                                // Vanilla's captions are vanilla's keys, not loaded here.
+                                if let Item::Horizon(_) = row.item {
+                                    row.item.label(&s);
+                                }
+                                let text = description(row.item, &s, row.text);
+                                lang::get(text);
+                                lang::get(row.cost.label());
+                                if let Some(why) = row.item.blocked(&s) {
+                                    lang::get(why);
+                                }
+                                if let Item::Horizon(h) = row.item {
+                                    h.cycle(&mut s, false);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            for text in [
+                "Search options",
+                "Results for \"%s\"",
+                "No settings match.",
+                "Undo",
+                "Done",
+            ] {
+                lang::get(text);
+            }
+        });
+        // `labelled` also looks up values that are already words in the language ("An") or
+        // numbers with a unit ("12 chunks", "Auto (8)"); those are not keys, and "FSR 3.1" is
+        // a name.
+        let missed: Vec<_> = missed
+            .into_iter()
+            .filter(|m| !m.starts_with(|c: char| c.is_ascii_digit()) && !m.starts_with("Auto ("))
+            .filter(|m| !["An", "Aus", "FSR 3.1", "key.keyboard.unknown"].contains(&m.as_str()))
+            .collect();
+        assert_eq!(missed, Vec::<String>::new());
+    }
+    /// Leaf Culling, Frame Generation and Shadow Cache came with English captions only (#1927).
+    #[test]
+    fn newer_graphics_settings_are_translated() {
+        let mut s = Settings::default();
+        s.horizon.leaf_culling = LeafCullingMode::Hollow;
+        s.horizon.entity_culling = EntityCullingMode::Asynchronous;
+        for (code, leaf, entity, leaf_text) in [
+            (
+                "de_de",
+                "Laub-Culling: Hohl",
+                "Objekt-Culling: Asynchron",
+                "Lässt Flächen zwischen Blättern weg: schneller, aber Lücken sind durchsichtig.",
+            ),
+            (
+                "pl_pl",
+                "Pomijanie liści: Puste",
+                "Pomijanie bytów: Asynchroniczne",
+                "Pomija ściany między liśćmi: szybciej, ale luki są przezroczyste.",
+            ),
+            (
+                "uk_ua",
+                "Відсікання листя: Порожнє",
+                "Відсік. сутностей: Асинхронно",
+                "Прибирає грані між листям: швидше, але прогалини прозорі.",
+            ),
+            (
+                "zh_cn",
+                "树叶剔除: 镂空",
+                "实体剔除: 异步",
+                "省略树叶之间的面：更快，但缝隙会透视。",
+            ),
+            (
+                "fr_fr",
+                "Occlusion feuillage: Creux",
+                "Occlusion des entités: Asynchrone",
+                "Supprime les faces entre feuilles : plus rapide, mais on voit à travers les trous.",
+            ),
+        ] {
+            let (shown, _) = lang::scoped(lang::Language::load(&[], code), || {
+                let item = |h| Item::Horizon(h);
+                (
+                    item(H::LeafCulling).label(&s).plain(),
+                    item(H::EntityCulling).label(&s).plain(),
+                    lang::get(description(item(H::LeafCulling), &s, "")),
+                )
+            });
+            assert_eq!(
+                shown,
+                (leaf.into(), entity.into(), leaf_text.into()),
+                "{code}"
+            );
         }
     }
 }

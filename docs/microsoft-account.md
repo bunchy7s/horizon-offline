@@ -309,7 +309,9 @@ To chat on such servers the game (`auth.rs`, `game/remote_chat.rs`, `horizon_pro
 `tools/secure_chat_client_e2e.py` checks it against vanilla 26.3's server with a mock of the services
 that issues certificates: online mode with `enforce-secure-profile=true` (signed chat logged as secure,
 a `/msg` whisper delivered, a message flushed from Chat Delay still counted as seen, nothing refused) and
-offline mode (unsigned chat, as before).
+offline mode (unsigned chat, as before). Both also click commands: `sendUnattendedCommand`'s confirmations
+(`game/remote_chat.rs`) ask before anything but a plain command, and a clicked command with a message argument
+only reaches the chat box, for the player to send.
 
 Chat from other players is checked as vanilla's client does (`ClientPacketListener.handlePlayerChat`,
 `game/remote.rs`, `secure_chat::MessageValidator`): a wrong global chat index disconnects, and a sender

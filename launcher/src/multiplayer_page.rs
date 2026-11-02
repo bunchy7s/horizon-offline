@@ -96,18 +96,16 @@ impl Launcher {
         let t = self.theme;
         let home = self.selected_instance()?.home.clone();
         self.load_servers(home);
-        let actions = div().child(
-            button("server-add", "Add server", Kind::Ghost, &t).on_click(cx.listener(
-                |this, _: &ClickEvent, _, cx| {
-                    this.multiplayer.adding = !this.multiplayer.adding;
-                    this.multiplayer.error = None;
-                    if this.multiplayer.adding {
-                        this.servers.focus_soon = Some(Field::ServerAddress);
-                    }
-                    cx.notify();
-                },
-            )),
-        );
+        let actions = div().child(tab_action("server-add", "Add server", &t).on_click(
+            cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.multiplayer.adding = !this.multiplayer.adding;
+                this.multiplayer.error = None;
+                if this.multiplayer.adding {
+                    this.servers.focus_soon = Some(Field::ServerAddress);
+                }
+                cx.notify();
+            }),
+        ));
         let mut section = div().flex().flex_col().gap(px(8.));
         if let Some(e) = self.multiplayer.error.clone() {
             section = section.child(notice(e, &t));

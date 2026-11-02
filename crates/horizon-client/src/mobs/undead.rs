@@ -262,6 +262,13 @@ pub fn drowned_travel(
     m.velocity = Vec3::new(m.velocity.x * 0.9, m.velocity.y * 0.9, m.velocity.z * 0.9);
     true
 }
+/// `RangedAttackMob.rangedAttackUncertainty`: 14 on peaceful, four less per
+/// difficulty step, so a hard drowned throws its trident almost straight.
+/// `Drowned` overrides it to return its own field when that is not negative,
+/// but nothing in the game sets that field, so the default always applies.
+fn ranged_attack_uncertainty(difficulty: u8) -> f32 {
+    14.0 - 4.0 * f32::from(difficulty)
+}
 /// The trident throw of `Drowned.performRangedAttack`: a `ThrownTrident` of
 /// the held trident (a plain one when it holds none), owned by the drowned,
 /// which cannot be picked up and does not return (`AbstractArrow` constructor:
@@ -291,7 +298,7 @@ fn drowned_throw(m: &mut Mob, who: Who, _power: f32, cx: &mut Cx) {
         &mut crate::projectiles::own_random(m),
         [xd, yd + dist * f64::from(0.2_f32), zd],
         1.6,
-        (14 - 2 * 4) as f32,
+        ranged_attack_uncertainty(cx.w.difficulty.id),
     );
     cx.events.push(MobEvent::Projectile(p));
     let pitch = 1.0 / (m.random.next_float() * 0.4 + 0.8);
@@ -1351,5 +1358,51 @@ mod conversion_tests {
         assert_eq!(z.custom_name.as_deref(), Some("Dusty"));
         assert!(z.silent && z.is_baby() && z.extra.left_handed);
         assert_eq!(z.extra.feet.as_deref(), Some("minecraft:golden_boots"));
+    }
+}
+
+#[cfg(test)]
+mod trident_tests {
+    use super::ranged_attack_uncertainty;
+
+    /// `RangedAttackMob.rangedAttackUncertainty` is 14 minus four per
+    /// difficulty step, so a drowned's trident spread shrinks from 14 on
+    /// peaceful to 2 on hard. Horizon used to hard-code the normal value.
+    #[test]
+    fn the_trident_spread_follows_the_difficulty() {
+        assert_eq!(ranged_attack_uncertainty(0), 14.0, "peaceful");
+        assert_eq!(ranged_attack_uncertainty(1), 10.0, "easy");
+        assert_eq!(ranged_attack_uncertainty(2), 6.0, "normal");
+        assert_eq!(ranged_attack_uncertainty(3), 2.0, "hard");
+    }
+}
+
+#[cfg(test)]
+mod creative_target_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    /// #6790: an angry zombified piglin lets go of a player in creative mode
+    /// (`TargetGoal.canContinueToUse` / `TargetingConditions` skip invulnerable
+    /// players).
+    #[test]
+    fn an_angry_zombified_piglin_drops_a_creative_player() {
+        with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            let mut player = test_player(Vec3::new(3.5, 64.0, 0.5));
+            player.creative = true;
+            w.player = Some(player);
+            let kind = Arc::new(types.types["minecraft:zombified_piglin"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            m.ai.target = Some(Who::Player);
+            m.extra.anger = 300;
+            let mut lr = horizon_core::random::LegacyRandom::new(0);
+            for _ in 0..40 {
+                let mut events = Vec::new();
+                m.tick(&w, &mut lr, &mut events);
+            }
+            assert_eq!(m.ai.target, None, "anger {}", m.extra.anger);
+        });
     }
 }

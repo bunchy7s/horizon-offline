@@ -3,7 +3,7 @@
 
 Build horizon-client and horizon-ctl with the fast profile first, then run:
   python3 tools/singleplayer_forced_chunks_audit.py --case force-save
-Runs both default server-thread and in-frame singleplayer, using scratch homes.
+Runs singleplayer on its server thread, using scratch homes.
 """
 import argparse
 import os
@@ -39,7 +39,7 @@ def query(cli, dimension, expected):
     raise AssertionError(f'{dimension}: expected {expected}, got {reply}')
 
 
-def run(bin_dir, resources, in_frame):
+def run(bin_dir, resources):
     with tempfile.TemporaryDirectory(prefix='hz-force-save-') as scratch:
         work = Path(scratch)
         previous = None
@@ -55,8 +55,6 @@ def run(bin_dir, resources, in_frame):
             args = [str(bin_dir / 'horizon-client'), '--resources', str(resources),
                     '--world', 'forced', '--creative', '--seed', '4242', '--offscreen',
                     '--render-distance', '4', '--control', '--control-socket', str(socket)]
-            if in_frame:
-                args.append('--in-frame')
             with (work / f'{stage}.log').open('w') as log:
                 process = subprocess.Popen(args, cwd=home, env=env, stdout=log, stderr=log)
                 try:
@@ -94,7 +92,7 @@ def run(bin_dir, resources, in_frame):
                         process.terminate()
                         process.wait(timeout=30)
             previous = home / 'saves'
-        print(f'PASS force-save: {"in-frame" if in_frame else "server-thread"}, three dimensions, add/remove/restart')
+        print('PASS force-save: three dimensions, add/remove/restart')
 
 
 def main():
@@ -102,8 +100,7 @@ def main():
     parser.add_argument('--case', choices=['force-save'], default='force-save')
     parser.add_argument('--bin-dir', type=Path, default=Path(__file__).resolve().parents[1] / 'target/fast')
     args = parser.parse_args()
-    for in_frame in (False, True):
-        run(args.bin_dir.resolve(), lab.RESOURCES.resolve(), in_frame)
+    run(args.bin_dir.resolve(), lab.RESOURCES.resolve())
 
 
 if __name__ == '__main__':

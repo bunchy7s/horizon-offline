@@ -753,6 +753,9 @@ fn print(out: &mut String, t: i32, i: usize, m: &Mob, player_down: bool, now: i6
     if let Some((acts, mem)) = brain {
         let _ = write!(out, "\tact {acts}\tmem {mem}");
     }
+    if horizon_client::mobs::finalize::ageable(m.species()) {
+        let _ = write!(out, "\tage {}", m.extra.age);
+    }
     if m.species() == Species::Villager {
         let _ = write!(out, "\tvx {}", villager(m));
     }
@@ -1026,6 +1029,7 @@ pub fn main() -> horizon_client::Result<()> {
                         m.rider = Some(horizon_client::mobs::equine::Rider::default());
                     }
                     "noai" => m.no_ai = true,
+                    "agelocked" => m.extra.age_locked = true,
                     // Warden.finalizeSpawn's own part.
                     "digcooldown" | "emerge" => horizon_client::mobs::warden::finalize(
                         &mut m,
@@ -1171,6 +1175,7 @@ pub fn main() -> horizon_client::Result<()> {
                     player: player.clone(),
                     nearest_player: player.as_ref().filter(|p| !p.spectator).map(|p| p.position),
                     others: $snapshot,
+                    dragon: None,
                     leash_boats: &[],
                     others_grid: $grid,
                     others_index: None,
@@ -1196,6 +1201,7 @@ pub fn main() -> horizon_client::Result<()> {
                     items: Some(&items),
                     lid_openers: &lid_openers,
                     mod_effects: None,
+                    border: None,
                 }
             };
         }

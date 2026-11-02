@@ -287,12 +287,12 @@ def species_cases(layer, base_cases):
             yield {**base_cases[index], **extra}
     if name == 'bat':
         # Entity clocks, rather than injected render clocks: flight, rest, transitions and
-        # unrelated flag bits. Exercise the in-frame tick and server-client visual update.
+        # unrelated flag bits. Exercise the server's tick and the client's visual update.
         for flags in ([0] * 4, [1] * 4, [0, 0, 1, 1, 0, 0], [1, 1, 0, 0, 1, 1], [2, 3, 2, 2]):
-            for in_frame in (False, True):
+            for server_tick in (False, True):
                 for partial in (0.0, 0.5):
                     yield {**base_cases[0], 'ageInTicks': len(flags) + partial,
-                           '@batTicks': flags, '@batInFrame': in_frame}
+                           '@batTicks': flags, '@batServerTick': server_tick}
 
 
 def compare_vertices(v, r, args, stats):
@@ -381,7 +381,7 @@ def main():
     run(['javac', '--release', lock['minecraft']['java_major'], '-proc:none', '-cp', dependencies, '-d', classes, oracle], 'compile-java')
     run(['java', '-Xmx1G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaEntityAnimOracle',
          inputs, build / 'vanilla.jsonl', jars['client']], 'vanilla')
-    run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client', '--example', 'client_probe', '--',
+    run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client-lib', '--example', 'client_probe', '--',
          'entity_anim_fixture', resources, build / 'vanilla.jsonl', build / 'rust.jsonl'], 'rust')
     vanilla = [json.loads(l) for l in (build / 'vanilla.jsonl').read_text().splitlines()]
     rust = [json.loads(l) for l in (build / 'rust.jsonl').read_text().splitlines()]

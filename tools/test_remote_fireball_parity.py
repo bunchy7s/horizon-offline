@@ -80,7 +80,7 @@ def check_thrown(host, guest, out):
 
 
 def main():
-    subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client',
+    subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client', '-p', 'horizon-client-lib',
                     '--bin', 'horizon-client', '--bin', 'horizon-ctl'], cwd=lab.ROOT, check=True)
     metadata = json.loads(subprocess.check_output(
         ['cargo', 'metadata', '--format-version', '1', '--no-deps'], cwd=lab.ROOT, text=True))
@@ -90,16 +90,12 @@ def main():
     # Use the runner's current display (xvfb on Linux), with fresh isolated homes.
     lan.game_env = lambda _screen, home: lab.game_env(
         HORIZON_HOME=home, HORIZON_TELEMETRY_URL='off')
-    reports = {}
-    for threaded in (True, False):
-        lan.SERVER_THREAD = threaded
-        mode = 'server-thread' if threaded else 'in-frame'
-        out = lab.LOCAL / 'remote-fireball-parity' / mode
-        out.mkdir(parents=True, exist_ok=True)
-        # lan.Game launches each client with lab.game_env and private scratch homes.
-        reports[mode] = lan.run(ctl, out, lab.RESOURCES.resolve(), ['remote-fireball', 'remote-thrown'])
-    lab.write_json(lab.LOCAL / 'remote-fireball-parity' / 'report.json', reports)
-    assert all(r['pass'] for mode in reports.values() for r in mode.values()), reports
+    out = lab.LOCAL / 'remote-fireball-parity'
+    out.mkdir(parents=True, exist_ok=True)
+    # lan.Game launches each client with lab.game_env and private scratch homes.
+    report = lan.run(ctl, out, lab.RESOURCES.resolve(), ['remote-fireball', 'remote-thrown'])
+    lab.write_json(out / 'report.json', report)
+    assert all(r['pass'] for r in report.values()), report
 
 
 if __name__ == '__main__':

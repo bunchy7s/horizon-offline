@@ -27,7 +27,7 @@ fn pushed(velocity: [f64; 3], kick: [f32; 3]) -> Option<[f64; 3]> {
 impl Game<'_> {
     /// For a client mod: a push added to the local player's velocity, in blocks a tick, as an
     /// explosion's knockback is (the window's player moves itself, as vanilla's client does). Each component is
-    /// clamped to -4..4; a spectator, or a value that is not a number, is left alone. API @API:native_motion@.
+    /// clamped to -4..4; a spectator, or a value that is not a number, is left alone. API 105.
     pub(super) fn native_push_player(&mut self, kick: [f32; 3]) {
         if let Some(p) = self.player.as_mut()
             && !p.spectator
@@ -43,7 +43,7 @@ impl Game<'_> {
     /// the server's player and sent to their client. A respawn or a game mode change keeps it, and it is saved
     /// with the player (`abilities.flySpeed`, as vanilla saves it). False for a player not here or a client of a
     /// server, and inside a player's hook, where the server's player list is busy: call it from a tick hook.
-    /// API @API:native_motion@.
+    /// API 105.
     pub(super) fn native_set_flying_speed(&mut self, player: u128, speed: Option<f32>) -> bool {
         let speed = speed
             .filter(|s| s.is_finite())

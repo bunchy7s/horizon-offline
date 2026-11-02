@@ -150,7 +150,7 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev libudev-dev
       - name: Build the client, horizon-ctl, horizon-prepare and horizon-server
-        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
+        run: cargo build --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl -p horizon-prepare --bin horizon-prepare -p horizon-server --bin horizon-server
       - name: Every program the release folder takes was built
         run: |
           for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do
@@ -185,6 +185,15 @@ jobs:
               ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_imports.py "$file"
             fi
           done
+      - name: Baseline x86-64 CPUs only
+        # No POPCNT or LZCNT at all (the script says why only those): a C library's count intrinsic killed the
+        # game before main on a Core 2 (#7264). Not the Mac builds: every Intel Mac that runs macOS 11 has both.
+        if: runner.os != 'macOS'
+        run: |
+          set -euo pipefail
+          rustup component add llvm-tools
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/check_cpu_baseline.py \
+            $(for binary in horizon-client horizon-ctl horizon-prepare horizon-server; do echo "$BIN/$binary${{ matrix.exe }}"; done)
       - name: Every program starts
         run: |
           set -euo pipefail

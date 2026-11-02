@@ -122,6 +122,11 @@ impl Navigation {
         )
     }
 }
+/// `LivingEntity.getComfortableFallDistance`: the drop an entity accepts on
+/// top of what it was asked for.
+fn comfortable_fall_distance(f: f32) -> i32 {
+    (f + 3.0).floor() as i32
+}
 impl Mob {
     pub fn path_mob(&self) -> PathMob {
         PathMob {
@@ -140,14 +145,19 @@ impl Mob {
             stands_on_lava: self.kind.flags.lava_walker,
         }
     }
-    /// Mob.getMaxFallDistance (normal difficulty).
+    /// `Mob.getMaxFallDistance` (normal difficulty), with `Creeper`'s
+    /// override: a creeper that has a target falls by its own health, so a
+    /// full-health one walks off a 22-block drop instead of 3.
     pub fn max_fall_distance(&self) -> i32 {
         if self.ai.target.is_none() {
-            return 3;
+            return comfortable_fall_distance(0.0);
+        }
+        if self.species() == super::Species::Creeper {
+            return comfortable_fall_distance(self.health - 1.0);
         }
         let mut sacrifice = (self.health - self.attrs.max_health * 0.33) as i32;
         sacrifice -= 4;
-        sacrifice.max(0) + 3
+        comfortable_fall_distance(sacrifice.max(0) as f32)
     }
     pub fn malus(&self, t: PathType) -> f32 {
         self.ai.malus[t as usize].unwrap_or_else(|| t.malus())
@@ -743,5 +753,24 @@ mod tests {
                 prefers_shallow: false
             }
         ));
+    }
+
+    /// `Creeper.getMaxFallDistance` replaces the shared
+    /// `health - a third` formula with its own `health - 1`: a creeper
+    /// chasing something drops 22 blocks at full health and 6 at four,
+    /// where the shared formula would have given 3.
+    #[test]
+    fn a_creeper_falls_by_its_own_health_while_it_has_a_target() {
+        // Skipped without the extracted vanilla data (CI's verify has none).
+        crate::mobs::world::with_test_world(&[], |_, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:creeper"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            assert_eq!(m.max_fall_distance(), 3, "no target");
+            m.ai.target = Some(crate::mobs::Who::Player);
+            m.health = 20.0;
+            assert_eq!(m.max_fall_distance(), 22, "full health, has a target");
+            m.health = 4.0;
+            assert_eq!(m.max_fall_distance(), 6, "hurt, has a target");
+        });
     }
 }

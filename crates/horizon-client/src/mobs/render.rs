@@ -38,6 +38,8 @@ pub fn scroll_offset(age: f32, speed: f32) -> f32 {
 fn scroll_u(u: f32, scroll: f32) -> f32 {
     if scroll == 0.0 { u } else { (u + scroll) % 1.0 }
 }
+/// Full sky and block light in a vertex's `light`.
+pub const FULL_BRIGHT: u32 = 240 | 240 << 8;
 /// How brightly the eyes render type's layers (spiders', endermen's and
 /// phantoms' eyes, the breeze's, the creaking's, the copper golem's) shine in
 /// HDR output, as `mesher::hdr_tier`.
@@ -76,6 +78,25 @@ fn translucent_layer(m: &Mob, layer: &Layer) -> bool {
         || layer.model == "slime#outer"
         || matches!(m.species(), Species::SulfurCube)
         || layer.texture.starts_with("entity/horse/horse_markings")
+}
+
+/// Whether a layer is the eyes render type's (`RenderTypes.eyes`: full bright, no
+/// normal, at `EYES_TIER`) on a mob whose other draws are plain: spiders',
+/// endermen's, phantoms', the creaking's and the copper golem's. The GPU path
+/// poses them as [`super::skin::Skin`] `FLAT` draws when improved transparency
+/// is off ([`super::skin::SkinModels::eyes`]).
+fn eyes_layer(m: &Mob, layer: &Layer) -> bool {
+    layer.full_bright
+        && layer.scroll == 0.0
+        && matches!(
+            m.species(),
+            Species::Spider
+                | Species::CaveSpider
+                | Species::Enderman
+                | Species::Phantom
+                | Species::Creaking
+                | Species::CopperGolem
+        )
 }
 
 /// One draw of a model with a texture.
@@ -194,6 +215,12 @@ fn climate(m: &Mob) -> &'static str {
 /// the player model, its resolved skin and the same scale.
 fn avatar(m: &Mob) -> bool {
     matches!(&*m.kind.id, "minecraft:player" | "minecraft:mannequin")
+}
+/// `AvatarRenderer.shouldRenderLayers`: a spectating player or mannequin
+/// draws no layers at all (armour, held items, head item, cape, wings,
+/// parrots, ears, stuck arrows), only its translucent head.
+pub fn layers_shown(m: &Mob) -> bool {
+    !(avatar(m) && m.extra.spectator)
 }
 /// The model layer key and texture for the mob's body.
 pub fn body(m: &Mob) -> (String, String) {
@@ -1276,15 +1303,7 @@ fn draw_normals(
     out: &mut Vec<Vertex>,
 ) {
     let p = poses.pose(part);
-    let m = base
-        * glam::Mat4::from_translation(glam::Vec3::new(p[0], p[1], p[2]) / 16.0)
-        * glam::Mat4::from_quat(glam::Quat::from_euler(
-            glam::EulerRot::ZYX,
-            p[5],
-            p[4],
-            p[3],
-        ))
-        * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]));
+    let m = posed(base, p);
     if poses.is_hidden(part) || p[6] == 0.0 && p[7] == 0.0 && p[8] == 0.0 {
         return;
     }
@@ -1322,6 +1341,47 @@ fn draw_normals(
         draw_normals(c, m, normals, poses, uv, scroll, color, light, overlay, out);
     }
 }
+/// A part's matrix under `base` for its pose (`ModelPart.translateAndRotate`
+/// and its scale), as `draw` and the GPU path (`super::skin`) both use it.
+pub(super) fn posed(base: glam::Mat4, p: [f32; 9]) -> glam::Mat4 {
+    base * glam::Mat4::from_translation(glam::Vec3::new(p[0], p[1], p[2]) / 16.0)
+        * glam::Mat4::from_quat(glam::Quat::from_euler(
+            glam::EulerRot::ZYX,
+            p[5],
+            p[4],
+            p[3],
+        ))
+        * glam::Mat4::from_scale(glam::Vec3::new(p[6], p[7], p[8]))
+}
+/// `draw_scrolled` through the GPU path when the mob takes it (`skin`), on
+/// the CPU otherwise.
+#[allow(clippy::too_many_arguments)]
+pub fn put(
+    skin: &mut Option<&mut super::skin::Skin>,
+    part: &std::sync::Arc<Part>,
+    base: glam::Mat4,
+    poses: &Poses,
+    uv: [f32; 4],
+    scroll: f32,
+    color: u32,
+    light: u32,
+    overlay: u32,
+    out: &mut Vec<Vertex>,
+) {
+    let paint = super::skin::Paint {
+        uv,
+        scroll,
+        color,
+        light,
+        overlay,
+    };
+    if let Some(skin) = skin
+        && skin.draw(part, base, poses, paint)
+    {
+        return;
+    }
+    draw_scrolled(part, base, poses, uv, scroll, color, light, overlay, out);
+}
 /// Render a mob with its variant model, texture and layers.
 pub fn render(
     m: &Mob,
@@ -1345,7 +1405,7 @@ pub fn render_with(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32, u32)],
+    extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
     // The invisibility effect hides the model (a drinking wandering trader);
@@ -1358,7 +1418,7 @@ pub fn render_with(
                 let shifted =
                     camera - glam::DVec3::new(off[0] + w[0], off[1] + w[1], off[2] + w[2]);
                 let base = base_transform(m, alpha, shifted);
-                render_visible(m, alpha, base, atlas, light, data, extra, true, out);
+                render_visible(m, alpha, base, atlas, light, data, extra, true, out, None);
             }
         }
         return;
@@ -1373,6 +1433,37 @@ pub fn render_with(
         extra,
         true,
         out,
+        None,
+    );
+}
+/// `render` with the model's ordinary draws posed on the GPU when the mob
+/// allows it (`super::skin`): the same picture, no vertices on the CPU.
+#[allow(clippy::too_many_arguments)]
+pub fn render_skinned(
+    m: &Mob,
+    alpha: f32,
+    camera: glam::DVec3,
+    atlas: Atlas,
+    light: u32,
+    data: &MobData,
+    out: &mut Vec<Vertex>,
+    skin: &mut super::skin::Skin,
+) {
+    if super::trader::is_invisible(m) {
+        render_with(m, alpha, camera, atlas, light, data, &[], out);
+        return;
+    }
+    render_visible(
+        m,
+        alpha,
+        base_transform(m, alpha, camera),
+        atlas,
+        light,
+        data,
+        &[],
+        true,
+        out,
+        Some(skin),
     );
 }
 /// `CapeLayer.submit` with `PlayerCapeModel`: the player model's body posed
@@ -1626,11 +1717,11 @@ pub fn render_layers(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32, u32)],
+    extra: &[(&Part, [f32; 4], u32, u32, bool)],
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform(m, alpha, camera);
-    render_visible(m, alpha, base, atlas, light, data, extra, false, out);
+    render_visible(m, alpha, base, atlas, light, data, extra, false, out, None);
 }
 /// A mob drawn under `origin` instead of at its position (the spinning mob
 /// of `SpawnerRenderer.submitEntityInSpawner`).
@@ -1644,7 +1735,78 @@ pub fn render_posed(
     out: &mut Vec<Vertex>,
 ) {
     let base = base_transform_at(m, alpha, origin);
-    render_visible(m, alpha, base, atlas, light, data, &[], true, out);
+    render_visible(m, alpha, base, atlas, light, data, &[], true, out, None);
+}
+/// The custom model's key of a body model: `main` is the wide player model, `kind.model`.
+fn cem_key(model_key: &str) -> &str {
+    if model_key == "main" {
+        "player#main"
+    } else {
+        model_key
+    }
+}
+/// Every texture [`render_visible`] may look up for `m` now (keep the two in step: a texture
+/// drawn but not listed here never gets a random pick): the body's and each layer's, a
+/// custom model's own texture beside them (`cem_texture` falls back to the vanilla one when
+/// the atlas lacks it, and only the layer a `.jem` was made for takes it, `paints_with_jem`),
+/// and the warden's glowing layers (whether they glow this frame or not). Random textures
+/// choose a variant for each.
+pub fn drawn_textures(m: &Mob, data: &MobData) -> Vec<String> {
+    fn push(names: &mut Vec<String>, custom: Option<&super::cem::CemLayer>, vanilla: String) {
+        if let Some(texture) = custom.and_then(|c| c.texture.clone()) {
+            names.push(texture);
+        }
+        names.push(vanilla);
+    }
+    let cem = data
+        .cem
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (model_key, texture) = body(m);
+    let cem_key = cem_key(&model_key);
+    let mut names = Vec::new();
+    push(&mut names, cem.layer(cem_key), texture);
+    let mut all_layers = layers(m, m.age as f32);
+    if m.species() == Species::Warden {
+        for (model, texture, _) in super::warden::emissive_layers(m, 0.0) {
+            all_layers.push(Layer {
+                model: model.into(),
+                texture: texture.into(),
+                color: 0,
+                full_bright: true,
+                scroll: 0.0,
+            });
+        }
+    }
+    let body_keys = [model_key.as_str(), cem_key];
+    for (i, layer) in all_layers.iter().enumerate() {
+        let custom = cem
+            .layer(&layer.model)
+            .filter(|_| paints_with_jem(&all_layers, i, body_keys));
+        push(&mut names, custom, layer.texture.clone());
+    }
+    names
+}
+/// The texture a model drawn as `custom` takes: the `.jem`'s when the atlas has it, else
+/// `vanilla` (a texture the atlas lacks would hide the model).
+fn cem_texture<'a>(
+    custom: Option<&'a super::cem::CemLayer>,
+    vanilla: &'a str,
+    atlas: Atlas<'_>,
+) -> &'a str {
+    custom
+        .and_then(|c| c.texture.as_deref())
+        .filter(|t| atlas(t).is_some())
+        .unwrap_or(vanilla)
+}
+/// Whether `layers[i]` is the layer its model's `.jem` was made for, so the `.jem`'s texture
+/// paints it: the first drawn with that model (`sheep#wool`, a wolf's armour). Later layers
+/// on the same model are overlays (the armour's cracks), like those on the body's model
+/// (`body`: eyes, collars, a villager's type and profession), and keep their own textures
+/// over the new geometry.
+fn paints_with_jem(layers: &[Layer], i: usize, body: [&str; 2]) -> bool {
+    let key = layers[i].model.as_str();
+    !body.contains(&key) && layers[..i].iter().all(|l| l.model != key)
 }
 #[allow(clippy::too_many_arguments)]
 fn render_visible(
@@ -1654,10 +1816,13 @@ fn render_visible(
     atlas: Atlas,
     light: u32,
     data: &MobData,
-    extra: &[(&Part, [f32; 4], u32, u32)],
+    extra: &[(&Part, [f32; 4], u32, u32, bool)],
     body_visible: bool,
     out: &mut Vec<Vertex>,
+    skin: Option<&mut super::skin::Skin>,
 ) {
+    // The armour is a layer: none for a spectator.
+    let extra = if layers_shown(m) { extra } else { &[] };
     let overlay = u32::from(red_overlay(m));
     let s = anim::state(m, alpha);
     let (model_key, texture) = body(m);
@@ -1667,77 +1832,64 @@ fn render_visible(
         .cem
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    // `main` is the wide player model, `kind.model`.
-    let cem_key = if model_key == "main" {
-        "player#main"
-    } else {
-        model_key.as_str()
+    let cem_key = cem_key(&model_key);
+    let custom_body = cem.layer(cem_key);
+    let body_animation = custom_body.and_then(|c| c.animation.as_ref());
+    let model = match custom_body {
+        Some(custom) => custom.model.clone(),
+        None => m
+            .kind
+            .layer(&model_key)
+            .cloned()
+            .unwrap_or_else(|| m.kind.model.clone()),
     };
-    let body_animation = cem.layer(cem_key).and_then(|c| c.animation.as_ref());
-    let (model, texture) = match cem.layer(cem_key) {
-        Some(custom) => (
-            custom.model.clone(),
-            custom.texture.clone().unwrap_or(texture),
-        ),
-        None => (
-            m.kind
-                .layer(&model_key)
-                .cloned()
-                .unwrap_or_else(|| m.kind.model.clone()),
-            texture,
-        ),
-    };
-    // OptiFine random textures: the sprite of the variant the mob wears for a texture, when
-    // the atlas has it. The texture keeps its name for everything else.
+    let texture = cem_texture(custom_body, &texture, atlas);
+    // OptiFine random textures and ETF blinking: the sprite a texture draws with instead, when
+    // the atlas has it: the variant the mob wears, then its blink frame while it blinks (or
+    // sleeps). The texture keeps its name for everything else.
     let random = data
         .random_textures
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let random_uv = |texture: &str| {
-        if random.is_empty() {
+    let blinks = data
+        .blinks
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let sprite = |texture: &str| {
+        let variant = (!random.is_empty())
+            .then(|| super::random_textures::texture(m, &random, texture))
+            .flatten()
+            .filter(|v| atlas(v).is_some());
+        let frame = (!blinks.is_empty())
+            .then(|| blinks.get(variant.unwrap_or(texture)))
+            .flatten()
+            .and_then(|b| {
+                if super::villager::sleeping(m) {
+                    Some(b.shut.as_str())
+                } else {
+                    b.frame(s.age as u32, m.id.wrapping_mul(0x9E37_79B1))
+                }
+            })
+            .filter(|f| atlas(f).is_some());
+        let name = frame.or(variant)?;
+        Some((name, atlas(name)?))
+    };
+    // OptiFine emissive overlays: the drawn sprite's `_e`, at full brightness with the model's
+    // shading, as OptiFine draws them.
+    let emissive = data
+        .emissive
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let emissive_uv = |drawn: &str| {
+        if emissive.is_empty() {
             return None;
         }
-        atlas(super::random_textures::texture(m, &random, texture)?)
+        atlas(emissive.overlay(drawn)?)
     };
     let mut poses = Poses::new(&model);
     anim::setup(m, &s, &mut poses, &data.animations);
     if let Some(animation) = body_animation {
         animation.run(m, &s, &mut poses);
-    }
-    let draw_body = |out: &mut Vec<Vertex>| {
-        // A player or mannequin whose skin has no atlas sprite (an evicted or
-        // never stored download) draws with its default skin, not invisibly.
-        let uv = random_uv(&texture).or_else(|| atlas(&texture)).or_else(|| {
-            if avatar(m) {
-                atlas(&m.kind.texture)
-            } else {
-                None
-            }
-        });
-        if body_visible && let Some(uv) = uv {
-            let start = out.len();
-            draw(
-                &model,
-                base,
-                &poses,
-                uv,
-                body_color(m, alpha),
-                light,
-                body_overlay(m, alpha),
-                out,
-            );
-            if translucent_body(m) {
-                mark_oit(&mut out[start..]);
-            }
-        }
-    };
-    // The translucent shell writes depth: draw the opaque core before it.
-    let shell_last = m.species() == Species::SulfurCube;
-    if !shell_last {
-        draw_body(out);
-    }
-    for (part, uv, color, layer_overlay) in extra {
-        draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
     }
     let mut all_layers = layers(m, s.age);
     // WardenRenderer: the translucent emissive layers fade with the animations.
@@ -1754,24 +1906,108 @@ fn render_visible(
             }
         }
     }
+    // The GPU path takes the whole mob or none of it, so its draws keep their
+    // order: only plain opaque and cutout draws of models it can pose (no
+    // custom models, translucency, eyes or energy swirl, which the CPU path
+    // changes after drawing).
+    let mut skin = skin;
+    let posable = match skin.as_deref_mut() {
+        Some(skin) => {
+            custom_body.is_none()
+                && extra.is_empty()
+                && m.species() != Species::SulfurCube
+                && !translucent_body(m)
+                && energy_swirl(m, s.age).is_none()
+                && skin.supports(&model)
+                && all_layers.iter().all(|layer| {
+                    (skin.models.eyes && eyes_layer(m, layer)
+                        || !layer.full_bright && !translucent_layer(m, layer))
+                        && cem.layer(&layer.model).is_none()
+                        && m.kind
+                            .layer(&layer.model)
+                            .is_none_or(|part| skin.supports(part))
+                })
+        }
+        None => false,
+    };
+    if !posable {
+        skin = None;
+    }
+    let draw_body = |out: &mut Vec<Vertex>, skin: &mut Option<&mut super::skin::Skin>| {
+        // A player or mannequin whose skin has no atlas sprite (an evicted or
+        // never stored download) draws with its default skin, not invisibly.
+        let drawn = sprite(texture).or_else(|| Some((texture, atlas(texture)?)));
+        let uv = drawn.map(|(_, uv)| uv).or_else(|| {
+            if avatar(m) {
+                atlas(&m.kind.texture)
+            } else {
+                None
+            }
+        });
+        if body_visible && let Some(uv) = uv {
+            let start = out.len();
+            put(
+                skin,
+                &model,
+                base,
+                &poses,
+                uv,
+                0.0,
+                body_color(m, alpha),
+                light,
+                body_overlay(m, alpha),
+                out,
+            );
+            if let Some(glow) = drawn.and_then(|(name, _)| emissive_uv(name)) {
+                put(
+                    skin,
+                    &model,
+                    base,
+                    &poses,
+                    glow,
+                    0.0,
+                    body_color(m, alpha),
+                    FULL_BRIGHT,
+                    0,
+                    out,
+                );
+            }
+            if translucent_body(m) {
+                mark_oit(&mut out[start..]);
+            }
+        }
+    };
+    // The translucent shell writes depth: draw the opaque core before it.
+    let shell_last = m.species() == Species::SulfurCube;
+    if !shell_last {
+        draw_body(out, &mut skin);
+    }
+    // The worn armour's layers (and their emissive overlays, full bright).
+    for (part, uv, color, layer_overlay, glows) in extra {
+        let light = if *glows { FULL_BRIGHT } else { light };
+        draw(part, base, &poses, *uv, *color, light, *layer_overlay, out);
+    }
     // One Poses refilled for every layer (armour draws up to seven): it keeps
     // its maps' capacity.
     let mut layer_poses = Poses::default();
-    for mut layer in all_layers {
+    let body_keys = [model_key.as_str(), cem_key];
+    for (i, layer) in all_layers.iter().enumerate() {
         let custom = cem.layer(&layer.model);
+        // `layer.texture` stays the vanilla name (the villager hats below look for its
+        // `/type/` folder).
+        let texture = cem_texture(
+            custom.filter(|_| paints_with_jem(&all_layers, i, body_keys)),
+            &layer.texture,
+            atlas,
+        );
         let part = match custom {
-            Some(custom) => {
-                if let Some(texture) = &custom.texture {
-                    layer.texture.clone_from(texture);
-                }
-                custom.model.clone()
-            }
+            Some(custom) => custom.model.clone(),
             None => match m.kind.layer(&layer.model) {
                 Some(part) => part.clone(),
                 None => continue,
             },
         };
-        let Some(uv) = random_uv(&layer.texture).or_else(|| atlas(&layer.texture)) else {
+        let Some((drawn, uv)) = sprite(texture).or_else(|| Some((texture, atlas(texture)?))) else {
             continue;
         };
         layer_poses.reset(&part);
@@ -1792,7 +2028,7 @@ fn render_visible(
                 .apply(folder, variant, profession, &mut layer_poses);
         }
         let light = if layer.full_bright {
-            240 | 240 << 8
+            FULL_BRIGHT
         } else {
             light
         };
@@ -1804,7 +2040,9 @@ fn render_visible(
             None => overlay,
         };
         let start = out.len();
-        draw_scrolled(
+        let first_job = skin.as_deref().map(|skin| skin.frame.jobs.len());
+        put(
+            &mut skin,
             &part,
             base,
             &layer_poses,
@@ -1815,14 +2053,50 @@ fn render_visible(
             overlay,
             out,
         );
-        if translucent_layer(m, &layer) {
+        if let Some(glow) = emissive_uv(drawn) {
+            put(
+                &mut skin,
+                &part,
+                base,
+                &layer_poses,
+                glow,
+                layer.scroll,
+                layer.color,
+                FULL_BRIGHT,
+                0,
+                out,
+            );
+        }
+        if translucent_layer(m, layer) {
             mark_oit(&mut out[start..]);
+        }
+        // The same marks on what the GPU path posed of the layer (only eyes
+        // layers get there among the marked ones): the tags in the overlay word,
+        // no normal.
+        if let (Some(skin), Some(first)) = (skin.as_deref_mut(), first_job) {
+            let tagged = translucent_layer(m, layer);
+            let eyes = layer.full_bright && m.species() != Species::Warden;
+            for job in &mut skin.frame.jobs[first..] {
+                if tagged {
+                    job.overlay |= crate::gfx::OIT_ENTITY;
+                }
+                if eyes {
+                    job.overlay |= u32::from(EYES_TIER) << 16;
+                    job.mode = crate::gfx::entity_skin::SkinJob::FLAT;
+                }
+            }
         }
         // The eyes render type's glowing eyes also shine in HDR output, at
         // `EYES_TIER` in the overlay's high bits (entity.wgsl fs_hdr_mark).
         if layer.full_bright && m.species() != Species::Warden {
             for vertex in &mut out[start..] {
                 vertex.normal = [0; 4];
+                vertex.layer |= u32::from(EYES_TIER) << 16;
+            }
+        }
+        // The warden's heart and spots shine too, by how far their layers have faded in.
+        if layer.full_bright && m.species() == Species::Warden {
+            for vertex in &mut out[start..] {
                 vertex.layer |= u32::from(EYES_TIER) << 16;
             }
         }
@@ -1853,7 +2127,7 @@ fn render_visible(
         }
     }
     if shell_last {
-        draw_body(out);
+        draw_body(out, &mut skin);
     }
 }
 /// `EnergySwirlLayer`'s model, texture and `xOffset(t)` for a charged creeper
@@ -1927,7 +2201,8 @@ pub fn part_matrix(
         .iter()
         .find_map(|c| part_matrix(c, m, poses, name, x_offset))
 }
-fn find_part<'a>(part: &'a Part, name: &str) -> Option<&'a Part> {
+/// The first part named `name`, depth first.
+pub(super) fn find_part<'a>(part: &'a Part, name: &str) -> Option<&'a Part> {
     if part.name == name {
         return Some(part);
     }
@@ -2363,6 +2638,7 @@ mod tests {
             .map(|_| super::super::Polygon {
                 normal: [0.0; 3],
                 vertices: [corner(min), corner(max), corner(min), corner(max)],
+                cull_back: false,
             })
             .collect()
     }
@@ -2461,6 +2737,8 @@ mod tests {
             villager_hats: Default::default(),
             cem: Default::default(),
             random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
             pois: Default::default(),
             species_placements: Default::default(),
         };
@@ -2552,6 +2830,8 @@ mod tests {
             villager_hats: Default::default(),
             cem: Default::default(),
             random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
             pois: Default::default(),
             species_placements: Default::default(),
         };
@@ -2607,6 +2887,8 @@ mod tests {
             villager_hats: Default::default(),
             cem: Default::default(),
             random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
             pois: Default::default(),
             species_placements: Default::default(),
         };
@@ -2718,6 +3000,8 @@ mod tests {
             villager_hats: Default::default(),
             cem: Default::default(),
             random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
             pois: Default::default(),
             species_placements: Default::default(),
         };
@@ -2732,7 +3016,7 @@ mod tests {
                 &atlas,
                 0xf0f0,
                 &data,
-                &[(part, [0.5, 0.5, 0.75, 0.75], 0xFFFF_FFFF, overlay)],
+                &[(part, [0.5, 0.5, 0.75, 0.75], 0xFFFF_FFFF, overlay, false)],
                 &mut vertices,
             );
             let (armour, body): (Vec<&Vertex>, Vec<&Vertex>) =
@@ -2948,5 +3232,557 @@ mod scroll_tests {
                 layer("sheep#wool", "entity/sheep/sheep_wool")
             ]
         );
+    }
+
+    /// `anim::Poses` keys parts by a hash of their name: within any vanilla model, two
+    /// different names never share one (they would share a pose).
+    #[test]
+    fn no_two_part_names_share_a_key() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        fn names<'a>(p: &'a Part, out: &mut Vec<&'a str>) {
+            out.push(&p.name);
+            for c in &p.children {
+                names(c, out);
+            }
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let mut models = 0;
+        for kind in types.types.values() {
+            for model in std::iter::once(&kind.model).chain(kind.layers.values()) {
+                let mut all = Vec::new();
+                names(model, &mut all);
+                let mut keys = std::collections::HashMap::new();
+                for name in all {
+                    let other = *keys.entry(super::super::anim::key(name)).or_insert(name);
+                    assert_eq!(other, name, "{} shares a key", kind.id);
+                }
+                models += 1;
+            }
+        }
+        assert!(models > 100);
+    }
+
+    /// The CPU cost of posing a mob farm (tools/stress_scenes.py `stress_mobs`): 1000 mobs of
+    /// 8 kinds through `render_with`, as `mob_geometry` draws them each frame. Prints the median
+    /// thread CPU time per frame (busy machines stretch wall time), the vertices and a hash of them (the same hash before and after a speed-up
+    /// means the same picture). `cargo test --profile fast -p horizon-client --lib
+    /// benchmark_mob_farm_geometry -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual benchmark; needs the prepared resources"]
+    fn benchmark_mob_farm_geometry() {
+        use std::{hash::Hasher, hint::black_box, time::Instant};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client/26.3");
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let types = super::super::MobTypes::load(&root).unwrap();
+        let kinds = [
+            "husk", "creeper", "cow", "pig", "sheep", "chicken", "villager", "spider",
+        ]
+        .map(|k| std::sync::Arc::new(types.types[&format!("minecraft:{k}")].clone()));
+        let mobs: Vec<Mob> = (0..1000u32)
+            .map(|i| {
+                let (layer, row, col) = (i / 200, i / 20 % 10, i % 20);
+                let at = horizon_core::geometry::Vec3::new(
+                    -14.25 + 1.5 * f64::from(col),
+                    1.0 + 2.5 * f64::from(layer),
+                    8.0 + 2.0 * f64::from(row),
+                );
+                let mut m = Mob::new(i + 1, kinds[i as usize % 8].clone(), at, 180.0);
+                m.previous = at;
+                m.age = i;
+                m
+            })
+            .collect();
+        let data = MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: Default::default(),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        };
+        let atlas = |name: &str| {
+            let h = name.len() as f32 / 64.0;
+            Some([h, h, h + 0.25, h + 0.25])
+        };
+        let camera = glam::DVec3::new(0.5, 9.6, 0.5);
+        let mut out = Vec::new();
+        let frame = |out: &mut Vec<Vertex>| {
+            out.clear();
+            for m in &mobs {
+                render_with(m, 0.5, camera, &atlas, 0xf0f0, &data, &[], out);
+            }
+        };
+        frame(&mut out);
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        hash.write(bytemuck::cast_slice(&out));
+        // The thread's own CPU time where the platform gives it, else wall time.
+        let timed = |f: &mut dyn FnMut()| {
+            let (wall, cpu) = (Instant::now(), horizon_client_render::spans::thread_cpu());
+            f();
+            match (horizon_client_render::spans::thread_cpu(), cpu) {
+                (Some(end), Some(start)) => (end - start).as_secs_f64() * 1000.0,
+                _ => wall.elapsed().as_secs_f64() * 1000.0,
+            }
+        };
+        let mut times = Vec::new();
+        for _ in 0..30 {
+            times.push(timed(&mut || frame(black_box(&mut out))));
+        }
+        times.sort_by(f64::total_cmp);
+        println!(
+            "mob farm: 1000 mobs, {} vertices, {:.3} ms/frame (median of 30, min {:.3}), hash {:016x}",
+            out.len(),
+            times[15],
+            times[0],
+            hash.finish()
+        );
+        // Where it goes: the body's poses alone (state, pose map, setupAnim), then the
+        // body's vertices alone from those poses.
+        let median = |mut f: Box<dyn FnMut() + '_>| {
+            let mut t: Vec<f64> = (0..30).map(|_| timed(&mut f)).collect();
+            t.sort_by(f64::total_cmp);
+            t[15]
+        };
+        let posed: Vec<(std::sync::Arc<Part>, Poses)> = mobs
+            .iter()
+            .map(|m| {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                (model, poses)
+            })
+            .collect();
+        let poses_ms = median(Box::new(|| {
+            for m in &mobs {
+                let model = m.kind.model.clone();
+                let mut poses = Poses::new(&model);
+                anim::setup(m, &anim::state(m, 0.5), &mut poses, &data.animations);
+                black_box(&poses);
+            }
+        }));
+        let mut body = Vec::new();
+        let draw_ms = median(Box::new(|| {
+            body.clear();
+            for (m, (model, poses)) in mobs.iter().zip(&posed) {
+                let base = base_transform(m, 0.5, camera);
+                draw(
+                    model,
+                    base,
+                    poses,
+                    [0.0, 0.0, 0.25, 0.25],
+                    u32::MAX,
+                    0xf0f0,
+                    0,
+                    &mut body,
+                );
+            }
+            black_box(&body);
+        }));
+        println!(
+            "  body poses only {poses_ms:.3} ms; body vertices only {draw_ms:.3} ms ({} vertices)",
+            body.len()
+        );
+    }
+}
+
+#[cfg(test)]
+mod emissive_tests {
+    use super::*;
+    use crate::mobs::{Polygon, Species};
+    use horizon_optifine::{blink::Blinks, emissive::Emissive, random_textures::RandomTextures};
+    use std::sync::{Arc, RwLock};
+
+    /// A silverfish (drawn with its type's texture) whose model is one quad.
+    fn silverfish() -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let k = Arc::make_mut(&mut kind);
+        k.species = Species::Silverfish;
+        k.texture = "entity/silverfish".into();
+        k.model = Arc::new(Part {
+            name: "root".into(),
+            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            polygons: vec![Polygon {
+                normal: [0.0, 0.0, -1.0],
+                cull_back: false,
+                vertices: [
+                    [0.0, 0.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0, 0.0],
+                    [1.0, 1.0, 0.0, 1.0, 1.0],
+                    [0.0, 1.0, 0.0, 0.0, 1.0],
+                ],
+            }],
+            children: Vec::new(),
+        });
+        Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0)
+    }
+
+    fn data(files: &[&str]) -> MobData {
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "horizon-render-emissive-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        for file in files {
+            let path = root.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            // Rules files pick variant 2; images are only their names.
+            let text = if file.ends_with(".properties") {
+                "textures.1=2"
+            } else {
+                ""
+            };
+            std::fs::write(path, text).unwrap();
+        }
+        let random = RandomTextures::scan(&root);
+        let blinks = Blinks::scan(&root, &random);
+        let mut emissive = Emissive::scan(&root, &random);
+        emissive.pair_beside(&root, blinks.files());
+        let _ = std::fs::remove_dir_all(&root);
+        MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: RwLock::new(random),
+            emissive: RwLock::new(Arc::new(emissive)),
+            blinks: RwLock::new(blinks),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        }
+    }
+
+    /// Every sprite the test atlas has, each at its own rect.
+    fn atlas(name: &str) -> Option<[f32; 4]> {
+        match name {
+            "entity/silverfish" => Some([0.0, 0.0, 0.5, 0.5]),
+            "entity/silverfish_e" => Some([0.5, 0.5, 1.0, 1.0]),
+            "entity/silverfish_blink" => Some([0.0, 0.5, 0.5, 1.0]),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn an_emissive_overlay_draws_the_body_again_at_full_brightness() {
+        let lit = (3 * 16) | ((5 * 16) << 8);
+        let m = silverfish();
+        let draw = |data: &MobData| {
+            let mut out = Vec::new();
+            render_with(&m, 0.0, glam::DVec3::ZERO, &atlas, lit, data, &[], &mut out);
+            out
+        };
+        // No `_e` file: one quad, as vanilla.
+        let plain = draw(&data(&["assets/minecraft/textures/entity/silverfish.png"]));
+        assert_eq!(plain.len(), 4);
+        assert!(plain.iter().all(|v| v.light == lit));
+        let glowing = draw(&data(&[
+            "assets/minecraft/textures/entity/silverfish.png",
+            "assets/minecraft/textures/entity/silverfish_e.png",
+        ]));
+        assert_eq!(glowing.len(), 8);
+        let (body, glow) = glowing.split_at(4);
+        assert!(body.iter().all(|v| v.light == lit));
+        assert!(glow.iter().all(|v| v.light == FULL_BRIGHT));
+        // The overlay samples its own sprite, and keeps the body's shading normals.
+        assert!(glow.iter().all(|v| v.uv[0] >= 0.5 && v.uv[1] >= 0.5));
+        assert!(body.iter().all(|v| v.uv[0] <= 0.5 && v.uv[1] <= 0.5));
+        assert_eq!(
+            glow.iter().map(|v| v.normal).collect::<Vec<_>>(),
+            body.iter().map(|v| v.normal).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_blink_frame_replaces_the_texture_for_a_few_ticks() {
+        let data = data(&[
+            "assets/minecraft/textures/entity/silverfish.png",
+            "assets/minecraft/textures/entity/silverfish_blink.png",
+        ]);
+        let uvs = |age: u32| {
+            let mut m = silverfish();
+            m.age = age;
+            let mut out = Vec::new();
+            render_with(&m, 0.0, glam::DVec3::ZERO, &atlas, 0, &data, &[], &mut out);
+            out.iter().map(|v| v.uv).collect::<Vec<_>>()
+        };
+        // Entity 1's phase is 0x9E3779B1 % 150 = 61: of every 150 ticks, it blinks for the
+        // default 5 from age 89 (89 + 61 = 150).
+        let shut = |uv: &Vec<[f32; 2]>| uv.iter().all(|uv| uv[0] <= 0.5 && uv[1] >= 0.5);
+        let open = |uv: &Vec<[f32; 2]>| uv.iter().all(|uv| uv[0] <= 0.5 && uv[1] <= 0.5);
+        assert!(open(&uvs(88)));
+        assert!(shut(&uvs(89)));
+        assert!(shut(&uvs(93)));
+        assert!(open(&uvs(94)));
+        assert!(shut(&uvs(89 + 150)));
+    }
+
+    #[test]
+    fn a_blink_shows_its_own_glow_or_none() {
+        let atlas = |name: &str| {
+            let u = match name {
+                "entity/silverfish" => 0.0,
+                "entity/silverfish_e" => 0.25,
+                "entity/silverfish_blink" => 0.5,
+                "entity/silverfish_blink_e" => 0.75,
+                _ => return None,
+            };
+            Some([u, 0.0, u + 0.25, 1.0])
+        };
+        let base = [
+            "assets/minecraft/textures/entity/silverfish.png",
+            "assets/minecraft/textures/entity/silverfish_e.png",
+            "assets/minecraft/textures/entity/silverfish_blink.png",
+        ];
+        let at = |data: &MobData, age: u32| {
+            let mut m = silverfish();
+            m.age = age;
+            drawn(&m, data, &atlas)
+        };
+        // Age 89 is shut (see above), 0 open.
+        let plain = data(&base);
+        let open = at(&plain, 0);
+        assert_eq!(open.len(), 8);
+        assert!(inside(&open[4..], 0.25), "the texture's glow");
+        let shut = at(&plain, 89);
+        assert_eq!(shut.len(), 4, "no glowing open eyes over the shut ones");
+        assert!(inside(&shut, 0.5));
+        let mut own = base.to_vec();
+        own.push("assets/minecraft/textures/entity/silverfish_blink_e.png");
+        let shut = at(&data(&own), 89);
+        assert_eq!(shut.len(), 8);
+        assert!(inside(&shut[4..], 0.75), "the frame's own glow");
+    }
+
+    /// Draws `m` and returns each vertex's (uv, light).
+    fn drawn(m: &Mob, data: &MobData, atlas: Atlas) -> Vec<([f32; 2], u32)> {
+        let mut out = Vec::new();
+        render_with(m, 0.0, glam::DVec3::ZERO, atlas, 7, data, &[], &mut out);
+        out.iter().map(|v| (v.uv, v.light)).collect()
+    }
+
+    /// Whether every vertex samples inside the rect starting at `at` (each rect is 0.25 wide).
+    fn inside(vertices: &[([f32; 2], u32)], at: f32) -> bool {
+        vertices
+            .iter()
+            .all(|(uv, _)| (at..=at + 0.25).contains(&uv[0]))
+    }
+
+    #[test]
+    fn a_layer_glows_with_its_own_overlay() {
+        let mut m = silverfish();
+        let k = Arc::make_mut(&mut m.kind);
+        k.species = Species::Sheep;
+        k.layers.insert("sheep#wool".into(), k.model.clone());
+        let data = data(&[
+            "assets/minecraft/textures/entity/sheep/sheep.png",
+            "assets/minecraft/textures/entity/sheep/sheep_wool.png",
+            "assets/minecraft/textures/entity/sheep/sheep_wool_e.png",
+        ]);
+        let atlas = |name: &str| {
+            let u = match name {
+                "entity/sheep/sheep" => 0.0,
+                "entity/sheep/sheep_wool" => 0.25,
+                "entity/sheep/sheep_wool_e" => 0.5,
+                _ => return None,
+            };
+            Some([u, 0.0, u + 0.25, 1.0])
+        };
+        let v = drawn(&m, &data, &atlas);
+        assert_eq!(v.len(), 12, "body, wool, wool's glow");
+        assert!(inside(&v[..4], 0.0) && inside(&v[4..8], 0.25) && inside(&v[8..], 0.5));
+        assert!(v[..8].iter().all(|(_, light)| *light == 7));
+        assert!(v[8..].iter().all(|(_, light)| *light == FULL_BRIGHT));
+    }
+
+    #[test]
+    fn a_random_variant_glows_with_its_own_overlay_only() {
+        const RANDOM: &str = "assets/minecraft/optifine/random/entity";
+        let atlas = |name: &str| {
+            let u = match name {
+                "entity/silverfish" => 0.0,
+                "entity/silverfish_e" => 0.25,
+                "minecraft:optifine/random/entity/silverfish2" => 0.5,
+                "minecraft:optifine/random/entity/silverfish2_e" => 0.75,
+                _ => return None,
+            };
+            Some([u, 0.0, u + 0.25, 1.0])
+        };
+        let seen = || crate::mobs::random_textures::Seen {
+            biome: None,
+            y: 64,
+            blocks: Vec::new(),
+            moon_phase: 0,
+            day_time: 0,
+            weather: horizon_optifine::random::Weather::Clear,
+        };
+        let props = format!("{RANDOM}/silverfish.properties");
+        let variant = format!("{RANDOM}/silverfish2.png");
+        let variant_e = format!("{RANDOM}/silverfish2_e.png");
+        let base = [
+            "assets/minecraft/textures/entity/silverfish.png",
+            "assets/minecraft/textures/entity/silverfish_e.png",
+        ];
+        for own_overlay in [true, false] {
+            let mut files = vec![base[0], base[1], props.as_str(), variant.as_str()];
+            if own_overlay {
+                files.push(variant_e.as_str());
+            }
+            let data = data(&files);
+            let mut m = silverfish();
+            {
+                let textures = data.random_textures.read().unwrap();
+                crate::mobs::random_textures::choose(&mut m, &textures, &data, Some(seen()), 0);
+            }
+            let v = drawn(&m, &data, &atlas);
+            assert!(inside(&v[..4], 0.5), "the variant");
+            if own_overlay {
+                assert_eq!(v.len(), 8);
+                assert!(inside(&v[4..], 0.75), "its own overlay, not silverfish_e");
+            } else {
+                assert_eq!(v.len(), 4, "silverfish_e doesn't glow over silverfish2");
+            }
+        }
+    }
+
+    #[test]
+    fn worn_armour_glows_when_its_extra_layer_says_so() {
+        let m = silverfish();
+        let data = data(&[]);
+        let atlas = |_: &str| Some([0.0, 0.0, 0.5, 0.5]);
+        let part = m.kind.model.clone();
+        let extra = [
+            (part.as_ref(), [0.5, 0.0, 1.0, 0.5], 0xFFFF_FFFF, 0, false),
+            (part.as_ref(), [0.5, 0.5, 1.0, 1.0], 0xFFFF_FFFF, 0, true),
+        ];
+        let mut out = Vec::new();
+        render_with(
+            &m,
+            0.0,
+            glam::DVec3::ZERO,
+            &atlas,
+            7,
+            &data,
+            &extra,
+            &mut out,
+        );
+        assert_eq!(out.len(), 12, "body, armour, armour's glow");
+        assert!(out[..8].iter().all(|v| v.light == 7));
+        assert!(out[8..].iter().all(|v| v.light == FULL_BRIGHT));
+    }
+}
+
+#[cfg(test)]
+mod random_texture_tests {
+    use super::*;
+    use crate::mobs::{Polygon, Species};
+    use horizon_optifine::random_textures::RandomTextures;
+    use std::sync::{Arc, RwLock};
+
+    /// A silverfish (drawn with its type's texture) whose model is one quad.
+    fn silverfish() -> Mob {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let k = Arc::make_mut(&mut kind);
+        k.species = Species::Silverfish;
+        k.texture = "entity/silverfish".into();
+        k.model = Arc::new(Part {
+            name: "root".into(),
+            pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            polygons: vec![Polygon {
+                normal: [0.0, 0.0, -1.0],
+                cull_back: false,
+                vertices: [
+                    [0.0, 0.0, 0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0, 1.0, 0.0],
+                    [1.0, 1.0, 0.0, 1.0, 1.0],
+                    [0.0, 1.0, 0.0, 0.0, 1.0],
+                ],
+            }],
+            children: Vec::new(),
+        });
+        Mob::new(1, kind, horizon_core::geometry::Vec3::ZERO, 0.0)
+    }
+
+    /// A pack whose silverfish has a second variant, every silverfish wearing it.
+    fn data() -> MobData {
+        let root =
+            std::env::temp_dir().join(format!("horizon-render-random-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("assets/minecraft/optifine/random/entity");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("silverfish.properties"), "textures.1=2").unwrap();
+        std::fs::write(dir.join("silverfish2.png"), "").unwrap();
+        let random = RandomTextures::scan(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        MobData {
+            states: Vec::new(),
+            placements: Default::default(),
+            heightmaps: Default::default(),
+            animations: Default::default(),
+            villager_hats: Default::default(),
+            cem: Default::default(),
+            random_textures: RwLock::new(random),
+            emissive: Default::default(),
+            blinks: Default::default(),
+            biome_tags: Default::default(),
+            entity_tags: Default::default(),
+            pois: Default::default(),
+            species_placements: Default::default(),
+        }
+    }
+
+    fn uvs(m: &Mob, data: &MobData, atlas: Atlas) -> Vec<[f32; 2]> {
+        let mut out = Vec::new();
+        render_with(m, 0.0, glam::DVec3::ZERO, atlas, 0, data, &[], &mut out);
+        out.iter().map(|v| v.uv).collect()
+    }
+
+    #[test]
+    fn a_mob_draws_its_variant_and_the_texture_when_the_atlas_lacks_it() {
+        let data = data();
+        let mut m = silverfish();
+        {
+            let textures = data.random_textures.read().unwrap();
+            let seen = crate::mobs::random_textures::Seen {
+                biome: None,
+                y: 64,
+                blocks: Vec::new(),
+                moon_phase: 0,
+                day_time: 0,
+                weather: horizon_optifine::random::Weather::Clear,
+            };
+            crate::mobs::random_textures::choose(&mut m, &textures, &data, Some(seen), 0);
+        }
+        let both = |name: &str| match name {
+            "entity/silverfish" => Some([0.0, 0.0, 0.5, 0.5]),
+            "minecraft:optifine/random/entity/silverfish2" => Some([0.5, 0.5, 1.0, 1.0]),
+            _ => None,
+        };
+        let drawn = uvs(&m, &data, &both);
+        assert_eq!(drawn.len(), 4);
+        assert!(drawn.iter().all(|uv| uv[0] >= 0.5 && uv[1] >= 0.5));
+        let vanilla_only =
+            |name: &str| (name == "entity/silverfish").then_some([0.0, 0.0, 0.5, 0.5]);
+        let drawn = uvs(&m, &data, &vanilla_only);
+        assert_eq!(drawn.len(), 4, "still drawn");
+        assert!(drawn.iter().all(|uv| uv[0] <= 0.5 && uv[1] <= 0.5));
     }
 }

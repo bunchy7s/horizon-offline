@@ -51,6 +51,8 @@ def cargo_example(package, example, *args, profile=None):
     if profile:
         command += ['--profile', profile]
     probe = package.removeprefix('horizon-') + '_probe'  # each crate's probe example: client_probe, world_probe
+    if package == 'horizon-client':
+        package = 'horizon-client-lib'
     command += ['-p', package, '--example', probe, '--', example, *map(str, args)]
     subprocess.run(command, check=True, cwd=lab.ROOT)
 

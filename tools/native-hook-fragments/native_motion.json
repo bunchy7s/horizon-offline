@@ -1,8 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "a push for the local player and a player's flying speed (`native_push_player`,\n`native_set_flying_speed`).",
-  "doc_summary": "`native_push_player([x, y, z])` on a client, added to the local player's velocity as an explosion's knockback is, and `native_set_flying_speed(player, speed)` for server mods, a player's creative flying speed, kept across respawns and game mode changes and saved with the player as vanilla's `abilities.flySpeed` is. Bundles need `\"hooks\": @API:native_motion@`.",
-  "comments": [
-    "crates/horizon-client/src/game/native_motion.rs"
-  ]
-}

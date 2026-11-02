@@ -5,36 +5,33 @@ use super::Game;
 use std::collections::BTreeMap;
 
 /// A stack as a client mod's use events carry it.
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativeHeldItem {
-    pub(crate) id: String,
-    pub(crate) count: u32,
+pub struct NativeHeldItem {
+    pub id: String,
+    pub count: u32,
     /// The inventory slot: 0 to 8, the hotbar (a mod use is the main hand's).
-    pub(crate) slot: u32,
+    pub slot: u32,
     /// `minecraft:custom_name` as SNBT, when the stack has one.
-    pub(crate) custom_name: Option<String>,
+    pub custom_name: Option<String>,
     /// `minecraft:custom_data` as SNBT, when the stack has some.
-    pub(crate) custom_data: Option<String>,
+    pub custom_data: Option<String>,
 }
 /// The block a ray along the view meets.
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativeHit {
-    pub(crate) block_x: i32,
-    pub(crate) block_y: i32,
-    pub(crate) block_z: i32,
+pub struct NativeHit {
+    pub block_x: i32,
+    pub block_y: i32,
+    pub block_z: i32,
     /// Where the ray meets the block.
-    pub(crate) x: f64,
-    pub(crate) y: f64,
-    pub(crate) z: f64,
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
     /// The block's id (`minecraft:stone`).
-    pub(crate) block: String,
+    pub block: String,
 }
 /// What happened to a mod's claimed item, oldest first.
-#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) enum NativeModEvent {
+pub enum NativeModEvent {
     /// A right-click with the item began its use: the stack, and 0 ticks.
     UseStart(NativeHeldItem, u32),
     /// The use ended: the stack it began with, and the ticks it was held. It
@@ -136,12 +133,12 @@ impl Game<'_> {
                 .map(horizon_client::snbt::to_snbt),
         })
     }
-    /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain. API @API:native_claimed_items@.
+    /// The first block along the view within `distance` (at most 1024), past the loaded chunks over the distant terrain. API 116.
     pub(super) fn native_raycast(&self, distance: f32) -> Option<NativeHit> {
         let (d, hit) = self.native_view_hit()?;
         (d <= distance.clamp(0.0, RAYCAST_MAX)).then_some(hit)
     }
-    /// The first block along the view within `RAYCAST_MAX`, and its distance. API @API:native_claimed_items@.
+    /// The first block along the view within `RAYCAST_MAX`, and its distance. API 116.
     pub(super) fn native_view_hit(&self) -> Option<(f32, NativeHit)> {
         self.player.as_ref()?;
         let eye = self.eye_position()?;
@@ -198,11 +195,11 @@ impl Game<'_> {
         }
         None
     }
-    /// Right-clicks with these items (at most 64 ids) are mod `mod_id`'s; a later call replaces the list. API @API:native_claimed_items@.
+    /// Right-clicks with these items (at most 64 ids) are mod `mod_id`'s; a later call replaces the list. API 116.
     pub(super) fn native_claim_items(&mut self, mod_id: &str, ids: &[String]) {
         self.native_input.claim(mod_id, ids);
     }
-    /// Mod `mod_id`'s events since its last poll (at most 256 wait). API @API:native_claimed_items@.
+    /// Mod `mod_id`'s events since its last poll (at most 256 wait). API 116.
     pub(super) fn native_poll(&mut self, mod_id: &str) -> Vec<NativeModEvent> {
         self.native_input.poll(mod_id)
     }

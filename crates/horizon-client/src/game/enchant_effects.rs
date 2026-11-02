@@ -89,7 +89,17 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let loss = self.durability_loss(stack, amount);
+        let mut loss = self.durability_loss(stack, amount);
+        // The mods hear a server player's wear once Unbreaking has had its say,
+        // and may change it or stop it.
+        if loss > 0
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let mut points = loss as i32;
+            let mut cancel = false;
+            self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
+            loss = if cancel { 0 } else { points.max(0) as u32 };
+        }
         if loss > 0 {
             self.trigger_item_durability(stack, stack.damage + loss);
         }
@@ -540,21 +550,55 @@ impl Game<'_> {
                 items: Some(world_items!(self)),
                 ..Default::default()
             };
-            let to_repair_xp = world_stations!(self).enchantments.modify_value(
+            let mut to_repair_xp = world_stations!(self).enchantments.modify_value(
                 Some(&stack),
                 "minecraft:repair_with_xp",
                 &ctx,
                 &mut self.world.random,
                 amount as f32,
             ) as u32;
-            let repaired = to_repair_xp.min(stack.damage);
-            if let Some(s) = self.mend_slot_mut(slot).as_mut() {
-                s.damage -= repaired;
+            let vanilla_repair = to_repair_xp;
+            if self.serving.is_some() || self.options.dedicated.is_some() {
+                let player = self.native_acting_id();
+                self.native_mending_repair(player, &stack, amount, &mut to_repair_xp);
             }
-            if repaired == 0 || to_repair_xp == 0 {
-                return 0;
+            // A hook can re-enter experience granting or replace the slot. Only
+            // repair the same eligible stack, using its current damage.
+            let Some(current) = self.mend_slot_mut(slot).as_mut() else {
+                return amount;
+            };
+            let mut original = stack.clone();
+            original.damage = current.damage;
+            if *current != original
+                || current.damage == 0
+                || current.enchantment_level("minecraft:mending") == 0
+            {
+                return amount;
             }
-            let remaining = amount.saturating_sub(repaired * amount / to_repair_xp);
+            if to_repair_xp == 0 {
+                // Vanilla consumes the XP when its own repair effect returns zero.
+                return if vanilla_repair == 0 { 0 } else { amount };
+            }
+            let repaired = to_repair_xp.min(current.damage);
+            if repaired == 0 {
+                return amount;
+            }
+            current.damage -= repaired;
+            let item = current.item.to_string();
+            let player = (self.serving.is_some() || self.options.dedicated.is_some())
+                .then(|| self.native_acting_id());
+            let remaining = amount.saturating_sub(
+                (u64::from(repaired) * u64::from(amount) / u64::from(to_repair_xp)) as u32,
+            );
+            if let Some(player) = player
+                && let Some(name) = self
+                    .native_server_players()
+                    .into_iter()
+                    .find(|p| p.uuid == player)
+                    .map(|p| p.name)
+            {
+                self.native_player_item_mend(player, &name, &item, repaired, amount);
+            }
             if remaining == 0 {
                 return 0;
             }
@@ -812,7 +856,30 @@ impl Game<'_> {
         if !moved && !landed && !changed.iter().any(|c| *c) {
             return;
         }
+        let id = stand.id;
+        let told: Vec<_> = (0..6)
+            .filter(|&i| changed[i])
+            .map(|i| {
+                let slot = horizon_client::entities::ArmorStand::SLOTS[i];
+                (
+                    slot,
+                    stand.enchantment_equipment[i].clone(),
+                    stand.equipment[i].clone(),
+                )
+            })
+            .collect();
         stand.enchantment_equipment.clone_from(&stand.equipment);
+        if self.remote.is_none() && !self.options.execution_role.is_client() {
+            for (slot, from, to) in told {
+                self.native_living_equipment_change(
+                    id,
+                    "minecraft:armor_stand",
+                    slot,
+                    from.as_ref(),
+                    to.as_ref(),
+                );
+            }
+        }
         let stand = &self.armor_stands[index];
         let at = [stand.position.x, stand.position.y, stand.position.z];
         let who = Who::Mob(stand.id);

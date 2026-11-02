@@ -32,14 +32,15 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Preprocessed {
     /// The code, one line per entry of `lines`.
     pub code: String,
     pub lines: Vec<Origin>,
     /// The pack paths of the files read, the stage file first.
     pub files: Vec<String>,
-    /// `#version` of the stage file: the number and the profile word, if any.
+    /// The stage's `#version`, the first one read (an included file's too): the number and the
+    /// profile word, if any.
     pub version: Option<(u32, Option<String>)>,
     /// `#extension` lines of live code, as written after `#extension`.
     pub extensions: Vec<String>,
@@ -70,8 +71,12 @@ pub fn preprocess(pack: &Pack, path: &str, macros: &Macros) -> Preprocessed {
         texts: HashMap::new(),
     };
     run.file(path, 0, Origin::default());
+    // Iris 1.11.7 draws a program whose `#if` stays open to its end: a warning, as there.
     if run.conditionals.open() {
-        run.diagnose(Origin::default(), "`#if` without `#endif`");
+        run.out.warnings.push(Diagnostic {
+            origin: Origin::default(),
+            message: "`#if` without `#endif`: read to the end of the file".into(),
+        });
     }
     run.out.code = run.code.join("\n");
     run.out
@@ -169,6 +174,11 @@ impl Run<'_> {
             Err(e) if e.ends_with("read as false") => {
                 return self.out.warnings.push(Diagnostic { origin, message: e });
             }
+            // Iris 1.11.7 logs a stray `#endif` and draws the program: it is ignored.
+            Err(e) if word == "endif" => {
+                let message = format!("{e}: ignored");
+                return self.out.warnings.push(Diagnostic { origin, message });
+            }
             Err(e) => return self.diagnose(origin, &e),
             Ok(true) => return,
             Ok(false) if !self.conditionals.active() => return,
@@ -191,7 +201,8 @@ impl Run<'_> {
                     None => self.diagnose(origin, &format!("`{target}` is outside the pack")),
                 }
             }
-            "version" if depth == 0 && self.out.version.is_none() => {
+            // The first `#version`, also from an included file (a pack's common header).
+            "version" if self.out.version.is_none() => {
                 let mut words = rest.split_whitespace();
                 let number = words.next().and_then(|v| v.parse().ok()).unwrap_or(110);
                 self.out.version = Some((number, words.next().map(str::to_owned)));
@@ -409,6 +420,28 @@ mod tests {
         assert_eq!(code_lines(&p), [("float x;", "program/final.fsh:9".into())]);
         let messages: Vec<&str> = p.diagnostics.iter().map(|d| d.message.as_str()).collect();
         assert_eq!(messages, ["#error live", "unknown directive `#bogus`"]);
+    }
+
+    /// A stray `#endif` and an `#if` left open are warnings, as in Iris 1.11.7 (which draws such
+    /// a program): the `#endif` is ignored, the open `#if` reads on to the end of the file.
+    #[test]
+    fn unbalanced_conditionals_warn_and_the_code_goes_on() {
+        let p = run(&[(
+            "program/final.fsh",
+            "#version 330\n#ifdef NEVER\nfloat a;\n#else\nfloat b;\n#endif\n#endif\n\
+             #if 1\nfloat c;\n",
+        )]);
+        assert!(p.diagnostics.is_empty(), "{:?}", p.diagnostics);
+        let warnings: Vec<&str> = p.warnings.iter().map(|w| w.message.as_str()).collect();
+        assert_eq!(
+            warnings,
+            [
+                "`#endif` without `#if`: ignored",
+                "`#if` without `#endif`: read to the end of the file"
+            ]
+        );
+        let code: Vec<&str> = code_lines(&p).iter().map(|(c, _)| *c).collect();
+        assert_eq!(code, ["float b;", "float c;"]);
     }
 
     /// A condition that can't be evaluated is a warning and reads as false; the code goes on.

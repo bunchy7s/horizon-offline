@@ -439,6 +439,18 @@ fn mingw_path(path: &Path) -> Option<PathBuf> {
 /// Windows' `windows-gnu` toolchain brings its own linker, and MinGW-w64 for C and import
 /// libraries ([`MINGW`]).
 pub fn linker() -> Result<(), String> {
+    link(true)
+}
+
+/// The headless build's ([`crate::native_mods::build_server`]): the same check, minus what only
+/// the game links. A server build compiles without the default features, so it links none of
+/// the system's sound or controller libraries and needs no pkg-config to find them: only a C
+/// compiler and the C library's headers.
+pub fn linker_server() -> Result<(), String> {
+    link(false)
+}
+
+fn link(full: bool) -> Result<(), String> {
     let ok = |program: &str, args: &[&str]| {
         Command::new(program)
             .args(args)
@@ -452,19 +464,25 @@ pub fn linker() -> Result<(), String> {
             "Native mods need Apple's Command Line Tools to link the game. Run `xcode-select --install` in Terminal, then build again."
                 .into(),
         ),
-        "linux" => linux_needs(ok, &fs::read_to_string("/etc/os-release").unwrap_or_default()),
+        "linux" => linux_needs(
+            ok,
+            &fs::read_to_string("/etc/os-release").unwrap_or_default(),
+            full,
+        ),
         _ => Ok(()),
     }
 }
 
 /// What a Linux build needs from the system, checked before anything is downloaded: a C compiler
-/// (the linker; `ring` and `hidapi` compile C) with the C library's headers, `pkg-config`, and
-/// the development files of ALSA (`alsa-sys`, sound) and libudev (`libudev-sys` and `hidapi`,
-/// controllers), which those crates look up with it. Desktop distributions ship the libraries but
-/// not these files, and SteamOS has GCC without the C library's headers (`stdint.h` not found in
-/// `ring`, #4770), so a build without them failed minutes in. `ok` runs a check; `os` is
-/// `/etc/os-release`, which picks the install command.
-fn linux_needs(ok: impl Fn(&str, &[&str]) -> bool, os: &str) -> Result<(), String> {
+/// (the linker; `ring` and `hidapi` compile C) with the C library's headers and, for the game
+/// only (`full`), `pkg-config` and the development files of ALSA (`alsa-sys`, sound) and
+/// libudev (`libudev-sys` and `hidapi`, controllers), which those crates look up with it. The
+/// headless server build links none of those (`--no-default-features`, docs/server.md).
+/// Desktop distributions ship the libraries but not these files, and SteamOS has GCC without
+/// the C library's headers (`stdint.h` not found in `ring`, #4770), so a build without them
+/// failed minutes in. `ok` runs a check; `os` is `/etc/os-release`, which picks the install
+/// command.
+fn linux_needs(ok: impl Fn(&str, &[&str]) -> bool, os: &str, full: bool) -> Result<(), String> {
     let cc = ok("cc", &["--version"]);
     // GCC's and Clang's own `stdint.h` include the C library's.
     let headers = [
@@ -475,19 +493,28 @@ fn linux_needs(ok: impl Fn(&str, &[&str]) -> bool, os: &str) -> Result<(), Strin
         "stdint.h",
         "/dev/null",
     ];
-    let pkg_config = ok("pkg-config", &["--version"]);
-    let has = |name: &str| pkg_config && ok("pkg-config", &["--exists", name]);
-    let missing: Vec<&str> = [
+    let mut missing: Vec<&str> = [
         (cc, "a C compiler (cc)"),
         (!cc || ok("cc", &headers), "the C library's headers"),
-        (pkg_config, "pkg-config"),
-        (has("alsa"), "ALSA's development files"),
-        (has("libudev"), "libudev's development files"),
     ]
     .into_iter()
     .filter(|(found, _)| !found)
     .map(|(_, what)| what)
     .collect();
+    if full {
+        let pkg_config = ok("pkg-config", &["--version"]);
+        let has = |name: &str| pkg_config && ok("pkg-config", &["--exists", name]);
+        missing.extend(
+            [
+                (pkg_config, "pkg-config"),
+                (has("alsa"), "ALSA's development files"),
+                (has("libudev"), "libudev's development files"),
+            ]
+            .into_iter()
+            .filter(|(found, _)| !found)
+            .map(|(_, what)| what),
+        );
+    }
     if missing.is_empty() {
         return Ok(());
     }
@@ -503,15 +530,31 @@ fn linux_needs(ok: impl Fn(&str, &[&str]) -> bool, os: &str) -> Result<(), Strin
             .chain(like.split_whitespace())
             .any(|n| names.contains(&n))
     };
-    const APT: &str = "sudo apt install build-essential pkg-config libasound2-dev libudev-dev";
+    let apt = if full {
+        "sudo apt install build-essential pkg-config libasound2-dev libudev-dev"
+    } else {
+        "sudo apt install build-essential"
+    };
     let command = if family(&["debian", "ubuntu"]) {
-        Some(APT)
+        Some(apt)
     } else if family(&["fedora", "rhel"]) {
-        Some("sudo dnf install gcc pkgconf-pkg-config alsa-lib-devel systemd-devel")
+        Some(if full {
+            "sudo dnf install gcc pkgconf-pkg-config alsa-lib-devel systemd-devel"
+        } else {
+            "sudo dnf install gcc glibc-devel"
+        })
     } else if family(&["arch"]) && id != "steamos" {
-        Some("sudo pacman -S --needed base-devel alsa-lib systemd-libs")
+        Some(if full {
+            "sudo pacman -S --needed base-devel alsa-lib systemd-libs"
+        } else {
+            "sudo pacman -S --needed base-devel"
+        })
     } else if family(&["suse", "opensuse"]) {
-        Some("sudo zypper install gcc pkg-config alsa-devel libudev-devel")
+        Some(if full {
+            "sudo zypper install gcc pkg-config alsa-devel libudev-devel"
+        } else {
+            "sudo zypper install gcc glibc-devel"
+        })
     } else {
         None
     };
@@ -526,7 +569,7 @@ fn linux_needs(ok: impl Fn(&str, &[&str]) -> bool, os: &str) -> Result<(), Strin
         }
         _ if id == "steamos" => "SteamOS ships without them and its system is read-only, so native mods can't be built on it yet.".to_owned(),
         Some(command) => format!("Install them in a terminal, then build again:\n{command}"),
-        None => format!("Install them with your distribution's package manager, then build again (on Debian, Ubuntu or Mint: {APT})."),
+        None => format!("Install them with your distribution's package manager, then build again (on Debian, Ubuntu or Mint: {apt})."),
     };
     Err(format!(
         "Native mods need these to build the game on Linux, and this computer lacks them: {}. {how}",
@@ -834,7 +877,7 @@ mod tests {
         let no_dev =
             |program: &str, args: &[&str]| program != "pkg-config" || args[0] != "--exists";
         let mint = "NAME=\"Linux Mint\"\nID=linuxmint\nID_LIKE=\"ubuntu debian\"\n";
-        let e = linux_needs(no_dev, mint).unwrap_err();
+        let e = linux_needs(no_dev, mint, true).unwrap_err();
         assert!(
             e.contains("lacks them: ALSA's development files, libudev's development files."),
             "{e}"
@@ -842,36 +885,49 @@ mod tests {
         assert!(
             e.ends_with("\nsudo apt install build-essential pkg-config libasound2-dev libudev-dev")
         );
+        // The headless server build needs none of those: only a C compiler and its headers.
+        assert_eq!(
+            linux_needs(no_dev, mint, false),
+            Ok(()),
+            "headless links none"
+        );
         // Nothing to check through without pkg-config, and nothing at all on SteamOS.
         let nothing = |_: &str, _: &[&str]| false;
         let deck = "ID=steamos\nID_LIKE=arch\n";
-        let e = linux_needs(nothing, deck).unwrap_err();
+        let e = linux_needs(nothing, deck, true).unwrap_err();
         assert!(e.contains("a C compiler (cc), pkg-config, ALSA's"), "{e}");
         assert!(e.contains("SteamOS") && !e.contains("pacman"), "{e}");
+        // Headless, the same system names only what it lacks: cc and the C library's headers.
+        let e = linux_needs(nothing, deck, false).unwrap_err();
+        assert!(e.contains("lacks them: a C compiler (cc)."), "{e}");
+        assert!(!e.contains("pkg-config") && !e.contains("ALSA"), "{e}");
+        // A C compiler alone is enough for the headless build.
+        let cc_only = |program: &str, _: &[&str]| program == "cc";
+        assert_eq!(linux_needs(cc_only, mint, false), Ok(()));
         // SteamOS 3's GCC runs but finds no `stdint.h` (#4770).
         let headless = |program: &str, args: &[&str]| program != "cc" || args == ["--version"];
-        let e = linux_needs(headless, deck).unwrap_err();
+        let e = linux_needs(headless, deck, false).unwrap_err();
         assert!(
             e.contains("lacks them: the C library's headers. SteamOS"),
             "{e}"
         );
-        let arch = linux_needs(nothing, "ID=endeavouros\nID_LIKE=arch\n").unwrap_err();
+        let arch = linux_needs(nothing, "ID=endeavouros\nID_LIKE=arch\n", true).unwrap_err();
         assert!(arch.contains("pacman -S --needed base-devel"), "{arch}");
-        let fedora = linux_needs(nothing, "ID=fedora\n").unwrap_err();
+        let fedora = linux_needs(nothing, "ID=fedora\n", true).unwrap_err();
         assert!(fedora.contains("dnf install"), "{fedora}");
-        let other = linux_needs(nothing, "ID=gentoo\n").unwrap_err();
+        let other = linux_needs(nothing, "ID=gentoo\n", true).unwrap_err();
         assert!(
             other.contains("package manager") && other.contains("apt install"),
             "{other}"
         );
         // NixOS's packages are in the store: a shell that lists them is the only way in (#5248).
-        let nixos = linux_needs(nothing, "NAME=NixOS\nID=nixos\n").unwrap_err();
+        let nixos = linux_needs(nothing, "NAME=NixOS\nID=nixos\n", true).unwrap_err();
         assert!(nixos.contains("nix-shell"), "{nixos}");
         assert!(
             nixos.contains("lacks them: a C compiler (cc), pkg-config"),
             "{nixos}"
         );
         assert!(!nixos.contains("apt install"), "{nixos}");
-        assert_eq!(linux_needs(|_: &str, _: &[&str]| true, mint), Ok(()));
+        assert_eq!(linux_needs(|_: &str, _: &[&str]| true, mint, true), Ok(()));
     }
 }

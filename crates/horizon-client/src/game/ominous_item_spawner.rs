@@ -21,8 +21,10 @@ const TICKS_SCALING: f32 = 50.0;
 const ROTATION_SPEED: f32 = 40.0;
 
 pub(super) struct OminousItemSpawner {
-    /// The entity id a server tracks it by (0 until it is tracked).
+    /// Its entity id: from the entity counter on the server, the server's on
+    /// a client.
     pub(super) id: u32,
+    /// `DATA_ITEM`; `minecraft:air` stands for `ItemStack.EMPTY`.
     pub(super) item: ItemStack,
     pub(super) position: [f64; 3],
     pub(super) spawn_item_after: i64,
@@ -66,8 +68,9 @@ impl Game<'_> {
         position: [f64; 3],
         delay: i32,
     ) {
+        self.next_entity += 1;
         self.ominous_spawners.push(OminousItemSpawner {
-            id: 0,
+            id: self.next_entity,
             item,
             position,
             spawn_item_after: i64::from(delay),
@@ -84,8 +87,9 @@ impl Game<'_> {
         else {
             return;
         };
+        self.next_entity += 1;
         self.ominous_spawners.push(OminousItemSpawner {
-            id: 0,
+            id: self.next_entity,
             item,
             position: [at.x, at.y, at.z],
             spawn_item_after,
@@ -154,6 +158,10 @@ impl Game<'_> {
     /// `spawnItem`: a projectile shot down, or an item entity; level event
     /// 3021 and the entity_place game event.
     fn spawn_ominous_item(&mut self, s: &OminousItemSpawner) {
+        // An empty item spawns nothing, and no event marks it.
+        if &*s.item.item == "minecraft:air" {
+            return;
+        }
         let at = block(s.position);
         let p = s.position;
         match projectile(&s.item.item) {

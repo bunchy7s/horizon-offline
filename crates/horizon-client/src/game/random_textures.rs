@@ -1,5 +1,6 @@
 //! OptiFine random entity textures: each mob's variants, chosen when this window first sees it
-//! and checked again once a second (`horizon_client::mobs::random_textures`).
+//! and checked again once a second, counted in this window's ticks so a frozen world still
+//! checks (`horizon_client::mobs::random_textures`).
 
 use super::Game;
 use horizon_client::mobs::random_textures::{Seen, choose, seed};
@@ -17,15 +18,16 @@ impl Game<'_> {
         if textures.is_empty() {
             return;
         }
-        let tick = self.world.game_time;
         for i in 0..self.mobs.len() {
-            let m = &self.mobs[i];
-            if !m.random_textures.due(tick, m.id) {
+            let m = &mut self.mobs[i];
+            let id = m.id;
+            if !m.random_textures.due(&textures, id) {
                 continue;
             }
-            let seed = seed(m, self.persist.uuids.get(&m.id).copied());
+            let m = &self.mobs[i];
+            let seed = seed(m, self.persist.uuids.get(&id).copied());
             let seen = (!m.random_textures.has_seen()).then(|| self.seen_at(m.position));
-            choose(&mut self.mobs[i], &textures, seen, seed);
+            choose(&mut self.mobs[i], &textures, res.mob_data(), seen, seed);
         }
     }
 

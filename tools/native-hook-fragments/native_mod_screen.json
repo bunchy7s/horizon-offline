@@ -1,5 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "a native mod's own screen (`native_mod_screen_open`, `native_mod_screen_close`,\n`native_mod_screen`) and two drawing helpers for the screen hooks (`native_quad`,\n`native_item_model`).",
-  "doc_summary": "a screen of a client mod's own: `native_mod_screen_open(mod_id)` opens one over the world (every mod's own screen has the `NativeScreenView.id` `mod`: check `native_mod_screen()` is yours; it doesn't pause a single-player game; it opens only on the window's own client, over the world with no overlay up; a gamepad can close it but not click on it), the screen hooks fire over it as over any other, so the mod draws it in `native_screen_render_post` and takes its clicks, scroll, keys and typing from them, and Escape closes it (`native_mod_screen()` says whose is open, `native_mod_screen_close(mod_id)` closes it); and two drawing helpers beside `native_fill`: `native_quad(batch, points, argb)` and `native_item_model(batch, item, model, at, size)`, an icon drawn with another `item_model`. Bundles need `\"hooks\": @API:native_mod_screen@`."
-}

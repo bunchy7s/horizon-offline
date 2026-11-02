@@ -9,7 +9,7 @@ use crate::{
     text::{Text, format_translation},
     ui,
 };
-use horizon_assets::item_model::{DisplayContext, NoEnv};
+use horizon_assets::item_model::{DisplayContext, ItemEnv};
 use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{collections::BTreeSet, path::Path};
@@ -293,7 +293,7 @@ impl State {
         if index < self.settings.layers.len() {
             self.settings.layers.remove(index);
         }
-        self.selected = None;
+        self.selected = selection_after_removal(row, self.settings.layers.len());
     }
     /// PresetFlatWorldScreen's Select: parse the share text into the settings
     /// the Create New World screen keeps.
@@ -889,6 +889,26 @@ fn draw_presets(
     );
 }
 
+/// The item environment of the layer icons: only the grass colormap is needed
+/// (`minecraft:grass` tint of the grass block), as the inventory draws it.
+struct GrassEnv<'a>(&'a ItemRenderer);
+impl ItemEnv for GrassEnv<'_> {
+    fn grass_color(&self, temperature: f64, downfall: f64) -> i32 {
+        self.0.grass_color(temperature, downfall)
+    }
+}
+/// A layer's item model for the GUI, with the grass colormap in its environment.
+fn layer_state(renderer: &ItemRenderer, id: &str) -> ItemRenderState {
+    let stack = ItemStack::new(&layer_item(id), 1);
+    renderer.resolve(
+        &item_render::stack_view(&stack),
+        DisplayContext::Gui,
+        None,
+        None,
+        0,
+        &GrassEnv(renderer),
+    )
+}
 /// The 18x18 slot behind a layer's item icon (`container/slot`), then the item
 /// (`GuiGraphics.renderItem`): its GUI model, so a block shows as the isometric
 /// block. Without item models, or for an id with none, the flat sprite stands in.
@@ -908,15 +928,7 @@ fn slot(
         batch.fill(atlas, x + 1.0, y + 1.0, 16.0, 16.0, rgba(55, 55, 55, 255));
     }
     if let Some(renderer) = items {
-        let stack = ItemStack::new(&layer_item(id), 1);
-        let state = renderer.resolve(
-            &item_render::stack_view(&stack),
-            DisplayContext::Gui,
-            None,
-            None,
-            0,
-            &NoEnv,
-        );
+        let state = layer_state(renderer, id);
         if !state.is_empty() {
             pending.push((state, x + 1.0, y + 1.0));
             return;
@@ -1013,9 +1025,51 @@ fn pretty(name: &str) -> String {
         .join(" ")
 }
 
+/// `CreateFlatWorldScreen.DetailsList.deleteLayer`: after a row is removed the
+/// same row stays selected, or the last one when the removed row was the last
+/// of the list. An empty list selects nothing.
+pub(super) fn selection_after_removal(row: usize, remaining: usize) -> Option<usize> {
+    (remaining > 0).then(|| row.min(remaining - 1))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::layer_item;
+    use super::{layer_item, selection_after_removal};
+    use crate::item_render::ItemRenderer;
+    use std::path::Path;
+
+    /// Vanilla keeps the deleted row's position selected: the layer that slid
+    /// into it, or the new last row when the last one was deleted, and nothing
+    /// when the list is empty.
+    #[test]
+    fn deleting_a_layer_keeps_the_selection_in_place() {
+        assert_eq!(selection_after_removal(0, 3), Some(0));
+        assert_eq!(selection_after_removal(2, 3), Some(2));
+        assert_eq!(selection_after_removal(3, 3), Some(2), "the last row");
+        assert_eq!(selection_after_removal(0, 0), None, "nothing left");
+    }
+
+    /// The grass block icon of a Superflat layer is tinted by the grass
+    /// colormap (`minecraft:grass` tint source), not the missing-tint magenta.
+    #[test]
+    fn the_grass_block_layer_icon_is_tinted_by_the_colormap() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-models.json").exists() {
+            return;
+        }
+        let renderer = ItemRenderer::load(&root).unwrap();
+        let tinted: Vec<i32> = super::layer_state(&renderer, "minecraft:grass_block")
+            .layers
+            .iter()
+            .flat_map(|layer| layer.tints.clone())
+            .collect();
+        assert!(
+            !tinted.is_empty() && !tinted.contains(&-65281),
+            "{tinted:?}"
+        );
+    }
 
     #[test]
     fn a_layer_shows_the_item_of_its_block() {

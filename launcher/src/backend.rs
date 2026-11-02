@@ -141,7 +141,7 @@ pub(crate) const CLIENT: &str = if cfg!(windows) {
 
 /// The agent `url` is fetched with: the launcher's own user agent, through the player's proxy when
 /// one is set (`proxy`).
-fn agent(url: &str) -> ureq::Agent {
+pub(crate) fn agent(url: &str) -> ureq::Agent {
     crate::proxy::agent(
         ureq::AgentBuilder::new()
             .user_agent(&format!("horizon-launcher/{VERSION}"))
@@ -175,7 +175,10 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
         }
     }
     request.call().map_err(|e| match e {
-        ureq::Error::Status(403, _) => {
+        ureq::Error::Status(code, r)
+            if url.starts_with("https://api.github.com/")
+                && crate::github::rate_limited(code, |h| r.header(h).map(str::to_owned)) =>
+        {
             "GitHub's rate limit was reached. Try again in a few minutes.".into()
         }
         ureq::Error::Status(code, _) => format!("{url} answered {code}"),
@@ -311,10 +314,12 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     release_order(a).cmp(&release_order(b))
 }
 
-/// Every published release of the repository, both kinds, as GitHub's JSON.
+/// Every published release of the repository, both kinds, as GitHub's JSON (kept on disk with its
+/// ETag, and read through Kira's mirror past GitHub's rate limit: [`crate::github`]).
 fn release_list() -> Result<serde_json::Value, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100");
-    get(&url)?.into_json().map_err(|e| e.to_string())
+    crate::github::json(&format!(
+        "https://api.github.com/repos/{REPO}/releases?per_page=100"
+    ))
 }
 
 /// The releases in `list` whose tag passes `keep`, newest first, with the asset named `asset`.
@@ -391,9 +396,7 @@ pub(crate) fn game_releases(list: &serde_json::Value) -> Vec<Release> {
 /// `launcher@` and `launcher-v` tags are looked up one by one (a draft's tag is skipped: it has no
 /// public release).
 fn launcher_releases_in(list: &serde_json::Value) -> Vec<Release> {
-    launcher_releases_in_with(list, |url| {
-        get(&url)?.into_json().map_err(|e| e.to_string())
-    })
+    launcher_releases_in_with(list, |url| crate::github::json(&url))
 }
 
 fn launcher_releases_in_with(
@@ -555,15 +558,22 @@ fn ascii(path: &Path) -> bool {
     path.as_os_str().to_str().is_some_and(str::is_ascii)
 }
 
+/// `path` as Windows' MinGW-w64 tools can take it: [`ascii`], and on Windows without a space.
+/// `windres` hands its include folders to the preprocessor unquoted, so a user name with a space
+/// in %APPDATA% splits there ("cc1.exe: fatal error: v\: No such file or directory").
+fn tool_safe(path: &Path) -> bool {
+    ascii(path) && !(cfg!(windows) && path.as_os_str().to_str().is_some_and(|p| p.contains(' ')))
+}
+
 /// Where builds happen — the Rust toolchain, its Cargo home and `native_mods::root` — as a
 /// path every build tool can read: `data_dir()` resolved, so the tools are never handed a
 /// link (horizon-mixins refuses one, and macOS's /tmp is one). On Windows, when the resolved
-/// path isn't [`ascii`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
+/// path isn't [`tool_safe`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
 pub fn build_dir() -> PathBuf {
     let data = data_dir();
     let _ = fs::create_dir_all(&data);
     let real = data.canonicalize().map(plain).unwrap_or(data);
-    if ascii(&real) {
+    if tool_safe(&real) {
         return real;
     }
     #[cfg(windows)]
@@ -572,18 +582,31 @@ pub fn build_dir() -> PathBuf {
     real
 }
 
-/// [`build_dir`] when `real` isn't [`ascii`]: the folder's own short (8.3) name where the
-/// volume keeps one — the same files, spelled in ASCII — else a folder of ProgramData's,
-/// named for the path so each user's is its own and can be created there.
+/// [`build_dir`] when `real` isn't [`tool_safe`]: [`ascii_build_dir`], a real folder of
+/// ProgramData's. Only when it can't be created, the data folder's short (8.3) name.
+///
+/// The short name came first until #6009, and wasn't enough: it is only another spelling of the
+/// same folder, and rustc canonicalizes its own path to find its sysroot, which spells the long,
+/// Cyrillic name again and hands it to the linker (`x86_64-w64-mingw32-gcc`: "No such file or
+/// directory" on `C:/Users/\xca\xe8…`). A folder whose real name is ASCII stays ASCII however a
+/// tool resolves it.
 #[cfg(windows)]
 fn windows_build_dir(real: &Path) -> PathBuf {
-    use sha2::{Digest, Sha256};
-    if let Some(short) = short_path(real).filter(|p| ascii(p)) {
-        return short;
+    let dir = ascii_build_dir(real, std::env::var_os("ProgramData").map(PathBuf::from));
+    if fs::create_dir_all(&dir).is_ok() {
+        return dir;
     }
-    let public = std::env::var_os("ProgramData")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute() && ascii(p))
+    short_path(real).filter(|p| tool_safe(p)).unwrap_or(dir)
+}
+
+/// The build folder for a data folder `real` whose path isn't [`ascii`]: in `program_data`
+/// (`%ProgramData%`, `C:\ProgramData` when unset, relative or not ASCII), which every user may
+/// create folders in, named for `real` so each user's is their own.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ascii_build_dir(real: &Path, program_data: Option<PathBuf>) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let public = program_data
+        .filter(|p| p.is_absolute() && tool_safe(p))
         .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
     let key = Sha256::digest(real.as_os_str().as_encoded_bytes());
     let key: String = key[..4].iter().map(|b| format!("{b:02x}")).collect();
@@ -806,8 +829,7 @@ pub(crate) fn install_as(
     fs::rename(&top, &target).map_err(|e| e.to_string())?;
     fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
-    reuse_prepared(&root, tag);
-    complete_assets(tag);
+    reuse_prepared_for(tag);
     progress(1.0);
     Ok(())
 }
@@ -1088,12 +1110,19 @@ fn files_under(dir: &Path, relative: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_dir_except(from, to, None)
+}
+
+/// Copy a folder, leaving out one directory when given.
+pub(crate) fn copy_dir_except(from: &Path, to: &Path, skip: Option<&Path>) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
+            if Some(entry.path().as_path()) != skip {
+                copy_dir_except(&entry.path(), &target, skip)?;
+            }
         } else {
             horizon_prepare::clone_or_copy(&entry.path(), &target)?;
         }
@@ -1145,6 +1174,13 @@ fn reuse_prepared(versions: &Path, tag: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// What an install does once its folder is in place (an imported build's too, `build_import`):
+/// another installed version's resources if it has none, and whatever its resources lack.
+pub(crate) fn reuse_prepared_for(tag: &str) {
+    reuse_prepared(&versions_dir(), tag);
+    complete_assets(tag);
 }
 
 /// `reuse_prepared` for every installed version that is not prepared, oldest first, so a
@@ -1447,7 +1483,9 @@ fn download_for_owner(
         account::store(),
         &mut accounts,
     );
-    let _ = accounts.save();
+    if let Err(e) = accounts.save() {
+        log(format!("Horizon: the accounts are not saved: {e}"));
+    }
     download_for(pins, dir, pass, !accounts.accounts.is_empty(), fetch, log)
 }
 
@@ -2279,7 +2317,7 @@ pub fn remove_version(tag: &str) -> Result<(), String> {
     let mut settings = Settings::load();
     if settings.selected.as_deref() == Some(tag) {
         settings.selected = installed().first().cloned();
-        settings.save();
+        settings.save()?;
     }
     Ok(())
 }
@@ -2591,11 +2629,13 @@ pub fn check_updates() -> Result<Updates, String> {
 /// Whether a version installed as an update becomes the selected one: when the player had none,
 /// was on a Nightly, or on the newest installed release (so a player of the release channel moves
 /// to the Nightly at the first check, docs/release-flow.md). An older release picked by hand
-/// stays; an instance pinned to a version keeps it either way.
+/// stays, and so does an imported build (`build_import`); an instance pinned to a version keeps it
+/// either way.
 pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) -> bool {
     match selected {
         None => true,
         Some(s) if crate::nightly::date_of(s).is_some() => true,
+        Some(s) if crate::build_import::is_imported(s) => false,
         Some(s) => installed_before
             .iter()
             .find(|t| is_game_tag(t))
@@ -2626,7 +2666,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
     let mut settings = Settings::load();
     if !as_update || select_after_update(settings.selected.as_deref(), &before) {
         settings.selected = Some(release.tag.clone());
-        settings.save();
+        settings.save()?;
     }
     if as_update && release.nightly.is_some() {
         crate::nightly::after_update(&release.tag);
@@ -2922,6 +2962,9 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
             exe_path().display()
         )
     })?;
+    // An installed launcher's Uninstall entry names the new version (installer.rs).
+    #[cfg(windows)]
+    crate::installer::after_update(launcher_version(&release.tag).unwrap_or(VERSION));
     let _ = fs::remove_dir_all(&work);
     progress(1.0);
     Ok(())
@@ -3083,6 +3126,8 @@ pub enum Msg {
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
+    /// An imported game build is installed (`build_import::import`): its version, or why not.
+    Imported(Result<String, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.
@@ -3284,8 +3329,11 @@ pub struct Settings {
     /// Native mods are always on: an older file's `native_mods` switch is ignored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
-    /// Native builds compile with the release profile (`native_mods::Profile`) instead of `fast`:
-    /// slower to build, slightly faster game.
+    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the
+    /// default, or the release's own while `native_release` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_profile: Option<crate::native_mods::Profile>,
+    /// An older file's switch for the release profile, read when `native_profile` is unset.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_release: bool,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
@@ -3352,12 +3400,25 @@ impl Settings {
     pub fn keep_newest(&self) -> usize {
         self.keep_versions.unwrap_or(KEEP_NEWEST).max(1)
     }
-    pub fn save(&self) {
-        let _ = fs::create_dir_all(data_dir());
-        let _ = fs::write(
-            data_dir().join("settings.json"),
-            serde_json::to_string_pretty(self).unwrap(),
-        );
+    pub fn save(&self) -> Result<(), String> {
+        // The window and background jobs share the process's temporary file.
+        static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A write that stops halfway leaves settings.json unreadable, and `load` answers
+        // defaults for it: the file is replaced only once it is whole.
+        let dir = data_dir();
+        let path = dir.join("settings.json");
+        let tmp = dir.join(format!("settings.{}.tmp", std::process::id()));
+        let json =
+            serde_json::to_vec_pretty(self).map_err(|e| format!("{}: {e}", path.display()))?;
+        let written = fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(&tmp, json))
+            .and_then(|()| fs::rename(&tmp, &path));
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("{}: {e}", path.display()));
+        }
+        Ok(())
     }
 }
 
@@ -3407,6 +3468,10 @@ mod tests {
             r"C:\Users\Кириченко Павло\AppData\Roaming\horizon-launcher"
         )));
         assert!(!ascii(Path::new("/høme/me/horizon-launcher")));
+        // A space splits windres' include folders, which matters on Windows only.
+        let spaced = Path::new(r"C:\Users\Jane Doe\AppData\Roaming\horizon-launcher");
+        assert!(ascii(spaced));
+        assert_eq!(tool_safe(spaced), !cfg!(windows));
         let built = build_dir();
         assert!(ascii(&built) || cfg!(windows), "{}", built.display());
         // Resolved: the build never sees a link in the path (where the answer is the data
@@ -3419,6 +3484,33 @@ mod tests {
                     .map(plain)
                     .unwrap_or_else(|_| built.clone())
             );
+        }
+    }
+
+    /// [#6009](https://github.com/horizon-rust/horizon/issues/6009): with a Cyrillic user name the
+    /// build folder is a real ASCII folder of ProgramData's (not a short name of the data folder,
+    /// which rustc resolves back to the Cyrillic one), its own for each data folder.
+    #[test]
+    fn a_cyrillic_data_folder_builds_in_an_ascii_folder_of_its_own() {
+        let pavlo = Path::new(r"C:\Users\Кириченко Павло\AppData\Roaming\horizon-launcher");
+        let other = Path::new(r"C:\Users\Олена\AppData\Roaming\horizon-launcher");
+        let public = PathBuf::from(if cfg!(windows) { r"D:\Data" } else { "/data" });
+        let dir = ascii_build_dir(pavlo, Some(public.clone()));
+        assert!(ascii(&dir), "{}", dir.display());
+        assert_eq!(dir.parent(), Some(public.as_path()));
+        let name = dir.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("horizon-launcher-") && name.len() == 25,
+            "{name}"
+        );
+        assert_eq!(dir, ascii_build_dir(pavlo, Some(public.clone())), "stable");
+        assert_ne!(dir, ascii_build_dir(other, Some(public)), "one per user");
+        // %ProgramData% unset, relative or itself not ASCII: C:\ProgramData.
+        let default = PathBuf::from(r"C:\ProgramData");
+        for pd in [None, Some("ProgramData".into()), Some(r"C:\Дані".into())] {
+            let dir = ascii_build_dir(pavlo, pd);
+            assert_eq!(dir.parent(), Some(default.as_path()));
+            assert!(ascii(&dir));
         }
     }
 
@@ -4276,6 +4368,10 @@ pub fn {f}("
         assert!(select_after_update(Some("v2026.10.12"), &installed));
         assert!(!select_after_update(Some("v2026.10.1"), &installed));
         assert!(select_after_update(None, &installed));
+        assert!(!select_after_update(
+            Some("imported-2026-11-01-abcdef0"),
+            &["imported-2026-11-01-abcdef0".to_string()]
+        ));
     }
 
     /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the

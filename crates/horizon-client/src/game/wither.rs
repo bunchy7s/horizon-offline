@@ -228,7 +228,16 @@ impl Game<'_> {
         self.combat.explosion_in_water = p.touching_water;
         // The blast's source names a player owner, for the dragon's kill credit.
         self.set_blast_by_player(live_owner == Some(Who::Player));
+        // WitherSkull.getBlockExplosionResistance: only a blue skull's blast
+        // caps a destroyable block's resistance at 0.8 (`isDangerous`).
+        if matches!(
+            p.kind,
+            horizon_client::projectiles::ProjectileKind::WitherSkull { dangerous: true }
+        ) {
+            self.combat.blast_resistance_cap = Some(0.8);
+        }
         let result = self.with_hive_emptying_blast(|g| g.explode(at, 1.0));
+        self.combat.blast_resistance_cap = None;
         self.set_blast_by_player(false);
         self.combat.explosion_owner = None;
         self.combat.explosion_in_water = false;
@@ -240,7 +249,7 @@ impl Game<'_> {
         match owner {
             Some(Who::Mob(id)) => {
                 if let Some(w) = self.mobs.iter_mut().find(|m| m.id == id && m.alive()) {
-                    w.health = (w.health + 5.0).min(w.attrs.max_health);
+                    w.heal(5.0);
                 }
             }
             // The player (or the guest acting now) who owns the skull.

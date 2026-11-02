@@ -4,6 +4,7 @@
 //! column's status (`ChunkLevel.generationStatus`). The chunk itself and the
 //! two rings around it are level chunks with their light, the third ring has
 //! its features and the fourth only its terrain.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,

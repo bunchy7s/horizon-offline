@@ -43,6 +43,29 @@ fn projectile_slot(
         })
 }
 
+/// `CrossbowItem.onUseTick`'s loading sounds for a charge now at `charge`
+/// (of `getChargeDuration`) that has played `played` so far: the start and
+/// middle sounds each play once the charge reaches their point, and both
+/// count as unheard again while the charge is under the first one. A tick
+/// that jumped the charge past a point still plays that point's sound, as
+/// vanilla's two flags do. Returns the flags for the next tick and the
+/// sounds to play now.
+fn charge_sounds(
+    charge: f32,
+    played: [bool; 2],
+    sounds: [&'static str; 3],
+) -> ([bool; 2], Option<&'static str>, Option<&'static str>) {
+    let mut played = if charge < 0.2 { [false; 2] } else { played };
+    let mut play = [None; 2];
+    for (i, point) in [0.2, 0.5].into_iter().enumerate() {
+        if charge >= point && !played[i] && !sounds[i].is_empty() {
+            played[i] = true;
+            play[i] = Some(sounds[i]);
+        }
+    }
+    (played, play[0], play[1])
+}
+
 impl Game<'_> {
     pub(super) fn charge_ticks(stack: &ItemStack) -> u32 {
         // crossbow_charge_time: 1.25 s, minus 0.25 s per Quick Charge level.
@@ -96,20 +119,23 @@ impl Game<'_> {
     }
     /// `CrossbowItem.onUseTick` for the charge in progress.
     pub(super) fn tick_crossbow(&mut self, slot: usize, ticks: u32, stack: &ItemStack) {
-        let ticks = ticks + 1;
-        self.using = Some((slot, ticks));
+        // getUseDuration - the ticks left, as a mod's Start or Tick left them.
+        let held = self.ticks_held(stack, ticks);
+        self.using = Some((slot, ticks + 1));
         let charge = Self::charge_ticks(stack).max(1) as f32;
-        let (before, now) = ((ticks - 1) as f32 / charge, ticks as f32 / charge);
+        let now = (held + 1) as f32 / charge;
         let sounds = Self::charging_sounds(stack);
         let at = self
             .player
             .as_ref()
             .map(|p| [p.position.x, p.position.y, p.position.z]);
-        if before < 0.2 && now >= 0.2 && !sounds[0].is_empty() {
-            self.audio.play(sounds[0], at, 0.5, 1.0);
+        let (played, start, middle) = charge_sounds(now, self.crossbow_sounds, sounds);
+        self.crossbow_sounds = played;
+        if let Some(sound) = start {
+            self.audio.play(sound, at, 0.5, 1.0);
         }
-        if before < 0.5 && now >= 0.5 && !sounds[1].is_empty() {
-            self.audio.play(sounds[1], at, 0.5, 1.0);
+        if let Some(sound) = middle {
+            self.audio.play(sound, at, 0.5, 1.0);
         }
         let charged = stack.data().is_some_and(|d| !d.charged.is_empty());
         if now >= 1.0 && !charged {
@@ -229,6 +255,12 @@ impl Game<'_> {
                 }
                 arrow.shoot(&mut self.world.random, dir.to_array(), power, 1.0);
                 self.add_projectile(arrow);
+                let (player, name, projectile) = (
+                    horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid()),
+                    self.acting_player_name().to_owned(),
+                    self.next_entity,
+                );
+                self.native_entity_shoot_bow(player, &name, projectile, power as f32);
             }
             self.player_projectile_shot();
             let pitch = if index == 0 {
@@ -252,6 +284,44 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A charge that crosses a point between two ticks plays that point's
+    /// sound, and one a mod's tick jumps over (`native_living_entity_use_item_tick`
+    /// cutting the ticks left) still plays every point it passed, as
+    /// `CrossbowItem.onUseTick`'s two flags do.
+    #[test]
+    fn a_jumped_charge_still_plays_the_loading_sounds_it_passed() {
+        let sounds = [
+            "minecraft:item.crossbow.loading_start",
+            "minecraft:item.crossbow.loading_middle",
+            "minecraft:item.crossbow.loading_end",
+        ];
+        // Each step: the charge and the sounds it plays, from the flags the
+        // step before left.
+        let mut played = [false; 2];
+        let mut step = |charge: f32| {
+            let (next, start, middle) = charge_sounds(charge, played, sounds);
+            played = next;
+            [start, middle]
+        };
+        assert_eq!(step(0.1), [None, None]);
+        assert_eq!(step(0.25), [Some(sounds[0]), None]);
+        assert_eq!(step(0.25), [None, None]);
+        assert_eq!(step(0.55), [None, Some(sounds[1])]);
+        assert_eq!(step(1.0), [None, None]);
+        // A charge below the first point is a new charge: both sound again.
+        assert_eq!(step(0.1), [None, None]);
+        assert_eq!(step(0.6), [Some(sounds[0]), Some(sounds[1])]);
+        // One tick from the start past every point, as a mod's tick makes it.
+        assert_eq!(step(0.1), [None, None]);
+        assert_eq!(step(0.9), [Some(sounds[0]), Some(sounds[1])]);
+        // Quick Charge 1 and up have no middle sound.
+        let quick = [sounds[0], "", sounds[2]];
+        assert_eq!(
+            charge_sounds(0.9, [false; 2], quick),
+            ([true, false], Some(sounds[0]), None)
+        );
+    }
 
     #[test]
     fn held_projectiles_come_before_the_inventory() {

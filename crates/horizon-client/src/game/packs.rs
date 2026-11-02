@@ -188,10 +188,7 @@ impl Game<'_> {
         // until those resources exist, then apply the latest selection once.
         // A reload already under its overlay finishes first (vanilla's
         // `pendingReload`, which `runTick` starts once the overlay is gone).
-        if reload_waits(
-            self.rest_loader.is_some() || self.world_loader.is_some(),
-            self.pack_reload.is_some(),
-        ) {
+        if reload_waits(self.rest_loader.is_some(), self.pack_reload.is_some()) {
             self.pending_pack_reload = true;
             return;
         }
@@ -299,6 +296,10 @@ impl Game<'_> {
             pack,
             textures,
             cem,
+            block_entity_shapes,
+            sounds,
+            ui_metadata,
+            language,
         } = staged;
         // Keep the working GPU resources, and hand its window surface over.
         if let Some(renderer) = &mut self.renderer {
@@ -372,7 +373,12 @@ impl Game<'_> {
             .cem
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = cem;
-        // The random entity textures the new atlas packs: every mob chooses again.
+        self.res
+            .block_entity_render()
+            .set_shapes(block_entity_shapes);
+        // The random entity textures and emissive overlays the new atlas packs. A new scan is
+        // a new generation:
+        // every mob (every splitscreen player's too) chooses again on its next tick.
         *self
             .res
             .mob_data()
@@ -380,13 +386,29 @@ impl Game<'_> {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             std::mem::take(&mut self.gui.atlas.random_textures);
-        for m in &mut self.mobs {
-            m.random_textures.forget_picks();
-        }
-        horizon_client::ui::load_metadata(&root);
-        lang::set(lang::Language::load(&[&root], &lang::code()));
+        *self
+            .res
+            .mob_data()
+            .emissive
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = self.gui.atlas.emissive.clone();
+        *self
+            .res
+            .mob_data()
+            .blinks
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            std::mem::take(&mut self.gui.atlas.blinks);
+        horizon_client::ui::set_metadata(ui_metadata);
+        // Read with the language in use when the reload started: one picked since then wins.
+        let code = lang::code();
+        lang::set(if language.code == code {
+            language
+        } else {
+            lang::Language::load(&[&root], &code)
+        });
         self.refresh_remote_language();
-        self.audio.reload(&root);
+        self.audio.reload_with(&root, sounds);
         self.clear_lod();
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
@@ -439,11 +461,30 @@ pub(super) fn stage_pack(
     progress.set(1);
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
-    let (render, atlas, panorama) = std::thread::scope(|s| {
-        let atlas =
-            s.spawn(|| HudAtlas::build_over(&root, vanilla_root).map_err(|e| e.to_string()));
-        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root));
-        (assets.reload(&root), atlas.join(), panorama.join())
+    let mod_image = !horizon_client::mod_api::mods().is_empty();
+    // The sound events, the GUI sprites' metadata and the language are read here too, not in
+    // the frame that applies the reload (about 20 ms of it).
+    let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {
+        let atlas = s.spawn(|| {
+            HudAtlas::build_over_with_image(&root, vanilla_root, mod_image)
+                .map_err(|e| e.to_string())
+        });
+        let panorama = s.spawn(|| horizon_client::gfx::panorama::Faces::load(&root, vanilla_root));
+        let small = s.spawn(|| {
+            (
+                horizon_client::sound_events::SoundRegistry::load(&root),
+                horizon_client::ui::read_metadata(&root),
+                lang::Language::load(&[&root], &lang::code()),
+            )
+        });
+        (
+            assets.reload(&root),
+            atlas.join(),
+            panorama.join(),
+            small
+                .join()
+                .unwrap_or_else(|p| std::panic::resume_unwind(p)),
+        )
     });
     let render = Arc::new(render?);
     let mut atlas = atlas.unwrap_or_else(|p| std::panic::resume_unwind(p))?;
@@ -467,6 +508,7 @@ pub(super) fn stage_pack(
         &root,
         res.mob_types(),
     ));
+    let block_entity_shapes = res.block_entity_render().shapes_for(&root);
     progress.set(3);
     Ok(StagedPack {
         root,
@@ -474,6 +516,10 @@ pub(super) fn stage_pack(
         pack,
         textures,
         cem,
+        block_entity_shapes,
+        sounds,
+        ui_metadata,
+        language,
     })
 }
 
@@ -486,6 +532,12 @@ pub(super) struct StagedPack {
     pub textures: PreparedTextures,
     /// The packs' custom entity models (OptiFine CEM).
     pub cem: Arc<horizon_client::mobs::cem::CemModels>,
+    /// The block entities' models, the packs' custom entity models over vanilla's.
+    pub block_entity_shapes: Arc<horizon_client::block_entity_render::BlockEntityShapes>,
+    /// The root's sound events, GUI sprite metadata and current language.
+    pub sounds: horizon_client::sound_events::SoundRegistry,
+    pub ui_metadata: horizon_client::ui::UiMetadata,
+    pub language: lang::Language,
 }
 
 /// `LoadingOverlay`'s stage lines for a pack reload, indexed by `progress`.

@@ -34,6 +34,44 @@ pub struct ContentMod {
     pub content: Content,
 }
 
+/// Leaves out a mod with an item whose `crafting_remainder` names an item the mod does not have:
+/// a file item that named a code-declared one the declaration check then refused. Left in, the
+/// overlay would fail on it and no content mod at all would load. Returns what was left out.
+pub fn drop_dangling_remainders(mods: &mut Vec<ContentMod>) -> Vec<String> {
+    let mut dropped = Vec::new();
+    mods.retain(|m| {
+        // The mod's items and its blocks that have an item (`Content::read`'s own rule).
+        let ids: BTreeSet<&str> = m
+            .content
+            .items
+            .iter()
+            .map(|i| i.id.as_str())
+            .chain(
+                m.content
+                    .blocks
+                    .iter()
+                    .filter(|b| b.item)
+                    .map(|b| b.id.as_str()),
+            )
+            .collect();
+        let dangling = m.content.items.iter().find(|i| {
+            i.crafting_remainder
+                .as_deref()
+                .is_some_and(|r| !r.starts_with("minecraft:") && !ids.contains(r))
+        });
+        if let Some(item) = dangling {
+            dropped.push(format!(
+                "mod {} content not loaded: {}: crafting_remainder {:?} is not one of its items",
+                m.id,
+                item.id,
+                item.crafting_remainder.as_deref().unwrap_or_default()
+            ));
+        }
+        dangling.is_none()
+    });
+    dropped
+}
+
 /// The mods' mob effects in registry order: by id, as items are. Their
 /// network ids follow vanilla's in this order.
 pub fn mob_effects(mods: &[ContentMod]) -> Vec<&MobEffect> {
@@ -225,6 +263,10 @@ struct Rename {
     /// template state moves to the first of them, which is the one every
     /// declared property is at its default for.
     fanout: u32,
+    /// The lookup from a template state and a declared combination to the state's row, as an
+    /// offset from `first`: `rows[template offset * fanout + combination]`, laid out as vanilla
+    /// does (`state_order`). Empty: the template's states times the combinations, in that order.
+    rows: Vec<u32>,
 }
 impl Rename {
     fn new(from: &str, to: &str) -> Self {
@@ -234,6 +276,7 @@ impl Rename {
             states: 0..0,
             first: 0,
             fanout: 1,
+            rows: Vec::new(),
         }
     }
     /// The id itself, `Block{id}`, and `block.<ns>.<path>` / `item.<ns>.<path>` keys.
@@ -252,11 +295,98 @@ impl Rename {
         }
         None
     }
+    /// The row of a template state's `combination`, as an offset from `first`.
+    fn row(&self, at: u32, combination: u32) -> u32 {
+        let index = at * self.fanout + combination;
+        self.rows.get(index as usize).copied().unwrap_or(index)
+    }
+    /// Where a template state moves: its combination with every declared property at its default.
     fn id(&self, id: u32) -> Option<u32> {
         self.states
             .contains(&id)
-            .then(|| self.first + (id - self.states.start) * self.fanout)
+            .then(|| self.first + self.row(id - self.states.start, 0))
     }
+}
+
+/// A template's own state properties, sorted by name, each with how many values it takes across
+/// the template's `states`: how `StateTable::new` reads them back, the first name slowest.
+fn template_properties<'a>(
+    states: &Range<u32>,
+    properties: impl Fn(u32) -> Option<&'a J>,
+) -> Vec<(String, u32)> {
+    let Some(J::Obj(own)) = states.clone().next().and_then(&properties) else {
+        return Vec::new();
+    };
+    let mut names: Vec<&str> = own.iter().map(|(k, _)| k.as_str()).collect();
+    names.sort_unstable();
+    let mut out = Vec::new();
+    for name in names {
+        let mut seen: Vec<&J> = Vec::new();
+        for id in states.clone() {
+            if let Some(v) = properties(id).and_then(|p| p.get(name))
+                && !seen.contains(&v)
+            {
+                seen.push(v);
+            }
+        }
+        out.push((name.to_owned(), (seen.len() as u32).max(1)));
+    }
+    out
+}
+
+/// A block's states: in vanilla's order when the template's own properties multiply out to its
+/// states (every vanilla block's do), else the template's states times the combinations.
+fn block_order<'a>(
+    states: &Range<u32>,
+    properties: impl Fn(u32) -> Option<&'a J>,
+    declared: &[(String, u32)],
+    combinations: u32,
+) -> Vec<(u32, u32)> {
+    let template = template_properties(states, properties);
+    if template.iter().map(|p| p.1).product::<u32>() == states.len() as u32 {
+        return state_order(&template, declared);
+    }
+    (0..states.len() as u32)
+        .flat_map(|state| (0..combinations).map(move |combo| (state, combo)))
+        .collect()
+}
+
+/// The states of a block in vanilla's order (`StateDefinition`): every property, the template's
+/// and the declared ones, sorted by name, the first name varying slowest. Each entry is a
+/// template state's offset and the index of a declared combination (`combinations`), whose own
+/// order is by declared name, the first slowest. With every declared name after the template's
+/// this is the template's states times the combinations, as before.
+fn state_order(template: &[(String, u32)], declared: &[(String, u32)]) -> Vec<(u32, u32)> {
+    // (name, values, its own side's stride, from the template)
+    let mut all: Vec<(&str, u32, u32, bool)> = Vec::new();
+    for (side, from_template) in [(template, true), (declared, false)] {
+        let mut stride = 1;
+        let mut strides = Vec::new();
+        for (_, len) in side.iter().rev() {
+            strides.push(stride);
+            stride *= len;
+        }
+        for ((name, len), stride) in side.iter().zip(strides.into_iter().rev()) {
+            all.push((name, *len, stride, from_template));
+        }
+    }
+    all.sort_by(|a, b| a.0.cmp(b.0));
+    let total: u32 = all.iter().map(|p| p.1).product();
+    (0..total)
+        .map(|position| {
+            let (mut state, mut combo, mut rest) = (0, 0, total);
+            for &(_, len, stride, from_template) in &all {
+                rest /= len;
+                let value = (position / rest) % len;
+                if from_template {
+                    state += value * stride;
+                } else {
+                    combo += value * stride;
+                }
+            }
+            (state, combo)
+        })
+        .collect()
 }
 
 /// The combinations of a block's declared state properties, in a fixed
@@ -450,14 +580,20 @@ struct NewBlock<'a> {
     /// default first (one empty combination when the block declares none):
     /// the block's states are its template's states times these.
     combos: Vec<Vec<(String, String)>>,
+    /// Each state's template state offset and combination index, in registry order
+    /// (`state_order`).
+    order: Vec<(u32, u32)>,
+    /// The sign whose item places this block on a wall, which makes that item
+    /// this block's too (`StandingAndWallBlockItem.registerBlocks`).
+    wall_of: Option<String>,
 }
 impl NewBlock<'_> {
     /// Template states and declared combinations in registry order.
     fn state_combinations(&self) -> impl Iterator<Item = (u32, &[(String, String)])> {
-        self.rename
-            .states
-            .clone()
-            .flat_map(|id| self.combos.iter().map(move |combo| (id, combo.as_slice())))
+        let start = self.rename.states.start;
+        self.order
+            .iter()
+            .map(move |&(state, combo)| (start + state, self.combos[combo as usize].as_slice()))
     }
 }
 /// An item being added (declared, or a block's).
@@ -467,6 +603,8 @@ struct NewItem {
     rarity: Option<Rarity>,
     components: Vec<(String, J)>,
     crafting_remainder: Option<String>,
+    /// `StandingAndWallBlockItem.wallBlock`, when its block declares it.
+    wall_block: Option<String>,
 }
 
 struct Plan<'a> {
@@ -511,6 +649,73 @@ fn component_types(map: &J) -> BTreeSet<String> {
             .collect(),
         _ => BTreeSet::new(),
     }
+}
+
+/// Blocks and items native mods declare in code (`native_blocks`,
+/// `native_items`), joined to the content mods: each namespace's go into
+/// the content mod of that id when one is on (a native mod's own `.hmod`,
+/// with its models and textures), else into a content mod with no files of
+/// its own. Checked as files are ([`horizon_mods::Content::declare`],
+/// [`accept_mod`]); a namespace whose declarations are refused is left out
+/// whole, and its error returned.
+pub fn accept_declared(
+    mods: &mut Vec<ContentMod>,
+    blocks: &[horizon_mods::content::Block],
+    items: &[horizon_mods::content::Item],
+    known: &BTreeSet<String>,
+) -> Vec<String> {
+    let namespace = |id: &str| id.split_once(':').map_or("", |(ns, _)| ns).to_owned();
+    let mut by_namespace: std::collections::BTreeMap<String, (Vec<_>, Vec<_>)> = Default::default();
+    for block in blocks {
+        by_namespace
+            .entry(namespace(&block.id))
+            .or_default()
+            .0
+            .push(block.clone());
+    }
+    for item in items {
+        by_namespace
+            .entry(namespace(&item.id))
+            .or_default()
+            .1
+            .push(item.clone());
+    }
+    let mut errors = Vec::new();
+    for (ns, (blocks, items)) in by_namespace {
+        let result = match mods.iter().position(|m| m.id == ns) {
+            Some(i) => {
+                let mut content = horizon_mods::Content::declared(&ns);
+                content.blocks.clone_from(&mods[i].content.blocks);
+                content.items.clone_from(&mods[i].content.items);
+                content
+                    .declare(&blocks, &items)
+                    .and_then(|()| {
+                        let mut added = horizon_mods::Content::declared(&ns);
+                        added.blocks.clone_from(&blocks);
+                        added.items.clone_from(&items);
+                        validate_components(&added, known).map_err(|e| e.to_string())
+                    })
+                    .map(|()| {
+                        mods[i].content.blocks.extend(blocks);
+                        mods[i].content.items.extend(items);
+                    })
+            }
+            None => {
+                let mut content = horizon_mods::Content::declared(&ns);
+                content.declare(&blocks, &items).and_then(|()| {
+                    let candidate = ContentMod {
+                        id: ns.clone(),
+                        content,
+                    };
+                    accept_mod(mods, candidate, known).map_err(|e| e.to_string())
+                })
+            }
+        };
+        if let Err(e) = result {
+            errors.push(format!("native blocks and items of {ns}: {e}"));
+        }
+    }
+    errors
 }
 
 /// Check and accept one mod without disturbing previously accepted mods.
@@ -817,9 +1022,25 @@ impl<'a> Plan<'a> {
                     }
                     default = matches[0];
                 }
+                // The game reads a state table as vanilla's `StateDefinition` does: every
+                // property, the template's and the declared ones, sorted by name, the first
+                // name slowest. A declared name that sorts before the template's has to
+                // interleave with them, so the states are laid out in that order.
+                let declared: Vec<(String, u32)> = decl
+                    .state_properties
+                    .iter()
+                    .map(|(name, property)| (name.clone(), property.values().len() as u32))
+                    .collect();
+                let order = block_order(&states, properties, &declared, combos.len() as u32);
+                // The lookup from (template state, combination) to the state's row.
+                let mut rows = vec![0; order.len()];
+                for (position, &(state, combo)) in order.iter().enumerate() {
+                    rows[state as usize * combos.len() + combo as usize] = position as u32;
+                }
                 let mut rename = Rename::new(&decl.template, &decl.id);
                 rename.first = next;
                 rename.fanout = combos.len() as u32;
+                rename.rows = rows;
                 let count =
                     u32::try_from(states.len() as u64 * combos.len() as u64).unwrap_or(u32::MAX);
                 next = next.saturating_add(count);
@@ -837,7 +1058,19 @@ impl<'a> Plan<'a> {
                     shapes,
                     default,
                     combos,
+                    order,
+                    wall_of: None,
                 });
+            }
+        }
+        // A sign's wall form, which `Content` checked against its mod's blocks.
+        let pairs: Vec<_> = blocks
+            .iter()
+            .filter_map(|b| Some((b.decl.wall_block.clone()?, b.decl.id.clone())))
+            .collect();
+        for (wall, sign) in pairs {
+            if let Some(block) = blocks.iter_mut().find(|b| b.decl.id == wall) {
+                block.wall_of = Some(sign);
             }
         }
         if next > MAX_STATES {
@@ -884,6 +1117,7 @@ impl<'a> Plan<'a> {
                     rarity: None,
                     components: component_patch(&b.decl.id, &b.decl.components)?,
                     crafting_remainder: None,
+                    wall_block: b.decl.wall_block.clone(),
                 });
             }
         }
@@ -895,6 +1129,7 @@ impl<'a> Plan<'a> {
                     rarity: i.rarity,
                     components: component_patch(&i.id, &i.components)?,
                     crafting_remainder: i.crafting_remainder.clone(),
+                    wall_block: None,
                 });
             }
         }
@@ -931,13 +1166,15 @@ impl<'a> Plan<'a> {
 
     /// What moves in a new block's copies of its template's rows: the
     /// block, and the template's item when it has another name. A block
-    /// without an item gets `minecraft:air` where rows name one.
+    /// without an item gets `minecraft:air` where rows name one, except a
+    /// sign's wall form, whose item is the paired sign's.
     fn renames(&self, b: &NewBlock) -> Vec<Rename> {
         let mut out = vec![b.rename.clone()];
+        let own = b.decl.item.then_some(b.decl.id.as_str());
         if let Some(item) = b.item.as_deref().filter(|i| *i != b.decl.template)
-            && b.decl.item
+            && let Some(to) = own.or(b.wall_of.as_deref())
         {
-            out.push(Rename::new(item, &b.decl.id));
+            out.push(Rename::new(item, to));
         }
         out
     }
@@ -963,10 +1200,10 @@ impl<'a> Plan<'a> {
                 }
                 if gameplay {
                     row.set("id", J::Num(next.into()));
-                    if !b.decl.item {
+                    if !b.decl.item && b.wall_of.is_none() {
                         row.set("item", J::Str("minecraft:air".into()));
                     }
-                    self.override_gameplay(b, &mut row);
+                    self.override_gameplay(b, combo, &mut row);
                     if let Some(shapes) = &b.shapes {
                         let shape = &shapes[t];
                         let boxes = shape
@@ -1003,8 +1240,11 @@ impl<'a> Plan<'a> {
     }
 
     /// The declared properties, on a gameplay row.
-    fn override_gameplay(&self, b: &NewBlock, row: &mut J) {
+    fn override_gameplay(&self, b: &NewBlock, combo: &[(String, String)], row: &mut J) {
         let p = &b.decl.properties;
+        if let Some(ticks) = &p.random_ticks {
+            row.set("random_ticks", J::Bool(ticks.applies(combo)));
+        }
         if let Some(v) = p.hardness {
             row.set("hardness", J::f64(v as f64));
         }
@@ -1056,6 +1296,11 @@ impl<'a> Plan<'a> {
             };
             let mut v = v.clone();
             v.rename(&i.rename, false);
+            if let Some(wall) = &i.wall_block
+                && let Some(fields) = v.get_mut("fields")
+            {
+                fields.set("wallBlock", J::Str(wall.clone()));
+            }
             if components {
                 if let Some(n) = i.max_stack_size {
                     v.set("minecraft:max_stack_size", J::Num(n.into()));
@@ -1123,8 +1368,15 @@ impl<'a> Plan<'a> {
                         for r in &self.renames(b) {
                             v.rename(r, false);
                         }
-                        if !b.decl.item {
+                        if !b.decl.item && b.wall_of.is_none() {
                             v.set("item", J::Str("minecraft:air".into()));
+                        }
+                        // `SignBlock.getWoodType`: the wood's name is what
+                        // the editor reads of it.
+                        if let Some(wood) = &b.decl.wood_type
+                            && let Some(name) = v.at("fields/type/name")
+                        {
+                            *name = J::Str(wood.clone());
                         }
                         // A connecting block: the chorus plant's PipeBlock
                         // without its rules, joining the declared tag.
@@ -1316,15 +1568,20 @@ impl<'a> Plan<'a> {
         };
         for block in &self.blocks {
             if let Some(shapes) = &block.shapes {
-                let fanout = block.combos.len();
-                for (i, shape) in shapes.iter().enumerate() {
-                    let id = entries.len() as i32;
-                    entries.push(encode_shape(shape));
-                    // One shape per template state, shared by every combination
-                    // of it: the geometry is the template's, the properties are
-                    // the block's.
-                    for c in 0..fanout {
-                        indices.push((block.rename.first as usize + i * fanout + c, id));
+                // One shape per template state, shared by every combination
+                // of it: the geometry is the template's, the properties are
+                // the block's.
+                let ids: Vec<i32> = shapes
+                    .iter()
+                    .map(|shape| {
+                        entries.push(encode_shape(shape));
+                        entries.len() as i32 - 1
+                    })
+                    .collect();
+                for (at, &shape) in ids.iter().enumerate() {
+                    for combination in 0..block.rename.fanout {
+                        let row = block.rename.row(at as u32, combination);
+                        indices.push((block.rename.first as usize + row as usize, shape));
                     }
                 }
             }
@@ -1432,10 +1689,11 @@ impl<'a> Plan<'a> {
                     for b in &self.blocks {
                         // Parallel to `states`: every combination of a template
                         // state keeps that state's shape.
-                        let mut copy = Vec::new();
-                        for id in b.rename.states.clone() {
-                            for _ in &b.combos {
-                                copy.push(a[id as usize]);
+                        let mut copy = vec![0; b.order.len()];
+                        for (at, id) in b.rename.states.clone().enumerate() {
+                            for combination in 0..b.rename.fanout {
+                                copy[b.rename.row(at as u32, combination) as usize] =
+                                    a[id as usize];
                             }
                         }
                         a.extend(copy);
@@ -1716,6 +1974,11 @@ impl Overlay<'_> {
         };
         for entry in read.flatten() {
             let rel = rel.join(entry.file_name());
+            // The base's files in one file: it describes the base, not this root (and
+            // would be copied where links are not made).
+            if rel == Path::new(horizon_core::prepared_files::FILE_NAME) {
+                continue;
+            }
             link(&self.base.join(&rel), &self.out.join(&rel))?;
         }
         Ok(())
@@ -1770,8 +2033,25 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
         }
         Ok(())
     } else {
-        fs::copy(target, at).map(|_| ())
+        link_file(target, at, |target, at| fs::hard_link(target, at))
     }
+}
+/// A file of the overlay where symlinks need a privilege: a hard link to the base's file, which costs a name where
+/// a copy costs the file's bytes (the base is ~28,000 files, 0.6 GiB), or a copy when no link can be made (another
+/// volume, a filesystem without links, the NTFS limit on links to one file). A link shares the base file's data,
+/// which is safe because the overlay is only ever replaced name by name (`Overlay::write` removes the name before it
+/// writes), never written in place. A symlink is copied through, as before: linked, it would stay a symlink.
+#[cfg(any(not(unix), test))]
+fn link_file(
+    target: &Path,
+    at: &Path,
+    hard_link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let symlink = fs::symlink_metadata(target).is_ok_and(|m| m.file_type().is_symlink());
+    if !symlink && hard_link(target, at).is_ok() {
+        return Ok(());
+    }
+    fs::copy(target, at).map(|_| ())
 }
 
 /// A tag file's JSON text with `more` appended to its values (no repeats).
@@ -1967,7 +2247,7 @@ fn tables(base: &Path, plan: &Plan, overlay: &Overlay<'_>) -> Result<()> {
         overlay.write(name, &bytes)
     };
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let threads = horizon_threads::worker_count();
     std::thread::scope(|scope| {
         let workers: Vec<_> = (0..threads.min(TABLE_THREADS))
             .map(|_| {
@@ -2240,7 +2520,10 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
 /// and mod files reuse it. With ATM10's carried mods a build takes about
 /// 25 s and peaks above 3 GB, more than everything the game keeps.
 pub fn resource_root(base: &Path, mods: &[ContentMod], cache: &Path) -> Result<PathBuf> {
-    if mods.iter().all(|m| m.content.is_empty()) {
+    if mods
+        .iter()
+        .all(|m| m.content.is_empty() && m.content.blocks.is_empty() && m.content.items.is_empty())
+    {
         return Ok(base.to_owned());
     }
     let out = cache.join("mod-content");
@@ -2295,8 +2578,12 @@ fn stamp(base: &Path, mods: &[ContentMod]) -> Result<String> {
     }
     for m in mods {
         parts.push(m.id.clone());
+        // What it declares, so blocks and items from code count too.
+        parts.push(format!("{:?} {:?}", m.content.blocks, m.content.items));
         let source = m.content.source();
-        if source.is_dir() {
+        if m.content.files.is_empty() {
+            // Declared in code only: nothing to read.
+        } else if source.is_dir() {
             for file in &m.content.files {
                 parts.push(meta(&source.join(file))?);
             }

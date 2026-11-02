@@ -274,6 +274,9 @@ pub struct Node {
     /// A custom suggestion provider (`.suggests(...)`), used instead of the
     /// argument type's own suggestions.
     pub suggests: Option<Suggests>,
+    /// ArgumentNodeStub's RESTRICTED_COMMAND: the server marked this node as
+    /// needing elevated permissions.
+    pub restricted: bool,
 }
 /// The custom SuggestionProviders vanilla command nodes use.
 #[derive(Clone, Debug, PartialEq)]
@@ -430,6 +433,11 @@ impl ParseResults {
         } else {
             CommandError::tr_at("command.unknown.argument", &[], &reader)
         })
+    }
+    /// ClientPacketListener.isValidCommand: all of it read, no errors, and it
+    /// ends on a node that runs something.
+    pub fn is_valid(&self) -> bool {
+        !self.can_read() && self.errors.is_empty() && self.context.last_child().command.is_some()
     }
     /// SignableCommand.of: the message arguments a signed command signs, by
     /// name, with their text, not past a redirect to the root (`execute ...
@@ -745,8 +753,18 @@ impl Dispatcher {
                 redirect: None,
                 permission: 0,
                 suggests: None,
+                restricted: false,
             }],
         }
+    }
+    /// This tree as a player without elevated permissions has it
+    /// (ClientPacketListener.restrictedSuggestionsProvider): no restricted node.
+    pub fn without_restricted(&self) -> Self {
+        let mut tree = self.clone();
+        for node in &mut tree.nodes {
+            node.children.retain(|&child| !self.nodes[child].restricted);
+        }
+        tree
     }
     fn add(&mut self, parent: usize, kind: NodeKind) -> usize {
         let name = match &kind {
@@ -770,6 +788,7 @@ impl Dispatcher {
             redirect: None,
             permission,
             suggests: None,
+            restricted: false,
         });
         let id = self.nodes.len() - 1;
         self.nodes[parent].children.push(id);

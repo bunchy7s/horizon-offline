@@ -42,8 +42,8 @@ def close(g):
 
 
 def build():
-    subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client', '--bin', 'horizon-client',
-                    '--bin', 'horizon-ctl', '--example', 'old_world_fixture'], cwd=lan.ROOT, check=True)
+    subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client', '-p', 'horizon-client-lib',
+                    '--bin', 'horizon-client', '--bin', 'horizon-ctl', '--example', 'old_world_fixture'], cwd=lan.ROOT, check=True)
     meta = json.loads(subprocess.run(['cargo', 'metadata', '--format-version', '1', '--no-deps'], cwd=lan.ROOT,
                                      capture_output=True, text=True, check=True).stdout)
     return Path(meta['target_directory']) / 'fast'

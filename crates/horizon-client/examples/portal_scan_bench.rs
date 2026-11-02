@@ -2,6 +2,7 @@
 //! entity reaches, with the per-tick palette map against the resident cache.
 //! Run with prepared client resources:
 //! cargo run --profile fast -p horizon-client --example portal_scan_bench -- RESOURCES
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     blocks::BlockFacts,
     chunk::{Chunk, MIN_Y, SECTIONS, Section},

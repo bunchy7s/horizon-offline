@@ -32,7 +32,7 @@ pub struct Archetype {
     pub explosion: Option<(i32, f32, bool)>,
     /// `contact_damage` amount (`sulfur_cube_hot`).
     pub contact_damage: Option<f32>,
-    /// The knockback resistance modifier (the attribute clamps to 0..1).
+    /// The knockback resistance modifier (the attribute range is -2..1; negative values add knockback).
     pub knockback_resistance: f64,
     /// `Attributes.BOUNCINESS` (the modifier added to a base of 0).
     pub bounciness: f32,
@@ -389,7 +389,7 @@ mod immune_tests {
     }
 
     /// `#sulfur_cube_with_block_immune_to` has these too: a cube with a block
-    /// takes none of them, a cube without one does.
+    /// loses no health to any of them (and `hurtServer` still answers true), a cube without one does.
     #[test]
     fn a_cube_with_a_block_shrugs_off_the_whole_tag() {
         for kind in [
@@ -404,11 +404,43 @@ mod immune_tests {
         ] {
             let mut m = cube(Some("minecraft:dirt"));
             let health = m.health;
-            assert!(!m.damage(1.0, Damage::of(kind)), "{kind:?}");
+            // `SulfurCube.hurtServer` returns true for these, though no health is lost.
+            assert!(m.damage(1.0, Damage::of(kind)), "{kind:?}");
             assert_eq!(m.health, health, "{kind:?}");
             let mut m = cube(None);
             assert!(m.damage(1.0, Damage::of(kind)), "{kind:?}");
             assert_eq!(m.health, health - 1.0, "{kind:?}");
+        }
+    }
+
+    /// `SulfurCube.knockback` with `comesFromEffect`: a sprint hit's extra push (power 0.5) is
+    /// `0.5 * 0.25` of the plain push, a Knockback II hit's (power 1.0) a quarter of it.
+    #[test]
+    fn an_effect_push_is_a_fraction_of_the_blows_own() {
+        let push = |scale: f32| {
+            launch(
+                (1.0, 0.5),
+                0.0,
+                4.0,
+                (1.0, 0.0),
+                [-2.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                [0.0, 0.5, 0.0],
+                1.0,
+                None,
+                scale,
+            )
+        };
+        let plain = push(1.0);
+        assert!(plain[0].abs() > 0.01, "the plain push moves it: {plain:?}");
+        for (power, scale) in [(0.5_f32, 0.125_f64), (1.0, 0.25)] {
+            let extra = push(power * 0.25);
+            for axis in 0..3 {
+                assert!(
+                    (extra[axis] - plain[axis] * scale).abs() < 1.0e-6,
+                    "{power}: {extra:?} against {plain:?}"
+                );
+            }
         }
     }
 
@@ -518,21 +550,10 @@ pub fn prime(m: &mut Mob, imminent: bool) -> bool {
     m.extra.scratch[1] |= 1;
     true
 }
-/// `hurtServer`: fire or `#is_explosion` (a firework rocket's burst too)
-/// light an explosive cube; with a block it shrugs off blows, falls and
-/// explosions and is only knocked about.
-pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
-    if !has_body(m) {
-        return true;
-    }
-    if can_explode(m) && !primed(m) {
-        if source.is_fire() {
-            prime(m, false);
-        } else if matches!(source.kind, DamageKind::Explosion | DamageKind::Fireworks) {
-            prime(m, true);
-        }
-    }
-    let immune = matches!(
+/// `#sulfur_cube_with_block_immune_to`: the damage a cube with a block shrugs off and is only
+/// knocked by.
+pub fn immune_to(source: &Damage) -> bool {
+    matches!(
         source.kind,
         DamageKind::PlayerAttack
             | DamageKind::MaceSmash
@@ -556,8 +577,23 @@ pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
             | DamageKind::Stalagmite
             | DamageKind::SulfurCubeHot
             | DamageKind::WindCharge
-    );
-    if immune {
+    )
+}
+/// `hurtServer`: fire or `#is_explosion` (a firework rocket's burst too)
+/// light an explosive cube; with a block it shrugs off blows, falls and
+/// explosions and is only knocked about.
+pub fn accepts_damage(m: &mut Mob, source: &Damage, amount: f32) -> bool {
+    if !has_body(m) {
+        return true;
+    }
+    if can_explode(m) && !primed(m) {
+        if source.is_fire() {
+            prime(m, false);
+        } else if matches!(source.kind, DamageKind::Explosion | DamageKind::Fireworks) {
+            prime(m, true);
+        }
+    }
+    if immune_to(source) {
         // `dealDefaultKnockback`, unless the damage type is tagged no_knockback.
         if !source.no_knockback() {
             deal_default_knockback(m, source, amount);
@@ -634,6 +670,15 @@ fn vertical_hit_angle_power_transfer(
     }
     (powers.0 * (1.0 - ratio), powers.1 * (1.0 + ratio))
 }
+/// The `knockback_resistance` attribute's value: vanilla clamps it to -2..1, and a negative one
+/// (an explosive or bouncy block) adds knockback.
+fn resistance(attribute: f64) -> f32 {
+    attribute.clamp(-2.0, 1.0) as f32
+}
+/// `playerPush`'s scale: `Math.max(0, 1 - knockback_resistance)`, in double like vanilla.
+fn push_factor(attribute: f64) -> f64 {
+    (1.0 - attribute.clamp(-2.0, 1.0)).max(0.0)
+}
 /// What `SulfurCube.knockback` adds to the cube's movement for a blow of `damage`: the
 /// archetype's `powers` (horizontal, vertical) turned by where the blow came from (`from`, the
 /// direct entity: the direction of the knock) and, with the causing entity's `aim` (eye, view
@@ -649,6 +694,7 @@ fn launch(
     center: [f64; 3],
     height: f32,
     aim: Option<([f64; 3], [f64; 3])>,
+    effect_scale: f32,
 ) -> [f64; 3] {
     let (h0, v0) = powers;
     let (mut xd, mut zd) = (xd as f32, zd as f32);
@@ -673,7 +719,8 @@ fn launch(
         h *= 1.0 / max;
         v *= 1.0 / max;
     }
-    let k = damage.sqrt();
+    // `Mth.sqrt(damage) * (comesFromEffect ? power * 0.25 : 1)`.
+    let k = damage.sqrt() * effect_scale;
     h *= k;
     v *= k;
     h *= 1.0 - resistance;
@@ -702,14 +749,20 @@ fn deal_default_knockback(m: &mut Mob, source: &Damage, damage: f32) {
             .map_or((0.0, 0.0), |f| (f[0] - m.position.x, f[2] - m.position.z)),
     };
     if source.attacker.is_some() {
-        knockback(m, (xd, zd), source.from, damage);
+        knockback(m, (xd, zd), source.from, damage, None);
     } else {
         m.knockback(f64::from(0.4_f32), xd, zd, source);
     }
 }
 /// `SulfurCube.knockback` with a block and a causing entity: the archetype's powers, turned by
 /// where the blow came from and by the entity's aim (`Mob::attacker_aim`, from the game).
-pub fn knockback(m: &mut Mob, direction: (f64, f64), from: Option<[f64; 3]>, damage: f32) -> bool {
+pub fn knockback(
+    m: &mut Mob,
+    direction: (f64, f64),
+    from: Option<[f64; 3]>,
+    damage: f32,
+    effect_power: Option<f64>,
+) -> bool {
     let Some(a) = archetype(m) else {
         return false;
     };
@@ -717,7 +770,7 @@ pub fn knockback(m: &mut Mob, direction: (f64, f64), from: Option<[f64; 3]>, dam
     let from = from.unwrap_or([m.position.x, m.position.y, m.position.z]);
     let delta = launch(
         (a.horizontal_power, a.vertical_power),
-        a.knockback_resistance.clamp(0.0, 1.0) as f32,
+        resistance(a.knockback_resistance),
         damage,
         direction,
         aim.map_or(from, |a| a.feet),
@@ -725,6 +778,7 @@ pub fn knockback(m: &mut Mob, direction: (f64, f64), from: Option<[f64; 3]>, dam
         m.center(),
         m.height(),
         aim.map(|a| (a.eye, a.look)),
+        effect_power.map_or(1.0, |p| p as f32 * 0.25),
     );
     m.velocity = Vec3::new(
         m.velocity.x + delta[0],
@@ -842,7 +896,7 @@ fn player_push(m: &mut Mob, p: &super::PlayerView, events: &mut Vec<MobEvent>) {
         return;
     }
     let a = archetype(m);
-    let kb = (1.0 - a.map_or(0.0, |a| a.knockback_resistance.clamp(0.0, 1.0))).max(0.0);
+    let kb = push_factor(a.map_or(0.0, |a| a.knockback_resistance));
     let len = horizontal.max(1.0e-4);
     let speed = (p.velocity.length() * 2.0 * f64::from(0.3f32)).clamp(0.0, 0.5);
     let push = Vec3::new(
@@ -1286,6 +1340,7 @@ mod launch_tests {
                 center,
                 height,
                 c.aim,
+                1.0,
             );
             for axis in 0..3 {
                 assert!(
@@ -1295,5 +1350,41 @@ mod launch_tests {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod resistance_tests {
+    use super::{launch, push_factor, resistance};
+
+    #[test]
+    fn negative_resistance_adds_knockback() {
+        assert_eq!(resistance(-1.0), -1.0);
+        assert_eq!(resistance(-2.0), -2.0);
+        assert_eq!(resistance(-5.0), -2.0);
+        assert_eq!(resistance(3.0), 1.0);
+        assert_eq!(push_factor(-1.0), 2.0);
+        assert_eq!(push_factor(-2.0), 3.0);
+        assert_eq!(push_factor(1.0), 0.0);
+        assert_eq!(push_factor(0.3), 1.0 - 0.3);
+        let push = |r: f64, damage: f32| {
+            launch(
+                (1.0, 0.6),
+                resistance(r),
+                damage,
+                (1.0, 0.0),
+                [0.0, 64.0, 0.0],
+                [1.0, 64.0, 0.0],
+                [1.0, 64.5, 0.0],
+                1.0,
+                None,
+                1.0,
+            )
+        };
+        let base = push(0.0, 4.0);
+        let explosive = push(-1.0, 4.0);
+        let bouncy = push(-2.0, 4.0);
+        assert!((explosive[0] / base[0] - 2.0).abs() < 1.0e-6);
+        assert!((bouncy[0] / base[0] - 3.0).abs() < 1.0e-6);
     }
 }

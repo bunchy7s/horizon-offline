@@ -86,17 +86,20 @@ impl State {
     }
 }
 
+/// `Raider.class`: the species a goal that takes `Raider.class` filters out
+/// (`HurtByTargetGoal(this, Raider.class)`). A vex is not a raider.
+pub const RAIDERS: [Species; 6] = [
+    Species::Pillager,
+    Species::Vindicator,
+    Species::Evoker,
+    Species::Illusioner,
+    Species::Witch,
+    Species::Ravager,
+];
+
 /// The raider species (`EntityTypeTags.RAIDERS`).
 pub fn is_raider(s: Species) -> bool {
-    matches!(
-        s,
-        Species::Pillager
-            | Species::Vindicator
-            | Species::Evoker
-            | Species::Illusioner
-            | Species::Witch
-            | Species::Ravager
-    )
+    RAIDERS.contains(&s)
 }
 /// `canBeLeader`: witches and ravagers never lead.
 pub fn can_be_leader(s: Species) -> bool {

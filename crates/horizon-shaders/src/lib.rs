@@ -13,7 +13,7 @@
 //! - [`translate_core`]: a resource pack's vanilla core shader (`shaders/core/`) into naga modules.
 //! - [`Config`] and [`draw_buffers`]: the buffer settings and output lists stage files carry (1.7, 6.1).
 //! - [`load_post`]: a dimension's `prepare`, `deferred`, `composite` and `final` programs, in order (2.1).
-//! - [`load_textures`]: the custom textures `texture.*` names (3.4).
+//! - [`load_textures`]: the custom textures `texture.*` and `customTexture.*` name (3.4).
 //! - [`Macros`] and [`eval_condition`]: the macros packs test, and the `#if` arithmetic (1.5).
 
 mod biomes;
@@ -45,7 +45,7 @@ pub use lang::Lang;
 pub use macros::{MC_VERSION, Macros, RENDER_STAGES, render_stage};
 pub use options::{
     PackOption, apply as apply_options, chosen_file, chosen_text, options, parse_chosen,
-    switches_on, value_options, with_options,
+    read_properties, switches_on, value_options, with_options,
 };
 pub use pack::{Pack, PackError};
 pub use post::{
@@ -56,7 +56,8 @@ pub use preprocess::{Diagnostic, Origin, Preprocessed, preprocess};
 pub use properties::{Entry, Note, Properties};
 pub use screens::{Item as ScreenItem, Screens};
 pub use textures::{
-    CustomTexture, Dim as TextureDim, Texels, Texture, TextureSource, decode_png, load_textures,
+    CustomTexture, Dim as TextureDim, EVERY_STAGE, Texels, Texture, TextureSource, decode_png,
+    load_textures, resolve_resources,
 };
 pub use translate::{
     AlphaTest, ComputeProgram, DRAW_UNIFORMS, Error, GbuffersInputs, GeometryInputs, Image,

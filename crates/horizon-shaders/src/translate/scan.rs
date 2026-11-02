@@ -57,6 +57,14 @@ pub(super) struct Stage<'p> {
     pub(super) out_copies: Vec<String>,
     /// The stage calls `inverse`, which ours replaces, and doesn't define its own.
     pub(super) inverse: bool,
+    /// The stage calls `textureGatherOffsets`, which naga lacks: ours is in the prelude.
+    pub(super) gather_offsets: bool,
+    /// The stage calls `textureQueryLod`, which naga lacks: ours is in the prelude.
+    pub(super) query_lod: bool,
+    /// The stage calls `dot` / `normalize` and defines neither: the scalar overloads GLSL has
+    /// (`dot(float, float)`, `normalize(float)`) and naga lacks go in the prelude.
+    pub(super) scalar_dot: bool,
+    pub(super) scalar_normalize: bool,
     /// The pack's functions that take samplers: which parameters are samplers.
     pub(super) sampler_functions: HashMap<String, Vec<bool>>,
     /// The pack's structs: each member's type and name with its array suffix.
@@ -254,6 +262,10 @@ impl<'p> Stage<'p> {
             frag_outs: Vec::new(),
             out_copies: Vec::new(),
             inverse: false,
+            gather_offsets: false,
+            query_lod: false,
+            scalar_dot: false,
+            scalar_normalize: false,
             sampler_functions: HashMap::new(),
             structs: HashMap::new(),
             outputs: BTreeSet::new(),
@@ -266,6 +278,7 @@ impl<'p> Stage<'p> {
         s.rename_vulkan_types();
         let (mut start, mut depth, mut parens) = (0, 0usize, 0usize);
         let mut own_inverse = false;
+        let (mut own_dot, mut own_normalize) = (false, false);
         for i in 0..s.tokens.len() {
             match s.tokens[i] {
                 "(" => parens += 1,
@@ -300,6 +313,23 @@ impl<'p> Stage<'p> {
                     }
                 }
                 "gl_FragCoord" => s.frag_coord = true,
+                "textureGatherOffsets" => s.gather_offsets = true,
+                "textureQueryLod" => s.query_lod = true,
+                "dot" | "normalize" => {
+                    // A definition at the top level: `float dot(float a, ...)`.
+                    let defines = depth == 0
+                        && s.tokens[..i]
+                            .iter()
+                            .rfind(|t| significant(t))
+                            .is_some_and(|t| is_ident(t));
+                    if s.tokens[i] == "dot" {
+                        s.scalar_dot = true;
+                        own_dot |= defines;
+                    } else {
+                        s.scalar_normalize = true;
+                        own_normalize |= defines;
+                    }
+                }
                 "inverse" => {
                     s.inverse = true;
                     // `mat4 inverse(mat4 m)`: a pack for GLSL 1.20, which has none, wrote its own.
@@ -323,6 +353,19 @@ impl<'p> Stage<'p> {
             }
         }
         s.inverse &= !own_inverse;
+        s.scalar_dot &= !own_dot;
+        s.scalar_normalize &= !own_normalize;
+        if s.gather_offsets {
+            // Its sampler is passed as a texture and a sampler, as to the pack's own functions.
+            s.sampler_functions
+                .entry("textureGatherOffsets".into())
+                .or_insert_with(|| vec![true, false, false, false, false]);
+        }
+        if s.query_lod {
+            s.sampler_functions
+                .entry("textureQueryLod".into())
+                .or_insert_with(|| vec![true, false]);
+        }
         s
     }
 
@@ -695,6 +738,11 @@ impl<'p> Stage<'p> {
         let mut binding = None;
         for (k, &i) in words.iter().enumerate() {
             match self.tokens[i] {
+                // An extension adds real buffer syntax even in a GLSL 1.x stage.
+                // It must not take the legacy identifier rename for `buffer`.
+                "buffer" => {
+                    self.replaced.insert(i, "buffer".into());
+                }
                 "binding" => {
                     binding = words
                         .get(k + 2)

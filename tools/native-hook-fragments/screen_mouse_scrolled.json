@@ -1,8 +1,0 @@
-{
-  "hooks": [
-    {"name": "screen_mouse_scrolled_pre", "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_scrolled_pre"}
-  ],
-  "rust_summary": "the open screen hears of the wheel before it scrolls (`native_screen_mouse_scrolled_pre`,\nthe `ScreenEvent.MouseScrolled.Pre` point, with the screen, the scroll in x and y as the game's\nscroll handler scales it, and the modifiers), so a cancelled turn scrolls nothing.",
-  "doc_summary": "the open screen hears of the wheel (`native_screen_mouse_scrolled_pre`) before it scrolls, as vanilla's `ScreenEvent.MouseScrolled.Pre`: the screen, the scroll's x and y as the game's scroll handler scales them (a line times the wheel sensitivity: with Discrete Scrolling on, a notch is ±1, its sign only; a touchpad's pixels are divided by 30), GLFW's modifier bits (shift 1, control 2, alt 4, super 8) and the pointer in `screen.mouse`. A cancelled turn scrolls nothing: no bundle under the pointer, no list, slider or scrollbar, and no hotbar slot. It fires for the window's wheel (horizon-ctl's `scroll-at` included), never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves, and never for a wheel a gamepad or the keyboard's focus sends. Bundles need \"hooks\": @API:screen_mouse_scrolled@.",
-  "comments": []
-}

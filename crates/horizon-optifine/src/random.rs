@@ -139,13 +139,19 @@ impl Rules {
         Self { rules }
     }
 
-    /// The variant this entity wears: the first matching rule's pick, or 1 (the default). ETF
-    /// also lets a rule list 0 for the default; the caller treats 0 as 1.
+    /// The first matching rule's pick, or 1 when none matches. [`Rules::matching`] tells a miss
+    /// (the texture itself, as is a rule's 0) from a pick of 1, which `<name>1.png` replaces.
     pub fn select(&self, facts: &Facts, seed: i32) -> u32 {
+        self.matching(facts, seed).unwrap_or(1)
+    }
+
+    /// The first matching rule's pick, `None` when no rule matches: the texture itself, even
+    /// where a `<name>1.png` replaces variant 1 (ETF).
+    pub fn matching(&self, facts: &Facts, seed: i32) -> Option<u32> {
         self.rules
             .iter()
             .find(|r| r.matches(facts))
-            .map_or(1, |r| r.pick(seed))
+            .map(|r| r.pick(seed))
     }
 
     /// Whether any rule reads a fact that changes while the entity lives (name, profession,
@@ -495,6 +501,10 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(r.select(&baby, 1), 3);
+        // `matching` tells a miss from a rule that picks 1.
+        assert_eq!(r.matching(&Facts::default(), 1), None);
+        assert_eq!(r.matching(&baby, 1), Some(3));
+        assert_eq!(rules("textures.1=1").matching(&baby, 0), Some(1));
     }
 
     #[test]

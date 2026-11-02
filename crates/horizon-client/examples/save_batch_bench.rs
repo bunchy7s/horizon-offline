@@ -2,6 +2,7 @@
 //! full chunk NBT encoder. Run with `cargo run --profile fast -p horizon-client
 //! --example save_batch_bench`. Add `-- --nbt` to also time serialization.
 //! Exact NBT equality is always validated. No GPU, compression or disk I/O timed.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     biome::Biomes,
     chunk::{Chunk, block_strategy},

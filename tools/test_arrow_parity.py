@@ -66,6 +66,11 @@ def corpus():
         start = (rng.uniform(17, 30), rng.uniform(5, 14), rng.uniform(2, 30))
         v = aim(rng.choice([.3, 1, 1.6, 2.4, 3]), rng.uniform(-180, 180), rng.uniform(-60, 45))
         yield arrow(start, v, ticks(60), crit=rng.random() < .5)
+    # Straight up at the lowest power a bow fires (BowItem: 0.1 power, 0.3
+    # speed): the arrow turns over as soon as gravity takes the climb away.
+    for _ in range(4):
+        start = (rng.uniform(17, 30), rng.uniform(5, 8), rng.uniform(2, 30))
+        yield arrow(start, aim(.3, rng.uniform(-180, 180), -90), ticks(30))
     # Without physics: straight through blocks, no gravity, inverted yaw.
     for _ in range(6):
         start = (rng.uniform(17, 30), rng.uniform(5, 8), rng.uniform(2, 30))
@@ -241,7 +246,7 @@ def main():
     expected = 3 * operations + len(fixtures)
     (build / 'inputs.txt').write_text(''.join(json.dumps(f, separators=(',', ':')) + '\n' for f in fixtures))
     input_hash = lab.digest(build / 'inputs.txt', 'sha256')
-    run(['cargo', 'build', '--locked', '-p', 'horizon-client', '--example', 'client_probe'], 'compile-rust')
+    run(['cargo', 'build', '--locked', '-p', 'horizon-client-lib', '--example', 'client_probe'], 'compile-rust')
     metadata = json.loads(subprocess.check_output(['cargo', 'metadata', '--locked', '--no-deps', '--format-version', '1'], cwd=lab.ROOT))
     binary = Path(metadata['target_directory']) / 'debug/examples' / ('client_probe.exe' if os.name=='nt' else 'client_probe')
     run([binary, 'arrow_probe',resources, build, '--describe'], 'describe')

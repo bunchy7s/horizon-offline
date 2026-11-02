@@ -6,10 +6,9 @@ HORIZON_DISCORD_IPC_DIR) that answers the handshake with READY and records every
 The game goes title -> world -> Nether -> quit through horizon-ctl, and the activities must say
 "In the menus", "Singleplayer" in the Overworld, then the Nether, and be cleared on quit:
 
-    single     single player on its server thread (the default)
-    in-frame   single player ticked in the window's frame (--in-frame)
+    single     single player on its server thread
     lan        a host opens its world to LAN and a guest joins: the guest shows "Multiplayer",
-               the host "Hosting a world" with a party of 2 of 8 (lan-in-frame: the host in-frame)
+               the host "Hosting a world" with a party of 2 of 8
     setting    off in horizon-extras.txt: nothing reaches Discord; the Horizon Settings switch
                turns it on (the activity appears) and off (it is cleared)
     late       Discord starts after the game: found within the 15 s retry
@@ -160,8 +159,8 @@ class Game:
         shutil.rmtree(self.home, ignore_errors=True)
 
 
-def single(bins, args=()):
-    game = Game(bins, 'single', args=args)
+def single(bins):
+    game = Game(bins, 'single')
     d = game.discord
     try:
         d.wait('title screen', shows('In the menus'))
@@ -182,8 +181,8 @@ def single(bins, args=()):
         game.close()
 
 
-def lan(bins, host_args=()):
-    host = Game(bins, 'host', args=host_args)
+def lan(bins):
+    host = Game(bins, 'host')
     guest = None
     try:
         host.ctl_run('open', 'Hosted', '5', 'creative')
@@ -246,9 +245,7 @@ def late(bins):
         game.close()
 
 
-CHECKS = {'single': single, 'in-frame': lambda b: single(b, ['--in-frame']), 'lan': lan,
-          'lan-in-frame': lambda b: lan(b, ['--in-frame']), 'setting': setting,
-          'late': late}
+CHECKS = {'single': single, 'lan': lan, 'setting': setting, 'late': late}
 
 
 def main():
@@ -261,7 +258,7 @@ def main():
     if args.bin_dir:
         bins = Path(args.bin_dir).resolve()
     else:
-        subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client', '--bins'],
+        subprocess.run(['cargo', 'build', '--locked', '--profile', 'fast', '-p', 'horizon-client', '-p', 'horizon-client-lib', '--bins'],
                        cwd=ROOT, check=True)
         meta = json.loads(subprocess.run(['cargo', 'metadata', '--format-version', '1', '--no-deps'], cwd=ROOT,
                                          capture_output=True, text=True, check=True).stdout)

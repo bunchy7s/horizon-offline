@@ -325,9 +325,72 @@ pub fn interact(
     }
 }
 
+/// What `interact` would answer for `held`, changing nothing: a client's
+/// `useItemOn`, where every interaction checks the same conditions and acts
+/// only `if (!level.isClientSide())`.
+pub fn outcome(
+    cauldron: &BlockState,
+    under_water: bool,
+    removes_dye: bool,
+    held: &ItemStack,
+) -> Outcome {
+    struct Dry(Option<ItemStack>);
+    impl Player for Dry {
+        fn creative(&self) -> bool {
+            false
+        }
+        fn hand(&mut self) -> &mut Option<ItemStack> {
+            &mut self.0
+        }
+        fn add(&mut self, _: &mut ItemStack) -> bool {
+            true
+        }
+        fn contains(&self, _: &ItemStack) -> bool {
+            false
+        }
+        fn drop_stack(&mut self, _: ItemStack) {}
+    }
+    interact(
+        cauldron,
+        under_water,
+        removes_dye,
+        &mut Dry(Some(held.clone())),
+    )
+    .outcome
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_client_sees_the_bucket_taken_without_acting() {
+        let empty = state("minecraft:cauldron", None);
+        let water = |l| state("minecraft:water_cauldron", Some(l));
+        let stack = |id| ItemStack::new(id, 1);
+        let outcome = |c: &BlockState, under_water, id| outcome(c, under_water, false, &stack(id));
+        assert_eq!(
+            outcome(&empty, false, "minecraft:water_bucket"),
+            Outcome::Success
+        );
+        assert_eq!(
+            outcome(&empty, false, "minecraft:lava_bucket"),
+            Outcome::Success
+        );
+        // fillLavaInteraction under water: CONSUME, the bucket kept.
+        assert_eq!(
+            outcome(&empty, true, "minecraft:lava_bucket"),
+            Outcome::Consume
+        );
+        assert_eq!(
+            outcome(&water(3), false, "minecraft:bucket"),
+            Outcome::Success
+        );
+        // fillBucket needs a full cauldron.
+        assert_eq!(outcome(&water(2), false, "minecraft:bucket"), Outcome::Pass);
+        assert_eq!(outcome(&empty, false, "minecraft:bucket"), Outcome::Pass);
+        assert_eq!(outcome(&empty, false, "minecraft:stone"), Outcome::Pass);
+    }
 
     #[test]
     fn a_burning_entity_lowers_water_and_melts_powder_snow() {

@@ -5,16 +5,82 @@
 //! markMessageAsProcessed). Without a signed-in
 //! account, or on a server that plays the account under another profile
 //! (offline mode), there is no session and everything goes unsigned.
-use super::Game;
-use horizon_client::auth::{self, ChatKeyPair};
+use super::{Game, Screen, books::BookScreen, dialogs::ClosedDialog};
+use horizon_client::{
+    auth::{self, ChatKeyPair},
+    command::{Dispatcher, Registries},
+    confirm_screen::Choice,
+    hud::HudBatch,
+    text::Text,
+};
 use horizon_protocol::{
     packets::play::{self, Serverbound as S},
     secure_chat::{Body, Encoder, LastSeenTracker, Signature},
 };
 use std::sync::Arc;
+use winit::keyboard::KeyCode;
 
 /// ClientPacketListener.sendChatAcknowledgement's threshold.
 const ACK_AFTER: i32 = 64;
+
+/// ClientPacketListener.CommandCheckResult.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CommandCheck {
+    NoIssues,
+    ParseErrors,
+    SignatureRequired,
+    PermissionsRequired,
+}
+
+/// ClientPacketListener.verifyCommand over the tree the server sent.
+fn verify_command(tree: &Dispatcher, registries: &Registries, command: &str) -> CommandCheck {
+    let parse = tree.parse(command, registries);
+    if !parse.is_valid() {
+        return CommandCheck::ParseErrors;
+    }
+    if !parse.signable_arguments(tree).is_empty() {
+        return CommandCheck::SignatureRequired;
+    }
+    if !tree
+        .without_restricted()
+        .parse(command, registries)
+        .is_valid()
+    {
+        return CommandCheck::PermissionsRequired;
+    }
+    CommandCheck::NoIssues
+}
+
+/// What the confirmation's first button does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CommandAccept {
+    /// openCommandSendConfirmationWindow: the command goes as it is.
+    Run,
+    /// openSignedCommandSendConfirmationWindow: into the chat box, for the
+    /// player to read and send.
+    Suggest,
+    /// The same with a screen to come back to: on the clipboard.
+    Copy,
+}
+
+/// The screen a clicked command left, which answering no returns to
+/// (openSendConfirmationWindow's `currentScreen`).
+pub(super) enum Behind {
+    Book(Box<BookScreen>),
+    Dialog(ClosedDialog),
+}
+
+/// The `ConfirmScreen` of ClientPacketListener.openSendConfirmationWindow.
+pub(super) struct CommandPrompt {
+    command: String,
+    message: &'static str,
+    accept: CommandAccept,
+    /// A screen is open behind it: the second button says Back, not Cancel.
+    over_screen: bool,
+    behind: Option<Behind>,
+    /// The button Tab or an arrow key moved to.
+    focus: Option<usize>,
+}
 
 /// `FriendlyByteBuf.readUtf(256)` counts UTF-16 code units, not Unicode scalar
 /// values. Keep a whole scalar at the boundary so the wire string is valid.
@@ -114,7 +180,7 @@ impl Game<'_> {
     /// (isLocalPlayer), and only when the key pair changed: a new session
     /// (random id, chain from link 0) the server hears of at once.
     fn update_chat_session(&mut self) {
-        let Some(account) = auth::current() else {
+        let Some(account) = self.auth() else {
             return;
         };
         let Some(r) = self.remote.as_mut() else {
@@ -224,21 +290,194 @@ impl Game<'_> {
     }
 
     /// ClientPacketListener.sendUnattendedCommand: a command the player
-    /// didn't type (a clicked chat line, a dialog's button, a mod's
-    /// command) goes unsigned. Vanilla asks the player before signing one
-    /// (multiplayer.confirm_command.signature_required); with no such
-    /// screen here, neither a server nor a mod can have the player sign a
-    /// message they never saw. A server that enforces secure chat refuses
-    /// one with a message argument, as it did before chat was signed.
+    /// didn't type (a clicked chat line, a dialog's button, a mod's command)
+    /// goes unsigned when `verify_command` has no issue with it. Any other
+    /// asks first, and one with a message argument is never sent from here:
+    /// the player can only send it themselves, from the chat box. So neither
+    /// a server nor a mod can have the player sign a message they never saw.
     pub(super) fn send_unattended_command(&mut self, command: &str) {
         let command = command.trim();
         let command = command.strip_prefix('/').unwrap_or(command);
         if command.is_empty() || !self.chat_abilities().allows(&format!("/{command}")) {
             return;
         }
-        self.send(S::ChatCommand(play::ChatCommand {
+        let Some(r) = self.remote.as_ref() else {
+            return;
+        };
+        // Vanilla's dispatcher is empty until the server sends its tree.
+        let check = if r.chat_tree_received {
+            verify_command(&r.chat_tree, &self.ui.registries, command)
+        } else {
+            CommandCheck::ParseErrors
+        };
+        // screenAfterCommand: what stays once it has run, a dialog included.
+        let over_screen = self.screen != Screen::Playing || self.dialog_open();
+        let (message, accept) = match check {
+            CommandCheck::NoIssues => {
+                self.send(S::ChatCommand(play::ChatCommand {
+                    command: command.to_owned(),
+                }));
+                return;
+            }
+            CommandCheck::ParseErrors => (
+                "multiplayer.confirm_command.parse_errors",
+                CommandAccept::Run,
+            ),
+            CommandCheck::PermissionsRequired => (
+                "multiplayer.confirm_command.permissions_required",
+                CommandAccept::Run,
+            ),
+            CommandCheck::SignatureRequired => (
+                "multiplayer.confirm_command.signature_required",
+                if over_screen {
+                    CommandAccept::Copy
+                } else {
+                    CommandAccept::Suggest
+                },
+            ),
+        };
+        self.command_prompt = Some(CommandPrompt {
             command: command.to_owned(),
-        }));
+            message,
+            accept,
+            over_screen,
+            behind: None,
+            focus: None,
+        });
+        self.capture(false);
+    }
+
+    /// The command just clicked left this screen: if it asks, no returns there.
+    pub(super) fn command_prompt_returns_to(&mut self, behind: Behind) {
+        if let Some(prompt) = self.command_prompt.as_mut() {
+            prompt.behind = Some(behind);
+            prompt.over_screen = true;
+        }
+    }
+
+    /// The translation key of the open confirmation's message.
+    pub(super) fn command_prompt_message(&self) -> Option<&'static str> {
+        self.command_prompt.as_ref().map(|p| p.message)
+    }
+
+    /// The confirmation's title, the command in yellow in its message, and
+    /// its two buttons.
+    fn command_prompt_layout(&self, prompt: &CommandPrompt, size: (f32, f32)) -> Choice {
+        let command = Text::literal(&prompt.command).with_color(0xFF_FF55);
+        let mut choice = Choice::new(
+            &self.gui.atlas.font,
+            size,
+            &Text::translate("multiplayer.confirm_command.title", &[]),
+            &Text::translate(prompt.message, &[command]),
+            2,
+            150.0,
+        );
+        choice.focus = prompt.focus;
+        choice
+    }
+
+    pub(super) fn draw_command_prompt(&self, batch: &mut HudBatch) {
+        let Some(prompt) = &self.command_prompt else {
+            return;
+        };
+        horizon_client::widgets::begin_screen(|| {
+            super::screen_info::confirm(
+                "multiplayer/confirm_command",
+                &super::screen_info::tr("multiplayer.confirm_command.title", &[]),
+                &prompt.command,
+            )
+        });
+        let atlas = &self.gui.atlas;
+        let (w, h) = (batch.width, batch.height);
+        horizon_client::ui::menu_background(batch, atlas, 0.0, 0.0, w, h, true);
+        let labels = [
+            Text::translate(
+                match prompt.accept {
+                    CommandAccept::Run => "multiplayer.confirm_command.run_command",
+                    CommandAccept::Suggest => "multiplayer.confirm_command.suggest_command",
+                    CommandAccept::Copy => "chat.copy",
+                },
+                &[],
+            ),
+            Text::translate(
+                if prompt.over_screen {
+                    "gui.back"
+                } else {
+                    "gui.cancel"
+                },
+                &[],
+            ),
+        ];
+        self.command_prompt_layout(prompt, (w, h))
+            .draw(batch, atlas, self.cursor, &labels);
+    }
+
+    /// The confirmation's answer; on no, what was behind it is back.
+    pub(super) fn answer_command_prompt(&mut self, yes: bool) {
+        let Some(prompt) = self.command_prompt.take() else {
+            return;
+        };
+        match (yes, prompt.accept, prompt.behind) {
+            (true, CommandAccept::Run, _) => {
+                if self.remote.is_some() {
+                    self.send(S::ChatCommand(play::ChatCommand {
+                        command: prompt.command,
+                    }));
+                }
+            }
+            // Gui.openChatAndAddText.
+            (true, CommandAccept::Suggest, _) => self.open_chat(&format!("/{}", prompt.command)),
+            (true, CommandAccept::Copy, _) => {
+                use horizon_client::clipboard::Clipboard;
+                self.clipboard.set(&format!("/{}", prompt.command));
+            }
+            (false, _, Some(Behind::Book(book))) => self.book = Some(*book),
+            (false, _, Some(Behind::Dialog(dialog))) => self.reopen_dialog(dialog),
+            (false, _, None) => {}
+        }
+        if self.screen == Screen::Playing && !self.screen_over_playing() {
+            self.capture(true);
+        }
+    }
+
+    /// ConfirmScreen.keyPressed, and what its buttons take from the keyboard
+    /// (Screen's focus navigation, AbstractButton's Enter and Space).
+    pub(super) fn command_prompt_key(&mut self, key: KeyCode) {
+        let (size, shift) = (self.gui_size(), self.has_shift_down());
+        let Some(prompt) = &self.command_prompt else {
+            return;
+        };
+        let mut choice = self.command_prompt_layout(prompt, size);
+        match key {
+            KeyCode::Escape => return self.answer_command_prompt(false),
+            KeyCode::Tab => choice.tab(shift),
+            KeyCode::ArrowLeft | KeyCode::ArrowRight => choice.arrow(key == KeyCode::ArrowLeft),
+            KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space => {
+                if let Some(button) = choice.pressed() {
+                    self.audio.play_button_click();
+                    self.answer_command_prompt(button == 0);
+                }
+                return;
+            }
+            _ => return,
+        }
+        let focus = choice.focus;
+        if let Some(prompt) = self.command_prompt.as_mut() {
+            prompt.focus = focus;
+        }
+    }
+
+    pub(super) fn command_prompt_click(&mut self) {
+        let Some(prompt) = &self.command_prompt else {
+            return;
+        };
+        let pressed = self
+            .command_prompt_layout(prompt, self.gui_size())
+            .pressed_at(self.cursor);
+        if let Some(button) = pressed {
+            self.audio.play_button_click();
+            self.answer_command_prompt(button == 0);
+        }
     }
 
     /// markMessageAsProcessed, when the chat takes a signed message (past

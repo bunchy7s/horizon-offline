@@ -827,7 +827,7 @@ impl PackScreen {
 
     /// The shown screen's calls (`Screen.extractRenderState`); `blink_ms`
     /// is the time since the search box took the focus.
-    pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64) -> Vec<Draw> {
+    pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64, now_ms: i64) -> Vec<Draw> {
         let mut out = Vec::new();
         // PackSelectionScreen, or the ConfirmScreen over it (its title and
         // its message).
@@ -845,7 +845,7 @@ impl PackScreen {
             for ((bx, by), key) in buttons.into_iter().zip(["gui.yes", "gui.no"]) {
                 let hover = d::inside(mouse, bx, by, 150, 20);
                 crate::widgets::widget_cursor(hover, true);
-                d::button(&mut out, m, &tr(key), bx, by, 150, 20, true, hover);
+                d::button(&mut out, m, &tr(key), bx, by, 150, 20, true, hover, now_ms);
             }
             return out;
         }
@@ -863,25 +863,40 @@ impl PackScreen {
         for side in 0..2 {
             self.draw_list(&mut out, m, side, mouse);
         }
-        for (i, (bx, by)) in self.footer().into_iter().enumerate() {
+        self.draw_footer(
+            &mut out,
+            m,
+            mouse,
+            now_ms,
+            [&tr("pack.openFolder"), &tr("gui.done")],
+        );
+        out
+    }
+    /// The footer's two buttons, "Open Pack Folder" and "Done", over their
+    /// labels; a label wider than its button scrolls with the clock.
+    fn draw_footer(
+        &self,
+        out: &mut Vec<Draw>,
+        m: &Measure,
+        mouse: (i32, i32),
+        now_ms: i64,
+        labels: [&Text; 2],
+    ) {
+        for (i, ((bx, by), label)) in self.footer().into_iter().zip(labels).enumerate() {
             let hover = d::inside(mouse, bx, by, 150, 20);
-            let label = tr(if i == 0 {
-                "pack.openFolder"
-            } else {
-                "gui.done"
-            });
             // The cursor follows the mouse; the highlight also keyboard focus.
             crate::widgets::widget_cursor(hover, true);
             d::button(
-                &mut out,
+                out,
                 m,
-                &label,
+                label,
                 bx,
                 by,
                 150,
                 20,
                 true,
                 hover || self.focus == Focus::Button(i),
+                now_ms,
             );
             if i == 0 {
                 crate::widgets::last_narratable(|n| {
@@ -889,10 +904,9 @@ impl PackScreen {
                 });
             }
             if i == 0 && hover {
-                d::tooltip(&mut out, m, &tr("pack.folderInfo"), mouse);
+                d::tooltip(out, m, &tr("pack.folderInfo"), mouse);
             }
         }
-        out
     }
     fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, side: usize, mouse: (i32, i32)) {
         let l = &self.lists[side];
@@ -1151,7 +1165,7 @@ mod icon_tests {
             pack("file/Iconless", None),
         ];
         let screen = PackScreen::new(&m, tr("resourcePack.title"), 480, 320, false, packs, &[]);
-        let mut draws = screen.draw(&m, (0, 0), 0);
+        let mut draws = screen.draw(&m, (0, 0), 0, 0);
         let mut patches = Vec::new();
         screen.bind_icons(&mut draws, &atlas, &mut patches);
         let icons: Vec<&str> = draws
@@ -1240,5 +1254,133 @@ mod click_sound_tests {
             Action::None
         );
         assert!(!screen.confirming());
+    }
+}
+
+#[cfg(test)]
+mod footer_label_tests {
+    use super::*;
+    use crate::lang::{self, Language};
+
+    /// The footer drawn with these labels (no global language involved) and
+    /// the footer buttons' positions.
+    fn footer(
+        atlas: &HudAtlas,
+        open_folder: &Text,
+        done: &Text,
+        now_ms: i64,
+    ) -> (Vec<Draw>, [(i32, i32); 2]) {
+        let m = Measure(&atlas.font);
+        let screen = PackScreen::new(&m, Text::literal("Packs"), 480, 320, false, Vec::new(), &[]);
+        let mut out = Vec::new();
+        screen.draw_footer(&mut out, &m, (0, 0), now_ms, [open_folder, done]);
+        (out, screen.footer())
+    }
+    /// Every label drawn in `[bx + 2, bx + 148] x [by, by + 20]` of its button:
+    /// the scissor of a scrolling one is that box, and the text sits between
+    /// the scissor's calls.
+    fn assert_labels_stay_in_their_buttons(draws: &[Draw], buttons: &[(i32, i32)]) -> usize {
+        let mut scissors = 0;
+        let mut open = None;
+        let mut button = 0;
+        for d in draws {
+            match d {
+                Draw::Sprite { x, y, .. } => {
+                    button = buttons.iter().position(|b| *b == (*x, *y)).unwrap();
+                }
+                Draw::Scissor { x0, y0, x1, y1 } => {
+                    let (bx, by) = buttons[button];
+                    assert_eq!([*x0, *y0, *x1, *y1], [bx + 2, by, bx + 148, by + 20]);
+                    assert!(open.replace(()).is_none());
+                    scissors += 1;
+                }
+                Draw::NoScissor => assert!(open.take().is_some()),
+                _ => {}
+            }
+        }
+        assert!(open.is_none());
+        scissors
+    }
+
+    /// The Resource Packs footer with a label wider than its 150 px button
+    /// does not panic and scrolls; the short "Done" keeps its centre.
+    #[test]
+    fn a_footer_label_wider_than_its_button_scrolls() {
+        let atlas =
+            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
+                .unwrap();
+        let m = Measure(&atlas.font);
+        let wide = Text::literal("Otvori papku s paketami resursov, i jos nesto");
+        assert!(m.width(&wide) > 146);
+        let (draws, buttons) = footer(&atlas, &wide, &Text::literal("Done"), 0);
+        assert_eq!(assert_labels_stay_in_their_buttons(&draws, &buttons), 1);
+        // The clock moves it.
+        let x = |draws: &[Draw]| {
+            draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Text { x, .. } => Some(*x),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let (later, _) = footer(&atlas, &wide, &Text::literal("Done"), 2000);
+        assert_ne!(x(&draws), x(&later));
+        // Both too wide: both scroll.
+        let (draws, buttons) = footer(&atlas, &wide, &wide, 0);
+        assert_eq!(assert_labels_stay_in_their_buttons(&draws, &buttons), 2);
+    }
+
+    /// The real language files: the Resource Packs footer in each of the 143
+    /// languages draws without a panic, and in the ones whose "Open Pack
+    /// Folder" is wider than the button (Afrikaans and Macedonian among them,
+    /// the crash of #6129) it scrolls. A local `Language` per file: the global
+    /// language stays as it was.
+    #[test]
+    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES or .local/horizon-client/26.3"]
+    fn the_footer_draws_in_every_language_file() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client/26.3")
+            });
+        let atlas = crate::hud::HudAtlas::build(&root).unwrap();
+        let m = Measure(&atlas.font);
+        let before = lang::code();
+        let mut codes: Vec<String> = std::fs::read_dir(root.join("assets/minecraft/lang"))
+            .unwrap()
+            .filter_map(|e| {
+                let name = e.ok()?.file_name().into_string().ok()?;
+                name.strip_suffix(".json").map(str::to_owned)
+            })
+            .collect();
+        codes.sort();
+        assert!(codes.len() >= 143, "{}", codes.len());
+        let mut scrolling = Vec::new();
+        for code in &codes {
+            let language = Language::load(&[&root], code);
+            let label = |key| Text::literal(language.get(key).unwrap_or(key));
+            let (open_folder, done) = (label("pack.openFolder"), label("gui.done"));
+            for now_ms in [0, 700, 1300, 5000] {
+                let (draws, buttons) = footer(&atlas, &open_folder, &done, now_ms);
+                let n = assert_labels_stay_in_their_buttons(&draws, &buttons);
+                assert_eq!(
+                    n,
+                    [&open_folder, &done]
+                        .iter()
+                        .filter(|t| m.width(t) > 146)
+                        .count(),
+                    "{code}"
+                );
+                if now_ms == 0 && n > 0 {
+                    scrolling.push(code.as_str());
+                }
+            }
+        }
+        for code in ["af_za", "mk_mk"] {
+            assert!(scrolling.contains(&code), "{code} not in {scrolling:?}");
+        }
+        assert_eq!(lang::code(), before, "the global language was left alone");
     }
 }

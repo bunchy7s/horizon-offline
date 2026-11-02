@@ -1703,6 +1703,22 @@ pub fn ai_step(
     if !w.nether && !m.extra.flag2 && m.alive() {
         m.extra.counter2 += 1;
         if m.extra.counter2 > CONVERSION {
+            // `Piglin.finishConversion` runs `PiglinAi.cancelAdmiring` first:
+            // the item the piglin is admiring leaves the off hand and lands
+            // where it stands, so the zombified piglin never carries it.
+            if m.species() == Species::Piglin {
+                let admiring = (m.extra.off_hand.is_some() && m.extra.using_item > 0)
+                    || m.extra.piglin.seen_admire > 0;
+                if admiring && let Some(item) = m.extra.off_hand.take() {
+                    events.push(MobEvent::DropItem {
+                        mob: m.id,
+                        item,
+                        count: 1,
+                        at: [m.position.x, m.position.y, m.position.z],
+                    });
+                    m.extra.using_item = 0;
+                }
+            }
             // `Hoglin.finishConversion` is `ConversionParams.single(this, true,
             // false)`, `AbstractPiglin.finishConversion` `(this, true, true)`;
             // both leave the new mob nauseous (the game adds it).
@@ -2170,5 +2186,49 @@ mod crossbow_tests {
         };
         f.admire_seen(true, None, false);
         assert_eq!(f.seen_admire, 40);
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+
+    /// `Piglin.finishConversion` cancels the admire before it converts: the
+    /// item in the off hand is dropped at the piglin's feet and the zombified
+    /// piglin does not carry it, where Horizon used to hand it over.
+    #[test]
+    fn a_converted_piglin_drops_the_item_it_was_admiring() {
+        let ran = with_test_world(&[], |w, types| {
+            let mut m = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:piglin"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            m.extra.off_hand = Some("minecraft:gold_ingot".into());
+            m.extra.using_item = 60;
+            m.extra.counter2 = CONVERSION + 1;
+            let mut lr = LegacyRandom::new(0);
+            let mut events = Vec::new();
+            ai_step(&mut m, w, &mut lr, &mut events);
+            assert!(
+                events.iter().any(|e| matches!(
+                    e,
+                    MobEvent::DropItem { item, count, .. }
+                        if &**item == "minecraft:gold_ingot" && *count == 1
+                )),
+                "the admired item is dropped"
+            );
+            let from = events
+                .iter()
+                .find_map(|e| match e {
+                    MobEvent::Convert { from, .. } => Some(from),
+                    _ => None,
+                })
+                .expect("the piglin converts");
+            assert_eq!(from.extra.off_hand, None, "the new mob carries nothing");
+        });
+        let _ = ran;
     }
 }

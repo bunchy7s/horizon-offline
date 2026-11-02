@@ -19,6 +19,14 @@ CASES = [
     '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'"One"\',\'{"text":"Two","bold":1b}\']}}',
     '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'"Hidden"\'],"minecraft:tooltip_display":{hidden_components:["minecraft:lore"]}}}',
     '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'{"text":"Line","underlined":1b,"strikethrough":1b}\']}}',
+    # A line with no text of its own: the root's explicit italic:0b reaches the
+    # children that set no italic, and a child's italic:1b still wins there.
+    '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'{"italic":0b,"extra":[{"text":"A"},{"text":"B","italic":1b}]}\']}}',
+    # A plain-string child next to an object child, and an explicit bold:0b
+    # under the dark purple italic line style.
+    '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'{"text":"A","extra":["B",{"text":"C","color":"red","bold":0b}]}\']}}',
+    # A packed RGB colour and an explicit strikethrough that a child inherits.
+    '{id:"minecraft:stick",count:1,components:{"minecraft:lore":[\'{"text":"Z","color":"#12ab34","strikethrough":1b,"extra":[{"text":"Y"}]}\']}}',
 ]
 
 
@@ -31,7 +39,8 @@ def cases(build):
 if __name__ == '__main__':
     harness.differential(
         'lore-tooltip-parity', 'VanillaLoreTooltipOracle', 'lore_tooltip_fixture', cases,
-        'Item lore tooltip lines: dark purple italic, child colours, explicit non-italic, and tooltip_display',
+        'Item lore tooltip lines: dark purple italic, child colours, explicit non-italic, a line with no text of its own,'
+        ' plain-string children and packed colours, and tooltip_display',
         sources=[
             lab.ROOT / 'crates/horizon-client/src/item_tooltip.rs',
             lab.ROOT / 'crates/horizon-items/src/item_data.rs',

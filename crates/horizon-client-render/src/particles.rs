@@ -996,7 +996,14 @@ impl ParticleLevel<'_> {
             binding: self.collision,
             subject: None,
         };
-        match scene.resolve(bb, Vec3::new(d[0], d[1], d[2]), 0.0, false) {
+        let movement = Vec3::new(d[0], d[1], d[2]);
+        // `Entity.collideBoundingBox(null, ...)`: no entity shapes, no border. Where no
+        // block of the swept box's cells can collide, it finds no shape and the
+        // movement stands, as the resolution below would return it.
+        if scene.cells_without_collision(bb.expand_towards(movement)) {
+            return d;
+        }
+        match scene.resolve(bb, movement, 0.0, false) {
             Ok(v) => [v.x, v.y, v.z],
             Err(_) => d,
         }
@@ -1091,6 +1098,43 @@ pub struct ParticleEngine {
 const MAX_PARTICLES: usize = 16384;
 /// `ParticleLimit.SPORE_BLOSSOM`, the only limited particle.
 const SPORE_BLOSSOM_LIMIT: usize = 1000;
+const PARTICLE_LIGHT_CACHE_SIZE: usize = 64;
+
+#[derive(Clone, Copy)]
+struct CachedParticleLight {
+    block: [i32; 3],
+    packed: u8,
+}
+
+struct ParticleLightCache {
+    entries: [Option<CachedParticleLight>; PARTICLE_LIGHT_CACHE_SIZE],
+}
+
+impl Default for ParticleLightCache {
+    fn default() -> Self {
+        Self {
+            entries: [None; PARTICLE_LIGHT_CACHE_SIZE],
+        }
+    }
+}
+
+impl ParticleLightCache {
+    fn get(&mut self, block: [i32; 3], light_at: &dyn Fn([i32; 3]) -> u8) -> u8 {
+        let hash = (block[0] as u32).wrapping_mul(73_856_093)
+            ^ (block[1] as u32).wrapping_mul(19_349_663)
+            ^ (block[2] as u32).wrapping_mul(83_492_791);
+        let slot = hash as usize & (PARTICLE_LIGHT_CACHE_SIZE - 1);
+        if let Some(entry) = self.entries[slot]
+            && entry.block == block
+        {
+            return entry.packed;
+        }
+        let packed = light_at(block);
+        self.entries[slot] = Some(CachedParticleLight { block, packed });
+        packed
+    }
+}
+
 impl ParticleEngine {
     pub fn new(root: &Path, atlas: &HashMap<String, Rect>, translucent: &HashSet<String>) -> Self {
         let mut engine = Self {
@@ -1158,7 +1202,9 @@ impl ParticleEngine {
         }
         let dir = root.join("assets/minecraft/particles");
         for &ty in ParticleType::ALL {
-            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
+            let Ok(bytes) =
+                horizon_core::prepared_files::read(&dir.join(format!("{}.json", ty.name())))
+            else {
                 continue;
             };
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
@@ -4093,6 +4139,47 @@ impl ParticleEngine {
         }
     }
 
+    /// The particles that `entries` name, as lights: where each is this frame, its entry's colour
+    /// as RGB and reach, and its alpha as the intensity.
+    pub fn lights(
+        &self,
+        entries: &[horizon_shader_api::manifest::ParticleLight],
+        partial: f32,
+    ) -> Vec<([f64; 3], u32, f32, f32)> {
+        let shining: Vec<(ParticleType, u32, f32)> = entries
+            .iter()
+            .flat_map(|e| {
+                let [r, g, b] = e.color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u32);
+                e.particles.iter().filter_map(move |name| {
+                    let name = if name.contains(':') {
+                        name.clone()
+                    } else {
+                        format!("minecraft:{name}")
+                    };
+                    Some((
+                        ParticleType::from_name(&name)?,
+                        r << 16 | g << 8 | b,
+                        e.reach,
+                    ))
+                })
+            })
+            .collect();
+        if shining.is_empty() {
+            return Vec::new();
+        }
+        let f = f64::from(partial);
+        self.particles
+            .iter()
+            .filter(|p| p.rgba[3] > 0.0)
+            .filter_map(|p| {
+                let (_, rgb, reach) = shining.iter().find(|(ty, ..)| *ty == p.ty)?;
+                let at =
+                    std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * f);
+                Some((at, *rgb, *reach, p.rgba[3].clamp(0.0, 1.0)))
+            })
+            .collect()
+    }
+
     /// Camera-facing quads (`QuadParticleRenderState.renderRotatedQuad`).
     pub fn render(
         &self,
@@ -4106,6 +4193,7 @@ impl ParticleEngine {
         // Camera.setRotation: rotationYXZ(PI - yRot, -xRot, 0).
         let base = Quat::from_rotation_y(std::f32::consts::PI - yaw.to_radians())
             * Quat::from_rotation_x(-pitch.to_radians());
+        let mut light_cache = ParticleLightCache::default();
         for p in &self.particles {
             if p.no_render {
                 continue;
@@ -4205,7 +4293,7 @@ impl ParticleEngine {
                 _ => {}
             }
             let block = ParticleLevel::block_at(p.position);
-            let packed = light_at(block);
+            let packed = light_cache.get(block, light_at);
             let (sky_light, block_light) = p.light_coords(
                 partial,
                 u32::from(packed >> 4) * 16,
@@ -4315,6 +4403,25 @@ const CREEPER: [[f64; 2]; 12] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn particle_light_cache_reuses_exact_blocks_and_fails_open_on_collisions() {
+        let reads = std::cell::Cell::new(0);
+        let light_at = |block: [i32; 3]| {
+            reads.set(reads.get() + 1);
+            block[0] as u8
+        };
+        let mut cache = ParticleLightCache::default();
+        let first = [0, 0, 0];
+        let colliding = [64, 0, 0];
+
+        assert_eq!(cache.get(first, &light_at), 0);
+        assert_eq!(cache.get(first, &light_at), 0);
+        assert_eq!(reads.get(), 1);
+        assert_eq!(cache.get(colliding, &light_at), 64);
+        assert_eq!(cache.get(first, &light_at), 0);
+        assert_eq!(reads.get(), 3);
+    }
 
     #[test]
     fn a_mod_particles_json_becomes_its_sprite_set() {

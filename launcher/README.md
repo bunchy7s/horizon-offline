@@ -15,7 +15,10 @@ The opening, then Play ([clip](docs/opening.webm)):
 
 - **Versions**: lists the published builds of horizon-rust/horizon (the current Nightly, the last
   week's, then the releases from before), installs the build for this platform into its own
-  folder, and removes it again.
+  folder, and removes it again. **Import a game build…** takes a `horizon-client` you have (one
+  built on your fork's Actions, or the zip holding it) and installs it as `imported-<date>-<sha>`:
+  a copy of the selected release or Nightly's folder, game files included, with that program as the
+  game. Imported builds are listed apart as unsigned, and no update replaces them.
 - **Play**: prepares resources as `PLAY.txt` describes (your launcher's 26.3 install, the
   26.3 server jar from that version's own json, and Java 25) and copies its sounds from your
   launcher's asset store (`horizon-prepare sounds`; a launcher install without them only
@@ -96,7 +99,7 @@ The opening, then Play ([clip](docs/opening.webm)):
   from the window or `horizon-launcher play` adds to it (`instance list` shows it too). Each
   instance plays the launcher's version, which follows updates, unless the Play page's version
   picker keeps it on another installed one (to keep an old world on the version it was made
-  with); picking the version marked "follows updates" lets it follow again.
+  with); picking the version marked "auto-update" lets it follow again.
 - **Export**: Home's Instance row has **Export…**: the selected instance (or a port) as a `.mrpack`
   (Modrinth's modpack format: resource packs the browser installed from Modrinth are listed by
   their download, the rest is in `overrides/`) or a `.zip` of the game folder's layout, with the
@@ -229,7 +232,8 @@ page `servers.json` (the list), `servers/<name>/` (the servers created there) an
 - **Updates**: Horizon ships only the Nightly (since 2026-10-28, docs/release-flow.md). The
   launcher installs the current one (the `nightly` pre-release, checksums signed for the Nightly
   channel) as `nightly-<date>-<commit>` and selects it when the player was on a Nightly, on the
-  newest release or on nothing; a version picked by hand or pinned by an instance stays. Older
+  newest release or on nothing; a version picked by hand or pinned by an instance stays, and so
+  does an imported build. Older
   Nightlies are removed once nothing plays them. Worlds are never touched: they live in the game's
   folder, not in a version's. The last week's Nightlies (`nightly-<date>`), the `vX.Y.Z`
   releases and the old Alpha pre-releases stay on the Versions page to install by hand, never as
@@ -266,6 +270,15 @@ minimize, maximize/restore and close; macOS and Linux keep their system title ba
 The launcher looks for a newer Nightly when it starts and every 30 minutes while it is open, and
 shows a small "available, Install" line on Play.
 
+Release lists and commits come from GitHub's API, which allows 60 anonymous calls an hour per
+address: players behind a shared one (a school, a dorm, a carrier's NAT) spend them together.
+So each answer is kept in `cache/github/` in the data folder and used again for 5 minutes without
+asking, then revalidated with its ETag. When GitHub answers with its rate limit, or not at all,
+Horizon's own releases are read through Kira's read-only mirror
+(`https://mcp.playhorizon.dev/github/public`; `HORIZON_GITHUB_MIRROR` replaces it, empty turns it
+off); when both fail the last saved answer is used, else the error names both. The release files
+themselves come from their download links, which that limit doesn't cover.
+
 It also updates itself from GitHub releases tagged `launcher@X.Y.Z` (the game's are `nightly`, and
 `vX.Y.Z` before 2026-10-28; neither is ever taken for the other). Before 0.2 they were `launcher-vX.Y.Z` and `vYYYY.MM.DD`:
 every 0.2 tag counts as newer than all of those (docs/versioning.md). It downloads the new build, replaces its
@@ -299,6 +312,16 @@ labelled `feature`) with `horizon-launcher-linux-x86_64.tar.gz`,
 `horizon-launcher-macos-x64.zip` (Intel Macs) and `horizon-launcher-windows-x64.zip`, never marked latest. The version is built in from the tag
 (`HORIZON_LAUNCHER_VERSION`); `Cargo.toml`'s version is only what local builds report.
 
+Windows also publishes `horizon-launcher-setup.exe`: the launcher's own binary under another name, which opens
+a per-user setup instead of the window (no administrator). It copies itself to
+`%LOCALAPPDATA%\Programs\Horizon Launcher\horizon-launcher.exe`, makes the Start menu shortcut (and the
+desktop one if asked) and an entry in *Apps & features*, then starts the copy. `horizon-launcher-setup.exe
+setup --quiet [--dir <folder>] [--desktop-shortcut]` does the same without a window, and
+`horizon-launcher.exe uninstall` (or `... uninstall --quiet [--remove-data]`) takes it all away again: the
+shortcuts, the registry entries and the install folder. The game's folders are never touched, and the
+launcher's data folder only with `--remove-data`. An installed launcher keeps updating itself, so the
+uninstaller at that path is always the newest one.
+
 ## Command line
 
 Generate shell completions without opening the window:
@@ -324,6 +347,7 @@ and don't set `%ERRORLEVEL%` / `$LASTEXITCODE`. Scripts that need the exit code 
     horizon-launcher versions [--installed]       releases on GitHub, or what is installed (* = selected)
     horizon-launcher install <tag|latest>
     horizon-launcher remove <tag>
+    horizon-launcher import-build <path> [--version <tag>] --trust-unsigned   a game program you have, as its own version
     horizon-launcher prepare [--minecraft <dir>] [--version <tag>]
     horizon-launcher play [--version <tag>] [--instance <name>] [--arg <ARG>]...   start the client; --arg passes an extra argument through (repeatable)
     horizon-launcher server [--dir <dir>] [--version <tag>] [--accept-eula]

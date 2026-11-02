@@ -25,6 +25,20 @@ use horizon_world::{
 };
 use std::{collections::BTreeMap, fs, path::Path};
 
+/// A living entity is about to handle a fall (`LivingFallEvent`). Mods may
+/// change the distance and damage multiplier, or cancel fall handling.
+/// 357.
+#[inline(never)]
+pub fn native_living_fall(
+    entity: u32,
+    kind: &str,
+    distance: &mut f64,
+    multiplier: &mut f32,
+    cancel: &mut bool,
+) {
+    crate::native_client_hooks::living_fall(entity, kind, distance, multiplier, cancel);
+}
+
 pub fn load(root: &Path, properties: &MovementProperties<'_>) -> Result<BlockLandingRegistry> {
     let raw: BTreeMap<String, serde_json::Value> =
         serde_json::from_slice(&fs::read(root.join("landing-definitions.json"))?)?;
@@ -78,6 +92,18 @@ impl SceneSound {
             Self::Block(_) => None,
         }
     }
+    /// The sound event a block plays where it is (`Level.playSound(null, pos,
+    /// ..)`, which every player hears), if this is one: a turtle egg breaking
+    /// (`TurtleEggBlock.decreaseEggs`), a shelf mushroom bouncing.
+    pub fn block_sound(self) -> Option<&'static str> {
+        match self {
+            Self::Block(LandingSound::TurtleEggBreak) => Some("minecraft:block.turtle_egg.break"),
+            Self::Block(LandingSound::ShelfMushroomBounce) => {
+                Some("minecraft:block.shelf_mushroom.bounce")
+            }
+            _ => None,
+        }
+    }
     fn name(self) -> &'static str {
         match self {
             Self::SmallFall => "small",
@@ -124,6 +150,8 @@ pub enum FallEvent {
     Destroy {
         position: BlockPos,
         drops: bool,
+        /// The block it destroyed, for `Level.destroyBlock`'s level event 2001.
+        state: BlockStateId,
     },
     BlockEvent {
         kind: LandingEvent,
@@ -194,7 +222,9 @@ impl FallEvent {
                 state,
                 flags,
             } => format!("write {} {} {}", p(position), state.0, flags),
-            Self::Destroy { position, drops } => format!("destroy {} {}", p(position), drops),
+            Self::Destroy {
+                position, drops, ..
+            } => format!("destroy {} {}", p(position), drops),
             Self::BlockEvent {
                 kind,
                 position,
@@ -273,6 +303,25 @@ impl MotionWorld<'_, '_, '_> {
                 floor
             }) as i64;
             self.fall_event(FallEvent::Statistic(rounded as i32));
+        }
+        let mut distance = distance;
+        let mut multiplier = multiplier;
+        let mut cancel = false;
+        if !self.player.replaying {
+            native_living_fall(
+                self.player.entity_id as u32,
+                "minecraft:player",
+                &mut distance,
+                &mut multiplier,
+                &mut cancel,
+            );
+        }
+        // A canceled fall still lands on the block (`Block.fallOn`).
+        if cancel {
+            if let Some((state, position, original_distance)) = contact {
+                self.mod_block_fall(state, position, original_distance, 0.0);
+            }
+            return Ok(false);
         }
         living_fall::cause_living_fall_damage(
             &mut FallCall {
@@ -508,8 +557,13 @@ impl BlockLandingWorld for MotionWorld<'_, '_, '_> {
             .registry
             .default_state("minecraft:air")
             .ok_or("missing air")?;
+        let state = self.scene.block(position.x, position.y, position.z);
         self.scene.set(position.x, position.y, position.z, air)?;
-        self.fall_event(FallEvent::Destroy { position, drops });
+        self.fall_event(FallEvent::Destroy {
+            position,
+            drops,
+            state,
+        });
         Ok(true)
     }
     fn set_block(&mut self, position: BlockPos, state: BlockStateId, flags: u32) -> Result<bool> {
@@ -629,5 +683,24 @@ mod tests {
             SceneSound::Block(LandingSound::HoneyFall).player_fall_sound(),
             None
         );
+    }
+
+    /// The sounds a block plays where it is; the honey block's are the
+    /// entity's own (`Entity.playSound`) and the fall sounds the player's.
+    #[test]
+    fn block_sounds_map_to_block_events() {
+        assert_eq!(
+            SceneSound::Block(LandingSound::TurtleEggBreak).block_sound(),
+            Some("minecraft:block.turtle_egg.break")
+        );
+        assert_eq!(
+            SceneSound::Block(LandingSound::ShelfMushroomBounce).block_sound(),
+            Some("minecraft:block.shelf_mushroom.bounce")
+        );
+        assert_eq!(
+            SceneSound::Block(LandingSound::HoneySlide).block_sound(),
+            None
+        );
+        assert_eq!(SceneSound::BigFall.block_sound(), None);
     }
 }

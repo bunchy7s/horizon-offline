@@ -34,7 +34,7 @@ Checks:
 
 Each server runs in a fresh folder with fresh HORIZON_HOME and XDG folders (lab.game_env), on a free port,
 in a flat world (creative unless the check says otherwise: the bots fly). Build first:
-    cargo build --profile fast -p horizon-client --bin horizon-client --bin horizon-ctl
+    cargo build --profile fast -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl
     cargo build --profile fast -p horizon-bots
 """
 import argparse

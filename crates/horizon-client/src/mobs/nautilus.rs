@@ -350,6 +350,12 @@ pub fn client_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
 fn in_water_at(w: &MobWorld, p: Vec3) -> bool {
     w.fluid(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32) == Fluid::Water
 }
+/// `AbstractNautilus.isAggravated`: the brain holds an `ANGRY_AT` or an
+/// `ATTACK_TARGET` memory. Horizon keeps those as the anger timer (whose
+/// target is `last_hurt_by`) and the current attack target.
+pub fn aggravated(m: &Mob) -> bool {
+    m.extra.anger > 0 || m.ai.target.is_some()
+}
 /// `NautilusAi.findNearestValidAttackTarget`: whoever it is angry at, else
 /// now and then (a coin flip every 2400 to 3600 ticks) the nearest pufferfish.
 fn find_target(m: &mut Mob, w: &MobWorld) -> Option<Who> {

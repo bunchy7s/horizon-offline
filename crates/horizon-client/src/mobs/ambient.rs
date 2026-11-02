@@ -1,7 +1,7 @@
 //! What a client's copy of a mob makes on its own, in the
 //! `level().isClientSide()` branches of `aiStep`: nothing of it reaches the
-//! server or goes over the network, so the window's game runs it, whether it
-//! simulates the world (in-frame) or follows a server.
+//! server or goes over the network, so the window's game runs it as it follows
+//! a server.
 use super::{Mob, MobEvent, Species, bee};
 use horizon_core::geometry::trig::Mth;
 use horizon_core::random::RandomSource;

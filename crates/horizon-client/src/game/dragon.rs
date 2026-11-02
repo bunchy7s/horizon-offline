@@ -17,6 +17,7 @@ use horizon_client::{
     projectiles::ProjectileKind,
     text::Text,
 };
+use horizon_core::position::BlockPos;
 use horizon_core::{
     geometry::{Aabb, Vec3},
     random::{LegacyRandom, RandomSource},
@@ -24,10 +25,46 @@ use horizon_core::{
 use horizon_protocol::entity_data::Value;
 use horizon_world::nbt::Tag;
 
+/// `HealOrHarmMobEffect.applyInstantaneousEffect` at an `AreaEffectCloud`'s
+/// 0.5 scale: `(int) (scale * (6 << amplifier) + 0.5)`.
+fn harm_amount(amplifier: u32) -> f32 {
+    (0.5 * f64::from(6u32 << amplifier) + 0.5) as i32 as f32
+}
+
+/// Whether a cloud at `at` (its floor) reaches a living entity: its box is
+/// `radius * 2` wide and 0.5 tall, and the entity's position must lie within
+/// the radius horizontally.
+fn cloud_hits(at: [f64; 3], radius: f32, bounds: Aabb, pos: Vec3) -> bool {
+    let r = f64::from(radius);
+    let area = Aabb::new(
+        Vec3::new(at[0] - r, at[1], at[2] - r),
+        Vec3::new(at[0] + r, at[1] + 0.5, at[2] + r),
+    );
+    let (dx, dz) = (pos.x - at[0], pos.z - at[2]);
+    bounds.intersects(area) && dx * dx + dz * dz <= f64::from(radius * radius)
+}
+
+/// `DragonFireball.onHit`: the cloud moves to the first living entity in the
+/// fireball's box inflated by (4, 2, 4) that is within 4 blocks of it.
+/// `feet` is the fireball's position (the bottom of its 1x1x1 box).
+fn fireball_cloud_origin(feet: [f64; 3], targets: &[(Aabb, Vec3)]) -> [f64; 3] {
+    let area = Aabb::new(
+        Vec3::new(feet[0] - 4.5, feet[1] - 2.0, feet[2] - 4.5),
+        Vec3::new(feet[0] + 4.5, feet[1] + 3.0, feet[2] + 4.5),
+    );
+    for (bounds, pos) in targets {
+        let (dx, dy, dz) = (pos.x - feet[0], pos.y - feet[1], pos.z - feet[2]);
+        if bounds.intersects(area) && dx * dx + dy * dy + dz * dz < 16.0 {
+            return [pos.x, pos.y, pos.z];
+        }
+    }
+    feet
+}
+
 /// Mob ids from here on are dragon parts (`SPECIAL + part`) and crystals
 /// (`SPECIAL + 16 + crystal`), so projectiles can target them.
 pub(super) const SPECIAL: u32 = u32::MAX - 4096;
-const CRYSTAL_IDS: u32 = SPECIAL + 16;
+pub(super) const CRYSTAL_IDS: u32 = SPECIAL + 16;
 const FIGHT_FILE: &str = "data/minecraft/ender_dragon_fight.dat";
 const MAX_HEALTH: f32 = 200.0;
 /// `Mob.getAmbientSoundInterval`.
@@ -101,6 +138,16 @@ pub(super) struct Crystal {
     pub beam: Option<[i32; 3]>,
     /// `setPermanentlyInvulnerable` (respawned spike crystals).
     pub invulnerable: bool,
+}
+impl Crystal {
+    /// `EntityType.END_CRYSTAL`: 2 x 2.
+    pub(super) fn bounds(&self) -> Aabb {
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - 1.0, p.y, p.z - 1.0),
+            Vec3::new(p.x + 1.0, p.y + 2.0, p.z + 1.0),
+        )
+    }
 }
 #[derive(Clone, Debug, Default)]
 struct Path {
@@ -278,6 +325,7 @@ pub(super) struct Dragon {
     /// `lastHurtByPlayer` with its 100 tick memory: the player credited with
     /// the kill, and the dragon tick of their last hit.
     hurt_by_player: Option<(FightWho, i32)>,
+    pub last_source: Option<(&'static str, Option<i32>, Option<i32>)>,
     pub death_time: i32,
     pub flap: f32,
     pub old_flap: f32,
@@ -406,6 +454,7 @@ impl Dragon {
             invulnerable: 0,
             last_hurt: 0.0,
             hurt_by_player: None,
+            last_source: None,
             death_time: 0,
             flap: 0.0,
             old_flap: 0.0,
@@ -596,6 +645,40 @@ impl Dragon {
             })
             .collect()
     }
+    /// `ServerExplosion.hurtEntities` knockback on the dragon itself:
+    /// `pushFromExplosion` adds `(1 - dist) * exposure` along the blast to
+    /// its eye to the motion (`Entity.push`); the parts are not pushed.
+    fn whole_box(&self) -> Aabb {
+        let p = self.position;
+        Aabb::new(
+            Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+            Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+        )
+    }
+    fn explosion_push(&mut self, center: [f64; 3], radius: f32, exposure: f32) {
+        let diameter = f64::from(radius * 2.0);
+        let p = self.position;
+        let at = |y: f64| [p.x - center[0], y - center[1], p.z - center[2]];
+        let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let dist = len(at(p.y)) / diameter;
+        if dist > 1.0 {
+            return;
+        }
+        // The dragon's eye is 0.85 of its 8 block height, in floats.
+        let away = at(p.y + f64::from(8.0f32 * 0.85f32));
+        let l = len(away);
+        // `Vec3.normalize` gives zero below 1.0E-5F, then `scale(power)`.
+        if l < 9.999_999_747_378_752e-6 {
+            return;
+        }
+        let dir = [away[0] / l, away[1] / l, away[2] / l];
+        let power = (1.0 - dist) * f64::from(exposure);
+        self.velocity = Vec3::new(
+            self.velocity.x + dir[0] * power,
+            self.velocity.y + dir[1] * power,
+            self.velocity.z + dir[2] * power,
+        );
+    }
     /// `DragonHoldingPatternPhase.onCrystalDestroyed`: strafe `player` if
     /// the dragon can attack them (`EnderDragon.canAttack`, on Peaceful too).
     /// The first such crystal wins: the dragon strafes from then on, and
@@ -783,15 +866,15 @@ impl Game<'_> {
         (-2..=1).all(|cz| (-2..=1).all(|cx| self.streaming.is_lit(cx, cz)))
     }
     /// A player's entity id: the acting player's body has it, another
-    /// player's comes from the LAN host (0 when it is out on a guest's turn,
-    /// and for an in-frame host with none).
+    /// player's comes from the hub (0 when it is out on a guest's turn, and
+    /// for no player).
     fn fight_entity(&self, who: FightWho) -> i32 {
         if who == self.acting_player() {
             return self.player.as_ref().map_or(0, |p| p.entity_id);
         }
         let host = self.lan.as_ref();
         match who {
-            FightWho::Host => host.map_or(0, |h| h.host_entity),
+            FightWho::Host => 0,
             FightWho::Guest(conn) => host
                 .and_then(|h| h.hub.guest(conn))
                 .map_or(0, |g| g.entity_id),
@@ -867,9 +950,6 @@ impl Game<'_> {
     /// `EnderDragonFight.tick` and the fight's entities, while the End is
     /// ticked (in place for its player, or on a server with players in it).
     pub(super) fn tick_fight(&mut self) {
-        if self.travelling.is_some() {
-            return;
-        }
         // A dragon outside the End (`/summon`) has no fight: `ServerLevel.getDragonFight` is
         // null there, but `EnderDragon.aiStep` still flies it.
         if self.dim != Dim::End {
@@ -1182,6 +1262,15 @@ impl Game<'_> {
             let pitch = 0.8 + self.world.random.next_float() * 0.3;
             self.audio
                 .play("minecraft:entity.ender_dragon.hurt", Some(at), 5.0, pitch);
+            if let Some(s) = source {
+                d.last_source = Some((
+                    s.damage_type,
+                    (s.causing != 0).then_some(s.causing),
+                    (s.direct != 0).then_some(s.direct),
+                ));
+            } else {
+                d.last_source = Some(("minecraft:generic", None, None));
+            }
         }
         hurt
     }
@@ -1227,8 +1316,8 @@ impl Game<'_> {
         view: &horizon_client::advancements::EntityView,
         blow: Option<(DamageKind, bool)>,
     ) {
-        self.stats.add("killed", "minecraft:ender_dragon", 1);
-        self.stats.custom("mob_kills", 1);
+        self.award_stat("killed", "minecraft:ender_dragon", 1);
+        self.award_custom_stat("mob_kills", 1);
         self.score_player_killed(super::commands::Target::Mob(id));
         // KilledTrigger: the damage source `die` was given.
         let blow = blow.map(|(kind, by_player)| {
@@ -1297,7 +1386,7 @@ impl Game<'_> {
         let hurt = self.hit_special(id, amount, true, DamageKind::PlayerAttack, None);
         // The sweep and the sounds read the charge, which the hit then spends.
         if let (Some(area), Hurt::Landed { .. }) = (area, hurt) {
-            self.attack_effects(area, None, super::mace::Spared::Nothing, None);
+            self.attack_effects(area, None, false, super::mace::Spared::Nothing, None);
         }
         self.attack_ticks = 0;
         true
@@ -1803,8 +1892,9 @@ impl Game<'_> {
                     {
                         y -= 1.0;
                     }
+                    let id = self.take_entity_id();
                     self.breath_clouds.push(Breath {
-                        id: 0,
+                        id,
                         at: [x, y.floor() + 1.0, z],
                         radius: 5.0,
                         age: 0,
@@ -1884,6 +1974,17 @@ impl Game<'_> {
             _ => 0.0,
         };
         super::view_vector(d.yaw, pitch).map(|v| v)
+    }
+    /// `getHeadLookVector(1).normalize()`, which the phases' `doClientTick`s
+    /// take (a look the dragon has never turned from stays the zero vector).
+    fn dragon_look_normalised(&self) -> [f64; 3] {
+        let look = self.dragon_look();
+        let norm = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
+        if norm < 1.0e-5 {
+            [0.0; 3]
+        } else {
+            [look[0] / norm, look[1] / norm, look[2] / norm]
+        }
     }
     /// `EnderDragon.aiStep` (and `tickDeath`) for the dragon.
     fn tick_dragon(&mut self) {
@@ -2084,6 +2185,27 @@ impl Game<'_> {
             set(d, 3 + i, x, y, z);
         }
     }
+    /// `Level.getEntity`: revenge goals must resolve the dragon too.
+    pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
+        let d = self.dragon.as_ref().filter(|d| d.alive())?;
+        let p = d.position;
+        Some((
+            d.id,
+            horizon_client::mobs::TargetInfo {
+                position: p,
+                eye_y: p.y + 6.8,
+                bounds: Aabb::new(
+                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+                ),
+                alive: true,
+                can_be_seen_as_enemy: true,
+                is_player: false,
+                creative: false,
+                passenger: false,
+            },
+        ))
+    }
     /// Wing knockback, head and neck damage, and breaking blocks in the way.
     fn dragon_contacts(&mut self) {
         let Some(d) = self.dragon.as_ref() else {
@@ -2126,6 +2248,35 @@ impl Game<'_> {
                         });
                     }
                 }
+            }
+        }
+        // EnderDragon.aiStep queries living entities, not only players.
+        if let Some(d) = self.dragon.as_ref() {
+            let frame = horizon_client::mobs::dragon_contacts::Frame {
+                dragon_id: d.id,
+                origin: d.position,
+                center: (bc, bz),
+                wings: wings.map(|w| {
+                    w.inflate(Vec3::new(4.0, 2.0, 4.0))
+                        .move_by(Vec3::new(0.0, -2.0, 0.0))
+                }),
+                heads: heads.map(|h| h.inflate(Vec3::new(1.0, 1.0, 1.0))),
+                sitting,
+                recently_hurt,
+            };
+            // Keep team lookup in Game (including tamed pets' owner teams).
+            let allowed: Vec<bool> = self
+                .mobs
+                .iter()
+                .map(|m| {
+                    horizon_client::scoreboard::teams_allow_damage(
+                        self.mob_team(d.id),
+                        self.mob_team_of(m),
+                    )
+                })
+                .collect();
+            for (mob, allowed) in self.mobs.iter_mut().zip(allowed) {
+                horizon_client::mobs::dragon_contacts::contact(mob, &frame, allowed);
             }
         }
         // checkWalls over head, neck and body.
@@ -2260,7 +2411,17 @@ impl Game<'_> {
                     f.full_collision || f.legacy_solid
                 })
                 .map_or(64, |y| y + 1);
-            let _ = self.level_set([0, y, 0], egg);
+            let pos = BlockPos::new(0, y, 0);
+            let allowed = self.with_level(|_, level, _| {
+                let mut cancel = false;
+                if level.native_authoritative {
+                    level.native_dragon_egg_form(level.dimension, pos, &mut cancel);
+                }
+                !cancel
+            });
+            if allowed {
+                let _ = self.level_set([0, y, 0], egg);
+            }
         }
         self.fight.previously_killed = true;
         self.fight.killed = true;
@@ -2280,8 +2441,9 @@ impl Game<'_> {
         );
         // assignDirectionalMovement: the direction times the acceleration power 0.1.
         let velocity = Vec3::new(v.x * 0.1, v.y * 0.1, v.z * 0.1);
+        let id = self.take_entity_id();
         self.dragon_fireballs.push(DragonFireball {
-            id: 0,
+            id,
             position: at,
             previous: at,
             velocity,
@@ -2298,6 +2460,13 @@ impl Game<'_> {
             .iter()
             .filter(|p| p.alive && !p.spectator)
             .map(|p| p.bounds)
+            .collect();
+        // DragonFireball.onHit snaps to any living entity (mobs not ported here).
+        let snap_targets: Vec<(Aabb, Vec3)> = self
+            .fight_players()
+            .iter()
+            .filter(|p| p.alive)
+            .map(|p| (p.bounds, p.position))
             .collect();
         balls.retain_mut(|b| {
             b.previous = b.position;
@@ -2327,9 +2496,14 @@ impl Game<'_> {
                 ))
             });
             if hit_block || hit_player || b.age > 600 {
+                let id = self.take_entity_id();
+                // The cloud starts at the fireball's feet; DragonFireball.onHit
+                // then moves it to the first living entity within 4 blocks.
+                let feet = [next.x, next.y - 0.5, next.z];
+                let at = fireball_cloud_origin(feet, &snap_targets);
                 self.breath_clouds.push(Breath {
-                    id: 0,
-                    at: [next.x, next.y, next.z],
+                    id,
+                    at,
                     radius: 3.0,
                     age: 0,
                     duration: 600,
@@ -2411,13 +2585,11 @@ impl Game<'_> {
             }
             // AreaEffectCloud: after its 20-tick wait, every 20 ticks per entity.
             if c.age >= 20 && c.age % 20 == 0 {
-                // Instant damage: I (6) from the breath, II (12) from a fireball.
-                let amount = if c.from_dragon { 6.0 } else { 12.0 };
+                // Instant damage I from the flame cloud, II from a fireball's,
+                // both at the cloud's 0.5 scale.
+                let amount = harm_amount(u32::from(!c.from_dragon));
                 for p in &players {
-                    let pp = p.position;
-                    if (pp.x - c.at[0]).hypot(pp.z - c.at[2]) <= f64::from(r)
-                        && (pp.y - c.at[1]).abs() < 1.0
-                    {
+                    if cloud_hits(c.at, r, p.bounds, p.position) {
                         harmed.push((p.who, amount));
                     }
                 }
@@ -2555,6 +2727,67 @@ impl DragonFireball {
             self.position.y + v.y,
             self.position.z + v.z,
         );
+    }
+}
+/// `DragonLandingPhase.doClientTick` and `DragonSittingFlamingPhase.doClientTick`:
+/// the dragon-breath particles one tick of `doClientTick` spawns at the head, as
+/// (position, velocity) pairs. `look` is `EnderDragon.getHeadLookVector(1)`
+/// normalised, `head` the head part's centre (`getY(0.5)`), `motion` the
+/// dragon's `getDeltaMovement`, and `random` the stream the jitter comes from.
+/// Both phases rotate `look` by a quarter turn and throw the result away, so
+/// every puff of a fan leaves along the same line; a flaming dragon walks down
+/// that line in six steps.
+fn breath_puffs(
+    phase: &Phase,
+    look: [f64; 3],
+    head: [f64; 3],
+    motion: [f64; 3],
+    random: &mut LegacyRandom,
+) -> Vec<([f64; 3], [f64; 3])> {
+    // A puff's start: the head's centre jittered by `nextGaussian() / 2`.
+    let jitter = |random: &mut LegacyRandom| {
+        [
+            head[0] + random.next_gaussian() / 2.0,
+            head[1] + random.next_gaussian() / 2.0,
+            head[2] + random.next_gaussian() / 2.0,
+        ]
+    };
+    match phase {
+        // Eight a tick, along `-look * 0.08F` (0.3 for the vertical part) plus
+        // the dragon's own motion.
+        Phase::Landing { .. } => (0..8)
+            .map(|_| {
+                (
+                    jitter(random),
+                    [
+                        -look[0] * f64::from(0.08_f32) + motion[0],
+                        -look[1] * f64::from(0.3_f32) + motion[1],
+                        -look[2] * f64::from(0.08_f32) + motion[2],
+                    ],
+                )
+            })
+            .collect(),
+        // Every second tick of the first ten: eight starts, each a fan of six
+        // puffs down the look line, the vertical part of the speed once.
+        Phase::Flaming { ticks } if ticks % 2 == 0 && *ticks < 10 => {
+            let mut puffs = Vec::with_capacity(48);
+            for _ in 0..8 {
+                let at = jitter(random);
+                for j in 0..6 {
+                    let j = f64::from(j);
+                    puffs.push((
+                        at,
+                        [
+                            -look[0] * f64::from(0.08_f32) * j,
+                            -look[1] * f64::from(0.6_f32),
+                            -look[2] * f64::from(0.08_f32) * j,
+                        ],
+                    ));
+                }
+            }
+            puffs
+        }
+        _ => Vec::new(),
     }
 }
 pub(super) struct Breath {
@@ -2728,15 +2961,32 @@ impl Game<'_> {
         } else {
             0.0
         };
-        // The dissolve is approximated by fading out.
-        let color = if death > 0.0 {
-            let alpha = ((1.0 - death / 200.0) * 255.0).clamp(0.0, 255.0) as u32;
-            alpha << 24 | 0x00FF_FFFF
+        // Dying: DYING_RENDER_TYPE, `entityCutoutDissolve` of the skin with dragon_exploding as
+        // the mask, white at `ARGB.white(1 - deathTime / 200)` and no overlay.
+        let mask = sprite("entity/enderdragon/dragon_exploding").filter(|_| death > 0.0);
+        let (color, overlay) = if mask.is_some() {
+            (dissolve_color(death), horizon_client::gfx::DISSOLVE_OVERLAY)
         } else {
-            0xFFFF_FFFF
+            (0xFFFF_FFFF, u32::from(d.hurt_time > 0))
         };
-        let overlay = u32::from(d.hurt_time > 0);
+        let first = out.len();
         horizon_client::mobs::render::draw(model, base, &poses, skin, color, light, overlay, out);
+        if let Some(mask) = mask {
+            dissolve_mask(&mut out[first..], skin, mask);
+        }
+        // The skin's OptiFine emissive overlay, full bright.
+        let glow = self
+            .res
+            .mob_data()
+            .emissive
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .overlay("entity/enderdragon/dragon")
+            .and_then(sprite);
+        if let Some(glow) = glow.filter(|_| mask.is_none()) {
+            let full = horizon_client::mobs::render::FULL_BRIGHT;
+            horizon_client::mobs::render::draw(model, base, &poses, glow, color, full, 0, out);
+        }
         // RenderTypes.eyes: the glowing eyes, added on top.
         let mut eye_quads = Vec::new();
         horizon_client::mobs::render::draw(
@@ -3013,8 +3263,14 @@ impl Game<'_> {
             let (lo, hi) = (b.min_position(), b.max_position());
             self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z])
         });
+        let whole = d.whole_box();
+        let (lo, hi) = (whole.min_position(), whole.max_position());
+        let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
         for (part, amount) in hits {
             self.hurt_dragon(part, amount, true, by, DamageKind::Explosion);
+        }
+        if let Some(d) = self.dragon.as_mut().filter(|d| d.alive()) {
+            d.explosion_push(center, radius, exposure);
         }
     }
 }
@@ -3045,16 +3301,20 @@ impl Game<'_> {
             head_yaw: d.yaw,
             on_ground: false,
             velocity: [d.velocity.x, d.velocity.y, d.velocity.z],
+            minecart_steps: None,
             data: 0,
             meta,
             defaults: Vec::new(),
             equipment: Vec::new(),
             attributes: Vec::new(),
             precise: false,
+            vertical_collision: false,
+            horizontal_collision: false,
             needs_sync: false,
             leash: None,
             spectator: false,
             watching: false,
+            hidden: None,
         })
     }
 }
@@ -3587,9 +3847,14 @@ impl Game<'_> {
             }
         }
     }
-    /// The remote dragon, if `id` is it.
+    /// The remote dragon, if `id` is it or one of its parts.
     fn remote_dragon_mut(&mut self, id: i32) -> Option<&mut Dragon> {
-        self.dragon.as_mut().filter(|d| d.id as i32 == id)
+        let Ok(uid) = u32::try_from(id) else {
+            return None;
+        };
+        self.dragon
+            .as_mut()
+            .filter(|d| d.id == uid || (d.id != 0 && (d.id + 1..=d.id + 8).contains(&uid)))
     }
     /// `handleSetEntityData`: LivingEntity.DATA_HEALTH_ID and
     /// EnderDragon.DATA_PHASE (`onSyncedDataUpdated` sets the phase).
@@ -3614,13 +3879,15 @@ impl Game<'_> {
     /// `handleHurtAnimation` and `handleDamageEvent`: the red flash.
     pub(super) fn remote_dragon_hurt(&mut self, id: i32) {
         if let Some(d) = self.remote_dragon_mut(id) {
+            // `LivingEntity.handleDamageEvent`: the red flash. Its sound is the
+            // server's (`playHurtSound`); a client plays one only for its own player.
             d.hurt_time = 10;
         }
     }
     /// `handleRemoveEntities`, or a crystal removed: the healing beam
     /// keeps pointing at the same crystal.
     pub(super) fn remove_remote_dragon(&mut self, id: i32) {
-        if self.remote_dragon_mut(id).is_some() {
+        if self.dragon.as_ref().is_some_and(|d| d.id as i32 == id) {
             self.dragon = None;
             return;
         }
@@ -3730,13 +3997,7 @@ impl Game<'_> {
     /// away in vanilla, so every puff leaves along the same line), the third
     /// puffs an explosion every 10 ticks and the last growls on every tick.
     fn remote_dragon_phase_tick(&mut self) {
-        let look = self.dragon_look();
-        let norm = (look[0] * look[0] + look[1] * look[1] + look[2] * look[2]).sqrt();
-        let look = if norm < 1.0e-5 {
-            [0.0; 3]
-        } else {
-            [look[0] / norm, look[1] / norm, look[2] / norm]
-        };
+        let look = self.dragon_look_normalised();
         let Some(d) = self.dragon.as_mut() else {
             return;
         };
@@ -3744,51 +4005,20 @@ impl Game<'_> {
         let head_y = head.y + PART_SIZES[0].1 * 0.5;
         let motion = d.velocity;
         let at = [d.position.x, d.position.y, d.position.z];
-        let mut puffs: Vec<([f64; 3], [f64; 3])> = Vec::new();
+        // `flameTicks`: the client copy's own counter, advanced before it is read.
+        if let Phase::Flaming { ticks } = &mut d.phase {
+            *ticks += 1;
+        }
+        let puffs = breath_puffs(
+            &d.phase,
+            look,
+            [head.x, head_y, head.z],
+            [motion.x, motion.y, motion.z],
+            &mut d.random,
+        );
         let mut emitter = None;
         let mut growl = None;
         match &mut d.phase {
-            Phase::Landing { .. } => {
-                for _ in 0..8 {
-                    let r = &mut d.random;
-                    let p = [
-                        head.x + r.next_gaussian() / 2.0,
-                        head_y + r.next_gaussian() / 2.0,
-                        head.z + r.next_gaussian() / 2.0,
-                    ];
-                    puffs.push((
-                        p,
-                        [
-                            -look[0] * f64::from(0.08_f32) + motion.x,
-                            -look[1] * f64::from(0.3_f32) + motion.y,
-                            -look[2] * f64::from(0.08_f32) + motion.z,
-                        ],
-                    ));
-                }
-            }
-            Phase::Flaming { ticks } => {
-                *ticks += 1;
-                if *ticks % 2 == 0 && *ticks < 10 {
-                    for _ in 0..8 {
-                        let r = &mut d.random;
-                        let p = [
-                            head.x + r.next_gaussian() / 2.0,
-                            head_y + r.next_gaussian() / 2.0,
-                            head.z + r.next_gaussian() / 2.0,
-                        ];
-                        for j in 0..6 {
-                            puffs.push((
-                                p,
-                                [
-                                    -look[0] * f64::from(0.08_f32) * f64::from(j),
-                                    -look[1] * f64::from(0.6_f32),
-                                    -look[2] * f64::from(0.08_f32) * f64::from(j),
-                                ],
-                            ));
-                        }
-                    }
-                }
-            }
             Phase::Dying { time, .. } => {
                 if *time % 10 == 0 {
                     let r = &mut d.random;
@@ -3842,6 +4072,24 @@ impl Game<'_> {
     }
 }
 
+/// The dying model's colour, `ARGB.white(1 - deathTime / 200)`: `Mth.floor` of the alpha
+/// shifted as a Java int, so past 200 it wraps as vanilla's does.
+fn dissolve_color(death: f32) -> u32 {
+    let alpha = ((1.0 - death / 200.0) * 255.0).floor() as i32;
+    (alpha << 24) as u32 | 0x00FF_FFFF
+}
+/// `DissolveMaskSampler` at the vertex's `UV0`: the same place in the mask's sprite as in the
+/// skin's, as the dissolve overlay reads it from `glint_uv` (entity.wgsl).
+fn dissolve_mask(quads: &mut [Vertex], skin: [f32; 4], mask: [f32; 4]) {
+    for v in quads {
+        let u = (v.uv[0] - skin[0]) / (skin[2] - skin[0]);
+        let w = (v.uv[1] - skin[1]) / (skin[3] - skin[1]);
+        v.glint_uv = [
+            mask[0] + (mask[2] - mask[0]) * u,
+            mask[1] + (mask[3] - mask[1]) * w,
+        ];
+    }
+}
 /// `submitRays`: the death rays from a fixed seed, fading in white to magenta.
 fn dragon_rays(base: glam::Mat4, t: f32, white: horizon_client::hud::Rect, out: &mut Vec<Vertex>) {
     // Vanilla's dragonRays has no texture. Sample inside the white sprite:
@@ -3919,6 +4167,53 @@ fn push_seen_with_hurt(
 mod tests {
     use super::*;
 
+    fn player_box(feet: [f64; 3]) -> (Aabb, Vec3) {
+        (
+            Aabb::new(
+                Vec3::new(feet[0] - 0.3, feet[1], feet[2] - 0.3),
+                Vec3::new(feet[0] + 0.3, feet[1] + 1.8, feet[2] + 0.3),
+            ),
+            Vec3::new(feet[0], feet[1], feet[2]),
+        )
+    }
+
+    #[test]
+    fn instant_damage_at_cloud_scale() {
+        assert_eq!(harm_amount(0), 3.0);
+        assert_eq!(harm_amount(1), 6.0);
+    }
+
+    #[test]
+    fn cloud_box_is_half_a_block_tall_from_its_floor() {
+        let at = [0.0, 64.0, 0.0];
+        let hit = |feet: [f64; 3], r: f32| {
+            let (b, p) = player_box(feet);
+            cloud_hits(at, r, b, p)
+        };
+        assert!(hit([0.0, 64.0, 0.0], 3.0));
+        // Feet above the 0.5 box: the old |dy| < 1 test hit here.
+        assert!(!hit([0.0, 64.6, 0.0], 3.0));
+        // Feet below, head reaching into the box.
+        assert!(hit([0.0, 63.0, 0.0], 3.0));
+        // Box overlaps but the centre is outside the radius.
+        assert!(!hit([3.2, 64.0, 0.0], 3.0));
+        assert!(hit([3.0, 64.0, 0.0], 3.0));
+    }
+
+    #[test]
+    fn fireball_cloud_snaps_to_a_player_within_four() {
+        let (b, p) = player_box([2.0, 70.0, 1.0]);
+        assert_eq!(
+            fireball_cloud_origin([0.0, 70.0, 0.0], &[(b, p)]),
+            [2.0, 70.0, 1.0]
+        );
+        let (b, p) = player_box([4.5, 70.0, 0.0]);
+        assert_eq!(
+            fireball_cloud_origin([0.0, 70.0, 0.0], &[(b, p)]),
+            [0.0, 70.0, 0.0]
+        );
+    }
+
     #[test]
     fn dying_dragons_keep_their_flight_pose_between_frames() {
         let mut dragon = Dragon::new(Vec3::new(0.0, 80.0, 0.0), 0.0, 432);
@@ -3969,6 +4264,25 @@ mod tests {
     }
 
     #[test]
+    fn the_dying_model_reads_the_mask_where_it_reads_the_skin() {
+        // The skin in the atlas's top-left quarter, the mask in its bottom-right one.
+        let mut quad = [Vertex {
+            pos: [0.0; 3],
+            uv: [0.25, 0.125],
+            layer: 0,
+            color: 0,
+            light: 0,
+            normal: [0; 4],
+            glint_uv: [0.0; 2],
+        }];
+        dissolve_mask(&mut quad, [0.0, 0.0, 0.5, 0.5], [0.5, 0.5, 1.0, 1.0]);
+        assert_eq!(quad[0].glint_uv, [0.75, 0.625]);
+        // ARGB.white(1 - deathTime / 200): floor(127.5), and past 200 the int shift wraps.
+        assert_eq!(dissolve_color(100.0), 0x7FFF_FFFF);
+        assert_eq!(dissolve_color(200.5), 0xFFFF_FFFF);
+    }
+
+    #[test]
     fn death_rays_sample_inside_the_white_sprite() {
         // A four-texel white sprite surrounded by transparent atlas pixels.
         // A border UV can round outside it during perspective interpolation.
@@ -4016,6 +4330,107 @@ mod tests {
             path: None,
             target: None,
             clockwise: false,
+        }
+    }
+
+    /// `DragonLandingPhase.doClientTick`: eight puffs a tick from the head,
+    /// along `getHeadLookVector(1)` (a quarter turn of it is thrown away in
+    /// vanilla) plus the dragon's own motion.
+    #[test]
+    fn a_landing_dragon_breathes_eight_puffs_from_its_head() {
+        let look = [0.0, -0.6, 0.8];
+        let head = [10.0, 70.5, -3.0];
+        let motion = [0.25, -0.05, 0.5];
+        let mut random = LegacyRandom::new(7);
+        let puffs = breath_puffs(
+            &Phase::Landing { target: None },
+            look,
+            head,
+            motion,
+            &mut random,
+        );
+        assert_eq!(puffs.len(), 8);
+        let speed = [
+            -look[0] * f64::from(0.08_f32) + motion[0],
+            -look[1] * f64::from(0.3_f32) + motion[1],
+            -look[2] * f64::from(0.08_f32) + motion[2],
+        ];
+        for (at, v) in puffs {
+            assert_eq!(v, speed);
+            // The head's centre, jittered by `nextGaussian() / 2`.
+            for a in 0..3 {
+                assert!(
+                    (at[a] - head[a]).abs() < 2.0,
+                    "puff {} off the head: {at:?}",
+                    a
+                );
+            }
+        }
+    }
+
+    /// `DragonSittingFlamingPhase.doClientTick`: on the even ticks of the first
+    /// ten, eight starts each breathe a fan of six puffs down the look line.
+    #[test]
+    fn a_flaming_dragon_breathes_a_fan_on_every_second_tick() {
+        let look = [0.6, -0.0, 0.8];
+        let head = [0.0, 65.5, 4.0];
+        for (tick, want) in [(1, 0), (2, 48), (3, 0), (4, 48), (8, 48), (9, 0), (10, 0)] {
+            let mut random = LegacyRandom::new(11);
+            let puffs = breath_puffs(
+                &Phase::Flaming { ticks: tick },
+                look,
+                head,
+                [0.0; 3],
+                &mut random,
+            );
+            assert_eq!(puffs.len(), want, "flame tick {tick}");
+        }
+        let mut random = LegacyRandom::new(11);
+        let puffs = breath_puffs(
+            &Phase::Flaming { ticks: 2 },
+            look,
+            head,
+            [0.0; 3],
+            &mut random,
+        );
+        for (i, (at, v)) in puffs.iter().enumerate() {
+            let j = (i % 6) as f64;
+            // Six puffs leave from each of the eight starts.
+            assert_eq!(at, &puffs[i - i % 6].0);
+            assert_eq!(
+                *v,
+                [
+                    -look[0] * f64::from(0.08_f32) * j,
+                    -look[1] * f64::from(0.6_f32),
+                    -look[2] * f64::from(0.08_f32) * j,
+                ]
+            );
+        }
+    }
+
+    /// No other phase has a `doClientTick` that breathes.
+    #[test]
+    fn only_the_landing_and_flaming_phases_breathe() {
+        let mut random = LegacyRandom::new(3);
+        for phase in [
+            flying(),
+            Phase::Scanning { time: 5 },
+            Phase::Hover { target: None },
+            Phase::Takeoff {
+                first: false,
+                path: None,
+                target: None,
+            },
+            Phase::Attacking { ticks: 3 },
+            Phase::Dying {
+                target: None,
+                time: 0,
+            },
+        ] {
+            assert!(
+                breath_puffs(&phase, [0.0, -1.0, 0.0], [0.0; 3], [0.0; 3], &mut random).is_empty(),
+                "{phase:?}"
+            );
         }
     }
 
@@ -4242,6 +4657,21 @@ mod tests {
     }
 
     #[test]
+    fn an_explosion_pushes_the_dragon_along_the_blast() {
+        let mut d = dragon(flying());
+        d.position = Vec3::new(0.0, 70.0, 0.0);
+        d.velocity = Vec3::ZERO;
+        // Power 5 right under the dragon: it is thrown up, away from the blast.
+        d.explosion_push([0.0, 66.0, 0.0], 5.0, 1.0);
+        assert!(d.velocity.y > 0.0 && d.velocity.x == 0.0 && d.velocity.z == 0.0);
+        let up = d.velocity.y;
+        // Out of reach or fully covered: no push.
+        d.explosion_push([0.0, 40.0, 0.0], 5.0, 1.0);
+        d.explosion_push([0.0, 66.0, 0.0], 5.0, 0.0);
+        assert_eq!(d.velocity.y, up);
+    }
+
+    #[test]
     fn explosions_hit_each_part_by_its_exposure() {
         let mut d = dragon(flying());
         for (i, part) in d.parts.iter_mut().enumerate() {
@@ -4376,5 +4806,13 @@ mod tests {
         assert_eq!(t.map(|p| p.who), Some(FightWho::Guest(8)));
         let t = nearest_enemy(&players, false, Vec3::new(9.0, 64.0, 0.0), None, |_| true);
         assert_eq!(t.map(|p| p.who), Some(FightWho::Host));
+    }
+    #[test]
+    fn a_landed_hurt_sets_the_dragon_hurt_flash_time() {
+        let mut d = dragon_as(42);
+        assert_eq!(d.hurt_time, 0);
+        let hurt = d.hurt(0, 5.0, HIT, false);
+        assert_eq!(hurt, Hurt::Landed { full: true });
+        assert_eq!(d.hurt_time, 10);
     }
 }

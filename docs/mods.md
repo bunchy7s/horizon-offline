@@ -77,6 +77,15 @@ effects, entity types and menu types (each below) in `creative_tab/`, `mob_effec
 them. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
 content is refused when it joins, with the reason.
 
+A server that has content mods on also checks them one by one (`horizon_protocol::mod_list`, channel
+`horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
+`side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
+not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
+HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
+with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
+list yet: their manifest has no side.
+
 A block names its template and what differs from it:
 
 ```json
@@ -85,11 +94,22 @@ A block names its template and what differs from it:
   "item": true }
 ```
 
+`random_ticks` makes a block tick randomly whatever its template does, as vanilla's
+`isRandomlyTicking(state)` does for its own blocks, so a crop, sapling or soil on a template that never
+ticks still grows: `"random_ticks": true` for every state (or `false`, to stop a template that ticks), or
+`{ "property": "grown", "values": ["false"] }` for the states whose own state property (declared in
+`state_properties`) is one of the values. The block's native `native_random_tick` hook then fires as it does
+for a vanilla block that ticks, and its sections count it.
+
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its
-template's states times the combinations of the ones it declares, in a fixed
-order with every declared default first, so ids do not move between loads:
+template's states times the combinations of the ones it declares, laid out as
+vanilla lays out a block's states (`StateDefinition`): every property, the
+template's and the declared ones, sorted by name with the first name varying
+slowest, and each declared property's default value first. The order is fixed,
+so ids do not move between loads, and a declared name may sort before one of
+the template's (`bites` on a carved pumpkin, whose `facing` comes after it):
 
 ```json
 { "template": "minecraft:stone",
@@ -105,6 +125,32 @@ A declared name may not be one the template already has, and `default_state`
 takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
+
+A block whose template is one of vanilla's signs is a sign, whatever its name: it has vanilla's sign block
+entity, so the text, the editor, dye, glow ink, wax and saving all work as they do on an oak sign, and the
+client draws its text. A wooden sign is two blocks and a hanging sign two more, one form per template, and the
+one with the item names its wall form:
+
+```json
+{ "template": "minecraft:oak_sign", "wood_type": "ruby:elm", "wall_block": "ruby:elm_wall_sign" }
+```
+
+```json
+{ "template": "minecraft:oak_wall_sign", "wood_type": "ruby:elm", "item": false }
+```
+
+The same goes for `minecraft:oak_hanging_sign` and `minecraft:oak_wall_hanging_sign`. `wall_block` is what the
+sign's item places on a wall, a block of the same mod, declared in its files when the sign is; without it the
+item places the template's wall sign. The wall form has no item of its own, and its sign's item is what picking
+it gives. `wood_type` names the editor's background:
+`ruby:elm` is `assets/ruby/textures/gui/signs/elm.png` (24x26) and `assets/ruby/textures/gui/hanging_signs/elm.png`
+(16x16), and a bare name is vanilla's, such as `cherry`; without it the template's wood is used. The board is
+the block's model: `minecraft:block/template_sign_rot_0` to `_rot_3` and `template_wall_sign`, and for hanging
+signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign_rot_0` to `_rot_3` and
+`template_wall_hanging_sign`, with `all` and `particle` textures. List your blocks in vanilla's tags as well:
+`minecraft:standing_signs`, `minecraft:wall_signs`, `minecraft:ceiling_hanging_signs` and
+`minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
+wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
@@ -133,8 +179,8 @@ round-trip through saved NBT; negative zero is not supported. A key such as
 recipe uses it, as a milk bucket leaves a bucket (vanilla's
 `Item.Properties.craftRemainder`, not a data component): a vanilla item or
 one of the mod's own, refused at load otherwise. It holds on the crafting
-table, the inventory grid and the crafter, not yet as furnace fuel or in a
-brewing stand. What the item leaves once eaten
+table, the inventory grid, the crafter and as furnace fuel (the last of the stack leaves it in
+the fuel slot, a stack with more left drops it), not yet in a brewing stand. What the item leaves once eaten
 or drunk is the `minecraft:use_remainder` component instead:
 
 ```json
@@ -237,9 +283,11 @@ slot, and one on the container goes to the inventory, as a chest's does. `result
 container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`
 (16-bit on the network, as vanilla's), all sent when it opens, then each change. A Horizon client shows it through the
 mod's own screen (`native_screen`); without one it closes again. Clients join a server only with the same mods' menu
-types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Not
-yet: per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra data, and
-client prediction of its clicks.
+types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Its
+clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
+mod can decide what a slot takes in code with `native_menu_slot_rules` ([native-mods.md](native-mods.md#menu-slot-rules)).
+Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
+data, and client prediction of its clicks.
 
 #### Namespaces and limits
 

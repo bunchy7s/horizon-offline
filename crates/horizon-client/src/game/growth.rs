@@ -44,7 +44,7 @@ impl Game<'_> {
         if used {
             self.swing_arm();
             // ItemStack.useOn: an item interaction counts as a use.
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             self.consume_held();
         }
         Ok(used)
@@ -89,7 +89,7 @@ impl Game<'_> {
         );
         self.damage_held(1);
         // ItemStack.useOn: an item interaction counts as a use.
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         // ServerPlayerGameMode.useItemOn: a consuming useOn reports it.
         self.trigger_block("minecraft:item_used_on_block", pos, stack);

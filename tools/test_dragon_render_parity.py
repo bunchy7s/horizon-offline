@@ -26,7 +26,7 @@ def main():
     harness.java_run(build, classes, dependencies, 'VanillaDragonRenderOracle', [build / 'client.json'], 'client')
     (build / 'rust.json').unlink(missing_ok=True)
     harness.run_logged(
-        ['cargo', 'test', '--locked', '-p', 'horizon-client', '--bin', 'horizon-client',
+        ['cargo', 'test', '--locked', '-p', 'horizon-client', '--lib',
          'game::dragon::tests::', '--', '--include-ignored'],
         build, 'rust', env=dict(os.environ, HORIZON_DRAGON_RENDER_OUTPUT=str(build / 'rust.json')))
     expected = json.loads((build / 'client.json').read_text())

@@ -135,6 +135,12 @@ pub fn start(shared: Arc<Shared>) -> Result<Option<SocketAddr>, String> {
     Ok(Some(address))
 }
 
+/// The control request that runs `line` as an RCON command: the console's, with the `Rcon` source
+/// (`RconConsoleSource`), so the operators hear of it when `broadcast-rcon-to-ops` is on.
+fn control_request(line: &str) -> String {
+    format!("rcon {}", line.trim_start_matches('/'))
+}
+
 /// What the game's console printed for `line`, or why it couldn't run it. The lines are joined as they are in
 /// vanilla (`RconConsoleSource` appends each message to one buffer).
 fn run_on_game(shared: &Shared, line: &str) -> Result<String, String> {
@@ -148,7 +154,7 @@ fn run_on_game(shared: &Shared, line: &str) -> Result<String, String> {
         return Err("the game isn't running right now".into());
     }
     let reply = engine::Control::connect(&shared.dir)
-        .and_then(|mut game| game.ask(&format!("console {}", line.trim_start_matches('/'))))
+        .and_then(|mut game| game.ask(&control_request(line)))
         .map_err(|e| format!("the game didn't answer: {e}"))?;
     if let Some(error) = reply["error"].as_str() {
         return Err(error.to_owned());
@@ -347,6 +353,12 @@ fn send_output(stream: &mut TcpStream, id: i32, output: &str) -> io::Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_command_goes_to_the_game_as_an_rcon_one_without_its_slash() {
+        assert_eq!(control_request("/say hi"), "rcon say hi");
+        assert_eq!(control_request("time set day"), "rcon time set day");
+    }
 
     /// A reply: its request id, type and payload.
     fn reply(stream: &mut TcpStream) -> (i32, i32, String) {
@@ -593,7 +605,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The game's control endpoint, as far as `console` goes: it answers `say hi` and fails on `fail`.
+    /// The game's control endpoint, as far as `rcon` goes: it answers `say hi` and fails on `fail`.
     fn game(dir: &Path) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -609,7 +621,7 @@ mod tests {
                 while let Some(Ok(line)) = lines.next() {
                     let answer = match line.as_str() {
                         "auth t" => "{\"ok\":true}",
-                        "console say hi" => "{\"output\":[\"[Server] \",\"hi\"]}",
+                        "rcon say hi" => "{\"output\":[\"[Server] \",\"hi\"]}",
                         _ => "{\"error\":\"unknown request\"}",
                     };
                     let _ = writeln!(stream, "{answer}");
@@ -619,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn a_command_goes_to_the_game_as_cmd_sends_it() {
+    fn a_command_goes_to_the_game_as_an_rcon_request_that_says_what_the_console_says() {
         let dir = scratch("game");
         game(&dir);
         let shared = Shared::with_install(&dir, None);

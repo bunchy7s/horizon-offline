@@ -4,6 +4,14 @@ The 40 areas changed most often in the 30 days to 2026-10-23 (commits on main to
 counted only for the game loop because nearly every gameplay change touches it). The crate map, how `Game` is
 organised and how to build and test are in [AGENTS.md](../AGENTS.md).
 
+Gameplay lives in the `horizon-client` library; `main.rs` is a thin executable calling
+`entry::main`. The reusable modules, control tool and probes belong to `horizon-client-lib`,
+whose library root is `crates/horizon-client/src/client_lib.rs`. Source paths stay in place.
+The gameplay library re-exports the reusable API, keeping existing mod targets unchanged.
+Gameplay tests run in its library test target, separately from the reusable library's tests.
+There is no copy of gameplay in the executable's test target. Tools and probes depend only
+on the reusable library, so gameplay edits do not invalidate their builds.
+
 Paths: `L/` = `crates/horizon-client/src/`, `G/` = `crates/horizon-client/src/game/`, `W/` =
 `crates/horizon-world/src/`, `K/` = `crates/horizon-client-core/src/`, `C/` = `crates/horizon-command/src/`,
 `I/` = `crates/horizon-items/src/`, `R/` = `crates/horizon-client-render/src/`, `N/` = `crates/horizon-client-input/src/`.
@@ -12,8 +20,10 @@ Checks: a bare name is a harness (`python3 tools/parity.py <name>`, script `tool
 
 For the full set of harnesses a file can affect, ask the runner:
 `printf '%s\n' <paths> > /tmp/p.txt && python3 tools/parity.py --changed-files /tmp/p.txt --list`.
-Any file of the game binary (`game.rs`, `game/`) selects the ~25 harnesses that run the binary; a client lib
-file selects ~103.
+Client probes are built with `-p horizon-client-lib`; the game with `-p horizon-client`.
+Because the probe library does not compile gameplay, its dep-info does not include `game.rs`
+or `game/`. Exact harness counts still depend on refreshed records and reachability; use the
+command above to inspect the selection rather than relying on historical counts.
 
 | # | Area (commits) | Files | Checks |
 |---|---|---|---|
@@ -22,7 +32,7 @@ file selects ~103.
 | 3 | World save and load (163) | `L/save.rs`, `G/saving.rs`, `G/persist.rs` (entities), `L/entity_nbt.rs`, `K/block_entity_nbt.rs`, `W/region.rs`, `W/nbt.rs` | save_roundtrip, world_reopen, world, datafix |
 | 4 | World generation (153) | `W/worldgen.rs`, `W/worldgen/` (`generator*.rs`, `feature_graph.rs`, `structure/`, `placement/`), `L/vanillagen.rs` | chunk_generation, worldgen, server_world_gen, world_spawn, feature_graph, feature_placement, decoration and the other worldgen harnesses |
 | 5 | Multiplayer client, packets in (145) | `G/remote.rs` (`fn handle_packet`, `fn tick_remote`), `G/remote_*.rs`, `L/net.rs` | dedicated_server, server_entities, lan_e2e (all) |
-| 6 | Agent control, horizon-ctl (145) | `L/control.rs`, `L/bin/horizon-ctl/`, `G/control.rs`, `G/agent.rs`, `G/events.rs`, `G/ui_control.rs` | `python3 tools/agent_control_e2e.py`; `cargo test -p horizon-client --bin horizon-ctl` |
+| 6 | Agent control, horizon-ctl (145) | `L/control.rs`, `L/bin/horizon-ctl/`, `G/control.rs`, `G/agent.rs`, `G/events.rs`, `G/ui_control.rs` | `python3 tools/agent_control_e2e.py`; `cargo test -p horizon-client-lib --bin horizon-ctl` |
 | 7 | CI and release (134) | `.github/workflows/` (`ci.yml`, `parity.yml`, `release.yml`, `launcher.yml`), `tools/ci/`, `tools/parity.py`, `tools/pr_ready.py` | `python3 -m unittest discover -s tests`; actionlint (`.github/actionlint.yaml`) |
 | 8 | LAN host: connections, play state, tracking (133) | `L/lan/` (`conn.rs`, `hub.rs` + `hub/`, `chunks.rs`, `entity.rs`, `tracking.rs`, `guest.rs`, `playerdata.rs`), `G/lan.rs` | lan, lan_e2e (all), `cargo test -p horizon-client --test lan_bot` |
 | 9 | Renderer core (132) | `R/gfx.rs` (`Renderer::new`, `Renderer::render`), `R/gfx/` (cull, occlusion, translucency, upload, timing, lod) | client_graphics, culling_rays, translucency; `horizon-client --benchmark standard` |
@@ -39,7 +49,7 @@ file selects ~103.
 | 20 | Mob models and animation (78) | `L/mobs/render.rs`, `L/mobs/anim.rs`, `L/mobs/body_anim.rs`, `L/mobs/keyframes.rs`, `R/entity.wgsl` | entity_model |
 | 21 | Block behaviour, server side (78) | `W/level/` (`mod.rs`, `tick.rs`, `hooks.rs`, `data.rs`, `redstone.rs`, `place.rs`), `G/block_entity_ticks.rs`, `G/moving_pistons.rs` | block_update, redstone, random_tick, simple_block, piston_movement, block_entity_tickers |
 | 22 | Player movement and collision (75) | `L/motion.rs` + `L/motion/`, `R/collisions.rs`, `W/entity_move.rs`, `W/player_travel.rs`, `W/collision.rs` | collision, entity_move, player_travel, living_motion, climbing, swimming; `python3 tools/test_native_scene_motion.py` |
-| 23 | Resource packs and models (65) | `R/packs.rs` + `R/packs/`, `R/pack_screen.rs`, `R/atlas_sources.rs`, `R/sprites.rs`, `R/model_library.rs`, `G/packs.rs`, `crates/horizon-assets/` | resource_pack, pack_selection, pack_screen, model_resolution, item_model, mipmap |
+| 23 | Resource packs and models (65) | `R/packs.rs` + `R/packs/`, `R/pack_screen.rs`, `R/atlas_sources.rs`, `R/sprites.rs`, `R/model_library.rs`, `G/packs.rs`, `L/mobs/cem.rs`, `L/mobs/cem_anim.rs`, `R/block_entity_cem.rs`, `crates/horizon-assets/`, `crates/horizon-optifine/` | resource_pack, pack_selection, pack_screen, model_resolution, item_model, mipmap |
 | 24 | Container menus and inventory (61) | `L/menu.rs`, `L/container_screen.rs`, `R/containers.rs`, `L/creative.rs`; game.rs `fn menu_ops`, `fn click_inventory` | menu_click, container_screen, creative, lan_e2e containers clicks |
 | 25 | Workstations (60) | `L/stations.rs`, `G/stations.rs`, `I/enchant.rs`, `R/brewing.rs` | enchanting, screen_layout, lan_e2e brewing loom stonecutter grindstone anvil smithing |
 | 26 | Crafting and the recipe book (59) | `L/crafting.rs`, `L/recipe_book.rs`, `L/recipe_book_screen.rs`, `G/recipe_book.rs`, `G/machines.rs`, `G/machines/crafter.rs` | recipe, recipe_book, recipe_book_view, place_recipe, ghost_recipe, crafter |

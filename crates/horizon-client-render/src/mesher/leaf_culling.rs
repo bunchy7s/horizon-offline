@@ -322,6 +322,7 @@ mod tests {
             legacy_solid: false,
             overlay: leaves,
             leaves,
+            pane: false,
             opaque_cube: opaque,
             blocks_flow: false,
             ice: false,

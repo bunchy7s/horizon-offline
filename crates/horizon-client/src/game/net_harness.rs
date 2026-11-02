@@ -2,7 +2,8 @@
 //! with `--server` and `HORIZON_NET_REPORT` set, the client joins without a
 //! window, waits until it stands in the world with the chunks around it,
 //! sends a chat message and `/list` (or the lines of `HORIZON_NET_CHAT`,
-//! split by `;`, one at a time; `.delay N` sets Chat Delay instead), collects the chat it is shown, leaves and
+//! split by `;`, one at a time; `.delay N` sets Chat Delay instead, `.click COMMAND` runs a clicked command and
+//! `.answer yes` or `.answer no` answers what it asks), collects the chat it is shown, leaves and
 //! writes a JSON report (position, chunks, chat lines, whether it signed its
 //! chat, whether the server kept it connected throughout). With `HORIZON_NET_QUIET` (lines
 //! split by `;`) it then sends them as one batch of a mod's quiet commands
@@ -34,6 +35,8 @@ impl Game<'_> {
             .map(|v| v.split(';').map(str::to_owned).collect())
             .unwrap_or_else(|_| vec!["hello from the horizon client".into(), "/list".into()]);
         let mut sent = 0;
+        let mut prompts = Vec::new();
+        let mut chat_box = None;
         let mut signed = false;
         let mut chunks = 0;
         let mut error = None;
@@ -67,7 +70,9 @@ impl Game<'_> {
             // Each step waits for what it sent to be answered (its chat line,
             // the /list reply), however busy the machine, up to 15 s.
             let shown = self.remote.as_ref().map_or(0, |r| r.chat.len());
-            let answered = shown > chat_at || now - step_at > Duration::from_secs(15);
+            let answered = shown > chat_at
+                || self.command_prompt.is_some()
+                || now - step_at > Duration::from_secs(15);
             match step {
                 0 if spawned_at.is_some()
                     && count > 0
@@ -82,9 +87,17 @@ impl Game<'_> {
                     chat_at = shown;
                 }
                 2 if answered && sent < lines.len() => {
-                    match lines[sent].strip_prefix(".delay ") {
-                        Some(delay) => self.settings.chat_delay = delay.parse().unwrap_or(0.0),
-                        None => self.send_chat(&lines[sent]),
+                    let line = &lines[sent];
+                    if let Some(delay) = line.strip_prefix(".delay ") {
+                        self.settings.chat_delay = delay.parse().unwrap_or(0.0);
+                    } else if let Some(command) = line.strip_prefix(".click ") {
+                        self.click_command(command);
+                        prompts.push(self.command_prompt_message());
+                    } else if let Some(answer) = line.strip_prefix(".answer ") {
+                        self.answer_command_prompt(answer == "yes");
+                        chat_box = self.ui.chat_screen.as_ref().map(|c| c.value().to_owned());
+                    } else {
+                        self.send_chat(line);
                     }
                     sent += 1;
                     step_at = now;
@@ -132,6 +145,8 @@ impl Game<'_> {
                 "chunks": chunks,
                 "chat": chat,
                 "signed": signed,
+                "prompts": prompts,
+                "chat_box": chat_box,
                 "error": error,
             })
             .to_string(),

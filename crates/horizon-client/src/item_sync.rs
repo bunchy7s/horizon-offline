@@ -34,6 +34,96 @@ pub fn from_network(s: &Stack, builtin: &Builtin, synced: &Dynamic) -> ItemStack
     out
 }
 
+/// `LivingEntity.canGlideUsing`: `stack`, worn in equipment slot `slot`
+/// (`EquipmentSlot`'s serialized name), has `glider`, its `equippable` slot is
+/// that one, and its next damage won't break it. Any item can glide this way:
+/// a server or a command may give a chestplate both components.
+pub fn can_glide_using(stack: &ItemStack, slot: &str, items: &crate::items::Items) -> bool {
+    let Some(info) = items.get(&stack.item) else {
+        return false;
+    };
+    if info.max_damage != 0 && stack.damage + 1 >= info.max_damage {
+        return false;
+    }
+    // Asked every tick for each slot: a stack with no components of its own
+    // answers from its item, with nothing to copy or decode.
+    if stack.data().is_none() {
+        return info.glider && info.equip_slot.as_deref() == Some(slot);
+    }
+    let (glider, equip_slot) = glider_and_slot(stack, info.glider, info.equip_slot.clone());
+    glider && equip_slot.as_deref() == Some(slot)
+}
+
+/// The `glider` and `equippable` slot `stack` has, from its item's own: the
+/// saved components (a command's, a save's) patch them, then the server's
+/// patch, which may also remove them and whose `equippable` isn't kept as a
+/// saved component.
+fn glider_and_slot(
+    stack: &ItemStack,
+    mut glider: bool,
+    mut slot: Option<String>,
+) -> (bool, Option<String>) {
+    let Some(data) = stack.data() else {
+        return (glider, slot);
+    };
+    if data.other("!minecraft:glider").is_some() {
+        glider = false;
+    } else if data.other("minecraft:glider").is_some() {
+        glider = true;
+    }
+    if data.other("!minecraft:equippable").is_some() {
+        slot = None;
+    } else if let Some(equippable) = data.other("minecraft:equippable") {
+        slot = match equippable.get("slot") {
+            Some(Tag::String(s)) => Some(s.to_string_lossy()),
+            _ => None,
+        };
+    }
+    let Some((added, removed)) = data
+        .wire
+        .patch()
+        .and_then(|p| horizon_protocol::item::WirePatch::decode(p).ok())
+    else {
+        return (glider, slot);
+    };
+    if removed.contains(&component::GLIDER) {
+        glider = false;
+    }
+    if removed.contains(&component::EQUIPPABLE) {
+        slot = None;
+    }
+    for (kind, c) in &added {
+        match (*kind, c) {
+            (component::GLIDER, _) => glider = true,
+            // Equippable.STREAM_CODEC starts with its slot's id (EquipmentSlot.getId).
+            (component::EQUIPPABLE, Component::Raw(bytes)) => {
+                slot = Reader::new(bytes)
+                    .varint()
+                    .ok()
+                    .and_then(equipment_slot_name)
+                    .map(str::to_owned);
+            }
+            _ => {}
+        }
+    }
+    (glider, slot)
+}
+
+/// `EquipmentSlot.byId`'s serialized names.
+fn equipment_slot_name(id: i32) -> Option<&'static str> {
+    Some(match id {
+        0 => "mainhand",
+        1 => "feet",
+        2 => "legs",
+        3 => "chest",
+        4 => "head",
+        5 => "offhand",
+        6 => "body",
+        7 => "saddle",
+        _ => return None,
+    })
+}
+
 /// `DyeColor.byId`: an unknown id is white (`OutOfBoundsStrategy.ZERO`).
 fn dye_name(id: i32) -> &'static str {
     usize::try_from(id)
@@ -392,6 +482,68 @@ fn profile_tag(p: &Profile) -> Tag {
 mod tests {
     use super::*;
     use horizon_protocol::registry::Ids;
+
+    /// A chestplate a server made a glider: its patch adds `glider` and an
+    /// `equippable` for the chest, or takes `glider` away again.
+    #[test]
+    fn a_servers_patch_makes_any_item_a_glider() {
+        let with_patch = |patch: &[u8]| {
+            let mut stack = ItemStack::new("minecraft:diamond_chestplate", 1);
+            stack.data_mut().wire =
+                crate::item_data::Wire::new(stack.clone(), Arc::from(patch.to_vec()));
+            stack
+        };
+        // Equippable: slot 3 (chest), a sound reference, no asset, overlay or
+        // allowed entities, its five flags, the shearing sound.
+        let equippable = [3, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1];
+        let mut adds = vec![
+            2,
+            0,
+            component::GLIDER as u8,
+            0,
+            component::EQUIPPABLE as u8,
+        ];
+        adds.push(equippable.len() as u8);
+        adds.extend(equippable);
+        assert_eq!(
+            glider_and_slot(&with_patch(&adds), false, Some("head".into())),
+            (true, Some("chest".into()))
+        );
+        let removes = [0, 1, component::GLIDER as u8];
+        assert_eq!(
+            glider_and_slot(&with_patch(&removes), true, Some("chest".into())),
+            (false, Some("chest".into()))
+        );
+        // No data: the item's own.
+        let plain = ItemStack::new("minecraft:elytra", 1);
+        assert_eq!(
+            glider_and_slot(&plain, true, Some("chest".into())),
+            (true, Some("chest".into()))
+        );
+    }
+
+    /// A command's chestplate (`/give @s diamond_chestplate[glider={},
+    /// equippable={slot:"chest"}]`) keeps both as saved components.
+    #[test]
+    fn saved_components_make_any_item_a_glider() {
+        let mut stack = ItemStack::new("minecraft:diamond_chestplate", 1);
+        stack.data_mut().other = vec![
+            ("minecraft:glider".into(), Tag::Compound(Default::default())),
+            (
+                "minecraft:equippable".into(),
+                Tag::compound([("slot", Tag::String("chest".into()))]),
+            ),
+        ];
+        assert_eq!(
+            glider_and_slot(&stack, false, Some("chest".into())),
+            (true, Some("chest".into()))
+        );
+        stack.data_mut().other = vec![(
+            "!minecraft:equippable".into(),
+            Tag::Compound(Default::default()),
+        )];
+        assert_eq!(glider_and_slot(&stack, true, Some("chest".into())).1, None);
+    }
 
     #[test]
     fn merchant_water_cost_survives_the_offer_packet() {
@@ -949,5 +1101,52 @@ mod tests {
             other(&back, "minecraft:custom_model_data"),
             other(&item, "minecraft:custom_model_data")
         );
+    }
+
+    #[test]
+    fn rarity_survives_lan_sync_and_enchantment_upgrade() {
+        use horizon_protocol::buf::{Reader, Writer};
+        use horizon_protocol::item::Slot;
+        use horizon_protocol::registry::Ids;
+        let mut components = vec![String::new(); component::RARITY as usize + 1];
+        components[component::RARITY as usize] = "minecraft:rarity".into();
+        let builtin = Builtin {
+            registries: [
+                (
+                    "minecraft:item".into(),
+                    Ids::from_names(vec!["minecraft:air".into(), "minecraft:stick".into()]),
+                ),
+                (
+                    "minecraft:data_component_type".into(),
+                    Ids::from_names(components),
+                ),
+            ]
+            .into(),
+        };
+        let dynamic = Dynamic::default();
+        let mut item = ItemStack::new("minecraft:stick", 1);
+        item.data_mut()
+            .set_other("minecraft:rarity", Some(Tag::String("epic".into())));
+        item.enchant("minecraft:aqua_affinity", 1);
+
+        let wire = crate::lan::guest::stack_to_network(
+            |name| builtin.get("minecraft:item").unwrap().id(name).unwrap(),
+            |_, _| None,
+            &Some(item.clone()),
+        );
+        let mut w = Writer::new();
+        Slot::write(&wire, &mut w);
+        let received = Slot::read(&mut Reader::new(&w.data)).unwrap().unwrap();
+        assert_eq!(
+            received.component(component::RARITY),
+            Some(&Component::Int(3))
+        );
+
+        let back = from_network(&received, &builtin, &dynamic);
+        assert_eq!(
+            back.data().and_then(|d| d.other("minecraft:rarity")),
+            Some(&Tag::String("epic".into()))
+        );
+        assert_eq!(crate::item_tooltip::rarity(&back, "common"), "epic");
     }
 }

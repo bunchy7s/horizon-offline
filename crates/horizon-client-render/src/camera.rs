@@ -419,6 +419,31 @@ pub enum CameraFluid {
     PowderSnow,
 }
 
+/// `Camera.NearPlane`: the near plane's centre and its half extents toward
+/// the camera's left and up, relative to the camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NearPlane {
+    pub forward: [f64; 3],
+    pub left: [f64; 3],
+    pub up: [f64; 3],
+}
+impl NearPlane {
+    /// `forward`, `getTopLeft`, `getTopRight`, `getBottomLeft`, `getBottomRight`:
+    /// the points `Camera.getFluidInCamera` looks for lava and powder snow at.
+    pub fn points(&self) -> [[f64; 3]; 5] {
+        let corner = |up: f64, left: f64| -> [f64; 3] {
+            std::array::from_fn(|i| self.forward[i] + self.up[i] * up + self.left[i] * left)
+        };
+        [
+            self.forward,
+            corner(1.0, 1.0),
+            corner(1.0, -1.0),
+            corner(-1.0, 1.0),
+            corner(-1.0, -1.0),
+        ]
+    }
+}
+
 /// `Camera`: the eye-height and field-of-view easing and the view placement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
@@ -480,6 +505,19 @@ impl Camera {
         self.forwards = self.rotation.transform([0.0, 0.0, -1.0]);
         self.up = self.rotation.transform([0.0, 1.0, 0.0]);
         self.left = self.rotation.transform([-1.0, 0.0, 0.0]);
+    }
+    /// `Camera.getNearPlane(fov)` for a `width` x `height` window, at the
+    /// projection's `zNear` of 0.05.
+    pub fn near_plane(&self, fov: f32, width: f32, height: f32) -> NearPlane {
+        let z_near = f64::from(0.05f32);
+        let aspect = f64::from(width) / f64::from(height);
+        let plane_height = horizon_core::jmath::tan(f64::from(fov * DEG_TO_RAD) / 2.0) * z_near;
+        let scale = |v: [f32; 3], by: f64| v.map(|c| f64::from(c) * by);
+        NearPlane {
+            forward: scale(self.forwards, z_near),
+            left: scale(self.left, plane_height * aspect),
+            up: scale(self.up, plane_height),
+        }
     }
     /// `Camera.move(forwards, up, right)`.
     pub fn move_by(&mut self, forwards: f32, up: f32, right: f32) {

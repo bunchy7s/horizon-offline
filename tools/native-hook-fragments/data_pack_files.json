@@ -1,7 +1,0 @@
-{
-  "hooks": [
-    {"name": "data_pack_files", "target": "horizon_client::game::native_hooks::Game<'_>::native_data_pack_files"}
-  ],
-  "rust_summary": "data pack files for the tables a native mod contributes (`native_data_pack_files`), on a world's first open and on every `/reload`.",
-  "doc_summary": "`native_data_pack_files(files)`, a native mod's own pack files in the data the server loads: while the tables are assembled (a world's first open, and again on every `/reload`), push `(path, bytes)` and they join that load. `path` is the overlay's key, `<kind>/<namespace>:<path>` without `.json`, over the kinds the tables read: `recipe/mymod:thing`, `tags/mymod:block/thing`, `loot_table/…`, `advancement/…`, `trade_set/…`, `villager_trade/…`, `dialog/…`; a file that isn't JSON is skipped with a warning. Asked once per load on both paths, so it is where a mod recomputes them from its config or the world. Contributed files sit below the world's own data packs: a pack's file for the same path still overrides a mod's, and a later contribution overrides an earlier one. Bundles that use it need \"hooks\": @API:data_pack_files@."
-}

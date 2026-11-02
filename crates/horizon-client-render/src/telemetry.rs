@@ -20,9 +20,6 @@ const MIN_SECONDS: f32 = 60.0;
 const CRASH_DETAILS: [&str; 3] = ["Horizon Version", "Graphics Adapter", "Render Settings"];
 
 static STARTED: OnceLock<Instant> = OnceLock::new();
-/// When the menu bundle became ready, so the time to the title screen measures
-/// the menu and not the world bundle loaded behind it.
-static UI_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 static CORE_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 static REST_READY_MS: AtomicU32 = AtomicU32::new(u32::MAX);
 /// The GPU, once the renderer has its adapter: name, maker, kind, driver, backend, its own memory.
@@ -44,14 +41,6 @@ pub struct Gpu {
 /// When the game started, for the time to the title screen. Call first thing in `main`.
 pub fn mark_start() {
     STARTED.get_or_init(Instant::now);
-}
-
-/// The menu bundle is ready: the title screen can draw. The first writer wins.
-pub fn mark_ui_ready() {
-    if let Some(started) = STARTED.get() {
-        let ms = started.elapsed().as_millis() as u32;
-        let _ = UI_READY_MS.compare_exchange(u32::MAX, ms, Ordering::Relaxed, Ordering::Relaxed);
-    }
 }
 
 pub fn mark_core_ready() {
@@ -234,6 +223,7 @@ pub struct Session {
     title_measured: bool,
     to_world_ms: Option<u32>,
     opening: Option<Instant>,
+    slow_frames: Vec<horizon_telemetry::payload::SlowFrames>,
 }
 
 impl Session {
@@ -241,17 +231,18 @@ impl Session {
     pub fn title_shown(&mut self) {
         if !self.title_measured {
             self.title_measured = true;
-            let ui_ms = UI_READY_MS.load(Ordering::Relaxed);
-            self.to_title_ms = if ui_ms != u32::MAX {
-                Some(ui_ms)
-            } else {
-                STARTED.get().map(|s| s.elapsed().as_millis() as u32)
-            };
+            crate::spans::startup::mark("title.shown");
+            // The frame itself: the menu bundle can be ready seconds before
+            // the renderer that draws it (pipelines compiling on a slow driver).
+            self.to_title_ms = STARTED.get().map(|s| s.elapsed().as_millis() as u32);
         }
     }
 
     /// A world starts loading.
     pub fn world_opening(&mut self) {
+        if self.opening.is_none() {
+            crate::spans::startup::arm("world.opening");
+        }
         self.opening.get_or_insert_with(Instant::now);
     }
 
@@ -260,12 +251,26 @@ impl Session {
         self.opening = None;
     }
 
-    /// A frame drawn while playing (not in menus or loading).
-    pub fn frame(&mut self, ms: f32) {
-        if let Some(opening) = self.opening.take()
-            && self.to_world_ms.is_none()
-        {
-            self.to_world_ms = Some(opening.elapsed().as_millis() as u32);
+    /// A frame drawn while playing (not in menus or loading), with the spans the render thread
+    /// recorded in it ([`crate::spans::take_raw`]): a frame of `SLOW_FRAME_MS` or more counts
+    /// under the step it spent most of its time in ([`crate::spans::culprit`]).
+    pub fn frame(&mut self, ms: f32, spans: &[crate::spans::Span]) {
+        use horizon_telemetry::payload::{SLOW_FRAME_MS, SlowFrames};
+        if ms >= SLOW_FRAME_MS {
+            let (mut path, span_ms) = crate::spans::culprit(spans).unwrap_or_default();
+            // A path too long for the item keeps its last steps.
+            while path.len() > SlowFrames::MAX_NAME
+                && let Some((_, rest)) = path.split_once('/')
+            {
+                path = rest.to_owned();
+            }
+            SlowFrames::record(&mut self.slow_frames, ms, &path, span_ms);
+        }
+        if let Some(opening) = self.opening.take() {
+            crate::spans::startup::mark("world.first_frame");
+            if self.to_world_ms.is_none() {
+                self.to_world_ms = Some(opening.elapsed().as_millis() as u32);
+            }
         }
         self.frames.record(ms);
         self.played_ms += ms;
@@ -290,6 +295,7 @@ impl Session {
             to_world_ms: self.to_world_ms,
             to_core_ms: self.to_title_ms.and_then(|_| readiness_ms(&CORE_READY_MS)),
             to_rest_ms: self.to_title_ms.and_then(|_| readiness_ms(&REST_READY_MS)),
+            slow_frames: self.slow_frames.clone(),
         })
     }
 
@@ -499,10 +505,10 @@ mod tests {
         assert!(session.opening.is_some());
         session.cancel_world_opening();
         assert!(session.opening.is_none());
-        session.frame(16.0);
+        session.frame(16.0, &[]);
         assert!(session.to_world_ms.is_none());
         session.world_opening();
-        session.frame(16.0);
+        session.frame(16.0, &[]);
         assert!(session.to_world_ms.is_some());
     }
 
@@ -511,7 +517,7 @@ mod tests {
         let home = home("session");
         let mut session = Session::default();
         session.world_opening();
-        (0..2000).for_each(|_| session.frame(16.6));
+        (0..2000).for_each(|_| session.frame(16.6, &[]));
         session.finish(&home, Settings::default());
         assert!(outbox::pending(&home).is_empty(), "33 s, and no consent");
         allow(
@@ -521,11 +527,11 @@ mod tests {
                 ..Choices::NONE
             },
         );
-        (0..2000).for_each(|_| session.frame(16.6));
+        (0..2000).for_each(|_| session.frame(16.6, &[]));
         session.finish(&home, Settings::default());
         assert!(outbox::pending(&home).is_empty(), "33 s is too short");
         session.world_opening();
-        (0..4000).for_each(|_| session.frame(16.6));
+        (0..4000).for_each(|_| session.frame(16.6, &[]));
         (0..1200).for_each(|_| session.tick(4.0));
         session.finish(
             &home,
@@ -545,5 +551,35 @@ mod tests {
         assert_eq!(perf.settings.render_distance, 12);
         assert!(perf.to_world_ms.is_some());
         assert!(serde_json::to_vec(&pending[0].1).unwrap().len() < 1024);
+    }
+
+    /// Frames of 250 ms or more count under the step that took most of them; a frame with no
+    /// span counts under none. Faster frames leave no entry.
+    #[test]
+    fn slow_frames_are_put_down_to_their_step() {
+        use crate::spans::Span;
+        let span = |name, ms, depth| Span {
+            name,
+            ms,
+            cpu_ms: ms,
+            depth,
+        };
+        let mut session = Session::default();
+        (0..4000).for_each(|_| session.frame(16.6, &[span("tick", 10.0, 0)]));
+        let frozen = [span("r_uploads", 280.0, 1), span("renderer", 300.0, 0)];
+        session.frame(320.0, &frozen);
+        session.frame(900.0, &frozen);
+        session.frame(260.0, &[]);
+        session.frame(249.0, &frozen);
+        let perf = session.summary(Settings::default()).unwrap();
+        let seen: Vec<_> = perf
+            .slow_frames
+            .iter()
+            .map(|s| (s.span.as_str(), s.frames, s.frame_max_ms, s.span_max_ms))
+            .collect();
+        assert_eq!(
+            seen,
+            [("renderer/r_uploads", 2, 900.0, 280.0), ("", 1, 260.0, 0.0)]
+        );
     }
 }

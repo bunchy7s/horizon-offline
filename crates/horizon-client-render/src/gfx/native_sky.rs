@@ -211,7 +211,7 @@ mod tests {
     /// vanilla's pixels, one that inverts them draws the inverse (and stays opaque).
     #[test]
     fn a_pack_gets_vanilla_s_colour_and_draws_opaque() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             return;
         };

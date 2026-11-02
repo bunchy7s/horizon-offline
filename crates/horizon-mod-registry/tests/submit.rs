@@ -611,6 +611,67 @@ async fn what_the_form_refuses() {
     );
 }
 
+/// The origin gate in front of a submission, before the sign-in and the
+/// form: how the answer to a request from `origin`.
+async fn origin_gate(app: &Router, origin: Option<&str>) -> StatusCode {
+    let mut request = Request::post("/api/mods/submit");
+    if let Some(origin) = origin {
+        request = request.header(header::ORIGIN, origin);
+    }
+    let request = request.body(Body::empty()).unwrap();
+    app.clone().oneshot(request).await.unwrap().status()
+}
+
+/// #6159: a submission must come from the origin of `REGISTRY_PUBLIC_URL`,
+/// which is what the site's pages are. An `Origin` never carries a path, so
+/// a public URL that does (the form is a page below the site's root) still
+/// takes its own pages; another site's page is refused before the sign-in is
+/// looked at, and so is a request that names no origin.
+#[tokio::test]
+async fn a_submission_comes_from_the_sites_own_pages() {
+    let site = |public_url: &str| {
+        router(
+            App::new(Config {
+                public_url: public_url.into(),
+                session_key: b"a test key of at least thirty-two bytes".to_vec(),
+                github: github::GitHub::new(
+                    github::Endpoints::default(),
+                    "o/r".into(),
+                    "client".into(),
+                    "secret".into(),
+                    "bot".into(),
+                ),
+                update_key: None,
+                scratch: std::env::temp_dir().join("horizon-mod-registry-test"),
+                database: ":memory:".into(),
+            })
+            .unwrap(),
+        )
+    };
+    // A public URL with the form's page in it, as the site's pages are.
+    let app = site("https://playhorizon.test/mods");
+    assert_eq!(
+        origin_gate(&app, Some("https://playhorizon.test")).await,
+        StatusCode::UNAUTHORIZED
+    );
+    // Another site's page, and one that names no origin at all.
+    assert_eq!(
+        origin_gate(&app, Some("https://evil.test")).await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(origin_gate(&app, None).await, StatusCode::FORBIDDEN);
+    // A public URL that is the origin itself keeps working.
+    let app = site("https://playhorizon.test");
+    assert_eq!(
+        origin_gate(&app, Some("https://playhorizon.test")).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        origin_gate(&app, Some("https://evil.test")).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
 const ENTRY: &str = "kind = \"mod\"\nname = \"N\"\nsummary = \"s\"\nlicense = \"MIT\"\nsource = \"https://x.test\"\n\n[[versions]]\nversion = \"1.0.0\"\npublished = \"2026-01-01\"\ngame = \"26.3\"\nfile = \"f.hmod\"\nsha256 = \"0000000000000000000000000000000000000000000000000000000000000000\"\n";
 
 impl Client {

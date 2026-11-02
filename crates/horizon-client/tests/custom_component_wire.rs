@@ -1,3 +1,4 @@
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{item_sync, items::ItemStack, lan::guest::stack_to_network};
 use horizon_items::item_nbt::{item_from_nbt, item_to_nbt};
 use horizon_protocol::{

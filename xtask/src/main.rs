@@ -1,7 +1,7 @@
 //! Repository tasks, run with `cargo run -p xtask -- TASK`.
 //!
 //! `package BINARY OUTDIR`: a playable Horizon folder with the game binary, horizon-ctl,
-//! horizon-prepare and horizon-server (built beside it: cargo build --release -p horizon-client
+//! horizon-prepare and horizon-server (built beside it: cargo build --release -p horizon-client -p horizon-client-lib
 //! --bins -p horizon-prepare -p horizon-server), the exporters horizon-prepare compiles, its sources (the launcher compares
 //! them to its own), and PLAY.txt. It holds none of Minecraft's files: players prepare those
 //! from their own copy. .github/workflows/release.yml makes the release folders with it.
@@ -16,6 +16,8 @@
 //! `icons`: renders the icon masters in `docs/media/brand` (with `rsvg-convert`, from librsvg)
 //! into every size the platforms and the website use, and packs `packaging/icons/horizon.ico`
 //! and `horizon.icns`. `docs/media/brand/README.md` lists what goes where.
+
+mod mod_api;
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -48,6 +50,8 @@ fn main() -> ExitCode {
         [task, engine, out] if task == "package-server" => {
             package_server(Path::new(engine), Path::new(out))
         }
+        [task] if task == "mod-api" => mod_api::run(false),
+        [task, check] if task == "mod-api" && check == "--check" => mod_api::run(true),
         [task] if task == "tokens" => tokens(),
         [task] if task == "icons" => icons(),
         _ => Err(USAGE.to_string()),
@@ -294,7 +298,7 @@ fn copy_beside(program: &Path, tools: &[&str], out: &Path) -> Result<(), String>
             .join(program_name(program, tool));
         if !path.is_file() {
             return Err(format!(
-                "{} is missing; build it too: cargo build --release -p horizon-client --bins -p horizon-prepare -p horizon-server",
+                "{} is missing; build it too: cargo build --release -p horizon-client -p horizon-client-lib --bins -p horizon-prepare -p horizon-server",
                 path.display()
             ));
         }

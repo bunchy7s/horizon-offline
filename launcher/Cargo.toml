@@ -15,6 +15,9 @@ gpui_platform = { package = "gpui-fast-platform", version = "0.1.12", features =
 ureq = { version = "2", features = ["json", "tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Validate and render injected trait signatures before they reach rustc.
+syn = { version = "2", features = ["full", "visit-mut"] }
+quote = "1"
 # Checks the client jar and the version file found in other launchers' folders (sources.rs).
 sha1 = "0.10"
 # The mod browser checks Modrinth's SHA-512 before a pack reaches the game folder (browser/download.rs).
@@ -25,6 +28,7 @@ pulldown-cmark = { version = "0.12", default-features = false }
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
 toml = "1.1"
+semver = "1"
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 dirs = "5"
 # The system's preferred languages, for the window's language (i18n.rs).
@@ -33,6 +37,8 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
+# `horizon-launcher mcp`: the Model Context Protocol, shared with horizon-ctl and horizon-server.
+horizon-mcp = { path = "../crates/horizon-mcp" }
 horizon-prepare = { path = "../crates/horizon-prepare" }
 # Join a friend: invite codes (the game does the joining).
 horizon-friends = { path = "../crates/horizon-friends" }
@@ -80,6 +86,11 @@ raw-window-handle = "0.6"
 keyring = { version = "3", features = ["windows-native"] }
 # The computer's memory, the end of the Launch panel's memory slider; already in the lockfile.
 windows-sys = { version = "0.61", features = ["Win32_System_SystemInformation"] }
+# Shortcuts written by the shell itself (shortcut::write_windows_link): the hand-laid Shell Link has
+# no target ID list, so Explorer shows an empty target and starts nothing.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_UI_Shell"] }
+# Per-user setup: the Uninstall entry and the launcher's own key under HKCU (installer.rs).
+winreg = "0.56"
 
 [target.'cfg(windows)'.build-dependencies]
 # The icon resource in the .exe (build.rs).

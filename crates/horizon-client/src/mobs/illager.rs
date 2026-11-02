@@ -388,14 +388,18 @@ fn cast_fangs(m: &mut Mob, cx: &mut Cx) {
         }
     }
 }
-/// `createSpellEntity`: the first sturdy floor going down from `max_y`,
-/// standing on the top of any block in the way.
+/// `createSpellEntity`: the first block below `max_y` whose up face is
+/// sturdy, standing on the top of whatever collision shape is in the way.
+///
+/// The floor test is `BlockState.isFaceSturdy(.., UP)`, not a full cube: a
+/// soul sand or mud block is 14/16 high and still supports a fang, where
+/// requiring a full collision shape drops the fang into the block.
 fn fang_floor(w: &super::MobWorld, x: f64, z: f64, min_y: f64, max_y: f64) -> Option<f64> {
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     let mut y = max_y.floor() as i32;
     while y >= min_y.floor() as i32 - 1 {
-        let below = w.facts.get(w.world.block(bx, y - 1, bz));
-        if below.full_collision {
+        let below = w.world.block(bx, y - 1, bz);
+        if w.data.state(below).flags & super::data::STURDY_TOP != 0 {
             let here = w.world.block(bx, y, bz);
             let top = if w.facts.is_air(here) {
                 0.0
@@ -931,5 +935,36 @@ mod tests {
                 .data()
                 .is_none_or(|d| d.charged.is_empty())
         );
+    }
+    /// `EvokerAttackSpellGoal.createSpellEntity` asks the block below for a
+    /// sturdy up face, not for a full cube. Soul sand is 14/16 high and still
+    /// supports a fang, which a full-collision test drops into the block.
+    #[test]
+    fn a_fang_stands_on_a_soul_sand_floor() {
+        let build = |world: &mut crate::world::World,
+                     registry: &horizon_world::registry::BlockRegistry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            let soul_sand = registry.default_state("minecraft:soul_sand").unwrap();
+            for cx in -1..1 {
+                for cz in -1..1 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -4..4 {
+                for z in -4..4 {
+                    world.set(x, 63, z, stone).unwrap();
+                }
+            }
+            world.set(0, 64, 0, soul_sand).unwrap();
+        };
+        let ran = crate::mobs::world::with_built_test_world(&[], build, |w, _| {
+            // An evoker standing on the soul sand has its feet at 64.875, so
+            // the cast asks for a floor from 65 down: the soul sand at 64 is
+            // the first sturdy block and the fang sits at 65.
+            assert_eq!(fang_floor(w, 0.5, 0.5, 64.0, 65.875), Some(65.0));
+        });
+        let _ = ran;
     }
 }
