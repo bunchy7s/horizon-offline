@@ -2911,12 +2911,7 @@ impl Game<'_> {
     /// added. The player's state is not swapped in, so helpers that look them up
     /// through `self.lan` may find nothing while a guest packet is handled.
     /// Server-side. @API:native_player_exp_change@.
-    pub(super) fn native_player_exp_change(
-        &mut self,
-        player: u128,
-        name: &str,
-        amount: &mut i32,
-    ) {
+    pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         let _ = (player, name, amount);
     }
     /// An item cooldown is about to start for a server player. `item` is the
@@ -2963,6 +2958,23 @@ impl Game<'_> {
         cancel: &mut bool,
     ) {
         let _ = (player, name, dimension, pos, cause, cancel);
+    }
+    /// A server player is about to travel through a Nether portal, End portal
+    /// or End gateway. `cause` is `nether_portal`, `end_portal` or `end_gateway`.
+    /// The player's state is not swapped in, so helpers that look them up
+    /// through `self.lan` may find nothing while a guest packet is handled.
+    /// Set `cancel` to keep them in their current place. Server-side.
+    /// @API:native_player_portal@.
+    pub(super) fn native_player_portal(
+        &mut self,
+        player: u128,
+        name: &str,
+        from_dimension: &str,
+        to_dimension: &str,
+        cause: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, from_dimension, to_dimension, cause, cancel);
     }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's

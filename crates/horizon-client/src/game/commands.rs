@@ -3046,9 +3046,7 @@ impl Game<'_> {
         for &t in &targets {
             self.for_player(t, |g| {
                 let mut cancel = false;
-                if let (Some(player), Some(name)) =
-                    (g.lan_acting_uuid, g.lan_acting_name.clone())
-                {
+                if let (Some(player), Some(name)) = (g.lan_acting_uuid, g.lan_acting_name.clone()) {
                     g.native_player_spawn_point_set(
                         player,
                         &name,

@@ -266,18 +266,10 @@ impl Game<'_> {
                 .and_then(|(slot, _)| self.stack_in(slot))
                 .map(|stack| stack.item.clone());
             let mut cancel = false;
-            if let (Some(player), Some(name), Some(item)) = (
-                self.lan_acting_uuid,
-                self.lan_acting_name.clone(),
-                item,
-            ) {
-                self.native_player_item_cooldown(
-                    player,
-                    &name,
-                    &item,
-                    ticks as i32,
-                    &mut cancel,
-                );
+            if let (Some(player), Some(name), Some(item)) =
+                (self.lan_acting_uuid, self.lan_acting_name.clone(), item)
+            {
+                self.native_player_item_cooldown(player, &name, &item, ticks as i32, &mut cancel);
             }
             if !cancel {
                 self.shield_cooldown = ticks;

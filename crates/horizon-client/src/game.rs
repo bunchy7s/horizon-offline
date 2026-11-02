@@ -5965,9 +5965,7 @@ impl Game<'_> {
         };
         let group = horizon_client::cooldowns::group(stack, default.as_ref());
         let mut cancel = false;
-        if let (Some(player), Some(name)) =
-            (self.lan_acting_uuid, self.lan_acting_name.clone())
-        {
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             self.native_player_item_cooldown(
                 player,
                 &name,

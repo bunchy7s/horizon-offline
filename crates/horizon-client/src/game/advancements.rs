@@ -629,9 +629,7 @@ impl Game<'_> {
     pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) {
         let mut allowed = Vec::with_capacity(unlocked.len());
         let mut refused = Vec::new();
-        if let (Some(player), Some(name)) =
-            (self.lan_acting_uuid, self.lan_acting_name.clone())
-        {
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
             for recipe in unlocked {
                 let mut cancel = false;
                 self.native_player_recipe_discovered(player, &name, recipe, &mut cancel);
@@ -642,10 +640,10 @@ impl Game<'_> {
                 }
             }
             if !refused.is_empty() {
-                let removed = self.level.recipe_book.remove_recipes(
-                    &world_stations!(self).recipe_index,
-                    &refused,
-                );
+                let removed = self
+                    .level
+                    .recipe_book
+                    .remove_recipes(&world_stations!(self).recipe_index, &refused);
                 if self.lan_acting.is_some() && !removed.is_empty() {
                     self.guest_packets.push(C::RecipeBookRemove(
                         horizon_protocol::packets::recipes::RecipeBookRemove { ids: removed },
