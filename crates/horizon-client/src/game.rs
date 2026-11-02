@@ -5619,12 +5619,14 @@ impl Game<'_> {
         let world = &self.world;
         let facts = self.res.facts();
         let (registry, collision) = (self.pack.assets.registry, self.collision);
+        let mut tops = Vec::new();
         let stuck = horizon_client::falling_block::apply_effects_from_blocks(
             from,
             f.position,
             recorded.then_some(wanted),
             &mut f.velocity,
             &mut f.fall_distance,
+            &mut tops,
             |p| {
                 use horizon_client::falling_block::Inside;
                 if &*facts.get(world.block(p.x, p.y, p.z)).name == "minecraft:cobweb" {
@@ -5640,6 +5642,9 @@ impl Game<'_> {
         );
         if stuck {
             f.stuck = horizon_client::falling_block::web_multiplier();
+        }
+        for pos in tops {
+            self.bubble_column_particles(pos);
         }
         // FallingBlockEntity.tick handles its portal after the move's block
         // effects, before placing/dropping on the floor under an End portal.
@@ -20534,6 +20539,8 @@ fn start_game<'a>(
         game.mods.dev = game.options.dev_mods.clone();
         game.start_mods();
     }
+    // After the mods: their templates are among the ids it lists.
+    game.preload_registries();
     game.start_agent_control()?;
     if let Some(scenario) = game.options.benchmark.clone() {
         let control = game

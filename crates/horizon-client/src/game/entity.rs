@@ -19,6 +19,23 @@ use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
 
+/// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
+/// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
+/// nothing (projectiles, rockets, TNT, falling blocks, armor stands here) stays
+/// untouched. A strike runs the stages in this order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThunderHit {
+    Untouched,
+    /// Burns, takes 5 damage, and the kinds with their own `thunderHit` change.
+    Mob,
+    /// `VehicleEntity.hurtServer`: 5 x 10 is over the 40 that destroys it.
+    Vehicle,
+    /// `ExperienceOrb.hurtServer`: 5 damage off 5 health.
+    Orb,
+    /// `ItemEntity.hurtServer`: burns up unless fire resistant.
+    Item,
+}
+
 /// What a blast knows about itself, for the entities in its reach to answer.
 #[derive(Clone, Copy)]
 pub(super) struct Blast {
@@ -71,6 +88,14 @@ pub(super) trait Entity {
     /// whose tick skips that step, says no.
     fn sweeps_blocks_inside(&self) -> bool {
         true
+    }
+    /// `Entity.thunderHit` for this kind.
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Untouched
+    }
+    /// The box a lightning strike tests against.
+    fn thunder_bounds(&self) -> Aabb {
+        self.bounds()
     }
     /// `Entity.ignoreExplosion`: the blast neither hurts nor pushes it. Also
     /// answers for what `getEntities(source, box)` never lists: the exploding
@@ -197,6 +222,13 @@ macro_rules! define_entity_handles {
             pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
                 std::iter::empty()
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
+            }
+
+            /// [`Self::entity_handles`], last of each list first, so the
+            /// caller can remove the entity it is on.
+            pub(super) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
+                std::iter::empty()
+                    $(.chain((0..self$(.$list)+.len()).rev().map(EntityHandle::$kind)))*
             }
         }
     };
@@ -354,12 +386,30 @@ impl Entity for Mob {
     fn is_supported_by(&self, pos: BlockPos) -> bool {
         self.supporting == Some([pos.x, pos.y, pos.z])
     }
+    fn thunder_hit(&self) -> ThunderHit {
+        if self.alive() {
+            ThunderHit::Mob
+        } else {
+            ThunderHit::Untouched
+        }
+    }
+    /// The kind's own size, as the strike has always read it.
+    fn thunder_bounds(&self) -> Aabb {
+        let (p, w) = (self.position, self.kind.width / 2.0);
+        Aabb::new(
+            Vec3::new(p.x - w, p.y, p.z - w),
+            Vec3::new(p.x + w, p.y + self.kind.height, p.z + w),
+        )
+    }
 }
 
 impl Entity for ItemEntity {
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Item(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Item
     }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.items_ignore
@@ -390,6 +440,9 @@ impl Entity for ExperienceOrb {
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Orb(self.id))
     }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Orb
+    }
     fn explosion_eye_height(&self) -> f64 {
         f64::from(0.5f32 * 0.85f32)
     }
@@ -416,6 +469,9 @@ impl Entity for Boat {
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Boat(self.id))
     }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Vehicle
+    }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.vehicles_ignore
     }
@@ -435,6 +491,9 @@ impl Entity for Minecart {
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Cart(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Vehicle
     }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.vehicles_ignore

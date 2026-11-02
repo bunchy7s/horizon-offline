@@ -50,6 +50,7 @@ def stamp(check):
         raise ValueError("missing numeric NATIVE_HOOKS_API")
     version = int(match.group(1))
     names = {hook["name"] for hook in catalog["hooks"]}
+    helper_names = {helper["name"] for helper in catalog.get("helpers", [])}
     extra = {}
     for path in ordered:
         fragment = json.loads(path.read_text())
@@ -63,6 +64,11 @@ def stamp(check):
             # The catalog's optional facts about a hook travel with it.
             entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable", "mod_api") if k in hook})
             catalog["hooks"].append(entry)
+        for helper in fragment.get("helpers", []):
+            if helper["name"] in helper_names:
+                raise ValueError(f"duplicate helper: {helper['name']}")
+            helper_names.add(helper["name"])
+            catalog.setdefault("helpers", []).append(helper)
         rust_summary = fragment["rust_summary"].replace(marker, str(version))
         doc_summary = fragment["doc_summary"].replace(marker, str(version))
         if not rust_summary or not doc_summary:

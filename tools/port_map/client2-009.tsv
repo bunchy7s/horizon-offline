@@ -31,8 +31,8 @@ Gui.addSocialInteractionsToast	skip:service		social interactions are not offered
 Gui.handleKeybinds	port	crates/horizon-client/src/game.rs::Game::key_pressed	gap: minor: the social interactions key has no port (see addSocialInteractionsToast)
 Gui.openChatScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	
 Gui.openChatAndAddText	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	the text is passed as the initial input
-Gui.buildInitialScreens	missing		player: ban notices are not shown before the title screen (the services attributes and profile actions are not read); the onboarding screen is ported (title/onboarding.rs)
-Gui.addInitialScreens	missing		player: same as buildInitialScreens: the onboarding screen is queued first (Title::start_onboarding), no ban notice is
+Gui.buildInitialScreens	port	crates/horizon-client/src/title.rs::Title::next_ban_notice	the queue ban_notice::initial_notices fills (from Title::poll_account) is popped one notice at a time, the title last
+Gui.addInitialScreens	port	crates/horizon-client-render/src/ban_notice.rs::initial_notices	the ban notices in vanilla's order; the accessibility onboarding is queued by Title::start_onboarding
 Gui.canInterruptScreen	missing		minor: unsure: no check that stops a server-opened screen from replacing an open one was found
 Gui.renderActiveTextDebug	skip:debug		debug overlay of text bounds
 GuiGraphicsExtractor.enableScissor	port	crates/horizon-client-render/src/screen_draw.rs::paint	gap: minor: callers push a rectangle; there is no stack, so enclosing rectangles are not intersected
@@ -83,12 +83,12 @@ Hud.extractFood	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud
 Hud.extractTextureOverlay	port	crates/horizon-client-render/src/hud_overlays.rs::camera_overlays	gap: player: the powder-snow freeze outline is not drawn; only the equippable camera overlay (pumpkin) is
 Hud.extractSlot	port	crates/horizon-client/src/game.rs::Game::draw_slot_item	
 Hud.setNowPlaying	port	crates/horizon-client-render/src/hud_overlays.rs::Titles::set_overlay	the animate flag gives the rainbow colour
-Hud.onDisconnected	missing		minor: unsure: no HUD reset on disconnect found; titles clear only on the ClearTitles packet
+Hud.onDisconnected	port	crates/horizon-client/src/game/remote.rs::Game::hud_disconnected	the tab list, boss bars, toasts, debug charts and titles reset; chat is left alone (ChatComponent.storeState)
 Hud.willPrioritizeJumpInfo	port	crates/horizon-client/src/locator_bar.rs::ContextualBar::next	the jumping input comes from Game::mount_jumping
 Hud.HeartType.getSprite	port	crates/horizon-client-render/src/hud_layout.rs::heart	
 Hud.HeartType.forPlayer	inline	crates/horizon-client-render/src/hud_layout.rs::HealthHud::layout	heart kind comes from the health inputs
 AbstractButton.extractDefaultSprite	port	crates/horizon-client-render/src/screen_draw.rs::button	disabled, highlighted and normal sprites
-AbstractButton.keyPressed	missing		minor: Enter or Space does not press a focused button; Enter only confirms a title text edit
+AbstractButton.keyPressed	port	crates/horizon-client/src/game/key_focus.rs::act	Enter, Space and keypad Enter are Nav::Select, which presses the focused target (Act::Press), as pad_menu.rs and startup_menu.rs apply it
 AbstractContainerWidget.setFocused	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::set_focus	gap: minor: screen-level focus only; no child-container focus
 AbstractContainerWidget.mouseClicked	port	crates/horizon-client-render/src/ui.rs::Scroll::press	gap: minor: child click dispatch is per screen; only the scrollbar press is here
 AbstractScrollArea.isOverScrollbar	inline	crates/horizon-client-render/src/ui.rs::Scroll::press	scrollbar column test folded into the press
@@ -109,7 +109,7 @@ AbstractSelectionList.extractListBackground	port	crates/horizon-client-render/sr
 AbstractSelectionList.enableScissor	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	scissor clamped to the screen
 AbstractSelectionList.scrollToEntry	port	crates/horizon-client-render/src/pack_screen.rs::List::scroll_to	
 AbstractSelectionList.setFocused	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::set_focus	gap: minor: focusing a row does not select it; vanilla selects the focused entry
-AbstractSelectionList.nextEntry	missing		minor: arrow keys do not move the selection between rows in the pack or server lists
+AbstractSelectionList.nextEntry	port	crates/horizon-client/src/game/key_focus.rs::act	gap: minor: an arrow steps a Kind::Row target and the list selects the row it lands on (Title::focus_world_row); Page Up and Page Down do nothing
 AbstractSelectionList.extractListItems	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	rows culled to the visible band
 AbstractSelectionList.extractItem	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	selection outline and row content
 AbstractSelectionList.extractSelection	port	crates/horizon-client-render/src/pack_screen.rs::PackScreen::draw_list	two fills: outline colour and black inner
@@ -123,8 +123,8 @@ AbstractSliderButton.getHandleSprite	inline	crates/horizon-client-render/src/ui.
 AbstractSliderButton.updateWidgetNarration	skip:other		narration only
 AbstractSliderButton.extractWidgetRenderState	port	crates/horizon-client-render/src/ui.rs::slider_ext	the whole message, value included, scrolls inside the slider (margin 2)
 AbstractSliderButton.handleCursor	port	crates/horizon-client-render/src/widgets.rs::widget_cursor	gap: minor: no resize cursor while dragging
-AbstractSliderButton.setFocused	missing		minor: keyboard focus does not enable value changes; there is no change-value state
-AbstractSliderButton.keyPressed	missing		minor: Left and Right do not move a focused slider; Enter does not toggle it
+AbstractSliderButton.setFocused	port	crates/horizon-client/src/game/key_focus.rs::slider_edit_on_focus	the arrows change the value only when the mouse or Tab focused the slider, not when an arrow did
+AbstractSliderButton.keyPressed	port	crates/horizon-client/src/game/key_focus.rs::act	left and right nudge a focused slider once Tab or Enter let them (Act::Nudge), Enter toggles it (Act::ToggleSlider)
 AbstractSliderButton.setValue	port	crates/horizon-client-render/src/options_ui.rs::set_slider	gap: minor: the 0..1 clamp is done by the caller (ui.rs slider_value)
 AbstractStringWidget.extractWidgetRenderState	port	crates/horizon-client-render/src/screen_draw.rs::string_widget	gap: minor: hover tooltip and click cursor for styled text are not drawn
 AbstractStringWidget.onClick	missing		minor: clicking a styled label with a click event does nothing here; book links and chat links do work
@@ -143,7 +143,7 @@ AbstractWidget.extractScrollingStringOverContents	port	crates/horizon-client-ren
 AbstractWidget.mouseClicked	port	crates/horizon-client/src/title.rs::Title::click	gap: minor: click dispatch is per screen; the press sound is audio.rs Audio::play_button_click
 AbstractWidget.mouseReleased	port	crates/horizon-client-render/src/ui.rs::Scroll::release	gap: minor: only the scroll release; widget onRelease is per screen
 AbstractWidget.mouseDragged	port	crates/horizon-client-render/src/ui.rs::Scroll::drag	gap: minor: only scroll drag; widget onDrag is per screen
-AbstractWidget.nextFocusPath	missing		minor: unsure: no per-widget focus path; Horizon focus is per screen
+AbstractWidget.nextFocusPath	port	crates/horizon-client/src/game/key_focus.rs::act	focus navigation is per screen: act and gamepad::focus_step_rect answer nextFocusPath for the arrows, tab_step for Tab
 AbstractWidget.isMouseOver	port	crates/horizon-client-render/src/screen_draw.rs::inside	gap: minor: isActive is checked by the caller
 AbstractWidget.narrationPriority	skip:other		narration only
 AbstractWidget.defaultButtonNarrationText	skip:other		narration only
