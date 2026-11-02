@@ -246,10 +246,16 @@ impl Game<'_> {
         // another player.
         let (entity, descending) = match self.camera_mob() {
             Some(m) => (super::remote_camera::mob_camera_entity(m), false),
-            None => (
-                self.player_camera_entity()?,
-                self.player.as_ref()?.shift_key_down,
-            ),
+            None => {
+                let mut entity = self.player_camera_entity()?;
+                if let Some(position) = self.remote_minecart_rider_position(partial) {
+                    // Already evaluated at partial: do not linearly interpolate
+                    // between tick endpoints across a corner a second time.
+                    entity.position = position;
+                    entity.previous = position;
+                }
+                (entity, self.player.as_ref()?.shift_key_down)
+            }
         };
         let mut view = self.view;
         let kind = match self.camera_type {
@@ -352,7 +358,14 @@ impl Game<'_> {
         let ride_turn = self
             .riding
             .and_then(|id| self.boats.iter().find(|b| b.id == id))
-            .map_or(0.0, |b| b.delta_rotation);
+            .map_or_else(
+                || {
+                    self.riding
+                        .and_then(|id| self.carts.iter().find(|c| c.id == id))
+                        .map_or(0.0, |c| c.passenger_yaw_delta)
+                },
+                |b| b.delta_rotation,
+            );
         let entity = CameraEntity {
             position: [p.position.x, p.position.y, p.position.z],
             previous: [
@@ -1033,13 +1046,9 @@ impl Game<'_> {
             out,
         );
     }
-    /// The entity id the local player has: the server's, else the LAN host's.
+    /// The entity id the local player has on its server.
     fn own_entity_id(&self) -> i32 {
-        match (&self.remote, &self.lan) {
-            (Some(r), _) => r.entity_id,
-            (None, Some(host)) => host.host_entity,
-            _ => 0,
-        }
+        self.remote.as_ref().map_or(0, |r| r.entity_id)
     }
     /// `ArrowLayer` and `BeeStingerLayer` (`StuckInBodyLayer`) for a player:
     /// the arrows and bee stingers stuck in the body, placed from the entity

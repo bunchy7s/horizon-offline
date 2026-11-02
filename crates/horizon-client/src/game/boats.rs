@@ -2,7 +2,8 @@
 //! paddling controls, collisions, riding (`positionRider`, `clampRotation`,
 //! dismounting), `BoatItem` placement, `VehicleEntity.hurtServer` breaking,
 //! saving and `AbstractBoatRenderer` with animated paddles.
-use super::{Game, InteractTarget, Keys, entity_culling::at, view_vector};
+use super::{Game, InteractTarget, entity::Entity, entity_culling::at, view_vector};
+use horizon_client::entity_rules::EntityRules;
 use horizon_client::{
     blocks::Fluid,
     collisions::{EntityCollisions, SceneCollisions},
@@ -586,17 +587,10 @@ impl Game<'_> {
         }
         // `Entity.baseTick`: the boat is immersed and pushed by the current it
         // sits in (`isPushedByFluid`), before `floatBoat` scales the velocity.
-        let _ = horizon_client::entities::update_entity_fluids(
-            b.bounds(),
-            b.position,
-            b.position.y + HEIGHT,
-            &mut b.velocity,
-            &self.world,
-            &self.res.motion().fluids,
-        );
+        let _ = b.push_by_fluid(&self.world, &self.res.motion().fluids);
         // floatBoat
         // `-getGravity()`: none with NoGravity.
-        let mut vspeed = if b.no_gravity { 0.0 } else { -0.04 };
+        let mut vspeed = 0.0 - b.get_gravity();
         let mut buoyancy = 0.0;
         let inv_friction: f32;
         let obstacles = self.boat_move_obstacles(&b);
@@ -683,11 +677,12 @@ impl Game<'_> {
             b.velocity.z += f64::from(r.cos() * acceleration);
             b.paddling = [right && !left || up, left && !right || up];
         }
-        // Entity.move: collisions zero the blocked components.
+        // Entity.move: collisions zero the blocked components, the world border's
+        // among them (`CollisionGetter.borderCollision`).
         let mut scene = EntityCollisions {
             blocks: scene,
             entities: &obstacles,
-            border: None,
+            border: Some((self.border.geometry(), [b.position.x, b.position.z])),
         };
         if let Ok(moved) = scene.resolve(b.bounds(), b.velocity, 0.0, b.on_ground) {
             b.position = Vec3::new(
@@ -1067,43 +1062,6 @@ impl Game<'_> {
                 under_water: b.under_water(),
                 max_y: b.bounds().max_position().y,
             })
-    }
-    /// The player's tick while riding: steer, tick the boat, sit in it.
-    pub(super) fn tick_riding(&mut self, keys: Keys) -> horizon_client::Result<()> {
-        if self.tick_cushion_riding(keys) {
-            return Ok(());
-        }
-        let Some(i) = self.boats.iter().position(|b| Some(b.id) == self.riding) else {
-            if self.tick_cart_riding(keys) || self.tick_mount_riding(keys) {
-                return Ok(());
-            }
-            self.riding = None;
-            return Ok(());
-        };
-        if keys.shift || self.boats[i].out_of_control >= 60.0 {
-            self.dismount(i);
-            return Ok(());
-        }
-        // The boat steers with the input `LocalPlayer.rideTick` latched on the
-        // previous tick; this tick's keys are latched after it ticked.
-        let mut b = self.tick_boat(self.boats[i].clone(), true);
-        b.input = [keys.left, keys.right, keys.forward, keys.backward];
-        // positionRider: the seat, turned with the boat; clampRotation to 105 degrees.
-        self.yaw += b.delta_rotation;
-        let delta = (self.yaw - b.yaw + 180.0).rem_euclid(360.0) - 180.0;
-        self.yaw += delta.clamp(-105.0, 105.0) - delta;
-        self.boats[i] = b;
-        let seat = self.player_boat_seat(i);
-        if let Some(p) = self.player.as_mut() {
-            self.previous_position = p.position;
-            p.position = seat;
-            p.velocity = Vec3::ZERO;
-            p.fall_distance = 0.0;
-        }
-        if self.boat_lava_tick(i) {
-            self.riding = None;
-        }
-        Ok(())
     }
     /// `getDismountLocationForPassenger`: in front of the player if there is
     /// floor there, else on top of the boat.

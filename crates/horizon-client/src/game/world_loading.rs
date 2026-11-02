@@ -52,7 +52,7 @@ impl WorldRequest {
         let _prepare_step = startup::step("world.prepare");
         // Before any chunk is read: a loaded container with a loot table is rolled as its chunk
         // is decoded (`save::roll_loaded_loot`), and the spawn chunks are read while the world
-        // opens. Every world opens here: in-frame, on the server thread, on a dedicated server.
+        // opens. Every world opens here: on the server thread, on a dedicated server.
         let loot = || {
             horizon_client::structure_blocks::loot_data(
                 &options.resources,
@@ -177,8 +177,6 @@ impl WorldRequest {
                 o.flat_settings(),
                 o.single_biome(),
             )?;
-            // WorldCreationUiState.getGameRules, written with the level.
-            level.game_rules = o.rules.by_name();
             // The DataPackConfig the screen chose: the picked packs on,
             // everything else disabled — the feature packs left out, and the
             // world packs the Data Packs screen held back (`install` copies
@@ -207,16 +205,13 @@ impl WorldRequest {
             // picked feature packs over vanilla's (`FeatureFlags.REGISTRY`'s
             // codec writes the whole set, `minecraft:vanilla` included, and
             // omits the tag when it is the default).
-            let mut flags = vec!["minecraft:vanilla".to_owned()];
-            flags.extend(
-                packs
-                    .iter()
-                    .filter(|p| o.data_packs.contains(&p.id))
-                    .flat_map(|p| p.features()),
-            );
-            flags.sort();
-            flags.dedup();
-            level.enabled_features = flags;
+            level.enabled_features = o.enabled_features(&options.resources);
+            // CreateWorldScreen copies the edited rules with the final flags,
+            // even when the player never opened the rules screen.
+            level.game_rules = o
+                .rules
+                .copy_with_features(&level.enabled_features)
+                .by_name();
         }
         // Worlds made without the Create New World screen (--world, the
         // control socket) take its default: commands on for Creative only.
@@ -284,52 +279,29 @@ impl WorldRequest {
 }
 
 pub(super) struct WorldLoader {
-    pub cancelled: bool,
-    /// What the world's upgrade has done (`UpgradeProgress`), which
-    /// `FileFixerProgressScreen` shows while the file fixers run.
-    pub upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     handle: JoinHandle<std::result::Result<PreparedWorld, String>>,
 }
 
 impl WorldLoader {
+    /// Prepare the world on its own thread. `upgrade` is what its upgrade has done
+    /// (`UpgradeProgress`), which the window's `FileFixerProgressScreen` shows while the
+    /// file fixers run, and where its Cancel stops them.
     pub fn start(
         request: WorldRequest,
         res: Arc<Resources>,
         pack: PackResources,
         options: Options,
         settings: Settings,
+        upgrade: Arc<horizon_world::datafix::progress::UpgradeProgress>,
     ) -> Result<Self> {
-        let upgrade = Arc::new(horizon_world::datafix::progress::UpgradeProgress::new());
-        let worker_upgrade = upgrade.clone();
         let handle = std::thread::Builder::new()
             .name("World initialization".into())
             .spawn(move || {
                 request
-                    .prepare(&res, &pack, &options, &settings, &worker_upgrade)
+                    .prepare(&res, &pack, &options, &settings, &upgrade)
                     .map_err(|e| e.to_string())
             })?;
-        Ok(Self {
-            cancelled: false,
-            upgrade,
-            handle,
-        })
-    }
-
-    // Wait for construction and disposal off the window thread. Keeping this
-    // handle prevents a queued reopen racing the old session lock.
-    pub fn cancel(self) -> Self {
-        Self {
-            cancelled: true,
-            upgrade: self.upgrade.clone(),
-            handle: std::thread::spawn(move || {
-                drop(self.finish());
-                Err("world initialization cancelled".into())
-            }),
-        }
-    }
-
-    pub fn ready(&self) -> bool {
-        self.handle.is_finished()
+        Ok(Self { handle })
     }
 
     pub fn finish(self) -> Result<PreparedWorld> {
@@ -888,50 +860,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn polling_does_not_wait_for_world_initialization() {
-        let (release, wait) = std::sync::mpsc::channel();
-        let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
-            handle: std::thread::spawn(move || {
-                wait.recv().unwrap();
-                Err("test world failure".into())
-            }),
-        };
-        assert!(!loader.ready());
-        release.send(()).unwrap();
-        assert_eq!(
-            loader.finish().err().unwrap().to_string(),
-            "test world failure"
-        );
-    }
-
-    #[test]
-    fn cancellation_keeps_initialization_tracked_until_it_has_stopped() {
-        let (release, wait) = std::sync::mpsc::channel();
-        let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
-            handle: std::thread::spawn(move || {
-                wait.recv().unwrap();
-                Err("cancelled test world".into())
-            }),
-        }
-        .cancel();
-        assert!(loader.cancelled);
-        assert!(!loader.ready());
-        release.send(()).unwrap();
-        assert_eq!(
-            loader.finish().err().unwrap().to_string(),
-            "world initialization cancelled"
-        );
-    }
-
-    #[test]
     fn worker_panics_reach_the_client() {
         let loader = WorldLoader {
-            cancelled: false,
-            upgrade: Default::default(),
             handle: std::thread::spawn(|| panic!("broken world initialization")),
         };
         assert_eq!(

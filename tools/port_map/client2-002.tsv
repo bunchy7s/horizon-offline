@@ -8,7 +8,7 @@ Rect2i.contains	skip:ui		GUI hit test on a rectangle; Horizon's widgets hit-test
 RenderPipelines.register	skip:data		pipeline registry; Horizon creates its pipelines in gfx.rs
 RunningTrimmedMean.registerValueAndGetMean	skip:debug		frame-time smoothing helper; no vanilla caller in this source tree
 ScreenEffectRenderer.submit	port	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	gap: minor: the item activation is not built here (see renderItemActivationAnimation)
-ScreenEffectRenderer.renderItemActivationAnimation	port	crates/horizon-client/src/game.rs::itemActivation + tick_totem (game.rs:2205, 7139)	the totem flying up to the screen when it saves the player
+ScreenEffectRenderer.renderItemActivationAnimation	port	crates/horizon-client/src/game/totem.rs::Game::item_activation_geometry	the totem flying up to the screen when it saves the player: `ItemActivation.activate`/`tick` and `item_activation.rs`'s pose, drawn in the hand pass with the FIXED display and no camera transform
 ScreenEffectRenderer.submitWater	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	underwater overlay branch (misc/underwater)
 ScreenEffectRenderer.submitFire	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	first-person fire overlay branch (block/fire_1, two quads)
 ScreenEffectRenderer.buildFireQuad	inline	crates/horizon-client-render/src/screen_effects.rs::ScreenEffects::build	the two fire quads' corners and offsets
@@ -42,14 +42,14 @@ ShaderManager.compilePipelines	skip:other		pipeline compile plumbing; Horizon co
 ShaderManager.loadConfigs	skip:other		reads GLSL shader resources; Horizon's shader packs are read by horizon-shaders
 ShaderManager.loadShader	skip:other		reads one GLSL shader resource; see loadConfigs
 ShaderManager.loadInclude	skip:other		reads one GLSL include; WGSL has no include files
-ShaderManager.loadPostChain	missing		minor: JSON post chains (shaders/post) are not loaded; vanilla's spectator entity effects (creeper, spider, enderman) do not show in Horizon
+ShaderManager.loadPostChain	port	crates/horizon-client-render/src/post_chain.rs::Config::parse	`post_effect/*.json` is parsed into the chain config (`PostChainConfig.CODEC`); `PostEffects::load` reads the file, `Config::parse` the JSON
 ShaderManager.listAllIncludes	skip:other		lists GLSL include files; WGSL has none
 ShaderManager.apply	skip:other		swaps in compiled pipelines; Horizon compiles at startup and on reload
 ShaderManager.tryTriggerRecovery	skip:other		error hook for broken post chains; Horizon has none
-ShaderManager.isPostEffectValid	missing		minor: checks spectator entity post effects, which Horizon does not have (see loadPostChain)
-ShaderManager.getPostChain	missing		minor: spectator entity post effects (creeper, spider, enderman) are not drawn; spectator mode only
-ShaderManager.PostChainCache.getOrLoadPostChain	missing		minor: cache for the spectator entity post effects Horizon lacks
-ShaderManager.PostChainCache.loadPostChain	missing		minor: loads the spectator entity post effects Horizon lacks
+ShaderManager.isPostEffectValid	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	a chain whose referenced external targets are not `minecraft:main` is rejected with the same message, where vanilla allows only `LevelTargetBundle.MAIN_TARGETS`
+ShaderManager.getPostChain	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::apply	a chain is loaded on the first frame that asks for it and a load failure is remembered in `failed` and skipped after; the error-screen recovery handler is not ported
+ShaderManager.PostChainCache.getOrLoadPostChain	inline	crates/horizon-client-render/src/post_chain.rs::PostEffects::apply	the `chains` map holds each loaded chain (a miss as `None`) and a chain already there is reused, so a chain is built once
+ShaderManager.PostChainCache.loadPostChain	port	crates/horizon-client-render/src/post_chain.rs::PostEffects::load	targets, passes and pipelines are built from the config; a pass whose GLSL does not translate falls back to `post_chain.wgsl`, and a chain that still fails is skipped
 ShaderManager.PostChainCache.close	skip:other		releases post chains; Horizon has none
 Sheets.chooseSprite	port	crates/horizon-client-render/src/block_entity_render.rs::classify	gap: minor: the Christmas chest texture is picked outside this fn (block_entity_render.rs extended_christmas)
 SkyRenderer.<init>	inline	crates/horizon-client-render/src/gfx/pack_sky.rs::PackSky::new	gap: minor: builds the disc, sunset fan, stars and void up front; sun and moon quads are built per frame in game.rs celestial_geometry

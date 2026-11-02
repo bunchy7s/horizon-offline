@@ -71,12 +71,16 @@ impl PreparedFiles {
     /// The bytes of `name` (`/`-separated, from the root); `None` when this
     /// doesn't hold it (read it from the folder).
     pub fn read(&self, name: &str) -> Option<io::Result<Vec<u8>>> {
+        self.read_head(name, u64::MAX)
+    }
+    /// At most the first `max` bytes of `name`, as [`PreparedFiles::read`].
+    pub fn read_head(&self, name: &str, max: u64) -> Option<io::Result<Vec<u8>>> {
         let i = self
             .entries
             .binary_search_by(|e| self.name(e).cmp(name))
             .ok()?;
         let (offset, len) = self.entries[i].data;
-        let mut bytes = vec![0; len as usize];
+        let mut bytes = vec![0; len.min(max) as usize];
         Some(read_at(&self.file, &mut bytes, offset).map(|()| bytes))
     }
     /// The files under `dir` (`/`-separated, from the root) and its
@@ -205,6 +209,39 @@ pub fn find(path: &Path) -> Option<(Arc<PreparedFiles>, String)> {
         holds_folder(&rel).then_some(())?;
         Some((open(root)?, rel))
     })
+}
+
+/// `path`'s bytes: from its prepared root's data file when that holds it,
+/// where a file the data file doesn't have is missing (`NotFound`, without
+/// asking the disk: a texture's `.mcmeta` or LabPBR maps, mostly absent);
+/// else from the disk.
+pub fn read(path: &Path) -> io::Result<Vec<u8>> {
+    match find(path) {
+        Some((files, rel)) if holds_file(&rel) => files
+            .read(&rel)
+            .unwrap_or_else(|| Err(io::ErrorKind::NotFound.into())),
+        _ => fs::read(path),
+    }
+}
+
+/// At most the first `max` bytes of `path`, from where [`read`] takes them:
+/// a header, without reading the whole file.
+pub fn read_head(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+    match find(path) {
+        Some((files, rel)) if holds_file(&rel) => files
+            .read_head(&rel, max)
+            .unwrap_or_else(|| Err(io::ErrorKind::NotFound.into())),
+        _ => {
+            let mut bytes = Vec::new();
+            io::Read::read_to_end(&mut io::Read::take(File::open(path)?, max), &mut bytes)?;
+            Ok(bytes)
+        }
+    }
+}
+
+/// [`read`] as UTF-8 text.
+pub fn read_to_string(path: &Path) -> io::Result<String> {
+    String::from_utf8(read(path)?).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Write `root`'s file from its folders: through a temporary file renamed
@@ -455,6 +492,34 @@ mod tests {
         let (_, rel) = find(&root.join("data/minecraft/recipe")).unwrap();
         assert_eq!(rel, "data/minecraft/recipe");
         assert!(find(&root.join("worldgen/structure")).is_none());
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Under a root with a file, a file it holds reads from it and a file it
+    /// doesn't is missing even when the disk has one now; a file outside its
+    /// folders, or a sound, reads from the disk.
+    #[test]
+    fn read_takes_the_file_for_what_it_holds() {
+        let root = root("read");
+        write(&root).unwrap();
+        let stick = root.join("data/minecraft/recipe/stick.json");
+        fs::write(&stick, b"changed on disk").unwrap();
+        assert_eq!(read(&stick).unwrap(), b"{\"stick\":1}");
+        let added = root.join("assets/minecraft/textures/block/stone_n.png");
+        fs::write(&added, b"added after").unwrap();
+        assert_eq!(read(&added).unwrap_err().kind(), io::ErrorKind::NotFound);
+        assert_eq!(read(&root.join("facts.json")).unwrap(), b"{}");
+        let sound = root.join("assets/minecraft/sounds/ambient/cave1.ogg");
+        assert_eq!(read(&sound).unwrap(), b"OggS");
+        assert_eq!(read_to_string(&stick).unwrap(), "{\"stick\":1}");
+        // A header: from the file for what it holds, from the disk for the rest.
+        assert_eq!(read_head(&stick, 4).unwrap(), b"{\"st");
+        assert_eq!(read_head(&stick, 100).unwrap(), b"{\"stick\":1}");
+        assert_eq!(read_head(&sound, 2).unwrap(), b"Og");
+        assert_eq!(
+            read_head(&added, 2).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }
