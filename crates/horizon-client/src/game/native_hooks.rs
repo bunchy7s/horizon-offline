@@ -5065,6 +5065,31 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// NeoForge's `CriticalHitEvent`: a player's melee hit on a living
+    /// `target_kind` (`minecraft:zombie`, `minecraft:armor_stand`) that deals
+    /// damage, where `Player.attack` decides whether it is critical.
+    /// `vanilla_critical` is vanilla's answer; `critical` starts as it and may
+    /// be forced or denied (a denied crit also drops the sweep it would allow,
+    /// the crit sound and the particles); `damage_multiplier` starts at 1.5 and
+    /// scales the damage only while `critical` ends true. Not fired for a
+    /// target that is no living entity (a dragon part) or when the hit does
+    /// no damage. Fires on the Game that runs the attack. @API:critical_hit@.
+    pub(super) fn native_critical_hit(
+        &mut self,
+        target_kind: &str,
+        vanilla_critical: bool,
+        critical: &mut bool,
+        damage_multiplier: &mut f32,
+    ) {
+        mod_api::dispatch_critical_hit(
+            self,
+            mod_api::mods(),
+            target_kind,
+            vanilla_critical,
+            critical,
+            damage_multiplier,
+        );
+    }
     /// `Item.releaseUsing` of `stack`: `entity` let it go with `time_left`
     /// ticks of its `native_use_duration` left, so it was held for
     /// `duration - time_left` (a bow-like item shoots by that charge). Set

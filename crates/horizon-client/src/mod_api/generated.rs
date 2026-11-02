@@ -2669,6 +2669,19 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// NeoForge's `CriticalHitEvent`: a player's melee hit on a living
+    /// `target_kind` (`minecraft:zombie`, `minecraft:armor_stand`) that deals
+    /// damage, where `Player.attack` decides whether it is critical.
+    /// `vanilla_critical` is vanilla's answer; `critical` starts as it and may
+    /// be forced or denied (a denied crit also drops the sweep it would allow,
+    /// the crit sound and the particles); `damage_multiplier` starts at 1.5 and
+    /// scales the damage only while `critical` ends true. Not fired for a
+    /// target that is no living entity (a dragon part) or when the hit does
+    /// no damage. Fires on the Game that runs the attack. @API:critical_hit@.
+    fn critical_hit(&self, host: &mut dyn Host, event: &mut CriticalHitEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// The server's difficulty changed, from `from` to `to` (`peaceful`,
     /// `easy`, `normal`, `hard`; NeoForge's `DifficultyChangeEvent`). It is
     /// vanilla's `MinecraftServer.setDifficulty`, which `/difficulty`, a
@@ -9090,6 +9103,34 @@ pub fn dispatch_creeper_power(
     for mod_hook in mods {
         mod_hook.creeper_power(host, &mut event);
     }
+}
+/// What [`Hooks::critical_hit`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct CriticalHitEvent<'a> {
+    pub target_kind: &'a str,
+    pub vanilla_critical: bool,
+    pub critical: bool,
+    pub damage_multiplier: f32,
+}
+pub fn dispatch_critical_hit(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    target_kind: &str,
+    vanilla_critical: bool,
+    critical: &mut bool,
+    damage_multiplier: &mut f32,
+) {
+    let mut event = CriticalHitEvent {
+        target_kind,
+        vanilla_critical,
+        critical: *critical,
+        damage_multiplier: *damage_multiplier,
+    };
+    for mod_hook in mods {
+        mod_hook.critical_hit(host, &mut event);
+    }
+    *critical = event.critical;
+    *damage_multiplier = event.damage_multiplier;
 }
 /// What [`Hooks::difficulty_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
