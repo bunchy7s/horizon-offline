@@ -879,3 +879,19 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
         }
     }
 }
+#[test]
+fn time_argument_rounds_like_math_round_float() {
+    let ticks = |input: &str| {
+        let reg = reg();
+        let parse = vanilla::dispatcher().parse(input, &reg);
+        let (ctx, _) = parse.executable().unwrap();
+        match ctx.args.iter().find(|a| a.name == "time").unwrap().value {
+            Arg::Int(t) => t,
+            ref other => panic!("{other:?}"),
+        }
+    };
+    // 0.49999997 + 0.5 rounds up to 1.0 in f32, but Math.round is exact.
+    assert_eq!(ticks("time set 0.49999997t"), 0);
+    assert_eq!(ticks("time set 0.5t"), 1);
+    assert_eq!(ticks("time add -2.5t"), -2);
+}
