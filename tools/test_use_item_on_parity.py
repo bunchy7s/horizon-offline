@@ -282,10 +282,10 @@ def wire_case(rng, states, case):
     for direction, at in (('north', (0, 0, -1)), ('east', (1, 0, 0)), ('south', (0, 0, 1)), ('west', (-1, 0, 0))):
         if rng.random() < 0.6:
             name = rng.choice(['redstone_wire', 'redstone_wire', 'lever', 'stone', 'repeater', 'redstone_block'])
-            state = states.any(rng, name) if name == 'redstone_wire' else states.get(name)
-            if name in ('lever', 'repeater'):
-                state = states.any(rng, name)
-            cells.append([*at, state])
+            # Wire, levers and repeaters have too many states to name one; stone and
+            # a redstone block have a single default.
+            varied = ('redstone_wire', 'lever', 'repeater')
+            cells.append([*at, states.any(rng, name) if name in varied else states.get(name)])
     case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
                         'food': 20, 'face': rng.choice(['up', 'north', 'south', 'west', 'east'])}
     case['cells'] = cells
@@ -394,6 +394,12 @@ def cases(facts, count, seed):
         case = {**h.environment(rng), 'pos': [0, 0, 0]}
         case.pop('raining', None)
         case.pop('thundering', None)
+        if rng.random() < 0.08:
+            wire_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
         if rng.random() < 0.1:
             bed_case(rng, states, case)
             case['items'] = []
