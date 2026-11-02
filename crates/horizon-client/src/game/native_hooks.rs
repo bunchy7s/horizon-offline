@@ -3174,6 +3174,18 @@ impl Game<'_> {
         let _ = (dimension, pos, item);
     }
 
+    /// A beacon at `pos` activated or deactivated after its beam was checked.
+    /// `active` says whether it now has a complete pyramid. Server-side.
+    /// @API:native_beacon_state_change@.
+    pub(super) fn native_beacon_state_change(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        active: bool,
+    ) {
+        let _ = (dimension, pos, active);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

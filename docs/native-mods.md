@@ -1426,6 +1426,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_vault_change_state(dimension, pos, state)`**: the vault block at `pos` changed its state to `state`
   (`inactive`, `active`, `unlocking`, or `ejecting`).
 - **`native_block_failed_dispense(dimension, pos, item)`**: a dispenser at `pos` failed to dispense `item`.
+- **`native_beacon_state_change(dimension, pos, active)`**: the beacon at `pos` gained or lost its complete beam
+  pyramid; `active` says whether it is active now.
 - **`native_note_play(dimension, player, pos, instrument, note, cancel)`** (on `GameLevel`): a note block is about to
   sound when punched, used, or powered. Set `cancel` to silence it; when used to tune it, the note remains unchanged.
 - **`native_bell_ring(dimension, player, pos, cancel)`** (on `GameLevel`): a bell is about to ring. Set `cancel` to
