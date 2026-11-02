@@ -2317,7 +2317,7 @@ pub fn remove_version(tag: &str) -> Result<(), String> {
     let mut settings = Settings::load();
     if settings.selected.as_deref() == Some(tag) {
         settings.selected = installed().first().cloned();
-        settings.save();
+        settings.save()?;
     }
     Ok(())
 }
@@ -2666,7 +2666,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
     let mut settings = Settings::load();
     if !as_update || select_after_update(settings.selected.as_deref(), &before) {
         settings.selected = Some(release.tag.clone());
-        settings.save();
+        settings.save()?;
     }
     if as_update && release.nightly.is_some() {
         crate::nightly::after_update(&release.tag);
@@ -3400,19 +3400,25 @@ impl Settings {
     pub fn keep_newest(&self) -> usize {
         self.keep_versions.unwrap_or(KEEP_NEWEST).max(1)
     }
-    pub fn save(&self) {
+    pub fn save(&self) -> Result<(), String> {
+        // The window and background jobs share the process's temporary file.
+        static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // A write that stops halfway leaves settings.json unreadable, and `load` answers
         // defaults for it: the file is replaced only once it is whole.
         let dir = data_dir();
         let path = dir.join("settings.json");
         let tmp = dir.join(format!("settings.{}.tmp", std::process::id()));
+        let json =
+            serde_json::to_vec_pretty(self).map_err(|e| format!("{}: {e}", path.display()))?;
         let written = fs::create_dir_all(&dir)
-            .and_then(|()| fs::write(&tmp, serde_json::to_string_pretty(self).unwrap()))
+            .and_then(|()| fs::write(&tmp, json))
             .and_then(|()| fs::rename(&tmp, &path));
         if let Err(e) = written {
             let _ = fs::remove_file(&tmp);
-            eprintln!("Horizon: settings.json is not saved: {e}");
+            return Err(format!("{}: {e}", path.display()));
         }
+        Ok(())
     }
 }
 

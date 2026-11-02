@@ -1114,7 +1114,7 @@ impl Lod {
         let keeps_observed = source
             .as_ref()
             .is_some_and(|source| source.keeps_observed());
-        let cores = thread::available_parallelism().map_or(1, |n| n.get());
+        let cores = horizon_threads::worker_count();
         let shared = Arc::new(Shared {
             jobs: Mutex::new(VecDeque::new()),
             mesh_jobs: Mutex::new(std::collections::BinaryHeap::new()),
