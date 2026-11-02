@@ -4254,6 +4254,49 @@
       "mod_api": {
         "contract": "listen"
       }
+    },
+    {
+      "name": "living_drown",
+      "version": 1,
+      "target": "horizon_client_lib::breathing::native_living_drown",
+      "neoforge": "LivingDrownEvent",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_fall",
+      "version": 1,
+      "target": "horizon_client_lib::landing::native_living_fall",
+      "neoforge": "LivingFallEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_heal",
+      "version": 1,
+      "target": "horizon_client_lib::hunger::native_living_heal",
+      "neoforge": "LivingHealEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    },
+    {
+      "name": "living_jump",
+      "version": 1,
+      "target": "horizon_client_lib::motion::native_living_jump",
+      "neoforge": "LivingEvent.LivingJumpEvent",
+      "side": "both",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ]
 }
