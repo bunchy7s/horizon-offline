@@ -2594,6 +2594,23 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// A server player empties a bucket at `pos` (`fluid`: `minecraft:water`,
+    /// `minecraft:lava`, `minecraft:powder_snow`; a fish or axolotl bucket
+    /// empties `minecraft:water`): where `BucketItem.use` has found the block
+    /// the fluid goes into and the player may build there, right before it is
+    /// placed. Set `cancel` and nothing is poured and the bucket stays full.
+    /// The player's state is swapped in, so `native_tell` answers them. Only
+    /// for guests of a server. `native_fill_bucket` hears this click too (and
+    /// the filling one) without the player and the fluid. Not heard: a
+    /// dispenser, a cauldron, and a fluid a block places itself.
+    /// @API:native_bucket_empty@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn bucket_empty(&self, host: &mut dyn Host, event: &mut BucketEmptyEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A player opens one of the game's own menus (`ServerPlayer.openMenu`; the
     /// job of NeoForge's `PlayerContainerEvent.Open`, which comes after the
     /// menu is open and cannot stop it): `kind` is the menu type
@@ -2656,6 +2673,25 @@ pub trait Hooks: Send + Sync {
         host: &mut dyn Host,
         event: &mut FoodLevelChangedEvent<'_>,
     ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A server player places a hanging entity: an item frame
+    /// (`minecraft:item_frame`, `minecraft:glow_item_frame`), a painting
+    /// (`minecraft:painting`) or a leash knot (`minecraft:leash_knot`, when a
+    /// lead is tied to a fence that has none yet), `kind` its entity type and
+    /// `pos` the block it takes (the fence's for a knot). Where
+    /// `HangingEntityItem.useOn` and `LeadItem.useOn` create it, once it is
+    /// known to fit and before anything is placed or used up. Set `cancel`
+    /// and nothing is placed: the item stays in the player's hand. The
+    /// player's state is swapped in, so `native_tell` answers them. Only for
+    /// guests of a server; `/summon`, a dispenser and the game's own player
+    /// are not heard, nor is a lead tied to a mob or a boat.
+    /// @API:native_hanging_place@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn hanging_place(&self, host: &mut dyn Host, event: &mut HangingPlaceEvent<'_>) -> Flow {
         let _ = host;
         let _ = event;
         Flow::Continue
@@ -7443,6 +7479,39 @@ pub fn dispatch_armor_stand_manipulate(
         }
     }
 }
+/// What [`Hooks::bucket_empty`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct BucketEmptyEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub pos: [i32; 3],
+    pub fluid: &'a str,
+}
+pub fn dispatch_bucket_empty(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    pos: [i32; 3],
+    fluid: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = BucketEmptyEvent {
+        player,
+        name,
+        pos,
+        fluid,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.bucket_empty(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::container_opened`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ContainerOpenedEvent<'a> {
@@ -7545,6 +7614,39 @@ pub fn dispatch_food_level_changed(
         }
     }
     *to = event.to;
+}
+/// What [`Hooks::hanging_place`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct HangingPlaceEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub pos: [i32; 3],
+}
+pub fn dispatch_hanging_place(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    kind: &str,
+    pos: [i32; 3],
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = HangingPlaceEvent {
+        player,
+        name,
+        kind,
+        pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.hanging_place(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::item_damaged`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

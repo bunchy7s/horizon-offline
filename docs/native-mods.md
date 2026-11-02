@@ -1345,6 +1345,25 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   3 accepted, 4 downloaded, 5 invalid URL, 6 failed reload, 7 discarded). It only hears. The pack a dedicated server
   offers during the configuration is answered before the player has joined and is not heard. The player's state is
   swapped in, so `native_tell` works.
+- **`native_projectile_hit(owner, kind, hit_entity, pos, cancel)`**: a projectile a server player launched (arrow,
+  snowball, egg, thrown trident, ender pearl, ...) hit an entity (`hit_entity`) or a block at `pos`, heard before any
+  of its effects (NeoForge's `ProjectileImpactEvent`). Set `cancel` and it does nothing: it vanishes, a thrown trident
+  flies on through. The shooter's state is swapped in, so `native_tell` answers them. Mobs' and the host's
+  projectiles are not heard, nor are fishing bobbers and firework rockets.
+- **`native_tnt_primed(player, pos, cancel)`**: TNT at `pos` is about to be lit by a flint and steel or fire charge
+  (`player` is whoever clicked, whose state is swapped in), fire, a redstone signal, an arrow or a dispenser (`player` is
+  None). Set `cancel` and it is not primed: the block stays, or is put back if fire or a signal had already taken it
+  out. TNT set off by a blast, a TNT minecart and a sulfur cube are not asked; `native_explosion_detonate` can spare
+  the blocks of a blast.
+- **`native_hanging_place(player, name, kind, pos, cancel)`**: a server player places an item frame, a glow item
+  frame, a painting or a leash knot (tying a lead to a fence that has none; `pos` is the fence), once it fits and
+  before it is placed or the item used. Set `cancel` and nothing happens; the item stays in the hand. The player's
+  state is swapped in, so `native_tell` answers them. `/summon` and a lead tied to a mob are not heard.
+- **`native_bucket_empty(player, name, pos, fluid, cancel)`**: a server player empties a bucket (`fluid` is
+  `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
+  right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
+  `native_tell` answers them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers
+  and cauldrons are not heard.
 - **`native_player_fish(player, name, state, cancel)`**: a player's fishing rod, on a server: `state` 0 the cast, 1 a fish
   biting, 2 the reel-in of a bite (the catch), 3 the reel-in with nothing on the line, 4 the reel-in of a bobber hooked
   to an entity or item. Set `cancel` and nothing is thrown (0), the fish gets away and the wait starts over (1), or the

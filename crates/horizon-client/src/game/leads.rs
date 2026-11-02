@@ -401,6 +401,14 @@ impl Game<'_> {
         {
             return false;
         }
+        // A knot is made when a lead is tied to a fence that has none.
+        if existing.is_empty()
+            && existing_boats.is_empty()
+            && (!in_hand.is_empty() || !boats_in_hand.is_empty())
+            && self.hanging_place_cancelled("minecraft:leash_knot", knot_pos)
+        {
+            return true;
+        }
         let mut attached = self.tie_player_boats(center, Holder::Knot(knot_pos));
         for j in in_hand {
             if self.can_attach_lead(j, center) {
