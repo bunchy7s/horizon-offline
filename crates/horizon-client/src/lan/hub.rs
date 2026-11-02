@@ -239,6 +239,9 @@ pub struct Hub {
     /// Criteria `CriteriaTriggers.TICK` granted to players, for the game to
     /// tell the mods.
     pub native_advancement_grants: Vec<TickGrants>,
+    /// Whether any native mod is loaded: `Input` and `Sneak` events only exist for them, so
+    /// the hub queues none otherwise. The game sets it before each poll.
+    pub mods_loaded: bool,
     /// Players a native mod hid (`native_hide_player`), by UUID, on or off:
     /// only players of at least that permission level see them, in the
     /// player list, the world and their joining and leaving.
@@ -587,6 +590,7 @@ impl Hub {
             pending_kicks: Vec::new(),
             native_tracking: Vec::new(),
             native_advancement_grants: Vec::new(),
+            mods_loaded: false,
             hidden: Default::default(),
             teams: Vec::new(),
             nicknames: std::collections::HashMap::new(),
@@ -3140,14 +3144,20 @@ impl Hub {
                     let g = &mut self.guests[i];
                     g.input = p.flags;
                     if g.client_loaded() {
-                        events.push(HostEvent::Input {
-                            conn,
-                            flags: i32::from(p.flags),
-                        });
+                        // The events only tell the mods: nothing is queued with none loaded.
+                        let listening = self.mods_loaded;
+                        if listening {
+                            events.push(HostEvent::Input {
+                                conn,
+                                flags: i32::from(p.flags),
+                            });
+                        }
                         let sneaking = p.flags & 32 != 0;
                         if g.sneaking != sneaking {
                             g.sneaking = sneaking;
-                            events.push(HostEvent::Sneak { conn, sneaking });
+                            if listening {
+                                events.push(HostEvent::Sneak { conn, sneaking });
+                            }
                         }
                     }
                     // handlePlayerInput only records keys and updates crouching.

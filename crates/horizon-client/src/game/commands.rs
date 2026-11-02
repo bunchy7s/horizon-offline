@@ -159,9 +159,11 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     i32::try_from(id).ok()
 }
 impl Game<'_> {
-    fn native_player_level_changed(&mut self, from: i32) {
+    /// `native_player_level_change` for a level that was `from` before an experience change.
+    pub(super) fn native_player_level_changed(&mut self, from: i32) {
         let to = self.experience.level;
         if from != to
+            && !horizon_client::mod_api::mods().is_empty()
             && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
         {
             self.native_player_level_change(player, &name, from, to);
@@ -2740,8 +2742,8 @@ impl Game<'_> {
         Ok(count)
     }
     /// Player.giveExperiencePoints including negative amounts.
+    /// The caller reports the level change to the mods.
     fn give_points(&mut self, amount: i32) {
-        let old_level = self.experience.level;
         let e = &mut self.experience;
         e.progress += amount as f32 / horizon_client::entities::Experience::needed(e.level) as f32;
         e.total = e.total.saturating_add(amount).clamp(0, i32::MAX);
@@ -2761,7 +2763,6 @@ impl Game<'_> {
             e.level += 1;
             e.progress /= horizon_client::entities::Experience::needed(e.level) as f32;
         }
-        self.native_player_level_changed(old_level);
     }
     /// AdvancementCommands.perform / performCriterion.
     fn cmd_advancement(&mut self, ctx: &Context) -> R<i32> {

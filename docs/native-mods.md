@@ -1407,8 +1407,6 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   find nothing during packet handling.
 - **`native_player_recipe_book_settings_change(player, name, book, open, filtering)`**: a server player's recipe
   book open or filter setting changed; `book` is the book type's protocol id. The player's state is not swapped in.
-- **`native_player_item_break(player, name, item)`**: a server player broke the item in their hand when its
-  durability damage removed it.
 - **`native_player_advancement_criterion_grant(player, name, advancement, criterion)`**: a server player earned
   one advancement criterion, after its progress was recorded.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
@@ -1641,7 +1639,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_ready_arrow(player, name, arrow)`**: a server player released a drawn bow, with `arrow` naming
   the selected projectile item. The guest's state is not swapped in while the packet is handled.
 - **`native_prepare_hopper_transfer(pos)`**: a hopper at `pos` begins a transfer attempt, after its cooldown and enabled checks and before pushing or pulling items.
-- **`native_inventory_move_item(source, destination, item, cancel)`**: a hopper is about to move one item between containers. Set `cancel` to leave it in the source slot.
+- **`native_inventory_move_item(source, destination, item, cancel)`**: a hopper is about to move one item between containers (a composter's bone meal too). Set `cancel` to leave it in the source slot. A chest boat or minecart is reported at the block it is in.
 - **`native_hopper_inventory_search(hopper, container, entity)`**: a hopper selects a block container or container entity while searching for items.
 - **`native_vault_loot(pos, item)`**: a vault is about to eject a loot item, before the item entity spawns.
 - **`native_world_border_bounds_change_finish()`**: a timed world border size change finished on the server, after the border reached its final size.
@@ -1664,7 +1662,7 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_input(player, name, flags)`**: a loaded guest sent a `PlayerInput` packet, after its flags were applied to the hub. `flags` is the packet's bit field, and the guest's state is swapped in.
 - **`native_player_arm_swing(player, name, hand)`**: a guest's arm swing was handled and their attack strength reset. The packet currently swings `mainhand`; the guest's state is swapped in.
 - **`native_player_jump(player, name)`**: accepted guest movement made the server player jump from the ground, after movement simulation finishes. The guest's state is swapped in.
-- **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in.
+- **`native_player_kicked(player, name, reason)`**: a guest was kicked after the hub recorded the rendered disconnect reason and sent the disconnect. The guest's state is swapped in, unless the guest was already removed in the same poll (a kick and the disconnect arriving together): the hook still fires, without it.
 - **`native_player_level_change(player, name, from, to)`**: a server player's experience change altered their level, after the new level was applied. The guest's state is swapped in when the player is a guest.
 - **`native_perform_command(player, command, ran)`**: a player typed a registered command (without its slash) and
   their level allows it, whether the world allows commands or not. The mod parses the line and sets `ran`. The

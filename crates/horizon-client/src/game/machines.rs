@@ -885,24 +885,56 @@ impl Game<'_> {
         self.with_entity_container(id, |g, target| g.eject_into(pos, hopper, target, face))
             .unwrap_or(false)
     }
+    /// Where a container is in the world for the mods: its block, or the block a chest
+    /// boat or minecart is in (its view sits under a placeholder key).
+    fn container_world_pos(&self, view: &View) -> [i32; 3] {
+        let (x, y, z) = view.parts[0].0;
+        if x == i32::MAX - 15 && y == super::minecarts::CART_KEY_Y {
+            let id = z as u32;
+            let at = self
+                .carts
+                .iter()
+                .find(|c| c.id == id)
+                .map(|c| c.position)
+                .or_else(|| self.boats.iter().find(|b| b.id == id).map(|b| b.position));
+            if let Some(p) = at {
+                return [p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32];
+            }
+        }
+        [x, y, z]
+    }
+    /// `InventoryMoveItemEvent` for the item in `slot` of `holder` going from `source` to
+    /// `destination`: whether a mod canceled the move. Nothing is looked up with no mod loaded.
+    fn hopper_move_canceled(
+        &self,
+        holder: &View,
+        slot: usize,
+        source: &View,
+        destination: &View,
+    ) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let containers = self.containers();
+        let Some(stack) = containers.get(holder, slot) else {
+            return false;
+        };
+        let mut cancel = false;
+        self.native_inventory_move_item(
+            self.container_world_pos(source),
+            self.container_world_pos(destination),
+            &stack.item,
+            &mut cancel,
+        );
+        cancel
+    }
     /// The rest of `HopperBlockEntity.ejectItems`: one item into `target`.
     fn eject_into(&mut self, pos: Pos, hopper: &View, target: &View, face: Direction) -> bool {
         if self.containers().is_full(target, face) {
             return false;
         }
         for slot in 0..hopper.len() {
-            let containers = self.containers();
-            let Some(stack) = containers.get(hopper, slot) else {
-                continue;
-            };
-            let mut cancel = false;
-            self.native_inventory_move_item(
-                [pos.0, pos.1, pos.2],
-                target.parts[0].0.into(),
-                &stack.item,
-                &mut cancel,
-            );
-            if cancel {
+            if self.hopper_move_canceled(hopper, slot, hopper, target) {
                 continue;
             }
             let Some(one) = self.take_one(hopper, slot) else {
@@ -998,6 +1030,18 @@ impl Game<'_> {
             // room, the setItem putting the bone meal back into the detached
             // container (whose bone meal is lost with it).
             let bone_meal = c.bone_meal.clone();
+            if !horizon_client::mod_api::mods().is_empty() {
+                let mut cancel = false;
+                self.native_inventory_move_item(
+                    [above.0, above.1, above.2],
+                    self.container_world_pos(hopper),
+                    &bone_meal.item,
+                    &mut cancel,
+                );
+                if cancel {
+                    return Some(false);
+                }
+            }
             let at = BlockPos::new(above.0, above.1, above.2);
             self.with_level(|b, level, ticks| b.composter_empty(level, ticks, at));
             let moved = self.add_item(None, hopper, bone_meal, None).is_none();
@@ -1023,16 +1067,7 @@ impl Game<'_> {
             if !c.can_take(source, slot, stack, Direction::Down) {
                 continue;
             }
-            let source_pos = source.parts[0].0;
-            let destination = hopper.parts[0].0;
-            let mut cancel = false;
-            self.native_inventory_move_item(
-                [source_pos.0, source_pos.1, source_pos.2],
-                [destination.0, destination.1, destination.2],
-                &stack.item,
-                &mut cancel,
-            );
-            if cancel {
+            if self.hopper_move_canceled(source, slot, source, hopper) {
                 continue;
             }
             let Some(one) = self.take_one(source, slot) else {

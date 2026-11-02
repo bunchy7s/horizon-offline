@@ -770,7 +770,11 @@ impl Game<'_> {
             }
         }
         let guest = &host.hub.guests[i];
+        let listening = !horizon_client::mod_api::mods().is_empty();
         for projectile in projectiles..self.creatures.projectiles.len() {
+            if !listening {
+                break;
+            }
             let item = match &self.creatures.projectiles[projectile].kind {
                 horizon_client::projectiles::ProjectileKind::Snowball => {
                     Some("minecraft:snowball".to_owned())
@@ -784,7 +788,7 @@ impl Game<'_> {
                 horizon_client::projectiles::ProjectileKind::Trident => {
                     Some("minecraft:trident".to_owned())
                 }
-                horizon_client::projectiles::ProjectileKind::Potion(stack) => {
+                horizon_client::projectiles::ProjectileKind::Potion(stack, _) => {
                     Some(stack.item.to_string())
                 }
                 _ => None,
@@ -1871,9 +1875,12 @@ impl Game<'_> {
                 // RELEASE_USE_ITEM: ServerPlayer.releaseUsingItem, with the
                 // hand of the item in use acting.
                 6 => {
-                    let (uuid, name) = {
+                    let listening = !horizon_client::mod_api::mods().is_empty();
+                    let (uuid, name) = if listening {
                         let guest = &host.hub.guests[gi];
                         (guest.uuid, guest.name.clone())
+                    } else {
+                        (0, String::new())
                     };
                     self.as_guest(host, conn, |g| {
                         let Some(hand) = g.used_hand() else {
@@ -1883,7 +1890,8 @@ impl Game<'_> {
                             if let Some((slot, ticks)) = g.using.take()
                                 && let Some(stack) = g.stack_in(slot).cloned()
                             {
-                                if &*stack.item == "minecraft:bow"
+                                if listening
+                                    && &*stack.item == "minecraft:bow"
                                     && let Some(arrow) = g
                                         .projectile_slot("minecraft:bow")
                                         .and_then(|slot| g.stack_in(slot).map(|s| s.item.clone()))
@@ -1891,7 +1899,9 @@ impl Game<'_> {
                                     g.native_player_ready_arrow(uuid, &name, &arrow);
                                 }
                                 g.release_used_item(&stack, ticks, false);
-                                g.native_player_stop_using_item(uuid, &name);
+                                if listening {
+                                    g.native_player_stop_using_item(uuid, &name);
+                                }
                             }
                         });
                     });
@@ -4241,6 +4251,7 @@ impl Game<'_> {
             return;
         };
         if jumps > 0
+            && !horizon_client::mod_api::mods().is_empty()
             && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
         {
             self.as_guest(host, conn, |game| {

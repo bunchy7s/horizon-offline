@@ -4847,20 +4847,20 @@ impl Game<'_> {
     /// A server player finished loading the world around them after joining,
     /// respawning or changing dimension. The guest's state is not swapped in,
     /// so helpers that look them up through `self.lan` may find nothing while
-    /// a guest packet is handled. Server-side. @API:native_player_client_loaded_world@.
+    /// a guest packet is handled. Server-side. @API:player_client_loaded_world@.
     pub(super) fn native_player_client_loaded_world(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_client_loaded_world(self, mod_api::mods(), player, name);
     }
     /// A server player released the use-item key before the item finished
     /// being used. The guest's state is not swapped in, so helpers that look
     /// them up through `self.lan` may find nothing during packet handling.
-    /// @API:native_player_stop_using_item@.
+    /// @API:player_stop_using_item@.
     pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_stop_using_item(self, mod_api::mods(), player, name);
     }
     /// A server player's recipe book open or filter setting changed. `book`
     /// is the book type's protocol id. The guest's state is not swapped in.
-    /// @API:native_player_recipe_book_settings_change@.
+    /// @API:player_recipe_book_settings_change@.
     pub(super) fn native_player_recipe_book_settings_change(
         &mut self,
         player: u128,
@@ -4879,13 +4879,8 @@ impl Game<'_> {
             filtering,
         );
     }
-    /// A server player broke the item they were holding after durability
-    /// damage removed it from the hand. @API:native_player_item_break@.
-    pub(super) fn native_player_item_break(&mut self, player: u128, name: &str, item: &str) {
-        mod_api::dispatch_player_item_break(self, mod_api::mods(), player, name, item);
-    }
     /// A server player earned one criterion of an advancement, after the
-    /// progress was recorded. @API:native_player_advancement_criterion_grant@.
+    /// progress was recorded. @API:player_advancement_criterion_grant@.
     pub(super) fn native_player_advancement_criterion_grant(
         &mut self,
         player: u128,
@@ -4903,12 +4898,12 @@ impl Game<'_> {
         );
     }
     /// A server player released a drawn bow with `arrow` selected. The guest's
-    /// state is not swapped in during packet handling. @API:native_player_ready_arrow@.
+    /// state is not swapped in during packet handling. @API:player_ready_arrow@.
     pub(super) fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str) {
         mod_api::dispatch_player_ready_arrow(self, mod_api::mods(), player, name, arrow);
     }
     /// A server player selected a bundle item in `slot` at `index`. The guest's
-    /// state is not swapped in during packet handling. @API:native_player_bundle_item_select@.
+    /// state is not swapped in during packet handling. @API:player_bundle_item_select@.
     pub(super) fn native_player_bundle_item_select(
         &mut self,
         player: u128,
@@ -4927,18 +4922,19 @@ impl Game<'_> {
     }
     /// A server player stopped digging `pos` before the block broke, after
     /// the server cleared the dig and sent the block back to the client.
-    /// The player's state is not swapped in. @API:native_block_damage_abort@.
+    /// The player's state is not swapped in. @API:block_damage_abort@.
     pub(super) fn native_block_damage_abort(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         mod_api::dispatch_block_damage_abort(self, mod_api::mods(), player, name, pos);
     }
     /// A hopper at `pos` began an item transfer attempt. This runs after its
     /// cooldown and enabled checks, before pushing or pulling any items.
-    /// Server-side, including the single-player server. @API:native_prepare_hopper_transfer@.
+    /// Server-side, including the single-player server. @API:prepare_hopper_transfer@.
     pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
         mod_api::dispatch_prepare_hopper_transfer(self, mod_api::mods(), pos);
     }
-    /// A hopper is about to move one item between containers. Set `cancel`
-    /// to leave it in its source slot. @API:native_inventory_move_item@.
+    /// A hopper is about to move one item between containers, a composter's
+    /// bone meal included. Set `cancel` to leave it in its source slot. A chest
+    /// boat or minecart is reported at the block it is in. @API:inventory_move_item@.
     pub(super) fn native_inventory_move_item(
         &self,
         source: [i32; 3],
@@ -4957,7 +4953,7 @@ impl Game<'_> {
     }
     /// A hopper selected a container while searching for items to push or
     /// pull. Exactly one of `container` and `entity` identifies the target.
-    /// @API:native_hopper_inventory_search@.
+    /// @API:hopper_inventory_search@.
     pub(super) fn native_hopper_inventory_search(
         &self,
         hopper: [i32; 3],
@@ -4966,13 +4962,13 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_hopper_inventory_search(self, mod_api::mods(), hopper, container, entity);
     }
-    /// A vault at `pos` is about to eject a loot item. @API:native_vault_loot@.
+    /// A vault at `pos` is about to eject a loot item. @API:vault_loot@.
     pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
         mod_api::dispatch_vault_loot(self, mod_api::mods(), pos, item);
     }
     /// A timed world-border size change finished on the server, after its
     /// final size was applied. Server-side, including the single-player
-    /// server. @API:native_world_border_bounds_change_finish@.
+    /// server. @API:world_border_bounds_change_finish@.
     pub(super) fn native_world_border_bounds_change_finish(&mut self) {
         mod_api::dispatch_world_border_bounds_change_finish(self, mod_api::mods());
     }
@@ -4984,12 +4980,12 @@ impl Game<'_> {
     }
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
-    /// usual. Server-side, including the single-player server. @API:native_explosion_prime@.
+    /// usual. Server-side, including the single-player server. @API:explosion_prime@.
     pub(super) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32) {
         mod_api::dispatch_explosion_prime(self, mod_api::mods(), center, radius);
     }
     /// A dropped item entity reached its 6000-tick lifetime and is about to be
-    /// removed (Bukkit's `ItemDespawnEvent`). @API:native_item_despawn@.
+    /// removed (Bukkit's `ItemDespawnEvent`). @API:item_despawn@.
     pub(super) fn native_item_despawn(
         &mut self,
         entity: u32,
@@ -5000,7 +4996,7 @@ impl Game<'_> {
         mod_api::dispatch_item_despawn(self, mod_api::mods(), entity, item, count, pos);
     }
     /// A mob is about to drop `count` of `item` at `pos` (Bukkit's
-    /// `EntityDropItemEvent`). @API:native_entity_drop_item@.
+    /// `EntityDropItemEvent`). @API:entity_drop_item@.
     pub(super) fn native_entity_drop_item(
         &mut self,
         entity: u32,
@@ -5011,7 +5007,7 @@ impl Game<'_> {
         mod_api::dispatch_entity_drop_item(self, mod_api::mods(), entity, item, count, pos);
     }
     /// A leashed mob's leash was removed, before any lead drop is handled
-    /// (Bukkit's `EntityUnleashEvent`). @API:native_entity_unleash@.
+    /// (Bukkit's `EntityUnleashEvent`). @API:entity_unleash@.
     pub(super) fn native_entity_unleash(&mut self, entity: u32, kind: &str) {
         mod_api::dispatch_entity_unleash(self, mod_api::mods(), entity, kind);
     }
@@ -5050,7 +5046,8 @@ impl Game<'_> {
     pub(super) fn native_player_jump(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_jump(self, mod_api::mods(), player, name);
     }
-    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. @API:player_kicked@.
+    /// A guest was disconnected by a server kick, after the hub recorded the rendered `reason`. The guest's state is
+    /// swapped in unless they were already removed in the same poll. @API:player_kicked@.
     pub(super) fn native_player_kicked(&mut self, player: u128, name: &str, reason: &str) {
         mod_api::dispatch_player_kicked(self, mod_api::mods(), player, name, reason);
     }
