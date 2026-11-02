@@ -1164,7 +1164,7 @@ pub trait Host {
     /// for a player who is off (who joins hidden), until a mod sets it again
     /// or the server stops. Works anywhere on a server, inside a player's
     /// hook too; false on a client and in a world nobody else can join.
-    /// API @API:hide_player@.
+    /// API 314.
     fn hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
         let _ = uuid;
         let _ = level;
@@ -1173,7 +1173,7 @@ pub trait Host {
     /// Draw a stack and its slot decorations, except the count, at `at`,
     /// `size` GUI pixels square. False when nothing was drawn: an unknown item
     /// or an empty stack (air, or a count of 0, as `ItemStack.isEmpty`).
-    /// API @API:item_stack@.
+    /// API 313.
     fn item_stack(&self, batch: &mut HudBatch, stack: &ItemStack, at: [f32; 2], size: f32) -> bool {
         let _ = batch;
         let _ = stack;
@@ -1187,7 +1187,7 @@ pub trait Host {
     /// is `width * height` pixels of four bytes, each side at most
     /// [`MOD_IMAGE_SIZE`](crate::hud::MOD_IMAGE_SIZE); false when it is not that
     /// size. The upload costs a texture patch of the image, so send one when the
-    /// image changed, not every frame. API @API:mod_image@.
+    /// image changed, not every frame. API 355.
     fn mod_image(&mut self, width: u32, height: u32, rgba: &[u8]) -> bool {
         let _ = width;
         let _ = height;
@@ -1199,7 +1199,7 @@ pub trait Host {
     /// title's screens create worlds and read packs there. A world's own
     /// `datapacks/` is in that world's folder (`saves/<world>/datapacks`).
     /// The folder the game runs in (`--player-dir` moves a player's options
-    /// and servers only, not the instance). Nothing is created. API @API:native_instance_dir@.
+    /// and servers only, not the instance). Nothing is created. API 326.
     fn instance_dir(&self) -> PathBuf {
         unimplemented!("Host::instance_dir")
     }

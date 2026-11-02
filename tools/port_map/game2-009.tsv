@@ -68,7 +68,7 @@ ItemContainerContents.itemCopies	skip:other		no callers in the vanilla source
 ItemContainerContents.asMutable	skip:other		no callers in the vanilla source
 ItemContainerContents.equals	skip:java		value equality; Horizon compares the item data directly
 KineticWeapon.makeLocalHitSound	port	crates/horizon-client/src/game/spear.rs::Game::kinetic_hit_feedback	the local hit sound, at most once per ten ticks per entity
-KineticWeapon.computeDamageUseDuration	missing		unsure: the use duration (delay plus the damage window) is not computed in Horizon's use_spear or spear_tick; the windows are checked one by one
+KineticWeapon.computeDamageUseDuration	port	crates/horizon-client/src/spear.rs::Kinetic::damage_use_duration	the delay plus the damage window's duration, which `SpearUseGoal` and `SpearAttack` read as the spear's use duration
 KineticWeapon.Condition.test	port	crates/horizon-client/src/spear.rs::Condition::test	tick, attacker speed and relative speed against the scaled minimums
 PiercingWeapon.makeHitSound	port	crates/horizon-client/src/game/spear.rs::Game::jab	gap: minor: the hit sound plays at this player's feet only; vanilla plays it for everyone nearby
 ResolvableProfile.createUnresolved	port	crates/horizon-client-render/src/skins.rs::parse_profile	keeps a name or id as the unresolved key, resolved later
@@ -97,7 +97,7 @@ Ingredient.testOptionalIngredient	port	crates/horizon-client/src/crafting.rs::In
 Ingredient.equals	skip:java		value equality
 Ingredient.of	port	crates/horizon-client/src/crafting.rs::Ingredient::of	ingredient from item ids
 Ingredient.displayForSingleItem	skip:other		no callers in the vanilla source
-Ingredient.getSingleItem	missing		unsure: returns the one item of a single-item ingredient; no Horizon function found in this pass
+Ingredient.getSingleItem	skip:data		only `BrewingRecipeBuilder.defaultId` (datagen) asks for it; the brewing recipes Horizon reads come from the JSON tables
 PlacementInfo.create	port	crates/horizon-client/src/crafting.rs::Placement::of	placement for one ingredient, none when it is empty
 PotionIngredient.test	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::test	item id and the potion filter
 PotionIngredient.of	port	crates/horizon-client-render/src/brewing.rs::PotionIngredient::parse	built from the recipe JSON, with the potion filter
@@ -116,24 +116,24 @@ ShapedRecipePattern.unpack	port	crates/horizon-client/src/crafting.rs::Recipes::
 ShapedRecipePattern.firstNonEmpty	port	crates/horizon-client/src/crafting.rs::shrink	trims empty rows and columns at both ends
 ShapedRecipePattern.lastNonEmpty	port	crates/horizon-client/src/crafting.rs::shrink	trims empty rows and columns at both ends
 ShapedRecipePattern.matches	port	crates/horizon-client/src/crafting.rs::Recipes::assemble_if_matches	shaped arm: exact size, cell tests, mirrored match
-SmithingTransformRecipe.display	missing		unsure: the recipe book slot displays for a smithing transform are not built in Horizon's recipe book; the smithing table uses StationRecipes::smithing_result
-SmithingTrimRecipe.display	missing		unsure: the recipe book slot displays for a smithing trim are not built in Horizon's recipe book; the smithing table uses StationRecipes::smithing_result
+SmithingTransformRecipe.display	missing		the book's entries are built from shaped, shapeless, furnace and special recipes only (Book::build), so a smithing transform gets its display count (1) and its station in RecipeIndex and no slot displays
+SmithingTrimRecipe.display	missing		same as SmithingTransformRecipe.display: the table's own screens come from StationRecipes::smithing_result, the book builds no smithing entry
 TransmuteRecipe.computeResultSize	port	crates/horizon-client/src/crafting.rs::Special::assemble	result count plus the material count when it is added
 TransmuteRecipe.matches	port	crates/horizon-client/src/crafting.rs::Special::matches	Transmute arm: one input and the material list
 TransmuteRecipe.assemble	port	crates/horizon-client/src/crafting.rs::Special::assemble	Transmute arm: result with the input's components
 TransmuteRecipe.resultDisplay	port	crates/horizon-client/src/recipe_book.rs::RecipeIndex::result	the recipe's result id
 TransmuteRecipe.createPlacementInfo	port	crates/horizon-client/src/crafting.rs::Recipes::placement	the placement of the input and the materials
-RecipeDisplay.isEnabled	missing		minor: no feature flag check, so a display for a disabled feature still shows
+RecipeDisplay.isEnabled	missing		no feature flag check: RecipeIndex::load and Book::build skip the level's enabled_features, so a display of a disabled feature still shows
 SlotDisplay.applyDemoTransformation	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	gap: minor: only the trim demo draws (up to 256 tries); the dyed demo is not modelled
 SlotDisplay.AnyFuel.resolve	port	crates/horizon-client/src/recipe_book.rs::ghost	every item with a cooking fuel component, grouped by component value in registry order
-SlotDisplay.Composite.resolve	missing		unsure: no composite display list found in Horizon's recipe book
+SlotDisplay.Composite.resolve	missing		the synced display parses SlotDisplay::Composite (horizon-protocol/src/packets/recipes.rs) but nothing resolves it into stacks; Book::items_of reads an Ingredient's own item list
 SlotDisplay.DyedSlotDemo.resolve	port	crates/horizon-client/src/crafting.rs::book_displays	the targets cycle fastest and the list stops at 16 stacks
 SlotDisplay.ItemSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	the item of a single-item slot
 SlotDisplay.ItemStackSlotDisplay.resolve	port	crates/horizon-client/src/recipe_book.rs::Book::items_of	gap: minor: keeps item ids only; the stack's components are not carried into the display
-SlotDisplay.OnlyWithComponent.resolve	missing		unsure: no display that filters by an item component found in Horizon's recipe book
+SlotDisplay.OnlyWithComponent.resolve	missing		the book's displays hold item ids, not stacks (Book::items_of), so there is no component for a predicate to test
 SlotDisplay.SmithingTrimDemoSlotDisplay.resolve	port	crates/horizon-client/src/stations.rs::StationRecipes::trim_demo	a random base trimmed by a random material
 SlotDisplay.WithAnyPotion.resolve	port	crates/horizon-client/src/crafting.rs::book_displays	every potion resolved onto the source item
-SlotDisplay.WithRemainder.resolve	missing		unsure: no remainder display found in Horizon's recipe book; remainders exist in Recipes::remainders for play
-SlotDisplay.WithRemainder.isEnabled	missing		minor: no feature flag check for the remainder display
+SlotDisplay.WithRemainder.resolve	missing		remainders are kept for play (Recipes::remainders), and the book's displays never apply them
+SlotDisplay.WithRemainder.isEnabled	missing		no feature flag check: the recipe load and the book never read the level's enabled_features
 BlockPlaceContext.at	port	crates/horizon-world/src/level/place.rs::Sim::placement_at	the placement position and face from the clicked block
 UseOnContext.isSecondaryUseActive	port	crates/horizon-client/src/game.rs::Game::use_hand	the shift key sets the context's sneaking flag
