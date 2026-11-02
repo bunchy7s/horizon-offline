@@ -6914,7 +6914,7 @@ impl Game<'_> {
         let canceled = !hand_changed && !self.use_item_stopped(stack, ticks);
         let (release, spyglass) = item_use::release_parts(canceled, hand_changed);
         match &*stack.item {
-            "minecraft:bow" if release => self.release_bow(self.ticks_held(stack, ticks)),
+            "minecraft:bow" if release => self.release_bow(stack, self.ticks_held(stack, ticks)),
             "minecraft:trident" if release => self.release_trident(self.ticks_held(stack, ticks)),
             "minecraft:spyglass" if spyglass => self.stop_spyglass(),
             _ => {}
@@ -13877,15 +13877,12 @@ impl Game<'_> {
         }
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
-    fn release_bow(&mut self, ticks: u32) {
+    fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {
         let arrow_slot = self.projectile_slot("minecraft:bow");
         let has_ammo = arrow_slot.is_some() || self.creative;
-        let Some(stack) = self.held().cloned() else {
-            return;
-        };
         let mut charge = i32::try_from(ticks).unwrap_or(i32::MAX);
         let mut canceled = false;
-        self.native_arrow_loose(&stack, has_ammo, &mut charge, &mut canceled);
+        self.native_arrow_loose(stack, has_ammo, &mut charge, &mut canceled);
         let Some(power) = item_use::bow_release_power(has_ammo, charge, canceled) else {
             return;
         };

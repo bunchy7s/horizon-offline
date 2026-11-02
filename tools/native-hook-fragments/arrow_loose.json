@@ -4,7 +4,7 @@
       "name": "arrow_loose",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_arrow_loose",
       "neoforge": "ArrowLooseEvent",
-      "side": "both",
+      "side": "server",
       "cancellable": true,
       "mod_api": {
         "contract": "cancel",
