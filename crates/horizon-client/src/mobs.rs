@@ -1547,6 +1547,18 @@ pub enum MobEvent {
         amount: f32,
         source: Damage,
     },
+    /// A melee hit on another mob whose effect rides the hit:
+    /// `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` add it inside
+    /// the `super.doHurtTarget` branch, to any `LivingEntity`, so a mob the
+    /// hit lands on gets it too.
+    AttackMobWithEffect {
+        target: u32,
+        amount: f32,
+        source: Damage,
+        effect: &'static str,
+        ticks: i32,
+        amplifier: i32,
+    },
     /// `AbstractCubeMob.dealDamage` on the player (`playerTouch`): the hit,
     /// then, only when `hurtServer` let it land, the cube's
     /// `entity.slime.attack` with its pitch drawn from the cube's random.

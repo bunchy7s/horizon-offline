@@ -2077,6 +2077,23 @@ impl Game<'_> {
                 } => {
                     self.mob_hits_mob(target, amount, source);
                 }
+                MobEvent::AttackMobWithEffect {
+                    target,
+                    amount,
+                    source,
+                    effect,
+                    ticks,
+                    amplifier,
+                } => {
+                    // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
+                    // effect sits inside the branch where the hit landed, and
+                    // `LivingEntity.addEffect` takes a mob as well as a player.
+                    if self.mob_hits_mob(target, amount, source)
+                        && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
+                    {
+                        t.add_effect(effect, ticks, amplifier);
+                    }
+                }
                 MobEvent::CubeHurtPlayer { cube, amount, from } => {
                     // AbstractCubeMob.dealDamage: the attack sound (and its
                     // two pitch draws, made even for a silent cube, whose
