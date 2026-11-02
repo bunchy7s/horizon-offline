@@ -431,6 +431,9 @@ impl Game<'_> {
         let id = mob.id;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        if !self.mobs.iter().any(|m| m.id == id) {
+            return None;
+        }
         self.enchant_spawn_equipment(id);
         self.halloween_spawn_head(id);
         if !persistent && !scripted {
@@ -2309,21 +2312,29 @@ impl Game<'_> {
                         thrown.thrower = Some(thrower);
                     }
                 }
-                MobEvent::DropItem { item, count, at } => self.spawn_item(
-                    ItemStack {
-                        item,
-                        count,
-                        damage: 0,
-                        extra: None,
-                    },
+                MobEvent::DropItem {
+                    mob,
+                    item,
+                    count,
                     at,
-                    // The ItemEntity constructor's motion, from the entity's
-                    // own random (not the level's), so spawnAtLocation drops
-                    // (a fox's berries, a panda's held food, a goat's horn)
-                    // land apart.
-                    dispenser::new_item_motion(),
-                    10,
-                ),
+                } => {
+                    self.native_entity_drop_item(mob, &item, count as i32, at);
+                    self.spawn_item(
+                        ItemStack {
+                            item,
+                            count,
+                            damage: 0,
+                            extra: None,
+                        },
+                        at,
+                        // The ItemEntity constructor's motion, from the entity's
+                        // own random (not the level's), so spawnAtLocation drops
+                        // (a fox's berries, a panda's held food, a goat's horn)
+                        // land apart.
+                        dispenser::new_item_motion(),
+                        10,
+                    );
+                }
                 MobEvent::DropGoatHorn {
                     mob,
                     screaming,

@@ -271,6 +271,8 @@ pub enum ArmPose {
     ThrowTrident,
     /// Playing a goat horn.
     TootHorn,
+    /// Looking through a spyglass (`HumanoidModel.ArmPose.SPYGLASS`).
+    Spyglass,
     /// A spear held out (`HumanoidModel.ArmPose.SPEAR`), at rest or charging.
     Spear,
     /// A brush being used (`HumanoidModel.ArmPose.BRUSH`).
@@ -400,6 +402,8 @@ pub(super) fn crossbow_charge(p: &mut Poses, max: f32, ticks: f32, in_right: boo
     let x = lerp(alpha, p.get(pull)[3], -PI / 2.0);
     p.xrot(pull, x);
 }
+/// `HumanoidModel.SPYGLASS_ARM_ROT_X`.
+const SPYGLASS_ARM_ROT_X: f32 = 1.919_862_2;
 /// `HumanoidModel.poseRightArm` / `poseLeftArm`.
 fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
     let arm = if right { "right_arm" } else { "left_arm" };
@@ -435,6 +439,11 @@ fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
             let x = p.get(arm)[3];
             p.xrot(arm, x * 0.5 - PI);
             p.yrot(arm, 0.0);
+        }
+        ArmPose::Spyglass => {
+            let crouch = if h.crouching { 0.261_799_4 } else { 0.0 };
+            p.xrot(arm, (hx - SPYGLASS_ARM_ROT_X - crouch).clamp(-2.4, 3.3));
+            p.yrot(arm, hy + if right { -0.261_799_4 } else { 0.261_799_4 });
         }
         ArmPose::TootHorn => {
             p.xrot(arm, hx.clamp(-1.2, 1.2) - 1.483_529_8);
@@ -818,6 +827,7 @@ pub fn setup(
                     Some(_) if using_main && m.extra.blocking => ArmPose::Block,
                     Some("minecraft:bow") if using_main => ArmPose::Bow,
                     Some("minecraft:trident") if using_main => ArmPose::ThrowTrident,
+                    Some("minecraft:spyglass") if using_main => ArmPose::Spyglass,
                     Some("minecraft:goat_horn") if using_main => ArmPose::TootHorn,
                     Some("minecraft:crossbow") if using_main && !m.extra.charged => {
                         ArmPose::CrossbowCharge
@@ -838,6 +848,8 @@ pub fn setup(
                     ArmPose::Spear
                 } else if using_off && m.extra.blocking {
                     ArmPose::Block
+                } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:spyglass") {
+                    ArmPose::Spyglass
                 } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:goat_horn") {
                     ArmPose::TootHorn
                 } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:brush") {
@@ -1063,6 +1075,41 @@ mod flight_pose_tests {
                 assert!((pose[3] - expected_pitch).abs() < 1e-6);
                 let side = if right { -FRAC_PI_6 } else { FRAC_PI_6 };
                 assert!((pose[4] - (side + expected_yaw)).abs() < 1e-6);
+                assert_eq!(p.get(if right { "left_arm" } else { "right_arm" })[3], 0.0);
+            }
+        }
+    }
+    /// HumanoidModel.poseRightArm / poseLeftArm's SPYGLASS case: pitch, yaw,
+    /// crouching, and the arm's pitch.
+    #[test]
+    fn a_spyglass_raises_the_arm_with_the_head_in_both_hands() {
+        for right in [false, true] {
+            for (pitch, yaw, crouching, expected_pitch) in [
+                (0.0, 0.0, false, -1.919_862_2),
+                (0.5, 0.3, false, -1.419_862_2),
+                (0.0, 0.0, true, -2.181_661_6),
+                // Looking up: limited to -2.4.
+                (-1.5, 0.0, false, -2.4),
+            ] {
+                let mut p = Poses {
+                    map: ["head", "right_arm", "left_arm"]
+                        .into_iter()
+                        .map(|n| (key(n), [0.0; 9]))
+                        .collect(),
+                    dummy: [0.0; 9],
+                    skipped: Default::default(),
+                    hidden: Default::default(),
+                };
+                let arm = if right { "right_arm" } else { "left_arm" };
+                p.xrot("head", pitch);
+                p.yrot("head", yaw);
+                let mut h = Hum::new(ArmPose::Empty, ArmPose::Empty);
+                h.crouching = crouching;
+                pose_arm(&mut p, ArmPose::Spyglass, right, &h);
+                let pose = *p.get(arm);
+                assert!((pose[3] - expected_pitch).abs() < 1e-6, "{pose:?}");
+                let side = if right { -0.261_799_4 } else { 0.261_799_4 };
+                assert!((pose[4] - (yaw + side)).abs() < 1e-6, "{pose:?}");
                 assert_eq!(p.get(if right { "left_arm" } else { "right_arm" })[3], 0.0);
             }
         }

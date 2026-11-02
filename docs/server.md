@@ -517,7 +517,11 @@ runtime or new dependency. Server-sent events can replace the polling later if a
     watcher what `add`, `remove` and `clear` do, as vanilla's `StoredUserList` tells its `NotificationService`,
     so a change by the console, a command in the game or the protocol itself is told alike (`clear` once per
     entry); the event stream carries them as `operators_added`, `bans_removed`... too;
-  - planned: `serversettings/*` and `gamerules`, the other notifications and the heartbeat.
+  - game rules: `gamerules` lists every rule the game has as a typed rule (`{key, type, value}`), `gamerules/update`
+    sets one (checked against its type and bounds, logged and set only when the value changes) and
+    `notification/gamerules/updated` follows every change, by that method or by `/gamerule`
+    (`Game::set_game_rule`);
+  - planned: the rest of `serversettings/*`, the activity and world-upgrade notifications and the heartbeat.
 
 ## 9. Benchmark plan (bots against vanilla and Paper)
 

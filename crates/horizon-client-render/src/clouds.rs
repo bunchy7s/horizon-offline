@@ -62,18 +62,65 @@ pub fn radius_cells(cloud_range_chunks: i32) -> i32 {
     ((cloud_range_chunks * 16) as f32 / 12.0).ceil() as i32
 }
 
+#[derive(Clone)]
+pub struct CellIter {
+    radius: i32,
+    ring: i32,
+    x: i32,
+    pending_z: Option<i32>,
+}
+
+impl CellIter {
+    pub fn new(radius: i32) -> Self {
+        Self {
+            radius,
+            ring: 0,
+            x: 0,
+            pending_z: None,
+        }
+    }
+}
+
+impl Iterator for CellIter {
+    type Item = (i32, i32);
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(z) = self.pending_z.take() {
+            let x = self.x;
+            self.x += 1;
+            return Some((x, z));
+        }
+        let r2 = self.radius * self.radius;
+        while self.ring <= 2 * self.radius {
+            let min_abs = self.ring - self.radius;
+            while self.x <= self.ring {
+                if min_abs > 0 && self.x > -min_abs && self.x < min_abs {
+                    self.x = min_abs;
+                }
+                let x = self.x;
+                let z = self.ring - x.abs();
+                if z <= self.radius && x * x + z * z <= r2 {
+                    if z != 0 {
+                        self.pending_z = Some(z);
+                        return Some((x, -z));
+                    } else {
+                        self.x += 1;
+                        return Some((x, 0));
+                    }
+                }
+                self.x += 1;
+            }
+            self.ring += 1;
+            self.x = -self.ring;
+        }
+        None
+    }
+}
+
 /// CloudRenderer builds cells in expanding Manhattan rings, nearest first.
-pub fn cells(radius: i32) -> impl Iterator<Item = (i32, i32)> {
-    (0..=2 * radius).flat_map(move |ring| {
-        (-ring..=ring).flat_map(move |x| {
-            let z = ring - x.abs();
-            let visible = z <= radius && x * x + z * z <= radius * radius;
-            (visible && z != 0)
-                .then_some((x, -z))
-                .into_iter()
-                .chain(visible.then_some((x, z)))
-        })
-    })
+pub fn cells(radius: i32) -> CellIter {
+    CellIter::new(radius)
 }
 
 /// Per-frame cloud inputs. Resources are immutable for the renderer's lifetime:
@@ -150,7 +197,119 @@ impl Input<'_> {
 #[derive(Default)]
 pub(crate) struct Mesh {
     key: Option<MeshKey>,
+    cells: Vec<(i32, i32)>,
+    cached_radius: Option<i32>,
     pub vertices: Vec<crate::mesher::Vertex>,
+}
+
+#[inline(always)]
+fn push_quad(
+    vertices: &mut Vec<crate::mesher::Vertex>,
+    p: [[f32; 3]; 4],
+    shade: u32,
+    normal: [i8; 4],
+    uv: [f32; 2],
+) {
+    for pos in p {
+        vertices.push(crate::mesher::Vertex {
+            normal,
+            pos,
+            uv,
+            layer: 4,
+            color: u32::MAX,
+            light: shade,
+            glint_uv: [0.0, 0.0],
+        });
+    }
+}
+
+#[inline(always)]
+fn emit_face(
+    vertices: &mut Vec<crate::mesher::Vertex>,
+    direction: usize,
+    inside: bool,
+    x0: f32,
+    z0: f32,
+    uv: [f32; 2],
+) {
+    let x1 = x0 + 12.0;
+    let z1 = z0 + 12.0;
+    const Y0: f32 = 0.0;
+    const Y1: f32 = 4.0;
+    let (p, shade, normal) = match direction {
+        0 => (
+            [[x1, Y0, z0], [x1, Y0, z1], [x0, Y0, z1], [x0, Y0, z0]],
+            1,
+            [0, -127, 0, 0],
+        ),
+        1 => (
+            [[x0, Y1, z0], [x0, Y1, z1], [x1, Y1, z1], [x1, Y1, z0]],
+            0,
+            [0, 127, 0, 0],
+        ),
+        2 => (
+            [[x0, Y0, z0], [x0, Y1, z0], [x1, Y1, z0], [x1, Y0, z0]],
+            2,
+            [0, 0, -127, 0],
+        ),
+        3 => (
+            [[x1, Y0, z1], [x1, Y1, z1], [x0, Y1, z1], [x0, Y0, z1]],
+            2,
+            [0, 0, 127, 0],
+        ),
+        4 => (
+            [[x0, Y0, z1], [x0, Y1, z1], [x0, Y1, z0], [x0, Y0, z0]],
+            3,
+            [-127, 0, 0, 0],
+        ),
+        _ => (
+            [[x1, Y0, z0], [x1, Y1, z0], [x1, Y1, z1], [x1, Y0, z1]],
+            3,
+            [127, 0, 0, 0],
+        ),
+    };
+    if inside {
+        push_quad(
+            vertices,
+            [p[3], p[2], p[1], p[0]],
+            shade,
+            normal.map(|c| -c),
+            uv,
+        );
+    } else {
+        push_quad(vertices, p, shade, normal, uv);
+    }
+}
+
+#[inline(always)]
+fn emit_faces(
+    vertices: &mut Vec<crate::mesher::Vertex>,
+    mask: u16,
+    x0: f32,
+    z0: f32,
+    uv: [f32; 2],
+) {
+    for d in [1, 0, 2, 3, 4, 5] {
+        if mask & (1 << d) != 0 {
+            emit_face(vertices, d, false, x0, z0, uv);
+        }
+    }
+    if mask >> 6 != 0 {
+        for d in 0..6 {
+            if mask & (1 << (d + 6)) != 0 {
+                emit_face(vertices, d, true, x0, z0, uv);
+            }
+        }
+    }
+}
+
+#[inline(always)]
+fn emit_flat_cell(vertices: &mut Vec<crate::mesher::Vertex>, x0: f32, z0: f32, uv: [f32; 2]) {
+    let x1 = x0 + 12.0;
+    let z1 = z0 + 12.0;
+    let p = [[x1, 0.0, z0], [x1, 0.0, z1], [x0, 0.0, z1], [x0, 0.0, z0]];
+    push_quad(vertices, p, 0, [0; 4], uv);
+    push_quad(vertices, [p[3], p[2], p[1], p[0]], 0, [0; 4], uv);
 }
 
 impl Mesh {
@@ -161,80 +320,39 @@ impl Mesh {
         if self.key.as_ref() == Some(&key) {
             return (false, uniform);
         }
+        if self.cached_radius != Some(key.radius) {
+            self.cells = self::cells(key.radius).collect();
+            self.cached_radius = Some(key.radius);
+        }
         self.vertices.clear();
-        let (w, h, cells) = input.texture;
-        let (w, h) = (i64::from(*w), i64::from(*h));
-        let (cell_x, cell_z, radius) = (key.cell_x, key.cell_z, key.radius);
+
+        let (w, h, tex_cells) = input.texture;
+        let (cell_x, cell_z) = (key.cell_x, key.cell_z);
         let bottom = uniform.offset[1];
         let uv = input.uv;
-        let filled = |cx: i64, cz: i64| cells[(cz.rem_euclid(h) * w + cx.rem_euclid(w)) as usize];
-        for (dx, dz) in self::cells(radius) {
-            let (dx, dz) = (i64::from(dx), i64::from(dz));
-            let (cx, cz) = (cell_x + dx, cell_z + dz);
+
+        let (w_i64, h_i64) = (i64::from(*w), i64::from(*h));
+        let filled = |cx: i64, cz: i64| {
+            tex_cells[(cz.rem_euclid(h_i64) * w_i64 + cx.rem_euclid(w_i64)) as usize]
+        };
+
+        for &(dx, dz) in &self.cells {
+            let (dx_i64, dz_i64) = (i64::from(dx), i64::from(dz));
+            let (cx, cz) = (cell_x + dx_i64, cell_z + dz_i64);
             if !filled(cx, cz) {
                 continue;
             }
             let x0 = dx as f32 * 12.0;
             let z0 = dz as f32 * 12.0;
-            let (x1, z1, y0, y1) = (x0 + 12.0, z0 + 12.0, 0.0, 4.0);
-            // The face's normal is for shader packs (`gl_Normal`); the game's clouds shade by
-            // `shade`.
-            let mut quad = |p: [[f32; 3]; 4], shade: u32, normal: [i8; 4]| {
-                for v in p {
-                    // Overlay 4: clouds (unlit, faded by the cloud fog end).
-                    self.vertices.push(crate::mesher::Vertex {
-                        normal,
-                        pos: v,
-                        uv,
-                        layer: 4,
-                        color: u32::MAX,
-                        light: shade,
 
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            };
             if input.fast {
-                for p in flat_cell(x0, z0, 0.0) {
-                    quad(p, 0, [0; 4]);
-                }
+                emit_flat_cell(&mut self.vertices, x0, z0, uv);
                 continue;
             }
-            let quads = [
-                (
-                    [[x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y0, z0]],
-                    1,
-                    [0, -127, 0, 0],
-                ),
-                (
-                    [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
-                    0,
-                    [0, 127, 0, 0],
-                ),
-                (
-                    [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]],
-                    2,
-                    [0, 0, -127, 0],
-                ),
-                (
-                    [[x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [x0, y0, z1]],
-                    2,
-                    [0, 0, 127, 0],
-                ),
-                (
-                    [[x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]],
-                    3,
-                    [-127, 0, 0, 0],
-                ),
-                (
-                    [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
-                    3,
-                    [127, 0, 0, 0],
-                ),
-            ];
+
             let mask = face_mask(
-                dx as i32,
-                dz as i32,
+                dx,
+                dz,
                 bottom,
                 [
                     !filled(cx, cz - 1),
@@ -243,15 +361,9 @@ impl Mesh {
                     !filled(cx + 1, cz),
                 ],
             );
-            for (direction, inside) in faces(mask) {
-                let (p, shade, n) = quads[usize::from(direction)];
-                if inside {
-                    quad([p[3], p[2], p[1], p[0]], shade, n.map(|c| -c));
-                } else {
-                    quad(p, shade, n);
-                }
-            }
+            emit_faces(&mut self.vertices, mask, x0, z0, uv);
         }
+
         self.key = Some(key);
         (true, uniform)
     }
