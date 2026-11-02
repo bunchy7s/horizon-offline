@@ -528,6 +528,7 @@ impl Game<'_> {
 
     /// `Level.gameEvent`: tell the listeners within reach.
     pub(super) fn post_game_event(&mut self, event: &'static str, pos: [f64; 3], ctx: Context) {
+        self.native_game_event(event, pos);
         super::dispense_fixture::record(|| {
             format!(
                 "G {},{},{} {event}",

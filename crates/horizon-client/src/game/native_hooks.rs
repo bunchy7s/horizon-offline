@@ -3928,6 +3928,11 @@ impl Game<'_> {
         let _ = (dimension, chunk, count);
     }
 
+    /// A generic world game event was fired at `pos`. @API:native_game_event@.
+    pub(super) fn native_game_event(&mut self, event: &str, pos: [f64; 3]) {
+        let _ = (event, pos);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
