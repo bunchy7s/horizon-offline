@@ -344,6 +344,9 @@ impl Game<'_> {
                 self.persist.live.push((id, kind.into_owned(), true));
             }
         }
+        // Ids taken and never announced (the dragon's parts, another level's
+        // entities) must not keep the next flush walking.
+        self.persist.joined_mark = self.persist.joined_mark.max(self.next_entity);
         kept
     }
     /// The entity with the lowest id above the last one announced.
