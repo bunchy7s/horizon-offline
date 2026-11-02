@@ -510,8 +510,11 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.1:
             openable_case(rng, states, case)
-
-
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.1:
             dragon_egg_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
