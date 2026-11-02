@@ -1003,6 +1003,46 @@ fn login_and_configure(
             }),
         )?;
     }
+    // The mods that must be the same on both sides, named when they are not
+    // (horizon_protocol::mod_list); the registry hash below only sees ids.
+    let server_mods = horizon_protocol::mod_list::local();
+    if brand == "horizon" && !server_mods.is_empty() {
+        send(
+            c,
+            cfg::Clientbound::CustomPayload(cfg::CustomPayload {
+                channel: horizon_protocol::mod_list::CHANNEL.into(),
+                data: horizon_protocol::mod_list::encode(&horizon_protocol::mod_list::shared(
+                    &server_mods,
+                )),
+            }),
+        )?;
+        send(c, cfg::Clientbound::Ping(cfg::Ping { id: 1 }))?;
+        // A client that does not answer has no mods to offer.
+        let mut client_mods = Vec::new();
+        loop {
+            let (id, payload) = c.recv().map_err(e)?;
+            match decode_config(id, &payload).map_err(e)? {
+                cfg::Serverbound::CustomPayload(p)
+                    if p.channel == horizon_protocol::mod_list::CHANNEL =>
+                {
+                    client_mods = horizon_protocol::mod_list::decode(&p.data).unwrap_or_default();
+                }
+                cfg::Serverbound::Pong(p) if p.id == 1 => break,
+                cfg::Serverbound::ClientInformation(i) => info = i,
+                _ => {}
+            }
+        }
+        let difference = horizon_protocol::mod_list::compare(&server_mods, &client_mods);
+        if !difference.is_empty() {
+            let text = difference.reason();
+            let reason = horizon_world::nbt::Tag::String(horizon_world::nbt::JavaString::from(
+                text.as_str(),
+            ));
+            let _ = send(c, cfg::Clientbound::Disconnect(cfg::Disconnect { reason }));
+            lost(shared, &format!("{name} ({})", uuid_string(uuid)), &text);
+            return Ok(None);
+        }
+    }
     if brand == "horizon"
         && let Some(hash) = sync.content_identity
     {
