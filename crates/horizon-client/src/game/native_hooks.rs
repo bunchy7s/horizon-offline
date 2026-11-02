@@ -3659,6 +3659,17 @@ impl Game<'_> {
         let _ = (entity, item, count, pos);
     }
 
+    /// A mob became tamed after its owner and persistent state were set.
+    /// @API:native_entity_tame@.
+    pub(super) fn native_entity_tame(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        owner: Option<u128>,
+    ) {
+        let _ = (entity, kind, owner);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
