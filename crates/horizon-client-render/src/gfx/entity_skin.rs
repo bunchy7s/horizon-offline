@@ -70,8 +70,11 @@ pub struct SkinJob {
     /// face's axis rides in the part's first 6 normal words ([`SkinPart::item`]),
     /// shaded on the CPU, and the normal is `mesher::CULL_BACK`.
     pub item: u32,
-    /// Always 0: the shader reads the last as a zero it cannot fold away.
-    pub spare: [u32; 2],
+    /// 1 for a model whose render type culls back faces (`mobs::Polygon::cull_back`):
+    /// the normal's w is `mesher::SHADED_CULL_W` instead of -127.
+    pub cull: u32,
+    /// Always 0: the shader reads it as a zero it cannot fold away.
+    pub spare: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 44);
@@ -376,7 +379,12 @@ pub fn expand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
                 let color = part.normal[v.axis as usize].to_bits();
                 (color, crate::mesher::CULL_BACK)
             } else {
-                (job.color, [packed[0], packed[1], packed[2], -127])
+                let w = if job.cull != 0 {
+                    crate::mesher::SHADED_CULL_W
+                } else {
+                    -127
+                };
+                (job.color, [packed[0], packed[1], packed[2], w])
             };
             out[(job.dst + k) as usize] = Vertex {
                 pos: pos.to_array(),
@@ -490,6 +498,8 @@ mod tests {
                     color: 0xff80_40ff,
                     light: 0xf0_70,
                     overlay: 1,
+                    // The bat's encoding: the shader must write -126 like `expand`.
+                    cull: 1,
                     ..Default::default()
                 },
                 SkinJob {

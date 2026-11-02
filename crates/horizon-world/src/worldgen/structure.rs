@@ -368,18 +368,20 @@ impl StructureResources {
         }
         let (namespace, path) = id.split_once(':').unwrap();
         let file = self.dir.join(namespace).join(format!("{path}.nbt"));
-        let loaded = std::fs::read(&file).ok().and_then(|bytes| {
-            let mut raw = Vec::new();
-            flate2::read::GzDecoder::new(bytes.as_slice())
-                .read_to_end(&mut raw)
-                .ok()?;
-            let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
-            Some(StructureTemplate::from_nbt(
-                &tag,
-                self.registry,
-                &self.transforms,
-            ))
-        });
+        let loaded = horizon_core::prepared_files::read(&file)
+            .ok()
+            .and_then(|bytes| {
+                let mut raw = Vec::new();
+                flate2::read::GzDecoder::new(bytes.as_slice())
+                    .read_to_end(&mut raw)
+                    .ok()?;
+                let tag = nbt::read_named(&raw, Limits::templates()).ok()?.0.tag;
+                Some(StructureTemplate::from_nbt(
+                    &tag,
+                    self.registry,
+                    &self.transforms,
+                ))
+            });
         // StructureTemplateManager.getOrCreate: missing templates are empty.
         let mut loaded = loaded.unwrap_or_else(StructureTemplate::empty);
         loaded.location = id.as_str().into();

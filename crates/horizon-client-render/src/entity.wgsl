@@ -147,7 +147,8 @@ fn entity_vertex(position: vec3<f32>, uv: vec2<f32>,
     var back = c;
     // Normal w: 0 keeps the baked colour, +-127 shades by the normal, and a small positive 1
     // keeps the baked colour but culls back faces (entitySolid models such as the decorated pot).
-    out.cull = select(0u, 1u, normal.w > 0.0 && normal.w < 0.5);
+    // -126/127 shades like -127 and also culls (entityCutoutCull models such as the bat).
+    out.cull = select(0u, 1u, (normal.w > 0.0 && normal.w < 0.5) || (normal.w < 0.0 && normal.w > -0.996));
     if abs(normal.w) >= 0.5 {
         c = vec4(c.rgb * entity_light(normal.xyz, globals.time.y != 0.0), c.a);
         back = select(c, vec4(back.rgb * entity_light(-normal.xyz, globals.time.y != 0.0), back.a), normal.w < 0.0);
