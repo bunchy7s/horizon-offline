@@ -654,17 +654,19 @@ impl Dragon {
         if dist > 1.0 {
             return;
         }
-        // The dragon's eye is 0.85 of its 8 block height.
-        let away = at(p.y + 6.8);
+        // The dragon's eye is 0.85 of its 8 block height, in floats.
+        let away = at(p.y + f64::from(8.0f32 * 0.85f32));
         let l = len(away);
-        if l < 1.0e-4 {
+        // `Vec3.normalize` gives zero below 1.0E-5F, then `scale(power)`.
+        if l < 9.999_999_747_378_752e-6 {
             return;
         }
-        let power = (1.0 - dist) * f64::from(exposure) / l;
+        let dir = [away[0] / l, away[1] / l, away[2] / l];
+        let power = (1.0 - dist) * f64::from(exposure);
         self.velocity = Vec3::new(
-            self.velocity.x + away[0] * power,
-            self.velocity.y + away[1] * power,
-            self.velocity.z + away[2] * power,
+            self.velocity.x + dir[0] * power,
+            self.velocity.y + dir[1] * power,
+            self.velocity.z + dir[2] * power,
         );
     }
     /// `DragonHoldingPatternPhase.onCrystalDestroyed`: strafe `player` if
