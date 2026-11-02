@@ -174,7 +174,7 @@ jobs:
         run: |
           if ! xcrun metal --version > /dev/null 2>&1; then
             echo "::notice::No Metal toolchain on this runner: GPUI compiles its shaders at run time"
-            echo "LAUNCHER_FEATURES=gpui/runtime_shaders" >> "$GITHUB_ENV"
+            echo "LAUNCHER_FEATURES=gpui_platform/runtime_shaders" >> "$GITHUB_ENV"
           fi
       # Every test target (the library, the binary, tests/), on each system the launcher ships for.
       - run: cargo test --release --locked ${{ matrix.target && format('--target {0}', matrix.target) || '' }} ${LAUNCHER_FEATURES:+--features "$LAUNCHER_FEATURES"}
