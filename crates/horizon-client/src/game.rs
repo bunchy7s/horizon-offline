@@ -2300,6 +2300,9 @@ struct Game<'a> {
     lod_observe: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
     /// The server level far terrain keeps the chunks of.
     lod_level: Option<String>,
+    /// The server's BlueMap far terrain draws from, when the player named one
+    /// or Find BlueMap found it.
+    lod_blue_map: Option<Arc<horizon_client::bluemap::BlueMap>>,
     /// Beacon beam sections kept after their chunk unloads, so far terrain
     /// LOD still draws their beams (`beacon_geometry` refreshes them).
     far_beacons: HashMap<(i32, i32, i32), Vec<(u32, i32)>>,
@@ -2443,6 +2446,9 @@ struct Game<'a> {
     /// `SpectatorGui`: the menu a spectator opens with the hotbar keys.
     spectator_gui: horizon_client::spectator_menu::SpectatorGui,
     previous: Instant,
+    /// When the last frame's work ended: what runs before the next one starts (`idle`, the
+    /// event loop) shows in HORIZON_SPIKES as the time between frames.
+    frame_end: Instant,
     /// FramerateLimitTracker.latestInputTime.
     last_input: Instant,
     /// Controllers (Horizon's own).
@@ -5619,12 +5625,14 @@ impl Game<'_> {
         let world = &self.world;
         let facts = self.res.facts();
         let (registry, collision) = (self.pack.assets.registry, self.collision);
+        let mut tops = Vec::new();
         let stuck = horizon_client::falling_block::apply_effects_from_blocks(
             from,
             f.position,
             recorded.then_some(wanted),
             &mut f.velocity,
             &mut f.fall_distance,
+            &mut tops,
             |p| {
                 use horizon_client::falling_block::Inside;
                 if &*facts.get(world.block(p.x, p.y, p.z)).name == "minecraft:cobweb" {
@@ -5640,6 +5648,9 @@ impl Game<'_> {
         );
         if stuck {
             f.stuck = horizon_client::falling_block::web_multiplier();
+        }
+        for pos in tops {
+            self.bubble_column_particles(pos);
         }
         // FallingBlockEntity.tick handles its portal after the move's block
         // effects, before placing/dropping on the floor under an End portal.
@@ -7750,7 +7761,10 @@ impl Game<'_> {
         // The ride the player's file names, once the vehicle is in the world.
         self.restore_root_vehicle();
         if running {
+            let mobs_before = self.mob_ids();
             horizon_client::spans::time("tick_mobs", || self.tick_mobs())?;
+            // Dead, despawned or gone into a hive.
+            self.native_mobs_left_since(&mobs_before);
             horizon_client::spans::time("recheck_golem_openers", || self.recheck_golem_openers());
             self.tick_mod_container_viewers();
             let before = self.orb_ids();
@@ -16599,6 +16613,7 @@ impl Game<'_> {
         self.lod = None;
         self.lod_source_attempted = false;
         self.lod_observe.clear();
+        self.lod_blue_map = None;
         self.far_beacons.clear();
         self.lod_covered_at = None;
         if let Some(renderer) = &mut self.renderer {
@@ -16657,14 +16672,66 @@ impl Game<'_> {
             (None, None, Some(remote)) => std::env::current_dir().ok().map(|home| {
                 use horizon_client::server_terrain as terrain;
                 let address = &remote.session.address;
-                let dir = terrain::level_dir(
-                    &home.join("server-terrain"),
+                let root = home.join("server-terrain");
+                let dir = terrain::level_dir(&root, address, remote.hashed_seed, &remote.level);
+                self.lod_level = Some(remote.level.clone());
+                // Past them, the server's BlueMap, if the player named it or
+                // lets Horizon look for it (on the BlueMap worker).
+                let maps = root.join(terrain::server_folder(address)).join("BlueMap");
+                let settings = &self.settings.horizon.blue_map;
+                let blue_map = horizon_client::bluemap_detect::source(
+                    settings,
+                    address,
+                    &maps,
+                    std::time::SystemTime::now(),
+                )
+                .map(|source| {
+                    use horizon_client::{bluemap, bluemap_detect::Source};
+                    // The map's address only at debug: logs land in crash reports.
+                    log::info!("Horizon: far terrain also draws {}'s BlueMap", remote.level);
+                    if let Source::Url { url, .. } = &source {
+                        log::debug!("Horizon: BlueMap at {url}");
+                    }
+                    let map = Arc::new(bluemap::BlueMap::from_source(
+                        source,
+                        &remote.level,
+                        maps,
+                        settings.radius_blocks(),
+                        bluemap::Palette::from_game(self.pack.assets.registry, self.res.biomes()),
+                    ));
+                    map.start();
+                    map
+                });
+                self.lod_blue_map = blue_map.clone();
+                // And the player's Bobby cache of the level, only read.
+                let bobby = terrain::bobby_level_dir(
+                    &terrain::minecraft_dir().join(".bobby"),
                     address,
                     remote.hashed_seed,
                     &remote.level,
-                );
-                self.lod_level = Some(remote.level.clone());
-                terrain::ServerTerrain::new(dir) as _
+                )
+                .map(|bobby| {
+                    log::info!(
+                        "Horizon: far terrain also reads Bobby's chunks of {}",
+                        remote.level
+                    );
+                    let registry = self.pack.assets.registry;
+                    let biomes = self.res.biomes().clone();
+                    let dimension = &remote.dimension;
+                    let layout = horizon_client::chunk::ColumnLayout::of_level(
+                        dimension.min_y,
+                        dimension.height,
+                    );
+                    let sky_light = dimension.has_skylight;
+                    let decode: terrain::DecodeChunk =
+                        Box::new(move |root: &horizon_world::nbt::NamedTag| {
+                            horizon_client::save::decode_lit(
+                                root, registry, &biomes, layout, sky_light,
+                            )
+                        });
+                    terrain::Bobby::new(bobby, decode, self.res.facts())
+                });
+                terrain::ServerTerrain::with_bobby(dir, blue_map, bobby) as _
             }),
             _ => Some(self.streaming.lod_source()),
         };
@@ -16677,7 +16744,7 @@ impl Game<'_> {
         }
     }
     fn update_world(&mut self) {
-        if let Err(e) = self.poll_remote() {
+        if let Err(e) = horizon_client::spans::time("poll_remote", || self.poll_remote()) {
             log::warn!("Horizon: {e}");
         }
         // The renderer laid translucent quads out again (a shader pack's flat terrain came
@@ -16694,6 +16761,12 @@ impl Game<'_> {
         if self.lod.is_some() {
             for &((x, _, z), _, _) in &self.world.light_edits {
                 self.lod_observe.insert((x >> 4, z >> 4));
+            }
+        }
+        if let (Some(map), Some(p), Some(lod)) = (&self.lod_blue_map, &self.player, &mut self.lod) {
+            map.set_center(p.position.x.floor() as i32, p.position.z.floor() as i32);
+            for change in map.take_changed() {
+                lod.refresh(change.area, change.widths);
             }
         }
         if let Some(p) = &self.player {
@@ -16886,10 +16959,17 @@ impl Game<'_> {
                             .collect()
                     })
                 });
+                // Far terrain's finest tiles stand where full-detail terrain
+                // ends: on a server, where it stops sending chunks, often well
+                // inside the render distance. Thousands of chunk-sized tiles
+                // between the two filled in long after the coarser ones.
+                let detail = self.remote.as_ref().map_or(self.streaming.radius, |r| {
+                    self.streaming.radius.min(r.sent_radius())
+                });
                 let meshes = horizon_client::spans::time("lod_update", || {
                     lod.update(
                         [player.position.x, player.position.y, player.position.z],
-                        self.streaming.radius,
+                        detail,
                         lod_distance,
                         covered,
                     )
@@ -18201,7 +18281,7 @@ impl Game<'_> {
                     self.mapped_key_event(key, event.state == ElementState::Pressed, event.repeat)?;
                 }
                 WindowEvent::RedrawRequested => {
-                    self.recover_device()?;
+                    horizon_client::spans::time("recover_device", || self.recover_device())?;
                     self.observe_fullscreen();
                     self.sync_ime();
                     let now = Instant::now();
@@ -18210,6 +18290,7 @@ impl Game<'_> {
                         .spikes
                         .and_then(|_| horizon_client::spans::thread_cpu());
                     let elapsed = now.duration_since(self.previous);
+                    let between = now.saturating_duration_since(self.frame_end);
                     self.frame_ticks = elapsed.as_secs_f32() * 20.0;
                     self.previous = now;
                     // Arrow-key camera controls belong to gameplay; chat and
@@ -18297,8 +18378,10 @@ impl Game<'_> {
                         && let Some(r) = self.renderer.as_ref()
                     {
                         let cpu = now.elapsed().saturating_sub(r.last_wait).as_secs_f32() * 1000.0;
+                        // Spans timed between frames (`idle`) come first.
                         let spans = horizon_client::spans::take();
-                        if cpu > threshold {
+                        let between = between.as_secs_f32() * 1000.0;
+                        if cpu > threshold || between > threshold {
                             // The render thread's own CPU time in the frame:
                             // far below the wall time, the frame waited.
                             let worked = horizon_client::spans::thread_cpu()
@@ -18306,8 +18389,13 @@ impl Game<'_> {
                                 .map_or_else(String::new, |(end, start)| {
                                     format!(", cpu {:.1} ms", (end - start).as_secs_f32() * 1000.0)
                                 });
+                            let gap = if between > threshold {
+                                format!(", {between:.1} ms before it")
+                            } else {
+                                String::new()
+                            };
                             log::info!(
-                                "Horizon: slow frame {cpu:.1} ms{worked} ({steps} ticks): {}",
+                                "Horizon: slow frame {cpu:.1} ms{worked}{gap} ({steps} ticks): {}",
                                 horizon_client::spans::describe(&spans)
                             );
                         }
@@ -18423,6 +18511,7 @@ impl Game<'_> {
                             self.fps_frames = 0;
                             self.fps_at = Instant::now();
                         }
+                        self.frame_end = Instant::now();
                         if self.options.frames.is_some_and(|f| self.frames >= f)
                             || self
                                 .options
@@ -18489,7 +18578,8 @@ impl Game<'_> {
             }
             return;
         }
-        if let Err(error) = self.resume_world_entry() {
+        if let Err(error) = horizon_client::spans::time("world_entry", || self.resume_world_entry())
+        {
             self.error = Some(error);
             self.exit_on_error(event_loop);
             return;
@@ -18502,12 +18592,12 @@ impl Game<'_> {
             event_loop.exit();
             return;
         }
-        self.tick_server_packs();
-        self.poll_control(event_loop);
+        horizon_client::spans::time("server_packs", || self.tick_server_packs());
+        horizon_client::spans::time("control", || self.poll_control(event_loop));
         if self.pending_save.is_some() {
             return;
         }
-        self.poll_pads(event_loop);
+        horizon_client::spans::time("pads", || self.poll_pads(event_loop));
         self.pause_if_inactive();
         if self.options.frames.is_some() && self.started.elapsed() > self.options.timeout {
             self.error = Some("frame-limited run timed out".into());
@@ -18648,6 +18738,7 @@ impl<'a> Game<'a> {
             far_beacons: HashMap::new(),
             lod_observe: Default::default(),
             lod_level: None,
+            lod_blue_map: None,
             lod_covered_at: None,
             view_arrival: Default::default(),
             options,
@@ -18735,6 +18826,7 @@ impl<'a> Game<'a> {
             started: now,
             spectator_gui: Default::default(),
             previous: now,
+            frame_end: now,
             last_input: now,
             pad: Default::default(),
             frames: 0,
@@ -19999,6 +20091,7 @@ fn load_resources(
     let rest_loader = if menu {
         let resources = resources.clone();
         let root = root.clone();
+        let vanilla_root = vanilla_root.to_owned();
         let rest_progress = progress.clone();
         let progress = progress.clone();
         let handle = std::thread::Builder::new()
@@ -20027,6 +20120,7 @@ fn load_resources(
                     "Horizon: rest-ready after {} ms",
                     started.elapsed().as_millis()
                 );
+                write_prepared_files(vanilla_root);
                 Ok(())
             })?;
         Some(WorldRestLoader {
@@ -20092,6 +20186,37 @@ fn load_resources(
         pack,
         gui: loaded_gui,
     })
+}
+
+/// Write the prepared folder's `horizon-data.bin` when it has none the game
+/// can use: on a thread of its own, at idle priority, once the start is done.
+/// This start has just read the folder's files (they are in the disk cache);
+/// the next starts read them from one file (#1961).
+fn write_prepared_files(root: PathBuf) {
+    use horizon_core::prepared_files;
+    if prepared_files::open(&root).is_some() || !root.join("horizon-resources.json").is_file() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("Prepared data file".into())
+        .spawn(move || {
+            horizon_threads::idle_current();
+            let started = Instant::now();
+            match prepared_files::write(&root) {
+                Ok(()) => log::info!(
+                    "Horizon: wrote {} in {} ms",
+                    prepared_files::FILE_NAME,
+                    started.elapsed().as_millis()
+                ),
+                Err(e) => log::info!("Horizon: {} not written: {e}", prepared_files::FILE_NAME),
+            }
+        });
+    if let Err(e) = spawned {
+        log::info!(
+            "Horizon: {} not written: {e}",
+            horizon_core::prepared_files::FILE_NAME
+        );
+    }
 }
 
 fn load_world_rest(

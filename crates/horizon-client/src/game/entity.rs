@@ -7,6 +7,7 @@
 //! `Game` end. The walk allocates nothing and dispatch is static: hot paths pay
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
+use super::commands::Target;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
@@ -17,6 +18,23 @@ use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
 use horizon_core::position::BlockPos;
 use horizon_world::{level::data::PushReaction, piston_push};
+
+/// What `Entity.thunderHit` does to a kind: it sets the entity on fire and
+/// calls `hurtServer(lightning_bolt, 5)`, so a kind whose `hurtServer` does
+/// nothing (projectiles, rockets, TNT, falling blocks, armor stands here) stays
+/// untouched. A strike runs the stages in this order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ThunderHit {
+    Untouched,
+    /// Burns, takes 5 damage, and the kinds with their own `thunderHit` change.
+    Mob,
+    /// `VehicleEntity.hurtServer`: 5 x 10 is over the 40 that destroys it.
+    Vehicle,
+    /// `ExperienceOrb.hurtServer`: 5 damage off 5 health.
+    Orb,
+    /// `ItemEntity.hurtServer`: burns up unless fire resistant.
+    Item,
+}
 
 /// What a blast knows about itself, for the entities in its reach to answer.
 #[derive(Clone, Copy)]
@@ -30,10 +48,15 @@ pub(super) struct Blast {
 }
 
 pub(super) trait Entity {
+    /// `Entity.getId`.
+    fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
+    /// What a selector finds this entity as (`@e`), or `None` for one it cannot
+    /// name yet. Required, so a new kind states which.
+    fn selector_target(&self) -> Option<Target>;
 
     fn on_ground(&self) -> bool {
         false
@@ -67,6 +90,14 @@ pub(super) trait Entity {
     /// whose tick skips that step, says no.
     fn sweeps_blocks_inside(&self) -> bool {
         true
+    }
+    /// `Entity.thunderHit` for this kind.
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Untouched
+    }
+    /// The box a lightning strike tests against.
+    fn thunder_bounds(&self) -> Aabb {
+        self.bounds()
     }
     /// `Entity.ignoreExplosion`: the blast neither hurts nor pushes it. Also
     /// answers for what `getEntities(source, box)` never lists: the exploding
@@ -107,6 +138,28 @@ pub(super) trait Entity {
     fn get_piston_push_reaction(&self) -> PushReaction {
         PushReaction::PushPull
     }
+    /// Width and height of the box a portal sweep follows, or None for a kind
+    /// the game does not carry through portals (so far armor stands and
+    /// falling blocks; fishing hooks are off the walk, and
+    /// `FishingHook.canUsePortal` is false in vanilla).
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        None
+    }
+    /// `Entity.canUsePortal(false)` for a kind in `portal_size`. A kind that
+    /// cannot stays tracked, so its cooldown and process run out.
+    fn can_use_portal(&self, _game: &Game<'_>) -> bool {
+        true
+    }
+    /// Where it stood at the start of its tick, for the kinds that store it
+    /// (None: `portals.before` has it).
+    fn portal_from(&self) -> Option<Vec3> {
+        None
+    }
+    /// Whether this tick's movement can have entered a portal block: a stuck
+    /// arrow or a trident in the ground that did not move enters none.
+    fn portal_sweeps(&self) -> bool {
+        true
+    }
     /// `Entity.move(MoverType.PISTON, …)` once the movement is resolved.
     fn move_by_piston(&mut self, movement: Vec3) {
         let position = self.position_mut();
@@ -123,6 +176,9 @@ pub(super) trait Entity {
 /// The fields every kind stores under the same names.
 macro_rules! stored_motion {
     () => {
+        fn id(&self) -> u32 {
+            self.id
+        }
         fn position(&self) -> Vec3 {
             self.position
         }
@@ -193,6 +249,13 @@ macro_rules! define_entity_handles {
             pub(super) fn entity_handles(&self) -> impl Iterator<Item = EntityHandle> + use<> {
                 std::iter::empty()
                     $(.chain((0..self$(.$list)+.len()).map(EntityHandle::$kind)))*
+            }
+
+            /// [`Self::entity_handles`], last of each list first, so the
+            /// caller can remove the entity it is on.
+            pub(super) fn entity_handles_rev(&self) -> impl Iterator<Item = EntityHandle> + use<> {
+                std::iter::empty()
+                    $(.chain((0..self$(.$list)+.len()).rev().map(EntityHandle::$kind)))*
             }
         }
     };
@@ -295,6 +358,15 @@ pub(super) use with_entity_mut;
 
 impl Entity for Mob {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((self.width(), self.height()))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.mob_can_use_portal(self)
+    }
+    fn selector_target(&self) -> Option<Target> {
+        (self.death_time == 0).then_some(Target::Mob(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
     }
@@ -342,10 +414,34 @@ impl Entity for Mob {
     fn is_supported_by(&self, pos: BlockPos) -> bool {
         self.supporting == Some([pos.x, pos.y, pos.z])
     }
+    fn thunder_hit(&self) -> ThunderHit {
+        if self.alive() {
+            ThunderHit::Mob
+        } else {
+            ThunderHit::Untouched
+        }
+    }
+    /// The kind's own size, as the strike has always read it.
+    fn thunder_bounds(&self) -> Aabb {
+        let (p, w) = (self.position, self.kind.width / 2.0);
+        Aabb::new(
+            Vec3::new(p.x - w, p.y, p.z - w),
+            Vec3::new(p.x + w, p.y + self.kind.height, p.z + w),
+        )
+    }
 }
 
 impl Entity for ItemEntity {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.25, 0.25))
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Item(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Item
+    }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.items_ignore
     }
@@ -372,6 +468,15 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Orb(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Orb
+    }
     fn explosion_eye_height(&self) -> f64 {
         f64::from(0.5f32 * 0.85f32)
     }
@@ -395,6 +500,18 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Boat(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Vehicle
+    }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.vehicles_ignore
     }
@@ -412,6 +529,21 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((
+            super::minecarts::WIDTH as f32,
+            super::minecarts::HEIGHT as f32,
+        ))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Cart(self.id))
+    }
+    fn thunder_hit(&self) -> ThunderHit {
+        ThunderHit::Vehicle
+    }
     fn ignores_explosion(&self, blast: &Blast) -> bool {
         blast.vehicles_ignore
     }
@@ -440,6 +572,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 
 impl Entity for ArmorStand {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Stand(self.id))
+    }
     /// `ArmorStand.ignoreExplosion`: a visible stand feels only a burst that
     /// affects block-like entities (`items_ignore` is that flag, negated).
     fn ignores_explosion(&self, blast: &Blast) -> bool {
@@ -496,6 +631,16 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    /// `PrimedTnt` is 0.98 across.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.98, 0.98))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.tnt_can_use_portal(self.id)
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Tnt(self.id))
+    }
     /// Pushed from its position, not its eyes.
     fn explosion_eye_height(&self) -> f64 {
         0.0
@@ -516,6 +661,9 @@ impl Entity for PrimedTnt {
 
 impl Entity for FallingBlock {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Falling(self.id))
+    }
     fn bounds(&self) -> Aabb {
         horizon_client::falling_block::bounds(self.position)
     }
@@ -523,6 +671,28 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    /// Arrows and the thrown items and fireballs a chunk saves.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (super::nether_portal::is_arrow(self) || super::nether_portal::is_portal_projectile(self))
+            .then(|| super::nether_portal::projectile_box(self))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !super::nether_portal::is_arrow(self) || !self.stuck || self.previous != self.position
+    }
+    fn selector_target(&self) -> Option<Target> {
+        use horizon_client::projectiles::ProjectileKind as K;
+        // The kinds /data can write (entity_nbt).
+        let selectable = self.is_arrow()
+            || horizon_client::entity_nbt::saved_with_chunk(self)
+            || matches!(
+                self.kind,
+                K::LargeFireball { .. } | K::SmallFireball | K::WindCharge | K::BreezeWindCharge
+            );
+        selectable.then_some(Target::Projectile(self.id))
+    }
     /// `AbstractArrow.push` does nothing in the ground; a wind charge's motion
     /// stays 0.
     fn pushed_by_explosion(&self) -> bool {
@@ -554,6 +724,16 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    /// A rocket that carries its owner stays.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (self.attached_to.is_none() && !self.attached).then_some((0.25, 0.25))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Rocket(self.id))
+    }
     /// 0.25 wide, so 0.2125 to the eyes.
     fn explosion_eye_height(&self) -> f64 {
         0.2125
@@ -569,6 +749,19 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !self.in_ground || self.previous != self.position
+    }
+    fn selector_target(&self) -> Option<Target> {
+        // No `Target` variant for it yet: `@e` does not find tridents.
+        None
+    }
     /// Like any arrow (`AbstractArrow.push`) not pushed while in the ground.
     fn pushed_by_explosion(&self) -> bool {
         !self.in_ground

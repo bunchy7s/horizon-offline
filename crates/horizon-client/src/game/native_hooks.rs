@@ -278,7 +278,7 @@
 //! change a cauldron.
 //!
 //! API 53 adds entities leaving a level (`native_entity_leave_level`), for
-//! item entities and experience orbs so far.
+//! item entities, experience orbs and mobs so far.
 //!
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
@@ -5477,8 +5477,8 @@ impl Game<'_> {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities and experience orbs; later
-    /// APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
+    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
     pub(super) fn native_entity_leave_level(&mut self, dimension: &str, entity: u32, kind: &str) {
         mod_api::dispatch_entity_leave_level(self, mod_api::mods(), dimension, entity, kind);
     }
@@ -5997,10 +5997,9 @@ impl Game<'_> {
     /// does not happen: no damage, no knockback, no sound, no block reaction, the
     /// arrow does not stick, a pearl does not teleport, a potion or a fireball
     /// does not burst. The projectile flies on and is not discarded, so a mod
-    /// that cancels also decides what becomes of it: it hits again the next tick
-    /// unless the mod moves, turns or removes it. An arrow stays where it would
-    /// have hit, and the other projectiles go on through the whole of their
-    /// motion. Covers what `tick_projectiles` flies: arrows, tridents, snowballs,
+    /// that cancels also decides what becomes of it. It continues through its
+    /// whole motion and may hit something on a later tick. Covers what
+    /// `tick_projectiles` flies: arrows, tridents, snowballs,
     /// eggs, pearls, potions, fireballs, wither skulls, wind charges, llama spit and
     /// shulker bullets, from players, mobs and dispensers. It does not fire for
     /// a breeze's deflection, for a hit on a wind charge, for fireworks or for
@@ -6932,6 +6931,24 @@ impl Game<'_> {
         batch.scale_since(start, at[0], at[1], size / 16.0, size / 16.0);
         true
     }
+    /// Draw a stack and its slot decorations, except the count, at `at`,
+    /// `size` GUI pixels square. False for an unknown item. API @API:item_stack@.
+    pub(super) fn native_item_stack(
+        &self,
+        batch: &mut HudBatch,
+        stack: &ItemStack,
+        at: [f32; 2],
+        size: f32,
+    ) -> bool {
+        if self.res.items().get(&stack.item).is_none() {
+            return false;
+        }
+        let start = batch.vertices.len();
+        self.draw_item_model(batch, stack, at[0], at[1]);
+        self.draw_item_decorations(batch, stack, at[0], at[1], Some(String::new()));
+        batch.scale_since(start, at[0], at[1], size / 16.0, size / 16.0);
+        true
+    }
     /// Item `item`'s icon drawn with model `model` (`minecraft:paper` as
     /// `mymod:wheel_icon`, an `item_model` of a content mod's), as `native_item`
     /// draws one; false for an unknown item. API 111.
@@ -7320,6 +7337,22 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
+/// The ids of `before` (id, kind) that are not in `now`, grouped by kind in
+/// first-seen order: the entities that left the level.
+fn vanished_by_kind(
+    before: &[(u32, String)],
+    now: &std::collections::HashSet<u32>,
+) -> Vec<(String, Vec<u32>)> {
+    let mut out: Vec<(String, Vec<u32>)> = Vec::new();
+    for (id, kind) in before.iter().filter(|(id, _)| !now.contains(id)) {
+        match out.iter_mut().find(|(k, _)| k == kind) {
+            Some((_, ids)) => ids.push(*id),
+            None => out.push((kind.clone(), Vec::from([*id]))),
+        }
+    }
+    out
+}
+
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// The acting player as the hook points name one: the guest whose turn
@@ -7453,20 +7486,44 @@ impl Game<'_> {
     /// The IDs of the level's item entities, for `native_items_left_since`
     /// (none on a client of a server, which tells nothing).
     pub(super) fn dropped_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.dropped.iter().map(|e| e.id).collect()
     }
     /// The IDs of the level's experience orbs, for `native_orbs_left_since`.
     pub(super) fn orb_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
             return Vec::new();
         }
         self.orbs.iter().map(|o| o.id).collect()
     }
+    /// The (id, kind) of the level's mobs, for `native_mobs_left_since` (none
+    /// on a client of a server, which tells nothing).
+    pub(super) fn mob_ids(&self) -> Vec<(u32, String)> {
+        if self.remote.is_some() || mod_api::mods().is_empty() {
+            return Vec::new();
+        }
+        self.mobs.iter().map(|m| (m.id, mob_kind(m))).collect()
+    }
+    /// The mobs of `before` gone since have left the level (died, despawned,
+    /// entered a hive, unloaded). Mobs spawned meanwhile are not counted.
+    pub(super) fn native_mobs_left_since(&mut self, before: &[(u32, String)]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
+        let now: std::collections::HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
+        for (kind, ids) in vanished_by_kind(before, &now) {
+            self.native_entities_left(&kind, &ids);
+        }
+    }
     /// The item entities of `before` gone since have left the level.
     pub(super) fn native_items_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.dropped.iter().map(|e| e.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -7477,6 +7534,10 @@ impl Game<'_> {
     }
     /// The experience orbs of `before` gone since have left the level.
     pub(super) fn native_orbs_left_since(&mut self, before: &[u32]) {
+        // Nothing was taken: no mod listens, or a client of a server.
+        if before.is_empty() {
+            return;
+        }
         let now: std::collections::HashSet<u32> = self.orbs.iter().map(|o| o.id).collect();
         let gone: Vec<u32> = before
             .iter()
@@ -8353,6 +8414,25 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn vanished_mobs_are_reported_by_kind() {
+        use std::collections::HashSet;
+        let z = || "minecraft:zombie".to_string();
+        let b = || "minecraft:bee".to_string();
+        let before = vec![(1, z()), (2, b()), (3, z()), (4, b())];
+        let now: HashSet<u32> = [1, 4, 99].into_iter().collect(); // 99 spawned meanwhile
+        assert_eq!(
+            super::vanished_by_kind(&before, &now),
+            vec![(b(), vec![2]), (z(), vec![3])]
+        );
+        let all: HashSet<u32> = [1, 2, 3, 4, 5].into_iter().collect();
+        assert!(super::vanished_by_kind(&before, &all).is_empty());
+        assert_eq!(
+            super::vanished_by_kind(&before, &HashSet::new()),
+            vec![(z(), vec![1, 3]), (b(), vec![2, 4])]
+        );
+        assert!(super::vanished_by_kind(&[], &now).is_empty());
+    }
 
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.

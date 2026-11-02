@@ -615,7 +615,7 @@ carry that. Bundles that use it need `"hooks": 52`.
 
 API 53 adds `native_entity_leave_level(dimension, entity, kind)`, an entity leaving a server level (NeoForge's
 `EntityLeaveLevelEvent`, vanilla's `onTrackingEnd`): removed for any reason or its chunk unloading, not the entities
-still loaded when the server stops. It only hears. It tells item entities and experience orbs so far; check `kind`.
+still loaded when the server stops. It only hears. It tells item entities, experience orbs and mobs (`kind` is the mob type) so far; check `kind`.
 Bundles that use it need `"hooks": 53`.
 
 API 54 adds fluid tanks on a mod block's block entity, and the fluid helpers that read and change them, in millibuckets (a
