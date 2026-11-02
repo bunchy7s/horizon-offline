@@ -1414,3 +1414,46 @@ mod creative_target_tests {
         });
     }
 }
+#[cfg(test)]
+mod wither_arrow_tests {
+    use super::*;
+    use crate::mobs::world::{test_player, with_test_world};
+    use std::sync::Arc;
+
+    /// `WitherSkeleton.getArrow`: `super.getArrow(...)` then
+    /// `igniteForSeconds(100)` on the arrow, so a wither skeleton's arrow
+    /// burns for 2000 ticks where a plain skeleton's does not burn at all.
+    #[test]
+    fn only_a_wither_skeletons_arrow_comes_out_burning() {
+        let ran = with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            // A player four blocks away: the aim needs a visible target.
+            w.player = Some(test_player(Vec3::new(0.5, 64.0, 4.5)));
+            for (name, fire_ticks) in [
+                ("minecraft:wither_skeleton", 2000),
+                ("minecraft:skeleton", 0),
+            ] {
+                let kind = Arc::new(types.types[name].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+                let mut events = Vec::new();
+                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut cx = Cx {
+                    w: &w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                perform_ranged_attack(&mut m, Who::Player, &mut cx, 1.0);
+                let arrow = events
+                    .iter()
+                    .find_map(|e| match e {
+                        MobEvent::Projectile(p) => p.arrow.as_ref(),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{name} shot nothing"));
+                assert_eq!(arrow.fire_ticks, fire_ticks, "{name}");
+                assert_eq!(arrow.on_fire(), fire_ticks > 0, "{name}");
+            }
+        });
+        let _ = ran;
+    }
+}
