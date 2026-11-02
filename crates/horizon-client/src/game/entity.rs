@@ -184,14 +184,27 @@ pub(super) trait Entity: EntityRules {
         facts: &horizon_client::blocks::BlockFacts,
         collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
     ) -> bool {
+        self.push_by_bubble_column_over(world, registry, facts, collision, |_| {})
+    }
+    /// [`Entity::push_by_bubble_column`], telling `surface` the position of
+    /// each column block it lies in (for the bubbles at the top).
+    fn push_by_bubble_column_over(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+        surface: impl FnMut(BlockPos),
+    ) -> bool {
         let bounds = self.bounds();
-        horizon_client::motion::bubble_column_push(
+        horizon_client::motion::bubble_column_push_over(
             world,
             registry,
             facts,
             collision,
             bounds,
             self.velocity_mut(),
+            surface,
         )
     }
     /// `Entity.getPistonPushReaction`.
@@ -254,6 +267,36 @@ macro_rules! stored_motion {
             &mut self.velocity
         }
     };
+}
+
+/// One `ItemEntity.tick`, with the fluid push and the bubble column decided by
+/// the `Entity` defaults every kind shares: fluids, move, column, settle,
+/// fluids again. Returns false when the item should be removed.
+pub(super) fn tick_item(
+    item: &mut ItemEntity,
+    world: &horizon_client::world::World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &horizon_client::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    fluids: &horizon_client::motion::FluidResources,
+    no_physics: bool,
+    entity_boxes: &[Aabb],
+    border: Option<&horizon_core::geometry::border::BorderGeometry>,
+) -> bool {
+    let heights = item.push_by_fluid(world, fluids);
+    let step = item.tick_move(
+        world,
+        facts,
+        collision,
+        no_physics,
+        heights,
+        entity_boxes,
+        border,
+    );
+    item.push_by_bubble_column(world, registry, facts, collision);
+    let alive = item.tick_settle(world, facts, no_physics, step);
+    item.push_by_fluid(world, fluids);
+    alive
 }
 
 /// The game's lists of entities, in the order systems walk them. Hands them to
@@ -549,6 +592,9 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn fluid_eye_y(&self) -> f64 {
+        ItemEntity::fluid_eye_y(self)
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:item".into()
     }
@@ -738,6 +784,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn fluid_eye_y(&self) -> f64 {
+        ArmorStand::fluid_eye_y(self)
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:armor_stand".into()
     }

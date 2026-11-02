@@ -4055,13 +4055,14 @@ impl Game<'_> {
                 item.velocity.z.abs() + 1.0,
             );
             obstacles.near(item.bounds().inflate(reach), &mut nearby);
-            let alive = item.tick(
+            let alive = entity::tick_item(
+                item,
                 &self.world,
                 self.pack.assets.registry,
                 self.res.facts(),
                 self.collision,
-                no_physics,
                 &self.res.motion().fluids,
+                no_physics,
                 &nearby,
                 Some(self.border.geometry()),
             );
