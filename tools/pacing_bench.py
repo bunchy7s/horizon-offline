@@ -21,6 +21,12 @@ p99/p99.9, the worst frame, frames over 33 ms) in the situations where players s
     screens    the creative inventory and its 12 tabs, then the survival inventory and its recipe book,
                opened for the first time and once more
     reload     F3+T, 15 s recorded
+    tnt        50 TNT set off on a stone block, 10 s recorded (world changes: block updates, light and
+               remeshing in one frame; each built in the air in front of the camera)
+    fill       /fill of a 64x64x16 stone volume (two fills, the default block limit), then cleared
+    fluids     water, then lava, poured down a 16-block slope, 15 s each
+    fire       fire lit at 5 places on a 25x25 grove's canopy of leaves over logs, 25 s
+    pistons    an observer clock driving 20 pistons, 15 s
 
 One game per render distance, from a fresh world (seed 1234, creative), driven over horizon-ctl.
 The game runs with HORIZON_SPIKES so each slow frame logs its timed spans; the report keeps the
@@ -49,7 +55,8 @@ except ImportError:
 
 WORK = lab.ROOT / ".local/pacing-bench"
 SCENARIOS = ["fly16", "ocean", "fly64", "elytra", "teleport", "nether", "portal", "inventory", "mobs", "items",
-             "block_entities", "screens", "reload", "join"]
+             "block_entities", "screens", "reload", "tnt", "fill", "fluids", "fire", "pistons", "join"]
+WORLD_CHANGES = ["tnt", "fill", "fluids", "fire", "pistons"]
 
 # First sight: what each kind of thing costs the first frame it is on screen.
 MOBS = ["zombie", "skeleton", "creeper", "spider", "enderman", "cow", "pig", "sheep", "chicken", "horse", "donkey",
@@ -218,6 +225,9 @@ def scenario(name, control, distance):
             control("key t tap")
             control("key f3 up")
         add(record(control, reload, 15), "F3+T")
+    elif name in WORLD_CHANGES:
+        for step, result in world_change(name, control, distance, lambda action, seconds: record(control, action, seconds)):
+            add(result, step)
     elif name == "inventory":
         def spam():
             for _ in range(20):
@@ -232,6 +242,67 @@ def scenario(name, control, distance):
                 time.sleep(0.15)
         add(record(control, spam, 0.5))
     return frames, cpu
+
+
+def world_change(name, control, distance, record):
+    """Builds `name`'s setup in the air (y 200, away from terrain) in front of the camera, then
+    records it running: a list of (step, (frame times, cpu times))."""
+    cx, y, cz = 9000 + 300 * WORLD_CHANGES.index(name), 200, 9000
+    control(f"command execute in minecraft:overworld run tp @s {cx} {y + 22} {cz - 34} 0 30")
+    control(f"fly {cx} {y + 22} {cz - 34} {cx} {y + 22} {cz - 34} 0.1 30")
+    pb.wait_loaded(control, lambda p: True, 300, pb.view_chunks(distance))
+    # Typed in chat, as a player does: `command` blocks the frame on the server tick.
+    def chat(command):
+        control(f"chat /{command}")
+        time.sleep(0.06)
+    steps = []
+    if name == "tnt":
+        chat(f"fill {cx - 10} {y - 10} {cz - 10} {cx + 10} {y - 1} {cz + 10} minecraft:stone")
+        chat(f"fill {cx - 2} {y} {cz - 2} {cx + 2} {y + 1} {cz + 2} minecraft:tnt")
+        time.sleep(2)
+        steps.append(("50 TNT", record(lambda: chat(f"setblock {cx + 3} {y} {cz} minecraft:redstone_block"), 10)))
+    elif name == "fill":
+        fills = [(y, y + 7), (y + 8, y + 15)]
+        steps.append(("fill 64x64x16 stone", record(lambda: [chat(
+            f"fill {cx - 32} {lo} {cz - 32} {cx + 31} {hi} {cz + 31} minecraft:stone") for lo, hi in fills], 5)))
+        steps.append(("clear it", record(lambda: [chat(
+            f"fill {cx - 32} {lo} {cz - 32} {cx + 31} {hi} {cz + 31} minecraft:air") for lo, hi in fills], 5)))
+    elif name == "fluids":
+        # Two 9-wide slopes falling 16 blocks over 16, side by side: water on one, lava on the other.
+        for i in range(16):
+            chat(f"fill {cx - 14} {y - 20} {cz + i} {cx + 14} {y - i} {cz + i} minecraft:stone")
+        chat(f"fill {cx - 14} {y - 20} {cz + 16} {cx + 14} {y - 15} {cz + 30} minecraft:stone")
+        time.sleep(2)
+        steps.append(("water", record(lambda: chat(f"fill {cx - 13} {y + 1} {cz} {cx - 5} {y + 1} {cz} minecraft:water"), 15)))
+        steps.append(("lava", record(lambda: chat(f"fill {cx + 5} {y + 1} {cz} {cx + 13} {y + 1} {cz} minecraft:lava"), 15)))
+    elif name == "fire":
+        # A 25x25 grove: grass, a log every 4 blocks, persistent leaves around them.
+        chat(f"fill {cx - 12} {y - 1} {cz - 12} {cx + 12} {y - 1} {cz + 12} minecraft:grass_block")
+        chat(f"fill {cx - 12} {y + 3} {cz - 12} {cx + 12} {y + 6} {cz + 12} minecraft:oak_leaves[persistent=true]")
+        for x in range(cx - 12, cx + 13, 4):
+            for z in range(cz - 12, cz + 13, 4):
+                chat(f"fill {x} {y} {z} {x} {y + 5} {z} minecraft:oak_log")
+        time.sleep(2)
+        spots = [(cx - 8, cz - 8), (cx + 8, cz - 8), (cx, cz), (cx - 8, cz + 8), (cx + 8, cz + 8)]
+        steps.append(("fire spreading", record(lambda: [chat(f"setblock {x} {y + 7} {z} minecraft:fire")
+                                                         for x, z in spots], 25)))
+    elif name == "pistons":
+        # Two observers facing each other pulse every other tick into a dust line each way; each
+        # line powers the stone it lies on, and 10 pistons beside that stone push a block.
+        chat(f"fill {cx - 12} {y - 1} {cz - 1} {cx + 12} {y - 1} {cz + 3} minecraft:stone")
+        for xs in (range(cx + 1, cx + 11), range(cx - 11, cx - 1)):
+            for x in xs:
+                chat(f"setblock {x} {y} {cz} minecraft:stone")
+                chat(f"setblock {x} {y + 1} {cz} minecraft:redstone_wire")
+                chat(f"setblock {x} {y} {cz + 1} minecraft:piston[facing=south]")
+                chat(f"setblock {x} {y} {cz + 2} minecraft:oak_planks")
+        chat(f"setblock {cx} {y} {cz} minecraft:stone")
+        time.sleep(2)
+        def start():
+            chat(f"setblock {cx} {y + 1} {cz} minecraft:observer[facing=west]")
+            chat(f"setblock {cx - 1} {y + 1} {cz} minecraft:observer[facing=east]")
+        steps.append(("20-piston clock", record(start, 15)))
+    return steps
 
 
 def launch(args, distance, tag):
