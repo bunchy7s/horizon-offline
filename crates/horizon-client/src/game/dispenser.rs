@@ -1356,6 +1356,9 @@ impl Game<'_> {
         if self
             .with_level(|b, level, ticks| b.fire_can_be_placed_at(level, ticks, target_pos, facing))
         {
+            if !self.native_block_ignite_allowed(target_pos, "flint_and_steel") {
+                return Ok((Some(stack), CLICK));
+            }
             let fire =
                 self.with_level(|b, level, ticks| b.fire_state_for(level, ticks, target_pos));
             self.level_set([target.0, target.1, target.2], fire)?;

@@ -565,16 +565,18 @@ impl GameLevel<'_> {
 
     /// On an authoritative server, fire is about to be placed at `pos` by
     /// flint and steel, a fire charge, lava, lightning or fire spread. Set
-    /// `cancel` to leave the position unchanged. @API:native_block_ignite@.
+    /// `player` is the acting server player when there is one. Set `cancel` to
+    /// leave the position unchanged. @API:native_block_ignite@.
     #[inline(always)]
     pub(super) fn native_block_ignite(
         &self,
         dimension: LevelDimension,
+        player: Option<u128>,
         pos: BlockPos,
         cause: &str,
         cancel: &mut bool,
     ) {
-        let _ = (dimension, pos, cause, cancel);
+        let _ = (dimension, player, pos, cause, cancel);
     }
 
     /// On an authoritative server, fire is about to burn the block at `pos`
@@ -590,7 +592,7 @@ impl GameLevel<'_> {
     }
 
     /// On an authoritative server, a note block at `pos` is about to sound.
-    /// `player` is None for world simulation. Set `cancel` to silence it.
+    /// `player` is the acting server player when there is one. Set `cancel` to silence it.
     /// @API:native_note_play@.
     #[inline(always)]
     pub(super) fn native_note_play(

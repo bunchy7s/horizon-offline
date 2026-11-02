@@ -293,6 +293,9 @@ impl Game<'_> {
                 b.can_survive(level, ticks, at, fire).then_some(fire)
             });
             if let Some(fire) = fire {
+                if !self.native_block_ignite_allowed(at, "lightning") {
+                    continue;
+                }
                 let _ = self.level_set(p, fire);
                 set += 1;
             }

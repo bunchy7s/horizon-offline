@@ -8,5 +8,5 @@
     }
   ],
   "rust_summary": "Fire about to be placed (`native_block_ignite`).",
-  "doc_summary": "Fire about to be placed: `native_block_ignite(dimension, pos, cause, cancel)` is heard when fire spreads into `pos` (`cause` is `spread`). Set `cancel` to leave the position unchanged. Other fire sources are not covered yet. Bundles need \"hooks\": @API:block_ignite@."
+  "doc_summary": "Fire about to be placed: `native_block_ignite(dimension, player, pos, cause, cancel)` is heard for fire spread, lava, lightning and dispenser flint-and-steel. Set `cancel` to leave the position unchanged. Direct player flint-and-steel/fire-charge placement is not covered. Bundles need \"hooks\": @API:block_ignite@."
 }

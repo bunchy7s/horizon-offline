@@ -8,5 +8,5 @@
     }
   ],
   "rust_summary": "Note block about to sound (`native_note_play`).",
-  "doc_summary": "A note block is about to sound: `native_note_play(dimension, player, pos, instrument, note, cancel)` is asked when punched, used or powered. Set `cancel` to silence it; a canceled tuning interaction leaves the note unchanged. The world simulation has no player context and supplies None. Bundles need \"hooks\": @API:note_play@."
+  "doc_summary": "A note block is about to sound: `native_note_play(dimension, player, pos, instrument, note, cancel)` is asked when punched, used or powered. Set `cancel` to silence it; a canceled tuning interaction leaves the note unchanged. `player` is the acting server player when available. Bundles need \"hooks\": @API:note_play@."
 }

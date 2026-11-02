@@ -8,5 +8,5 @@
     }
   ],
   "rust_summary": "Bell about to ring (`native_bell_ring`).",
-  "doc_summary": "A bell is about to ring: `native_bell_ring(dimension, player, pos, cancel)` is asked before the bell event and sound. Set `cancel` to stop the ring and its raider reveal. The world simulation supplies None for player. Bundles need \"hooks\": @API:bell_ring@."
+  "doc_summary": "A bell is about to ring: `native_bell_ring(dimension, player, pos, cancel)` is asked before the bell event and sound. Set `cancel` to stop the ring and its raider reveal. `player` is the acting server player when available. Bundles need \"hooks\": @API:bell_ring@."
 }

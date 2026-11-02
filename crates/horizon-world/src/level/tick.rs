@@ -680,16 +680,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if self.rand_int(chance) < odds {
             let old = self.state(pos);
             let allowed = self.level.allow_spread(Spread::Fire, fire, pos);
+            let mut burned = false;
             if self.rand_int(age + 10) < 5 && !self.level.is_raining_at(pos) {
                 let new_age = (age + self.rand_int(5) / 4).min(15);
-                if allowed {
+                if allowed
+                    && self.level.allow_block_burn(pos)
+                    && self.level.allow_block_ignite(pos, "spread")
+                {
                     let next = self.fire_state_with_age(pos, new_age);
                     self.set_block_and_update(pos, next);
+                    burned = true;
                 }
             } else if allowed && self.level.allow_block_burn(pos) {
                 self.remove_block(pos, false);
+                burned = true;
             }
-            if allowed && !b.is_air(self.state(pos)) && b.instance_of(old, Class::Tnt) {
+            if burned && b.instance_of(old, Class::Tnt) {
                 self.prime_tnt(pos);
             }
         }

@@ -940,6 +940,7 @@ struct GameLevel<'w> {
     client_side: bool,
     /// Only the integrated or dedicated server dispatches native observations.
     native_authoritative: bool,
+    native_player: Option<u128>,
     /// `Level.isDebug`: `setBlock` changes nothing.
     debug: bool,
     native_sounds: &'w mut Vec<creatures::NativeSound>,
@@ -1169,7 +1170,7 @@ impl LevelAccess for GameLevel<'_> {
     fn allow_block_ignite(&self, pos: BlockPos, cause: &'static str) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
-            self.native_block_ignite(self.dimension, pos, cause, &mut cancel);
+            self.native_block_ignite(self.dimension, self.native_player, pos, cause, &mut cancel);
         }
         !cancel
     }
@@ -1183,14 +1184,21 @@ impl LevelAccess for GameLevel<'_> {
     fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
-            self.native_note_play(self.dimension, None, pos, instrument, note, &mut cancel);
+            self.native_note_play(
+                self.dimension,
+                self.native_player,
+                pos,
+                instrument,
+                note,
+                &mut cancel,
+            );
         }
         !cancel
     }
     fn allow_bell_ring(&self, pos: BlockPos) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
-            self.native_bell_ring(self.dimension, None, pos, &mut cancel);
+            self.native_bell_ring(self.dimension, self.native_player, pos, &mut cancel);
         }
         !cancel
     }
@@ -1205,7 +1213,7 @@ impl LevelAccess for GameLevel<'_> {
         if self.native_authoritative {
             self.native_cauldron_level_changed(
                 self.dimension,
-                None,
+                self.native_player,
                 pos,
                 from,
                 to,
@@ -4283,6 +4291,7 @@ impl Game<'_> {
             lid_openers: &self.lid_openers,
             client_side: self.remote.is_some(),
             native_authoritative: self.serving.is_some() || self.options.dedicated.is_some(),
+            native_player: self.lan_acting_uuid,
             debug: self.world_debug,
             native_sounds: &mut self.creatures.lan_sounds,
             native_particles: &mut self.creatures.lan_particles,
@@ -4294,6 +4303,22 @@ impl Game<'_> {
             self.flush_native_sounds();
         }
         result
+    }
+    pub(super) fn native_block_ignite_allowed(
+        &mut self,
+        pos: BlockPos,
+        cause: &'static str,
+    ) -> bool {
+        self.with_level(|_, level, _| level.allow_block_ignite(pos, cause))
+    }
+    pub(super) fn native_cauldron_level_change_allowed(
+        &mut self,
+        pos: BlockPos,
+        from: i32,
+        to: i32,
+        reason: &'static str,
+    ) -> bool {
+        self.with_level(|_, level, _| level.allow_cauldron_level_change(pos, from, to, reason))
     }
     /// Level.setBlock(pos, state, UPDATE_ALL) with neighbour/shape updates.
     fn level_set(&mut self, pos: [i32; 3], state: BlockStateId) -> Result<()> {
@@ -12883,6 +12908,30 @@ impl Game<'_> {
         let Ok(new) = registry.resolve(&horizon_client::cauldron::extinguished(&old)) else {
             return;
         };
+        let level = |state: &horizon_world::chunk::BlockState| {
+            if matches!(state.name.as_str(), "minecraft:cauldron") {
+                0
+            } else if state.name == "minecraft:lava_cauldron" {
+                3
+            } else {
+                state
+                    .properties
+                    .get("level")
+                    .and_then(|level| level.parse().ok())
+                    .unwrap_or(1)
+            }
+        };
+        let Some(new_state) = registry.state(new).cloned() else {
+            return;
+        };
+        if !self.native_cauldron_level_change_allowed(
+            pos,
+            level(&old),
+            level(&new_state),
+            "extinguishing",
+        ) {
+            return;
+        }
         if self.level_set(at, new).is_ok() {
             self.post_block_game_event("minecraft:block_change", at, None, Some(new));
         }

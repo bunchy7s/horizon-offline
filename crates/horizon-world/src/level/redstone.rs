@@ -1212,12 +1212,20 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `NoteBlock.playNote`: queues the block event and emits the game event.
     pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
+        if !self.note_play_allowed(pos, state) {
+            return;
+        }
+        self.note_play_unchecked(pos, state);
+    }
+    pub(crate) fn note_play_allowed(&self, pos: BlockPos, state: BlockStateId) -> bool {
         let b = self.b;
         let instrument = b.table.text(state, b.props.instrument);
         let note = b.table.int(state, b.props.note);
-        if !self.level.allow_note_play(pos, instrument, note) {
-            return;
-        }
+        self.level.allow_note_play(pos, instrument, note)
+    }
+    pub(crate) fn note_play_unchecked(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let instrument = b.table.text(state, b.props.instrument);
         let mob_head = super::data::INSTRUMENTS
             .iter()
             .position(|n| *n == instrument)
