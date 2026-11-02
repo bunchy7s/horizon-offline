@@ -4002,6 +4002,11 @@ impl Game<'_> {
         let _ = (entity, player, item);
     }
 
+    /// Lightning charged a creeper. @API:native_creeper_power@.
+    pub(super) fn native_creeper_power(&mut self, entity: u32, lightning: [f64; 3]) {
+        let _ = (entity, lightning);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

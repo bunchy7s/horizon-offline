@@ -513,6 +513,7 @@ impl Game<'_> {
             from: Some(b.at),
         };
         let mut events = Vec::new();
+        let mut powered = Vec::new();
         let peaceful = self.ui.difficulty == 0;
         for m in self.mobs.iter_mut().filter(|m| m.alive()) {
             if !meets(
@@ -560,7 +561,10 @@ impl Game<'_> {
                     m.damage(f32::MAX, damage);
                     continue;
                 }
-                Species::Creeper => m.extra.charged = true,
+                Species::Creeper => {
+                    m.extra.charged = true;
+                    powered.push(m.id);
+                }
                 // CopperGolem.thunderHit (after Entity.thunderHit's fire and
                 // damage): once per bolt, an oxidized golem goes back one step
                 // and its weathering timer (or wax, -2) is reset to -1.
@@ -584,6 +588,9 @@ impl Game<'_> {
         }
         if !events.is_empty() {
             let _ = self.handle_mob_events(events);
+        }
+        for entity in powered {
+            self.native_creeper_power(entity, [at[0], at[1], at[2]]);
         }
         // Cushion.thunderHit: a cushion whose box meets the strike box breaks and drops its item
         // (the bolt is no player, so no creative spare). Last first, since
