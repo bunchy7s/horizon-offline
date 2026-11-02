@@ -307,13 +307,15 @@ impl MotionWorld<'_, '_, '_> {
         let mut distance = distance;
         let mut multiplier = multiplier;
         let mut cancel = false;
-        native_living_fall(
-            self.player.entity_id as u32,
-            "minecraft:player",
-            &mut distance,
-            &mut multiplier,
-            &mut cancel,
-        );
+        if !self.player.replaying {
+            native_living_fall(
+                self.player.entity_id as u32,
+                "minecraft:player",
+                &mut distance,
+                &mut multiplier,
+                &mut cancel,
+            );
+        }
         // A canceled fall still lands on the block (`Block.fallOn`).
         if cancel {
             if let Some((state, position, original_distance)) = contact {
