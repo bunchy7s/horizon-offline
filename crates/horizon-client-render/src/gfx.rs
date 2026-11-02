@@ -82,18 +82,23 @@ fn gpu_culling_requested(info: &wgpu::AdapterInfo, env: Option<&str>) -> bool {
 
 /// Whether Translucent Batching is offered (`graphics::offer_translucent_batching`): where
 /// indirect multi-draws (`multi_draw`) take its batches, but not OpenGL's, which loop over
-/// their entries on the CPU (and without them every section is a call of its own anyway);
-/// nor where vanilla frames draw flat (`flat`'s `min_sections` below `usize::MAX`: Metal,
-/// Intel Gen11/Gen12's Vulkan driver, `HORIZON_FLAT_DRAWS=1`), as flat draws read
-/// translucent quads in the section arena.
-fn translucent_batchable(
-    info: &wgpu::AdapterInfo,
-    multi_draw: bool,
-    flat_min_sections: Option<usize>,
-) -> bool {
-    multi_draw
-        && info.backend != wgpu::Backend::Gl
-        && flat_min_sections.is_none_or(|min| min == usize::MAX)
+/// their entries on the CPU (and without them every section is a call of its own anyway).
+/// Frames drawn flat (Metal, Intel Gen11/Gen12's Vulkan driver) take it too: their
+/// translucent calls then come one per page of its arena rather than about one per section.
+fn translucent_batchable(info: &wgpu::AdapterInfo, multi_draw: bool) -> bool {
+    multi_draw && info.backend != wgpu::Backend::Gl
+}
+
+/// The vertices flat draws bind for a call's page key: a page of the section arena, or of
+/// the translucent arena up to its last range in use (`flat::TRANSLUCENT_KEYS`).
+fn flat_vertices<'a>(
+    arena: &'a arena::Arena,
+    translucent: Option<&'a arena::Arena>,
+) -> impl Fn(u32) -> wgpu::BufferSlice<'a> + Copy {
+    move |key| match (translucent, key.checked_sub(flat::TRANSLUCENT_KEYS)) {
+        (Some(translucent), Some(page)) => translucent.binding(page),
+        _ => arena.buffer(key).slice(..),
+    }
 }
 
 /// Whether translucent quads have an arena of their own: with Translucent Batching
@@ -476,8 +481,11 @@ fn move_off_page<'a>(
         arena.copy(encoder, (page, start), to, vertices);
         arena.release(page, start, vertices);
         if let (Some((flat, device, uploads)), Some(id)) = (&mut flat, s.flat_id) {
-            flat.remove(id);
-            s.flat_id = Some(flat.add(device, encoder, uploads, to.0, to.1, vertices));
+            let key = match part {
+                Part::Translucent => to.0 + flat::TRANSLUCENT_KEYS,
+                _ => to.0,
+            };
+            flat.place(device, encoder, uploads, id, key, to.1, vertices);
         }
         part.set(s, to);
         *budget = budget.saturating_sub(bytes);
@@ -3557,7 +3565,7 @@ impl Renderer {
             flat_wanted,
         );
         // Sections as one index list per frame where multi-draw is emulated.
-        let flat = flat_wanted.then(|| {
+        let mut flat = flat_wanted.then(|| {
             let buffers = [Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<TerrainVertex>() as u64,
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -3593,11 +3601,7 @@ impl Renderer {
                 .get_downlevel_capabilities()
                 .flags
                 .contains(wgpu::DownlevelFlags::INDIRECT_EXECUTION);
-        let batchable = translucent_batchable(
-            &adapter.get_info(),
-            multi_draw,
-            flat.as_ref().map(|f| f.min_sections),
-        );
+        let batchable = translucent_batchable(&adapter.get_info(), multi_draw);
         crate::graphics::offer_translucent_batching(batchable);
         let translucent_batching = batchable && translucent_batching;
         // A new renderer runs no shader pack: the game loads the picked one on its
@@ -3613,6 +3617,9 @@ impl Renderer {
             flat.is_some(),
             translucent_split(translucent_batching, flat.is_some(), shader_pack, false),
         );
+        if let (Some(flat), Some(arena)) = (&mut flat, &translucent_arena) {
+            flat.set_translucent_page_vertices(arena.page_vertices());
+        }
         // Without indirect draws (OpenGL before 4.0 without indirect execution, or
         // before 4.2 + GL_ARB_shader_draw_parameters without indirect first instance)
         // even creating an indirect buffer fails; one draw per section reads
@@ -3909,7 +3916,11 @@ impl Renderer {
         match flat {
             Some(flat) => {
                 pass.set_pipeline(&flat.translucent_mark);
-                flat.draw(pass, flat.translucent_calls(), |p| self.arena.buffer(p));
+                flat.draw(
+                    pass,
+                    flat.translucent_calls(),
+                    flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                );
                 pass.set_bind_group(0, &self.group, &[]);
             }
             None => {
@@ -4280,17 +4291,23 @@ impl Renderer {
         } else {
             None
         };
-        // Flat draws name the blocks of its range in `arena`: split, its solid
-        // quads alone (no frame draws flat then: `translucent_split`).
-        let flat_id = self.flat.as_mut().filter(|_| main > 0).map(|f| {
-            f.add(
-                &self.device,
-                encoder,
-                &mut self.section_uploads,
-                page,
-                start,
-                main,
-            )
+        // Flat draws name the blocks of its ranges by its id: its range in `arena` and,
+        // split, its translucent quads' in `translucent_arena` (`flat::TRANSLUCENT_KEYS`).
+        let translucent_key = (split && translucent > 0)
+            .then(|| (translucent_at.0 + flat::TRANSLUCENT_KEYS, translucent_at.1));
+        let flat_id = self.flat.as_mut().and_then(|f| {
+            let ranges = [(main > 0).then_some((page, start, main))]
+                .into_iter()
+                .chain([translucent_key.map(|(key, first)| (key, first, translucent_vertices))]);
+            let mut id = None;
+            for (key, first, vertices) in ranges.flatten() {
+                let uploads = &mut self.section_uploads;
+                match id {
+                    None => id = Some(f.add(&self.device, encoder, uploads, key, first, vertices)),
+                    Some(id) => f.place(&self.device, encoder, uploads, id, key, first, vertices),
+                }
+            }
+            id
         });
         let stride = std::mem::size_of::<TerrainVertex>() as u64;
         let translucent_arena = self.translucent_arena.as_ref().unwrap_or(&self.arena);
@@ -4523,7 +4540,13 @@ impl Renderer {
             _ => COMPACT_BUDGET,
         };
         let mut budget = left.min(cap);
-        if !move_off_page(arena, encoder, None, meshes, page, part, &mut budget) {
+        // Flat draws name translucent quads' blocks by their section's id; indices have none.
+        let flat = match part {
+            Part::Translucent => self.flat.as_mut(),
+            _ => None,
+        }
+        .map(|f| (f, &self.device, &mut self.section_uploads));
+        if !move_off_page(arena, encoder, flat, meshes, page, part, &mut budget) {
             // New ranges took the room: both pages stay, drawn, until a later try.
             arena.reopen();
             self.shrink_gate.wait(now, SHRINK_RETRY);
@@ -4636,6 +4659,9 @@ impl Renderer {
             self.flat.is_some(),
             split,
         );
+        if let (Some(flat), Some(arena)) = (&mut self.flat, &self.translucent_arena) {
+            flat.set_translucent_page_vertices(arena.page_vertices());
+        }
     }
     /// Whether every section and far tile was dropped since the last call, to be
     /// laid out again (`follow_translucent_layout`): the game meshes them again,
@@ -5529,7 +5555,11 @@ impl Renderer {
         arena::free_later(self.graveyard.advance());
         self.shrink_translucent(left);
         if let Some(flat) = &mut self.flat {
-            flat.trim(|page| self.arena.has_page(page));
+            let translucent = self.translucent_arena.as_ref();
+            flat.trim(|key| match key.checked_sub(flat::TRANSLUCENT_KEYS) {
+                Some(page) => translucent.is_some_and(|a| a.has_page(page)),
+                None => self.arena.has_page(key),
+            });
         }
         if self.suspended {
             return Ok(false);
@@ -6774,8 +6804,6 @@ impl Renderer {
                         || pack_terrain
                         || shadow_view.is_some()) =>
             {
-                // They read translucent quads in the section arena (`translucent_split`).
-                debug_assert!(self.translucent_arena.is_none(), "flat draws, split");
                 let sections = &self.sections;
                 let lods = &self.lods;
                 let sorted = &self.sorted_indices;
@@ -6792,6 +6820,7 @@ impl Renderer {
                         [shadow_first, shadow_first + shadow_solid].map(|d| d as usize),
                         [opaque_end, cutout_start],
                         phase2,
+                        self.translucent_arena.is_some(),
                         visible
                             .iter()
                             .chain(&shadow_visible)
@@ -7036,9 +7065,11 @@ impl Renderer {
             {
                 pass.set_pipeline(pipeline);
                 let [first, translucent] = flat.shadow_calls;
-                flat.draw(&mut pass, &flat.calls[first..translucent], |p| {
-                    self.arena.buffer(p)
-                });
+                flat.draw(
+                    &mut pass,
+                    &flat.calls[first..translucent],
+                    flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                );
             } else if !flat_frame {
                 pass.set_pipeline(&shadow.solid);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -7059,9 +7090,11 @@ impl Renderer {
             {
                 pass.set_pipeline(pipeline);
                 let [_, translucent] = flat.shadow_calls;
-                flat.draw(&mut pass, &flat.calls[translucent..], |p| {
-                    self.arena.buffer(p)
-                });
+                flat.draw(
+                    &mut pass,
+                    &flat.calls[translucent..],
+                    flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                );
             } else if !flat_frame {
                 pass.set_pipeline(&shadow.translucent);
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -7224,7 +7257,7 @@ impl Renderer {
                 // is phase 1's.
                 if flat_frame && let Some(flat) = &self.flat {
                     pass.set_pipeline(&flat.solid_mirror);
-                    let vertices = |p| self.arena.buffer(p);
+                    let vertices = flat_vertices(&self.arena, self.translucent_arena.as_ref());
                     flat.draw(&mut pass, &flat.calls[..flat.solid_calls], vertices);
                 } else {
                     pass.set_pipeline(&self.solid_mirror);
@@ -7412,7 +7445,7 @@ impl Renderer {
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 }
                 Some(flat) => {
-                    let vertices = |p| self.arena.buffer(p);
+                    let vertices = flat_vertices(&self.arena, self.translucent_arena.as_ref());
                     // Without a pack, on Metal, the opaque pass, then the cutout one
                     // (terrain.wgsl's `opaque_quad`), each over phase 1's lists with
                     // quads for it, and over all of phase 2's.
@@ -7865,7 +7898,11 @@ impl Renderer {
                             // Flat section draws take the flat pipelines.
                             if let Some((flat, pipeline)) = flat.zip(oit.flat(stage)) {
                                 pass.set_pipeline(pipeline);
-                                flat.draw(pass, flat.translucent_calls(), |p| self.arena.buffer(p));
+                                flat.draw(
+                                    pass,
+                                    flat.translucent_calls(),
+                                    flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                                );
                                 return;
                             }
                             pass.set_pipeline(oit.terrain(stage));
@@ -7926,9 +7963,11 @@ impl Renderer {
                 }
                 Some(flat) => {
                     pass.set_pipeline(pack_flat.map_or(&flat.translucent, |p| &p.1));
-                    flat.draw(&mut pass, flat.translucent_calls(), |p| {
-                        self.arena.buffer(p)
-                    });
+                    flat.draw(
+                        &mut pass,
+                        flat.translucent_calls(),
+                        flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                    );
                     pass.set_bind_group(0, &self.group, &[]);
                     pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                     self.mark_translucent_terrain(
@@ -8108,10 +8147,16 @@ impl Renderer {
                                             }],
                                         });
                                     rp.set_bind_group(5, &indices, &[]);
-                                    let vertices = |p| self.arena.buffer(p);
+                                    let vertices =
+                                        flat_vertices(&self.arena, self.translucent_arena.as_ref());
                                     flat.draw_geometry(rp, calls, vertices, page, instances);
                                 }
-                                None => flat.draw_with(rp, calls, |p| self.arena.buffer(p), page),
+                                None => flat.draw_with(
+                                    rp,
+                                    calls,
+                                    flat_vertices(&self.arena, self.translucent_arena.as_ref()),
+                                    page,
+                                ),
                             }
                         }
                         // A geometry stage reads flat draws' indices; without them it draws nothing.
@@ -9180,23 +9225,20 @@ mod tests {
         assert!(!super::gpu_culling_requested(&discrete, Some("0")));
     }
 
-    /// Translucent Batching is offered with indirect multi-draws that aren't OpenGL's,
-    /// and only where frames without a shader pack never draw flat.
+    /// Translucent Batching is offered with indirect multi-draws that aren't OpenGL's, flat
+    /// frames (Metal, Intel Gen11/Gen12 on Vulkan) included.
     #[test]
-    fn translucent_batching_is_offered_where_vanilla_frames_never_draw_flat() {
+    fn translucent_batching_is_offered_with_indirect_multi_draws_except_on_opengl() {
         let vulkan = adapter(wgpu::DeviceType::DiscreteGpu);
+        let mut metal = adapter(wgpu::DeviceType::IntegratedGpu);
+        metal.backend = wgpu::Backend::Metal;
         let mut gl = adapter(wgpu::DeviceType::DiscreteGpu);
         gl.backend = wgpu::Backend::Gl;
         let batchable = super::translucent_batchable;
-        // No flat draws, or flat draws for a shader pack's terrain alone.
-        assert!(batchable(&vulkan, true, None));
-        assert!(batchable(&vulkan, true, Some(usize::MAX)));
-        // Vanilla frames drawn flat past MIN_SECTIONS (Metal), or all of them.
-        assert!(!batchable(&vulkan, true, Some(super::flat::MIN_SECTIONS)));
-        assert!(!batchable(&vulkan, true, Some(0)));
-        assert!(!batchable(&vulkan, false, None));
-        assert!(!batchable(&gl, true, None));
-        assert!(!batchable(&gl, true, Some(usize::MAX)));
+        assert!(batchable(&vulkan, true));
+        assert!(batchable(&metal, true));
+        assert!(!batchable(&vulkan, false));
+        assert!(!batchable(&gl, true));
     }
 
     /// The pack-flat rule: with Translucent Batching translucent quads have an arena of
