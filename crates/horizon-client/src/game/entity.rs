@@ -7,6 +7,7 @@
 //! `Game` end. The walk allocates nothing and dispatch is static: hot paths pay
 //! no vtable. A new kind is one line in `entity_lists!` and one `impl Entity`.
 
+use super::commands::Target;
 use super::{FallingBlock, Game};
 use super::{
     boats::Boat, fireworks::Rocket, minecarts::Minecart, tnt::PrimedTnt, trident::ThrownTrident,
@@ -51,6 +52,9 @@ pub(super) trait Entity {
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
+    /// What a selector finds this entity as (`@e`), or `None` for one it cannot
+    /// name yet. Required, so a new kind states which.
+    fn selector_target(&self) -> Option<Target>;
 
     fn on_ground(&self) -> bool {
         false
@@ -327,6 +331,9 @@ pub(super) use with_entity_mut;
 
 impl Entity for Mob {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        (self.death_time == 0).then_some(Target::Mob(self.id))
+    }
     fn bounds(&self) -> Aabb {
         Mob::bounds(self)
     }
@@ -398,6 +405,9 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Item(self.id))
+    }
     fn thunder_hit(&self) -> ThunderHit {
         ThunderHit::Item
     }
@@ -427,6 +437,9 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Orb(self.id))
+    }
     fn thunder_hit(&self) -> ThunderHit {
         ThunderHit::Orb
     }
@@ -453,6 +466,9 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Boat(self.id))
+    }
     fn thunder_hit(&self) -> ThunderHit {
         ThunderHit::Vehicle
     }
@@ -473,6 +489,9 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Cart(self.id))
+    }
     fn thunder_hit(&self) -> ThunderHit {
         ThunderHit::Vehicle
     }
@@ -504,6 +523,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 
 impl Entity for ArmorStand {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Stand(self.id))
+    }
     /// `ArmorStand.ignoreExplosion`: a visible stand feels only a burst that
     /// affects block-like entities (`items_ignore` is that flag, negated).
     fn ignores_explosion(&self, blast: &Blast) -> bool {
@@ -560,6 +582,9 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Tnt(self.id))
+    }
     /// Pushed from its position, not its eyes.
     fn explosion_eye_height(&self) -> f64 {
         0.0
@@ -580,6 +605,9 @@ impl Entity for PrimedTnt {
 
 impl Entity for FallingBlock {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Falling(self.id))
+    }
     fn bounds(&self) -> Aabb {
         horizon_client::falling_block::bounds(self.position)
     }
@@ -587,6 +615,17 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        use horizon_client::projectiles::ProjectileKind as K;
+        // The kinds /data can write (entity_nbt).
+        let selectable = self.is_arrow()
+            || horizon_client::entity_nbt::saved_with_chunk(self)
+            || matches!(
+                self.kind,
+                K::LargeFireball { .. } | K::SmallFireball | K::WindCharge | K::BreezeWindCharge
+            );
+        selectable.then_some(Target::Projectile(self.id))
+    }
     /// `AbstractArrow.push` does nothing in the ground; a wind charge's motion
     /// stays 0.
     fn pushed_by_explosion(&self) -> bool {
@@ -618,6 +657,9 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        Some(Target::Rocket(self.id))
+    }
     /// 0.25 wide, so 0.2125 to the eyes.
     fn explosion_eye_height(&self) -> f64 {
         0.2125
@@ -633,6 +675,10 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    fn selector_target(&self) -> Option<Target> {
+        // No `Target` variant for it yet: `@e` does not find tridents.
+        None
+    }
     /// Like any arrow (`AbstractArrow.push`) not pushed while in the ground.
     fn pushed_by_explosion(&self) -> bool {
         !self.in_ground
