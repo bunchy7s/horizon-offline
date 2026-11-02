@@ -35,10 +35,11 @@ fn layer_color(undyed: Option<u32>, stack: Option<&ItemStack>) -> u32 {
 
 /// Armor stand models and the humanoid layers of every equipment asset.
 pub(super) struct ArmorStandAssets {
-    pub main: Option<Part>,
-    pub small: Option<Part>,
+    /// Shared (`Arc`) so the GPU path (`mobs::skin`) keeps one stored copy of each.
+    pub main: Option<Arc<Part>>,
+    pub small: Option<Arc<Part>>,
     /// (slot model suffix, small) -> model.
-    pub layers: HashMap<(&'static str, bool), Part>,
+    pub layers: HashMap<(&'static str, bool), Arc<Part>>,
     /// The player's armour models by slot (helmet, chestplate, leggings, boots).
     pub player: HashMap<&'static str, Part>,
     /// asset id -> layer kind (humanoid / humanoid_leggings) -> each layer's (texture, undyed colour), in order.
@@ -63,7 +64,7 @@ impl ArmorStandAssets {
             }
             for (small, model) in [(false, "armor_stand"), (true, "armor_stand_small")] {
                 if let Some(part) = load(&format!("minecraft:{model}#{slot}")) {
-                    layers.insert((slot, small), part);
+                    layers.insert((slot, small), Arc::new(part));
                 }
             }
         }
@@ -127,8 +128,8 @@ impl ArmorStandAssets {
             }
         }
         Self {
-            main: load("minecraft:armor_stand#main"),
-            small: load("minecraft:armor_stand_small#main"),
+            main: load("minecraft:armor_stand#main").map(Arc::new),
+            small: load("minecraft:armor_stand_small#main").map(Arc::new),
             layers,
             player,
             equipment,
@@ -851,6 +852,8 @@ impl Game<'_> {
         alpha: f64,
         out: &mut Vec<Vertex>,
     ) {
+        // The stands' models posed on the GPU path (`mobs::skin`), when it runs this frame.
+        let skinning = self.skinning();
         for a in &self.armor_stands {
             let entity_start = out.len();
             // ArmorStand.shouldRenderAtSqrDistance: 256 times the box's mean
@@ -904,20 +907,37 @@ impl Game<'_> {
                 at.z.floor() as i32,
             );
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-            self.armor_stand_vertices(a, base, packed, out);
-            self.cull_entity_vertices(out, entity_start);
+            let skinned = if skinning {
+                let mut models = self.skin_models.borrow_mut();
+                let mut frame = self.skin_frame.borrow_mut();
+                let mark = frame.mark();
+                let mut skin = horizon_client::mobs::skin::Skin {
+                    models: &mut models,
+                    frame: &mut frame,
+                    bounds: None,
+                };
+                self.armor_stand_vertices(a, base, packed, Some(&mut skin), out);
+                Some((mark, skin.bounds))
+            } else {
+                self.armor_stand_vertices(a, base, packed, None, out);
+                None
+            };
+            self.cull_skinned(out, entity_start, skinned);
         }
     }
     /// `ArmorStandRenderer.submit` for stand `a` under `base` (its
     /// `setupRotations`): the body, the hand and head items, the armour and
-    /// the wings, at packed light `packed`.
+    /// the wings, at packed light `packed`. With `skin`, the stand's own models
+    /// (body and armour) are posed on the GPU; items and wings stay here.
     fn armor_stand_vertices(
         &self,
         a: &ArmorStand,
         base: glam::Mat4,
         packed: u32,
+        mut skin: Option<&mut horizon_client::mobs::skin::Skin>,
         out: &mut Vec<Vertex>,
     ) {
+        use horizon_client::mobs::render::put;
         let assets = &self.armor_stand_assets;
         let sprites = &self.gui.atlas.sprites;
         let uv_of = |name: &str| sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
@@ -961,11 +981,13 @@ impl Game<'_> {
         // LivingEntityRenderer.submit: an invisible stand has no body render type, but its
         // layers (held items, custom head, armour) are submitted all the same.
         if !a.invisible {
-            horizon_client::mobs::render::draw(
+            put(
+                &mut skin,
                 model,
                 base,
                 &poses,
                 wood,
+                0.0,
                 0xFFFF_FFFF,
                 packed,
                 0,
@@ -973,11 +995,13 @@ impl Game<'_> {
             );
             if let Some(glow) = glow_of("entity/armorstand/armorstand") {
                 let full = horizon_client::mobs::render::FULL_BRIGHT;
-                horizon_client::mobs::render::draw(
+                put(
+                    &mut skin,
                     model,
                     base,
                     &poses,
                     glow,
+                    0.0,
                     0xFFFF_FFFF,
                     full,
                     0,
@@ -986,7 +1010,9 @@ impl Game<'_> {
             }
         }
         self.armor_stand_items(a, model, base, &posed, packed, out);
-        // HumanoidArmorLayer: head, chest, legs, feet.
+        // HumanoidArmorLayer: head, chest, legs, feet. One pose map for every layer
+        // (`reset` keeps its capacity).
+        let mut layer_poses = Poses::default();
         for (slot, layer) in [
             (5usize, "helmet"),
             (4, "chestplate"),
@@ -1030,7 +1056,7 @@ impl Game<'_> {
                 0
             };
             // ArmorStandArmorModel.setupAnim: the same pose as the stand.
-            let mut layer_poses = Poses::new(part);
+            layer_poses.reset(part);
             apply_pose(&mut layer_poses, &a.pose);
             // EquipmentLayerRenderer: every layer of the asset, the leather overlay
             // too; the shader glint goes on the first layer only (renderShaderGlint).
@@ -1040,11 +1066,13 @@ impl Game<'_> {
                     continue;
                 };
                 let color = layer_color(*undyed, Some(stack));
-                horizon_client::mobs::render::draw(
+                put(
+                    &mut skin,
                     part,
                     base,
                     &layer_poses,
                     uv,
+                    0.0,
                     color,
                     packed,
                     if i == 0 { overlay } else { 0 },
@@ -1052,11 +1080,13 @@ impl Game<'_> {
                 );
                 // The layer's OptiFine emissive overlay, full bright without the glint.
                 if let Some(glow) = glow_of(texture) {
-                    horizon_client::mobs::render::draw(
+                    put(
+                        &mut skin,
                         part,
                         base,
                         &layer_poses,
                         glow,
+                        0.0,
                         color,
                         horizon_client::mobs::render::FULL_BRIGHT,
                         0,
@@ -1069,11 +1099,13 @@ impl Game<'_> {
                 .trim_texture(&asset, kind, stack)
                 .and_then(|t| uv_of(&t.sprite()))
             {
-                horizon_client::mobs::render::draw(
+                put(
+                    &mut skin,
                     part,
                     base,
                     &layer_poses,
                     trim,
+                    0.0,
                     0xFFFF_FFFF,
                     packed,
                     overlay,
@@ -1123,7 +1155,7 @@ impl Game<'_> {
             * glam::Mat4::from_scale(glam::Vec3::new(-1.0, -1.0, 1.0))
             * glam::Mat4::from_translation(glam::Vec3::new(0.0, -1.501, 0.0));
         let mut verts = Vec::new();
-        self.armor_stand_vertices(&stand, base, 240 | 240 << 8, &mut verts);
+        self.armor_stand_vertices(&stand, base, 240 | 240 << 8, None, &mut verts);
         // ARMOR_STAND_ANGLE: rotationXYZ(0.43633232, 0, PI).
         let gui =
             glam::Mat4::from_translation(glam::Vec3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, 0.0))
