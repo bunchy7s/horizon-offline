@@ -15,6 +15,7 @@ use horizon_client::{
 };
 use horizon_core::{
     geometry::{Aabb, Vec3},
+    position::BlockPos,
     random::RandomSource,
 };
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
@@ -728,7 +729,7 @@ impl Game<'_> {
         let spread = [width / 4.0, height / 4.0, width / 4.0];
         self.particles
             .send_particles(&options, centre, spread, 0.05, 10);
-        self.lan_level_particles(&options, centre, spread, 0.05, 10, Some(state));
+        self.lan_level_particles(None, &options, centre, spread, 0.05, 10, Some(state));
     }
     /// `ArmorStand.hurtServer` for a player's attack (also a sweep's): a
     /// creative player breaks it, otherwise the first hit wobbles it and a
@@ -807,11 +808,22 @@ impl Game<'_> {
                 binding: collision,
                 subject: None,
             };
+            let mut tops: Vec<BlockPos> = Vec::new();
             a.tick(&mut scene, facts, in_water, &mut |bounds, velocity| {
-                horizon_client::motion::bubble_column_push(
-                    world, registry, facts, collision, bounds, velocity,
+                horizon_client::motion::bubble_column_push_over(
+                    world,
+                    registry,
+                    facts,
+                    collision,
+                    bounds,
+                    velocity,
+                    |pos| tops.push(pos),
                 );
             });
+            for pos in tops {
+                self.bubble_column_particles(pos);
+            }
+            let a = &mut self.armor_stands[i];
             if in_water {
                 a.enchantment_fall_distance = 0.0;
             } else {

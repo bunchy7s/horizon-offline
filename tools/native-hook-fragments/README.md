@@ -2,7 +2,7 @@
 
 A hook PR adds a uniquely named JSON file here instead of editing the API number,
 the API histories or `native-hooks.json`. Helper-only additions use an empty
-`hooks` array. Example:
+`hooks` array and list new Host helpers in `helpers` as catalog entries. Example:
 
 ```json
 {

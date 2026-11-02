@@ -1729,11 +1729,19 @@ impl Game<'_> {
             let splash_options = ParticleOptions::simple(ParticleType::Splash);
             self.particles
                 .send_particles(&splash_options, splash, [0.0; 3], 1.0, 1);
-            self.lan_level_particles(&splash_options, splash, [0.0; 3], 1.0, 1, None);
+            self.lan_level_particles(None, &splash_options, splash, [0.0; 3], 1.0, 1, None);
             let bubble_options = ParticleOptions::simple(ParticleType::Bubble);
             self.particles
                 .send_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1);
-            self.lan_level_particles(&bubble_options, bubble, [0.0, 0.01, 0.0], 0.2, 1, None);
+            self.lan_level_particles(
+                None,
+                &bubble_options,
+                bubble,
+                [0.0, 0.01, 0.0],
+                0.2,
+                1,
+                None,
+            );
         }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
@@ -1769,7 +1777,7 @@ impl Game<'_> {
                         let options = horizon_client::particles::ParticleOptions::simple(ty);
                         self.particles
                             .send_particles(&options, at, spread, speed, count);
-                        self.lan_level_particles(&options, at, spread, speed, count, None);
+                        self.lan_level_particles(None, &options, at, spread, speed, count, None);
                     }
                 }
                 MobEvent::Sound(name, at, volume, pitch)
@@ -3504,6 +3512,7 @@ impl Game<'_> {
         let mut deflections: Vec<[f64; 3]> = Vec::new();
         let mut arrow_events = Vec::new();
         let mut trails = Vec::new();
+        let mut bubble_tops = Vec::new();
         let mut keep_flags = vec![true; projectiles.len()];
         // The impacts the mods may cancel (`native_projectile_impact`), on a server.
         let hear = self.native_hears_impacts();
@@ -3626,7 +3635,7 @@ impl Game<'_> {
                 // ThrownEnderpearl.onAboveBubbleColumn / onInsideBubbleColumn.
                 if keep && hit == Hit::None && matches!(p.kind, ProjectileKind::EnderPearl) {
                     let (at, h) = (p.position, 0.125);
-                    horizon_client::motion::bubble_column_push(
+                    horizon_client::motion::bubble_column_push_over(
                         w.world,
                         w.registry,
                         w.facts,
@@ -3636,6 +3645,7 @@ impl Game<'_> {
                             Vec3::new(at.x + h, at.y + 2.0 * h, at.z + h),
                         ),
                         &mut p.velocity,
+                        |pos| bubble_tops.push(pos),
                     );
                 }
                 let events_from = arrow_events.len();
@@ -3719,6 +3729,9 @@ impl Game<'_> {
             );
         }
         self.smoke_trails(trails);
+        for pos in bubble_tops {
+            self.bubble_column_particles(pos);
+        }
         for at in deflections {
             self.audio
                 .play("minecraft:entity.breeze.deflect", Some(at), 1.0, 1.0);

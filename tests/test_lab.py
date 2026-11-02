@@ -173,7 +173,8 @@ class ArtifactTests(unittest.TestCase):
 
 class PublicationTests(unittest.TestCase):
     def test_private_paths_rejected(self):
-        for path in [".local/minecraft/source.java", "decompiled/Foo.txt", "game.JAR", "capture.jfr", "source/Foo.java"]:
+        for path in [".local/minecraft/source.java", "decompiled/Foo.txt", "game.JAR", "capture.jfr", "source/Foo.java",
+                     "fixtures/26.3/horizon-data.bin"]:
             self.assertTrue(check_public_tree.prohibited(path), path)
         for path in ["tools/lab.py", "crates/horizon-core/src/lib.rs", "Cargo.lock", "docs/analysis.md",
                      "mods/horizon/src/main/java/dev/horizonlab/HorizonLab.java",

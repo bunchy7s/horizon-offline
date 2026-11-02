@@ -10045,6 +10045,11 @@ impl Remote {
             }
         }
     }
+    /// How far the server sends chunks: its view distance and the ring
+    /// around (`ChunkTrackingView`), at least two.
+    pub(super) fn sent_radius(&self) -> i32 {
+        self.view_distance.max(2) + 1
+    }
     /// A player entity's profile name: the one it was created with, else its
     /// player-list entry's (an entity the list named after it spawned).
     fn level_player_name(&self, id: i32, uuid: &u128) -> Option<&str> {
