@@ -691,7 +691,9 @@ impl Game<'_> {
         );
     }
     /// `canUsePortal(false)` of a mob: alive, riding nothing, not asleep,
-    /// not carrying the player, and not a boss that never travels.
+    /// not carrying the player, not a boss that never travels, and — over
+    /// `Monster.canUsePortal` — not a creaking bound to a heart
+    /// (`Creaking.canUsePortal`).
     pub(super) fn mob_can_use_portal(&self, m: &horizon_client::mobs::Mob) -> bool {
         use horizon_client::mobs::Species;
         m.alive()
@@ -699,6 +701,7 @@ impl Game<'_> {
             && self.riding != Some(m.id)
             && (!self.guest_rides(m.id) || self.carries_riders())
             && m.species() != Species::Wither
+            && horizon_client::mobs::creaking::can_use_portal(m)
     }
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
     pub(super) fn tnt_can_use_portal(&self, id: u32) -> bool {
