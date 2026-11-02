@@ -519,4 +519,28 @@ impl Host for super::Game<'_> {
     fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
         self.native_entity_level(entity)
     }
+    fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        self.native_entity_velocity(entity)
+    }
+    fn entity_set_velocity(&mut self, entity: EntityRef, velocity: [f64; 3]) -> bool {
+        self.native_entity_set_velocity(entity, velocity)
+    }
+    fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
+        self.native_entity_on_ground(entity)
+    }
+    fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
+        self.native_entity_bounding_box(entity)
+    }
+    fn entity_eye_height(&self, entity: EntityRef) -> Option<f64> {
+        self.native_entity_eye_height(entity)
+    }
+    fn entity_eye_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        self.native_entity_eye_position(entity)
+    }
+    fn entity_view_vector(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        self.native_entity_view_vector(entity)
+    }
+    fn entity_distance_to_sqr(&self, entity: EntityRef, pos: [f64; 3]) -> Option<f64> {
+        self.native_entity_distance_to_sqr(entity, pos)
+    }
 }
