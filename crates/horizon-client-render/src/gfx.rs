@@ -5091,8 +5091,8 @@ impl Renderer {
             if self.detail_columns.remove(&(x, z)) == Some(complete) {
                 self.detail_revision += 1;
             }
-            self.occlusion.remove_column(x, z);
         }
+        self.occlusion.remove_columns(&gone);
         let kept = |key: &SectionKey| !gone.contains(&(key.0, key.2));
         let before = self.block_entities.len();
         self.block_entities.retain(|key, _| kept(key));
