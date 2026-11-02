@@ -2,8 +2,8 @@ ExperienceCommand.addExperience	port	crates/horizon-client/src/game/commands.rs:
 ExperienceCommand.setExperience	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	set branch; refuses points that do not fit the level; loop and feedback in cmd_experience
 ExperienceCommand.Type.<init>	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	per-unit (points or levels) keys chosen in cmd_experience
 ExperienceCommand.Type.queryResponse	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	query message built in the query branch of cmd_experience
-FetchProfileCommand.resolveName	missing		player: /fetchprofile name <name> always reports the profile as not found; no profile lookup
-FetchProfileCommand.resolveId	missing		player: /fetchprofile id <uuid> always reports the profile as not found; no profile lookup
+FetchProfileCommand.resolveName	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	the name lookup is queued on the profile resolver and answered on a later tick with commands.fetchprofile.name.success or .failure
+FetchProfileCommand.resolveId	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	the id is parsed with the selector's UUID reader and queued the same way, answered with commands.fetchprofile.id.success or .failure
 FetchProfileCommand.printForEntity	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	entity branch: player profile links; other entities get no_profile error
 FillBiomeCommand.register	port	crates/horizon-command/src/tree_world.rs::fillbiome	syntax of /fillbiome incl. replace filter
 FillBiomeCommand.quantize	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	quart snap (v >> 2) << 2 done in cmd_fillbiome
@@ -58,12 +58,12 @@ LootCommand.drop	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs:
 LootContextSources.ContextDecorator.createParams	port	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: keeps only the block and entity picks; no origin or this-entity loot params
 LootContextSources.ContextDecorator.createContext	inline	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: no LootContext is built
 MsgCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	msg literal with tell and w aliases
-OpCommand.register	missing		minor: no in-game /op literal; ops are set with the horizon-server CLI
+OpCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"op" reaches the op arm of cmd_profiles on a dedicated server: the entry joins the op list, the lists are synced and commands.op.success is said
 OpCommand.opPlayers	port	crates/horizon-server/src/lists.rs::run	gap: minor: CLI op only (ops.json); no in-game /op
-PardonCommand.register	missing		minor: no in-game /pardon literal
-PardonCommand.pardonPlayers	missing		minor: no pardon path; ban lists exist only as server files (horizon-server-files user_lists.rs)
-PardonIpCommand.register	missing		minor: no in-game /pardon-ip literal
-PardonIpCommand.unban	missing		minor: no pardon-ip path; ban lists exist only as server files
+PardonCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"pardon" reaches the pardon arm of cmd_profiles on a dedicated server
+PardonCommand.pardonPlayers	port	crates/horizon-client/src/game/commands/profiles.rs::Game::cmd_profiles	the profile leaves the ban list and commands.pardon.success is said; none banned gives commands.pardon.failed
+PardonIpCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"pardon-ip" is dispatched to cmd_ip_bans, next to "ban-ip"
+PardonIpCommand.unban	port	crates/horizon-client/src/game/commands/profiles.rs::Game::cmd_ip_bans	the address leaves the ip ban list with commands.pardonip.success; a target that is not an address gives commands.pardonip.invalid and one that is not banned commands.pardonip.failed
 ParticleCommand.register	port	crates/horizon-command/src/tree_world.rs::particle	particle syntax with viewers, force and normal; execution in cmd_particle
 PerfCommand.register	skip:server		profiler for the dedicated server; not a game behaviour
 PerfCommand.startProfilingDedicatedServer	skip:server		profiler for the dedicated server; not a game behaviour
