@@ -5332,6 +5332,14 @@ impl Renderer {
             && self.native.is_none()
     }
 
+    /// Whether the eyes render type's layers may be posed on the GPU too
+    /// (`mobs::skin::SkinModels::eyes`): only with improved transparency off,
+    /// where they are ordinary entity quads. On, `EntityBatch` sorts them into
+    /// its stages by the CPU vertices' `OIT_ENTITY` tag.
+    pub fn skins_eyes(&self) -> bool {
+        self.skins_entities() && !self.improved_transparency
+    }
+
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
@@ -5351,7 +5359,8 @@ impl Renderer {
         self.world_post.upscale = if taa { upscale.clamp(1.0, 4.0) } else { 1.0 };
     }
     /// Runs `post` over the world from now on (`None`: no pack), for the dimension `dimension`;
-    /// `block_ids` gives each block sprite layer's `mc_Entity` (id, fluid) pair.
+    /// `block_ids` gives each block sprite layer's `mc_Entity` (id, fluid) and `at_midBlock.w`
+    /// (its block's light), three values a layer.
     /// Returns the programs that run and the notes of loading them.
     pub fn set_shader_pack(
         &mut self,
@@ -7002,7 +7011,11 @@ impl Renderer {
         let additive_quads = (frame.additive.len() / 4) as u32 - self.entity_batch.moved_additive;
         let see_through_quads = (frame.see_through.len() / 4) as u32;
         let shadow_only_quads = (frame.shadow_only.len() / 4) as u32;
-        let entity_vertices = u64::from(posed) + all_entities.len() as u64;
+        // Glowing entities' silhouettes posed on the GPU go last, past every
+        // material (the outline pass draws them from there).
+        let outline_base = posed + all_entities.len() as u32;
+        let outlined = skin.map_or(0, |s| s.outline_vertices);
+        let entity_vertices = u64::from(outline_base) + u64::from(outlined);
         if entity_vertices > self.entity_capacity {
             self.entity_capacity = entity_vertices.next_power_of_two();
             self.entity_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -7028,6 +7041,7 @@ impl Renderer {
                 skin,
                 &self.entity_buffer,
                 0,
+                outline_base,
             );
         }
         let static_sections = frame.static_block_entities;
@@ -7154,6 +7168,7 @@ impl Renderer {
             &mut self.uploads,
             &mut encoder,
             frame.glowing,
+            (outline_base, outlined / 4),
             [self.config.width, self.config.height],
         );
         if let Some((rotation, brightness)) = frame.stars {
@@ -7185,7 +7200,8 @@ impl Renderer {
                     lightning::QUADS
                 })
                 .max(weather_quads)
-                .max(frame.glowing.len() as u32 / 4);
+                .max(frame.glowing.len() as u32 / 4)
+                .max(outlined / 4);
         if max_quads > self.index_quads {
             self.index_quads = max_quads.next_power_of_two();
             self.indices = Self::quad_indices(&self.device, self.index_quads);
@@ -9074,6 +9090,7 @@ impl Renderer {
             view_target,
             &self.entity_group,
             &self.indices,
+            &self.entity_buffer,
             timing.as_mut(),
         );
         // The world icon grabs here: after the level and the hand, before

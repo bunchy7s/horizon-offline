@@ -860,17 +860,23 @@ fn generate(root: &Path, check: bool) -> Result<(), String> {
             "/// What [`{trait_name}::{name}`] is told. Fields may be added: the struct is `#[non_exhaustive]`.\n#[non_exhaustive]\npub struct {event_type}{generics} {{\n{fields}}}\n"
         ));
         let build = format!("let mut {event} = {event_type} {{ {} }};", inits.join(", "));
+        // A trait mod's call is marked with the mod for a panic to name; render hooks are called bare.
+        let each = if is_render {
+            mod_list.clone()
+        } else {
+            format!("super::entered({mod_list}, \"{name}\")")
+        };
         let body = match contract {
             "cancel" => format!(
-                "if *{o} {{ return; }} {build} for {mod_item} in {mod_list} {{ if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; break; }} }} {write_back}",
+                "if *{o} {{ return; }} {build} for {mod_item} in {each} {{ if matches!({mod_item}.{name}({invoke}), Flow::Cancel) {{ *{o} = true; break; }} }} {write_back}",
                 o = out.unwrap()
             ),
             "replace" => format!(
-                "if {o}.is_some() {{ return; }} {build} for {mod_item} in {mod_list} {{ if let Some({replacement}) = {mod_item}.{name}({invoke}) {{ *{o} = Some({replacement}); break; }} }} {write_back}",
+                "if {o}.is_some() {{ return; }} {build} for {mod_item} in {each} {{ if let Some({replacement}) = {mod_item}.{name}({invoke}) {{ *{o} = Some({replacement}); break; }} }} {write_back}",
                 o = out.unwrap()
             ),
             _ => format!(
-                "{build} for {mod_item} in {mod_list} {{ {mod_item}.{name}({invoke}); }} {write_back}"
+                "{build} for {mod_item} in {each} {{ {mod_item}.{name}({invoke}); }} {write_back}"
             ),
         };
         dispatch.push_str(&format!(
@@ -1153,6 +1159,19 @@ mod tests {
         ));
     }
     use generated::*;
+    thread_local! {
+        /// The hooks each dispatch entered, a mod at a time.
+        static ENTERED: std::cell::RefCell<Vec<(usize, &'static str)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    fn entered<'a>(
+        mods: &'a [Box<dyn Hooks>],
+        hook: &'static str,
+    ) -> impl Iterator<Item = &'a Box<dyn Hooks>> {
+        mods.iter().enumerate().map(move |(index, hooks)| {
+            ENTERED.with(|entered| entered.borrow_mut().push((index, hook)));
+            hooks
+        })
+    }
     struct Mod {
         id: u32,
         calls: Arc<Mutex<Vec<u32>>>,
@@ -1327,6 +1346,9 @@ mod tests {
         dispatch_mouse_button_pre(&mut TestHost, &mods, 0, true, 0, &mut canceled);
         assert!(canceled);
         assert_eq!(*calls.lock().unwrap(), [1]);
+        // Each call is entered under the hook's name; the cancelled one's is the last.
+        let entered = ENTERED.with(|entered| entered.take());
+        assert_eq!(entered, [(0, "mouse_button_pre")]);
     }
 
     #[test]
@@ -1649,16 +1671,23 @@ mod tests {
             "native_item_damaged: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
         );
         assert_eq!(std::fs::read_to_string(&hooks).unwrap(), placeholder);
-        let fragment = root.join("tools/native-hook-fragments/native_item_damaged.json");
-        let shipped_fragment = std::fs::read_to_string(&fragment).unwrap();
-        let mut json: Value = serde_json::from_str(&shipped_fragment).unwrap();
-        json["hooks"][0].as_object_mut().unwrap().remove("mod_api");
-        std::fs::write(&fragment, json.to_string()).unwrap();
+        // A stamped hook lives in the catalog, not in a fragment.
+        let catalog_path = root.join("native-hooks.json");
+        let shipped_catalog = std::fs::read_to_string(&catalog_path).unwrap();
+        let mut json: Value = serde_json::from_str(&shipped_catalog).unwrap();
+        let hook = json["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|hook| hook["name"] == "item_damaged")
+            .unwrap();
+        hook.as_object_mut().unwrap().remove("mod_api").unwrap();
+        std::fs::write(&catalog_path, json.to_string()).unwrap();
         assert_eq!(
             super::generate(&root, false).unwrap_err(),
             "hook item_damaged has no mod_api entry: add one"
         );
-        std::fs::write(&fragment, shipped_fragment).unwrap();
+        std::fs::write(&catalog_path, shipped_catalog).unwrap();
         super::generate(&root, false).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");

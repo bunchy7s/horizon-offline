@@ -365,7 +365,7 @@ pub fn travel(m: &mut Mob, w: &MobWorld, input: Vec3, events: &mut Vec<MobEvent>
 /// `Allay.aiStep` / `tick`: healing, cooldowns, the hold and spin clocks.
 pub fn ai_step(m: &mut Mob) {
     if m.alive() && m.age.is_multiple_of(10) {
-        m.health = (m.health + 1.0).min(m.attrs.max_health);
+        m.heal(1.0);
     }
     for i in [2, 3] {
         if m.extra.ints[i] > 0 {
