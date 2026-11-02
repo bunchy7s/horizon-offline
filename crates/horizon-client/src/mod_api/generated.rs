@@ -3271,6 +3271,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// The item `item` of the server player `player` (`name`) broke in `slot`
+    /// (`mainhand`, `offhand`, `head`, `chest`, `legs`, `feet`, `body` or
+    /// `saddle`): `LivingEntity.onEquippedItemBroken`, Bukkit's
+    /// `PlayerItemBreakEvent`. Listen only; armour has a slot, not a hand.
+    /// The player's state is swapped in. Once for each break, on a server; a
+    /// creative player and the host of a LAN world are not heard.
+    /// @API:native_player_destroy_item@.
+    fn player_destroy_item(&self, host: &mut dyn Host, event: &mut PlayerDestroyItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A server player's fishing rod, with `state`: 0 the cast
     /// (`FishingRodItem.use` throwing the bobber), 1 a fish biting
     /// (`FishingHook.catchingFish`), 2 the reel-in of a bite, which gives the
@@ -10430,6 +10441,32 @@ pub fn dispatch_player_commands_sent(
     };
     for mod_hook in mods {
         mod_hook.player_commands_sent(host, &mut event);
+    }
+}
+/// What [`Hooks::player_destroy_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerDestroyItemEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+    pub slot: &'a str,
+}
+pub fn dispatch_player_destroy_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+    slot: &str,
+) {
+    let mut event = PlayerDestroyItemEvent {
+        player,
+        name,
+        item,
+        slot,
+    };
+    for mod_hook in mods {
+        mod_hook.player_destroy_item(host, &mut event);
     }
 }
 /// What [`Hooks::player_fish`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
