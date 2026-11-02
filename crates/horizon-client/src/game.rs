@@ -4164,7 +4164,7 @@ impl Game<'_> {
                 let mut extra_life = 0;
                 self.native_item_expire(item.id, &item.stack, &mut extra_life);
                 if extra_life > 0 {
-                    item.age = item.age.saturating_sub(extra_life as u32);
+                    item.age = item.age.saturating_sub(extra_life.min(32766));
                     alive = true;
                 }
             }

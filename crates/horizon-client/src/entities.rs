@@ -77,7 +77,7 @@ pub struct ItemEntity {
     pub previous: Vec3,
     pub velocity: Vec3,
     pub on_ground: bool,
-    pub age: u32,
+    pub age: i32,
     pub pickup_delay: u32,
     pub bob_offset: f32,
     /// `Entity.tickCount`: ticks since the item entered the level, which
@@ -99,8 +99,8 @@ pub struct ItemEnvironmentTick {
     pub lava_hurt: bool,
 }
 impl ItemEnvironmentTick {
-    pub fn should_play_lava_hurt_sound(&self, tick: u32) -> bool {
-        self.lava_hurt && (!self.alive || tick.is_multiple_of(10))
+    pub fn should_play_lava_hurt_sound(&self, tick: i32) -> bool {
+        self.lava_hurt && (!self.alive || tick % 10 == 0)
     }
 }
 impl ItemEntity {
@@ -240,7 +240,10 @@ impl ItemEntity {
         // horizontal speed. The idle branch still runs bubble-column push
         // (`applyEffectsFromBlocksForLastMovements`), so lift builds up and
         // the item moves on the next wake-up (#4558).
-        if !self.on_ground || horizontal > 1.0e-5 || (self.age + self.id).is_multiple_of(4) {
+        if !self.on_ground
+            || horizontal > 1.0e-5
+            || (self.age as u32).wrapping_add(self.id).is_multiple_of(4)
+        {
             let mut scene = SceneCollisions {
                 world,
                 binding: collision,
@@ -367,7 +370,9 @@ impl ItemEntity {
         if self.velocity.subtract(old_velocity).length_squared() > 0.01 {
             self.needs_sync = true;
         }
-        self.age += 1;
+        if self.age != i16::MIN as i32 {
+            self.age += 1;
+        }
         // ItemEntity.tick refreshes immersion after moving.
         self.update_fluids(world, fluids);
         self.age < 6000 && self.position.y > -128.0
@@ -454,8 +459,11 @@ impl ItemEntity {
     }
     /// `ItemEntity.isMergable` at `age`: a stack below its size whose pickup
     /// delay isn't infinite, before its lifetime ends.
-    fn mergeable(&self, age: u32, max_stack: u32) -> bool {
-        self.pickup_delay != u32::MAX && age < 6000 && self.stack.count < max_stack
+    fn mergeable(&self, age: i32, max_stack: u32) -> bool {
+        self.pickup_delay != u32::MAX
+            && age != i16::MIN as i32
+            && age < 6000
+            && self.stack.count < max_stack
     }
 }
 /// The boxes that stop a dropped item (boats, minecarts, shulkers, a held-still happy ghast),
@@ -591,7 +599,7 @@ pub fn merge_with_neighbours(
     max_stack: &dyn Fn(&ItemStack) -> u32,
 ) {
     let age = |items: &[ItemEntity], j: usize| {
-        if j == i {
+        if j == i && items[j].age != i16::MIN as i32 {
             items[j].age - 1
         } else {
             items[j].age
@@ -635,7 +643,7 @@ pub fn merge_with_neighbours(
         let to_item = &mut items[to];
         to_item.pickup_delay = to_item.pickup_delay.max(delay);
         // This item's age goes up once its tick ends.
-        to_item.age = to_age.min(from_age) + u32::from(to == i);
+        to_item.age = to_age.min(from_age) + i32::from(to == i);
         if items[from].stack.count == 0 {
             removed[from] = true;
             cells.remove(from, items[from].position);
@@ -1632,7 +1640,7 @@ mod armor_stand_render_tests {
 mod merge_tests {
     use super::*;
 
-    fn item(id: &str, count: u32, x: f64, age: u32) -> ItemEntity {
+    fn item(id: &str, count: u32, x: f64, age: i32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
             no_gravity: false,

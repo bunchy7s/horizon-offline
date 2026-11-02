@@ -766,7 +766,7 @@ impl Game<'_> {
             // `ItemEntity.tick` moves 1 of 4 ticks while resting (age was
             // counted already); `checkInsideBlocks` only follows a move.
             let moved = item.position != item.previous
-                || (item.age.wrapping_sub(1).wrapping_add(item.id)).is_multiple_of(4);
+                || ((item.age as u32).wrapping_sub(1).wrapping_add(item.id)).is_multiple_of(4);
             if !moved || item.stack.count == 0 {
                 i += 1;
                 continue;

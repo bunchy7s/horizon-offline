@@ -5557,8 +5557,8 @@ impl Game<'_> {
     /// A dropped item reaches its lifetime on the server (`ItemEntity.tick`,
     /// NeoForge's `ItemExpireEvent`). Every mod may set or add to `extra_life`,
     /// in ticks, which starts at zero; a positive total keeps the item that much
-    /// longer, zero or less lets it expire. Because Horizon stores age unsigned,
-    /// an extension is capped at the current age. @API:item_expire@.
+    /// longer, zero or less lets it expire. Extensions are capped at 32766
+    /// ticks. @API:item_expire@.
     pub(super) fn native_item_expire(
         &mut self,
         entity: u32,
