@@ -183,6 +183,7 @@ mod maps;
 mod minecarts;
 mod mob_blocks;
 mod mob_gear;
+mod mob_index;
 mod mob_looting;
 mod mob_sounds;
 mod mod_api_host;
@@ -2348,6 +2349,10 @@ struct Game<'a> {
     entity_spans: std::cell::RefCell<Vec<horizon_client::gfx::pack_draw::EntitySpan>>,
     /// Which entity this frame's entity vertices belong to (`Frame::entity_motion`).
     entity_motion: std::cell::RefCell<Vec<(u32, u64)>>,
+    /// Mob models posed on the GPU (`Frame::skin`, `mobs::skin`): the models stored there,
+    /// and this frame's draws.
+    skin_models: std::cell::RefCell<horizon_client::mobs::skin::SkinModels>,
+    skin_frame: std::cell::RefCell<horizon_client::gfx::entity_skin::SkinFrame>,
     /// The glowing entities' silhouettes this frame (game/glowing.rs).
     glowing_vertices: std::cell::RefCell<Vec<Vertex>>,
     /// The shader pack's entity and block entity ids, while one draws entities.
@@ -2444,6 +2449,8 @@ struct Game<'a> {
     /// player's own (taken by `update_world`).
     spawn_wait: Vec<(i32, i32)>,
     mobs: Vec<Mob>,
+    /// `mobs` by network id, for the packets that name one (`game/mob_index.rs`).
+    mob_index: mob_index::MobIndex,
     creatures: creatures::Creatures,
     sculk: sculk::SculkState,
     raiding: raids::Raiding,
@@ -15623,6 +15630,7 @@ impl Game<'_> {
         let entity_motion = std::mem::take(self.entity_motion.get_mut());
         let glowing = std::mem::take(self.glowing_vertices.get_mut());
         let shadow_only = std::mem::take(self.shadow_only_vertices.get_mut());
+        let skin = std::mem::take(self.skin_frame.get_mut());
         let frame = Frame {
             weather: &weather,
             weather_time: horizon_client::weather::Time::new(self.world.game_time, alpha as f32),
@@ -15709,6 +15717,7 @@ impl Game<'_> {
             static_block_entity_stats,
             entity_motion: &entity_motion,
             entity_spans: &entity_spans,
+            skin: skin.pending().then_some(&skin),
             glowing: &glowing,
             dynamic_lights: &self.dynamic_lights,
             colored_lights: &colored_lights,
@@ -15789,6 +15798,18 @@ impl Game<'_> {
         *self.entity_motion.get_mut() = entity_motion;
         *self.glowing_vertices.get_mut() = glowing;
         *self.shadow_only_vertices.get_mut() = shadow_only;
+        let mut skin = skin;
+        // The renderer took the new models when its store grew by them; otherwise they stay
+        // pending, or the stores restart (`SkinModels::begin`).
+        if self
+            .renderer
+            .as_ref()
+            .and_then(|r| r.skinned_models())
+            .is_some_and(|stored| stored == skin.base + skin.new_model.len() as u32)
+        {
+            skin.handed();
+        }
+        *self.skin_frame.get_mut() = skin;
         self.see_through_vertices = see_through;
         result
     }
@@ -18341,6 +18362,8 @@ impl<'a> Game<'a> {
             shadow_only_vertices: Default::default(),
             entity_spans: Default::default(),
             entity_motion: Default::default(),
+            skin_models: Default::default(),
+            skin_frame: Default::default(),
             glowing_vertices: Default::default(),
             pack_ids: None,
             health_hud: hud_layout::HealthHud::default(),
@@ -18402,6 +18425,7 @@ impl<'a> Game<'a> {
             player_spawn: None,
             spawn_wait: Vec::new(),
             mobs: Vec::new(),
+            mob_index: Default::default(),
             creatures: Default::default(),
             sculk: Default::default(),
             raiding: Default::default(),
@@ -20037,6 +20061,7 @@ fn loading_frame(hud: &HudBatch) -> Frame<'_> {
         static_block_entity_stats: Default::default(),
         entity_motion: &[],
         entity_spans: &[],
+        skin: None,
         glowing: &[],
         dynamic_lights: &[],
         colored_lights: &[],

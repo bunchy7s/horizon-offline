@@ -483,12 +483,22 @@ impl Game<'_> {
             }
             _ => None,
         });
+        // Entity.shouldRenderAtSqrDistance for the item's 0.25 box: 16 blocks
+        // times the view scale (32 at render distance 16), from its current
+        // position. A pickup particle is not an entity and keeps 64 blocks.
+        let range =
+            super::entity_culling::default_range(glam::DVec3::splat(0.25), self.view_scale());
         for (item, at, partial, entity) in live.chain(taken) {
             let entity_start = out.len();
             self.mark_motion(entity_start, (2 << 32) | u64::from(item.id));
             let q = item.position;
             let pos = glam::DVec3::from_array(at) - camera;
-            if pos.length_squared() > 64.0 * 64.0 {
+            let far = if entity {
+                (glam::DVec3::new(q.x, q.y, q.z) - camera).length_squared() >= range * range
+            } else {
+                pos.length_squared() > 64.0 * 64.0
+            };
+            if far {
                 continue;
             }
             // EntityRenderer.shouldRender: the item's 0.25 box, grown by 0.5,
