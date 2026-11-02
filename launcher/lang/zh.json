@@ -881,5 +881,9 @@
   "Shader pack · off": "光影包 · 关闭",
   "1 pack in {name}": "{name} 中有 1 个包",
   "{count} packs in {name}": "{name} 中有 {count} 个包",
-  "No resource packs. Find them on the Mods page under Modrinth.": "没有资源包。可以在“模组”页面的 Modrinth 中查找。"
+  "No resource packs. Find them on the Mods page under Modrinth.": "没有资源包。可以在“模组”页面的 Modrinth 中查找。",
+  "No mods in {name} yet.": "{name} 中还没有模组。",
+  "1 mod in {name}": "{name} 中有 1 个模组",
+  "{count} mods in {name}": "{name} 中有 {count} 个模组",
+  "Find mods": "查找模组"
 }

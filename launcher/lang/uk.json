@@ -881,5 +881,9 @@
   "Shader pack · off": "Набір шейдерів · вимк.",
   "1 pack in {name}": "1 набір у {name}",
   "{count} packs in {name}": "Наборів у {name}: {count}",
-  "No resource packs. Find them on the Mods page under Modrinth.": "Наборів ресурсів немає. Їх можна знайти на сторінці «Моди» в розділі Modrinth."
+  "No resource packs. Find them on the Mods page under Modrinth.": "Наборів ресурсів немає. Їх можна знайти на сторінці «Моди» в розділі Modrinth.",
+  "No mods in {name} yet.": "У {name} поки немає модів.",
+  "1 mod in {name}": "1 мод у {name}",
+  "{count} mods in {name}": "Модів у {name}: {count}",
+  "Find mods": "Знайти моди"
 }

@@ -57,10 +57,7 @@ impl Launcher {
         // The open tab's own buttons head its body, at the right.
         let (actions, body): (Option<Div>, Option<AnyElement>) = match open {
             HomeTab::Overview => (None, Some(self.glass_overview(rows, cx).into_any_element())),
-            HomeTab::Mods => {
-                let (actions, body) = self.instance_mods_tab(cx);
-                (Some(actions), Some(body.into_any_element()))
-            }
+            HomeTab::Mods => (None, Some(self.glass_instance_mods(cx).into_any_element())),
             HomeTab::Worlds => (
                 None,
                 self.glass_worlds(cx).map(IntoElement::into_any_element),

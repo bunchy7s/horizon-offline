@@ -881,5 +881,9 @@
   "Shader pack · off": "シェーダーパック · オフ",
   "1 pack in {name}": "{name} のパック 1 件",
   "{count} packs in {name}": "{name} のパック {count} 件",
-  "No resource packs. Find them on the Mods page under Modrinth.": "リソースパックがありません。Mods ページの Modrinth で探せます。"
+  "No resource packs. Find them on the Mods page under Modrinth.": "リソースパックがありません。Mods ページの Modrinth で探せます。",
+  "No mods in {name} yet.": "{name} にはまだ Mod がありません。",
+  "1 mod in {name}": "{name} の Mod 1 件",
+  "{count} mods in {name}": "{name} の Mod {count} 件",
+  "Find mods": "Mod を探す"
 }
