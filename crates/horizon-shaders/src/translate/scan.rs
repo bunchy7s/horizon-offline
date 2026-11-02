@@ -59,6 +59,8 @@ pub(super) struct Stage<'p> {
     pub(super) inverse: bool,
     /// The stage calls `textureGatherOffsets`, which naga lacks: ours is in the prelude.
     pub(super) gather_offsets: bool,
+    /// The stage calls `textureQueryLod`, which naga lacks: ours is in the prelude.
+    pub(super) query_lod: bool,
     /// The stage calls `dot` / `normalize` and defines neither: the scalar overloads GLSL has
     /// (`dot(float, float)`, `normalize(float)`) and naga lacks go in the prelude.
     pub(super) scalar_dot: bool,
@@ -261,6 +263,7 @@ impl<'p> Stage<'p> {
             out_copies: Vec::new(),
             inverse: false,
             gather_offsets: false,
+            query_lod: false,
             scalar_dot: false,
             scalar_normalize: false,
             sampler_functions: HashMap::new(),
@@ -311,6 +314,7 @@ impl<'p> Stage<'p> {
                 }
                 "gl_FragCoord" => s.frag_coord = true,
                 "textureGatherOffsets" => s.gather_offsets = true,
+                "textureQueryLod" => s.query_lod = true,
                 "dot" | "normalize" => {
                     // A definition at the top level: `float dot(float a, ...)`.
                     let defines = depth == 0
@@ -356,6 +360,11 @@ impl<'p> Stage<'p> {
             s.sampler_functions
                 .entry("textureGatherOffsets".into())
                 .or_insert_with(|| vec![true, false, false, false, false]);
+        }
+        if s.query_lod {
+            s.sampler_functions
+                .entry("textureQueryLod".into())
+                .or_insert_with(|| vec![true, false]);
         }
         s
     }
