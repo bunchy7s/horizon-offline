@@ -6,7 +6,8 @@
 use crate::entity_rules::EntityRules;
 use crate::mobs::Who;
 use horizon_core::{
-    geometry::{Aabb, Vec3},
+    geometry::{Aabb, Direction, Vec3},
+    position::BlockPos,
     random::RandomSource,
 };
 
@@ -257,6 +258,37 @@ pub trait ProjectileWorld {
     fn solid(&self, _p: [i32; 3]) -> bool {
         false
     }
+}
+/// `CollisionGetter.clipIncludingBorder` over a block clip's result: a ray
+/// from inside the world border whose hit (or end, on a miss) lies outside it
+/// stops on the border instead, at `WorldBorder.clampVec3ToBound` of that
+/// point, facing `Direction.getApproximateNearest` of the travel. `bounds` is
+/// the border's [minX, minZ, maxX, maxZ].
+pub fn clip_including_border(
+    hit: Option<(Vec3, [i32; 3], [i32; 3])>,
+    from: Vec3,
+    to: Vec3,
+    bounds: [f64; 4],
+) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+    let [min_x, min_z, max_x, max_z] = bounds;
+    // WorldBorder.isWithinBounds(x, z): the far edges are outside.
+    let within = |p: Vec3| p.x >= min_x && p.x < max_x && p.z >= min_z && p.z < max_z;
+    let end = hit.map_or(to, |h| h.0);
+    if !within(from) || within(end) {
+        return hit;
+    }
+    // Mth.clamp, up to 1.0E-5F inside the far edges.
+    let clamp = |v: f64, low: f64, high: f64| if v < low { low } else { v.min(high) };
+    let inset = f64::from(1.0e-5_f32);
+    let at = Vec3::new(
+        clamp(end.x, min_x, max_x - inset),
+        end.y,
+        clamp(end.z, min_z, max_z - inset),
+    );
+    let face =
+        Direction::approximate_nearest(Vec3::new(end.x - from.x, end.y - from.y, end.z - from.z));
+    let pos = BlockPos::containing(at);
+    Some((at, [pos.x, pos.y, pos.z], face.normal()))
 }
 /// Direction steps by 3D data value: down, up, north, south, west, east.
 pub const STEPS: [[i32; 3]; 6] = [
