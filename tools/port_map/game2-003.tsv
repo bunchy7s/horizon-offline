@@ -74,6 +74,7 @@ Creaking.checkEyeBlink	inline	crates/horizon-client/src/mobs/creaking.rs::animat
 Creaking.knockback	port	crates/horizon-client/src/mobs.rs::Mob::knockback	
 Creaking.CreakingPathNavigation.createPathFinder	missing		no home-distance node evaluator: `m.extra.home` is read for damage, tearing down and the save, never by the pathfinder
 Creaking.HomeNodeEvaluator.getPathType	missing		no node is marked blocked for being more than 32 blocks from the heart
+Creaking.getHurtSound	port	crates/horizon-client/src/mobs/ai.rs::voice_sounds	the sway while it is bound to a heart, `Monster.getHurtSound` (the hostile hurt) otherwise
 CreakingAi.initCoreActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	core swim, look-at-target and move sink
 CreakingAi.initIdleActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	idle: attack active creakings, look sometimes, stroll, look-walk or do nothing
 CreakingAi.initFightActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	fight: walk to target, melee on a 40 tick cooldown, stop when unreachable
