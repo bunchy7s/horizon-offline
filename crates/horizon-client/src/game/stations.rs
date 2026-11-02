@@ -932,13 +932,16 @@ impl Game<'_> {
             match &*name {
                 "minecraft:anvil" => {
                     let _ = self.set_state_named(pos, "minecraft:chipped_anvil", &["facing"]);
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:chipped_anvil");
                 }
                 "minecraft:chipped_anvil" => {
                     let _ = self.set_state_named(pos, "minecraft:damaged_anvil", &["facing"]);
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:damaged_anvil");
                 }
                 _ => {
                     let _ = self.world.set(pos[0], pos[1], pos[2], self.world.air);
                     self.world.modified.insert((pos[0] >> 4, pos[2] >> 4));
+                    self.native_anvil_damaged(self.dim.id(), pos, &name, "minecraft:air");
                     self.level_event_at(1029, pos, 0);
                     return true;
                 }
@@ -1392,15 +1395,7 @@ impl Game<'_> {
                 }
                 let (col, row) = (code % 16, code / 16);
                 let (cx, cy) = (px + col * cell, py + row * cell);
-                let mut used = 0;
-                for dx in (0..cell).rev() {
-                    if (0..cell).any(|dy| {
-                        atlas.pixels[(((cy + dy) * atlas.width + cx + dx) * 4 + 3) as usize] != 0
-                    }) {
-                        used = dx + 1;
-                        break;
-                    }
-                }
+                let used = u32::from(atlas.galactic_widths[code as usize]);
                 let advance = (used as f32 * 8.0 / cell as f32 + 0.5).floor() + 1.0;
                 if cursor + advance - x > max {
                     break;
@@ -2910,15 +2905,32 @@ impl Game<'_> {
         let Some(BlockEntity::Brewing(b)) = self.world.block_entities.get_mut(&pos) else {
             return Ok(());
         };
+        let was_idle = b.brew_time <= 0;
+        let was_unfueled = b.fuel <= 0;
+        let fuel_item = was_unfueled
+            .then(|| b.items[4].as_ref().map(|s| s.item.clone()))
+            .flatten();
         let out = b.tick(
             &world_stations!(self).brewing,
             world_items!(self),
             self.res.providers(),
         );
+        let consumed_fuel = was_unfueled && b.fuel > 0;
+        let started = was_idle && b.brew_time > 0;
+        let ingredient = started.then(|| b.ingredient.clone()).flatten();
+        if consumed_fuel && let Some(item) = fuel_item {
+            let (x, y, z) = pos;
+            self.native_brewing_fuel([x, y, z], &item);
+        }
+        if let Some(ingredient) = ingredient {
+            let (x, y, z) = pos;
+            self.native_brewing_start([x, y, z], &ingredient);
+        }
         if out != brewing::BrewTick::default() {
             let (x, y, z) = pos;
             self.world.modified.insert((x >> 4, z >> 4));
             if out.brewed {
+                self.native_brewing_complete([x, y, z]);
                 self.play_at("minecraft:block.brewing_stand.brew", [x, y, z], 1.0, 1.0);
             }
             for d in out.drops {

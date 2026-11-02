@@ -9,7 +9,10 @@ use std::time::Duration;
 /// moment, with why), a question its controller answers, and notices nobody has to answer.
 #[derive(Default)]
 pub(in crate::game) struct Hud {
+    pub(in crate::game) menu: bool,
     pub(super) badge: Option<String>,
+    /// The badge's name stays (P1's Setup, Names); off, it shows only with a place.
+    pub(super) names: bool,
     pub(super) place: Option<(String, Instant)>,
     pub(super) prompt: Option<Prompt>,
     pub(super) notice: Option<Notice>,
@@ -77,9 +80,14 @@ pub(super) fn lost_prompt(name: &str) -> Prompt {
 }
 
 impl Game<'_> {
-    /// Another player's pause menu opens its profiles to switch identity.
+    /// P1 opens Setup; another player opens profiles to switch identity.
     pub(in crate::game) fn open_split_settings(&mut self) {
-        self.open_options_at(false, horizon_client::options_ui::Page::SplitProfiles);
+        let page = if self.options.split_guest {
+            horizon_client::options_ui::Page::SplitProfiles
+        } else {
+            horizon_client::options_ui::Page::SplitSetup
+        };
+        self.open_options_at(false, page);
     }
 
     /// Splitscreen over this player's view, above the other toasts (`ToastManager`'s slots).
@@ -93,8 +101,11 @@ impl Game<'_> {
         // The badge, top left: who, and a moment where. F1 hides it with the rest of the HUD.
         if let (false, Some(badge)) = (hidden, &self.split_hud.badge) {
             let place = self.split_hud.place.as_ref();
-            if let Some((place, _)) = place.filter(|(_, until)| Instant::now() < *until) {
-                let text = format!("{badge} · {place}");
+            let text = match place.filter(|(_, until)| Instant::now() < *until) {
+                Some((place, _)) => Some(format!("{badge} · {place}")),
+                None => self.split_hud.names.then(|| badge.clone()),
+            };
+            if let Some(text) = text {
                 batch.text(atlas, &text, 2.0, 2.0, rgba(255, 255, 255, 230), true);
             }
         }

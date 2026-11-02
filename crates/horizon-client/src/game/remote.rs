@@ -493,6 +493,9 @@ pub(super) struct Remote {
     predictions: HashMap<[i32; 3], (i32, i32)>,
     /// Open container: (window id, menu name).
     pub(super) menu: Option<(i32, String)>,
+    /// The crafting result slot of the open menu as the server last set it
+    /// (`CraftingMenu.slotChangedCraftingGrid`): the client never computes it.
+    pub(super) craft_result: Option<ItemStack>,
     /// The open menu's title as the server named it, with its styles.
     pub(super) menu_title: Option<horizon_client::text::Text>,
     state_id: i32,
@@ -984,6 +987,7 @@ impl Game<'_> {
             sent_info: info,
             predictions: HashMap::new(),
             menu: None,
+            craft_result: None,
             menu_title: None,
             state_id: 0,
             use_target: None,
@@ -2828,7 +2832,14 @@ impl Game<'_> {
             return;
         };
         if internal == 200 {
-            return; // the result slot is recomputed from the grid
+            // ClientboundContainerSetSlotPacket for the open menu's slot 0: the
+            // server's result of its own recipes (a world's data packs' too).
+            if container == self.remote_menu().0
+                && let Some(r) = self.remote.as_mut()
+            {
+                r.craft_result = item;
+            }
+            return;
         }
         let slot = self.slot_mut(internal);
         let changed = !super::hand::matches_for_swap(slot.as_ref(), item.as_ref());
@@ -5522,6 +5533,7 @@ impl Game<'_> {
 
     fn tick_remote_level(&mut self) -> Result<()> {
         self.ticks += 1;
+        self.repro_tick();
         // Hud.tick ends with ChatComponent.tick.
         self.ui.chat.tick(&self.gui.atlas, self.ticks);
         self.tick_sign_editor();
@@ -7711,18 +7723,24 @@ impl Game<'_> {
         };
         let target = self.bucket_target(content, &hit);
         let pos = horizon_core::position::BlockPos::new(target[0], target[1], target[2]);
+        let [x, y, z] = hit.beside();
+        let beside = Some(horizon_core::position::BlockPos::new(x, y, z));
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
         let creative = self.creative;
-        // A water bucket on a liquid container fills it server-side only.
-        let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let client_change =
-            !(content.is_water() && self.res.behaviours().is_liquid_container(clicked));
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
-            let emptied =
-                b.bucket_empty(&mut level, ticks, pos, content, sound, sneaking, creative);
+            let emptied = b.bucket_empty(
+                &mut level, ticks, pos, beside, content, sound, sneaking, creative,
+            );
+            // Water poured into a liquid container (where it went, which may
+            // be the block beside a refusing one) fills it server-side only.
+            let client_change = !(content.is_water()
+                && emptied.is_some_and(|at| {
+                    use horizon_world::level::LevelAccess as _;
+                    b.is_liquid_container(level.block_state(at))
+                }));
             (
-                emptied,
+                emptied.is_some(),
                 client_change.then(|| level.changed.into_iter().collect()),
                 std::mem::take(&mut level.sounds),
             )
@@ -8813,6 +8831,20 @@ impl Game<'_> {
         self.send_clicks(container, sent);
     }
     fn send_clicks(&mut self, container: i32, clicks: Vec<Predicted>) {
+        // A result the engine claims to have changed is the one the server
+        // agrees to (`click_agreed`), so it sends none: keep it. A result the
+        // engine doesn't claim (a recipe it doesn't know) the server sends.
+        if matches!(
+            self.remote_menu().1.as_str(),
+            "inventory" | "minecraft:crafting"
+        ) && let Some(r) = self.remote.as_mut()
+        {
+            for (.., changed, _) in &clicks {
+                if let Some((_, result)) = changed.iter().find(|(slot, _)| *slot == 0) {
+                    r.craft_result = result.clone();
+                }
+            }
+        }
         let state = self.remote.as_ref().map_or(0, |r| r.state_id);
         let hashed = |g: &Self, s: &Option<ItemStack>| g.hashed_stack(s);
         for (slot, button, input, changed, carried) in clicks {
@@ -8921,6 +8953,7 @@ impl Game<'_> {
         if let Some(r) = self.remote.as_mut() {
             r.menu = None;
             r.menu_title = None;
+            r.craft_result = None;
         }
         self.mount_menu_reset();
         // The client's menu has no level access: what it holds is the server's.

@@ -2049,6 +2049,12 @@ fn render_visible(
                 vertex.layer |= u32::from(EYES_TIER) << 16;
             }
         }
+        // The warden's heart and spots shine too, by how far their layers have faded in.
+        if layer.full_bright && m.species() == Species::Warden {
+            for vertex in &mut out[start..] {
+                vertex.layer |= u32::from(EYES_TIER) << 16;
+            }
+        }
     }
     // EnergySwirlLayer: the armour model, additive, scrolling over the sprite.
     if let Some((model, texture, x_offset)) = energy_swirl(m, s.age)
