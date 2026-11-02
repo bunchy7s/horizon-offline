@@ -1499,7 +1499,7 @@ impl Game<'_> {
                     num(points.len()),
                     float(centre_f[0]),
                     float(centre_f[1]),
-                    Text::literal(format!("{min_distance:.2}")),
+                    Text::literal(super::percent_f(min_distance, 2)),
                 ],
             ));
         }
@@ -1553,7 +1553,7 @@ impl Game<'_> {
                 num(points.len()),
                 float(centre_f[0]),
                 float(centre_f[1]),
-                Text::literal(format!("{average:.2}")),
+                Text::literal(super::percent_f(average, 2)),
             ],
         ));
         Ok(points.len() as i32)
