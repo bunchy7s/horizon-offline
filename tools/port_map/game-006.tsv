@@ -105,7 +105,7 @@ LivingEntity.createEquipmentSlotAccess	inline	crates/horizon-client/src/game/com
 LivingEntity.getEquipmentSlot	inline	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	slot names instead of the numeric ids 98, 99 and 100 and up
 LivingEntity.getSlot	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	for the player and mobs through /item
 LivingEntity.recreateFromPacket	port	crates/horizon-client/src/game/remote.rs::Game::spawn_entity	position, head yaw and movement of a server's mob
-LivingEntity.getPassengerRidingPosition	port	crates/horizon-client/src/mobs/riders.rs::seat	gap: minor: attachments are a table by species, not scaled by getScale and the age scale
+LivingEntity.getPassengerRidingPosition	port	crates/horizon-client/src/mobs/riders.rs::seat	gap: minor: attachments are a table by species, not scaled by the age scale
 LivingEntity.lerpHeadRotationStep	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_entities	head_lerps: 1/steps of the way to the target yaw
 LivingEntity.isInvulnerableTo	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	gap: minor: the invulnerable flag only; no enchantment damage immunity
 Mob.getMoveControl	port	crates/horizon-client/src/mobs/control.rs::Mob::move_control_tick	a mount is steered through riders.rs::drive
