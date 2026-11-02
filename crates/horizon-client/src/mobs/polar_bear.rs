@@ -163,6 +163,17 @@ pub fn client_tick(m: &mut Mob) {
 pub fn standing_scale(m: &Mob, partial: f32) -> f32 {
     m.anim.lerp(STAND, partial) / STAND_TICKS
 }
+/// The height factor of `PolarBear.getDefaultDimensions`: `1 +
+/// clientSideStandAnimation / 6` while the bear is rearing up, so a bear at
+/// full height has a box twice as tall as its resting one.
+pub fn stand_box_scale(m: &Mob) -> f32 {
+    let animation = m.anim.v[STAND];
+    if animation > 0.0 {
+        1.0 + animation / STAND_TICKS
+    } else {
+        1.0
+    }
+}
 
 /// `PolarBear.tick`: the stand animation, the warning sound's delay and
 /// `NeutralMob.updatePersistentAnger`.

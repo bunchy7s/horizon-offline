@@ -484,6 +484,13 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // PolarBear.getDefaultDimensions: the rear-up animation scales the box
+        // by (1, 1 + clientSideStandAnimation / 6), so a bear at full height is
+        // twice as tall, with its eyes twice as high and the same width.
+        if k.species == super::Species::PolarBear {
+            let f = super::polar_bear::stand_box_scale(self);
+            (h, e) = (h * f, e * f);
+        }
         (f64::from(w), f64::from(h), f64::from(e))
     }
     pub fn eye_height(&self) -> f64 {
