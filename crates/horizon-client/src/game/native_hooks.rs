@@ -3006,6 +3006,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, state, cancel);
     }
+    /// A sculk sensor or shrieker received a vibration for `event` at `pos`.
+    /// Set `cancel` to suppress its response. Server-side.
+    /// @API:native_block_receive_game@.
+    pub(super) fn native_block_receive_game(
+        &mut self,
+        dimension: &str,
+        pos: [i32; 3],
+        block: &str,
+        event: &str,
+        cancel: &mut bool,
+    ) {
+        let _ = (dimension, pos, block, event, cancel);
+    }
     /// A dispenser sheared `entity` of kind `kind` at the block in front of
     /// its own block at `pos`, after the shearing effects. Server-side.
     /// @API:native_block_shear_entity@.

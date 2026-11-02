@@ -869,6 +869,23 @@ impl Game<'_> {
         let (kind, radius) = (entity.kind, entity.listener_radius());
         let origin = block_of(info.pos);
         let distance = (dist_sqr(origin, key) as f64).sqrt() as f32;
+        let block = match kind {
+            SculkKind::Sensor => "minecraft:sculk_sensor",
+            SculkKind::Calibrated => "minecraft:calibrated_sculk_sensor",
+            SculkKind::Shrieker => "minecraft:sculk_shrieker",
+            SculkKind::Catalyst => "minecraft:sculk_catalyst",
+        };
+        let mut cancel = false;
+        self.native_block_receive_game(
+            self.dim.id(),
+            [key.0, key.1, key.2],
+            block,
+            info.event,
+            &mut cancel,
+        );
+        if cancel {
+            return Ok(());
+        }
         match kind {
             SculkKind::Sensor | SculkKind::Calibrated => {
                 let state = self.world.block(key.0, key.1, key.2);
