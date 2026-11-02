@@ -1591,7 +1591,7 @@ impl Mesher<'_> {
             None => ao,
         };
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let directional = if self.shader_pack_lighting {
+        let directional = if self.shader_pack_lighting || !q.shade {
             1.0
         } else {
             lighting::cardinal(self.nether_shading, shade_face)
