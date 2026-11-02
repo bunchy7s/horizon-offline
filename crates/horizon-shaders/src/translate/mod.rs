@@ -2190,6 +2190,27 @@ mod tests {
             .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
+    /// A stage's `#version` may come from a header it includes: the program is that version
+    /// (`shared` is a keyword in GLSL 4.30, not a name to rename).
+    #[test]
+    fn the_version_may_come_from_an_included_header() {
+        let csh = "#include \"/prelude/core.glsl\"\nlayout(local_size_x = 4) in;\n\
+                   shared uint counts[4];\nlayout(r32ui) uniform uimage2D colorimg4;\n\
+                   void main() {\n    counts[gl_LocalInvocationIndex] = 1u;\n    barrier();\n    \
+                   imageStore(colorimg4, ivec2(0), uvec4(counts[1]));\n}\n";
+        let pack = Pack::from_zip_bytes(
+            "P.zip",
+            zip(&[
+                ("shaders/deferred_a.csh", csh),
+                ("shaders/prelude/core.glsl", "#version 460 core\n"),
+            ]),
+        )
+        .unwrap();
+        let pp = preprocess(&pack, "deferred_a.csh", &Macros::standard());
+        assert_eq!(pp.version, Some((460, Some("core".into()))));
+        translate_compute(&pp).unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
     #[test]
     fn work_group_size_is_its_layout() {
         let csh = "#version 430\nlayout(local_size_x = 8, local_size_y = 4) in;\n\

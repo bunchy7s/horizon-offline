@@ -39,7 +39,8 @@ pub struct Preprocessed {
     pub lines: Vec<Origin>,
     /// The pack paths of the files read, the stage file first.
     pub files: Vec<String>,
-    /// `#version` of the stage file: the number and the profile word, if any.
+    /// The stage's `#version`, the first one read (an included file's too): the number and the
+    /// profile word, if any.
     pub version: Option<(u32, Option<String>)>,
     /// `#extension` lines of live code, as written after `#extension`.
     pub extensions: Vec<String>,
@@ -191,7 +192,8 @@ impl Run<'_> {
                     None => self.diagnose(origin, &format!("`{target}` is outside the pack")),
                 }
             }
-            "version" if depth == 0 && self.out.version.is_none() => {
+            // The first `#version`, also from an included file (a pack's common header).
+            "version" if self.out.version.is_none() => {
                 let mut words = rest.split_whitespace();
                 let number = words.next().and_then(|v| v.parse().ok()).unwrap_or(110);
                 self.out.version = Some((number, words.next().map(str::to_owned)));
