@@ -98,7 +98,8 @@ pub mod warden_brain;
 pub mod witch;
 pub mod wither;
 mod world;
-pub use world::visual_clip;
+pub use world::{TargetInfo, visual_clip};
+pub mod dragon_contacts;
 pub mod zombie_villager;
 
 use crate::{blocks::BlockFacts, mesher::Vertex, world::World};
@@ -2430,6 +2431,8 @@ pub struct MobWorld<'a> {
     /// player in the level stands, alive or not (the despawn distance).
     pub nearest_player: Option<Vec3>,
     pub others: &'a [Seen],
+    /// The separately simulated dragon, visible to revenge and melee goals.
+    pub dragon: Option<(u32, TargetInfo)>,
     /// The boats and rafts a lead can hang on (`Holder::Boat`): id and state.
     pub leash_boats: &'a [(u32, leash::HolderState)],
     /// `others` by position, when the caller keeps one (the mob ticks).

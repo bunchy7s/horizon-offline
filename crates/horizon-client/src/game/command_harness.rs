@@ -210,6 +210,12 @@ impl Game<'_> {
                         out.push('\n');
                     }
                 }
+                "mobs" => {
+                    // Observe authoritative AI state without a control-socket race.
+                    let record = self.harness_owner(|g| Ok(g.control_mobs(128.0)))?;
+                    out.push_str(&record.to_string());
+                    out.push('\n');
+                }
                 "tick" => {
                     self.chat_capture = Some(Vec::new());
                     for _ in 0..op["n"].as_u64().unwrap_or(1) {

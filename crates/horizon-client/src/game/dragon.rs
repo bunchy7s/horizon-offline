@@ -2095,6 +2095,27 @@ impl Game<'_> {
             set(d, 3 + i, x, y, z);
         }
     }
+    /// `Level.getEntity`: revenge goals must resolve the dragon too.
+    pub(super) fn dragon_target(&self) -> Option<(u32, horizon_client::mobs::TargetInfo)> {
+        let d = self.dragon.as_ref().filter(|d| d.alive())?;
+        let p = d.position;
+        Some((
+            d.id,
+            horizon_client::mobs::TargetInfo {
+                position: p,
+                eye_y: p.y + 6.8,
+                bounds: Aabb::new(
+                    Vec3::new(p.x - 8.0, p.y, p.z - 8.0),
+                    Vec3::new(p.x + 8.0, p.y + 8.0, p.z + 8.0),
+                ),
+                alive: true,
+                can_be_seen_as_enemy: true,
+                is_player: false,
+                creative: false,
+                passenger: false,
+            },
+        ))
+    }
     /// Wing knockback, head and neck damage, and breaking blocks in the way.
     fn dragon_contacts(&mut self) {
         let Some(d) = self.dragon.as_ref() else {
@@ -2137,6 +2158,35 @@ impl Game<'_> {
                         });
                     }
                 }
+            }
+        }
+        // EnderDragon.aiStep queries living entities, not only players.
+        if let Some(d) = self.dragon.as_ref() {
+            let frame = horizon_client::mobs::dragon_contacts::Frame {
+                dragon_id: d.id,
+                origin: d.position,
+                center: (bc, bz),
+                wings: wings.map(|w| {
+                    w.inflate(Vec3::new(4.0, 2.0, 4.0))
+                        .move_by(Vec3::new(0.0, -2.0, 0.0))
+                }),
+                heads: heads.map(|h| h.inflate(Vec3::new(1.0, 1.0, 1.0))),
+                sitting,
+                recently_hurt,
+            };
+            // Keep team lookup in Game (including tamed pets' owner teams).
+            let allowed: Vec<bool> = self
+                .mobs
+                .iter()
+                .map(|m| {
+                    horizon_client::scoreboard::teams_allow_damage(
+                        self.mob_team(d.id),
+                        self.mob_team_of(m),
+                    )
+                })
+                .collect();
+            for (mob, allowed) in self.mobs.iter_mut().zip(allowed) {
+                horizon_client::mobs::dragon_contacts::contact(mob, &frame, allowed);
             }
         }
         // checkWalls over head, neck and body.
