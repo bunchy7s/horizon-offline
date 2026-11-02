@@ -5,7 +5,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_inventory_move_item",
       "side": "server",
       "cancellable": true,
-      "neoforge": "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)"
+      "neoforge": "none (NeoForge has no such event; Bukkit's InventoryMoveItemEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ],
   "rust_summary": "A hopper moves an item between containers (`native_inventory_move_item`).",

@@ -4,7 +4,10 @@
       "name": "player_recipe_book_settings_change",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_recipe_book_settings_change",
       "neoforge": "none (NeoForge has no such event; Bukkit's PlayerRecipeBookSettingsChange)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player's recipe book settings changed (`native_player_recipe_book_settings_change`).",

@@ -4,7 +4,10 @@
       "name": "vault_loot",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_vault_loot",
       "side": "server",
-      "neoforge": "none (NeoForge has no such event; Bukkit's BlockDispenseLoot)"
+      "neoforge": "none (NeoForge has no such event; Bukkit's BlockDispenseLoot)",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A vault ejects a loot item (`native_vault_loot`).",

@@ -4,7 +4,10 @@
       "name": "player_bundle_item_select",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bundle_item_select",
       "neoforge": "none (NeoForge has no such event; Bukkit's PlayerBundleItemSelect)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server player selected an item in a bundle (`native_player_bundle_item_select`).",

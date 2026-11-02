@@ -4693,14 +4693,14 @@ impl Game<'_> {
     /// so helpers that look them up through `self.lan` may find nothing while
     /// a guest packet is handled. Server-side. @API:native_player_client_loaded_world@.
     pub(super) fn native_player_client_loaded_world(&mut self, player: u128, name: &str) {
-        let _ = (player, name);
+        mod_api::dispatch_player_client_loaded_world(self, mod_api::mods(), player, name);
     }
     /// A server player released the use-item key before the item finished
     /// being used. The guest's state is not swapped in, so helpers that look
     /// them up through `self.lan` may find nothing during packet handling.
     /// @API:native_player_stop_using_item@.
     pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
-        let _ = (player, name);
+        mod_api::dispatch_player_stop_using_item(self, mod_api::mods(), player, name);
     }
     /// A server player's recipe book open or filter setting changed. `book`
     /// is the book type's protocol id. The guest's state is not swapped in.
@@ -4713,12 +4713,20 @@ impl Game<'_> {
         open: bool,
         filtering: bool,
     ) {
-        let _ = (player, name, book, open, filtering);
+        mod_api::dispatch_player_recipe_book_settings_change(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            book,
+            open,
+            filtering,
+        );
     }
     /// A server player broke the item they were holding after durability
     /// damage removed it from the hand. @API:native_player_item_break@.
     pub(super) fn native_player_item_break(&mut self, player: u128, name: &str, item: &str) {
-        let _ = (player, name, item);
+        mod_api::dispatch_player_item_break(self, mod_api::mods(), player, name, item);
     }
     /// A server player earned one criterion of an advancement, after the
     /// progress was recorded. @API:native_player_advancement_criterion_grant@.
@@ -4729,12 +4737,19 @@ impl Game<'_> {
         advancement: &str,
         criterion: &str,
     ) {
-        let _ = (player, name, advancement, criterion);
+        mod_api::dispatch_player_advancement_criterion_grant(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            advancement,
+            criterion,
+        );
     }
     /// A server player released a drawn bow with `arrow` selected. The guest's
     /// state is not swapped in during packet handling. @API:native_player_ready_arrow@.
     pub(super) fn native_player_ready_arrow(&mut self, player: u128, name: &str, arrow: &str) {
-        let _ = (player, name, arrow);
+        mod_api::dispatch_player_ready_arrow(self, mod_api::mods(), player, name, arrow);
     }
     /// A server player selected a bundle item in `slot` at `index`. The guest's
     /// state is not swapped in during packet handling. @API:native_player_bundle_item_select@.
@@ -4745,19 +4760,26 @@ impl Game<'_> {
         slot: i32,
         index: i32,
     ) {
-        let _ = (player, name, slot, index);
+        mod_api::dispatch_player_bundle_item_select(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            slot,
+            index,
+        );
     }
     /// A server player stopped digging `pos` before the block broke, after
     /// the server cleared the dig and sent the block back to the client.
     /// The player's state is not swapped in. @API:native_block_damage_abort@.
     pub(super) fn native_block_damage_abort(&mut self, player: u128, name: &str, pos: [i32; 3]) {
-        let _ = (player, name, pos);
+        mod_api::dispatch_block_damage_abort(self, mod_api::mods(), player, name, pos);
     }
     /// A hopper at `pos` began an item transfer attempt. This runs after its
     /// cooldown and enabled checks, before pushing or pulling any items.
     /// Server-side, including the single-player server. @API:native_prepare_hopper_transfer@.
     pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
-        let _ = (pos,);
+        mod_api::dispatch_prepare_hopper_transfer(self, mod_api::mods(), pos);
     }
     /// A hopper is about to move one item between containers. Set `cancel`
     /// to leave it in its source slot. @API:native_inventory_move_item@.
@@ -4768,7 +4790,14 @@ impl Game<'_> {
         item: &str,
         cancel: &mut bool,
     ) {
-        let _ = (source, destination, item, cancel);
+        mod_api::dispatch_inventory_move_item(
+            self,
+            mod_api::mods(),
+            source,
+            destination,
+            item,
+            cancel,
+        );
     }
     /// A hopper selected a container while searching for items to push or
     /// pull. Exactly one of `container` and `entity` identifies the target.
@@ -4779,17 +4808,17 @@ impl Game<'_> {
         container: Option<[i32; 3]>,
         entity: Option<u32>,
     ) {
-        let _ = (hopper, container, entity);
+        mod_api::dispatch_hopper_inventory_search(self, mod_api::mods(), hopper, container, entity);
     }
     /// A vault at `pos` is about to eject a loot item. @API:native_vault_loot@.
     pub(super) fn native_vault_loot(&self, pos: [i32; 3], item: &str) {
-        let _ = (pos, item);
+        mod_api::dispatch_vault_loot(self, mod_api::mods(), pos, item);
     }
     /// A timed world-border size change finished on the server, after its
     /// final size was applied. Server-side, including the single-player
     /// server. @API:native_world_border_bounds_change_finish@.
     pub(super) fn native_world_border_bounds_change_finish(&mut self) {
-        let _ = ();
+        mod_api::dispatch_world_border_bounds_change_finish(self, mod_api::mods());
     }
 
     /// A click in a menu a mod opened (`native_open_menu`), which moved

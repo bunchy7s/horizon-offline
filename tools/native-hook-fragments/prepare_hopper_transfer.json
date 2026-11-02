@@ -3,7 +3,10 @@
     {
       "name": "prepare_hopper_transfer",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_prepare_hopper_transfer",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A hopper begins an item transfer attempt (`native_prepare_hopper_transfer`).",
