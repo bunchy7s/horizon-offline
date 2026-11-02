@@ -27,6 +27,7 @@ use naga::valid::{Capabilities, ValidationFlags, Validator};
 
 use crate::Preprocessed;
 
+mod anonymous_structs;
 mod atomic_vectors;
 mod geometry;
 mod image_parameters;
@@ -239,9 +240,14 @@ fn translate(
     } else {
         GBUFFERS_MATRICES.to_owned()
     };
-    // Interface blocks travel as plain varyings (`interface_blocks`).
+    // Struct types without a name get one (`anonymous_structs`), and interface blocks travel
+    // as plain varyings (`interface_blocks`).
     let flat = |pp: &Preprocessed| {
-        interface_blocks::flatten(&pp.code).map(|code| Preprocessed { code, ..pp.clone() })
+        let named = anonymous_structs::name(&pp.code);
+        let code = named.as_deref().unwrap_or(&pp.code);
+        interface_blocks::flatten(code)
+            .or(named)
+            .map(|code| Preprocessed { code, ..pp.clone() })
     };
     let (vertex_flat, fragment_flat) = (flat(vertex), flat(fragment));
     let vertex = vertex_flat.as_ref().unwrap_or(vertex);
@@ -625,6 +631,11 @@ fn resources(
 
 /// Translates a compute program (`.csh`).
 pub fn translate_compute(compute: &Preprocessed) -> Result<ComputeProgram, Vec<Error>> {
+    let named = anonymous_structs::name(&compute.code).map(|code| Preprocessed {
+        code,
+        ..compute.clone()
+    });
+    let compute = named.as_ref().unwrap_or(compute);
     let split = atomic_vectors::rewrite(compute);
     let compute = split.as_ref().unwrap_or(compute);
     let mut c = Stage::scan(compute, ShaderStage::Compute);
@@ -2155,6 +2166,20 @@ mod tests {
                 )
             })
         }));
+    }
+
+    /// A `shared` variable whose struct type has no name (GLSL 4.60, 4.1.8), as compute
+    /// programs keep their work group's tiles.
+    #[test]
+    fn a_shared_struct_without_a_type_name_compiles() {
+        let csh = "#version 460\nlayout(local_size_x = 8, local_size_y = 8) in;\n\
+                   shared struct {\n    uint sum;\n    uint tile[gl_WorkGroupSize.x][gl_WorkGroupSize.y];\n} lds;\n\
+                   layout(r32ui) uniform uimage2D colorimg4;\nvoid main() {\n    \
+                   lds.tile[gl_LocalInvocationID.x][gl_LocalInvocationID.y] = gl_LocalInvocationIndex;\n    \
+                   barrier();\n    imageStore(colorimg4, ivec2(gl_GlobalInvocationID.xy), uvec4(lds.tile[1][1]));\n}\n";
+        let pack = Pack::from_zip_bytes("P.zip", zip(&[("shaders/deferred_a.csh", csh)])).unwrap();
+        translate_compute(&preprocess(&pack, "deferred_a.csh", &Macros::standard()))
+            .unwrap_or_else(|e| panic!("{e:?}"));
     }
 
     #[test]
