@@ -2,9 +2,10 @@
 //! place the chunk encoder numbers it by, and a client rebuilds it from that
 //! data.
 use horizon_client::{
-    biome::Biomes,
+    biome::{BiomeColors, Biomes},
     chunk::LevelShapes,
     lan::data::{BIOME_REGISTRY, SyncData, client_biomes},
+    scoreboard::json_to_tag,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -18,10 +19,8 @@ impl Drop for Scratch {
     }
 }
 
-#[test]
-fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
-    let root = std::env::temp_dir().join(format!("horizon-sync-biomes-{}", std::process::id()));
-    let _scratch = Scratch(root.clone());
+/// A resource folder with two biomes and 1x1 colormaps, loaded.
+fn write_base(root: &std::path::Path) -> Biomes {
     let maps = root.join("assets/minecraft/textures/colormap");
     let biome_dir = root.join("data/minecraft/worldgen/biome");
     std::fs::create_dir_all(&maps).unwrap();
@@ -38,7 +37,14 @@ fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
     for name in ["plains", "river"] {
         std::fs::write(biome_dir.join(format!("{name}.json")), "{}").unwrap();
     }
-    let base = Biomes::load(&root).unwrap();
+    Biomes::load(root).unwrap()
+}
+
+#[test]
+fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
+    let root = std::env::temp_dir().join(format!("horizon-sync-biomes-{}", std::process::id()));
+    let _scratch = Scratch(root.clone());
+    let base = write_base(&root);
     let pack: Value = serde_json::from_str(r##"{"effects":{"grass_color":"#123456"}}"##).unwrap();
     let world = base.with_packs([("minecraft:tundra_x", &pack)]);
     let sync =
@@ -77,10 +83,39 @@ fn a_pack_biome_is_sent_with_its_data_and_read_back_by_a_client() {
     );
 
     // Nothing new to a client that knows them all: it keeps its own table.
+    // even when the server sends data for them (another grass colour here).
+    let other: Value = serde_json::from_str(r##"{"effects":{"grass_color":"#654321"}}"##).unwrap();
+    let other = json_to_tag(&other);
     let known: Vec<_> = received
         .iter()
         .filter(|(n, _)| base.contains(n))
-        .cloned()
+        .map(|(n, _)| (n.clone(), Some(other.clone())))
         .collect();
     assert!(client_biomes(&base, &known).is_none());
+
+    // Beside a new biome, a known one keeps the game's colour.
+    let mut mixed = known.clone();
+    mixed.extend(received.iter().filter(|(n, _)| !base.contains(n)).cloned());
+    let client = client_biomes(&base, &mixed).unwrap();
+    let plains = base.get(base.id("minecraft:plains")).grass;
+    assert_ne!(plains, 0x654321);
+    assert_eq!(client.get(client.id("minecraft:plains")).grass, plains);
+    assert_eq!(client.get(client.id("minecraft:tundra_x")).grass, 0x123456);
+}
+
+#[test]
+fn recolouring_twice_starts_from_the_biome_files_each_time() {
+    let root = std::env::temp_dir().join(format!("horizon-recolor-biomes-{}", std::process::id()));
+    let _scratch = Scratch(root.clone());
+    let base = write_base(&root);
+    let grass = |b: &Biomes| b.get(b.id("minecraft:plains")).grass;
+    let darker = |_: &str, c: &mut BiomeColors| c.grass -= 0x10;
+    let once = base.recolored_from(&base, darker).expect("colours changed");
+    assert_eq!(grass(&once), grass(&base) - 0x10);
+    // The same colours again, asked from the base: nothing to rebuild.
+    assert!(base.recolored_from(&once, darker).is_none());
+    // Other colours replace the first ones rather than add to them.
+    let lighter = |_: &str, c: &mut BiomeColors| c.grass += 0x10;
+    let next = base.recolored_from(&once, lighter).unwrap();
+    assert_eq!(grass(&next), grass(&base) + 0x10);
 }

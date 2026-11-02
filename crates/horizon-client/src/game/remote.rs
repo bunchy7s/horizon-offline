@@ -837,6 +837,7 @@ impl Game<'_> {
         // server thread keeps the one it just set.
         if local.is_none() {
             self.world_biomes = None;
+            self.world_biomes_base = None;
         }
         let root = self.options.resources.clone();
         let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
@@ -2045,6 +2046,7 @@ impl Game<'_> {
                 .and_then(|list| client_biomes(self.res.biomes(), list))
                 .map(Arc::new);
             if table.is_some() || self.world_biomes.is_some() {
+                self.world_biomes_base = table.clone();
                 self.world_biomes = table;
                 let context = self.worker_context();
                 self.streaming.reload_resources(&mut self.world, context);

@@ -16,18 +16,20 @@ impl Game<'_> {
     /// slow fade) and once when the player joins, not every frame: a rebuild
     /// takes the workers a few seconds. API 107.
     pub(super) fn native_refresh_biome_colors(&mut self) {
-        let base = world_biomes!(self).clone();
-        let biomes = base
-            .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
-            .map_or_else(|| base.clone(), Arc::new);
-        // A world's own table is the one in use, coloured as of the last
-        // call; a plain world's is the pack's.
-        if self.world_biomes.is_some() {
-            if Arc::ptr_eq(&biomes, &base) {
+        // A world's own table is asked from the biome files' colours each
+        // time, so a mod's colours do not stack; a plain world's is the pack's.
+        if let (Some(base), Some(current)) = (&self.world_biomes_base, &self.world_biomes) {
+            let Some(biomes) = base.recolored_from(current, |biome, colors| {
+                self.native_biome_colors(biome, colors)
+            }) else {
                 return;
-            }
-            self.world_biomes = Some(biomes);
+            };
+            self.world_biomes = Some(Arc::new(biomes));
         } else {
+            let base = self.res.biomes().clone();
+            let biomes = base
+                .with_colors(|biome, colors| self.native_biome_colors(biome, colors))
+                .map_or_else(|| base.clone(), Arc::new);
             if Arc::ptr_eq(&biomes, &self.pack.context.biomes) {
                 return;
             }
