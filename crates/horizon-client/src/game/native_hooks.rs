@@ -697,7 +697,7 @@
 //! change a cauldron.
 //!
 //! API 53 adds entities leaving a level (`native_entity_leave_level`), for
-//! item entities, experience orbs and mobs so far.
+//! every kind the join hook tells (see API 47).
 //!
 //! API 52 adds `native_block_entity_sync`: a mod block entity's block and update tag
 //! sent to clients again (`Level.sendBlockUpdated`).
@@ -718,7 +718,7 @@
 //! API 47 adds entities joining a level (`native_entity_join_level`); it tells
 //! every kind the game keeps in its entity lists (items, orbs, mobs, boats,
 //! minecarts, armor stands, TNT, falling blocks, projectiles, rockets,
-//! tridents).
+//! tridents, end crystals, the dragon, cushions, paintings, item frames).
 //!
 //! API 46 adds bounded world-space rim and colored-light requests
 //! (`native_visuals`) and opt-in texture-matched emissive material
@@ -2323,6 +2323,16 @@ impl Game<'_> {
     /// has keeps that command's behaviour. API 35.
     pub(super) fn native_commands(&mut self, commands: &mut Vec<&'static str>) {
         mod_api::dispatch_commands(self, mod_api::mods(), commands);
+    }
+    /// Local player movement input, after reading it and before applying it.
+    pub(super) fn native_movement_input(
+        &self,
+        forward: &mut f32,
+        strafe: &mut f32,
+        jump: &mut bool,
+        sneak: &mut bool,
+    ) {
+        mod_api::dispatch_movement_input(self, mod_api::mods(), forward, strafe, jump, sneak);
     }
     /// World field of view, after normal calculation and zoom and before projection/Nausea.
     /// Called for world rendering and near-plane overlays; hand/HUD FOV uses its own path.
@@ -6332,8 +6342,10 @@ impl Game<'_> {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
-    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 told item entities, experience orbs and mobs; it now
+    /// tells every kind `native_entity_join_level` does (`kind` is the type), each
+    /// once, when the game next notices it gone (the tick or action that removed
+    /// it). Check `kind`. Server-side.
     pub(super) fn native_entity_leave_level(&mut self, dimension: &str, entity: u32, kind: &str) {
         mod_api::dispatch_entity_leave_level(self, mod_api::mods(), dimension, entity, kind);
     }
@@ -6347,12 +6359,14 @@ impl Game<'_> {
     /// back out as if never added, and a `/summon` of it fails. Tells every
     /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
     /// armor stands, primed TNT, falling blocks, projectiles, rockets,
-    /// tridents), once each, in the order they were created; check `kind`. A
-    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
-    /// `/summon` and a chunk's entities are told at once). A mod that
-    /// cancels one of the others sees it removed before it ticks again.
-    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
-    /// the entities Horizon keeps without simulating. Server-side.
+    /// tridents, end crystals, the dragon, cushions, paintings, item frames),
+    /// once each, in the order they were created; check `kind`. A drop, an
+    /// orb, a mob, a `/summon` and a chunk's entities are told at once, any
+    /// other spawn between the tick's phases (it is checked after the blocks,
+    /// the vehicles, the projectiles, the items and the mobs, and at the
+    /// tick's end). A mod that cancels one of the others sees it removed
+    /// before it ticks again. Not told: the entities Horizon keeps without
+    /// simulating (displays, markers, interactions). Server-side.
     pub(super) fn native_entity_join_level(
         &mut self,
         dimension: &str,
@@ -8273,22 +8287,6 @@ pub(super) fn mob_kind(mob: &horizon_client::mobs::Mob) -> String {
     ["minecraft:", mob.kind.id.trim_start_matches("minecraft:")].concat()
 }
 
-/// The ids of `before` (id, kind) that are not in `now`, grouped by kind in
-/// first-seen order: the entities that left the level.
-fn vanished_by_kind(
-    before: &[(u32, String)],
-    now: &std::collections::HashSet<u32>,
-) -> Vec<(String, Vec<u32>)> {
-    let mut out: Vec<(String, Vec<u32>)> = Vec::new();
-    for (id, kind) in before.iter().filter(|(id, _)| !now.contains(id)) {
-        match out.iter_mut().find(|(k, _)| k == kind) {
-            Some((_, ids)) => ids.push(*id),
-            None => out.push((kind.clone(), Vec::from([*id]))),
-        }
-    }
-    out
-}
-
 /// Where the game calls the hook points.
 impl Game<'_> {
     /// The acting player as the hook points name one: the guest whose turn
@@ -8409,80 +8407,6 @@ impl Game<'_> {
             let (kind, pos) = (mob_kind(m), [m.position.x, m.position.y, m.position.z]);
             self.native_mob_spawned(self.dim.id(), &kind, pos, natural);
         }
-    }
-    /// `native_entity_leave_level` for each of `entities`, of `kind`, gone
-    /// from the level in place. A client of a server tells nothing.
-    pub(super) fn native_entities_left(&mut self, kind: &str, entities: &[u32]) {
-        if self.remote.is_some() {
-            return;
-        }
-        let dimension = self.dim.id();
-        for &entity in entities {
-            self.native_entity_leave_level(dimension, entity, kind);
-        }
-    }
-    /// The IDs of the level's item entities, for `native_items_left_since`
-    /// (none on a client of a server, which tells nothing).
-    pub(super) fn dropped_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() || mod_api::mods().is_empty() {
-            return Vec::new();
-        }
-        self.dropped.iter().map(|e| e.id).collect()
-    }
-    /// The IDs of the level's experience orbs, for `native_orbs_left_since`.
-    pub(super) fn orb_ids(&self) -> Vec<u32> {
-        if self.remote.is_some() || mod_api::mods().is_empty() {
-            return Vec::new();
-        }
-        self.orbs.iter().map(|o| o.id).collect()
-    }
-    /// The (id, kind) of the level's mobs, for `native_mobs_left_since` (none
-    /// on a client of a server, which tells nothing).
-    pub(super) fn mob_ids(&self) -> Vec<(u32, String)> {
-        if self.remote.is_some() || mod_api::mods().is_empty() {
-            return Vec::new();
-        }
-        self.mobs.iter().map(|m| (m.id, mob_kind(m))).collect()
-    }
-    /// The mobs of `before` gone since have left the level (died, despawned,
-    /// entered a hive, unloaded). Mobs spawned meanwhile are not counted.
-    pub(super) fn native_mobs_left_since(&mut self, before: &[(u32, String)]) {
-        // Nothing was taken: no mod listens, or a client of a server.
-        if before.is_empty() {
-            return;
-        }
-        let now: std::collections::HashSet<u32> = self.mobs.iter().map(|m| m.id).collect();
-        for (kind, ids) in vanished_by_kind(before, &now) {
-            self.native_entities_left(&kind, &ids);
-        }
-    }
-    /// The item entities of `before` gone since have left the level.
-    pub(super) fn native_items_left_since(&mut self, before: &[u32]) {
-        // Nothing was taken: no mod listens, or a client of a server.
-        if before.is_empty() {
-            return;
-        }
-        let now: std::collections::HashSet<u32> = self.dropped.iter().map(|e| e.id).collect();
-        let gone: Vec<u32> = before
-            .iter()
-            .copied()
-            .filter(|id| !now.contains(id))
-            .collect();
-        self.native_entities_left("minecraft:item", &gone);
-    }
-    /// The experience orbs of `before` gone since have left the level.
-    pub(super) fn native_orbs_left_since(&mut self, before: &[u32]) {
-        // Nothing was taken: no mod listens, or a client of a server.
-        if before.is_empty() {
-            return;
-        }
-        let now: std::collections::HashSet<u32> = self.orbs.iter().map(|o| o.id).collect();
-        let gone: Vec<u32> = before
-            .iter()
-            .copied()
-            .filter(|id| !now.contains(id))
-            .collect();
-        self.native_entities_left("minecraft:experience_orb", &gone);
     }
     /// The acting player's blow killed mob `index`.
     pub(super) fn native_kill_event(&mut self, index: usize) {
@@ -9334,26 +9258,6 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn vanished_mobs_are_reported_by_kind() {
-        use std::collections::HashSet;
-        let z = || "minecraft:zombie".to_string();
-        let b = || "minecraft:bee".to_string();
-        let before = vec![(1, z()), (2, b()), (3, z()), (4, b())];
-        let now: HashSet<u32> = [1, 4, 99].into_iter().collect(); // 99 spawned meanwhile
-        assert_eq!(
-            super::vanished_by_kind(&before, &now),
-            vec![(b(), vec![2]), (z(), vec![3])]
-        );
-        let all: HashSet<u32> = [1, 2, 3, 4, 5].into_iter().collect();
-        assert!(super::vanished_by_kind(&before, &all).is_empty());
-        assert_eq!(
-            super::vanished_by_kind(&before, &HashSet::new()),
-            vec![(z(), vec![1, 3]), (b(), vec![2, 4])]
-        );
-        assert!(super::vanished_by_kind(&[], &now).is_empty());
-    }
-
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.
     #[test]
