@@ -2790,13 +2790,6 @@ impl Mob {
     pub fn damage(&mut self, amount: f32, source: Damage) -> bool {
         self.damage_with(amount, source, None)
     }
-    /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
-    /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
-    pub fn refuses_damage(&self, source: &Damage) -> bool {
-        !self.alive()
-            || self.removed
-            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
-    }
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
     /// weapon's armor-effectiveness enchantments (breach) over the armor fraction.
     pub fn damage_with(
@@ -2817,7 +2810,11 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
-        if self.refuses_damage(&source) {
+        // LivingEntity.isInvulnerableTo: only #bypasses_invulnerability gets past it.
+        if !self.alive()
+            || self.removed
+            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+        {
             return false;
         }
         // Ghast.isReflectedFireball: a fireball a player turned back is

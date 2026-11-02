@@ -7046,6 +7046,13 @@ impl Game<'_> {
     /// still counts as landed (`EnderDragon.hurt` returns true whatever
     /// `reallyHurt` did: the arrow is spent, the melee effects run). It runs
     /// on the thread that ticks the world (the server thread): state shared with render thread hooks needs synchronising.
+    /// `attacker` is the attacking entity's network id (the recorded attack scope, or `causing`),
+    /// `weapon` what it holds in its main hand (a player's selected stack, a mob's main hand; none
+    /// when unknown, recorded only while a native mod is loaded) with its enchantment levels, and
+    /// `source_position`, `victim_position` and `victim_view` the hit's position, a mob victim's
+    /// position and look vector (none when not known, always for a player or the dragon), so an
+    /// enchantment can tell a blow from behind. There is no host here: read the world from a
+    /// tick hook.
     /// No `self`: the game is in the middle of the hit. API 50.
     pub(super) fn native_living_incoming_damage(
         entity: i32,
@@ -7053,6 +7060,11 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
+        attacker: i32,
+        weapon: Option<&ItemStack>,
+        source_position: Option<[f64; 3]>,
+        victim_position: Option<[f64; 3]>,
+        victim_view: Option<[f64; 3]>,
         amount: &mut f32,
         canceled: &mut bool,
     ) {
@@ -7063,41 +7075,11 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
-            amount,
-            canceled,
-        );
-    }
-    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
-    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
-    /// this has a host and snapshots of the weapon, victim position/view and
-    /// DamageSource position. The acting player's network id is `causing`
-    /// (also the direct entity). Weapon enchantments include their levels.
-    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
-    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
-    pub(super) fn native_living_incoming_damage_v2(
-        &mut self,
-        entity: i32,
-        kind: &str,
-        damage_type: &str,
-        causing: i32,
-        source_position: Option<[f64; 3]>,
-        victim_position: [f64; 3],
-        victim_view: [f64; 3],
-        weapon: Option<&ItemStack>,
-        amount: &mut f32,
-        canceled: &mut bool,
-    ) {
-        mod_api::dispatch_living_incoming_damage_v2(
-            self,
-            mod_api::mods(),
-            entity,
-            kind,
-            damage_type,
-            causing,
+            attacker,
+            weapon,
             source_position,
             victim_position,
             victim_view,
-            weapon,
             amount,
             canceled,
         );
@@ -7321,6 +7303,17 @@ pub(super) fn block_contact(
 /// `native_living_incoming_damage` for the damage code (`health::HURT_SERVER`): whether
 /// it canceled the hit. Its one caller.
 pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let (victim_position, victim_view, source_position) = match &hurting {
+        Hurting::Mob(mob, damage) => (
+            Some([mob.position.x, mob.position.y, mob.position.z]),
+            Some(super::view_vector(mob.head_yaw, mob.head_pitch)),
+            damage.from,
+        ),
+        _ => (None, None, None),
+    };
     let (entity, kind, source) = hurt_server_args(hurting);
     let HurtSource {
         damage_type,
@@ -7328,12 +7321,22 @@ pub(super) fn hurt_server(hurting: Hurting<'_>, amount: &mut f32) -> bool {
         direct,
     } = source;
     let mut canceled = false;
+    let attacker = match causing {
+        0 => horizon_client::health::knockback_attacker(),
+        causing => causing,
+    };
+    let held = horizon_client::health::knockback_held();
     Game::native_living_incoming_damage(
         entity,
         kind,
         damage_type,
         causing,
         direct,
+        attacker,
+        held[0].as_ref(),
+        source_position,
+        victim_position,
+        victim_view,
         amount,
         &mut canceled,
     );
