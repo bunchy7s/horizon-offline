@@ -368,15 +368,15 @@ pub const ALL_VISIBLE: u64 = (1 << 36) - 1;
 fn visibility(pad: &Padded, info: &[Info]) -> u64 {
     let solid: Vec<bool> = info.iter().map(|i| i.solid).collect();
     let mut rows = Vec::new();
-    opaque_rows(pad, &solid, &mut rows);
+    solid_rows(pad, &solid, &mut rows);
     visibility_rows(&open_rows(&rows))
 }
-/// The section's non-opaque cells by row (`y << 4 | z`, bit x) from the padded
-/// opacity rows (`MeshScratch::opaque`).
-fn open_rows(opaque: &[u32]) -> [u16; 256] {
+/// The section's cells that are not `isSolidRender`, by row (`y << 4 | z`, bit
+/// x), from the padded rows of `MeshScratch::solid_rows`.
+fn open_rows(solid: &[u32]) -> [u16; 256] {
     std::array::from_fn(|r| {
         let (y, z) = ((r >> 4) as i32, (r & 15) as i32);
-        !(opaque[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
+        !(solid[((y + B) as usize) * P + (z + B) as usize] >> B) as u16
     })
 }
 /// The cells of `open` connected to `seeds` (a subset) within the row: an
@@ -922,14 +922,10 @@ impl Padded {
             let sources: [[Source; 3]; 3] = std::array::from_fn(|rz| {
                 std::array::from_fn(|rx| match region[rz][rx] {
                     None => Source::Missing,
-                    // `Chunk::get` and `Chunk::light` outside the column's sections.
-                    Some(c) => {
-                        let s = (wy - c.min_y()) >> 4;
-                        match c.sections.get(s as usize).filter(|_| s >= 0) {
-                            Some(section) => Source::Section(section),
-                            None => Source::Outside(if s < 0 { 0 } else { 0xF0 }),
-                        }
-                    }
+                    Some(c) => match c.section_at(wy) {
+                        Ok(section) => Source::Section(section),
+                        Err(light) => Source::Outside(light),
+                    },
                 })
             });
             for z in -B..16 + B {
@@ -1015,11 +1011,11 @@ pub struct MeshScratch {
     own: Option<Box<[u32; 4096]>>,
     leaf: leaf_culling::LeafMask,
     /// Per padded row (`pi(-B, y, z) / P`), bit `x + B` set where the block
-    /// is `isSolidRender`.
-    opaque: Vec<u32>,
+    /// is `isSolidRender` (`MeshTables::solid`).
+    solid_rows: Vec<u32>,
 }
-/// Fills `rows` with the padded section's opacity, one bit per block (`MeshScratch::opaque`).
-fn opaque_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
+/// Fills `rows` with the padded section's `isSolidRender` blocks, one bit each (`MeshScratch::solid_rows`).
+fn solid_rows(pad: &Padded, solid: &[bool], rows: &mut Vec<u32>) {
     rows.clear();
     rows.extend(pad.blocks.as_chunks::<P>().0.iter().map(|row| {
         row.iter().enumerate().fold(0u32, |bits, (x, &id)| {
@@ -1396,8 +1392,8 @@ impl Mesher<'_> {
         let own = scratch.own.get_or_insert_with(|| Box::new([0; 4096]));
         scratch.padded.fill(region, sy, own);
         let pad = &scratch.padded;
-        opaque_rows(pad, &self.tables.solid, &mut scratch.opaque);
-        let opaque = &scratch.opaque;
+        solid_rows(pad, &self.tables.solid, &mut scratch.solid_rows);
+        let opaque = &scratch.solid_rows;
         out.visibility = visibility_rows(&open_rows(opaque));
         let base_y = center.min_y() + sy * 16;
         if self.leaf_culling.is_interior() {

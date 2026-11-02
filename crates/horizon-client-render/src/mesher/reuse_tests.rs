@@ -45,6 +45,65 @@ fn padded_reuse_resets_missing_neighbors_and_matches_chunk_reads_across_layouts(
     }
 }
 
+#[test]
+fn padded_fill_reads_every_neighbour_and_its_light_like_chunk_reads() {
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let mut pad = Padded::default();
+    let mut own = Box::new([0; 4096]);
+    for min_y in [MIN_Y, 0] {
+        let layout = crate::chunk::ColumnLayout::new(min_y, 32 * 16).unwrap();
+        // Nine chunks with their own blocks and per-block light, near the
+        // bottom and top sections too, where the padding leaves the column.
+        let chunks: Vec<Chunk> = (0..9)
+            .map(|i| {
+                let mut c = Chunk::with_layout(i % 3 - 1, i / 3 - 1, layout);
+                for s in [0, 1, 30, 31] {
+                    for _ in 0..300 {
+                        let (x, y, z) = (next() % 16, next() % 16, next() % 16);
+                        let y = min_y + s * 16 + y as i32;
+                        c.set(x as i32, y, z as i32, 1 + (next() % 40) as u32);
+                    }
+                    let mut light = Box::new([0u8; 4096]);
+                    light.iter_mut().for_each(|l| *l = next() as u8);
+                    std::sync::Arc::make_mut(&mut c.sections[s as usize]).light =
+                        Light::Full(light);
+                }
+                c
+            })
+            .collect();
+        let region: [[Option<&Chunk>; 3]; 3] =
+            std::array::from_fn(|rz| std::array::from_fn(|rx| Some(&chunks[rz * 3 + rx])));
+        for sy in [0, 1, 30, 31] {
+            pad.fill(&region, sy, &mut own);
+            let base_y = min_y + sy * 16;
+            for y in -B..16 + B {
+                for z in -B..16 + B {
+                    for x in -B..16 + B {
+                        let c = region[((z + 16) >> 4) as usize][((x + 16) >> 4) as usize].unwrap();
+                        let (cx, cy, cz) = (x & 15, base_y + y, z & 15);
+                        assert_eq!(
+                            pad.blocks[pi(x, y, z)],
+                            c.get(cx, cy, cz),
+                            "{min_y} {sy} {x} {y} {z}"
+                        );
+                        assert_eq!(
+                            pad.light[pi(x, y, z)],
+                            c.light(cx, cy, cz),
+                            "{min_y} {sy} {x} {y} {z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Run explicitly with prepared assets; never silently pass without exercising geometry.
 /// With a shader pack lighting the faces, every face of a lone stone block has one colour; the
 /// game's face shading (up 1.0, down 0.5, north/south 0.8, east/west 0.6) is left to the pack.
@@ -181,7 +240,7 @@ fn reused_mesh_matches_fresh_geometry_across_sections_and_resource_reload() {
                 assert!(scratch.own.is_none());
                 assert_eq!(scratch.padded.blocks.capacity(), 0);
                 assert_eq!(scratch.padded.light.capacity(), 0);
-                assert_eq!(scratch.opaque.capacity(), 0);
+                assert_eq!(scratch.solid_rows.capacity(), 0);
             }
             fresh.sort_solid();
             recycled.sort_solid();
