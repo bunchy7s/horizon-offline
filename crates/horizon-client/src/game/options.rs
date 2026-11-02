@@ -331,6 +331,9 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                // The AI Agent page's repro buttons (game/repro.rs).
+                Event::ToggleRecording => self.toggle_recording_key(),
+                Event::ExportRepro => self.export_repro_key(),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
@@ -574,9 +577,23 @@ impl Game<'_> {
             has_overlay: false,
         };
         let limit = framerate_limit(self.settings.max_fps as i32, context);
-        self.settings
+        let limit = self
+            .settings
             .horizon
-            .battery_limit(limit, self.title.is_none(), self.focused)
+            .battery_limit(limit, self.title.is_none(), self.focused);
+        // A native mod may only lower it (`native_framerate_limit`).
+        let mut hooked = limit;
+        self.native_framerate_limit(
+            self.focused,
+            context.iconified,
+            self.title.is_none(),
+            &mut hooked,
+        );
+        if hooked >= 1 {
+            hooked.min(limit)
+        } else {
+            limit
+        }
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the

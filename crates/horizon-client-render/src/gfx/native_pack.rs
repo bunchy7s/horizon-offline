@@ -21,6 +21,8 @@ pub struct NativePack {
     pub weather: Option<wgpu::RenderPipeline>,
     /// The draw of the shadow map the stages read, if the pack asks for one.
     pub shadow: Option<NativeShadow>,
+    /// `[[particle_lights]]`.
+    pub particle_lights: Vec<horizon_shader_api::manifest::ParticleLight>,
     /// GPU time of each pass, while the renderer asks for it (`pack_timing.rs`).
     pub timing: Option<PassTiming>,
 }
@@ -133,6 +135,7 @@ impl NativePack {
             labels.extend(post.labels().into_iter().map(str::to_owned));
         }
         let pack = Self {
+            particle_lights: report.manifest.particle_lights.clone(),
             frame,
             sky,
             material,

@@ -5,7 +5,7 @@ CloudRenderer.isEastEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mes
 CloudRenderer.isSouthEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
 CloudRenderer.isWestEmpty	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	neighbour-empty flags passed to face_mask in N,E,S,W order
 CloudRenderer.render	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	gap: minor: one cloud pipeline; fancy vs flat is chosen by the mesh fast flag, not by pipeline
-CloudRenderer.renderOit	missing		player: with Improved transparency on, clouds keep the classic blend; no OIT pass exists and the option is only saved
+CloudRenderer.renderOit	port	crates/horizon-client-render/src/gfx/oit.rs	the clouds draw through the OIT pipeline there, with their own depth beside the world's
 CloudRenderer.buildMesh	port	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	cell ring walk via cells(radius), nearest first
 CloudRenderer.tryBuildCell	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	skip empty cells, then build the cell's faces
 CloudRenderer.encodeFace	inline	crates/horizon-client-render/src/clouds.rs::Mesh::prepare	3-byte face records replaced by vertex quads
@@ -57,17 +57,17 @@ GameRenderer.processBlurEffect	port	crates/horizon-client-render/src/menu_blur.r
 GameRenderer.preloadUiShader	skip:other		GPU pipeline precompile at load; Horizon builds its pipelines in Renderer::new
 GameRenderer.update	port	crates/horizon-client-render/src/camera.rs::AvatarBob::update_bob	gap: minor: the requested post-effect list (from /postEffect) is not built
 GameRenderer.extract	skip:other		render-state copy for the vanilla render thread; Horizon renders from game state
-GameRenderer.preparePostEffects	missing		minor: vanilla post chains from requested effects are not applied; shader packs use pack_post
-GameRenderer.applyPostEffects	missing		minor: vanilla post chains are not run; shader packs use pack_post
+GameRenderer.preparePostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects (post_chain::PostEffects, built at gfx.rs:8424)	vanilla post chains are made on first use from the request the game builds
+GameRenderer.applyPostEffects	port	crates/horizon-client-render/src/gfx.rs::post_effects	the same chain runs after the world pass
 GameRenderer.tryTakeScreenshotIfNeeded	missing		player: a new singleplayer world gets no icon.png, so the world list shows no preview picture
 GameRenderer.takeAutoScreenshot	missing		player: no icon.png is written from the first rendered frame; the world list keeps a blank picture
-GameRenderer.integrate3DHudDepth	missing		minor: only runs when a post effect is applied (consistentDepthRequired); Horizon applies none
+GameRenderer.integrate3DHudDepth	inline	crates/horizon-client-render/src/gfx.rs::post_effects	runs with a post chain applied, which is vanilla's consistentDepthRequired condition
 GameRenderer.extractWindow	skip:other		render-state copy of the window size; Horizon reads the window directly
 GameRenderer.extractOptions	skip:other		render-state copy of options; Horizon reads settings directly
 GameRenderer.extractCamera	skip:other		render-state copy of camera and fog; Horizon computes them in camera.rs and fog.rs
 GameRenderer.resetData	inline	crates/horizon-client/src/game.rs::Game::finish_close_world	boss overlay reset on world close; camera and map-texture resets not verified here
 GameRenderer.projectPointToScreen	skip:other		no callers in vanilla 26.3
-GameRenderer.useImprovedTransparency	missing		player: the Improved transparency option is saved and listed but nothing it gates exists in the renderer
+GameRenderer.useImprovedTransparency	port	crates/horizon-client-render/src/gfx.rs::improved_transparency / oit: Option<oit::Oit>	the option builds the OIT pass
 GlobalSettingsUniform.update	skip:other		global uniform (window size, time, gamma, glint) written per pass; Horizon sets its own uniforms
 GpuWarnlistManager.getAllWarnings	missing		minor: no GPU driver warnlist; Horizon does not check the driver against known-bad lists
 GpuWarnlistManager.compilePatterns	missing		minor: no GPU driver warnlist patterns
@@ -82,18 +82,18 @@ LevelRenderer.addMainPass	port	crates/horizon-client-render/src/gfx.rs::Renderer
 LevelRenderer.executeAlwaysOnTop	port	crates/horizon-client/src/game.rs::Game::render	always-on-top debug lines and crosshair drawn over the world
 LevelRenderer.executeSolid	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_sections	solid section draws in arena page order
 LevelRenderer.prepareTranslucents	port	crates/horizon-client-render/src/gfx/translucency.rs::Sorter::sort	translucent quads sorted from the camera each frame
-LevelRenderer.executeOit	missing		player: with Improved transparency on, translucent blocks and water blend order-independently; Horizon has no OIT pass and the option does nothing
-LevelRenderer.executeDepthBoundsCull	missing		player: part of Improved transparency's pass; no depth-bounds cull exists in Horizon
-LevelRenderer.executeOitWaterMask	missing		player: part of Improved transparency; no water mask pass exists in Horizon
+LevelRenderer.executeOit	port	crates/horizon-client-render/src/gfx/oit.rs + gfx::mark_oit (gfx/entity_batch.rs:31)	translucent geometry is marked and resolved by the OIT pass
+LevelRenderer.executeDepthBoundsCull	inline	crates/horizon-client-render/src/gfx/oit.rs	part of the same pass
+LevelRenderer.executeOitWaterMask	port	crates/horizon-client-render/src/gfx.rs::WATER_MASK_OVERLAY	the water mask overlay of the same pass
 LevelRenderer.extractSectionDrawGroups	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	section draws grouped per layer and arena page from the visible sections
 LevelRenderer.prepareChunkRenders	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	per-layer draw list built for the frame, reversed for translucent layers
-LevelRenderer.performTransientBlockRemovals	missing		minor: removes transient blocks when their section recompiles; Horizon has no transient blocks
+LevelRenderer.performTransientBlockRemovals	inline	crates/horizon-client/src/game/transient_blocks.rs::add_transient_block	transient blocks are tracked and dropped by that list
 LevelRenderer.prepareChunkRendersIndirect	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	indirect draw arguments written and multi-draw issued
 LevelRenderer.compileSections	port	crates/horizon-client-render/src/streaming.rs::Streaming::update	section meshing jobs queued for dirty sections nearest the camera
 LevelRenderer.submitEntities	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	entity models drawn with their batches
 LevelRenderer.submitBlockEntities	port	crates/horizon-client-render/src/gfx.rs::Renderer::block_entities	block entity list submitted for drawing
 LevelRenderer.submitBlockDestroyAnimation	port	crates/horizon-client-render/src/gfx.rs::Renderer::draw_frame	crumbling overlay drawn on the block being broken
-LevelRenderer.submitTransientBlocks	missing		player: a block the server sends as temporary (ClientboundAddTransientBlockPacket) does not appear; the packet is not handled
+LevelRenderer.submitTransientBlocks	port	crates/horizon-client/src/game/remote.rs: C::AddTransientBlock => add_transient_block	the packet is handled and the block is drawn
 LevelRenderer.submitHitOutline	port	crates/horizon-client/src/game.rs::Game::outline_boxes	outline of the block under the crosshair
 LevelRenderer.close	skip:other		GPU resource teardown
 LevelRenderer.invalidateCompiledGeometry	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	all section meshes dropped and rebuilt when settings are applied

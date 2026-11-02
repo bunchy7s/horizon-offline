@@ -70,7 +70,7 @@ ln -sfn "$state/parity-runner" .local/parity-runner && ln -sfn "$state/parity-ta
 }
 ROOT_RUST = {"Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml", "clippy.toml"}
 LAUNCHER_FEATURES = """export features=""
-if [ "$(uname)" = Darwin ] && ! xcrun metal --version > /dev/null 2>&1; then features="--features gpui/runtime_shaders"; fi
+if [ "$(uname)" = Darwin ] && ! xcrun metal --version > /dev/null 2>&1; then features="--features gpui_platform/runtime_shaders"; fi
 in_shell() { if [ "$(uname)" = Linux ] && ! pkg-config --exists xkbcommon 2>/dev/null && command -v nix-shell > /dev/null; then
   nix-shell shell.nix --run "$1"; else bash -c "$1"; fi; }"""
 

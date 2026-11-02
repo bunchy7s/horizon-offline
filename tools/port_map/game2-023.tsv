@@ -125,7 +125,7 @@ LevelStorageSource.LevelStorageAccess.modifyLevelDataWithoutDatafix	inline	crate
 LevelStorageSource.LevelStorageAccess.makeWorldBackup	port	crates/horizon-client/src/title/world_management.rs::backup	-
 LevelStorageSource.LevelStorageAccess.hasWorldData	inline	crates/horizon-client/src/title.rs::list_worlds	gap: minor: a folder counts as a world only when its level.dat reads; level.dat_old is not checked
 LevelStorageSource.LevelStorageAccess.restoreLevelDataFromOld	port	crates/horizon-client/src/save.rs::restore_level_data_from_old	keeps the broken file as level.dat_corrupted_<time>; gap: minor: a failed move puts level.dat back and reports the failure (vanilla reports success with noRollback)
-PlayerDataStorage.backup	missing	-	minor: a player file that fails to load is not copied to a _corrupted_ backup first; Horizon leaves it in place
+PlayerDataStorage.backup	port	crates/horizon-client/src/save.rs::back_up_unreadable_player	a player file that does not read is copied to <uuid>_corrupted_<time>.dat before the save writes over it
 SavedDataStorage.getDataFile	port	crates/horizon-client/src/save.rs::saved_data_path	gap: minor: no check that the path stays inside the data folder; the names come from fixed callers
 SavedDataStorage.computeIfAbsent	inline	crates/horizon-client/src/save.rs::compound_or_empty	the default is an empty compound when the file is absent
 SavedDataStorage.get	port	crates/horizon-client/src/save.rs::read_saved_data	gap: minor: reads the file on each call; vanilla caches the read per type
