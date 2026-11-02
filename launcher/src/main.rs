@@ -753,7 +753,7 @@ impl Launcher {
         self.native_step = Some(tr("Starting the build").into());
         self.native_started = Some((Instant::now(), 0));
         self.native_done = None;
-        let profile = native_mods::Profile::from_setting(self.settings.native_release);
+        let profile = native_mods::Profile::chosen(&self.settings);
         let tx = self.tx.clone();
         std::thread::spawn(move || {
             let result = native_mods::build(&base, &folder, &instance, anyway, profile, |step| {

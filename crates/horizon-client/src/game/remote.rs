@@ -2239,7 +2239,7 @@ impl Game<'_> {
                 )
             })
         } else {
-            self.mobs.iter().find(|m| m.id == id as u32).map(|m| {
+            self.mob_index.get(&self.mobs, id as u32).map(|m| {
                 (
                     [m.position.x, m.position.y, m.position.z],
                     m.kind.width,
@@ -2457,9 +2457,8 @@ impl Game<'_> {
         let dragon = self.dragon.as_ref().is_some_and(|d| d.id as i32 == id);
         let driven = self.driven_mount().is_some_and(|m| m.id as i32 == id);
         let mob = self
-            .mobs
-            .iter_mut()
-            .find(|m| m.id == id as u32)
+            .mob_index
+            .get_mut(&mut self.mobs, id as u32)
             .filter(|_| !dragon);
         let tracked = self
             .remote
@@ -2861,7 +2860,7 @@ impl Game<'_> {
             value("minecraft:movement_speed"),
             value("minecraft:jump_strength"),
         );
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id as u32) else {
+        let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) else {
             return;
         };
         // A horse its rider's client moves goes at its own speed and jumps
@@ -3293,7 +3292,7 @@ impl Game<'_> {
                         None => Some(Holder::Mob(d as u32)),
                     },
                 };
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.source as u32) {
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.source as u32) {
                     m.extra.leash = holder;
                 } else if let Some(b) = self.boats.iter_mut().find(|b| b.id == p.source as u32) {
                     // A leashed boat or raft (AbstractBoat is Leashable).
@@ -3313,7 +3312,7 @@ impl Game<'_> {
                 // Entity.DATA_SHARED_FLAGS_ID, DATA_CUSTOM_NAME and
                 // DATA_CUSTOM_NAME_VISIBLE: server NPCs and holograms rely on
                 // these instead of saved NBT.
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     for (index, _, value) in &p.values {
                         match (index, value) {
                             (0, Value::Byte(flags)) => {
@@ -3346,7 +3345,7 @@ impl Game<'_> {
                     }
                 }
                 self.remote_mob_data(p.id, &p.values);
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                     && m.species() == horizon_client::mobs::Species::Creeper
                 {
                     for (index, _, value) in &p.values {
@@ -3359,7 +3358,7 @@ impl Game<'_> {
                         }
                     }
                 }
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     for (index, _, value) in &p.values {
                         match (index, value) {
                             // Entity.DATA_TICKS_FROZEN: isFullyFrozen shakes it.
@@ -3391,7 +3390,7 @@ impl Game<'_> {
                     for (index, _, value) in &p.values {
                         if let (14, Value::OptPos(bed)) = (index, value) {
                             let code = bed.map_or(0, |b| self.bed_facing(b));
-                            if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                            if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                                 m.extra.ints[1] = code;
                                 if let Some(head) = *bed {
                                     // LivingEntity.onSyncedDataUpdated(SLEEPING_POS_ID): setPosToBed.
@@ -3410,14 +3409,14 @@ impl Game<'_> {
                         // Avatar.DATA_PLAYER_MAIN_HAND (HumanoidArm: 0 left, 1
                         // right): the arm a swing of the main hand moves.
                         if let (15, Value::Id(arm)) = (index, value)
-                            && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                            && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                         {
                             m.extra.main_hand_left = *arm == 0;
                         }
                         // Avatar.DATA_PLAYER_MODE_CUSTOMISATION: the skin layers
                         // the player shows (PlayerModelPart bits).
                         if let (16, Value::Byte(bits)) = (index, value)
-                            && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                            && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                         {
                             m.extra.hidden_model_parts = !(*bits as u8) & 0x7F;
                         }
@@ -3527,7 +3526,7 @@ impl Game<'_> {
                         .remote
                         .as_ref()
                         .is_some_and(|r| r.level_players.contains_key(&p.id)))
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
                     for (index, _, value) in &p.values {
                         if let (0, Value::Byte(flags)) = (index, value) {
@@ -3580,7 +3579,7 @@ impl Game<'_> {
                         )
                     })
                 });
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     if let Some(charged) = charged
                         && &*m.kind.id == "minecraft:player"
                     {
@@ -3762,7 +3761,7 @@ impl Game<'_> {
                             pitch,
                         );
                     }
-                } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                } else if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     m.limb_speed = 1.5;
                     m.hurt_time = 10;
                 } else {
@@ -3775,7 +3774,7 @@ impl Game<'_> {
                     if let Some(pl) = self.player.as_mut() {
                         pl.health.animate_hurt_dir(p.yaw);
                     }
-                } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                } else if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     m.hurt_time = 10;
                 } else {
                     self.remote_dragon_hurt(p.id);
@@ -3819,20 +3818,20 @@ impl Game<'_> {
                     self.fox_eat_particles(p.id as u32);
                 }
                 if p.event == 1
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                     && m.species() == horizon_client::mobs::Species::Rabbit
                 {
                     horizon_client::mobs::rabbit::hop_event(m);
                 }
                 if p.event == 19
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
                     horizon_client::mobs::aquatic::squid_cycle_event(m);
                 }
                 // LivingEntity.handleEntityEvent 55: another player swapped
                 // its main and off hand (`swapHandItems`).
                 if p.event == 55
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
                     std::mem::swap(&mut m.extra.main_hand, &mut m.extra.off_hand);
                 }
@@ -3844,7 +3843,7 @@ impl Game<'_> {
                 }
                 // EntityEvent.DEATH: start the death animation.
                 if p.event == 3
-                    && let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32)
                 {
                     m.health = 0.0;
                 }
@@ -3868,12 +3867,12 @@ impl Game<'_> {
                     );
                 }
                 // The events that start a mob's animation (the warden's).
-                if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     horizon_client::mobs::sync::entity_event(m, p.event as u8);
                 }
                 // LivingEntity.handleEntityEvent 60: the poof as the dead body goes.
                 if p.event == 60
-                    && let Some(m) = self.mobs.iter().find(|m| m.id == p.id as u32)
+                    && let Some(m) = self.mob_index.get(&self.mobs, p.id as u32)
                 {
                     let (at, w, h) = (m.position, f64::from(m.width()), f64::from(m.height()));
                     self.death_poof([at.x, at.y, at.z], w, h);
@@ -3950,7 +3949,7 @@ impl Game<'_> {
                 };
                 if self.remote.as_ref().is_some_and(|r| r.entity_id == p.id) {
                     self.swing_hand(hand, animation);
-                } else if let Some(m) = self.mobs.iter_mut().find(|m| m.id == p.id as u32) {
+                } else if let Some(m) = self.mob_index.get_mut(&mut self.mobs, p.id as u32) {
                     m.swing_hand_modified(hand == Hand::Off, animation);
                 }
             }
@@ -5231,7 +5230,7 @@ impl Game<'_> {
     fn remote_motion(&mut self, id: i32, velocity: [f64; 3]) {
         self.remote_dragon_motion(id, velocity);
         let v = Vec3::new(velocity[0], velocity[1], velocity[2]);
-        if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id as u32) {
+        if let Some(m) = self.mob_index.get_mut(&mut self.mobs, id as u32) {
             // Squid.aiStep derives its body pitch and roll from network motion.
             m.velocity = v;
         } else if let Some(d) = self.dropped.iter_mut().find(|d| d.id == id as u32) {
@@ -7664,18 +7663,24 @@ impl Game<'_> {
         };
         let target = self.bucket_target(content, &hit);
         let pos = horizon_core::position::BlockPos::new(target[0], target[1], target[2]);
+        let [x, y, z] = hit.beside();
+        let beside = Some(horizon_core::position::BlockPos::new(x, y, z));
         let sneaking = self.keys.contains(&KeyCode::ShiftLeft);
         let creative = self.creative;
-        // A water bucket on a liquid container fills it server-side only.
-        let clicked = self.world.block(hit.pos[0], hit.pos[1], hit.pos[2]);
-        let client_change =
-            !(content.is_water() && self.res.behaviours().is_liquid_container(clicked));
         self.with_level(|b, level, ticks| {
             let mut level = DryLevel::new(level);
-            let emptied =
-                b.bucket_empty(&mut level, ticks, pos, content, sound, sneaking, creative);
+            let emptied = b.bucket_empty(
+                &mut level, ticks, pos, beside, content, sound, sneaking, creative,
+            );
+            // Water poured into a liquid container (where it went, which may
+            // be the block beside a refusing one) fills it server-side only.
+            let client_change = !(content.is_water()
+                && emptied.is_some_and(|at| {
+                    use horizon_world::level::LevelAccess as _;
+                    b.is_liquid_container(level.block_state(at))
+                }));
             (
-                emptied,
+                emptied.is_some(),
                 client_change.then(|| level.changed.into_iter().collect()),
                 std::mem::take(&mut level.sounds),
             )

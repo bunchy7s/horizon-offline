@@ -1028,7 +1028,7 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
     // integer literals. Each refusal is rewritten where naga points, and the source parsed again.
     let mut text = std::borrow::Cow::Borrowed(text);
     let mut tries = 0;
-    let module = loop {
+    let mut module = loop {
         tries += 1;
         match Frontend::default().parse(&Options::from(stage.kind), &text) {
             Ok(m) => break m,
@@ -1040,6 +1040,7 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             },
         }
     };
+    end_returns_give_zero(&mut module);
     Validator::new(ValidationFlags::all(), Capabilities::all())
         .subgroup_operations(naga::valid::SubgroupOperationSet::all())
         .subgroup_stages(naga::valid::ShaderStages::all())
@@ -1057,6 +1058,42 @@ fn compile(stage: &Stage, text: &str, header_lines: usize) -> Result<naga::Modul
             vec![at(&text, span, message)]
         })?;
     Ok(module)
+}
+
+/// GLSL lets a function that returns a value reach its end without a `return`: what it returns
+/// then is undefined (GLSL 4.60, 6.1). naga's frontend ends every body that can reach its end
+/// with a `return` of no value, which its validator refuses in such a function; those returns
+/// give the result type's zero instead.
+fn end_returns_give_zero(module: &mut naga::Module) {
+    fn fill(block: &mut naga::Block, zero: &mut dyn FnMut() -> naga::Handle<naga::Expression>) {
+        // The ends naga's frontend gives a `return` to (`naga::proc::ensure_block_returns`).
+        match block.last_mut() {
+            Some(naga::Statement::Block(b)) => fill(b, zero),
+            Some(naga::Statement::If { accept, reject, .. }) => {
+                fill(accept, zero);
+                fill(reject, zero);
+            }
+            Some(naga::Statement::Switch { cases, .. }) => {
+                for case in cases.iter_mut().filter(|c| !c.fall_through) {
+                    fill(&mut case.body, zero);
+                }
+            }
+            Some(naga::Statement::Return { value }) if value.is_none() => *value = Some(zero()),
+            _ => {}
+        }
+    }
+    for (_, f) in module.functions.iter_mut() {
+        let Some(ty) = f.result.as_ref().map(|r| r.ty) else {
+            continue;
+        };
+        let (body, expressions) = (&mut f.body, &mut f.expressions);
+        let mut made = None;
+        fill(body, &mut || {
+            *made.get_or_insert_with(|| {
+                expressions.append(naga::Expression::ZeroValue(ty), naga::Span::default())
+            })
+        });
+    }
 }
 
 /// `text` without the scalar swizzle naga's frontend refused (`e`, GLSL 4.20's `f.x`, `f.xx`): one
@@ -1823,6 +1860,62 @@ mod tests {
             Target::Buffers,
         )
         .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// A function that returns a value may reach its end without a `return` (GLSL 4.60, 6.1:
+    /// the value is undefined): after a loop (Lux's `MaxIdx`), an `if` without `else`, a
+    /// `switch` without `default`; it returns zero there. A function ending in its own
+    /// `return` keeps it.
+    #[test]
+    fn functions_reaching_their_end_return_zero() {
+        let fsh = "#version 330\nuniform int k;\nout vec4 c;\n\
+                   struct S { float a; ivec2 b; };\n\
+                   float after_loop(float x) {\n    for (int i = 0; i < 4; i++) {\n        \
+                   if (x > float(i)) return float(i);\n    }\n}\n\
+                   vec3 after_if(float x) { if (x > 0.5) return vec3(x); }\n\
+                   int after_switch() { switch (k) { case 0: return 1; case 1: return 2; } }\n\
+                   S after_struct(float x) { if (x > 0.5) { return S(x, ivec2(k)); } }\n\
+                   float own(float x) { return x * 2.0; }\n\
+                   void main() {\n    float x = float(k) * 0.25;\n    \
+                   c = vec4(after_loop(x) + after_if(x).x, float(after_switch()), \
+                   after_struct(x).a, own(x));\n}\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Buffers,
+        )
+        .unwrap_or_else(|e| panic!("{e:?}"));
+        let zero_returns = |name: &str| {
+            let (_, f) = (p.fragment.functions.iter())
+                .find(|(_, f)| f.name.as_deref() == Some(name))
+                .unwrap_or_else(|| panic!("{name} missing"));
+            fn count(f: &naga::Function, b: &naga::Block) -> usize {
+                b.iter()
+                    .map(|s| match s {
+                        naga::Statement::Return { value: Some(v) } => matches!(
+                            f.expressions[*v],
+                            naga::Expression::ZeroValue(t) if Some(t) == f.result.as_ref().map(|r| r.ty)
+                        )
+                        .into(),
+                        naga::Statement::Block(b) => count(f, b),
+                        naga::Statement::If { accept, reject, .. } => {
+                            count(f, accept) + count(f, reject)
+                        }
+                        naga::Statement::Switch { cases, .. } => {
+                            cases.iter().map(|c| count(f, &c.body)).sum()
+                        }
+                        naga::Statement::Loop { body, continuing, .. } => {
+                            count(f, body) + count(f, continuing)
+                        }
+                        _ => 0,
+                    })
+                    .sum()
+            }
+            count(f, &f.body)
+        };
+        for name in ["after_loop", "after_if", "after_switch", "after_struct"] {
+            assert!(zero_returns(name) > 0, "{name}: its end returns no zero");
+        }
+        assert_eq!(zero_returns("own"), 0, "own: its own return was replaced");
     }
 
     /// `if (c) return; else ...` keeps its `else`: the statements the translation guards with

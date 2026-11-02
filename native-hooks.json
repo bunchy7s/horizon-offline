@@ -157,6 +157,102 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_set_block"
     },
     {
+      "name": "edit_blocks",
+      "target": "horizon_client::game::native_world_edit::Game<'_>::native_edit_blocks"
+    },
+    {
+      "name": "surface_heights",
+      "target": "horizon_client::game::native_world_columns::Game<'_>::native_surface_heights"
+    },
+    {
+      "name": "read_columns",
+      "target": "horizon_client::game::native_world_columns::Game<'_>::native_read_columns"
+    },
+    {
+      "name": "refresh_biome_colors",
+      "target": "horizon_client::game::native_biome_colors::Game<'_>::native_refresh_biome_colors"
+    },
+    {
+      "name": "neighbor_signal",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_neighbor_signal"
+    },
+    {
+      "name": "light",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_light"
+    },
+    {
+      "name": "weather",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_weather"
+    },
+    {
+      "name": "day_time",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_day_time"
+    },
+    {
+      "name": "world_height",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_height"
+    },
+    {
+      "name": "max_stack_size",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_max_stack_size"
+    },
+    {
+      "name": "item_model",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_model"
+    },
+    {
+      "name": "quad",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_quad"
+    },
+    {
+      "name": "mod_screen_open",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_screen_open"
+    },
+    {
+      "name": "mod_screen_close",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_screen_close"
+    },
+    {
+      "name": "mod_screen",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_screen"
+    },
+    {
+      "name": "set_experience_orb",
+      "target": "horizon_client::game::native_server::Game<'_>::native_set_experience_orb"
+    },
+    {
+      "name": "experience_orbs",
+      "target": "horizon_client::game::native_server::Game<'_>::native_experience_orbs"
+    },
+    {
+      "name": "clock",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_clock"
+    },
+    {
+      "name": "spawn_falling_block",
+      "target": "horizon_client::game::native_falling::Game<'_>::native_spawn_falling_block"
+    },
+    {
+      "name": "block_state_property",
+      "target": "horizon_client::game::native_block_entity_draw::Game<'_>::native_block_state_property"
+    },
+    {
+      "name": "raycast",
+      "target": "horizon_client::game::native_claimed_items::Game<'_>::native_raycast"
+    },
+    {
+      "name": "view_hit",
+      "target": "horizon_client::game::native_claimed_items::Game<'_>::native_view_hit"
+    },
+    {
+      "name": "claim_items",
+      "target": "horizon_client::game::native_claimed_items::Game<'_>::native_claim_items"
+    },
+    {
+      "name": "poll",
+      "target": "horizon_client::game::native_claimed_items::Game<'_>::native_poll"
+    },
+    {
       "name": "set_item_entity",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_set_item_entity"
     },
@@ -1247,19 +1343,29 @@
     {
       "name": "camera_shake",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_camera_shake"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_camera_shake",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "shader_params",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_shader_params"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_shader_params",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "block_highlight",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_highlight",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "render_hand",
@@ -1267,55 +1373,85 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_render_hand",
       "neoforge": "RenderHandEvent",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "client_resources_reloaded",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_resources_reloaded",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "item_decorations",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_decorations",
       "neoforge": "RegisterItemDecorationsEvent",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "use_duration",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_duration"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_use_duration",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "use_animation",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_use_animation",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "can_eat",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_can_eat"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_can_eat",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "living_entity_use_item_start",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_entity_use_item_start",
       "neoforge": "LivingEntityUseItemEvent.Start",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "living_entity_use_item_finish",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_entity_use_item_finish",
       "neoforge": "LivingEntityUseItemEvent.Finish",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "screen_mouse_scrolled_pre",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_scrolled_pre"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_scrolled_pre",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "player_command",
@@ -1323,45 +1459,74 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_command",
       "neoforge": "CommandEvent",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "perform_console_command",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_perform_console_command",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "ran"
+      }
     },
     {
       "name": "screen_key_pressed_pre",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_key_pressed_pre"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_key_pressed_pre",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "screen_char_typed_pre",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_char_typed_pre"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_char_typed_pre",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "data_pack_files",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_data_pack_files"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_data_pack_files",
+      "mod_api": {
+        "contract": "collect",
+        "out": "files"
+      }
     },
     {
       "name": "biome_colors",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_biome_colors",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "server_data_loaded",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_server_data_loaded"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_server_data_loaded",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "compute_fov",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_compute_fov",
       "neoforge": "ViewportEvent.ComputeFov",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "mob_submit",
@@ -1369,21 +1534,31 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mob_submit",
       "neoforge": "RenderLivingEvent.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "drawn"
+      }
     },
     {
       "name": "camera_distance",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_camera_distance",
       "neoforge": "CalculateDetachedCameraDistanceEvent",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "compute_fog_color",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_compute_fog_color",
       "neoforge": "ViewportEvent.ComputeFogColor",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "mouse_button_pre",
@@ -1391,28 +1566,41 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mouse_button_pre",
       "neoforge": "InputEvent.MouseButton.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "mouse_button_post",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mouse_button_post",
       "neoforge": "InputEvent.MouseButton.Post",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "player_respawned",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_respawned",
       "neoforge": "PlayerEvent.PlayerRespawnEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "render_fog",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_render_fog",
       "neoforge": "ViewportEvent.RenderFog",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "screen_key_released_pre",
@@ -1420,41 +1608,62 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_key_released_pre",
       "neoforge": "ScreenEvent.KeyReleased.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "music",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_music",
       "neoforge": "SelectMusicEvent",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "music_layers",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_music_layers",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "collect",
+        "out": "layers"
+      }
     },
     {
       "name": "datapack_sync",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_datapack_sync",
       "neoforge": "OnDatapackSyncEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "recipe_types"
+      }
     },
     {
       "name": "recipes_received",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_recipes_received",
       "neoforge": "RecipesReceivedEvent",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "input_key",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_input_key",
       "neoforge": "InputEvent.Key",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "mouse_scrolling",
@@ -1462,7 +1671,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mouse_scrolling",
       "neoforge": "InputEvent.MouseScrollingEvent",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "screen_mouse_dragged_pre",
@@ -1470,72 +1683,115 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_screen_mouse_dragged_pre",
       "neoforge": "ScreenEvent.MouseDragged.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "mod_container_viewers",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mod_container_viewers",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "living_knockback",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_knockback"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_knockback",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "experience_orb_can_merge",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_can_merge",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "experience_orb_merge",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_experience_orb_merge",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "menu_slot_rules",
       "version": 1,
       "target": "horizon_client::menu::native_menu_slot_rules",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "living_entity_use_item_tick",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_entity_use_item_tick",
       "neoforge": "LivingEntityUseItemEvent.Tick",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "on_use_tick",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_on_use_tick"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_on_use_tick",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "living_entity_use_item_stop",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_entity_use_item_stop",
       "neoforge": "LivingEntityUseItemEvent.Stop",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "release_using",
       "version": 1,
-      "target": "horizon_client::game::native_hooks::Game<'_>::native_release_using"
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_release_using",
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "loot_function",
       "version": 1,
-      "target": "horizon_world::loot::native_loot_function"
+      "target": "horizon_world::loot::native_loot_function",
+      "mod_api": {
+        "contract": "collect",
+        "out": "stack"
+      }
     },
     {
       "name": "loot_condition",
       "version": 1,
-      "target": "horizon_world::loot::native_loot_condition"
+      "target": "horizon_world::loot::native_loot_condition",
+      "mod_api": {
+        "contract": "collect",
+        "out": "holds"
+      }
     },
     {
       "name": "level_load",
@@ -1543,7 +1799,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_load",
       "neoforge": "LevelEvent.Load",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "level_unload",
@@ -1551,7 +1810,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_level_unload",
       "neoforge": "LevelEvent.Unload",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "client_level_load",
@@ -1559,7 +1821,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_level_load",
       "neoforge": "LevelEvent.Load",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "client_level_unload",
@@ -1567,13 +1832,20 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_client_level_unload",
       "neoforge": "LevelEvent.Unload",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "hears_projectile_impacts",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_hears_projectile_impacts",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "hears"
+      }
     },
     {
       "name": "projectile_impact",
@@ -1581,7 +1853,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_projectile_impact",
       "neoforge": "ProjectileImpactEvent",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "entity_mount",
@@ -1589,7 +1865,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_mount",
       "neoforge": "EntityMountEvent",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "interaction_key",
@@ -1597,7 +1877,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_interaction_key",
       "neoforge": "InputEvent.InteractionKeyMappingTriggered",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "gui_layer_pre",
@@ -1605,7 +1889,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_gui_layer_pre",
       "neoforge": "RenderGuiLayerEvent.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "gui_layer_post",
@@ -1613,7 +1901,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_gui_layer_post",
       "neoforge": "RenderGuiLayerEvent.Post",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "map_decorations",
@@ -1621,7 +1912,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_map_decorations",
       "neoforge": "MapDecorationType",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "decorations"
+      }
     },
     {
       "name": "player_start_tracking",
@@ -1629,7 +1924,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_start_tracking",
       "neoforge": "PlayerEvent.StartTracking",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "player_stop_tracking",
@@ -1637,21 +1935,32 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_stop_tracking",
       "neoforge": "PlayerEvent.StopTracking",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "block_entity_energy",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_energy",
       "neoforge": "Capabilities.Energy.BLOCK",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "replace",
+        "out": "energy"
+      }
     },
     {
       "name": "data_map_types",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_data_map_types",
       "neoforge": "RegisterDataMapTypesEvent",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "collect",
+        "out": "types"
+      }
     },
     {
       "name": "living_breathe",
@@ -1659,19 +1968,30 @@
       "target": "horizon_client::breathing::native_living_breathe",
       "neoforge": "LivingBreatheEvent",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "blocks",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_blocks",
-      "neoforge": "RegisterEvent"
+      "neoforge": "RegisterEvent",
+      "mod_api": {
+        "contract": "collect",
+        "out": "blocks"
+      }
     },
     {
       "name": "items",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_items",
-      "neoforge": "RegisterEvent"
+      "neoforge": "RegisterEvent",
+      "mod_api": {
+        "contract": "collect",
+        "out": "items"
+      }
     },
     {
       "name": "entity_tick_pre",
@@ -1679,7 +1999,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_tick_pre",
       "neoforge": "EntityTickEvent.Pre",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
     },
     {
       "name": "entity_tick_post",
@@ -1687,20 +2011,31 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_tick_post",
       "neoforge": "EntityTickEvent.Post",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "entity_tick_listened",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_tick_listened",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "listened"
+      }
     },
     {
       "name": "item_fluid_tank",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_item_fluid_tank",
-      "neoforge": "Capabilities.FluidHandler.ITEM"
+      "neoforge": "Capabilities.FluidHandler.ITEM",
+      "mod_api": {
+        "contract": "replace",
+        "out": "capacity"
+      }
     },
     {
       "name": "living_equipment_change",
@@ -1708,14 +2043,21 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_equipment_change",
       "neoforge": "LivingEquipmentChangeEvent",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "living_equipment_listened",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_living_equipment_listened",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "listened"
+      }
     },
     {
       "name": "player_submit",
@@ -1723,7 +2065,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_submit",
       "neoforge": "RenderPlayerEvent.Pre",
       "side": "client",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "drawn"
+      }
     },
     {
       "name": "mob_layer",
@@ -1731,14 +2077,21 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_mob_layer",
       "neoforge": "EntityRenderersEvent.AddLayers",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "player_render_listened",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_render_listened",
       "side": "client",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "collect",
+        "out": "listened"
+      }
     },
     {
       "name": "sign_changed",
@@ -1746,14 +2099,22 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_sign_changed",
       "neoforge": "none (NeoForge has no sign-editing event)",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     },
     {
       "name": "standalone_models",
       "version": 1,
       "target": "horizon_client::game::native_hooks::Game<'_>::native_standalone_models",
       "neoforge": "ModelEvent.RegisterStandalone",
-      "side": "client"
+      "side": "client",
+      "mod_api": {
+        "contract": "collect",
+        "out": "models"
+      }
     },
     {
       "name": "player_container_open",
@@ -1761,7 +2122,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_container_open",
       "neoforge": "PlayerContainerEvent.Open",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "player_container_close",
@@ -1769,7 +2133,10 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_container_close",
       "neoforge": "PlayerContainerEvent.Close",
       "side": "server",
-      "cancellable": false
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
     },
     {
       "name": "player_toggle_flight",
@@ -1777,7 +2144,11 @@
       "target": "horizon_client::game::native_hooks::Game<'_>::native_player_toggle_flight",
       "neoforge": "none (NeoForge has no flight toggle event; Bukkit's PlayerToggleFlightEvent)",
       "side": "server",
-      "cancellable": true
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
     }
   ]
 }

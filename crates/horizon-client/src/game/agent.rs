@@ -1712,7 +1712,7 @@ impl Game<'_> {
                 if let Some(server) = &self.integrated {
                     let chat = server
                         .call(move |g| g.owner_console_command(&command))
-                        .ok_or("the integrated server stopped")?;
+                        .ok_or(super::integrated::NO_ANSWER)?;
                     return ok(json!({ "ok": true, "chat": chat }));
                 }
                 if self.remote.is_some() {

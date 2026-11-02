@@ -1517,6 +1517,10 @@ pub struct OptionsUi {
     pub agent_status: Vec<String>,
     /// Keyboard focus: the interactive target currently focused.
     focus: Option<FocusId>,
+    /// The focus came from keyboard or pad navigation, so the mouse wheel steps it
+    /// from anywhere (`wheel`). A click focuses its widget too, for the highlight,
+    /// but vanilla's wheel ignores that: only the hovered widget then reacts.
+    focus_from_keyboard: bool,
     /// Whether a focused slider is in value-editing mode (`AbstractSliderButton.canChangeValue`).
     pub(crate) can_change_value: bool,
     /// The current GUI size (w, h).
@@ -1570,6 +1574,7 @@ impl Default for OptionsUi {
             split_setup: Default::default(),
             agent_status: Vec::new(),
             focus: None,
+            focus_from_keyboard: false,
             can_change_value: false,
             size: (427.0, 240.0),
             framebuffer: [1280, 720],
@@ -2092,6 +2097,7 @@ impl OptionsUi {
         self.stack.clear();
         self.data_pack_dir = None;
         self.focus = None;
+        self.focus_from_keyboard = false;
         self.can_change_value = false;
         self.push(page);
         self.in_world = in_world;
@@ -2102,6 +2108,7 @@ impl OptionsUi {
         self.scroll = 0.0;
         self.scrollbar_drag_y = None;
         self.focus = None;
+        self.focus_from_keyboard = false;
         self.can_change_value = false;
         if matches!(page, Page::Video | Page::Controls | Page::KeyBinds) {
             self.settings_search.set_value("");
@@ -3772,6 +3779,7 @@ impl OptionsUi {
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
                 self.focus = Some(FocusId::Search);
+                self.focus_from_keyboard = false;
                 self.can_change_value = false;
                 search.click(atlas, x, false, false);
                 self.scroll = 0.0;
@@ -3784,6 +3792,7 @@ impl OptionsUi {
             search.focused = ui::hovered((x, y), search.x, search.y, search.width, search.height);
             if search.focused {
                 self.focus = Some(FocusId::Search);
+                self.focus_from_keyboard = false;
                 self.can_change_value = false;
                 search.click(atlas, x, false, false);
                 self.scroll = 0.0;
@@ -3897,7 +3906,10 @@ impl OptionsUi {
             if wd.list && (y < top || y >= bottom) {
                 continue;
             }
+            // A click focuses the widget for its highlight only: vanilla's wheel
+            // steps a keyboard-focused widget from anywhere, not a clicked one.
             self.focus = Some(focus_id(wd_idx, &wd));
+            self.focus_from_keyboard = false;
             match wd.kind {
                 WKind::Button {
                     active: true, act, ..
@@ -4120,15 +4132,19 @@ impl OptionsUi {
         }
         events
     }
-    /// The mouse wheel at the cursor. Over a cycle button it takes the step
-    /// (`CycleButton.mouseScrolled`: up goes back) and the list stays put;
-    /// over a slider it nudges the slider up or down.
+    /// The mouse wheel at the cursor. Vanilla scrolls the list
+    /// (`AbstractScrollArea.mouseScrolled`), except that a hovered cycle button
+    /// takes the step and keeps the wheel (`CycleButton.mouseScrolled`: up goes
+    /// back); `AbstractSliderButton` does not override it, so a slider under the
+    /// cursor lets the list scroll.
     ///
-    /// **Horizon improvement (diverges from Vanilla 26.3):** when a slider or
-    /// cycle button is keyboard-focused (highlighted), the wheel steps or
-    /// cycles that widget regardless of where the cursor is. Vanilla 26.3
-    /// does not intercept the wheel for sliders at all; this makes keyboard
-    /// navigation far more usable.
+    /// **Horizon improvement (diverges from Vanilla 26.3):** a slider or cycle
+    /// button focused by the keyboard (Tab, the arrows, a pad) steps or cycles on
+    /// the wheel wherever the cursor is. Vanilla 26.3 does not intercept the wheel
+    /// for sliders at all; this makes keyboard navigation far more usable. Focus
+    /// left by a click does not count (`focus_from_keyboard`): vanilla's wheel
+    /// ignores it, and honouring it toggled the clicked option on every later wheel
+    /// event, from anywhere on the screen, while the list never scrolled.
     pub fn wheel(
         &mut self,
         s: &mut Settings,
@@ -4180,7 +4196,10 @@ impl OptionsUi {
         }
         // Horizon improvement: a keyboard-focused slider or cycle button
         // intercepts the wheel before hover detection (see doc-comment above).
-        if amount != 0.0 {
+        // A click focuses its widget for the highlight too, and vanilla's wheel
+        // must not act on that: it would toggle the clicked option from anywhere
+        // on the screen and the list would never scroll.
+        if amount != 0.0 && self.focus_from_keyboard {
             let (widgets, _, _, _) = self.layout(s, size.0, size.1);
             match &self.focus {
                 Some(FocusId::Slider(opt)) => {
@@ -4366,6 +4385,7 @@ impl OptionsUi {
         self.selected_key = None;
         self.selected_pad_action = None;
         self.focus = None;
+        self.focus_from_keyboard = false;
         self.settings_search.focused = false;
         self.language_search.focused = false;
         self.can_change_value = false;
@@ -4709,6 +4729,7 @@ impl OptionsUi {
             };
             let (next_id, rect, in_list) = &focusables[next_idx];
             self.focus = Some(next_id.clone());
+            self.focus_from_keyboard = true;
             self.can_change_value = matches!(next_id, FocusId::Slider(_));
             if *in_list {
                 if rect[1] < top {
@@ -4747,6 +4768,7 @@ impl OptionsUi {
                     if let Some(next_idx) = gamepad::focus_step_rect(from, dir, &rects) {
                         let (next_id, rect, in_list) = &focusables[next_idx];
                         self.focus = Some(next_id.clone());
+                        self.focus_from_keyboard = true;
                         self.can_change_value = false;
                         if *in_list {
                             if rect[1] < top {
@@ -4760,6 +4782,7 @@ impl OptionsUi {
                 }
             } else {
                 self.focus = Some(focusables[0].0.clone());
+                self.focus_from_keyboard = true;
                 self.can_change_value = false;
             }
             return Vec::new();
@@ -4782,6 +4805,7 @@ impl OptionsUi {
                     if let Some(next_idx) = step {
                         let (next_id, rect, in_list) = &focusables[next_idx];
                         self.focus = Some(next_id.clone());
+                        self.focus_from_keyboard = true;
                         self.can_change_value = false;
                         if *in_list {
                             if rect[1] < top {
@@ -4799,6 +4823,7 @@ impl OptionsUi {
                 }
             } else {
                 self.focus = Some(focusables[0].0.clone());
+                self.focus_from_keyboard = true;
                 self.can_change_value = false;
             }
             return Vec::new();
@@ -4822,6 +4847,7 @@ impl OptionsUi {
                     match act {
                         Act::Push(p) => {
                             self.focus = None;
+                            self.focus_from_keyboard = false;
                             self.can_change_value = false;
                             if p == Page::ShaderPacks {
                                 events.push(Event::ListShaderPacks);
@@ -4830,6 +4856,7 @@ impl OptionsUi {
                         }
                         Act::Done => {
                             self.focus = None;
+                            self.focus_from_keyboard = false;
                             self.can_change_value = false;
                             events.extend(self.back(s));
                         }
@@ -4869,6 +4896,7 @@ impl OptionsUi {
                         }
                         Act::ModSettings(i) => {
                             self.focus = None;
+                            self.focus_from_keyboard = false;
                             self.can_change_value = false;
                             self.push(Page::NativeMod(i));
                             events.push(Event::NativeSettings(i));
@@ -4893,6 +4921,7 @@ impl OptionsUi {
                         // The shader options page's buttons, as a click does them.
                         Act::ShaderOptions => {
                             self.focus = None;
+                            self.focus_from_keyboard = false;
                             self.can_change_value = false;
                             s.shader_options = None;
                             self.push(Page::ShaderOptions);
@@ -4910,6 +4939,7 @@ impl OptionsUi {
                         Act::ShaderScreen(screen) => {
                             if let Some(options) = &mut s.shader_options {
                                 self.focus = None;
+                                self.focus_from_keyboard = false;
                                 options.path.push(screen);
                                 self.scroll = 0.0;
                             }
@@ -7170,6 +7200,80 @@ mod tests {
         // ArrowRight does not change ChunkUpdates when can_change_value is false
         ui.key(&mut s, &atlas, K::ArrowRight, None);
         assert_eq!(s.horizon.chunk_updates, 11);
+    }
+
+    /// Vanilla's wheel scrolls the list (`AbstractScrollArea.mouseScrolled`); only a
+    /// widget focused by the keyboard takes the step from anywhere on the screen.
+    /// A click focuses its widget for the highlight, and honouring that focus made a
+    /// clicked option toggle on every later wheel event while the list never scrolled.
+    #[test]
+    fn a_clicked_option_lets_the_wheel_scroll_the_list() {
+        let atlas = atlas();
+        let mut s = Settings::default();
+        let mut ui = OptionsUi::default();
+        ui.show(Page::Video);
+        let framebuffer = [854, 480];
+        let click_size = (427.0, 400.0);
+        let (widgets, click_top, click_bottom, _) = ui.layout(&s, click_size.0, click_size.1);
+
+        // A click leaves the widget focused for its highlight, not for the wheel.
+        let wd = widgets
+            .iter()
+            .find(|wd| {
+                matches!(
+                    wd.kind,
+                    WKind::Button {
+                        act: Act::Cycle(_),
+                        ..
+                    }
+                ) && (!wd.list || (wd.y >= click_top && wd.y + wd.h <= click_bottom))
+            })
+            .expect("a visible cycle button");
+        ui.click(
+            &mut s,
+            &atlas,
+            wd.x + 5.0,
+            wd.y + 5.0,
+            click_size,
+            framebuffer,
+            false,
+            false,
+        );
+        assert!(
+            matches!(ui.focus, Some(FocusId::Cycle(_))),
+            "the click focuses the cycle button it hit"
+        );
+        assert!(
+            !ui.focus_from_keyboard,
+            "a click does not leave keyboard focus"
+        );
+
+        // The wheel over the list's empty margin scrolls it at a size where the
+        // page overflows, and the clicked cycle option stays put: no ButtonClick,
+        // no Changed.
+        let size = (427.0, 240.0);
+        let (_, top, bottom, content) = ui.layout(&s, size.0, size.1);
+        assert!(
+            content > bottom - top,
+            "the video page scrolls at this size"
+        );
+        let before = s.view_bobbing;
+        let start = ui.scroll;
+        let cursor = (2.0, (top + bottom) / 2.0);
+        let events = ui.wheel(&mut s, size, cursor, framebuffer, -1.0);
+        assert_eq!(s.view_bobbing, before, "the clicked option does not toggle");
+        assert!(!events.contains(&Event::ButtonClick), "no click reaches it");
+        assert!(!events.contains(&Event::Changed));
+        assert!(ui.scroll > start, "the list scrolls down instead");
+
+        // Keyboard focus keeps the documented divergence: the wheel steps it
+        // wherever the cursor is, even off the widget.
+        ui.focus = Some(FocusId::Cycle(Opt::ViewBobbing));
+        ui.focus_from_keyboard = true;
+        let events = ui.wheel(&mut s, size, cursor, framebuffer, -1.0);
+        assert_ne!(s.view_bobbing, before, "a keyboard-focused option cycles");
+        assert!(events.contains(&Event::ButtonClick));
+        assert!(events.contains(&Event::Changed));
     }
 
     #[test]

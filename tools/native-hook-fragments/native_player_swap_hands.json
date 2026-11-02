@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "player_swap_hands",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_swap_hands",
+      "neoforge": "LivingSwapItemsEvent.Hands",
+      "side": "server",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a player swapping their hands, cancellable (`native_player_swap_hands`).",
+  "doc_summary": "a player swapping their main and off hand items: `native_player_swap_hands(player, name, cancel)` is heard before the swap (Bukkit's `PlayerSwapHandItemsEvent`; a swap from an open inventory is not heard), for a player of a server who is not a spectator, with their state swapped in. A mod sets `cancel` to keep the items where they are; the player's client gets its slots back. Bundles that use it need `\"hooks\": @API:native_player_swap_hands@`."
+}

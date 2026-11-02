@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_name_entity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_name_entity",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "A server player named a mob (`native_player_name_entity`).",
+  "doc_summary": "A server player named a mob with a name tag, after its name and persistence changed: `native_player_name_entity(player, name, entity_id, entity_name)`. Bundles need \"hooks\": @API:player_name_entity@."
+}
