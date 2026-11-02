@@ -12,7 +12,7 @@ use super::{
     undead,
 };
 use crate::blocks::Fluid;
-use crate::breathing::{Breath, apply, breathe};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -1040,14 +1040,14 @@ fn base_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 refill: if drowns { 0 } else { 4 },
             };
             let breath = breathe(m.id, &m.kind.id, vanilla);
-            let (air, drowned) = apply(m.air, 300, breath);
-            m.air = air;
-            if drowned {
+            if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
                 events.push(MobEvent::Drown {
                     mob: m.id,
                     at: [m.position.x, m.position.y, m.position.z],
                 });
-                m.damage(2.0, Damage::of(DamageKind::Drown));
+                if let Some(damage) = drowning.damage {
+                    m.damage(damage, Damage::of(DamageKind::Drown));
+                }
             }
         }
 
@@ -2597,7 +2597,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
             {
-                m.health = (m.health + 1.0).min(m.attrs.max_health);
+                m.heal(1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.

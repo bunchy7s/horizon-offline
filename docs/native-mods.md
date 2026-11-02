@@ -934,6 +934,14 @@ API 142 adds an energy buffer on a mod block's block entity (`Capabilities.Energ
 
 API 143 adds data maps (`RegisterDataMapTypesEvent`). `native_data_map_types(types)` pushes the types a mod registers: an `id` (`mod_id:name`, not in `minecraft`) for a `registry`, `minecraft:item` or `minecraft:block` so far; asked once per load of the server's data (a world's first open and every `/reload`). The values come from `data/<mod_id>/data_maps/<registry path>/<name>.json` in the world's data packs and from files a mod pushes through `native_data_pack_files` under the key `data_maps/<mod_id>:<registry path>/<name>`: `{"replace": false, "values": {"minecraft:coal": ..., "#minecraft:logs": ...}, "remove": [...]}`, an entry's value being the data itself or `{"value": ..., "replace": false}`; `replace` clears what earlier files set, a tag gives every entry in it the value, `remove` applies after the file's own values, and a newer value overrides an older one. `native_data_map(registry, type, entry)` reads an entry's value (the JSON the file held) and `native_data_map_entries(registry, type)` lists them. Server side only and not synced to clients; mergers, conditions, other registries and mod datapack registries are not here yet. Bundles need "hooks": 143.
 
+`native_living_fall(entity, kind, distance, multiplier, cancel)` corresponds to NeoForge's `LivingFallEvent` at `LivingEntity.causeFallDamage`. Mods may change the distance and damage multiplier or cancel fall handling; cancellation does not reverse physical movement. This free function receives the entity ID and type and cannot call game helpers. Player landings, mounted player falls and non-equine mob falls are wired. Equines use their own fall-damage override rather than `LivingEntity.causeFallDamage`. Bundles need `"hooks": @API:native_living_fall@`.
+
+`native_living_jump(entity, kind)` listens for NeoForge's `LivingEvent.LivingJumpEvent` after a living entity jumps. It receives the entity ID and type, and cannot cancel or change the jump. The player motion and mob ground-jump paths, including cubes and ridden horses and camels, are wired; whether every client-side prediction path reaches them remains unverified. Bundles need `"hooks": @API:native_living_jump@`.
+
+`native_living_heal(entity, amount, cancel)` corresponds to NeoForge's `LivingHealEvent` at `LivingEntity.heal`. The amount can be changed and cancellation prevents the heal. It covers player effect, food and peaceful regeneration healing and the wired mob healing paths. Other healing paths and client-side coverage remain unverified. `entity` is the affected player or mob ID. Bundles need `"hooks": @API:native_living_heal@`.
+
+`native_living_drown(entity, kind, is_drowning, damage_amount, bubble_count, cancel)` asks on the server when a player or generic-air mob cannot breathe and has no air (NeoForge's `LivingDrownEvent`, `LivingEntity.baseTick`). Mods may change the drowning decision, damage and bubble count, or cancel. Damage at or below zero does not hurt. The normal eight bubbles use the entity event; other positive counts are sent in a particle packet, and nonpositive counts suppress bubbles. Bundles need "hooks": @API:native_living_drown@.
+
 API 144 adds a player's or mob's breathing, on the single player server thread and on a dedicated server: `native_living_breathe(entity, kind, can_breathe, consume, refill)` every tick for a player and for a mob with the generic air logic (NeoForge's `LivingBreatheEvent`, vanilla's `LivingEntity.baseTick`), with Horizon's answers as the defaults: set `can_breathe` and how much air `consume` takes or `refill` gives (up to 300); at -20 the entity is set to 0 air and takes 2 drowning damage. It is a free function in `horizon_client::breathing`, so it answers and cannot call helpers. Axolotls and `WaterAnimal`s keep their own air logic. Bundles that use it need "hooks": 144.
 
 API 145 adds blocks and items a native mod declares in code, as NeoForge's `DeferredRegister.Blocks` and `.Items` drained by `RegisterEvent`, instead of one content file each: `native_blocks(blocks)` and `native_items(items)`, asked once at start on every side, take `horizon_mods::content::Block` and `Item`, the declarations a content mod's `data/<id>/horizon/block/` and `item/` files hold (a vanilla template and what differs; `item: true` gives a block its item). Ids are in the mod's namespace. They join the content mods' blocks and items, inside the content mod whose id is that namespace when it is on (its models, textures, loot and recipes), else on their own with the template's look, so their network ids, saves and the joining client's content check are the files' (docs/mods.md). They pass the files' checks; a namespace whose declarations don't is logged and left out. Bundles that use them need `"hooks": 145`.
@@ -2829,10 +2837,11 @@ before it decodes, and `get_existing` returns `None` instead of the default. Nei
 adds anything to the holder's saved data. `set` runs the optional codec before
 changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
-an error. A missing or non-server holder is an error, not a new phantom holder.
+an error. On a server, a missing holder is an error, not a new phantom holder; a client
+keeps a copy for any holder it is asked about (see the sync paragraph below).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
-`InvalidNamespace` (a malformed saved compound) and `InvalidCopyPolicy` (death-copy
-without a codec).
+`InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
+without a codec) and `InvalidSyncPolicy` (sync without a codec).
 
 ```rust
 use horizon_client::mod_api::{AttachmentCodec, AttachmentError, AttachmentType, Compound, Holder, Tag};
@@ -2846,6 +2855,7 @@ static COUNTER: AttachmentType<i32> = AttachmentType {
         },
     }),
     copy_on_death: false,
+    sync: false,
 };
 // Inside a server hook, or mixin code, with `host: &mut dyn Host`:
 if !COUNTER.has(host, Holder::Chunk([0, 0]))? { /* chunk carries no counter yet */ }
@@ -2862,20 +2872,40 @@ entities, boats, minecarts, armor stands, cushions, item frames, paintings and t
 server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
 not covered. Player UUIDs cover online guests and the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
-cannot access attachments. These maps live on the server only: there is **no client
-synchronization**. Unserialized values disappear on unload or restart. A saved value
-is stored under `horizon:attachments`, then the mod namespace and attachment name,
-as `{value: <compound>, copy_on_death: 1b}` (the flag is omitted when false).
+cannot access attachments. Unserialized values disappear on unload or restart. A saved
+value is stored under `horizon:attachments`, then the mod namespace and attachment name,
+as `{value: <compound>, copy_on_death: 1b, sync: 1b}` (a flag is omitted when false).
 Unknown mods' saved entries survive load and save without being decoded. Level
 attachments use the dimension's `data/minecraft/horizon_attachments.dat` SavedData
 file, not `level.dat`.
 
+A type with `sync: true` sends its value to Horizon clients when `get` creates the
+default, on `set` and `remove`, and on demand with `AttachmentType::sync_data(host,
+holder)`; changes made in one tick are sent once, at its end. The recipients are the
+players who track the holder: guests who were sent a chunk for a chunk or block entity,
+who track an entity for an entity, the player and those tracking them for a player, and
+everyone in the level for the level. A client also gets all of a holder's synced values
+when it starts seeing it: a chunk sent (with its block entities), a level joined or
+re-entered, an entity tracked, and its own player. With no native
+mod loaded nothing is sent. The wire form is the codec's compound, so `sync` requires
+a codec.
+
+Only Horizon clients are sent values. A message with a namespace or name over 256
+characters, a value that cannot be written or a payload past 1 MiB is not sent.
+
+On a client, `Host::attachments` returns a copy of what the server synced, which `get`
+decodes; `set` and `remove` change only that copy, which is dropped when the chunk,
+entity or player goes. A client keeps no copy for the level hosts (`LevelRandomHost`):
+they stay server-only there, though their changes on a server are synced.
+
 `copy_on_death` requires a codec. Player respawn copies opted-in entries via their
 encoded representation, including raw entries of an absent mod; other entries are
 removed. Living-entity conversion is not supported. This follows the default supplier,
-persistence and respawn option of NeoForge 26.3's public `AttachmentType.Builder`
-contract and `IAttachmentHolder`'s `hasData`/`getExistingData`, but not its
-holder-aware supplier, custom copy handler, conditional serialization or sync APIs.
+optional server-side persistence, player-respawn option and `sync` with a `StreamCodec`
+(with `syncData`) of NeoForge 26.3's public `AttachmentType.Builder` contract, and
+`IAttachmentHolder`'s `hasData`/`getExistingData`, but not its holder-aware supplier,
+custom copy handler, conditional serialization, the `sendToPlayer` predicate,
+`AttachmentSyncHandler` partial updates or a wire codec apart from the disk codec.
 
 `Host` exposes the documented `Game` helpers listed under `helpers` in
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's

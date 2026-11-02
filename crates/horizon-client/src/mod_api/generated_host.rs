@@ -93,7 +93,8 @@ pub trait Host {
         let _ = seed;
         unimplemented!("Host::draw_item")
     }
-    /// Access a server-owned holder's attachment map.
+    /// Access a server-owned holder's attachment map. On a client it is the
+    /// copy of what the server synced: `set` and `remove` change only the copy.
     fn attachments(&mut self, holder: Holder) -> AttachmentResult<&mut Attachments> {
         let _ = holder;
         unimplemented!("Host::attachments")
