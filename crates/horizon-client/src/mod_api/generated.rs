@@ -3580,6 +3580,17 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty. Added entries must
+    /// be globally unique instances. @API:native_potential_spawns@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn potential_spawns(&self, host: &dyn Host, event: &mut PotentialSpawnsEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// A server player's client answered a resource pack in play (vanilla's
     /// `ServerboundResourcePackPacket`): `status` is `Action`'s number, 0
     /// successfully loaded, 1 declined, 2 failed download, 3 accepted, 4
@@ -3632,6 +3643,16 @@ pub trait Hooks: Send + Sync {
     fn vehicle_moved(&self, host: &mut dyn Host, event: &mut VehicleMovedEvent<'_>) {
         let _ = host;
         let _ = event;
+    }
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn village_siege(&self, host: &mut dyn Host, event: &mut VillageSiegeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
     }
     /// The server world's border bounds changed, either immediately or when
     /// its timed size change was requested. @API:native_world_border_bounds_changed@.
@@ -11196,6 +11217,39 @@ pub fn dispatch_player_totem(
         mod_hook.player_totem(host, &mut event);
     }
 }
+/// What [`Hooks::potential_spawns`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotentialSpawnsEvent<'a> {
+    pub dimension: &'a str,
+    pub category: &'a str,
+    pub pos: [i32; 3],
+    pub entries: &'a mut Vec<SpawnEntry>,
+}
+pub fn dispatch_potential_spawns(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    category: &str,
+    pos: [i32; 3],
+    entries: &mut Vec<SpawnEntry>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PotentialSpawnsEvent {
+        dimension,
+        category,
+        pos,
+        entries,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.potential_spawns(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
 /// What [`Hooks::resource_pack_status`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ResourcePackStatusEvent<'a> {
@@ -11284,6 +11338,36 @@ pub fn dispatch_vehicle_moved(
     };
     for mod_hook in mods {
         mod_hook.vehicle_moved(host, &mut event);
+    }
+}
+/// What [`Hooks::village_siege`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VillageSiegeEvent<'a> {
+    pub dimension: &'a str,
+    pub player: u128,
+    pub attempted_pos: [f64; 3],
+}
+pub fn dispatch_village_siege(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    player: u128,
+    attempted_pos: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = VillageSiegeEvent {
+        dimension,
+        player,
+        attempted_pos,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.village_siege(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
     }
 }
 /// What [`Hooks::world_border_bounds_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.

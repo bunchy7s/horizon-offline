@@ -4697,7 +4697,15 @@ impl Game<'_> {
         entries: &mut Vec<SpawnEntry>,
         canceled: &mut bool,
     ) {
-        let _ = (dimension, category, pos, entries, canceled);
+        mod_api::dispatch_potential_spawns(
+            self,
+            mod_api::mods(),
+            dimension,
+            category,
+            pos,
+            entries,
+            canceled,
+        );
     }
 
     /// The world's spawn point changed to `pos` and `angle`. @API:native_spawn_change@.
@@ -4745,7 +4753,14 @@ impl Game<'_> {
         attempted_pos: [f64; 3],
         canceled: &mut bool,
     ) {
-        let _ = (dimension, player, attempted_pos, canceled);
+        mod_api::dispatch_village_siege(
+            self,
+            mod_api::mods(),
+            dimension,
+            player,
+            attempted_pos,
+            canceled,
+        );
     }
 
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
