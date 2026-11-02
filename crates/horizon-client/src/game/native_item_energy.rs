@@ -15,12 +15,12 @@ use horizon_world::nbt::{Compound, JavaString, Tag};
 /// NeoForge's `SimpleEnergyHandler` is built: its capacity and the most one
 /// insert and one extract move.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct ItemEnergyBuffer {
-    pub(crate) capacity: i32,
+pub struct ItemEnergyBuffer {
+    pub capacity: i32,
     /// The most one insert moves; 0 takes none.
-    pub(crate) max_insert: i32,
+    pub max_insert: i32,
     /// The most one extract moves; 0 gives none.
-    pub(crate) max_extract: i32,
+    pub max_extract: i32,
 }
 
 /// What one item of a stack holds (`native_item_energy`).
