@@ -4824,13 +4824,13 @@ impl Game<'_> {
     /// A server player launched a projectile item, after it was created.
     /// `item` is the projectile's held item. @API:player_launch_projectile@.
     pub(super) fn native_player_launch_projectile(&mut self, player: u128, name: &str, item: &str) {
-        let _ = (player, name, item);
+        mod_api::dispatch_player_launch_projectile(self, mod_api::mods(), player, name, item);
     }
     /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
     /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
     /// usual. Server-side, including the single-player server. @API:native_explosion_prime@.
     pub(super) fn native_explosion_prime(&mut self, center: [f64; 3], radius: f32) {
-        let _ = (center, radius);
+        mod_api::dispatch_explosion_prime(self, mod_api::mods(), center, radius);
     }
     /// A dropped item entity reached its 6000-tick lifetime and is about to be
     /// removed (Bukkit's `ItemDespawnEvent`). @API:native_item_despawn@.
@@ -4841,7 +4841,7 @@ impl Game<'_> {
         count: i32,
         pos: [f64; 3],
     ) {
-        let _ = (entity, item, count, pos);
+        mod_api::dispatch_item_despawn(self, mod_api::mods(), entity, item, count, pos);
     }
     /// A mob is about to drop `count` of `item` at `pos` (Bukkit's
     /// `EntityDropItemEvent`). @API:native_entity_drop_item@.
@@ -4852,12 +4852,12 @@ impl Game<'_> {
         count: i32,
         pos: [f64; 3],
     ) {
-        let _ = (entity, item, count, pos);
+        mod_api::dispatch_entity_drop_item(self, mod_api::mods(), entity, item, count, pos);
     }
     /// A leashed mob's leash was removed, before any lead drop is handled
     /// (Bukkit's `EntityUnleashEvent`). @API:native_entity_unleash@.
     pub(super) fn native_entity_unleash(&mut self, entity: u32, kind: &str) {
-        let _ = (entity, kind);
+        mod_api::dispatch_entity_unleash(self, mod_api::mods(), entity, kind);
     }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's

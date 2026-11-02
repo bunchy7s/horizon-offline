@@ -4,7 +4,10 @@
       "name": "entity_drop_item",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_entity_drop_item",
       "neoforge": "none (NeoForge has no such event; Bukkit's EntityDropItemEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A mob is about to drop an item (`native_entity_drop_item`).",

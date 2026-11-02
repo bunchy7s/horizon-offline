@@ -4,7 +4,10 @@
       "name": "explosion_prime",
       "target": "horizon_client::game::native_hooks::Game<'_>::native_explosion_prime",
       "neoforge": "none (NeoForge has no such event; Bukkit's ExplosionPrimeEvent)",
-      "side": "server"
+      "side": "server",
+      "mod_api": {
+        "contract": "listen"
+      }
     }
   ],
   "rust_summary": "A server explosion is about to begin (`native_explosion_prime`).",

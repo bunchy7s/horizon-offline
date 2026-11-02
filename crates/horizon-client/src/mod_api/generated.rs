@@ -2710,6 +2710,12 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A mob is about to drop `count` of `item` at `pos` (Bukkit's
+    /// `EntityDropItemEvent`). @API:native_entity_drop_item@.
+    fn entity_drop_item(&self, host: &mut dyn Host, event: &mut EntityDropItemEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// A bee entered the hive at `pos` and was stored there.
     /// @API:native_entity_enter_block@.
     fn entity_enter_block(&self, host: &mut dyn Host, event: &mut EntityEnterBlockEvent<'_>) {
@@ -2772,6 +2778,12 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A leashed mob's leash was removed, before any lead drop is handled
+    /// (Bukkit's `EntityUnleashEvent`). @API:native_entity_unleash@.
+    fn entity_unleash(&self, host: &mut dyn Host, event: &mut EntityUnleashEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// An experience bottle broke and its experience was awarded.
     /// @API:native_exp_bottle@.
     fn exp_bottle(&self, host: &mut dyn Host, event: &mut ExpBottleEvent) {
@@ -2815,6 +2827,13 @@ pub trait Hooks: Send + Sync {
     /// Server-side, including `native_give_experience`.
     /// @API:experience_orb_pickup@.
     fn mending_repair(&self, host: &mut dyn Host, event: &mut MendingRepairEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A server explosion is about to begin at `center`, with `radius` (Bukkit's
+    /// `ExplosionPrimeEvent`). This is listen-only: the explosion proceeds as
+    /// usual. Server-side, including the single-player server. @API:native_explosion_prime@.
+    fn explosion_prime(&self, host: &mut dyn Host, event: &mut ExplosionPrimeEvent) {
         let _ = host;
         let _ = event;
     }
@@ -2974,6 +2993,12 @@ pub trait Hooks: Send + Sync {
     /// included, and not for a stonecutter's, a smithing table's or a
     /// furnace's result. Server-side. API @API:item_crafted@.
     fn item_crafted(&self, host: &mut dyn Host, event: &mut ItemCraftedEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A dropped item entity reached its 6000-tick lifetime and is about to be
+    /// removed (Bukkit's `ItemDespawnEvent`). @API:native_item_despawn@.
+    fn item_despawn(&self, host: &mut dyn Host, event: &mut ItemDespawnEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -3722,6 +3747,16 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         Flow::Continue
+    }
+    /// A server player launched a projectile item, after it was created.
+    /// `item` is the projectile's held item. @API:player_launch_projectile@.
+    fn player_launch_projectile(
+        &self,
+        host: &mut dyn Host,
+        event: &mut PlayerLaunchProjectileEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
     }
     /// A server player changed their client language option to `locale`.
     /// The player's state may not be found through `self.lan` during a guest
@@ -9318,6 +9353,32 @@ pub fn dispatch_entity_change_block(
         mod_hook.entity_change_block(host, &mut event);
     }
 }
+/// What [`Hooks::entity_drop_item`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityDropItemEvent<'a> {
+    pub entity: u32,
+    pub item: &'a str,
+    pub count: i32,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_entity_drop_item(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    item: &str,
+    count: i32,
+    pos: [f64; 3],
+) {
+    let mut event = EntityDropItemEvent {
+        entity,
+        item,
+        count,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.entity_drop_item(host, &mut event);
+    }
+}
 /// What [`Hooks::entity_enter_block`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct EntityEnterBlockEvent<'a> {
@@ -9540,6 +9601,23 @@ pub fn dispatch_entity_transform(
         mod_hook.entity_transform(host, &mut event);
     }
 }
+/// What [`Hooks::entity_unleash`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct EntityUnleashEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+}
+pub fn dispatch_entity_unleash(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+) {
+    let mut event = EntityUnleashEvent { entity, kind };
+    for mod_hook in mods {
+        mod_hook.entity_unleash(host, &mut event);
+    }
+}
 /// What [`Hooks::exp_bottle`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ExpBottleEvent {
@@ -9642,6 +9720,23 @@ pub fn dispatch_mending_repair(
         mod_hook.mending_repair(host, &mut event);
     }
     *repair = event.repair;
+}
+/// What [`Hooks::explosion_prime`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ExplosionPrimeEvent {
+    pub center: [f64; 3],
+    pub radius: f32,
+}
+pub fn dispatch_explosion_prime(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    center: [f64; 3],
+    radius: f32,
+) {
+    let mut event = ExplosionPrimeEvent { center, radius };
+    for mod_hook in mods {
+        mod_hook.explosion_prime(host, &mut event);
+    }
 }
 /// What [`Hooks::fire_odds`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
@@ -10025,6 +10120,32 @@ pub fn dispatch_item_crafted(
     };
     for mod_hook in mods {
         mod_hook.item_crafted(host, &mut event);
+    }
+}
+/// What [`Hooks::item_despawn`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemDespawnEvent<'a> {
+    pub entity: u32,
+    pub item: &'a str,
+    pub count: i32,
+    pub pos: [f64; 3],
+}
+pub fn dispatch_item_despawn(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    item: &str,
+    count: i32,
+    pos: [f64; 3],
+) {
+    let mut event = ItemDespawnEvent {
+        entity,
+        item,
+        count,
+        pos,
+    };
+    for mod_hook in mods {
+        mod_hook.item_despawn(host, &mut event);
     }
 }
 /// What [`Hooks::item_energy_buffer`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
@@ -11451,6 +11572,25 @@ pub fn dispatch_player_item_held(
             *cancel = true;
             break;
         }
+    }
+}
+/// What [`Hooks::player_launch_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PlayerLaunchProjectileEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub item: &'a str,
+}
+pub fn dispatch_player_launch_projectile(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    item: &str,
+) {
+    let mut event = PlayerLaunchProjectileEvent { player, name, item };
+    for mod_hook in mods {
+        mod_hook.player_launch_projectile(host, &mut event);
     }
 }
 /// What [`Hooks::player_locale_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
