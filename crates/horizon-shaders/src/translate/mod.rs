@@ -757,41 +757,160 @@ pub fn translate_compute(compute: &Preprocessed) -> Result<ComputeProgram, Vec<E
 /// `code` with `gl_WorkGroupSize` written as the constant its `layout(local_size_*)` declares:
 /// GLSL defines it so, and naga's HLSL writer has no such built-in.
 fn work_group_size(code: &str) -> Result<String, String> {
-    let tokens = crate::macros::lex(code);
-    if !tokens.contains(&"gl_WorkGroupSize") {
-        return Ok(code.to_owned());
-    }
-    let sig: Vec<&str> = tokens
-        .iter()
-        .copied()
-        .filter(|t| scan::significant(t))
+    let mut tokens: Vec<String> = crate::macros::lex(code)
+        .into_iter()
+        .map(str::to_owned)
         .collect();
-    // A size is one number, the whole of its `local_size_* = N`; 1 when not declared.
-    let size = |axis: &str| match sig.windows(4).find(|w| w[0] == axis && w[1] == "=") {
-        None => Ok(1),
-        Some(w) => w[2]
-            .trim_end_matches(['u', 'U'])
-            .parse::<u32>()
-            .ok()
-            .filter(|_| matches!(w[3], "," | ")"))
-            .ok_or_else(|| format!("`{axis}` is not a number gl_WorkGroupSize can take")),
-    };
-    let value = format!(
-        "uvec3({}u, {}u, {}u)",
-        size("local_size_x")?,
-        size("local_size_y")?,
-        size("local_size_z")?
-    );
-    Ok(tokens
-        .iter()
-        .map(|&t| {
-            if t == "gl_WorkGroupSize" {
-                value.as_str()
-            } else {
-                t
+    let mut sizes = [1u32; 3];
+    let axes = ["local_size_x", "local_size_y", "local_size_z"];
+    let sig: Vec<usize> = (0..tokens.len())
+        .filter(|&i| scan::significant(&tokens[i]))
+        .collect();
+    for (k, &at) in sig.iter().enumerate() {
+        let Some(axis) = axes.iter().position(|a| tokens[at] == *a) else {
+            continue;
+        };
+        if sig.get(k + 1).is_none_or(|&e| tokens[e] != "=") {
+            continue;
+        }
+        // The size's expression runs to the `,` or `)` that ends the qualifier.
+        let mut depth = 0usize;
+        let expr: Vec<usize> = sig[k + 2..]
+            .iter()
+            .copied()
+            .take_while(|&i| match tokens[i].as_str() {
+                "(" => {
+                    depth += 1;
+                    true
+                }
+                ")" if depth > 0 => {
+                    depth -= 1;
+                    true
+                }
+                "," | ")" if depth == 0 => false,
+                _ => true,
+            })
+            .collect();
+        let words: Vec<&str> = expr.iter().map(|&i| tokens[i].as_str()).collect();
+        let size = ConstantSize::eval(&words)
+            .ok_or_else(|| format!("`{}` is not a size Horizon can work out", axes[axis]))?;
+        sizes[axis] = size;
+        // naga takes a number there: the expression becomes its value.
+        if let (Some(&first), Some(&last)) = (expr.first(), expr.last()) {
+            tokens[first] = size.to_string();
+            for t in &mut tokens[first + 1..=last] {
+                t.retain(|c| c == '\n');
             }
-        })
-        .collect())
+        }
+    }
+    let value = format!("uvec3({}u, {}u, {}u)", sizes[0], sizes[1], sizes[2]);
+    for t in &mut tokens {
+        if t == "gl_WorkGroupSize" {
+            *t = value.clone();
+        }
+    }
+    Ok(tokens.concat())
+}
+
+/// A work group size given as an integer constant expression (GLSL 4.60, 4.4 and 4.4.1):
+/// numbers, `+ - * / %`, brackets, `min`, `max` and `gl_MaxComputeWorkGroupSize`, the minimum
+/// GLSL requires (`ivec3(1024, 1024, 64)`, 7.3); the translation knows no device.
+struct ConstantSize<'w> {
+    words: &'w [&'w str],
+    at: usize,
+}
+
+impl<'w> ConstantSize<'w> {
+    fn eval(words: &'w [&'w str]) -> Option<u32> {
+        let mut p = Self { words, at: 0 };
+        let v = p.sum()?;
+        (p.at == words.len())
+            .then_some(v)
+            .and_then(|v| u32::try_from(v).ok())
+    }
+
+    fn peek(&self) -> Option<&'w str> {
+        self.words.get(self.at).copied()
+    }
+
+    fn eat(&mut self, word: &str) -> bool {
+        let found = self.peek() == Some(word);
+        self.at += usize::from(found);
+        found
+    }
+
+    fn sum(&mut self) -> Option<i64> {
+        let mut v = self.product()?;
+        loop {
+            if self.eat("+") {
+                v = v.checked_add(self.product()?)?;
+            } else if self.eat("-") {
+                v = v.checked_sub(self.product()?)?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+
+    fn product(&mut self) -> Option<i64> {
+        let mut v = self.unary()?;
+        loop {
+            if self.eat("*") {
+                v = v.checked_mul(self.unary()?)?;
+            } else if self.eat("/") {
+                v = v.checked_div(self.unary()?)?;
+            } else if self.eat("%") {
+                v = v.checked_rem(self.unary()?)?;
+            } else {
+                return Some(v);
+            }
+        }
+    }
+
+    fn unary(&mut self) -> Option<i64> {
+        if self.eat("-") {
+            return self.unary()?.checked_neg();
+        }
+        if self.eat("+") {
+            return self.unary();
+        }
+        if self.eat("(") {
+            let v = self.sum()?;
+            return self.eat(")").then_some(v);
+        }
+        let word = self.peek()?;
+        self.at += 1;
+        match word {
+            "min" | "max" => {
+                if !self.eat("(") {
+                    return None;
+                }
+                let a = self.sum()?;
+                if !self.eat(",") {
+                    return None;
+                }
+                let b = self.sum()?;
+                if !self.eat(")") {
+                    return None;
+                }
+                Some(if word == "min" { a.min(b) } else { a.max(b) })
+            }
+            "gl_MaxComputeWorkGroupSize" => {
+                if !self.eat(".") {
+                    return None;
+                }
+                let axis = self.peek()?;
+                self.at += 1;
+                match axis {
+                    "x" => Some(1024),
+                    "y" => Some(1024),
+                    "z" => Some(64),
+                    _ => None,
+                }
+            }
+            number => number.trim_end_matches(['u', 'U']).parse().ok(),
+        }
+    }
 }
 
 /// The numbers of a constant's constructor, `const ivec3 name = ivec3(1, 2, 3);` → 1, 2, 3.
@@ -2256,14 +2375,38 @@ mod tests {
                 .iter()
                 .any(|(_, e)| matches!(e, naga::Expression::Literal(naga::Literal::U32(8))))
         );
+        // A constant expression (GLSL 4.60, 4.4) is worked out, also where naga reads it.
         assert_eq!(
-            work_group_size("layout(local_size_x = 8 * 2) in;\nuvec3 s = gl_WorkGroupSize;"),
-            Err("`local_size_x` is not a number gl_WorkGroupSize can take".into())
+            work_group_size(
+                "layout(local_size_x = min(gl_MaxComputeWorkGroupSize.x, 256 * 2), local_size_y = (3 + 1) / 2) in;\n\
+                 uvec3 s = gl_WorkGroupSize;"
+            )
+            .as_deref(),
+            Ok("layout(local_size_x = 512, local_size_y = 2) in;\nuvec3 s = uvec3(512u, 2u, 1u);")
+        );
+        assert_eq!(
+            work_group_size("layout(local_size_x = SIZE) in;\nvoid main() {}"),
+            Err("`local_size_x` is not a size Horizon can work out".into())
         );
         assert!(
             work_group_size("layout(local_size_x = 16) in;\nuvec3 s = gl_WorkGroupSize;")
                 .is_ok_and(|c| c.contains("uvec3(16u, 1u, 1u)"))
         );
+    }
+
+    /// A work group size given as a constant expression (GLSL 4.60, 4.4 and 4.4.1), kept within
+    /// the implementation's: the program compiles with its value.
+    #[test]
+    fn a_work_group_size_may_be_a_constant_expression() {
+        let csh = "#version 460\nlayout(local_size_x = min(gl_MaxComputeWorkGroupSize.x, 256), \
+                   local_size_y = 1, local_size_z = 1) in;\n\
+                   layout(r32ui) uniform uimage2D colorimg4;\n\
+                   void main() { imageStore(colorimg4, ivec2(gl_GlobalInvocationID.xy), uvec4(1u)); }\n";
+        let pack = Pack::from_zip_bytes("P.zip", zip(&[("shaders/deferred_a.csh", csh)])).unwrap();
+        let c = translate_compute(&preprocess(&pack, "deferred_a.csh", &Macros::standard()))
+            .unwrap_or_else(|e| panic!("{e:?}"));
+        let entry = &c.module.entry_points[0];
+        assert_eq!(entry.workgroup_size, [256, 1, 1]);
     }
 
     #[test]
