@@ -986,6 +986,21 @@ impl Mob {
         // AbstractHorse.causeFallDamage hurts the horse first and passes the fall
         // on to its riders only when it was hurt.
         let horse = super::equine::is_equine(self.species());
+        let mut distance = distance;
+        let mut modifier = modifier;
+        if !horse {
+            let mut cancel = false;
+            crate::landing::native_living_fall(
+                self.id as i32,
+                &self.kind.id,
+                &mut distance,
+                &mut modifier,
+                &mut cancel,
+            );
+            if cancel {
+                return false;
+            }
+        }
         // Entity.causeFallDamage: nothing happens to a fall immune entity, nor
         // to those on it.
         if self.kind.flags.fall_immune {
