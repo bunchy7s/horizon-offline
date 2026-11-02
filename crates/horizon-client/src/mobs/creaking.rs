@@ -400,34 +400,34 @@ pub fn can_use_portal(m: &Mob) -> bool {
     !heart_bound(m)
 }
 #[cfg(test)]
-mod tests {
+mod portal_tests {
     use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use std::sync::Arc;
 
-    fn types() -> Option<crate::mobs::MobTypes> {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../.local/horizon-client")
-            .join(horizon_core::VANILLA_VERSION);
-        if !root.join("items.json").exists() {
-            return None;
-        }
-        Some(crate::mobs::MobTypes::load(&root).unwrap())
-    }
-    fn spawn(types: &crate::mobs::MobTypes, kind: &str) -> Mob {
-        let kind = std::sync::Arc::new(types.types.get(kind).unwrap().clone());
-        Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0)
+    fn mob(species: Species) -> Mob {
+        let mut kind = (*kind()).clone();
+        kind.species = species;
+        Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0)
     }
 
-    /// `Creaking.canUsePortal`: the heart-bound creaking refuses a portal and
-    /// an unbound one does not; another mob is unaffected either way.
+    /// `Creaking.canUsePortal`: the creaking's own `!isHeartBound()`; a home
+    /// point another species keeps (a wolf's bed) is not a heart, so it does
+    /// not stop that mob from travelling.
     #[test]
-    fn a_heart_bound_creaking_does_not_use_a_portal() {
-        let Some(types) = types() else { return };
-        let mut c = spawn(&types, "minecraft:creaking");
-        assert!(can_use_portal(&c), "a creaking with no heart travels");
-        set_transient(&mut c, [0, 64, 0]);
-        assert!(heart_bound(&c));
-        assert!(!can_use_portal(&c), "a bound creaking must not leave its heart");
-        let z = spawn(&types, "minecraft:zombie");
-        assert!(can_use_portal(&z));
+    fn only_a_creaking_bound_to_a_heart_is_refused_the_portal() {
+        let mut m = mob(Species::Creaking);
+        assert!(!heart_bound(&m), "born free");
+        assert!(can_use_portal(&m), "a free creaking travels");
+        m.extra.home = Some([4, 64, -7]);
+        assert!(heart_bound(&m));
+        assert!(
+            !can_use_portal(&m),
+            "a creaking bound to its heart must not leave it behind"
+        );
+        let mut wolf = mob(Species::Wolf);
+        wolf.extra.home = Some([4, 64, -7]);
+        assert!(!heart_bound(&wolf));
+        assert!(can_use_portal(&wolf));
     }
 }
