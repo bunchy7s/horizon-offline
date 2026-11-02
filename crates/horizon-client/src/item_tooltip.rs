@@ -1066,22 +1066,9 @@ pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
             .iter()
             .map(|entry| crate::entity_nbt::name_text(entry).resolve_legacy())
             .collect(),
-        Tag::String(s) => {
-            let str_val = s.to_string_lossy();
-            let trimmed = str_val.trim();
-            if trimmed.starts_with('[')
-                && let Ok(serde_json::Value::Array(items)) =
-                    serde_json::from_str::<serde_json::Value>(trimmed)
-            {
-                items
-                    .iter()
-                    .map(|item| crate::scoreboard::comp_text(item).resolve_legacy())
-                    .collect()
-            } else {
-                vec![crate::entity_nbt::name_text(raw).resolve_legacy()]
-            }
+        Tag::Compound(_) | Tag::String(_) => {
+            vec![crate::entity_nbt::name_text(raw).resolve_legacy()]
         }
-        Tag::Compound(_) => vec![crate::entity_nbt::name_text(raw).resolve_legacy()],
         _ => Vec::new(),
     };
     lines
@@ -1383,7 +1370,7 @@ mod tests {
     }
 
     #[test]
-    fn lore_texts_handles_compound_lists_and_json_strings() {
+    fn lore_texts_handles_compound_lists() {
         // Direct command components from issue #6405
         let cmd = r#"[custom_name=[{"text":"Simple Custom Name","italic":false}],lore=[[{"text":"Simple Custom Lore","italic":false}]],rarity=epic,enchantments={aqua_affinity:1},unbreakable={}]"#;
         let comp = horizon_items::item_data::command_components(cmd).unwrap();
@@ -1405,32 +1392,6 @@ mod tests {
         assert_eq!(lore[0].spans[0].style.italic, Some(false));
         assert_eq!(lore[0].spans[0].style.color, Some(crate::text::DARK_PURPLE));
         assert!(TooltipDisplay::for_stack(&stack).shows("minecraft:lore"));
-
-        // Lore as a JSON string array
-        let mut json_array_stack = ItemStack::new("minecraft:stick", 1);
-        json_array_stack.data_mut().set_other(
-            "minecraft:lore",
-            Some(Tag::String(
-                r#"[{"text":"Array line","italic":false}]"#.into(),
-            )),
-        );
-        let lore_arr = lore_texts(&json_array_stack);
-        assert_eq!(lore_arr.len(), 1);
-        assert_eq!(lore_arr[0].plain(), "Array line");
-        assert_eq!(lore_arr[0].spans[0].style.italic, Some(false));
-
-        // Lore as a list of JSON strings
-        let mut json_str_stack = ItemStack::new("minecraft:stick", 1);
-        json_str_stack.data_mut().set_other(
-            "minecraft:lore",
-            Some(Tag::List(vec![Tag::String(
-                r#"{"text":"String line","color":"gold"}"#.into(),
-            )])),
-        );
-        let lore_str = lore_texts(&json_str_stack);
-        assert_eq!(lore_str.len(), 1);
-        assert_eq!(lore_str[0].plain(), "String line");
-        assert_eq!(lore_str[0].spans[0].style.color, Some(0xffaa00));
     }
 
     #[test]
