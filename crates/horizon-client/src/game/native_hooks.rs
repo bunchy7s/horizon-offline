@@ -4669,6 +4669,12 @@ impl Game<'_> {
     pub(super) fn native_block_damage_abort(&mut self, player: u128, name: &str, pos: [i32; 3]) {
         let _ = (player, name, pos);
     }
+    /// A hopper at `pos` began an item transfer attempt. This runs after its
+    /// cooldown and enabled checks, before pushing or pulling any items.
+    /// Server-side, including the single-player server. @API:native_prepare_hopper_transfer@.
+    pub(super) fn native_prepare_hopper_transfer(&self, pos: [i32; 3]) {
+        let _ = (pos,);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

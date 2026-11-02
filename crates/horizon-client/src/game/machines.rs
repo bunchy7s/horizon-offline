@@ -740,6 +740,7 @@ impl Game<'_> {
         if self.hoppers.get(&pos).is_some_and(|h| h.cooldown > 0) || !enabled {
             return;
         }
+        self.native_prepare_hopper_transfer([pos.0, pos.1, pos.2]);
         let mut changed = false;
         if !c.is_empty(&view) {
             changed = self.hopper_eject(pos, &view);
