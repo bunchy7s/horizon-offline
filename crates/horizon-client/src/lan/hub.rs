@@ -170,6 +170,13 @@ pub enum HostEvent {
     LocaleChanged(u32, String),
     /// A guest's client finished loading the level around them.
     PlayerLoaded(u32),
+    /// A guest changed recipe book settings.
+    RecipeBookSettings {
+        conn: u32,
+        book: i32,
+        open: bool,
+        filtering: bool,
+    },
     /// A guest's client started (`flying`) or stopped flying (their abilities packet), applied to
     /// the guest already: the game tells the mods, which may refuse it.
     Flight {
@@ -2993,8 +3000,18 @@ impl Hub {
                     if let Some(book) = crate::recipe_book::BookType::ALL.get(p.book_type as usize)
                     {
                         let settings = &mut self.guests[i].recipe_book;
+                        let changed = settings.open[book.index()] != p.open
+                            || settings.filtering[book.index()] != p.filtering;
                         settings.open[book.index()] = p.open;
                         settings.filtering[book.index()] = p.filtering;
+                        if changed {
+                            events.push(HostEvent::RecipeBookSettings {
+                                conn,
+                                book: i32::from(p.book_type),
+                                open: p.open,
+                                filtering: p.filtering,
+                            });
+                        }
                     }
                 }
                 S::ClientInformation(info) => {

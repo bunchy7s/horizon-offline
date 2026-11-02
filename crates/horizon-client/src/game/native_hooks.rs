@@ -4618,6 +4618,19 @@ impl Game<'_> {
     pub(super) fn native_player_stop_using_item(&mut self, player: u128, name: &str) {
         let _ = (player, name);
     }
+    /// A server player's recipe book open or filter setting changed. `book`
+    /// is the book type's protocol id. The guest's state is not swapped in.
+    /// @API:native_player_recipe_book_settings_change@.
+    pub(super) fn native_player_recipe_book_settings_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        book: i32,
+        open: bool,
+        filtering: bool,
+    ) {
+        let _ = (player, name, book, open, filtering);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

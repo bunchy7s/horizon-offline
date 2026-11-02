@@ -1359,6 +1359,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
 - **`native_player_stop_using_item(player, name)`**: a server player released the use-item key before the item
   finished being used. The player's state is not swapped in, so helpers that look them up through `self.lan` may
   find nothing during packet handling.
+- **`native_player_recipe_book_settings_change(player, name, book, open, filtering)`**: a server player's recipe
+  book open or filter setting changed; `book` is the book type's protocol id. The player's state is not swapped in.
 - **`native_player_command(player, name, command, canceled, replies)`**: any command a player typed (without the
   slash), vanilla's too and commands the player may not run, heard before anything looks at it, and each line of a
   quiet command batch. Set `canceled` and nothing runs; push lines to `replies` and the player gets them as system chat
