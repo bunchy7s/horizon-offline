@@ -270,13 +270,13 @@ fn main() -> Result<()> {
         let row = match recipe {
             Recipe::Shaped { cells, result, .. } => json!({
                 "result": result.item.as_deref(), "count": result.count,
-                "ingredients": cells.iter().flatten().map(|i| sorted(&i.1)).collect::<Vec<_>>()}),
+                "ingredients": cells.iter().flatten().map(|i| sorted(&i.order)).collect::<Vec<_>>()}),
             Recipe::Shapeless {
                 ingredients,
                 result,
             } => json!({
                 "result": result.item.as_deref(), "count": result.count,
-                "ingredients": ingredients.iter().map(|i| sorted(&i.1)).collect::<Vec<_>>()}),
+                "ingredients": ingredients.iter().map(|i| sorted(&i.order)).collect::<Vec<_>>()}),
             Recipe::Special(_) => json!({"special": true}),
         };
         recipe_rows.insert(name.clone(), row);
@@ -285,14 +285,14 @@ fn main() -> Result<()> {
         recipe_rows.insert(
             c.id.clone(),
             json!({"result": &*c.result.item, "count": c.result.count,
-                "ingredients": [sorted(&c.ingredient.1)]}),
+                "ingredients": [sorted(&c.ingredient.order)]}),
         );
     }
     for s in stations.stonecutting.iter().filter(|s| ours(&s.id)) {
         recipe_rows.insert(
             s.id.clone(),
             json!({"result": &*s.result.item, "count": s.result.count,
-                "ingredients": [sorted(&s.input.1)]}),
+                "ingredients": [sorted(&s.input.order)]}),
         );
     }
 

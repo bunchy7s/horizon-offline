@@ -756,6 +756,7 @@ impl Game<'_> {
         for (location, rgba) in ready {
             self.store_skin(location, rgba);
         }
+        self.cosmetics_frame();
     }
     /// `Hud.extractTabList`: the player list while the player-list key is
     /// held. A local world shows it with a joined LAN guest or a `list`

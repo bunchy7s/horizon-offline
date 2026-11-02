@@ -737,8 +737,9 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         for u in &used {
             let name = self.item_display_name(&u.item);
-            tracker.track(&holder(name), u.count as i32);
-            let _ = u;
+            // CommandResponseTracker.track(drop): one per stack, so the
+            // command returns how many stacks it used, not how many items.
+            tracker.track(&holder(name), 1);
         }
         let counts: Vec<u32> = used.iter().map(|u| u.count).collect();
         let (message, total) = tracker.message(
