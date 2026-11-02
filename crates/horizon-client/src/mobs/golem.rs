@@ -17,7 +17,7 @@ use crate::projectiles::{Projectile, ProjectileKind};
 use horizon_core::{geometry::Vec3, random::RandomSource};
 
 /// `Enemy` monsters an iron golem goes after (never creepers).
-fn golem_prey(s: &super::Seen) -> bool {
+pub(super) fn golem_prey(s: &super::Seen) -> bool {
     s.hostile && s.species != Species::Creeper
 }
 /// `IronGolem.registerGoals`, without `ResetUniversalAngerTargetGoal` (that

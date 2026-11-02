@@ -637,6 +637,8 @@ struct ServerState {
     max_players: usize,
     /// The mutable `gamemode` server property (`DedicatedServer.gameMode`).
     game_mode: i32,
+    /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
+    force_game_mode: bool,
 }
 
 /// The dedicated-only commands' replies vanilla sends with `broadcast`
@@ -1005,6 +1007,7 @@ impl Game<'_> {
             broadcast_rcon: props.broadcast_rcon_to_ops,
             op_level: props.op_permission_level,
             game_mode: props.game_mode,
+            force_game_mode: props.force_game_mode,
             report: None,
             view: (
                 props.view_distance.clamp(2, 32) as u32,

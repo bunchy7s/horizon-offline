@@ -458,6 +458,9 @@ def run_once(kind, bots, behaviour, args, out):
                 sample = None
             if isinstance(sample, dict) and 't' in sample:
                 measured.append(sample)
+            elif isinstance(sample, dict) and set(sample) == {'spawn'}:
+                # The first bot's spawn position (horizon-bots prints it for perf_bench --server-bots).
+                continue
             else:
                 rest.append(line)
         window = [l for l in measured if l['t'] >= measured[-1]['t'] - args.seconds] if measured else []

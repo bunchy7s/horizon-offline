@@ -469,11 +469,12 @@ impl FileSprites {
             cache.insert(sprite.to_owned(), translucent);
         }
         let alpha: Vec<u8> = argb.iter().map(|p| (p >> 24) as u8).collect();
-        let animation = fs::read_to_string(png.with_extension("png.mcmeta"))
-            .ok()
-            .and_then(|m| serde_json::from_str::<Value>(&m).ok())
-            .and_then(|m| m.get("animation").map(Value::to_string))
-            .and_then(|a| AnimationMetadata::from_json(&a).ok());
+        let animation =
+            horizon_core::prepared_files::read_to_string(&png.with_extension("png.mcmeta"))
+                .ok()
+                .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+                .and_then(|m| m.get("animation").map(Value::to_string))
+                .and_then(|a| AnimationMetadata::from_json(&a).ok());
         let (w, h) = match &animation {
             Some(a) => {
                 let [w, h] = a.frame_size(iw as i32, ih as i32);
@@ -542,40 +543,28 @@ pub struct ItemRenderer {
     pub cit: Option<cit::CitModels>,
 }
 
-/// Every `items/**/*.json` client item definition, by identifier.
+/// Every `items/**/*.json` client item definition, by identifier. Through
+/// `json_folder`: from the prepared data file when the root has one.
 fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
-    fn walk(dir: &Path, rel: &str, namespace: &str, out: &mut BTreeMap<String, ClientItem>) {
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-                continue;
-            };
-            let rel = if rel.is_empty() {
-                name
-            } else {
-                format!("{rel}/{name}")
-            };
-            if path.is_dir() {
-                walk(&path, &rel, namespace, out);
-            } else if let Some(id) = rel.strip_suffix(".json")
-                && let Some(item) = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|t| ClientItem::from_json(&t).ok())
-            {
-                out.insert(format!("{namespace}:{id}"), item);
-            }
-        }
-    }
     let mut out = BTreeMap::new();
     let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
         return out;
     };
     for ns in namespaces.flatten() {
+        let Ok(folder) = horizon_world::json_folder::read(&ns.path().join("items")) else {
+            continue;
+        };
         let namespace = ns.file_name().to_string_lossy().into_owned();
-        walk(&ns.path().join("items"), "", &namespace, &mut out);
+        for file in &folder.files {
+            if let Some(item) = file
+                .bytes()
+                .ok()
+                .and_then(|b| std::str::from_utf8(b).ok())
+                .and_then(|t| ClientItem::from_json(t).ok())
+            {
+                out.insert(format!("{namespace}:{}", file.name), item);
+            }
+        }
     }
     out
 }

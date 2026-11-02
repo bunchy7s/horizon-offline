@@ -660,11 +660,12 @@ impl Game<'_> {
         if !self.before_block(d) || self.mob_hit().is_some_and(|m| m.1 < d) {
             return false;
         }
-        let (_, _, _, magic) = self.melee_damage("minecraft:armor_stand", true);
+        let (_, _, crit, magic) = self.melee_damage("minecraft:armor_stand", true);
         let hurt = self.hit_armor_stand(i, |g, area, id| {
             g.attack_effects(
                 area,
                 Some(id as i32),
+                crit,
                 super::mace::Spared::Stand(id),
                 magic.then_some(id as i32),
             );
@@ -729,7 +730,7 @@ impl Game<'_> {
         let spread = [width / 4.0, height / 4.0, width / 4.0];
         self.particles
             .send_particles(&options, centre, spread, 0.05, 10);
-        self.lan_level_particles(&options, centre, spread, 0.05, 10, Some(state));
+        self.lan_level_particles(None, &options, centre, spread, 0.05, 10, Some(state));
     }
     /// `ArmorStand.hurtServer` for a player's attack (also a sweep's): a
     /// creative player breaks it, otherwise the first hit wobbles it and a

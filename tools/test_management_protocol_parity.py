@@ -16,7 +16,7 @@ sent the same things over TLS, and every answer is compared exactly:
   vanilla's data generator), `server/status`, the four lists, `players`, kicking nobody, `server/save` and
   `server/system_message` with no one online, the four lists changed (`add`, `remove`, `set`,
   `clear`; with no profile service, players named resolve to offline players on both), the live server
-  message, difficulty and default game mode read and changed (including their saved properties), and
+  message, difficulty, default game mode and forced game mode read and changed (including saved properties), and
   `server/stop`;
 - the TLS version each server agrees on.
 
@@ -138,6 +138,15 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":52,"method":"minecraft:serversettings/game_mode"}',
     '{"jsonrpc":"2.0","id":53,"method":"minecraft:serversettings/game_mode/set","params":["spectator"]}',
     '{"jsonrpc":"2.0","id":54,"method":"minecraft:serversettings/game_mode"}',
+    '{"jsonrpc":"2.0","id":55,"method":"minecraft:serversettings/force_game_mode"}',
+    '{"jsonrpc":"2.0","id":56,"method":"minecraft:serversettings/force_game_mode/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":57,"method":"minecraft:serversettings/force_game_mode"}',
+    '{"jsonrpc":"2.0","id":58,"method":"minecraft:serversettings/force_game_mode/set","params":[false]}',
+    '{"jsonrpc":"2.0","id":59,"method":"minecraft:serversettings/force_game_mode"}',
+    '{"jsonrpc":"2.0","id":60,"method":"minecraft:serversettings/force_game_mode/set","params":[true]}',
+    '{"jsonrpc":"2.0","id":61,"method":"minecraft:serversettings/force_game_mode"}',
+    '{"jsonrpc":"2.0","id":62,"method":"minecraft:serversettings/force_game_mode/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":63,"method":"minecraft:serversettings/force_game_mode"}',
 ]
 
 
@@ -360,12 +369,32 @@ def main():
                 sides[side]['saved_game_mode'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('gamemode=')), None)
+                sides[side]['saved_force_game_mode'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('force-gamemode=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
                     sides[side]['saved_config_game_mode'] = 'game_mode = "spectator"' in world
+                    sides[side]['saved_config_force_game_mode'] = 'force-gamemode = true' in (
+                        folder / 'server.toml').read_text()
             finally:
                 server.stop()
+            restarted = Server(command, folder, build / f'{side}-restart.log')
+            try:
+                restarted.wait_for(DONE, 600)
+                ws = Socket(management, context, [f'Authorization: Bearer {SECRET}'])
+                try:
+                    ws.send('{"jsonrpc":"2.0","id":64,"method":"minecraft:serversettings/force_game_mode"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_force_game_mode'] = reply
+                finally:
+                    ws.sock.close()
+            finally:
+                restarted.stop()
         vanilla, horizon = sides['vanilla'], sides['horizon']
         failures = []
         for key in ('no secret', 'wrong secret', 'origin not allowed', 'subprotocol', 'tls', 'stop'):
@@ -382,7 +411,16 @@ def main():
             failures.append(f"saved game mode: vanilla {vanilla['saved_game_mode']!r}, Horizon {horizon['saved_game_mode']!r}")
         if not horizon['saved_config_game_mode']:
             failures.append('Horizon did not save spectator game mode in server.toml')
+        if vanilla['saved_force_game_mode'] != horizon['saved_force_game_mode'] or vanilla['saved_force_game_mode'] != 'true':
+            failures.append(f"saved forced game mode: vanilla {vanilla['saved_force_game_mode']!r}, Horizon {horizon['saved_force_game_mode']!r}")
+        if not horizon['saved_config_force_game_mode']:
+            failures.append('Horizon did not save forced game mode in server.toml')
+        if vanilla['restarted_force_game_mode'] != horizon['restarted_force_game_mode'] or \
+                vanilla['restarted_force_game_mode'] != {'jsonrpc': '2.0', 'id': 64, 'result': True}:
+            failures.append(f"restarted forced game mode: vanilla {vanilla['restarted_force_game_mode']!r}, Horizon {horizon['restarted_force_game_mode']!r}")
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
+        if failures:
+            sys.exit(f'{NAME}: {len(failures)} differences (logs in {build}):\n' + '\n'.join(failures))
         report = lab.LOCAL / 'datagen/out/reports/json-rpc-api-schema.json'
         discovered = horizon['answers'][MESSAGES.index('{"jsonrpc":"2.0","id":12,"method":"rpc.discover"}')]
         if json.loads(report.read_text()) != discovered.get('result'):
