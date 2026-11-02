@@ -4093,6 +4093,7 @@ impl Game<'_> {
         let (sneaking, sleeping) = (g.sneaking, g.sleeping);
         let riding = g.vehicle.is_some();
         let mut soul = None;
+        let mut jumps = 0;
         let events = self.as_guest(host, conn, |game| {
             let (rules, motion) = (game.world.health_rules, game.motion);
             let health = &motion.health;
@@ -4153,6 +4154,7 @@ impl Game<'_> {
                     // ServerGamePacketListenerImpl.handlePlayerPositionChange:
                     // the server's copy jumps with the player, so the velocity
                     // it sends them keeps the jump.
+                    jumps += 1;
                     let _ = w.jump_from_ground();
                 }
                 let landed = (|| -> horizon_client::Result<()> {
@@ -4267,6 +4269,15 @@ impl Game<'_> {
         let Some((events, marked)) = events else {
             return;
         };
+        if jumps > 0
+            && let Some((uuid, name)) = host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+        {
+            self.as_guest(host, conn, |game| {
+                for _ in 0..jumps {
+                    game.native_player_jump(uuid, &name);
+                }
+            });
+        }
         if let Some((at, velocity)) = soul {
             super::lan_particles::send_soul_particle(host, at, velocity);
         }

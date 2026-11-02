@@ -4895,6 +4895,10 @@ impl Game<'_> {
     pub(super) fn native_player_arm_swing(&mut self, player: u128, name: &str, hand: &str) {
         let _ = (player, name, hand);
     }
+    /// A guest's accepted movement made the server jump them from the ground. Server-side. @API:player_jump@.
+    pub(super) fn native_player_jump(&mut self, player: u128, name: &str) {
+        let _ = (player, name);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
