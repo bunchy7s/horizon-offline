@@ -5539,7 +5539,7 @@ impl Game<'_> {
             f.stuck = Vec3::ZERO;
             f.velocity = Vec3::ZERO;
         }
-        let mut scene = collisions::SceneCollisions {
+        let scene = collisions::SceneCollisions {
             world: &self.world,
             binding: self.collision,
             subject: Some(collisions::PowderSnowSubject {
@@ -5558,7 +5558,13 @@ impl Game<'_> {
             false,
         );
         // On an error the caller keeps the block as it was before this tick.
-        let movement = scene.resolve_with_context(
+        // Entity.collide: the world border's walls stop it too.
+        let movement = collisions::EntityCollisions {
+            blocks: scene,
+            entities: &[],
+            border: Some((self.border.geometry(), [f.position.x, f.position.z])),
+        }
+        .resolve_with_context(
             horizon_client::falling_block::bounds(f.position),
             wanted,
             0.0,
