@@ -6177,7 +6177,7 @@ impl Game<'_> {
         // tropical fish lie on their side without `in_water`, #1591).
         // A frozen level ticks only the players, as below.
         // Entity.isInRain for the wolves, which dry off by their own `Wolf.tick`.
-        let (fluids, rain, thundering): (Vec<_>, Vec<_>, bool) = {
+        let (fluids, rain, standings, thundering): (Vec<_>, Vec<_>, Vec<_>, bool) = {
             let w = self.mob_world_base(&[]);
             let players = self.remote.as_ref().map(|r| &r.level_players);
             let fluids = self
@@ -6196,11 +6196,31 @@ impl Game<'_> {
                         && horizon_client::mobs::tame::in_rain(m, &w)
                 })
                 .collect();
-            (fluids, rain, w.thundering)
+            // The block under each mob the packs' random-model rules read (a grazing
+            // cow), one hair below the feet like `Entity.getBlockStateOn`; nothing
+            // without rules.
+            let standings = self
+                .mobs
+                .iter()
+                .map(|m| {
+                    horizon_client::mobs::cem::tracks_standing(&m.kind.id).then(|| {
+                        let (x, y, z) = (
+                            m.position.x.floor() as i32,
+                            (m.position.y - 0.0001).floor() as i32,
+                            m.position.z.floor() as i32,
+                        );
+                        w.block_name(x, y, z).to_owned()
+                    })
+                })
+                .collect();
+            (fluids, rain, standings, w.thundering)
         };
-        for (m, fluids) in self.mobs.iter_mut().zip(fluids) {
+        for ((m, fluids), standing) in self.mobs.iter_mut().zip(fluids).zip(standings) {
             if let Some(fluids) = fluids {
                 m.fluids = fluids;
+            }
+            if let Some(name) = standing {
+                m.standing_on = Some(name);
             }
         }
         let game_time = self.world.game_time;

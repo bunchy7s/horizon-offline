@@ -1189,6 +1189,9 @@ pub struct Mob {
     /// `Entity.mainSupportingBlockPos`: the block it stood on after its last
     /// move.
     pub supporting: Option<[i32; 3]>,
+    /// The block under the mob's feet by name (`minecraft:grass_block`), kept for the
+    /// packs' random-model rules (`rule_index`); `None` without rules or off the ground.
+    pub standing_on: Option<String>,
     /// `NoAI`: no goals and no movement.
     pub no_ai: bool,
     /// `Silent`.
@@ -2617,6 +2620,7 @@ impl Mob {
             first_tick: true,
             no_gravity: false,
             supporting: None,
+            standing_on: None,
             no_ai: false,
             silent: false,
             invulnerable_flag: false,

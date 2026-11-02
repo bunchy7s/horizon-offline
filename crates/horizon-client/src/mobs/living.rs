@@ -654,6 +654,13 @@ impl Mob {
         }
         // Entity.checkSupportingBlock
         self.supporting = self.supporting_block(w, moved);
+        // The block under the mob for the packs' random-model rules (a grazing cow reads
+        // `rule_index`); species without rules never pay the lookup.
+        if super::cem::tracks_standing(&self.kind.id) {
+            self.standing_on = self
+                .supporting
+                .map(|p| w.block_name(p[0], p[1], p[2]).to_owned());
+        }
         self.movement_emission(w, moved, events);
         // Entity.applyEffectsFromBlocks: bubble columns push the mob, and the
         // server shows the surface of one it is at the top of.
