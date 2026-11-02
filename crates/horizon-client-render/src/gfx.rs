@@ -5332,6 +5332,14 @@ impl Renderer {
             && self.native.is_none()
     }
 
+    /// Whether the eyes render type's layers may be posed on the GPU too
+    /// (`mobs::skin::SkinModels::eyes`): only with improved transparency off,
+    /// where they are ordinary entity quads. On, `EntityBatch` sorts them into
+    /// its stages by the CPU vertices' `OIT_ENTITY` tag.
+    pub fn skins_eyes(&self) -> bool {
+        self.skins_entities() && !self.improved_transparency
+    }
+
     pub fn frame_generation_share(&self) -> Option<f32> {
         self.frame_gen.made_share
     }
