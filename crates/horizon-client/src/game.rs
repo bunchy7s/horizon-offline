@@ -6484,7 +6484,13 @@ impl Game<'_> {
             return Ok(true);
         }
         if !on_block && &*stack.item == "minecraft:bow" {
-            if self.creative || self.projectile_slot("minecraft:bow").is_some() {
+            // BowItem.use: ArrowNockEvent, then FAIL without ammunition.
+            let has_ammo = self.creative || self.projectile_slot("minecraft:bow").is_some();
+            let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
+            let name = self.acting_player_name().to_owned();
+            let (hand, mut cancel) = (self.hand, false);
+            self.native_arrow_nock(player, &name, &stack, hand, has_ammo, &mut cancel);
+            if has_ammo && !cancel {
                 self.start_using_item();
             }
             return Ok(true);

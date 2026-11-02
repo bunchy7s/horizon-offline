@@ -4207,6 +4207,22 @@ impl Game<'_> {
         mod_api::dispatch_entity_shoot_bow(self, mod_api::mods(), player, name, projectile, force);
     }
 
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:native_arrow_nock@.
+    pub(super) fn native_arrow_nock(
+        &mut self,
+        player: u128,
+        name: &str,
+        bow: &ItemStack,
+        hand: Hand,
+        has_ammo: bool,
+        cancel: &mut bool,
+    ) {
+        let _ = (player, name, bow, hand, has_ammo, cancel);
+    }
+
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied. @API:native_entity_toggle_glide@.
     pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {
