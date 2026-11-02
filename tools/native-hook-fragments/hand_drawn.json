@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "hand_drawn",
+      "target": "horizon_client_render::gfx::native_render::native_hand_drawn",
+      "side": "client",
+      "mod_api": {"contract": "listen"}
+    }
+  ],
+  "rust_summary": "the render hook point `native_hand_drawn(hand)`: the first-person hand is drawn (`HandDrawn`).",
+  "doc_summary": "the render hook point `native_hand_drawn(hand)`, after the first-person hand and held item are drawn, with the\nframe's target, the hand's quads and its clip matrix (`HandDrawn`). Bundles need `\"hooks\": @API:hand_drawn@`.",
+  "comments": [
+    "crates/horizon-client-render/src/gfx/native_render.rs"
+  ]
+}

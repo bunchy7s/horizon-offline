@@ -936,6 +936,106 @@ use std::{
 };
 use winit::{event::MouseButton, keyboard::KeyCode};
 
+pub(super) struct ObservedScreen {
+    id: &'static str,
+    menu: Option<String>,
+    title: Option<Text>,
+    rect: [f32; 4],
+    slots: usize,
+    mouse: [f32; 2],
+    partial_tick: f32,
+}
+
+impl ObservedScreen {
+    fn view(&self) -> NativeScreenView<'_> {
+        NativeScreenView {
+            id: self.id,
+            menu: self.menu.as_deref(),
+            title: self.title.as_ref(),
+            rect: self.rect,
+            slots: self.slots,
+            mouse: self.mouse,
+            partial_tick: self.partial_tick,
+        }
+    }
+}
+
+fn observed_overlay_id(overlays: &[(bool, &'static str)]) -> Option<&'static str> {
+    overlays.iter().find_map(|(open, id)| open.then_some(*id))
+}
+
+impl Game<'_> {
+    fn observed_screen_view(&self) -> Option<NativeScreenView<'_>> {
+        let book = match &self.book {
+            Some(super::books::BookScreen::Edit { signing: true, .. }) => Some("book_sign"),
+            Some(super::books::BookScreen::Edit { .. }) => Some("book_edit"),
+            Some(super::books::BookScreen::View {
+                lectern: Some(_), ..
+            }) => Some("lectern"),
+            Some(super::books::BookScreen::View { .. }) => Some("book_view"),
+            None => None,
+        };
+        let overlay = observed_overlay_id(&[
+            (self.command_prompt.is_some(), "command_prompt"),
+            (self.link_prompt.is_some(), "link_prompt"),
+            (self.code_of_conduct.is_some(), "code_of_conduct"),
+            (self.server_packs.prompt.is_some(), "server_pack_prompt"),
+            (self.dialog_open(), "dialog"),
+            (book.is_some(), book.unwrap_or("book_view")),
+            (self.sign_edit.is_some(), "sign_editor"),
+        ]);
+        let Some(id) = overlay else {
+            return self.screen_view_now();
+        };
+        let renderer = self.renderer.as_ref()?;
+        let batch = HudBatch::new([renderer.config.width, renderer.config.height]);
+        Some(NativeScreenView {
+            id,
+            menu: None,
+            title: None,
+            rect: [0.0, 0.0, batch.width, batch.height],
+            slots: 0,
+            mouse: self.native_cursor(),
+            partial_tick: self.clock.fraction() as f32,
+        })
+    }
+
+    pub(super) fn observe_screen(&mut self) {
+        // Free with no native mod: the snapshot clones the title and menu.
+        if mod_api::mods().is_empty() {
+            return;
+        }
+        let current = self.observed_screen_view().map(|view| ObservedScreen {
+            id: view.id,
+            menu: view.menu.map(str::to_owned),
+            title: view.title.cloned(),
+            rect: view.rect,
+            slots: view.slots,
+            mouse: view.mouse,
+            partial_tick: view.partial_tick,
+        });
+        let changed = match (&self.observed_screen, &current) {
+            (Some(old), Some(new)) => old.id != new.id || old.menu != new.menu,
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            if let Some(old) = &self.observed_screen {
+                self.native_screen_closing(&old.view());
+            }
+            if let Some(new) = &current {
+                self.native_screen_opening(&new.view());
+                self.native_screen_init_post(&new.view());
+            }
+        } else if let (Some(old), Some(new)) = (&self.observed_screen, &current)
+            && old.rect != new.rect
+        {
+            self.native_screen_init_post(&new.view());
+        }
+        self.observed_screen = current;
+    }
+}
+
 /// `Level.setBlock`'s flags, for the `native_set_block_property` helpers:
 /// `flags::UPDATE_CLIENTS` as a vanilla crop grows, `flags::UPDATE_ALL` as a
 /// furnace sets its `lit`. Horizon sends every write to players, so
@@ -1646,6 +1746,27 @@ pub struct NativeShake {
 const SHAKE_MAX_DEGREES: f32 = 10.0;
 /// The largest offset a shake gives, in blocks, along each axis.
 const SHAKE_MAX_OFFSET: f32 = 0.5;
+
+/// The pose a native mod asks for the first-person hand, each out-of-range
+/// or non-finite component replaced by its identity.
+pub(super) fn hand_pose_matrix(values: [f32; 7]) -> glam::Mat4 {
+    let valid = |value: f32, min: f32, max: f32, default: f32| {
+        if value.is_finite() && (min..=max).contains(&value) {
+            value
+        } else {
+            default
+        }
+    };
+    let [x, y, z, pitch, yaw, roll, scale] = values;
+    glam::Mat4::from_translation(glam::Vec3::new(
+        valid(x, -16.0, 16.0, 0.0),
+        valid(y, -16.0, 16.0, 0.0),
+        valid(z, -16.0, 16.0, 0.0),
+    )) * glam::Mat4::from_rotation_x(valid(pitch, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_rotation_y(valid(yaw, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_rotation_z(valid(roll, -3600.0, 3600.0, 0.0).to_radians())
+        * glam::Mat4::from_scale(glam::Vec3::splat(valid(scale, 0.01, 100.0, 1.0)))
+}
 
 /// `shake` scaled by `scale` (Distortion Effects) and bounded on each axis;
 /// a value that isn't finite counts as none.
@@ -2372,6 +2493,25 @@ impl Game<'_> {
     pub(super) fn native_camera_shake(&self, partial: f32, shake: &mut NativeShake) {
         mod_api::dispatch_camera_shake(self, mod_api::mods(), partial, shake);
     }
+    /// Name tag visibility and optional replacement text. API @API:render_name_tag@.
+    pub(super) fn native_render_name_tag(
+        &self,
+        entity_id: u32,
+        kind: &str,
+        vanilla_visible: bool,
+        visible: &mut bool,
+        text: &mut Option<String>,
+    ) {
+        mod_api::dispatch_render_name_tag(
+            self,
+            mod_api::mods(),
+            entity_id,
+            kind,
+            vanilla_visible,
+            visible,
+            text,
+        );
+    }
     /// Before one first-person hand and its displayed stack are drawn (RenderHandEvent).
     /// Equip progress is the inverse arm height, including the item's swap animation scale.
     /// Cancel skips that hand's default geometry, including its map and arm geometry.
@@ -2394,6 +2534,42 @@ impl Game<'_> {
             swing,
             equip,
             canceled,
+        );
+    }
+
+    /// Additional first-person hand and item pose, including empty arms and maps.
+    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
+    /// API @API:render_hand_pose@.
+    pub(super) fn native_render_hand_pose(
+        &self,
+        hand: horizon_client::first_person::Hand,
+        stack: Option<&ItemStack>,
+        partial: f32,
+        swing: f32,
+        equip: f32,
+        x: &mut f32,
+        y: &mut f32,
+        z: &mut f32,
+        pitch: &mut f32,
+        yaw: &mut f32,
+        roll: &mut f32,
+        scale: &mut f32,
+    ) {
+        mod_api::dispatch_render_hand_pose(
+            self,
+            mod_api::mods(),
+            hand,
+            stack,
+            partial,
+            swing,
+            equip,
+            x,
+            y,
+            z,
+            pitch,
+            yaw,
+            roll,
+            scale,
         );
     }
 
@@ -2670,6 +2846,18 @@ impl Game<'_> {
     ) {
         mod_api::dispatch_item_energy_buffer(self, mod_api::mods(), item, buffer);
     }
+    /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
+    /// `slots` when the item is yours, for a backpack, a storage cell or a
+    /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
+    /// the item without slots, and vanilla's items have none. Asked at each
+    /// call of the item container helpers (`native_item_container_slots`,
+    /// `native_item_container_insert`, `native_item_container_extract`, in
+    /// `native_item_container.rs`). The contents are kept in the stack's
+    /// `minecraft:container`, as a shulker box item keeps them.
+    /// API @API:item_container@.
+    pub(super) fn native_item_container(&self, item: &str, slots: &mut Option<u32>) {
+        mod_api::dispatch_item_container(self, mod_api::mods(), item, slots);
+    }
     /// A server tick of the block entity at `pos`, in vanilla's order among
     /// the others (`Level.tickBlockEntities`), when its `id` is yours: read
     /// and change its saved compound `nbt`, its item slots `items` (keep
@@ -2867,6 +3055,20 @@ impl Game<'_> {
         origin: [f32; 2],
     ) {
         mod_api::dispatch_screen_draw(self, mod_api::mods(), block, data, batch, origin);
+    }
+    /// A screen was observed opening, at most once per frame.
+    pub(super) fn native_screen_opening(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_opening(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    pub(super) fn native_screen_init_post(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_init_post(self, mod_api::mods(), screen);
+    }
+
+    /// A screen was observed closing, at most once per frame.
+    pub(super) fn native_screen_closing(&self, screen: &NativeScreenView<'_>) {
+        mod_api::dispatch_screen_closing(self, mod_api::mods(), screen);
     }
     /// The open screen has drawn itself and its tooltips (`Screen.render`,
     /// the point of `ScreenEvent.Render.Post`): draw over it with
@@ -5594,6 +5796,24 @@ impl Game<'_> {
     /// hides. API 12.
     pub(super) fn native_tooltip(&self, stack: &ItemStack, lines: &mut Vec<(Text, u32)>) {
         mod_api::dispatch_tooltip(self, mod_api::mods(), stack, lines);
+    }
+    /// Change a tooltip box's background and border gradient colors, as ARGB.
+    /// Stack is None for tooltips not associated with an item.
+    pub(super) fn native_tooltip_color(
+        &self,
+        stack: Option<&ItemStack>,
+        background: &mut u32,
+        border_top: &mut u32,
+        border_bottom: &mut u32,
+    ) {
+        mod_api::dispatch_tooltip_color(
+            self,
+            mod_api::mods(),
+            stack,
+            background,
+            border_top,
+            border_bottom,
+        );
     }
     /// Client-side image component for this stack's tooltip. Answer its width/height
     /// in GUI pixels; finite positive dimensions reserve space after text and any
@@ -9287,6 +9507,42 @@ fn mod_screen_opens(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hand_pose_rejects_invalid_components() {
+        let identity = super::hand_pose_matrix([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(identity, glam::Mat4::IDENTITY);
+        assert_eq!(
+            super::hand_pose_matrix([
+                f32::NAN,
+                17.0,
+                f32::INFINITY,
+                3601.0,
+                -3601.0,
+                f32::NAN,
+                0.0
+            ]),
+            identity
+        );
+        let point = super::hand_pose_matrix([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.0])
+            .transform_point3(glam::Vec3::X);
+        assert_eq!(point, glam::Vec3::new(3.0, 2.0, 3.0));
+    }
+    #[test]
+    fn observed_overlay_prefers_first_open_screen() {
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (false, "book")]),
+            None
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(false, "sign"), (true, "book")]),
+            Some("book")
+        );
+        assert_eq!(
+            super::observed_overlay_id(&[(true, "sign"), (true, "book")]),
+            Some("sign")
+        );
+    }
+
     /// Exercise the gameplay constructor, where name-based entities compete
     /// with a mod block's sign template.
     #[test]

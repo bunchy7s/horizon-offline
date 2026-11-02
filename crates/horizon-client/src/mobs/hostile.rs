@@ -331,9 +331,9 @@ pub fn creeper_client_tick(m: &mut Mob) {
     if m.extra.flag {
         m.extra.counter = 1;
     }
-    m.swell = (m.swell + m.extra.counter).clamp(0, 30);
+    m.swell = (m.swell + m.extra.counter).max(0).min(m.max_swell);
 }
-/// Creeper.tick: advance the fuse and explode at 30.
+/// Creeper.tick: advance the fuse and explode at maxSwell.
 pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if !m.alive() {
         return;
@@ -352,8 +352,8 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
         ));
     }
     m.swell = (m.swell + dir).max(0);
-    if m.swell >= 30 {
-        m.swell = 30;
+    if m.swell >= m.max_swell {
+        m.swell = m.max_swell;
         let radius = if m.extra.charged { 6.0 } else { 3.0 };
         let name = match &m.custom_name {
             Some(name) => crate::text::Text::literal(name.clone()),
