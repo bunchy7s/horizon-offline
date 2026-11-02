@@ -76,3 +76,21 @@ does the asking.
   hash (they never change for one); a file past the limits is left out and not asked for again.
 - **Offline**: a request that fails leaves every answer as it was, and the next one waits 15 s, then
   30 s, doubling up to 10 minutes. A player whose item didn't arrive is asked for again after 15 s.
+
+## In the game
+
+- **The flag**: `horizon_cosmetics::ON_BY_DEFAULT` is `false`. Until it is turned on nothing runs:
+  no thread, no request, no setting, no drawing. `HORIZON_COSMETICS=1` turns them on for one run
+  (development, the bench); `HORIZON_COSMETICS_API=<url>` points the game at another service, and
+  `HORIZON_COSMETICS_LOCAL=<folder>` reads items from a folder instead: every player and every
+  mannequin wears its first item of each slot (the art and the bench, without the network).
+- **Settings** (Extras, under "Cosmetics", shown only with the flag on): *My cosmetics* and *Other
+  players' cosmetics*, both on. Off, the game asks for nothing about those players.
+- **Drawing** (`game/cosmetics.rs`): an item's texture takes one of the skin atlas's 64×64 slots
+  and its boxes are posed on the wearer's bone each frame, through the same GPU skin path as the
+  player model (the CPU path where that is off), lit and culled with the player. A helmet hides a
+  head item, an elytra or cape a back item. The third person view and the
+  inventory's player preview show your own.
+- **Cost**: a player with nothing to wear adds one cache lookup; with no cosmetic in view the frame
+  does no cosmetics work beyond that. The bench scene `stress_avatars` (300 mannequins, 20×15)
+  measures the cost with `HORIZON_COSMETICS=1 HORIZON_COSMETICS_LOCAL=…` against the same run off.

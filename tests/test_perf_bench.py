@@ -354,6 +354,7 @@ class StressSceneTests(unittest.TestCase):
         self.assertEqual(summons("stress_markings", "horse") + summons("stress_markings", "slime"), 1000)
         self.assertEqual(summons("stress_frames", "item_frame"), 512)
         self.assertEqual(summons("stress_armor_stands", "armor_stand"), 500)
+        self.assertEqual(summons("stress_avatars", "mannequin"), 300)
         self.assertEqual(stress_scenes.setup("stress_empty"), stress_scenes.SETTINGS + stress_scenes.floor(
             *stress_scenes.origin("stress_empty")))
         # Only the run's first stress scene sets the game rules.
@@ -363,7 +364,7 @@ class StressSceneTests(unittest.TestCase):
     def test_every_entity_is_near_enough_to_be_drawn_at_rd16(self):
         # Entity.shouldRenderAtSqrDistance with viewScale 2: a dropped item (0.25) within 32 blocks.
         from tools import stress_scenes
-        for name in ("stress_mobs", "stress_items", "stress_frames", "stress_armor_stands"):
+        for name in ("stress_mobs", "stress_items", "stress_frames", "stress_armor_stands", "stress_avatars"):
             _, at, _, _ = stress_scenes.scene(name)
             eye = (at[0], at[1] + 1.62, at[2])
             for line in stress_scenes.setup(name):
