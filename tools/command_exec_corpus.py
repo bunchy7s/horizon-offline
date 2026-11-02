@@ -1718,6 +1718,23 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def creeper_custom_fuse():
+    """Observe timed entity removal, rather than just echoed raw Fuse NBT (#7435)."""
+    ops = setup('/gamerule mob_griefing false')
+    for x, tag, fuse in [(4.5, 'fuse_short', ',Fuse:1s'),
+                         (14.5, 'fuse_default', ''), (24.5, 'fuse_long', ',Fuse:40s')]:
+        ops += setup(f'/summon minecraft:creeper {x} 220 4.5 '
+                     f'{{Tags:["{tag}"],NoAI:1b,NoGravity:1b,ignited:1b{fuse}}}')
+        ops.append(cmd(f'/data get entity @e[tag={tag},limit=1] Fuse'))
+    elapsed = 0
+    for tick in (1, 29, 30, 39, 40):
+        ops.append({'op': 'tick', 'n': tick - elapsed})
+        for tag in ('fuse_short', 'fuse_default', 'fuse_long'):
+            ops.append(cmd(f'/execute if entity @e[tag={tag}]'))
+        elapsed = tick
+    return ops + setup('/gamerule mob_griefing true')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1727,6 +1744,7 @@ def groups():
         ('player state', player_state()),
         ('blocks and border', world_blocks()),
         ('entities', entities()),
+        ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
