@@ -204,10 +204,12 @@ mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_refs;
 mod native_explosions;
 mod native_falling;
 mod native_hooks;
 mod native_inventories;
+mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
 mod native_lifecycle;
@@ -2399,6 +2401,7 @@ struct Game<'a> {
     /// `horizon-ctl gpu-passes`: time Horizon's own passes on the GPU with F3 shut.
     gpu_passes: bool,
     screen: Screen,
+    observed_screen: Option<native_hooks::ObservedScreen>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     /// Avoid an endless rebuild loop if the new device is lost as well.
@@ -6440,7 +6443,14 @@ impl Game<'_> {
             return Ok(true);
         }
         if !on_block && &*stack.item == "minecraft:bow" {
-            if self.creative || self.projectile_slot("minecraft:bow").is_some() {
+            // BowItem.use: ArrowNockEvent, then FAIL without ammunition.
+            let found_projectile = self.get_projectile(&stack).is_some();
+            let has_ammo = found_projectile || self.creative;
+            let player = horizon_client::lan::playerdata::ints_uuid(self.acting_player_uuid());
+            let name = self.acting_player_name().to_owned();
+            let (hand, mut cancel) = (self.hand, false);
+            self.native_arrow_nock(player, &name, &stack, hand, has_ammo, &mut cancel);
+            if has_ammo && !cancel {
                 self.start_using_item();
             }
             return Ok(true);
@@ -7327,6 +7337,7 @@ impl Game<'_> {
             // What the blocks spawned (a dispensed minecart, a lit TNT, a
             // placed boat) joins before the entities tick.
             self.native_joins_flush(false, 0);
+            self.lan_mark_synced();
         }
         if running {
             horizon_client::spans::time("tick_paintings", || self.tick_paintings());
@@ -7341,7 +7352,9 @@ impl Game<'_> {
             horizon_client::spans::time("tick_boats", || self.tick_boats());
             horizon_client::spans::time("tick_carts", || self.tick_carts());
             self.tick_vehicle_watch();
+            let from = self.lan_synced_from();
             horizon_client::spans::time("tick_thunder", || self.tick_thunder());
+            self.lan_synced_since(from);
             horizon_client::spans::time("tick_lecterns", || self.tick_lecterns());
             horizon_client::spans::time("tick_maps", || self.tick_maps());
             self.tick_lodestone_compasses();
@@ -7436,6 +7449,9 @@ impl Game<'_> {
         {
             self.use_with_hand()?;
             self.use_delay = 4;
+        }
+        if running {
+            horizon_client::spans::time("lan_note_joined", || self.lan_note_joined());
         }
         Ok(())
     }
@@ -9020,6 +9036,10 @@ impl Game<'_> {
         self.last_inv_click = None;
     }
     pub(super) fn close_container(&mut self) {
+        // `Gui.setScreen` clears the old screen's focus before it goes: the
+        // key that closed the container (Tab bound to the inventory) has
+        // already moved the focus, and it must not outlive the screen.
+        self.pad_clear_focus();
         self.mod_browser_closed();
         self.reset_inventory_clicks();
         self.close_station();
@@ -13409,23 +13429,22 @@ impl Game<'_> {
     }
     /// BowItem.releaseUsing: power from charge time, arrows at power * 3.
     fn release_bow(&mut self, stack: &ItemStack, ticks: u32) {
-        let arrow_slot = self.projectile_slot("minecraft:bow");
-        let has_ammo = arrow_slot.is_some() || self.creative;
+        let ammo = self.get_projectile(stack);
         let mut charge = i32::try_from(ticks).unwrap_or(i32::MAX);
         let mut canceled = false;
-        self.native_arrow_loose(stack, has_ammo, &mut charge, &mut canceled);
-        let Some(power) = item_use::bow_release_power(has_ammo, charge, canceled) else {
+        self.native_arrow_loose(stack, ammo.is_some(), &mut charge, &mut canceled);
+        let power = item_use::bow_release_power(ammo.is_some(), charge, canceled);
+        let (Some(power), Some(ammo)) = (power, ammo) else {
             return;
         };
+        let arrow_slot = ammo.slot;
+        let weapon = Some(stack.clone());
         let Some(eye) = self.eye_position() else {
             return;
         };
         // BowItem.shootProjectile: shootFromRotation(power * 3, inaccuracy 1).
         let p = Vec3::new(eye[0], eye[1] - 0.1, eye[2]);
-        let ammo = arrow_slot
-            .and_then(|i| self.stack_in(i).cloned())
-            .unwrap_or_else(|| ItemStack::new("minecraft:arrow", 1));
-        let weapon = self.held().cloned();
+        let ammo = ammo.stack;
         let (power_bonus, infinity) = self.bow_enchantments(&ammo.item);
         let effect = dispenser::tipped_effect(&ammo).or_else(|| {
             (&*ammo.item == "minecraft:spectral_arrow").then_some(("minecraft:glowing", 200))
@@ -13597,6 +13616,29 @@ impl Game<'_> {
             if canceled {
                 continue;
             }
+            let (mut x, mut y, mut z, mut pitch, mut yaw, mut roll, mut pose_scale) =
+                (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0);
+            self.native_render_hand_pose(
+                hand,
+                item.as_ref(),
+                a,
+                attack,
+                inverse_height,
+                &mut x,
+                &mut y,
+                &mut z,
+                &mut pitch,
+                &mut yaw,
+                &mut roll,
+                &mut pose_scale,
+            );
+            // No mod moved the hand (always so without one): no matrices to build.
+            let pose = [x, y, z, pitch, yaw, roll, pose_scale];
+            let to_world = if pose == [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0] {
+                to_world
+            } else {
+                to_world * native_hooks::hand_pose_matrix(pose)
+            };
             // The main hand on its arm, the off hand on the other one.
             let left = self.settings.main_hand_left != (hand == Hand::Off);
             let Some(stack) = item else {
@@ -14324,7 +14366,7 @@ impl Game<'_> {
         let lines = vec![(horizon_client::text::Text::literal(text), u32::MAX)];
         let (x, y, w, h) =
             Self::tooltip_geometry(atlas, &lines, (x, y), (batch.width, batch.height), [0.0; 2]);
-        Self::tooltip_box(batch, atlas, x, y, w, h);
+        self.tooltip_box(batch, None, x, y, w, h);
         Self::tooltip_text(batch, atlas, &lines, x, y);
     }
     /// `CreativeModeInventoryScreen.getTooltipFromContainerItem`: the lines
@@ -15023,6 +15065,7 @@ impl Game<'_> {
         if self.renderer.as_mut().is_some_and(|r| r.display_changed()) {
             self.apply_ui_settings();
         }
+        self.observe_screen();
         // Minecraft.doWorldLoad: the LevelLoadingScreen while single player's
         // server starts, with the server's chunk map and progress.
         if let Some(starting) = &self.integrated_starting {
@@ -15803,6 +15846,7 @@ impl Game<'_> {
                     self.capture(false);
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     self.carried = None;
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -15915,6 +15959,7 @@ impl Game<'_> {
                     }
                 }
                 Screen::Creative => {
+                    self.pad_clear_focus();
                     if let Some(c) = self.carried.take() {
                         let _ = self.give(c);
                     }
@@ -17343,6 +17388,25 @@ impl Game<'_> {
                     self.title_action(event_loop, action)?;
                     self.reopen_data_packs(event_loop)?;
                 }
+                // AbstractSelectionList.mouseClicked: the world list takes a
+                // click of any button, so the middle one selects its row
+                // without joining (only the left click's play icon or its
+                // click on the selected row does that).
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Middle,
+                    ..
+                } if self.title.is_some() && self.screen != Screen::Options => {
+                    let size = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| [r.config.width, r.config.height])
+                        .unwrap_or([1, 1]);
+                    let b = HudBatch::new(size);
+                    if let Some(title) = self.title.as_mut() {
+                        title.select_world_at(self.cursor.0, self.cursor.1, (b.width, b.height));
+                    }
+                }
                 WindowEvent::MouseInput { .. } if self.title.is_some() => {}
                 WindowEvent::MouseInput { state, button, .. } if self.book.is_some() => {
                     if state == ElementState::Pressed && button == MouseButton::Left {
@@ -18324,6 +18388,7 @@ impl<'a> Game<'a> {
             debug: false,
             gpu_passes: false,
             screen: Screen::Playing,
+            observed_screen: None,
             window: None,
             renderer: None,
             last_device_recovery: None,

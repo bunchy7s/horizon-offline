@@ -94,6 +94,29 @@ impl Game<'_> {
             .integrated
             .as_ref()
             .and_then(|i| i.call(|g| (g.level_census(), g.section_addresses())));
+        // The server thread's generation: proto chunks waiting for their
+        // neighbours, and the light jobs' views of them.
+        let generation = self.integrated.as_ref().and_then(|i| {
+            i.call(|g| {
+                let c = g.streaming.proto_census();
+                let [blocks, lists, heightmaps, other, biomes, records] = c.bytes;
+                json!({
+                    "protos": c.protos,
+                    "protos_mb": mb(c.bytes.iter().sum::<usize>()),
+                    "proto_blocks_mb": mb(blocks),
+                    "proto_section_lists_mb": mb(lists),
+                    "proto_heightmaps_mb": mb(heightmaps),
+                    "proto_other_terrain_mb": mb(other),
+                    "proto_biomes_mb": mb(biomes),
+                    "proto_records_mb": mb(records),
+                    "proto_sections_by_bits": c.sections_by_bits,
+                    "light_views": c.light_views,
+                    "light_views_mb": mb(c.light_view_bytes),
+                    "caches": c.caches.iter().map(|(name, n, bytes)| json!([name, n, bytes.map(mb)])).collect::<Vec<_>>(),
+                    "stages": g.streaming.stages().iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+                })
+            })
+        });
         // The window's sections the server thread holds too (lan/handoff.rs).
         let shared = server.as_ref().map(|(_, at)| {
             let (sections, bytes) = shared(self.all_worlds(), at);
@@ -136,6 +159,7 @@ impl Game<'_> {
             "client_columns": census_json(&client),
             "server_columns": server.as_ref().map(|(c, _)| census_json(c)),
             "shared_with_server": shared,
+            "server_generation": generation,
             "far_tiles": self.lod.as_ref().map(|lod| {
                 let (active, cached) = lod.stats();
                 json!({ "active": active, "cached": cached })
