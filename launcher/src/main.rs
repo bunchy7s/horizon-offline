@@ -63,6 +63,7 @@ mod switch_page;
 mod theme;
 mod themes_page;
 mod titlebar;
+mod wardrobe_page;
 mod while_playing;
 mod worlds_page;
 
@@ -251,6 +252,7 @@ struct Launcher {
     menu_closed_at: Option<Point<Pixels>>,
     /// Settings > Account's skin panel for an offline name (`skin_page.rs`).
     skin: Option<skin_page::SkinPanel>,
+    wardrobe: Option<wardrobe_page::WardrobePanel>,
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
     settings: Settings,
@@ -533,6 +535,7 @@ impl Launcher {
             look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
+            wardrobe: None,
             background_error: None,
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
@@ -671,6 +674,11 @@ impl Launcher {
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
+        }
+        if cfg!(debug_assertions)
+            && std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("wardrobe")
+        {
+            this.wardrobe_preview();
         }
         // What the game and the launcher kept, if the player allows it and there is a server.
         telemetry::send_in_background();
@@ -3953,6 +3961,17 @@ impl Launcher {
                     cx.notify();
                 }))
             });
+            if horizon_cosmetics::enabled() {
+                let dressed = uuid.clone();
+                actions = actions.child(
+                    button(format!("wardrobe-{i}"), "Wardrobe…", Kind::Ghost, &t).on_click(
+                        cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.open_wardrobe(dressed.clone(), cx);
+                            cx.notify();
+                        }),
+                    ),
+                );
+            }
             let sign_out = button(format!("sign-out-{i}"), "Sign out", Kind::Ghost, &t);
             actions = actions.child(if busy {
                 disabled(sign_out)
@@ -4001,6 +4020,7 @@ impl Launcher {
                 &t,
             ));
         }
+        rows = rows.children(self.wardrobe_panel(cx));
         let configured = account::client_id().is_some();
         let busy = matches!(
             self.sign_in_state,

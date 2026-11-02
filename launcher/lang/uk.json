@@ -882,5 +882,19 @@
   "Horizon's cosmetics service had a problem. Try again later.": "У сервісі косметики Horizon сталася помилка. Спробуйте пізніше.",
   "Mojang could not confirm your account. Sign in again and retry.": "Mojang не вдалося підтвердити ваш обліковий запис. Увійдіть знову й повторіть спробу.",
   "Sign in with a Minecraft account first.": "Спершу увійдіть з обліковим записом Minecraft.",
-  "Mojang's session server is not answering. Try again later.": "Сервер сеансів Mojang не відповідає. Спробуйте пізніше."
+  "Mojang's session server is not answering. Try again later.": "Сервер сеансів Mojang не відповідає. Спробуйте пізніше.",
+  "{name}'s Wardrobe": "Гардероб {name}",
+  "Head": "Голова",
+  "Back": "Спина",
+  "Shoulder": "Плече",
+  "Nothing": "Нічого",
+  "Checking your account with Mojang…": "Перевіряємо ваш обліковий запис у Mojang…",
+  "Only Horizon players see what you wear; other games and servers don't. Items change nothing in the game.": "Те, що ви носите, бачать лише гравці Horizon; інші ігри та сервери — ні. Предмети нічого не змінюють у грі.",
+  "Turn": "Повернути",
+  "Claim": "Отримати",
+  "You have the early-player set.": "У вас є набір перших гравців.",
+  "The early-player set is free to claim for a limited time.": "Набір перших гравців можна отримати безкоштовно протягом обмеженого часу.",
+  "The early-player set can't be claimed yet.": "Набір перших гравців поки не можна отримати.",
+  "The early-player set can no longer be claimed.": "Набір перших гравців більше не можна отримати.",
+  "Wardrobe…": "Гардероб…"
 }

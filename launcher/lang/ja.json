@@ -882,5 +882,19 @@
   "Horizon's cosmetics service had a problem. Try again later.": "Horizon のコスメティックサービスで問題が発生しました。後でもう一度お試しください。",
   "Mojang could not confirm your account. Sign in again and retry.": "Mojang がアカウントを確認できませんでした。もう一度サインインしてやり直してください。",
   "Sign in with a Minecraft account first.": "まず Minecraft アカウントでサインインしてください。",
-  "Mojang's session server is not answering. Try again later.": "Mojang のセッションサーバーが応答していません。後でもう一度お試しください。"
+  "Mojang's session server is not answering. Try again later.": "Mojang のセッションサーバーが応答していません。後でもう一度お試しください。",
+  "{name}'s Wardrobe": "{name} のワードローブ",
+  "Head": "頭",
+  "Back": "背中",
+  "Shoulder": "肩",
+  "Nothing": "なし",
+  "Checking your account with Mojang…": "Mojang でアカウントを確認中…",
+  "Only Horizon players see what you wear; other games and servers don't. Items change nothing in the game.": "あなたの装いは Horizon のプレイヤーにだけ見えます。他のゲームやサーバーには見えません。アイテムはゲーム内容を何も変えません。",
+  "Turn": "回転",
+  "Claim": "受け取る",
+  "You have the early-player set.": "アーリープレイヤーセットを持っています。",
+  "The early-player set is free to claim for a limited time.": "アーリープレイヤーセットは期間限定で無料で受け取れます。",
+  "The early-player set can't be claimed yet.": "アーリープレイヤーセットはまだ受け取れません。",
+  "The early-player set can no longer be claimed.": "アーリープレイヤーセットはもう受け取れません。",
+  "Wardrobe…": "ワードローブ…"
 }

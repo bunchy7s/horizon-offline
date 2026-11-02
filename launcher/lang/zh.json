@@ -882,5 +882,19 @@
   "Horizon's cosmetics service had a problem. Try again later.": "Horizon 的装饰服务出现问题。请稍后再试。",
   "Mojang could not confirm your account. Sign in again and retry.": "Mojang 无法确认你的账户。请重新登录后重试。",
   "Sign in with a Minecraft account first.": "请先使用 Minecraft 账户登录。",
-  "Mojang's session server is not answering. Try again later.": "Mojang 的会话服务器没有响应。请稍后再试。"
+  "Mojang's session server is not answering. Try again later.": "Mojang 的会话服务器没有响应。请稍后再试。",
+  "{name}'s Wardrobe": "{name} 的衣橱",
+  "Head": "头部",
+  "Back": "背部",
+  "Shoulder": "肩部",
+  "Nothing": "无",
+  "Checking your account with Mojang…": "正在通过 Mojang 验证你的账户…",
+  "Only Horizon players see what you wear; other games and servers don't. Items change nothing in the game.": "只有 Horizon 玩家能看到你的装扮；其他游戏和服务器看不到。物品不会改变游戏中的任何东西。",
+  "Turn": "旋转",
+  "Claim": "领取",
+  "You have the early-player set.": "你已拥有早期玩家套装。",
+  "The early-player set is free to claim for a limited time.": "早期玩家套装限时免费领取。",
+  "The early-player set can't be claimed yet.": "早期玩家套装尚不能领取。",
+  "The early-player set can no longer be claimed.": "早期玩家套装已无法领取。",
+  "Wardrobe…": "衣橱…"
 }

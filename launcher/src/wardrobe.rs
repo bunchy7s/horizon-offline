@@ -235,6 +235,17 @@ impl std::fmt::Debug for Session {
 }
 
 impl Session {
+    /// A made-up session for the launcher's screenshot preview (`HORIZON_LAUNCHER_PAGE=wardrobe`):
+    /// it carries no credential, so the service refuses anything sent with it.
+    pub fn preview(uuid: &str, name: &str) -> Self {
+        Self {
+            token: String::new(),
+            until: Instant::now() + Duration::from_secs(3600),
+            uuid: uuid.into(),
+            name: name.into(),
+        }
+    }
+
     pub fn live(&self) -> bool {
         Instant::now() < self.until
     }

@@ -882,5 +882,19 @@
   "Horizon's cosmetics service had a problem. Try again later.": "Le service de cosmétiques de Horizon a rencontré un problème. Réessayez plus tard.",
   "Mojang could not confirm your account. Sign in again and retry.": "Mojang n'a pas pu confirmer votre compte. Reconnectez-vous et réessayez.",
   "Sign in with a Minecraft account first.": "Connectez-vous d'abord avec un compte Minecraft.",
-  "Mojang's session server is not answering. Try again later.": "Le serveur de sessions de Mojang ne répond pas. Réessayez plus tard."
+  "Mojang's session server is not answering. Try again later.": "Le serveur de sessions de Mojang ne répond pas. Réessayez plus tard.",
+  "{name}'s Wardrobe": "Garde-robe de {name}",
+  "Head": "Tête",
+  "Back": "Dos",
+  "Shoulder": "Épaule",
+  "Nothing": "Rien",
+  "Checking your account with Mojang…": "Vérification de votre compte auprès de Mojang…",
+  "Only Horizon players see what you wear; other games and servers don't. Items change nothing in the game.": "Seuls les joueurs de Horizon voient ce que vous portez ; les autres jeux et serveurs non. Les objets ne changent rien au jeu.",
+  "Turn": "Tourner",
+  "Claim": "Réclamer",
+  "You have the early-player set.": "Vous avez le set des premiers joueurs.",
+  "The early-player set is free to claim for a limited time.": "Le set des premiers joueurs est gratuit à réclamer pour une durée limitée.",
+  "The early-player set can't be claimed yet.": "Le set des premiers joueurs ne peut pas encore être réclamé.",
+  "The early-player set can no longer be claimed.": "Le set des premiers joueurs ne peut plus être réclamé.",
+  "Wardrobe…": "Garde-robe…"
 }

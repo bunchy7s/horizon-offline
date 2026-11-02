@@ -882,5 +882,19 @@
   "Horizon's cosmetics service had a problem. Try again later.": "Horizon'un kozmetik hizmetinde bir sorun oluştu. Daha sonra tekrar dene.",
   "Mojang could not confirm your account. Sign in again and retry.": "Mojang hesabını doğrulayamadı. Yeniden giriş yapıp tekrar dene.",
   "Sign in with a Minecraft account first.": "Önce bir Minecraft hesabıyla giriş yap.",
-  "Mojang's session server is not answering. Try again later.": "Mojang'ın oturum sunucusu yanıt vermiyor. Daha sonra tekrar dene."
+  "Mojang's session server is not answering. Try again later.": "Mojang'ın oturum sunucusu yanıt vermiyor. Daha sonra tekrar dene.",
+  "{name}'s Wardrobe": "{name} adlı oyuncunun gardırobu",
+  "Head": "Kafa",
+  "Back": "Sırt",
+  "Shoulder": "Omuz",
+  "Nothing": "Hiçbiri",
+  "Checking your account with Mojang…": "Hesabın Mojang ile doğrulanıyor…",
+  "Only Horizon players see what you wear; other games and servers don't. Items change nothing in the game.": "Giydiklerini yalnızca Horizon oyuncuları görür; diğer oyunlar ve sunucular görmez. Eşyalar oyunda hiçbir şeyi değiştirmez.",
+  "Turn": "Döndür",
+  "Claim": "Al",
+  "You have the early-player set.": "İlk oyuncu setine sahipsin.",
+  "The early-player set is free to claim for a limited time.": "İlk oyuncu seti sınırlı bir süre için ücretsiz alınabilir.",
+  "The early-player set can't be claimed yet.": "İlk oyuncu seti henüz alınamıyor.",
+  "The early-player set can no longer be claimed.": "İlk oyuncu seti artık alınamıyor.",
+  "Wardrobe…": "Gardırop…"
 }
