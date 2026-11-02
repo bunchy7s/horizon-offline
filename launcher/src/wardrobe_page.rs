@@ -289,11 +289,7 @@ impl Launcher {
         // Degrees: a little turned, then a quarter more per click.
         let yaw = 30. + 90. * f32::from(panel.turn);
         let image = preview::render(&draws, w, h, yaw, 10.);
-        let texels: Vec<[u8; 4]> = image
-            .rgba
-            .chunks_exact(4)
-            .map(|c| [c[0], c[1], c[2], c[3]])
-            .collect();
+        let texels: Vec<[u8; 4]> = image.rgba.as_chunks::<4>().0.to_vec();
         let baked = art::bake(&texels, w as usize, h as usize, 1. / scale, scale);
         panel.seen = Some((scale, panel.turn, worn, baked.clone()));
         Some(baked)
