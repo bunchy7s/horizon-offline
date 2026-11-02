@@ -526,6 +526,20 @@ pub(super) use horizon_world::level::flags;
 pub(crate) const NATIVE_HOOKS_API: u32 = 153;
 
 impl GameLevel<'_> {
+    /// A broken block is about to drop `experience` points at `pos`. The
+    /// vanilla block drop rule has been checked; change the amount before its
+    /// orbs are awarded. Server-side. @API:native_block_exp@.
+    #[inline(always)]
+    pub(super) fn native_block_exp(
+        &self,
+        dimension: LevelDimension,
+        pos: BlockPos,
+        block: &str,
+        experience: &mut u32,
+    ) {
+        let _ = (dimension, pos, block, experience);
+    }
+
     /// An authoritative server committed a changed state through `Level.setBlock`.
     /// The world contains `new`; block side effects and neighbour updates follow.
     #[inline(always)]
