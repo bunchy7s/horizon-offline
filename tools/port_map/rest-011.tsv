@@ -11,11 +11,11 @@ Varint21FrameDecoder.decode	port	crates/horizon-protocol/src/frame.rs::split	gap
 ChatType.bind	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::handle_chat	the bound takes the chat type and the sender's display name
 ChatTypeDecoration.incomingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
 ChatTypeDecoration.outgoingDirectMessage	skip:data		chat_type registry bootstrap; the msg decorations come from the chat_type data
-ChatTypeDecoration.decorate	port	crates/horizon-client/src/game/remote.rs::Game::format_chat	the chat type's translation with its style, on the client when a PlayerChat or DisguisedChat arrives
-ChatTypeDecoration.resolveParameters	port	crates/horizon-client/src/game/remote.rs::Game::format_chat	the parameter list (sender, target, content) built in format_chat
+ChatTypeDecoration.decorate	port	crates/horizon-client/src/game/remote.rs::chat_type_decorate	the chat type's translation with its style, on the client when a PlayerChat or DisguisedChat arrives
+ChatTypeDecoration.resolveParameters	port	crates/horizon-client/src/game/remote.rs::chat_type_decorate	the parameter list (sender, target, content) built in format_chat
 ClickEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: a disallowed action (open_file) is dropped; vanilla refuses the whole component
 CommonComponents.optionStatus	port	crates/horizon-client-render/src/options_ui.rs::on_off	options.on / options.off text
-CommonComponents.joinForNarration	skip:other		screen-reader narration text; Horizon has no narrator output (the narrator option is only stored)
+CommonComponents.joinForNarration	port	crates/horizon-client-render/src/widgets.rs::join_for_narration	the parts joined with ". " (NARRATION_SEPARATOR), as vanilla; every narrated title-and-message screen goes through it
 Component.tryCollapseToString	skip:java		JSON shape only: Text always writes the object form, which reads the same
 Component.copy	skip:java		clone; Text is Clone
 Component.visit	port	crates/horizon-client-core/src/text.rs::Text::chars	gap: minor: no early exit on the first consumer result; the styled characters are the same
@@ -45,7 +45,7 @@ FilterMask.hashCode	skip:java		hashing
 FormattedText.of	skip:java		adapter from a String to FormattedText
 FormattedText.getString	port	crates/horizon-client-core/src/text.rs::Text::plain	
 HoverEvent.Action.filterForSerialization	port	crates/horizon-client-core/src/component.rs::object_style	gap: minor: show_entity is accepted by vanilla and dropped here
-HoverEvent.EntityTooltipInfo.getTooltipLines	missing		player: hovering a player or entity name in chat shows no tooltip with name, type and UUID; show_entity hovers are dropped
+HoverEvent.EntityTooltipInfo.getTooltipLines	port	crates/horizon-client/src/game/chat.rs::Game::entity_tooltip_lines	the name when the event has one, then the entity type and the uuid, for a show_entity hover
 HoverEvent.EntityTooltipInfo.equals	skip:java		value equality
 HoverEvent.EntityTooltipInfo.hashCode	skip:java		hashing
 LastSeenMessages.updateSignature	inline	crates/horizon-protocol/src/secure_chat.rs::signed_payload	the last-seen list written into the signed payload

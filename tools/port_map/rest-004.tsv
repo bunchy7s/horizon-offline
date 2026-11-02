@@ -1,6 +1,6 @@
 OptionInstance.SliderableEnum.toSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::kind	slider position of the graphics preset (index / 3)
-OptionInstance.SliderableEnum.next	missing		minor: unsure: no next-value step for the graphics preset slider; Opt::cycle has no Preset arm
-OptionInstance.SliderableEnum.previous	missing		minor: unsure: no previous-value step for the graphics preset slider; Opt::cycle has no Preset arm
+OptionInstance.SliderableEnum.next	inline	crates/horizon-client-render/src/options_ui.rs	Opt::Preset is a 0..3 slider (unit/step at options_ui.rs:335, 417, 844), so stepping happens through the slider rather than a cycle arm
+OptionInstance.SliderableEnum.previous	inline	crates/horizon-client-render/src/options_ui.rs	same slider
 OptionInstance.SliderableEnum.fromSliderValue	port	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: rounds v*3 where vanilla floors v*4
 OptionInstance.SliderableEnum.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	named spec accepts the four preset indexes
 OptionInstance.SliderableOrCyclableValueSet.createButton	port	crates/horizon-client-render/src/options_ui.rs::option_widget	cycle or slider button by option kind
@@ -8,14 +8,14 @@ OptionInstance.SliderableValueSet.createButton	port	crates/horizon-client-render
 OptionInstance.UnitDouble.validateValue	port	crates/horizon-client-render/src/options_file.rs::Spec::validate	unit range 0..1
 OptionInstance.UnitDouble.codec	port	crates/horizon-client-render/src/options_file.rs::codec_double	
 Options.updateResourcePacks	port	crates/horizon-client/src/game/options.rs::Game::handle_option_events	gap: minor: saves and reloads on every packs event; vanilla only when the list changed
-Options.maxAnisotropyValue	missing		player: no anisotropic filtering setting; textures are sampled without anisotropy
+Options.maxAnisotropyValue	port	crates/horizon-client/src/game/options.rs + horizon-client-render::gfx::set_texture_filtering	the options.txt maxAnisotropyBit (and textureFiltering) reach the sampler
 Options.createSoundSliderOptionInstance	port	crates/horizon-client-render/src/audio.rs::Audio::sync_volumes	gap: player: no now-playing toast when master or music changes
 Options.setGraphicsPresetToCustom	inline	crates/horizon-client-render/src/options_ui.rs::Opt::set_slider	gap: minor: cycle buttons set custom in Opt::cycle as well
 Options.processOptions	inline	crates/horizon-client-render/src/options_file.rs::OptionsFile::parse	gap: minor: the save direction is OptionsFile::serialize
 Options.dataFix	port	crates/horizon-client-render/src/options_fixes.rs::update	
-Options.getFullscreenVideoModeString	missing		player: the window's fullscreen mode is never saved to options.txt (fullscreen_resolution is only read back)
+Options.getFullscreenVideoModeString	inline	crates/horizon-client-render/src/options_file.rs	options.txt keeps fullscreen_resolution as the monitor index the option was picked from instead of a 'WxH@Hz' string; the window is restored from that index
 Options.buildPlayerInformation	port	crates/horizon-client/src/net.rs::run	gap: player: only view distance and chat visibility are sent; language, skin parts, main hand, particles and text filtering stay at defaults
-Options.setModelPart	missing		player: skin layer toggles (hat, jacket, sleeves, pants legs, cape) do not change the drawn skin or the info sent to the server
+Options.setModelPart	port	crates/horizon-client-render/src/options_file.rs::MODEL_PARTS + options_ui model part keys	the seven modelPart_* options are read back and sent as the PlayerModelPart set
 Options.loadSelectedResourcePacks	port	crates/horizon-client-render/src/packs.rs::enabled	gap: minor: dropped packs are not written back to resourcePacks
 Options.readListOfStrings	port	crates/horizon-client-render/src/options_file.rs::read_list	
 Options.dumpOptionsForReport	skip:debug		options dump for the debug report
@@ -47,8 +47,8 @@ Screenshot.takeScreenshot	port	crates/horizon-client-render/src/gfx.rs::Renderer
 Screenshot.getFile	port	crates/horizon-client/src/game/chat.rs::screenshot_name	minor: UTC instead of local time in the name
 ScrollWheelHandler.getNextScrollWheelSelection	port	crates/horizon-client-input/src/mouse.rs::ScrollWheelHandler::next_selection	
 SectionUpdateTracker.setDirty	port	crates/horizon-client-render/src/world.rs::DirtySections::insert	gap: minor: the from-player flag that orders remeshing is not kept
-SectionUpdateTracker.hasAllNeighbors	missing		minor: unsure: no separate neighbour-chunk check found; the mesher works from a 3x3 region
-SectionUpdateTracker.doesChunkExistAt	missing		minor: unsure: see hasAllNeighbors
+SectionUpdateTracker.hasAllNeighbors	inline	crates/horizon-client-render/src/streaming.rs::Streaming::update	the meshing loop waits until all eight neighbouring columns are lit and not lighting, and Streaming::region yields None unless all nine chunks are there, as doesChunkExistAt's chunk-at-FULL test
+SectionUpdateTracker.doesChunkExistAt	inline	crates/horizon-client-render/src/streaming.rs::Streaming::region	region() looks up each of the 3x3 chunks and gives None if one is absent; the light-on-in-column half is the `lit` set the update loop waits on
 SectionUpdateTracker.SectionDirtyState.setDirty	port	crates/horizon-client-render/src/world.rs::DirtySections::insert	gap: minor: the from-player flag is not kept
 SectionUpdateTracker.SectionDirtyState.setSectionNode	skip:java		section node exists only for the rotating storage; Horizon keys sections by coordinates
 StringSplitter.stringWidth	port	crates/horizon-client-render/src/font.rs::Font::width	
@@ -63,10 +63,10 @@ StringSplitter.WidthLimitedCharSink.accept	port	crates/horizon-client-render/src
 AnimationDefinition.Builder.addAnimation	skip:java		builder for code-made animations; Horizon parses animation JSON
 KeyframeAnimation.bake	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	gap: minor: bones are looked up per frame; no check that a bone exists
 KeyframeAnimation.getElapsedSeconds	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	seconds modulo the length when looping
-KeyframeAnimations.degreeVec	missing		minor: unsure: no degree-to-radian conversion found in mobs/keyframes.rs or horizon-assets; check where keyframe rotations are converted
-KeyframeAnimations.scaleVec	missing		minor: unsure: no scale-offset conversion found; see degreeVec
-ColorLerper.getLerpedColor	missing		player: a sheep named jeb_ keeps one colour; no colour cycling exists in Horizon
-ColorLerper.getModifiedColor	missing		minor: only builds ColorLerper's colour tables
+KeyframeAnimations.degreeVec	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	the vanilla animation definitions call degreeVec when they build their keyframes, so the pre/post targets the exporter writes and Horizon parses are already radians; apply adds them straight into the pose
+KeyframeAnimations.scaleVec	inline	crates/horizon-client/src/mobs/keyframes.rs::Animation::apply	the definitions call scaleVec first, so a keyframe scale arrives with 1 already subtracted and adds onto the part's scale, as ModelPart.offsetScale does
+ColorLerper.getLerpedColor	port	crates/horizon-client/src/mobs/render.rs::jeb_wool_rgb	a sheep whose custom name is exactly jeb_ cycles through the dye colours by age, as MobRenderer.checkMagicName does
+ColorLerper.getModifiedColor	inline	crates/horizon-client/src/mobs/render.rs::jeb_wool_rgb	the same table walk, inlined for the jeb_ name
 BlockColors.getTintSource	port	crates/horizon-client-render/src/mesher.rs::Mesher::tint	
 BlockColors.register	skip:data		tint sources come from block data in Horizon
 BlockColors.getColoringProperties	skip:other		only ModelGroupCollector uses it to group block states; Horizon bakes each state
@@ -81,32 +81,32 @@ Firework.calculate	port	crates/horizon-assets/src/item_model.rs::Resolve::tint
 ItemTintSources.bootstrap	skip:data		item tint ids are registered from data
 net/minecraft/client/color/item/Potion#calculate	port	crates/horizon-assets/src/item_model.rs::Resolve::tint	
 net/minecraft/client/color/item/TeamColor#calculate	port	crates/horizon-assets/src/item_model.rs::Resolve::tint	
-ClientAvatarState.moveCloak	missing		minor: no cape lag; capes are not drawn by Horizon's renderer
+ClientAvatarState.moveCloak	port	crates/horizon-client-render/src/camera.rs::AvatarBob::tick	the cloak point eases a quarter of the way to the player each tick, or jumps to it from 10 blocks away; the cape layer leans from it
 ClientMannequin.registerOverrides	skip:other		client-side constructor override; Horizon creates mannequins from the species table
 ClientMannequin.tick	missing		minor: unsure: the mannequin avatar state (walk bob, cloak) is not ticked; skins come from skins.rs
 AbstractSelectionList.getRowLeft	port	crates/horizon-client-render/src/pack_screen.rs::List::row_left	
 CycleButton.setValue	skip:ui		widgets read the settings each frame; no separate value setter
 CreateFlatWorldScreen.DetailsList.LayerEntry.getNarration	skip:ui		screen-reader text
-InputQuirks.isQuitShortcutDown	missing		player: the quitShortcuts option is stored but never read; with it off vanilla ignores the quit shortcut
-InputWithModifiers.isSelection	missing		minor: unsure: Space and Enter do not activate focused buttons on the screens checked
-InputWithModifiers.isConfirmation	missing		minor: unsure: Enter checks are per screen (options_ui.rs key, chat.rs); no shared predicate
+InputQuirks.isQuitShortcutDown	port	crates/horizon-client/src/game.rs	the close path reads settings.quit_shortcuts and input::is_quit_shortcut_down, so with the option off the shortcut no longer closes the window
+InputWithModifiers.isSelection	inline	crates/horizon-client/src/game/key_focus.rs::nav_of	Enter, Space and keypad Enter all map to Nav::Select, which presses the focused widget
+InputWithModifiers.isConfirmation	inline	crates/horizon-client-render/src/chat.rs::ChatScreen::key	Enter and keypad Enter only, as the text-field screens do (chat, sign, command block, books); no shared predicate
 InputWithModifiers.isCopy	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isPaste	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
 InputWithModifiers.isCut	port	crates/horizon-client-input/src/clipboard.rs::edit_shortcut	
-PreeditEvent.fromSdlTextEditing	missing		player: IME composition text (Japanese or Chinese input) is not shown while composing; no IME events are handled
-PreeditEvent.toFormattedText	missing		player: same as fromSdlTextEditing
+PreeditEvent.fromSdlTextEditing	port	crates/horizon-client/src/game.rs::ime_preedit	WindowEvent::Ime(Preedit) feeds the composition text to the focused field
+PreeditEvent.toFormattedText	inline	crates/horizon-client/src/game.rs::ime_preedit	the composing text is drawn as the field's preedit, not as formatted chat
 GameConfig.FolderData.getExternalAssetSource	skip:data		Horizon reads assets from the prepared resources folder
 net/minecraft/client/main/Main#getQuickPlayVariant	port	crates/horizon-client/src/game.rs::Options::read	gap: minor: only the quick play flags of the launch parser; realms branch not checked
 net/minecraft/client/main/Main#parseArgument	inline	crates/horizon-client/src/game.rs::Options::read	
 net/minecraft/client/main/Main#hasValidUuid	missing		minor: unsure: no --uuid argument found in the client
 net/minecraft/client/main/Main#isUuidValid	missing		minor: unsure: see hasValidUuid
-AbstractClientPlayer.getPlayerInfo	missing		minor: unsure: no per-player tab entry lookup found on the client
-AbstractClientPlayer.getSkin	missing		minor: unsure: remote player skins are not tied to a player info; skins.rs has the lookup
-AbstractClientPlayer.getParrotVariantOnShoulder	missing		player: a parrot on your shoulder is never drawn (no shoulder parrot code)
+AbstractClientPlayer.getPlayerInfo	inline	crates/horizon-client/src/game/remote.rs::Game::remote_pushes	the entity id -> uuid -> tab entry lookups stand in for the PlayerInfo; the name, team and game mode are read from that entry
+AbstractClientPlayer.getSkin	port	crates/horizon-client/src/game/remote.rs::Game::update_remote_skins	the downloaded skin and slim flag, else DefaultPlayerSkin by uuid, as PlayerInfo.getSkin
+AbstractClientPlayer.getParrotVariantOnShoulder	port	crates/horizon-client/src/mobs/render.rs::shoulder_parrot	the shoulder slot's stored variant picks the parrot texture and model in the layer
 ClientInput.makeJump	inline	crates/horizon-client/src/motion.rs::MotionWorld::controlled_simulation_tick	gap: minor: carries the auto-jump flag; no separate jump input
 FirstPersonHandsAndItems.extractRenderState	inline	crates/horizon-client/src/game/hand.rs::Game::visible_hand_items	gap: minor: bob, swing and map state are read elsewhere; no render-state struct
 FirstPersonHandsAndItems.shouldInstantlyReplaceVisibleItem	missing		minor: unsure: no instant swap rule found in first_person.rs; HandHeights::tick takes a changed flag
-FirstPersonHandsAndItems.extractMapRenderState	missing		minor: unsure: map-in-hand data lookup not found; one_handed_map_pose only sets the pose
+FirstPersonHandsAndItems.extractMapRenderState	inline	crates/horizon-client/src/game/maps.rs::Game::held_map	the MAP_ID component picks the map data drawn in the hand, its decorations included, and decides the checkerboard background
 FirstPersonHandsAndItems.isChargedCrossbow	inline	crates/horizon-client/src/first_person.rs::hands_to_render	
 ItemActivation.tick	missing		player: the totem-of-undying item pop is never drawn; game/totem.rs draws particles and sound only
 ItemActivation.activate	missing		player: same as tick
@@ -118,15 +118,15 @@ LocalPlayer.sendIsSprintingIfNeeded	inline	crates/horizon-client/src/game/remote
 LocalPlayer.closeContainer	port	crates/horizon-client/src/game/remote.rs::Game::remote_close_container	
 LocalPlayer.isSuppressingSlidingDownLadder	port	crates/horizon-client/src/motion.rs::MotionWorld::suppressing_ladder_slide	gap: minor: sneak only; vanilla also requires not flying
 LocalPlayer.canSpawnSprintParticle	port	crates/horizon-client/src/game/client_ambient.rs::Game::sprint_dust	gap: minor: flying check is the caller's
-LocalPlayer.sendRidingJump	missing		player: mounted jumps (horses, camels) never send START_RIDING_JUMP, so the server ignores the jump charge
+LocalPlayer.sendRidingJump	port	crates/horizon-client/src/game/remote_vehicles.rs::riding_jump	START_RIDING_JUMP carrying the jump scale
 LocalPlayer.removeRecipeHighlight	port	crates/horizon-client/src/recipe_book.rs::Settings::remove_highlight	gap: minor: the seen-recipe packet is not sent, so the server keeps the highlight
-LocalPlayer.moveTowardsClosestSpace	missing		player: you are not nudged out of blocks at your four corners each tick (aiStep)
-LocalPlayer.suffocatesAt	missing		player: no suffocation test for the corner nudge (see moveTowardsClosestSpace)
+LocalPlayer.moveTowardsClosestSpace	port	crates/horizon-client/src/game.rs::Game::closest_space_nudge	the four body corners, 0.1 towards the nearest free side on its axis, a later corner overwriting an earlier one
+LocalPlayer.suffocatesAt	inline	crates/horizon-client/src/game.rs::closest_space_nudge	the suffocates_at closure tests a full collision cube that is also a full render cube, over the body's Y span
 LocalPlayer.setExperienceDisplayStartTickToTickCount	inline	crates/horizon-client/src/game/locator_bar.rs::Game::track_experience_display	
 LocalPlayer.handleEntityEvent	port	crates/horizon-client/src/game/remote.rs::Game::handle_packet	gap: minor: only the permission events 24 to 28 of the local player
 LocalPlayer.startUsingItem	port	crates/horizon-client/src/game.rs::Game::use_hand	
-LocalPlayer.isSlowDueToUsingItem	missing		player: sprinting is not blocked while eating or drawing a bow; sprint_input_tick never sets slow_item
-LocalPlayer.onSyncedDataUpdated	missing		minor: unsure: server living flags and the elytra start sound are not applied to the local player
+LocalPlayer.isSlowDueToUsingItem	port	crates/horizon-client/src/game.rs::Game::sync_player_body	the used item's UseEffects.canSprint reaches sprint's slow_item, which stops a sprint starting and ends one
+LocalPlayer.onSyncedDataUpdated	inline	crates/horizon-client/src/game/music.rs::Game::tick_sound_engine	starting to glide starts the elytra flying sound; the living flags are local state on this side
 LocalPlayer.jumpableVehicle	inline	crates/horizon-client/src/game/mounts.rs::Game::charge_mount_jump	gap: minor: saddle and jump-capable check only; no separate vehicle lookup
 LocalPlayer.openTextEdit	port	crates/horizon-client/src/game/sign_edit.rs::Game::open_sign_editor	
 LocalPlayer.modifyInputSpeedForSquareMovement	port	crates/horizon-client-input/src/input.rs::square_movement	
@@ -135,14 +135,14 @@ LocalPlayer.resetPos	inline	crates/horizon-client/src/game/screens.rs::Game::res
 LocalPlayer.shouldStopRunSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::should_stop	gap: player: minor_horizontal_collision is always false, so wall slides stop the sprint
 LocalPlayer.shouldStopSwimSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::should_stop	
 LocalPlayer.tickDeath	missing		minor: unsure: the dead local player is not removed after 20 ticks; the death screen flow covers it
-LocalPlayer.rideTick	missing		minor: unsure: no code found that feeds movement keys into a boat's paddling
-LocalPlayer.isHorizontalCollisionMinor	missing		player: sprinting into a wall at an angle stops the sprint (motion.rs minor_horizontal_collision is a stub returning false)
+LocalPlayer.rideTick	port	crates/horizon-client/src/game/boats.rs::Game::tick_riding	the keys are latched into the boat's input and the seat follows its turn
+LocalPlayer.isHorizontalCollisionMinor	port	crates/horizon-client/src/motion.rs::EntityMoveWorld::minor_horizontal_collision	the sprint keeps when a move hits a wall at under 8 degrees
 LocalPlayer.isMoving	inline	crates/horizon-client/src/auto_jump.rs::can_auto_jump	
 LocalPlayer.isSprintingPossible	port	crates/horizon-client/src/sprint.rs::Conditions::possible	
 LocalPlayer.canStartSprinting	port	crates/horizon-client/src/sprint.rs::Conditions::can_start	gap: player: slow_item is never set, so eating does not block starting a sprint
 LocalPlayer.onGameModeChanged	missing		minor: switching to spectator keeps vertical momentum
-LocalPlayer.getRopeHoldPosition	missing		player: no leash or lead rope exists in Horizon, so no rope is drawn
+LocalPlayer.getRopeHoldPosition	port	crates/horizon-client/src/game/leads.rs::Game::player_rope_hold	the first-person rope point from the look angles and the main arm
 LocalPlayer.raycastHitResult	port	crates/horizon-client/src/game/hand.rs::GameHands::hit	gap: minor: block fallback is Game::pick; no separate item attack-range pass
 LocalPlayer.filterHitResult	inline	crates/horizon-client/src/game.rs::Game::pick	gap: minor: reach is applied inside the clip; no miss direction is returned
 LocalPlayerResolver.fetchByName	missing		minor: unsure: no player-list lookup by name on the client
-LocalPlayerResolver.fetchById	missing		minor: unsure: no player-list lookup by id on the client
+LocalPlayerResolver.fetchById	inline	crates/horizon-client/src/game/remote.rs::Game::remote_pushes	the uuid -> tab entry lookup is inline wherever a player's name, team or skin is needed

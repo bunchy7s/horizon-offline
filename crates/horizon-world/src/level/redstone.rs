@@ -1,4 +1,4 @@
-//! Redstone: `SignalGetter`, redstone wire (default evaluator), torches,
+//! Redstone: `SignalGetter`, default and experimental wire evaluators, torches,
 //! diodes (repeaters, comparators), observers, lamps and the power-driven
 //! responses of doors, trapdoors, gates and other consumers.
 use super::{
@@ -16,6 +16,8 @@ use horizon_core::{
     random::RandomSource,
     ticks::TickPriority,
 };
+
+mod experimental;
 
 const SIGNAL_ORDER: [Direction; 6] = [
     Direction::Down,
@@ -434,7 +436,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         (signal - 1).max(0)
     }
     /// `DefaultRedstoneWireEvaluator.updatePowerStrength`.
-    pub(crate) fn wire_update_power(&mut self, pos: BlockPos, state: BlockStateId) {
+    pub(crate) fn wire_update_power(
+        &mut self,
+        pos: BlockPos,
+        state: BlockStateId,
+        orientation: Option<super::orientation::Orientation>,
+        update_shape: bool,
+    ) {
+        if self.level.redstone_experiments() {
+            self.experimental_wire_update(pos, orientation, update_shape);
+            return;
+        }
         let block_signal = self.wire_block_signal(pos);
         let target = if block_signal == 15 {
             15
@@ -554,8 +566,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let direction = self.b.facing(state);
         let opposite_pos = rel(pos, direction.opposite());
         let block = self.b.block(state);
-        self.neighbor_changed_at(opposite_pos, block);
-        self.update_neighbors_at_except(opposite_pos, block, direction);
+        let orientation = self.initial_orientation(Some(direction.opposite()), Some(Direction::Up));
+        self.neighbor_changed_at_oriented(opposite_pos, block, orientation);
+        self.update_neighbors_at_except_oriented(opposite_pos, block, direction, orientation);
     }
     fn comparator_calculate_output(&self, pos: BlockPos, state: BlockStateId) -> i32 {
         let input = self.diode_input_signal(pos, state);
@@ -740,8 +753,17 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     pub(crate) fn torch_notify_neighbors(&mut self, pos: BlockPos, state: BlockStateId) {
         let block = self.b.block(state);
+        let front = self
+            .b
+            .instance_of(state, Class::RedstoneWallTorch)
+            .then(|| self.b.facing(state).opposite());
+        let orientation = self.initial_orientation(front, Some(Direction::Up));
         for direction in Direction::ALL {
-            self.update_neighbors_at(rel(pos, direction), block);
+            self.update_neighbors_at_oriented(
+                rel(pos, direction),
+                block,
+                orientation.map(|o| o.with_front(direction)),
+            );
         }
     }
     pub(crate) fn torch_neighbor_changed(&mut self, pos: BlockPos, state: BlockStateId) {
@@ -802,8 +824,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let direction = self.b.facing(state);
         let opposite = rel(pos, direction.opposite());
         let block = self.b.block(state);
-        self.neighbor_changed_at(opposite, block);
-        self.update_neighbors_at_except(opposite, block, direction);
+        let orientation = self.initial_orientation(Some(direction.opposite()), None);
+        self.neighbor_changed_at_oriented(opposite, block, orientation);
+        self.update_neighbors_at_except_oriented(opposite, block, direction, orientation);
     }
     pub(crate) fn observer_tick(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
@@ -816,14 +839,41 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         self.observer_update_in_front(pos, state);
     }
 
+    /// `LecternBlock.updateBelow`.
+    pub fn lectern_update_below(&mut self, pos: BlockPos, state: BlockStateId) {
+        let orientation =
+            self.initial_orientation(Some(self.b.facing(state).opposite()), Some(Direction::Up));
+        self.update_neighbors_at_oriented(below(pos), self.b.block(state), orientation);
+    }
+    /// `LightningRodBlock.updateNeighbours`.
+    pub fn lightning_rod_update_neighbors(&mut self, pos: BlockPos, state: BlockStateId) {
+        let front = self.b.facing(state).opposite();
+        let orientation = self.initial_orientation(Some(front), None);
+        self.update_neighbors_at_oriented(rel(pos, front), self.b.block(state), orientation);
+    }
+    /// `TrappedChestBlockEntity.signalOpenCount`.
+    pub fn trapped_chest_update_neighbors(&mut self, pos: BlockPos, state: BlockStateId) {
+        let orientation =
+            self.initial_orientation(Some(self.b.facing(state).opposite()), Some(Direction::Up));
+        let block = self.b.block(state);
+        self.update_neighbors_at_oriented(pos, block, orientation);
+        self.update_neighbors_at_oriented(below(pos), block, orientation);
+    }
+
     // ---- buttons, levers, plates ----
 
     /// `ButtonBlock/LeverBlock.updateNeighbours`.
     pub(crate) fn attached_update_neighbours(&mut self, pos: BlockPos, state: BlockStateId) {
         let front = self.face_attached_connected(state).opposite();
         let block = self.b.block(state);
-        self.update_neighbors_at(pos, block);
-        self.update_neighbors_at(rel(pos, front), block);
+        let up = if axis_of(front) == Axis::Y {
+            self.b.facing(state)
+        } else {
+            Direction::Up
+        };
+        let orientation = self.initial_orientation(Some(front), Some(up));
+        self.update_neighbors_at_oriented(pos, block, orientation);
+        self.update_neighbors_at_oriented(rel(pos, front), block, orientation);
     }
     pub(crate) fn plate_update_neighbours(&mut self, pos: BlockPos, block: BlockId) {
         self.update_neighbors_at(pos, block);
@@ -1212,6 +1262,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     }
     /// `NoteBlock.playNote`: queues the block event and emits the game event.
     pub(crate) fn note_play(&mut self, pos: BlockPos, state: BlockStateId) {
+        if !self.note_play_allowed(pos, state) {
+            return;
+        }
+        self.note_play_unchecked(pos, state);
+    }
+    pub(crate) fn note_play_allowed(&self, pos: BlockPos, state: BlockStateId) -> bool {
+        let b = self.b;
+        let instrument = b.table.text(state, b.props.instrument);
+        let note = b.table.int(state, b.props.note);
+        self.level.allow_note_play(pos, instrument, note)
+    }
+    pub(crate) fn note_play_unchecked(&mut self, pos: BlockPos, state: BlockStateId) {
         let b = self.b;
         let instrument = b.table.text(state, b.props.instrument);
         let mob_head = super::data::INSTRUMENTS
@@ -1348,6 +1410,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     /// `BellBlock.attemptToRing`: `BellBlockEntity.onHit` queues block event 1
     /// with the struck direction, then the sound and game event.
     pub(crate) fn bell_ring(&mut self, pos: BlockPos, state: BlockStateId, direction: Direction) {
+        if !self.level.allow_bell_ring(pos) {
+            return;
+        }
         self.block_event(pos, self.b.block(state), 1, direction as i32);
         self.emit(LevelEvent::Sound {
             pos,

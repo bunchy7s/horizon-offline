@@ -3,7 +3,8 @@
   "package": "dev.horizonlab.bench.mixin",
   "compatibilityLevel": "JAVA_25",
   "client": [
-    "FrameHookMixin"
+    "FrameHookMixin",
+    "TickHookMixin"
   ],
   "injectors": {
     "defaultRequire": 1

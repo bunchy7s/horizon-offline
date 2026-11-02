@@ -222,10 +222,14 @@ fn component_text(tag: &Tag) -> String {
         _ => String::new(),
     }
 }
-/// Whether a block name is a sign (standing, wall, hanging or wall hanging).
+/// Whether a vanilla block's name is a sign (standing, wall, hanging or wall
+/// hanging). A mod's sign goes by its template's class, whatever its name; a
+/// mod's `road_sign` of stone is no sign.
 pub fn sign_kind(name: &str) -> Option<bool> {
     let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    if name == "hanging_sign" || name.ends_with("_hanging_sign") {
+    if name.contains(':') {
+        None
+    } else if name == "hanging_sign" || name.ends_with("_hanging_sign") {
         Some(true)
     } else if name == "sign" || name.ends_with("_sign") {
         Some(false)
@@ -233,15 +237,17 @@ pub fn sign_kind(name: &str) -> Option<bool> {
         None
     }
 }
-/// Wood type of a sign block (`SignBlock.getWoodType`), for the editor texture.
-pub fn wood_type(name: &str) -> &str {
-    let name = name.strip_prefix("minecraft:").unwrap_or(name);
-    for suffix in ["_wall_hanging_sign", "_hanging_sign", "_wall_sign", "_sign"] {
-        if let Some(wood) = name.strip_suffix(suffix) {
-            return wood;
+/// The sprite of a wood type's editor background, `folder` being `signs` or
+/// `hanging_signs`: `textures/gui/<folder>/<wood>.png` (`SignEditScreen`), in
+/// a mod's namespace when the wood names one.
+pub fn editor_sprite(folder: &str, wood: &str) -> String {
+    match wood.split_once(':') {
+        Some((namespace, path)) if namespace != "minecraft" => {
+            format!("{namespace}:gui/{folder}/{path}")
         }
+        Some((_, path)) => format!("gui/{folder}/{path}"),
+        None => format!("gui/{folder}/{wood}"),
     }
-    "oak"
 }
 
 #[cfg(test)]
@@ -262,12 +268,25 @@ mod tests {
         assert_eq!(decoded, data);
     }
     #[test]
+    fn a_mods_sign_like_name_does_not_make_it_a_sign() {
+        assert_eq!(sign_kind("ruby:road_sign"), None);
+        assert!(crate::containers::BlockEntity::for_block("ruby:road_sign").is_none());
+    }
+    #[test]
     fn names_and_colors() {
         assert_eq!(sign_kind("minecraft:oak_wall_hanging_sign"), Some(true));
         assert_eq!(sign_kind("minecraft:sign"), Some(false));
         assert_eq!(sign_kind("minecraft:spruce_wall_sign"), Some(false));
         assert_eq!(sign_kind("minecraft:stone"), None);
-        assert_eq!(wood_type("minecraft:dark_oak_wall_sign"), "dark_oak");
+        assert_eq!(editor_sprite("signs", "dark_oak"), "gui/signs/dark_oak");
+        assert_eq!(
+            editor_sprite("signs", "minecraft:cherry"),
+            "gui/signs/cherry"
+        );
+        assert_eq!(
+            editor_sprite("hanging_signs", "ruby:elm"),
+            "ruby:gui/hanging_signs/elm"
+        );
         assert_eq!(SignText::default().dark_color(), 0);
         let red = SignText {
             color: 14,

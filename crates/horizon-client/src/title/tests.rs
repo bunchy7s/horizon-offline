@@ -1042,6 +1042,65 @@ fn create_world_tabs_follow_vanilla_and_their_choices_reach_the_action() {
 }
 
 #[test]
+fn ctrl_digits_and_ctrl_tab_switch_the_create_world_tabs() {
+    use winit::keyboard::KeyCode;
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    let shown = |f: &Fixture| -> (usize, u8) {
+        let Mode::Create { focus, options, .. } = &f.title.mode else {
+            panic!("the Create World screen")
+        };
+        (options.tab, *focus)
+    };
+    // The screen opens on the Game tab with the name box focused.
+    assert_eq!(shown(&f), (0, 0));
+    // `TabNavigationBar.getNextTabIndex`: a digit is floorMod(key - 1, 10), so
+    // Ctrl+2 is the World tab, Ctrl+3 the More tab. The tab's fields are new
+    // widgets, so the name box that had the keys gives them up.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit2, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (1, 2));
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Numpad3, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f), (2, 2));
+    // The same tab again changes nothing and plays no click sound.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit3, true, false),
+        Some(false)
+    );
+    // Ctrl+4..9 and Ctrl+0 ask for tabs past the third: Mth.clamp keeps the
+    // last tab, and none of them moves or sounds.
+    for key in [KeyCode::Digit4, KeyCode::Digit9, KeyCode::Digit0] {
+        assert_eq!(f.title.tab_bar_key(key, true, false), Some(false));
+        assert_eq!(shown(&f).0, 2);
+    }
+    // Ctrl+Tab steps one tab forward and Ctrl+Shift+Tab one back, wrapping.
+    assert_eq!(
+        f.title.tab_bar_key(KeyCode::Digit1, true, false),
+        Some(true)
+    );
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, false), Some(true));
+    assert_eq!(shown(&f).0, 1);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 0);
+    assert_eq!(f.title.tab_bar_key(KeyCode::Tab, true, true), Some(true));
+    assert_eq!(shown(&f).0, 2);
+    // Without Ctrl the bar leaves the key alone, so the digit still types.
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, false, false), None);
+    assert_eq!(shown(&f).0, 2);
+    // Only the Create World screen has a tab bar under these keys.
+    f.click("Cancel");
+    assert!(matches!(f.title.mode, Mode::Main));
+    assert_eq!(f.title.tab_bar_key(KeyCode::Digit2, true, false), None);
+}
+
+#[test]
 fn new_world_generation_settings_round_trip() {
     let f = Fixture::new();
     let dir = f.root.join("flat");
@@ -1152,6 +1211,53 @@ fn world_fields_edit_at_their_cursor() {
     assert_eq!(f.title.search, "world");
 }
 
+/// `ManageServerScreen`'s focus order: the name, the address, the Server
+/// Resource Packs button, Done, Cancel, then the name again.
+#[test]
+fn tab_walks_the_edit_server_screen_through_its_buttons() {
+    use crate::multiplayer::Screen;
+    let size = (854.0, 480.0);
+    let mut f = Fixture::new();
+    f.title.mode = Mode::Multiplayer(Screen::Edit {
+        index: None,
+        name: "Minecraft Server".into(),
+        address: "localhost".into(),
+        focus: 0,
+        packs: None,
+    });
+    let focus = |f: &Fixture| match &f.title.mode {
+        Mode::Multiplayer(Screen::Edit { focus, .. }) => (*focus, f.title.focused_button),
+        _ => panic!("edit"),
+    };
+    let mut seen = Vec::new();
+    for _ in 0..5 {
+        f.title.tab_dir(false, size);
+        seen.push(focus(&f));
+    }
+    // Address, then packs (60), Done (50), Cancel (51), and round to the name.
+    assert_eq!(
+        seen,
+        [
+            (1, None),
+            (2, Some(60)),
+            (2, Some(50)),
+            (2, Some(51)),
+            (0, None)
+        ]
+    );
+    // A button has the focus: typing goes nowhere.
+    f.title.tab_dir(true, size);
+    assert_eq!(focus(&f), (2, Some(51)));
+    f.title.type_text("x");
+    let Mode::Multiplayer(Screen::Edit { name, address, .. }) = &f.title.mode else {
+        panic!("edit");
+    };
+    assert_eq!(
+        (name.as_str(), address.as_str()),
+        ("Minecraft Server", "localhost")
+    );
+}
+
 #[test]
 fn server_fields_edit_at_their_cursor() {
     use winit::keyboard::KeyCode;
@@ -1179,8 +1285,8 @@ fn server_fields_edit_at_their_cursor() {
         panic!("add server");
     };
     assert_eq!(address, "Yhost");
-    // Tab moves to the name, which edits at its own cursor.
-    f.title.tab();
+    // Shift+Tab moves back to the name, which edits at its own cursor.
+    f.title.tab_dir(true, (854.0, 480.0));
     f.title.field_key(KeyCode::ArrowLeft, false, false);
     f.title.type_text("X");
     let Mode::Multiplayer(crate::multiplayer::Screen::Edit { name, .. }) = &f.title.mode else {
@@ -2026,4 +2132,222 @@ fn labels_at(f: &Fixture) -> (f32, f32, (f32, f32)) {
         buttons[0].y,
         (customize.x + 10.0, customize.y + 10.0),
     )
+}
+
+/// A button with an icon at its right end (`SpriteIconButton.TextAndIcon`, the
+/// Music & Sounds button of the Accessibility screen): `extractContents` gives
+/// the label `left = x + 2` and `right = x + width - spriteWidth - 4`.
+mod text_and_icon {
+    use super::*;
+
+    fn atlas() -> HudAtlas {
+        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+    fn button(label: &str, icon: Option<(&'static str, f32)>) -> Button {
+        Button {
+            x: 30.0,
+            y: 40.0,
+            w: 150.0,
+            label: label.into(),
+            enabled: true,
+            id: 0,
+            icon: None,
+            trailing: icon,
+        }
+    }
+    /// The x of every vertex of the label's text.
+    fn xs(batch: &HudBatch) -> Vec<f32> {
+        batch
+            .vertices
+            .iter()
+            .filter(|v| v.text == 1)
+            .map(|v| v.pos[0])
+            .collect()
+    }
+    /// The first `n` letters of a text with no repeating pattern.
+    fn label(n: usize) -> String {
+        "Bezpostrzydnie połōnczynie Direct Connection Join Server"
+            .chars()
+            .take(n)
+            .collect()
+    }
+    fn width(atlas: &HudAtlas, label: &str) -> i32 {
+        HudBatch::text_width(atlas, label).ceil() as i32
+    }
+
+    /// A label that fits beside the icon but, centred on the button, would end
+    /// under it (`Settings sa Aksesibilidad...` in `fil_ph`, and about 40 other
+    /// languages) is moved left until it ends where the icon's room begins:
+    /// `Mth.clamp(centerX, left + lineWidth / 2, right - lineWidth / 2)` in
+    /// `defaultScrollingHelper`. It does not scroll. The same label in a plain
+    /// button stays centred.
+    #[test]
+    fn a_label_that_fits_beside_the_icon_is_moved_clear_of_it() {
+        let atlas = atlas();
+        // A 16 px icon: `left = x + 2`, `right = x + 130`, `centerX = x + 75`.
+        let (left, right, center) = (32, 30 + 130, 30 + 75);
+        // The widest label that fits; `right - width / 2 < centerX` by most.
+        let text = (1..60)
+            .map(label)
+            .rfind(|t| width(&atlas, t) <= right - left)
+            .expect("a label that fits");
+        let half = width(&atlas, &text) / 2;
+        assert!(right - half < center, "{text}: {}", width(&atlas, &text));
+        let drawn_from = |from: i32| {
+            let mut batch = HudBatch::new([640, 480]);
+            batch.text(&atlas, &text, from as f32, 46.0, u32::MAX, true);
+            xs(&batch)
+        };
+        let draw = |b: &Button, now_ms: i64| {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            xs(&batch)
+        };
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        // Vanilla: `textX = right - width / 2`, drawn from `textX - width / 2`.
+        assert!(draw(&b, 0) == drawn_from(right - half - half), "{text}");
+        for now_ms in [700, 1500, 31_337] {
+            assert!(draw(&b, now_ms) == draw(&b, 0), "it scrolls at {now_ms}");
+        }
+        let plain = button(&text, None);
+        assert!(draw(&plain, 0) == drawn_from(center - half), "plain {text}");
+    }
+
+    /// A label wider than the room beside the icon scrolls inside
+    /// `x + 2 ..= x + width - spriteWidth - 4`, never under the icon.
+    #[test]
+    fn a_label_wider_than_the_room_beside_the_icon_scrolls_clear_of_it() {
+        let atlas = atlas();
+        let text = label(40);
+        let b = button(&text, Some(("icon/music_notes", 16.0)));
+        assert!(width(&atlas, &text) > 130 - 2);
+        let mut seen = std::collections::BTreeSet::new();
+        for now_ms in (0..40_000).step_by(250) {
+            let mut batch = HudBatch::new([640, 480]);
+            b.draw_label_at(&mut batch, &atlas, u32::MAX, now_ms);
+            let xs = xs(&batch);
+            assert!(!xs.is_empty());
+            for x in &xs {
+                assert!(
+                    (32.0..=30.0 + 150.0 - 16.0 - 4.0).contains(x),
+                    "{x} at {now_ms} ms"
+                );
+            }
+            seen.insert(xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>());
+        }
+        assert!(seen.len() > 3, "the label hardly moves");
+    }
+}
+
+/// `MenuTabBar.MenuTabButton.renderLabel`: a tab's label slides inside the
+/// tab's box with a 1 px margin when it is wider than the tab (here a window
+/// too narrow for the English labels), instead of running into the next tab.
+#[test]
+fn a_create_world_tab_label_wider_than_its_tab_stays_inside_it() {
+    let mut f = Fixture::new();
+    f.click("Singleplayer");
+    let atlas = HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap();
+    // 90 px wide: three 20 px tabs from x = 14, too narrow for "Game".
+    let mut batch = HudBatch::new([90, 262]);
+    f.title.draw(&atlas, &mut batch, (0.0, 100.0), true);
+    let labels: Vec<f32> = batch
+        .vertices
+        .iter()
+        .filter(|v| v.text == 1 && v.pos[1] < 24.0)
+        .map(|v| v.pos[0])
+        .collect();
+    assert!(!labels.is_empty());
+    let boxes: Vec<(f32, f32)> = (0..3)
+        .map(|tab| {
+            (
+                14.0 + 20.0 * tab as f32 + 1.0,
+                14.0 + 20.0 * (tab + 1) as f32 - 1.0,
+            )
+        })
+        .collect();
+    for x in &labels {
+        assert!(
+            boxes.iter().any(|(lo, hi)| (*lo..=*hi).contains(x)),
+            "label vertex at {x} is outside every tab's box"
+        );
+    }
+    for (tab, (lo, hi)) in boxes.iter().enumerate() {
+        assert!(
+            labels.iter().any(|x| (*lo..=*hi).contains(x)),
+            "tab {tab} draws no label"
+        );
+    }
+}
+
+/// The ids native mods see for the title's screens (`Mode::id`, the screen
+/// hooks' `NativeScreenView.id`): one per screen, stable across releases.
+#[test]
+fn the_title_screens_have_their_own_ids() {
+    let mut f = Fixture::new();
+    assert_eq!(f.title.mode.id(), "title");
+    // An empty list opens Create New World (an empty list is why vanilla
+    // starts one), a world in it opens the list.
+    f.title.enter_singleplayer();
+    assert!(matches!(f.title.mode, Mode::Create { .. }));
+    assert_eq!(f.title.mode.id(), "world_create");
+    f.title.escape();
+    assert_eq!(f.title.mode.id(), "title");
+    f.world("World", "World");
+    f.select();
+    assert_eq!(f.title.mode.id(), "world_select");
+    f.click("Edit");
+    assert_eq!(f.title.mode.id(), "world_edit");
+}
+
+/// The multiplayer screens' ids, the ones the title's `Multiplayer` mode
+/// passes through.
+#[test]
+fn the_multiplayer_screens_have_their_own_ids() {
+    use crate::multiplayer::Screen as M;
+    assert_eq!(
+        M::Direct {
+            address: String::new()
+        }
+        .id(),
+        "direct_connect"
+    );
+    assert_eq!(
+        M::Edit {
+            index: None,
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "add_server"
+    );
+    assert_eq!(
+        M::Edit {
+            index: Some(0),
+            name: String::new(),
+            address: String::new(),
+            focus: 0,
+            packs: None,
+        }
+        .id(),
+        "edit_server"
+    );
+    assert_eq!(
+        M::Friend {
+            code: String::new(),
+            relay: String::new(),
+            focus: 0,
+        }
+        .id(),
+        "friends_join"
+    );
+    assert_eq!(
+        M::Disconnected {
+            reason: String::new(),
+            retry: None,
+        }
+        .id(),
+        "disconnected"
+    );
 }

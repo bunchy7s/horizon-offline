@@ -7,6 +7,7 @@ use horizon_client::{
     items::ItemStack,
     mesher::Vertex,
     mobs::leash::{self, Holder, Pending},
+    mod_api::NativeLootDrops,
 };
 use horizon_world::nbt::Tag;
 
@@ -135,16 +136,24 @@ impl Game<'_> {
     }
     fn drop_leash(&mut self, id: u32, drop: bool, sound: bool, used: bool) {
         let killer = self.lead_killers.remove(&id).map(|(killer, _)| killer);
-        let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) else {
+        let Some((alive, at, kind)) = self.mobs.iter_mut().find(|m| m.id == id).and_then(|m| {
+            horizon_client::mobs::leash::remove(m)?;
+            Some((
+                m.alive(),
+                [m.position.x, m.position.y, m.position.z],
+                super::native_hooks::mob_kind(m),
+            ))
+        }) else {
             return;
         };
-        if horizon_client::mobs::leash::remove(m).is_none() {
-            return;
+        self.native_entity_unleash(id, &kind);
+        if used
+            && let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            self.native_player_unleash_entity(player, &name, id);
         }
         // Leashable.tickLeash gates a dying entity's lead drop on entity_drops.
-        let drop = drop && (m.alive() || self.ui.rules.bool("entity_drops"));
-        let at = [m.position.x, m.position.y, m.position.z];
-        let kind = super::native_hooks::mob_kind(m);
+        let drop = drop && (alive || self.ui.rules.bool("entity_drops"));
         if sound {
             self.lead_sound("break", at);
         }
@@ -163,7 +172,7 @@ impl Game<'_> {
             return;
         };
         let mut drops = vec![ItemStack::new("minecraft:lead", 1)];
-        let context = super::native_hooks::NativeLootDrops {
+        let context = NativeLootDrops {
             table: "",
             dimension: self.dim.id(),
             origin: at,
@@ -400,6 +409,14 @@ impl Game<'_> {
         {
             return false;
         }
+        // A knot is made when a lead is tied to a fence that has none.
+        if existing.is_empty()
+            && existing_boats.is_empty()
+            && (!in_hand.is_empty() || !boats_in_hand.is_empty())
+            && self.hanging_place_cancelled("minecraft:leash_knot", knot_pos)
+        {
+            return true;
+        }
         let mut attached = self.tie_player_boats(center, Holder::Knot(knot_pos));
         for j in in_hand {
             if self.can_attach_lead(j, center) {
@@ -598,12 +615,9 @@ impl Game<'_> {
             }
         }
         // The knots: a 6 by 8 by 6 pixel block on the fence post.
-        static KNOT: std::sync::OnceLock<Option<horizon_client::mobs::Part>> =
-            std::sync::OnceLock::new();
-        let model = KNOT.get_or_init(|| {
-            horizon_client::mobs::load_model(&self.options.resources, "minecraft:leash_knot#main")
-        });
-        let Some(model) = model else { return };
+        let Some(model) = self.entity_models.leash_knot.as_ref() else {
+            return;
+        };
         let Some(r) = atlas.sprites.get("entity/lead_knot/lead_knot").copied() else {
             return;
         };

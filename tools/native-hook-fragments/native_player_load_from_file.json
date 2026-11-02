@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "player_load_from_file",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_load_from_file",
+      "neoforge": "PlayerEvent.LoadFromFile (not cancellable)",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a player loaded from the world's save (`native_player_load_from_file`).",
+  "doc_summary": "a player loaded from the world's save: `native_player_load_from_file(player, name, directory)` is heard once for each join (the owner of an integrated server too), after the player's `.dat` is read and applied and before they are placed in a level (NeoForge's `PlayerEvent.LoadFromFile`, `PlayerList.loadPlayerData`). `directory` is the world's player directory (`players/data`); a mod reads its own file there, named `<uuid>.<suffix>`. It cannot change or stop anything; no player's state is swapped in. Bundles that use it need `\"hooks\": @API:native_player_load_from_file@`."
+}

@@ -330,6 +330,7 @@ impl Split<'_> {
         guest.window = Some(window);
         guest.world_renderer_ready = true;
         guest.keyboard_mouse = false;
+        guest.split_window = host.split_window;
         guest.apply_settings();
         // Its pad comes from the split (`route_pads`): it never opens the controllers itself.
         guest.pad.feed = Some(PadState::default());
@@ -349,6 +350,12 @@ impl Split<'_> {
         for k in (0..self.guests.len()).rev() {
             let g = &mut self.guests[k];
             g.entered |= g.game.remote.is_some() && g.game.player.is_some();
+            // In the world: a pad P1 gave up is this player's for good.
+            if g.entered
+                && let Some(id) = g.pad
+            {
+                self.p1_pad.joined(id);
+            }
             let g = &self.guests[k];
             // A player picking a profile has no connection yet.
             let playing = g.name.is_none() || g.game.remote.is_some();
@@ -383,6 +390,12 @@ impl Split<'_> {
             self.turn(0);
         }
         let guest = self.guests.remove(k);
+        // Gone before it got into the world: a pad P1 gave up goes back to P1.
+        if !guest.entered
+            && let Some(id) = guest.pad
+        {
+            self.restore_given_up_pad(id);
+        }
         if self.focus > k + 1 {
             self.focus -= 1;
         }

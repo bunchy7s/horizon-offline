@@ -996,7 +996,14 @@ impl ParticleLevel<'_> {
             binding: self.collision,
             subject: None,
         };
-        match scene.resolve(bb, Vec3::new(d[0], d[1], d[2]), 0.0, false) {
+        let movement = Vec3::new(d[0], d[1], d[2]);
+        // `Entity.collideBoundingBox(null, ...)`: no entity shapes, no border. Where no
+        // block of the swept box's cells can collide, it finds no shape and the
+        // movement stands, as the resolution below would return it.
+        if scene.cells_without_collision(bb.expand_towards(movement)) {
+            return d;
+        }
+        match scene.resolve(bb, movement, 0.0, false) {
             Ok(v) => [v.x, v.y, v.z],
             Err(_) => d,
         }
@@ -1158,7 +1165,9 @@ impl ParticleEngine {
         }
         let dir = root.join("assets/minecraft/particles");
         for &ty in ParticleType::ALL {
-            let Ok(bytes) = std::fs::read(dir.join(format!("{}.json", ty.name()))) else {
+            let Ok(bytes) =
+                horizon_core::prepared_files::read(&dir.join(format!("{}.json", ty.name())))
+            else {
                 continue;
             };
             let Ok(json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
@@ -4091,6 +4100,47 @@ impl ParticleEngine {
                 p.behaviour = Behaviour::DragonBreath { hit_ground };
             }
         }
+    }
+
+    /// The particles that `entries` name, as lights: where each is this frame, its entry's colour
+    /// as RGB and reach, and its alpha as the intensity.
+    pub fn lights(
+        &self,
+        entries: &[horizon_shader_api::manifest::ParticleLight],
+        partial: f32,
+    ) -> Vec<([f64; 3], u32, f32, f32)> {
+        let shining: Vec<(ParticleType, u32, f32)> = entries
+            .iter()
+            .flat_map(|e| {
+                let [r, g, b] = e.color.map(|c| (c.clamp(0.0, 1.0) * 255.0) as u32);
+                e.particles.iter().filter_map(move |name| {
+                    let name = if name.contains(':') {
+                        name.clone()
+                    } else {
+                        format!("minecraft:{name}")
+                    };
+                    Some((
+                        ParticleType::from_name(&name)?,
+                        r << 16 | g << 8 | b,
+                        e.reach,
+                    ))
+                })
+            })
+            .collect();
+        if shining.is_empty() {
+            return Vec::new();
+        }
+        let f = f64::from(partial);
+        self.particles
+            .iter()
+            .filter(|p| p.rgba[3] > 0.0)
+            .filter_map(|p| {
+                let (_, rgb, reach) = shining.iter().find(|(ty, ..)| *ty == p.ty)?;
+                let at =
+                    std::array::from_fn(|i| p.previous[i] + (p.position[i] - p.previous[i]) * f);
+                Some((at, *rgb, *reach, p.rgba[3].clamp(0.0, 1.0)))
+            })
+            .collect()
     }
 
     /// Camera-facing quads (`QuadParticleRenderState.renderRotatedQuad`).

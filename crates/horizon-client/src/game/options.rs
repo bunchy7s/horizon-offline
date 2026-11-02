@@ -121,8 +121,10 @@ impl Game<'_> {
         self.screen = Screen::Options;
         self.options_from_title = from_title;
         self.options_to_game = false;
+        let minecart_improvements = self.minecart_improvements();
         let ui = &mut self.ui.options;
         ui.open_at(!from_title && self.title.is_none(), page);
+        ui.minecart_improvements = minecart_improvements;
         let root = self.options.resources.clone();
         ui.languages = lang::available(&[&root]);
         self.refresh_pack_lists();
@@ -331,6 +333,9 @@ impl Game<'_> {
                     let text = self.agent_details();
                     self.clipboard.set(&text);
                 }
+                // The AI Agent page's repro buttons (game/repro.rs).
+                Event::ToggleRecording => self.toggle_recording_key(),
+                Event::ExportRepro => self.export_repro_key(),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
@@ -478,7 +483,7 @@ impl Game<'_> {
                 s.horizon.hdr,
                 s.horizon.paper_white_nits() as f32,
                 s.horizon.peak_nits() as f32,
-                s.horizon.hdr_black_level as f32 / 100.0,
+                s.horizon.black_level_nits(),
                 s.horizon.hdr_ui_brightness as f32 / 100.0,
                 &Self::options_path().with_file_name(horizon_client::graphics::HDR_MARKER),
             );
@@ -574,9 +579,23 @@ impl Game<'_> {
             has_overlay: false,
         };
         let limit = framerate_limit(self.settings.max_fps as i32, context);
-        self.settings
+        let limit = self
+            .settings
             .horizon
-            .battery_limit(limit, self.title.is_none(), self.focused)
+            .battery_limit(limit, self.title.is_none(), self.focused);
+        // A native mod may only lower it (`native_framerate_limit`).
+        let mut hooked = limit;
+        self.native_framerate_limit(
+            self.focused,
+            context.iconified,
+            self.title.is_none(),
+            &mut hooked,
+        );
+        if hooked >= 1 {
+            hooked.min(limit)
+        } else {
+            limit
+        }
     }
     /// `Minecraft.runTick`'s frame limiter: `FramerateLimiter.limitDisplayFPS`
     /// below 260 frames per second, sleeping then spin-waiting until the

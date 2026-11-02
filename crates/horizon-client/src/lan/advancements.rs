@@ -35,6 +35,13 @@ pub struct ServerAdvancements {
 pub struct FirstTick {
     pub recipe_book_add: Option<Vec<u8>>,
     pub update_advancements: Vec<u8>,
+    pub granted: Vec<CriterionGrant>,
+}
+
+/// A criterion `CriteriaTriggers.TICK` newly granted, for the game to tell the mods.
+pub struct CriterionGrant {
+    pub advancement: String,
+    pub criterion: String,
 }
 
 impl ServerAdvancements {
@@ -89,9 +96,15 @@ impl ServerAdvancements {
             })
             .collect();
         let date = crate::advancements::date_text(now_millis.div_euclid(1000));
+        let mut granted = Vec::new();
         for (a, got) in self.tree.list.iter().zip(&obtained) {
             for c in got {
-                progress.grant(&a.id, c, &date);
+                if progress.grant(&a.id, c, &date) {
+                    granted.push(CriterionGrant {
+                        advancement: a.id.clone(),
+                        criterion: (*c).to_owned(),
+                    });
+                }
             }
         }
         // AdvancementRewards.grant: the recipes, in the advancements' order.
@@ -126,6 +139,7 @@ impl ServerAdvancements {
         FirstTick {
             recipe_book_add,
             update_advancements: w.data,
+            granted,
         }
     }
 
@@ -135,13 +149,15 @@ impl ServerAdvancements {
     /// drops a criterion it lost), the next `flushDirty` is a first packet
     /// again, and the next `CriteriaTriggers.TICK` meets the new tree's
     /// `minecraft:tick` criteria, rewarding the recipes of the advancements
-    /// that complete. Returns the recipe book packet those recipes need.
+    /// that complete. The criteria it grants are added to `granted`. Returns
+    /// the recipe book packet those recipes need.
     pub fn reload(
         &self,
         sync: &SyncData,
         now_millis: i64,
         progress: &mut Progress,
         book: &mut Settings,
+        granted: &mut Vec<CriterionGrant>,
     ) -> Option<Vec<u8>> {
         let by_id: HashMap<&str, &crate::advancements::Advancement> =
             self.tree.list.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -159,8 +175,14 @@ impl ServerAdvancements {
         for a in &self.tree.list {
             let was_done = progress.done(a);
             for c in &a.criteria {
-                if c.trigger == "minecraft:tick" && c.conditions.is_null() {
-                    progress.grant(&a.id, &c.name, &date);
+                if c.trigger == "minecraft:tick"
+                    && c.conditions.is_null()
+                    && progress.grant(&a.id, &c.name, &date)
+                {
+                    granted.push(CriterionGrant {
+                        advancement: a.id.clone(),
+                        criterion: c.name.clone(),
+                    });
                 }
             }
             if !was_done && progress.done(a) {
@@ -694,6 +716,78 @@ mod tests {
     /// A recipe whose ingredient kind no loader knows stays out of the book:
     /// the server does not load it, and an empty ingredient slot in its
     /// place would mislead the client.
+    /// The shared probe: a recipe the player crafts is learned by the
+    /// name the crafting copy hands out, and rejoining sends what the
+    /// book knows.
+    fn crafted_recipe_reaches_the_book(name: &str, pack: bool) {
+        let shaped = r#"{"type":"minecraft:crafting_shaped","pattern":["X"],
+            "key":{"X":"minecraft:raw_copper"},
+            "result":{"id":"minecraft:copper_ingot"}}"#;
+        let root = if pack {
+            resources(name, &[])
+        } else {
+            resources(name, &[(name, shaped)])
+        };
+        let packs = pack.then(|| {
+            vec![(
+                format!("recipe/minecraft:{name}"),
+                vec![shaped.as_bytes().to_vec()],
+            )]
+        });
+        let overlay = match &packs {
+            Some(p) => horizon_world::loot::PackOverlay { files: p },
+            None => horizon_world::loot::PackOverlay::NONE,
+        };
+        let sync = SyncData::load(&root, &overlay).unwrap();
+        // What the craft hands the book: find_with over the crafting
+        // copy, the way award_crafted calls it.
+        let items = crate::items::Items::catalog(&root, &overlay).unwrap();
+        let recipes = crate::crafting::Recipes::load(&root, &items, &overlay).unwrap();
+        let grid = vec![Some(horizon_items::items::ItemStack {
+            item: "minecraft:raw_copper".into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        })];
+        let (found, _) = recipes
+            .find_with(&grid, 1, &|_| None)
+            .unwrap_or_else(|| panic!("{name}: the recipe matches a grid"));
+        assert_eq!(
+            found, name,
+            "{name}: the crafting copy names it bare, folder and pack alike"
+        );
+        // The book learns what the craft awards; rejoining sends it.
+        let mut book = crate::recipe_book::Settings::default();
+        let (_, unlocked) = book.add_recipes(&sync.advancements.displays, &[found.to_owned()]);
+        assert_eq!(
+            unlocked,
+            [format!("minecraft:{name}")],
+            "{name}: the book knows it under its whole id"
+        );
+        let bytes = sync.advancements.initial_recipe_book(&book, &sync);
+        let mut r = Reader::new(&bytes);
+        let add =
+            <horizon_protocol::packets::recipes::RecipeBookAdd as horizon_protocol::buf::Codec<
+                horizon_protocol::packets::recipes::RecipeBookAdd,
+            >>::read(&mut r)
+            .unwrap();
+        assert!(
+            !add.entries.is_empty(),
+            "{name}: the crafted recipe reaches the book after rejoining"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_recipe_unlocked_by_crafting_shows_in_the_book() {
+        crafted_recipe_reaches_the_book("folder_recipe", false);
+    }
+
+    #[test]
+    fn a_pack_recipe_unlocked_by_crafting_shows_in_the_book() {
+        crafted_recipe_reaches_the_book("pack_recipe", true);
+    }
+
     #[test]
     fn a_recipe_with_an_unknown_ingredient_kind_stays_out_of_the_book() {
         let root = resources(
@@ -823,6 +917,57 @@ mod tests {
         assert_eq!(station, SlotDisplay::Item(item("minecraft:furnace")));
         assert_eq!(duration, 200);
         assert_eq!(experience, 0.7);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A recipe filter's `replace_input` (#5910) reaches the book swapped:
+    /// the book writes from the network copy, so the swap must have run
+    /// there, once, before the ingredient normalization. A world's pack
+    /// carries the filter (the way the game reads them).
+    #[test]
+    fn a_recipe_filters_swapped_input_shows_swapped_in_the_book() {
+        let root = resources(
+            "filter_swap",
+            &[(
+                "copper_ingot_from_smelting_raw_copper",
+                r#"{"type":"minecraft:smelting","cookingtime":200,"experience":0.7,
+                    "ingredient":"minecraft:raw_copper",
+                    "result":{"id":"minecraft:copper_ingot"}}"#,
+            )],
+        );
+        let packs = vec![(
+            "recipe_filter/minecraft:swap".to_owned(),
+            vec![
+                br#"{"filters":[{"id":"minecraft:copper_ingot_from_smelting_raw_copper",
+                "replace_input":{"from":"minecraft:raw_copper","to":"minecraft:redstone"}}]}"#
+                    .to_vec(),
+            ],
+        )];
+        let overlay = horizon_world::loot::PackOverlay { files: &packs };
+        let sync = SyncData::load(&root, &overlay).unwrap();
+        let entries = sync.advancements.book_entries(
+            "minecraft:copper_ingot_from_smelting_raw_copper",
+            &sync,
+            NOTIFY_AND_HIGHLIGHT,
+        );
+        assert_eq!(entries.len(), 1, "the recipe has one display");
+        let mut r = Reader::new(&entries[0]);
+        let e = RecipeBookEntry::read(&mut r).unwrap();
+        assert_eq!(r.remaining(), 0, "the entry ends with its flags");
+        let item = |n: &str| sync.id("minecraft:item", n).unwrap();
+        assert_eq!(
+            e.requirements,
+            Some(vec![HolderSet::Items(vec![item("minecraft:redstone")])]),
+            "the filter's swapped input, not the file's"
+        );
+        let RecipeDisplay::Furnace { ingredient, .. } = e.display else {
+            panic!("a smelting recipe shows a furnace display");
+        };
+        assert_eq!(
+            ingredient,
+            SlotDisplay::Tag(HolderSet::Items(vec![item("minecraft:redstone")])),
+            "the display shows the swapped input too"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -549,6 +549,20 @@ pub fn is_monster(s: Species) -> bool {
     )
 }
 /// One full entity tick. Returns false when the mob is gone.
+/// `Mob.getTarget` / `Mob.setTarget` (`asValidTarget`): a player in creative
+/// or spectator mode is never a mob's target, however the target was set (an
+/// alert from another mob included). A `NeutralMob` angry at that player stops
+/// being angry (`NeutralMob.updatePersistentAnger`).
+fn drop_invalid_player_target(m: &mut Mob, w: &MobWorld) {
+    if m.ai.target == Some(Who::Player)
+        && w.player.as_ref().is_some_and(|p| p.creative || p.spectator)
+    {
+        m.ai.target = None;
+        if matches!(m.species(), Species::ZombifiedPiglin | Species::IronGolem) {
+            m.extra.anger = 0;
+        }
+    }
+}
 pub fn tick(
     m: &mut Mob,
     w: &MobWorld,
@@ -577,6 +591,7 @@ pub fn tick(
     if m.ai.last_hurt_by_player > 0 {
         m.ai.last_hurt_by_player -= 1;
     }
+    drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
     pre_tick(m, events);
     if m.removed {
@@ -1489,6 +1504,15 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
         }
+        // IronGolem.doPush: a monster that is not a creeper becomes its target
+        // one time in 20, and the draw is made for those alone, then the push.
+        if m.species() == Species::IronGolem
+            && let Who::Mob(id) = who
+            && w.seen(id).is_some_and(super::golem::golem_prey)
+            && m.random.next_int_bound(20).unwrap_or(1) == 0
+        {
+            m.ai.target = Some(who);
+        }
         // Entity.push: passengers of the same vehicle (a rider and its mount
         // among them) never push each other.
         if same {
@@ -1812,12 +1836,11 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
     let d = m.distance_sqr(p);
     let persistent = m.persistent || requires_custom_persistence(m);
     // removeWhenFarAway: animals, villagers, golems, patrols and raiders,
-    // zombie villagers being cured and ridden mobs stay.
+    // zombie villagers being cured and ridden mobs stay, bar the two felines.
     let creature = m.kind.category == "creature";
+    let feline_goes = feline_removed_when_far(m.species(), m.extra.tame || m.extra.trusting, m.age);
     let removable = !(never_removed_when_far(m.species())
-        || creature && m.kind.flags.animal && !m.extra.jockey && m.species() != Species::Ocelot
-        // Ocelot.removeWhenFarAway: `!isTrusting() && tickCount > 2400`.
-        || m.species() == Species::Ocelot && (m.extra.trusting || m.age <= 2400)
+        || creature && m.kind.flags.animal && !m.extra.jockey && !feline_goes
         || super::raider::keeps_alive(m, d)
         || super::zombie_villager::keeps_alive(m)
         || super::riders::keeps_alive(m));
@@ -1842,6 +1865,13 @@ fn check_despawn(m: &mut Mob, w: &MobWorld) -> bool {
         m.ai.no_action_time = 0;
     }
     true
+}
+/// `Cat.removeWhenFarAway` and `Ocelot.removeWhenFarAway`: an untamed cat or an
+/// untrusting ocelot is removed once it is older than 2400 ticks. That is
+/// `Entity.tickCount`, not `AgeableMob.age`, which only counts a baby up to
+/// adulthood. `Animal.removeWhenFarAway` keeps every other animal.
+fn feline_removed_when_far(s: Species, tamed: bool, ticks: u32) -> bool {
+    matches!(s, Species::Cat | Species::Ocelot) && !tamed && ticks > 2400
 }
 /// The types whose `removeWhenFarAway` is always false (`Villager`,
 /// `WanderingTrader`, `AbstractGolem`: iron, snow and copper golems and
@@ -2722,8 +2752,12 @@ pub fn intern_sound(s: &std::sync::Arc<str>) -> &'static str {
     set.insert(leaked);
     leaked
 }
-/// `getSwimSound`.
-pub fn swim_sound(m: &Mob) -> &'static str {
+/// `getSwimSound`. A skeleton horse's own override counts the steps it takes
+/// through the water, so it needs the mob, not just its species.
+pub fn swim_sound(m: &mut Mob) -> &'static str {
+    if m.species() == Species::SkeletonHorse {
+        return super::equine::skeleton_horse_swim_sound(m);
+    }
     match m.species() {
         Species::Drowned => "entity.drowned.swim",
         Species::Axolotl => "entity.axolotl.swim",
@@ -2770,6 +2804,23 @@ mod despawn_tests {
         }
         for s in [Species::Zombie, Species::ZombieVillager, Species::Pillager] {
             assert!(!never_removed_when_far(s), "{s:?}");
+        }
+    }
+
+    /// `Cat.removeWhenFarAway` (`!isTame() && tickCount > 2400`) and
+    /// `Ocelot.removeWhenFarAway` (`!isTrusting() && tickCount > 2400`): the two
+    /// animals vanilla lets go, on `Entity.tickCount` and never on
+    /// `AgeableMob.age`, which an adult keeps at 0.
+    #[test]
+    fn an_untamed_feline_goes_once_it_is_old() {
+        for s in [Species::Cat, Species::Ocelot] {
+            assert!(!feline_removed_when_far(s, false, 2400), "{s:?}");
+            assert!(feline_removed_when_far(s, false, 2401), "{s:?}");
+            assert!(!feline_removed_when_far(s, true, 12000), "{s:?}");
+        }
+        // Animal.removeWhenFarAway: every other animal stays at any age.
+        for s in [Species::Cow, Species::Sheep, Species::Wolf] {
+            assert!(!feline_removed_when_far(s, false, 12000), "{s:?}");
         }
     }
 }
@@ -3591,5 +3642,61 @@ mod silverfish_walk_target_tests {
             assert!(dirt < 10.0, "standing on dirt falls through, got {dirt}");
         });
         let _ = ran;
+    }
+}
+
+#[cfg(test)]
+mod iron_golem_push_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    fn mob(id: u32, species: Species, category: &str) -> Mob {
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.species = species;
+        kind.category = category.into();
+        Mob::new(id, Arc::new(kind), Vec3::ZERO, 0.0)
+    }
+
+    /// `IronGolem.doPush`: a monster that is not a creeper and bumps the golem
+    /// becomes its target one time in 20, and the draw is made for those alone,
+    /// so a creeper or an animal leaves the golem's random alone.
+    #[test]
+    fn an_iron_golem_targets_the_monster_that_bumps_it() {
+        // CI has no prepared 26.3 data, so a world that does not build skips
+        // the whole check rather than asserting the data exists.
+        let hits = |victim: Mob| -> Option<u32> {
+            let seen = victim.seen(None);
+            let mut hits = 0;
+            let ran = with_test_world(&[seen], |w, _| {
+                let mut golem = mob(1, Species::IronGolem, "monster");
+                for _ in 0..400 {
+                    let mut events = Vec::new();
+                    push_entities(&mut golem, w, &mut events);
+                    if golem.ai.target.is_some() {
+                        hits += 1;
+                        golem.ai.target = None;
+                    }
+                }
+            });
+            ran.then_some(hits)
+        };
+        let Some(zombie) = hits(mob(2, Species::Zombie, "monster")) else {
+            return;
+        };
+        assert!(
+            zombie > 0,
+            "a zombie that bumps the golem is taken as its target"
+        );
+        assert_eq!(
+            hits(mob(3, Species::Creeper, "monster")),
+            Some(0),
+            "IronGolem.doPush never targets a creeper"
+        );
+        assert_eq!(
+            hits(mob(4, Species::Cow, "creature")),
+            Some(0),
+            "a pushed animal is not an Enemy"
+        );
     }
 }

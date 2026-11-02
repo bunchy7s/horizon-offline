@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "world_border_bounds_changed",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_world_border_bounds_changed",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "World border bounds change (`native_world_border_bounds_changed`).",
+  "doc_summary": "`native_world_border_bounds_changed()` is told after `/worldborder set` or `/worldborder add` changes the border size or starts its timed size change. It hears successful commands only. Bundles need \"hooks\": @API:native_world_border_bounds_changed@."
+}

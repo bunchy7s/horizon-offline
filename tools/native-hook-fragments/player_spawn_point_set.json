@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_spawn_point_set",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_spawn_point_set",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerSpawnChangeEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A server player's respawn point about to change, cancellable (`native_player_spawn_point_set`).",
+  "doc_summary": "A server player's respawn point about to change: `native_player_spawn_point_set(player, name, dimension, pos, cause, cancel)` is heard for `bed`, `respawn_anchor`, `command` and `death_reset`; `pos` is the block position. Set `cancel` to keep the old point. A canceled `death_reset` keeps the old point even if its bed or anchor is gone. The player's state is not swapped in, so helpers that look them up through `self.lan` may find nothing while a guest packet is handled. Bundles need \"hooks\": @API:player_spawn_point_set@."
+}

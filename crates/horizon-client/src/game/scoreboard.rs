@@ -181,6 +181,7 @@ impl Game<'_> {
             | Target::Dragon(id)
             | Target::Tnt(id)
             | Target::Falling(id)
+            | Target::Rocket(id)
             | Target::Other(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
@@ -224,6 +225,7 @@ impl Game<'_> {
             | Target::Projectile(id)
             | Target::Crystal(id)
             | Target::Dragon(id)
+            | Target::Rocket(id)
             | Target::Other(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
             // A server's player: the saved compound the guest's file is written from.
@@ -450,17 +452,6 @@ impl Game<'_> {
                 board.for_all_objectives_with(criteria, &name, Some(&display), |_| value);
             }
         }
-    }
-    /// `ServerPlayer.die`: the death count.
-    pub(super) fn score_player_died(&mut self) {
-        let display = self.player_display_comp();
-        let me = self.acting_player_name().to_owned();
-        let board = &mut self.score.board;
-        board.for_all_objectives_with(sb::CRITERIA_DEATH_COUNT, &me, Some(&display), |v| {
-            v.wrapping_add(1)
-        });
-        // A respawned player has everything to record again.
-        self.score.recorded = Recorded::default();
     }
     /// `ServerPlayer.awardKillScore`: total kills and the team kill counts.
     pub(super) fn score_player_killed(&mut self, victim: Target) {

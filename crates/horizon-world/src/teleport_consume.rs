@@ -26,6 +26,13 @@ pub trait TeleportConsumeWorld {
     fn is_passenger(&mut self) -> Result<bool, Self::Error>;
     fn stop_riding(&mut self) -> Result<(), Self::Error>;
     fn position(&mut self) -> Result<Vec3, Self::Error>;
+    /// Horizon's mods (NeoForge's `EntityTeleportEvent.ChorusFruit`): before
+    /// each attempt, after the user stopped riding. They may move `target`;
+    /// false stops the effect without teleporting and without more draws.
+    fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, Self::Error> {
+        let _ = target;
+        Ok(true)
+    }
     /// showParticles=true and forbidden tag=CONSUMABLE_DOES_NOT_TELEPORT_TO.
     fn random_teleport(&mut self, position: Vec3) -> Result<bool, Self::Error>;
     /// Level TELEPORT event, old position, context containing this actor.
@@ -91,7 +98,11 @@ impl TeleportConsume {
                 world.stop_riding()?;
             }
             let old = world.position()?;
-            if world.random_teleport(Vec3::new(x, y, z))? {
+            let mut target = Vec3::new(x, y, z);
+            if !world.teleport_allowed(&mut target)? {
+                return Ok(false);
+            }
+            if world.random_teleport(target)? {
                 world.teleport_event(level, old)?;
                 let fox = world.is_fox();
                 world.teleport_sound(level, world.position_field(), fox)?;
@@ -114,5 +125,123 @@ impl TeleportConsume {
             }
         }
         Ok(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use horizon_core::random::LegacyRandom;
+    use std::convert::Infallible;
+
+    /// A user at the origin whose every landing fails unless `lands`; it
+    /// records the targets tried and how the mods answer.
+    struct Stub {
+        random: LegacyRandom,
+        allow: fn(&mut Vec3) -> bool,
+        lands: bool,
+        asked: usize,
+        tried: Vec<Vec3>,
+    }
+    impl TeleportConsumeWorld for Stub {
+        type Error = Infallible;
+        type Level = ();
+        type Random = ();
+        type Source = LegacyRandom;
+        fn position_field(&self) -> Vec3 {
+            Vec3::ZERO
+        }
+        fn get_random(&mut self) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn random_source(&mut self, (): ()) -> &mut LegacyRandom {
+            &mut self.random
+        }
+        fn min_y(&mut self, (): ()) -> Result<i32, Infallible> {
+            Ok(-64)
+        }
+        fn logical_height(&mut self, (): ()) -> Result<i32, Infallible> {
+            Ok(384)
+        }
+        fn is_passenger(&mut self) -> Result<bool, Infallible> {
+            Ok(false)
+        }
+        fn stop_riding(&mut self) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn position(&mut self) -> Result<Vec3, Infallible> {
+            Ok(Vec3::ZERO)
+        }
+        fn teleport_allowed(&mut self, target: &mut Vec3) -> Result<bool, Infallible> {
+            self.asked += 1;
+            Ok((self.allow)(target))
+        }
+        fn random_teleport(&mut self, position: Vec3) -> Result<bool, Infallible> {
+            self.tried.push(position);
+            Ok(self.lands)
+        }
+        fn teleport_event(&mut self, (): (), _: Vec3) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn is_fox(&self) -> bool {
+            false
+        }
+        fn teleport_sound(&mut self, (): (), _: Vec3, _: bool) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn block_position(&mut self) -> Result<BlockPos, Infallible> {
+            Ok(BlockPos::new(0, 0, 0))
+        }
+        fn directional_particles(&mut self, (): (), _: BlockPos, _: i32) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn reset_fall_distance(&mut self) -> Result<(), Infallible> {
+            Ok(())
+        }
+        fn reset_impulse(&mut self) -> Result<(), Infallible> {
+            Ok(())
+        }
+    }
+    fn stub(allow: fn(&mut Vec3) -> bool, lands: bool) -> Stub {
+        Stub {
+            random: LegacyRandom::new(7),
+            allow,
+            lands,
+            asked: 0,
+            tried: Vec::new(),
+        }
+    }
+    const CHORUS: TeleportConsume = TeleportConsume {
+        diameter: 16.0,
+        directional_particles: false,
+    };
+
+    #[test]
+    fn a_refused_attempt_ends_the_effect_without_teleporting() {
+        let mut w = stub(|_| false, true);
+        assert_eq!(CHORUS.apply(&mut w, ()), Ok(false));
+        assert_eq!((w.asked, w.tried.len()), (1, 0), "asked once, never tried");
+    }
+
+    #[test]
+    fn the_mods_target_is_where_the_user_tries_to_land() {
+        let mut w = stub(
+            |t| {
+                *t = Vec3::new(100.5, 70.0, -3.5);
+                true
+            },
+            true,
+        );
+        assert_eq!(CHORUS.apply(&mut w, ()), Ok(true));
+        assert_eq!(w.tried, [Vec3::new(100.5, 70.0, -3.5)]);
+    }
+
+    #[test]
+    fn without_mods_all_sixteen_attempts_stay_vanillas() {
+        let mut w = stub(|_| true, false);
+        assert_eq!(CHORUS.apply(&mut w, ()), Ok(false));
+        assert_eq!((w.asked, w.tried.len()), (16, 16));
+        // Each target is within half the diameter of the user.
+        assert!(w.tried.iter().all(|t| t.x.abs() <= 8.0 && t.z.abs() <= 8.0));
     }
 }

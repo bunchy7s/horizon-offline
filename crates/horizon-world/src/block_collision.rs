@@ -158,6 +158,13 @@ impl<'r> BlockCollisionRegistry<'r> {
             empty_shape: flags & 4 != 0,
         })
     }
+    /// Whether `state` can have a collision shape: false for states whose shape is always
+    /// empty, whatever the context. States outside the registry count.
+    pub fn may_collide(&self, state: BlockStateId) -> bool {
+        self.scan_flags
+            .get(state.0 as usize)
+            .is_none_or(|flags| flags & 4 == 0)
+    }
     /// Whether a scan keeps `state` in the cells around its box: a large
     /// collision shape or a moving piston. States outside the registry count.
     pub fn reaches_out(&self, state: BlockStateId) -> bool {
