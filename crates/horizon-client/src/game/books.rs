@@ -895,7 +895,21 @@ impl Game<'_> {
     /// lectern, so the screen closes (the server closes the menu once the
     /// book is gone; a server's client closes at once rather than wait).
     fn take_lectern_book(&mut self, key: (i32, i32, i32)) {
+        let before = match self.world.block_entities.get(&key) {
+            Some(BlockEntity::Lectern(l)) => l.book.clone(),
+            _ => None,
+        };
         self.lectern_button(key, 3);
+        if let (Some(book), Some(player), Some(name)) = (
+            before.filter(|_| {
+                matches!(self.world.block_entities.get(&key),
+                Some(BlockEntity::Lectern(l)) if l.book.is_none())
+            }),
+            self.lan_acting_uuid,
+            self.lan_acting_name.clone(),
+        ) {
+            self.native_player_take_lectern_book(player, &name, [key.0, key.1, key.2], &book.item);
+        }
         if self.may_build()
             && matches!(
                 self.book,

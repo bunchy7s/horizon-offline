@@ -3340,6 +3340,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, book);
     }
+    /// A server player took the book from a lectern, after the menu and block
+    /// entity changed. `book` is the removed item id. Helpers looking up a
+    /// guest through `self.lan` may find nothing during packet handling.
+    /// Server-side. @API:player_take_lectern_book@.
+    pub(super) fn native_player_take_lectern_book(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        book: &str,
+    ) {
+        let _ = (player, name, pos, book);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
