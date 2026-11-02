@@ -5091,6 +5091,16 @@ impl Game<'_> {
     pub(super) fn native_player_respawned(&mut self, player: u128, name: &str) {
         mod_api::dispatch_player_respawned(self, mod_api::mods(), player, name);
     }
+    /// A player's data was copied to their new player (NeoForge's
+    /// `PlayerEvent.Clone`, from `ServerPlayer.restoreFrom`): `was_death` is
+    /// true after a death, false when they left the End after the credits
+    /// (`respawn` with `keepAllPlayerData`). The uuid stays the same, so the
+    /// old and the new player share `player`. Heard before the new player is
+    /// placed, on a server, with no player's state swapped in. Not
+    /// cancellable.
+    pub(super) fn native_player_clone(&mut self, player: u128, name: &str, was_death: bool) {
+        let _ = (player, name, was_death);
+    }
     /// The number of players with the mod container at `pos` of `dimension`
     /// open went from `previous` to `viewers` (vanilla's
     /// `ContainerOpenersCounter`, as a barrel keeps it): 0 to more than 0 is
