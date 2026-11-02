@@ -3168,6 +3168,103 @@ fn the_level_chooses_the_state_a_block_is_placed_in() {
 }
 
 #[test]
+fn sugar_cane_survival_reads_adjacent_block_before_fluid() {
+    use std::cell::Cell;
+
+    let Some(f) = fixture() else { return };
+    let b = &f.behaviours;
+    let cane = f.registry.default_state("minecraft:sugar_cane").unwrap();
+    let stone = f.registry.default_state("minecraft:stone").unwrap();
+
+    let supporting = b
+        .tag("minecraft:supports_sugar_cane")
+        .expect("vanilla sugar-cane support tag");
+    let adjacent_tag = b
+        .tag("minecraft:supports_sugar_cane_adjacently")
+        .expect("vanilla sugar-cane adjacent-support tag");
+
+    // Select actual members of the prepared vanilla tags.
+    let ground = (0..f.registry.len())
+        .map(|id| BlockStateId(id as u32))
+        .find(|&id| supporting.contains(b.block(id)) && b.block(id) != b.block(cane))
+        .expect("at least one sugar-cane supporting block");
+
+    let first = (0..f.registry.len())
+        .map(|id| BlockStateId(id as u32))
+        .find(|&id| {
+            adjacent_tag.contains(b.block(id))
+                && b.fluid(id).kind() == crate::fluid::FluidKind::Empty
+        })
+        .expect("a non-fluid block in the sugar-cane adjacent-support tag");
+
+    assert!(
+        !adjacent_tag.contains(b.block(stone)),
+        "stone must not satisfy the adjacent-support block tag"
+    );
+
+    let pos = BlockPos::new(1, 64, 1);
+    let watched = update::rel(update::below(pos), Direction::North);
+
+    // This coordinate deliberately returns different states on successive reads.
+    // Vanilla reads getBlockState before getFluidState.
+    struct ChangingReadLevel {
+        inner: TestLevel,
+        watched: BlockPos,
+        first: BlockStateId,
+        second: BlockStateId,
+        reads: Cell<usize>,
+    }
+
+    impl LevelAccess for ChangingReadLevel {
+        fn block_state(&self, pos: BlockPos) -> BlockStateId {
+            if pos == self.watched {
+                let read = self.reads.get();
+                self.reads.set(read + 1);
+                if read == 0 { self.first } else { self.second }
+            } else {
+                self.inner.block_state(pos)
+            }
+        }
+
+        fn set_raw(&mut self, pos: BlockPos, state: BlockStateId) -> Option<BlockStateId> {
+            self.inner.set_raw(pos, state)
+        }
+
+        fn is_loaded(&self, pos: BlockPos) -> bool {
+            self.inner.is_loaded(pos)
+        }
+
+        fn random(&mut self) -> &mut LegacyRandom {
+            self.inner.random()
+        }
+
+        fn game_time(&self) -> i64 {
+            self.inner.game_time()
+        }
+
+        fn emit(&mut self, event: LevelEvent) {
+            self.inner.emit(event);
+        }
+    }
+
+    let mut level = ChangingReadLevel {
+        inner: TestLevel::new(b),
+        watched,
+        first,
+        second: stone,
+        reads: Cell::new(0),
+    };
+
+    level.inner.set_raw(update::below(pos), ground);
+
+    let mut ticks = Ticks::new(0);
+    ticks.add_empty_chunk(ChunkPos::new(0, 0)).unwrap();
+
+    assert!(b.can_survive(&mut level, &mut ticks, pos, cane));
+    assert_eq!(level.reads.get(), 2, "one block-state read and one fluid-state read");
+}
+
+#[test]
 fn survive_hooks_answer_for_the_block() {
     use std::cell::Cell;
 
