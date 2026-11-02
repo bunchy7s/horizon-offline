@@ -138,6 +138,10 @@ pub struct Extras {
     /// The wheel over a cycle button in the settings changes it (`CycleButton.mouseScrolled`,
     /// on by default as vanilla); off, the wheel only scrolls the list.
     pub wheel_cycles_settings: bool,
+    /// Cosmetics (`horizon_cosmetics`, off unless enabled): the player's own, and the other
+    /// players' (`cosmeticsMine`, `cosmeticsOthers`; both on by default).
+    pub cosmetics_mine: bool,
+    pub cosmetics_others: bool,
 }
 impl Default for Extras {
     fn default() -> Self {
@@ -181,6 +185,8 @@ impl Default for Extras {
             splitscreen_three: 0,
             splitscreen_names: true,
             wheel_cycles_settings: true,
+            cosmetics_mine: true,
+            cosmetics_others: true,
         }
     }
 }
@@ -266,6 +272,8 @@ impl Extras {
                 "splitscreenThree" => e.splitscreen_three = value.parse().unwrap_or(0).min(2),
                 "splitscreenNames" => e.splitscreen_names = flag(e.splitscreen_names),
                 "wheelCyclesSettings" => e.wheel_cycles_settings = flag(e.wheel_cycles_settings),
+                "cosmeticsMine" => e.cosmetics_mine = flag(e.cosmetics_mine),
+                "cosmeticsOthers" => e.cosmetics_others = flag(e.cosmetics_others),
                 _ => {}
             }
         }
@@ -273,7 +281,7 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\n",
+            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\n",
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -318,6 +326,8 @@ impl Extras {
             self.splitscreen_three,
             bool_text(self.splitscreen_names),
             bool_text(self.wheel_cycles_settings),
+            bool_text(self.cosmetics_mine),
+            bool_text(self.cosmetics_others),
         )
     }
     /// Binds the extra key `name` (`SORT_KEY`); false for
@@ -463,11 +473,14 @@ pub enum Item {
     /// On the Splitscreen settings page.
     Splitscreen,
     WheelCyclesSettings,
+    /// Shown only while cosmetics are enabled (`horizon_cosmetics::enabled`).
+    CosmeticsMine,
+    CosmeticsOthers,
 }
 /// The Extras page: headers (language keys) and items.
 pub fn rows() -> Vec<Result<Item, &'static str>> {
     use Item::*;
-    vec![
+    let mut rows = vec![
         Err("horizon.extras.header.lighting"),
         Ok(Fullbright),
         Ok(DynamicLights),
@@ -489,7 +502,15 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Ok(UiSoundReserve),
         Err("horizon.extras.header.menus"),
         Ok(WheelCyclesSettings),
-    ]
+    ];
+    if horizon_cosmetics::enabled() {
+        rows.extend([
+            Err("horizon.extras.header.cosmetics"),
+            Ok(CosmeticsMine),
+            Ok(CosmeticsOthers),
+        ]);
+    }
+    rows
 }
 impl Item {
     /// The language key of the caption (`horizon.*`, assets/horizon/lang).
@@ -513,6 +534,8 @@ impl Item {
             Item::ChatAnimation => "horizon.extras.chat_animation",
             Item::ChatIndicator => "horizon.extras.chat_indicator",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
+            Item::CosmeticsMine => "horizon.extras.cosmetics_mine",
+            Item::CosmeticsOthers => "horizon.extras.cosmetics_others",
         }
     }
     /// The language key of the description shown as the row's tooltip.
@@ -536,6 +559,8 @@ impl Item {
             Item::ChatAnimation => "horizon.extras.chat_animation.tooltip",
             Item::ChatIndicator => "horizon.extras.chat_indicator.tooltip",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
+            Item::CosmeticsMine => "horizon.extras.cosmetics_mine.tooltip",
+            Item::CosmeticsOthers => "horizon.extras.cosmetics_others.tooltip",
         }
     }
     /// The caption in the current language (English when the key is missing).
@@ -568,6 +593,8 @@ impl Item {
             Item::DiscordPresence => "Discord Rich Presence",
             Item::Splitscreen => "Splitscreen",
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
+            Item::CosmeticsMine => "My cosmetics",
+            Item::CosmeticsOthers => "Other players' cosmetics",
         }
     }
     /// The switch this setting belongs to: it does nothing while that is off.
@@ -580,7 +607,7 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation | WheelCyclesSettings => {
+            | ChatAnimation | WheelCyclesSettings | CosmeticsMine | CosmeticsOthers => {
                 return None;
             }
         })
@@ -635,6 +662,12 @@ impl Item {
             Item::ReproKeys => {
                 "F3+R starts or stops a repro recording and F3+E writes its bundle. Off by default: a recording copies the world."
             }
+            Item::CosmeticsMine => {
+                "Shows the cosmetics you wear on your own player, in third person and the inventory."
+            }
+            Item::CosmeticsOthers => {
+                "Shows the cosmetics other Horizon players wear. Off, the game never asks what they wear."
+            }
             Item::WheelCyclesSettings => {
                 "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
             }
@@ -655,6 +688,7 @@ impl Item {
             | Item::Sort
             | Item::Splitscreen
             | Item::WheelCyclesSettings => Some(Cost::None),
+            Item::CosmeticsMine | Item::CosmeticsOthers => Some(Cost::Low),
             _ => None,
         }
     }
@@ -678,6 +712,8 @@ impl Item {
             Item::DiscordPresence => e.discord_presence,
             Item::Splitscreen => e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
+            Item::CosmeticsMine => e.cosmetics_mine,
+            Item::CosmeticsOthers => e.cosmetics_others,
             _ => return None,
         })
     }
@@ -712,6 +748,8 @@ impl Item {
             Item::DiscordPresence => e.discord_presence = !e.discord_presence,
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
+            Item::CosmeticsMine => e.cosmetics_mine = !e.cosmetics_mine,
+            Item::CosmeticsOthers => e.cosmetics_others = !e.cosmetics_others,
             Item::SortKey => {}
         }
     }

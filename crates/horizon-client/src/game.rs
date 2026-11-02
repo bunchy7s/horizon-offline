@@ -97,6 +97,7 @@ mod control;
 mod copper_golems;
 mod creaking;
 mod creative_hotbar;
+mod cosmetics;
 mod creatures;
 mod crossbow;
 pub(crate) mod cushions;
@@ -2760,6 +2761,8 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
     skin_slots: horizon_client::skins::SkinSlots,
+    /// Cosmetics on players (game/cosmetics.rs), off by default.
+    cosmetics: cosmetics::Cosmetics,
     /// Atlas trim slots in use: (sprite name, slot), least recently drawn first.
     trim_slots: Vec<(String, usize)>,
     cart_models: minecarts::CartModels,
@@ -18591,6 +18594,7 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
+            cosmetics: Default::default(),
             trim_slots: Vec::new(),
             cart_models: prepared.cart_models,
             riding: None,
