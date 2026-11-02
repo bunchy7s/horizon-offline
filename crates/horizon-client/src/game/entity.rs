@@ -48,6 +48,8 @@ pub(super) struct Blast {
 }
 
 pub(super) trait Entity {
+    /// `Entity.getId`.
+    fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
@@ -136,6 +138,33 @@ pub(super) trait Entity {
     fn get_piston_push_reaction(&self) -> PushReaction {
         PushReaction::PushPull
     }
+    /// Width and height of the box a portal sweep follows, or None for a kind
+    /// the game does not carry through portals (so far armor stands and
+    /// falling blocks; fishing hooks are off the walk, and
+    /// `FishingHook.canUsePortal` is false in vanilla).
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        None
+    }
+    /// `Entity.canUsePortal(false)` for a kind in `portal_size`. A kind that
+    /// cannot stays tracked, so its cooldown and process run out.
+    fn can_use_portal(&self, _game: &Game<'_>) -> bool {
+        true
+    }
+    /// A boat or minecart: the kinds whose portal pass opens the tick, before
+    /// they move (`AbstractMinecart.tick` handles its portal first).
+    fn is_vehicle(&self) -> bool {
+        false
+    }
+    /// Where it stood at the start of its tick, for the kinds that store it
+    /// (None: `portals.before` has it).
+    fn portal_from(&self) -> Option<Vec3> {
+        None
+    }
+    /// Whether this tick's movement can have entered a portal block: a stuck
+    /// arrow or a trident in the ground that did not move enters none.
+    fn portal_sweeps(&self) -> bool {
+        true
+    }
     /// `Entity.move(MoverType.PISTON, …)` once the movement is resolved.
     fn move_by_piston(&mut self, movement: Vec3) {
         let position = self.position_mut();
@@ -152,6 +181,9 @@ pub(super) trait Entity {
 /// The fields every kind stores under the same names.
 macro_rules! stored_motion {
     () => {
+        fn id(&self) -> u32 {
+            self.id
+        }
         fn position(&self) -> Vec3 {
             self.position
         }
@@ -331,6 +363,12 @@ pub(super) use with_entity_mut;
 
 impl Entity for Mob {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((self.width(), self.height()))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.mob_can_use_portal(self)
+    }
     fn selector_target(&self) -> Option<Target> {
         (self.death_time == 0).then_some(Target::Mob(self.id))
     }
@@ -405,6 +443,9 @@ impl Entity for Mob {
 
 impl Entity for ItemEntity {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.25, 0.25))
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Item(self.id))
     }
@@ -437,6 +478,9 @@ impl Entity for ItemEntity {
 
 impl Entity for ExperienceOrb {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Orb(self.id))
     }
@@ -466,6 +510,15 @@ impl Entity for ExperienceOrb {
 
 impl Entity for Boat {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((super::boats::WIDTH as f32, super::boats::HEIGHT as f32))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Boat(self.id))
     }
@@ -489,6 +542,18 @@ impl Entity for Boat {
 
 impl Entity for Minecart {
     stored_motion!();
+    fn is_vehicle(&self) -> bool {
+        true
+    }
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((
+            super::minecarts::WIDTH as f32,
+            super::minecarts::HEIGHT as f32,
+        ))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.vehicle_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Cart(self.id))
     }
@@ -582,6 +647,13 @@ impl Entity for ArmorStand {
 
 impl Entity for PrimedTnt {
     stored_motion!();
+    /// `PrimedTnt` is 0.98 across.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.98, 0.98))
+    }
+    fn can_use_portal(&self, game: &Game<'_>) -> bool {
+        game.tnt_can_use_portal(self.id)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Tnt(self.id))
     }
@@ -615,6 +687,17 @@ impl Entity for FallingBlock {
 
 impl Entity for Projectile {
     stored_motion!();
+    /// Arrows and the thrown items and fireballs a chunk saves.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (super::nether_portal::is_arrow(self) || super::nether_portal::is_portal_projectile(self))
+            .then(|| super::nether_portal::projectile_box(self))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !super::nether_portal::is_arrow(self) || !self.stuck || self.previous != self.position
+    }
     fn selector_target(&self) -> Option<Target> {
         use horizon_client::projectiles::ProjectileKind as K;
         // The kinds /data can write (entity_nbt).
@@ -657,6 +740,13 @@ impl Entity for Projectile {
 
 impl Entity for Rocket {
     stored_motion!();
+    /// A rocket that carries its owner stays.
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        (self.attached_to.is_none() && !self.attached).then_some((0.25, 0.25))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Rocket(self.id))
     }
@@ -675,6 +765,15 @@ impl Entity for Rocket {
 
 impl Entity for ThrownTrident {
     stored_motion!();
+    fn portal_size(&self) -> Option<(f32, f32)> {
+        Some((0.5, 0.5))
+    }
+    fn portal_from(&self) -> Option<Vec3> {
+        Some(self.previous)
+    }
+    fn portal_sweeps(&self) -> bool {
+        !self.in_ground || self.previous != self.position
+    }
     fn selector_target(&self) -> Option<Target> {
         // No `Target` variant for it yet: `@e` does not find tridents.
         None
