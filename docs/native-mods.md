@@ -1943,8 +1943,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
   right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
   `native_tell` answers them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers
-  and cauldrons are not heard. A fluid or mob bucket is also heard at the block beside the clicked face when that
-  block is not `pos`: a block that refuses the fluid passes it there.
+  and cauldrons are not heard. A fluid or mob bucket is also heard at the block beside the clicked face whenever that
+  block is not `pos`, since a block that refuses the fluid passes it there; the fluid may still go into `pos`.
 - **`native_player_bed_enter(player, name, pos, cancel)`**: a server player passed the sleep checks and is about to
   enter the bed at its head position. Set `cancel` to keep them out; helpers that look them up through `self.lan` may
   find nothing while a guest packet is handled.
@@ -2216,8 +2216,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before any is hit; take out the ones to spare. Entities are hurt as before.
 - **`native_fill_bucket(stack, pos, canceled)`** and **`native_attack_entity(entity, kind, pos, canceled)`** (API 22):
   a player's bucket at a block, and their blow on an entity, with the acting player swapped in. Canceled, the bucket
-  does nothing and the blow does no harm. A fluid or mob bucket also asks about the block beside the clicked face when
-  that block is not its target: a block that refuses the fluid passes it there.
+  does nothing and the blow does no harm. A fluid or mob bucket also asks about the block beside the clicked face
+  whenever that block is not its target, since a block that refuses the fluid passes it there; the fluid may still
+  stay in the target.
 
 ### Mobs
 
