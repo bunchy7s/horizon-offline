@@ -644,6 +644,7 @@ impl Game<'_> {
             let world = super::creatures::ProjWorld {
                 w: &w,
                 targets: Vec::new(),
+                border: Some(self.border.bounds()),
             };
             for p in &mut projectiles {
                 match p.kind {
