@@ -3,7 +3,7 @@ HarvestFarmland.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B
 HarvestFarmland.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears look and walk target, worked = 0, next_ok = now + 40
 InsideBrownianWalk.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InsideBrownianWalk arm: shuffled 3x3x3 cells, first one without sky view that is solid; a solid-block test stands in for loadedAndEntityCanStandOn
 InteractWith.of	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	InteractWith arm for villager, breeding villager and cat targets (range 8, speed 0.5, stop distance 2); piglins and piglin brutes use goals instead
-InteractWithDoor.create	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::InteractWithDoor (copper golem), villager_brain.rs::B::try_start (villager)	gap: piglins have no door behaviour yet (the probe has no piglin brain); a golem does not look for another golem coming through the door
+InteractWithDoor.create	inline	crates/horizon-client/src/mobs/animal_brain.rs::B::trigger, crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the copper golem's trigger arm and the villager's try_start; gap: piglins have no door behaviour yet (the probe has no piglin brain); a golem does not look for another golem coming through the door
 InteractWithDoor.areOtherMobsComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	villagers within 2 blocks of the door whose path has the door as previous or next node
 InteractWithDoor.isMobComingThroughDoor	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	read from the other villager's Seen.path_nodes
 InteractWithDoor.isDoorTooFarAway	inline	crates/horizon-client/src/mobs/villager_brain.rs::close_doors	3 block test; no dimension compare needed
@@ -20,7 +20,7 @@ JumpOnBed.tiredOfWalking	inline	crates/horizon-client/src/mobs/villager_brain.rs
 JumpOnBed.tiredOfJumping	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	folded into the still-using test
 LocateHidingPlace.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	LocateHidingPlace arm: a home POI within close+1 and near, else a shuffled one within the radius, else the home memory; sets the hiding place and walks there when far
 LongJumpMidJump.stop	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::end	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
-LongJumpToPreferredBlock.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start (wanting_preferred)	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
+LongJumpToPreferredBlock.start	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::start	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain); wanting_preferred marks the preferred-block jump
 LongJumpToPreferredBlock.getJumpCandidate	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::candidate	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
 LongJumpToRandomPos.defaultAcceptableLandingSpot	inline	crates/horizon-client/src/mobs/frog.rs::default_acceptable_landing	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
 LongJumpToRandomPos.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/frog.rs::LongJump::can_use	goal stand-in for the frog and goat brains (#3946; no tick parity: the probe has no frog or goat brain)
@@ -43,9 +43,9 @@ MoveToTargetSink.canStillUse	inline	crates/horizon-client/src/mobs/villager_brai
 MoveToTargetSink.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the arm sets the PATH memory and starts the navigation as it starts
 MoveToTargetSink.isWalkTargetSpectator	missing		minor: a walk target on a player in spectator mode is not dropped
 PlayTagWithOtherKids.chaseKid	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	PlayTag arm sets interaction, look and walk target (speed 0.6, close 1)
-PlayTagWithOtherKids.findSomeoneBeingChased	missing		minor: a kid always chases the first friend it sees instead of joining a chase of a kid that has 1 to 5 chasers (Seen.interaction_target is recorded but unused)
-PlayTagWithOtherKids.checkHowManyChasersEachFriendHas	missing		minor: no chaser counts; see findSomeoneBeingChased
-PlayTagWithOtherKids.isFriendChasingMe	missing		player: a kid that is being chased never runs off to a spot in the village, so the tag game is only chasing
+PlayTagWithOtherKids.findSomeoneBeingChased	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the kid chased by the fewest chasers, one to five, else any friend; what a friend chases is its INTERACTION_TARGETrded but unused)
+PlayTagWithOtherKids.checkHowManyChasersEachFriendHas	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the chaser count per chased kid that picks the target
+PlayTagWithOtherKids.isFriendChasingMe	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	the chased kid runs to a random spot inside the village (land_random_pos, 10 tries, one section from the village)
 PoiCompetitorScan.selectWinner	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	PoiCompetitorScan arm: higher xp keeps the site, a tie goes to the later villager; gap: minor: only this villager's own site is erased, a losing neighbour loses its site in its own scan
 PoiCompetitorScan.competesForSameJobsite	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	same job site and profession; the profession is compared with this villager's, not with the site's POI type
 PrepareRamNearestTarget.start	port	crates/horizon-client/src/mobs/goat.rs::Ram::start	picks the nearest allowed target and chooses a ramming spot
@@ -66,12 +66,12 @@ SetWalkTargetFromBlockMemory.create	port	crates/horizon-client/src/mobs/villager
 SetWalkTargetFromLookTarget.create	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	WalkToLookTarget arm; the sniffer, ghastling and breeze brains have the same
 ShowTradesToPlayer.canStillUse	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	ShowTrades arm: still near the player, look time left and an interaction target
 ShowTradesToPlayer.start	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	looks at the player, look time 40
-ShowTradesToPlayer.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears the interaction target; the held item is never touched because no offer is ever shown
-ShowTradesToPlayer.findItemsToDisplay	missing		player: a villager facing a player who holds an item matching one of its trade costs never holds up the matching offer, and the look time never extends to 900 ticks
-ShowTradesToPlayer.updateDisplayItems	missing		minor: the offer list matched against the player's item, part of findItemsToDisplay
-ShowTradesToPlayer.playerItemStackMatchesCostOfOffer	missing		minor: cost match of findItemsToDisplay
+ShowTradesToPlayer.stop	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::do_stop	clears the interaction target and the held item (clearHeldItem), and the player's item it compared against
+ShowTradesToPlayer.findItemsToDisplay	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the offers the player's held item pays for; a match raises the look time to 900 and puts the result in the villager's hand
+ShowTradesToPlayer.updateDisplayItems	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	rebuilt when the player's held item changes, skipping an offer that is out of stock
+ShowTradesToPlayer.playerItemStackMatchesCostOfOffer	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the held item against an offer's cost A or cost B
 ShowTradesToPlayer.lookAtTarget	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	the arm sets the look target to the player on start and each tick
-ShowTradesToPlayer.displayCyclingItems	missing		player: with several matching offers the villager would swap the item in its hand every 40 ticks; it never holds anything
+ShowTradesToPlayer.displayCyclingItems	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::tick_or_stop	with two or more matching offers the held item moves on every 40 ticks, wrapping round
 ShufflingList.add	inline	crates/horizon-client/src/mobs/warden_brain.rs::activities	the idle RunOne list is built with its weights (stroll 2, do nothing 1); the other brains list weights where their packages are built
 ShufflingList.WeightedEntry.setRandom	inline	crates/horizon-client/src/mobs/warden_brain.rs::B::try_start	the RunOne arm draws -pow(random, 1/weight) per entry and sorts; the villager, animal and monster brains do the same in their gates
 SleepInBed.checkExtraStartConditions	inline	crates/horizon-client/src/mobs/villager_brain.rs::B::try_start	SleepInBed arm: not riding, 100 ticks since waking, bed within 2 blocks and free
@@ -144,4 +144,4 @@ TryFindLand.create	inline	crates/horizon-client/src/mobs/goals.rs::Stroll::can_u
 TryFindLand.canStandOn	missing		minor: no scan for the nearest solid land next to water; see TryFindLand.create
 TryFindLandNearLiquid.create	missing		minor: only runs in the frog's lay-spawn activity, which needs a pregnant frog (see TryLaySpawnOnFluidNearLand)
 TryFindLiquid.create	port	crates/horizon-client/src/mobs/animal_brain.rs::axolotl_action	FindLiquid arm: nearest water within 6, speed 0.15, re-run every 40 ticks
-TryLaySpawnOnFluidNearLand.create	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn	goal stand-in for the frog brain (no tick parity: the probe has no frog brain): feeding, pregnancy, walk to land beside water, frogspawn
+TryLaySpawnOnFluidNearLand.create	inline	crates/horizon-client/src/mobs/frog.rs::LaySpawn::can_use	goal stand-in for the frog brain (no tick parity: the probe has no frog brain): feeding, pregnancy, walk to land beside water, frogspawn
