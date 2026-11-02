@@ -3353,6 +3353,19 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, book);
     }
+    /// A server player changed the page of a lectern, after its page and
+    /// redstone pulse changed. `page` is the zero-based new page. Helpers
+    /// looking up a guest through `self.lan` may find nothing during packet
+    /// handling. Server-side. @API:player_lectern_page_change@.
+    pub(super) fn native_player_lectern_page_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        page: i32,
+    ) {
+        let _ = (player, name, pos, page);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

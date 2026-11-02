@@ -1058,6 +1058,15 @@ impl Game<'_> {
             self.lectern_pulses.push((key, 2));
             self.level_event_at(1043, [key.0, key.1, key.2], 0);
             self.container_changed(key);
+            if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+            {
+                self.native_player_lectern_page_change(
+                    player,
+                    &name,
+                    [key.0, key.1, key.2],
+                    menu.data[0],
+                );
+            }
         }
     }
     /// The open lectern screen follows its block entity (`LecternScreen`'s
