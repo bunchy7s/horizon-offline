@@ -286,8 +286,11 @@ impl Game<'_> {
             bookcases,
             gs.menu.slot(0),
         );
+        let guest = &host.hub.guests[gi];
+        let mut costs = offers.costs;
+        self.native_prepare_item_enchant(guest.uuid, &guest.name, gs.pos, &mut costs);
         for i in 0..3 {
-            gs.menu.data[i] = offers.costs[i];
+            gs.menu.data[i] = costs[i];
             let clue = offers.clues[i].as_ref();
             gs.menu.data[4 + i] = clue
                 .and_then(|(e, _)| host.hub.registry_id("minecraft:enchantment", e))

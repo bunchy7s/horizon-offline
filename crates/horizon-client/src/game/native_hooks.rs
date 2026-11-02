@@ -3732,6 +3732,16 @@ impl Game<'_> {
     ) {
         let _ = (player, name, pos, item, levels);
     }
+    /// Enchanting offers were calculated for a server player at `pos`. Change `costs` before they are sent to the menu. @API:native_prepare_item_enchant@.
+    pub(super) fn native_prepare_item_enchant(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        costs: &mut [i32; 3],
+    ) {
+        let _ = (player, name, pos, costs);
+    }
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`
