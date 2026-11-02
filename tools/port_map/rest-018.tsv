@@ -93,7 +93,7 @@ SynchronizeRegistriesTask.sendRegistries	port	crates/horizon-client/src/lan/data
 SynchronizeRegistriesTask.handleResponse	port	crates/horizon-client/src/lan/conn.rs::login_and_configure	known-pack answer: only the core pack is offered, so it is all or the core pack
 NotificationManager.setServer	skip:service		external notification services for dedicated servers
 NotificationManager.onGameRuleChanged	skip:service		external notification services for dedicated servers
-ServerActivityMonitor.processWithRateLimit	skip:service		external notification services for dedicated servers
+ServerActivityMonitor.processWithRateLimit	port	crates/horizon-server/src/management.rs::activity_due	the thirty-second limit around the server-activity notification (the monitor's minimum time between notifications)
 AbstractPackMetadataResources.getMetadataSection	skip:data		pack file access; Horizon reads its data from tables and files
 AbstractPackMetadataResources.loadMetadata	skip:data		pack file access; Horizon reads its data from tables and files
 DownloadCacheCleaner.listFilesWithModificationTimes	inline	crates/horizon-client/src/server_packs/download.rs::vacuum	the folder walk and modification times are in vacuum
@@ -101,11 +101,11 @@ DownloadCacheCleaner.prioritizeFilesInDirs	inline	crates/horizon-client/src/serv
 DownloadQueue.getFileInfo	port	crates/horizon-client/src/server_packs/download.rs::run	the size and relative name of each downloaded file are in the log entry built by run
 DownloadQueue.downloadBatch	port	crates/horizon-client/src/server_packs/download.rs::Queue::download	queues the batch for the download thread, which runs run
 FilePackResources.getPathFromLocation	skip:data		pack file access; Horizon reads its data from tables and files
-FilePackResources.getResource	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.getResource	port	crates/horizon-client-render/src/datapack.rs::DataPack::read	the prefixed path through the pack's source: `Zip::index` looks the entry up (folder entries included), a folder pack reads the file
 FilePackResources.addPrefix	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.getNamespaces	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.extractNamespace	skip:data		pack file access; Horizon reads its data from tables and files
-FilePackResources.listResources	skip:data		pack file access; Horizon reads its data from tables and files
+FilePackResources.listResources	port	crates/horizon-client-render/src/datapack.rs::DataPack::list	the pack's files under a prefix: zip entry names or a folder walk, folder entries and directories skipped
 FilePackResources.FileResourcesSupplier.openMetadata	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.FileResourcesSupplier.openResources	skip:data		pack file access; Horizon reads its data from tables and files
 FilePackResources.SharedZipFileAccess.getOrCreateZipFile	skip:java		lazily opened zip cache

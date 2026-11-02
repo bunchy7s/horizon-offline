@@ -489,4 +489,28 @@ impl Host for super::Game<'_> {
     fn instance_dir(&self) -> PathBuf {
         self.native_instance_dir()
     }
+    fn camera(&self) -> Option<NativeCamera> {
+        self.native_camera()
+    }
+    fn block_collision(&self, pos: [i32; 3]) -> Vec<[f64; 6]> {
+        self.native_block_collision(pos)
+    }
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        self.native_item_container_slots(stack)
+    }
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        self.native_item_container_insert(stack, item)
+    }
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        self.native_item_container_extract(stack, slot, max)
+    }
 }

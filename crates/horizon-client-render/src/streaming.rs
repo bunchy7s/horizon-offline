@@ -99,6 +99,10 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// The worker has had nothing to do for [`IDLE_RELEASE`]: give back what
     /// it keeps between jobs only to go faster.
     fn idle(&self, _worker: &mut Self::Worker) {}
+    /// Every worker has had nothing to do for [`IDLE_RELEASE`]: give back the
+    /// caches the workers share, which only spare work for chunks generated
+    /// next to each other in a run. Results do not change.
+    fn all_idle(&self) {}
     fn proto(&self, worker: &mut Self::Worker, x: i32, z: i32) -> Proto;
     fn decorates(&self) -> bool {
         false
@@ -148,6 +152,16 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// layers count once it is at INITIALIZE_LIGHT.
     fn non_air_sections(&self, _proto: &Proto) -> Option<SectionMask> {
         None
+    }
+    /// What the generator's shared caches hold: (name, entries, bytes, if
+    /// known), for `horizon-ctl memory`.
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        Vec::new()
+    }
+    /// A proto chunk's heap bytes by part, and its sections by bits per
+    /// block, for `horizon-ctl memory` (`ProtoChunk::heap_bytes`).
+    fn proto_heap_bytes(&self, _proto: &Proto) -> ([usize; 6], [usize; 16]) {
+        ([0; 6], [0; 16])
     }
     fn saved_proto(&self, _proto: &Proto) -> Option<crate::chunk::SavedProto> {
         None
@@ -399,12 +413,29 @@ impl Mailbox {
         done.pop_front()
     }
 }
+/// [`Streaming::proto_census`].
+#[derive(Debug, Default)]
+pub struct ProtoCensus {
+    pub protos: usize,
+    /// Packed blocks, section palettes and lists, heightmaps, other terrain
+    /// data, biomes, the box and its structure lists.
+    pub bytes: [usize; 6],
+    pub sections_by_bits: [usize; 16],
+    pub light_views: usize,
+    pub light_view_bytes: usize,
+    /// `ChunkGenerator::cache_census`.
+    pub caches: Vec<(&'static str, usize, Option<usize>)>,
+}
 pub struct Streaming {
     shared: Arc<Shared>,
     /// Columns generated and saved as they were left behind: new when they
     /// next arrive, though read from the save (`World::loaded_chunks`).
     dropped_new: FxHashSet<(i32, i32)>,
     non_air_sections: Arc<dyn Fn(&Proto) -> Option<SectionMask> + Send + Sync>,
+    /// `ChunkGenerator::proto_heap_bytes`, for the memory census.
+    proto_bytes: Arc<dyn Fn(&Proto) -> ([usize; 6], [usize; 16]) + Send + Sync>,
+    /// `ChunkGenerator::cache_census`.
+    caches: Arc<dyn Fn() -> Vec<(&'static str, usize, Option<usize>)> + Send + Sync>,
     /// This streamer's place in the shared pool (`horizon_threads::jobs`);
     /// dropping it waits for its running jobs.
     jobs: Registration,
@@ -824,6 +855,7 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
         // pool lock; the pool then asks the allocator to return freed pages.
         let meshes = std::mem::take(&mut *self.shared.meshes.lock().unwrap());
         drop(meshes);
+        self.generator.all_idle();
     }
 }
 impl<G: ChunkGenerator> Jobs<G> {
@@ -961,9 +993,19 @@ impl Streaming {
             let generator = generator.clone();
             Arc::new(move |p: &Proto| generator.non_air_sections(p))
         };
+        let proto_bytes = {
+            let generator = generator.clone();
+            Arc::new(move |p: &Proto| generator.proto_heap_bytes(p))
+        };
+        let caches = {
+            let generator = generator.clone();
+            Arc::new(move || generator.cache_census())
+        };
         Self {
             shared,
             non_air_sections,
+            proto_bytes,
+            caches,
             jobs,
             workers,
             order: 0,
@@ -1136,20 +1178,39 @@ impl Streaming {
             self.submit(None, 0, Job::Free(meshes));
         }
     }
-    /// A column the server unloaded (ClientboundForgetLevelChunkPacket).
-    pub fn forget(&mut self, world: &mut World, x: i32, z: i32) -> Option<Arc<Chunk>> {
-        self.lit.remove(&(x, z));
-        self.meshed.remove(&(x, z));
-        self.lighting.remove(&(x, z));
-        // By key, not by a pass over every pending section: a moved or
-        // shrunk storage forgets thousands of columns in one frame.
-        for sy in 0..world.layout().sections() as i32 {
-            self.meshing.remove(&(x, sy, z));
-            self.compile_started.remove(&(x, sy, z));
-            self.waiting.remove(&(x, sy, z));
+    /// The columns the server unloaded (ClientboundForgetLevelChunkPacket),
+    /// often thousands at once (a teleport or a moved view): their pending
+    /// sections go through [`forget_pending_sections`]. Returns the chunks
+    /// they held.
+    pub fn forget_columns(
+        &mut self,
+        world: &mut World,
+        gone: &FxHashSet<(i32, i32)>,
+    ) -> Vec<Arc<Chunk>> {
+        // Every column held (a far teleport): no pending section is left to keep, and a
+        // pass over them all (80,000 at render distance 32) took 1.7 ms of the frame.
+        if world.chunks.keys().all(|column| gone.contains(column)) {
+            self.meshing.clear();
+            self.compile_started.clear();
+            self.waiting.clear();
+        } else {
+            forget_pending_sections(
+                &mut self.meshing,
+                &mut self.compile_started,
+                &mut self.waiting,
+                gone,
+                world.layout().sections() as i32,
+            );
         }
-        world.dirty_sections.take_column(x, z);
-        world.chunks.remove(&(x, z))
+        let mut chunks = Vec::with_capacity(gone.len());
+        for &(x, z) in gone {
+            self.lit.remove(&(x, z));
+            self.meshed.remove(&(x, z));
+            self.lighting.remove(&(x, z));
+            world.dirty_sections.take_column(x, z);
+            chunks.extend(world.chunks.remove(&(x, z)));
+        }
+        chunks
     }
     /// Queue a job for the column `at`, nearest first: its distance (`distance`)
     /// times four plus `bias`, which orders a column's jobs. A job without a
@@ -1462,6 +1523,26 @@ impl Streaming {
             && self.viewing.is_empty()
             && self.finishing.is_empty()
             && self.lighting.is_empty())
+    }
+    /// The proto chunks held (not checked out): how many, their heap bytes by
+    /// part and their sections by bits per block; and the light views of
+    /// them with their bytes. For `horizon-ctl memory`.
+    pub fn proto_census(&self) -> ProtoCensus {
+        let mut census = ProtoCensus::default();
+        for proto in self.protos.values().flatten() {
+            let (bytes, bits) = (self.proto_bytes)(proto);
+            census.protos += 1;
+            for (sum, b) in census.bytes.iter_mut().zip(bytes) {
+                *sum += b;
+            }
+            for (sum, b) in census.sections_by_bits.iter_mut().zip(bits) {
+                *sum += b;
+            }
+        }
+        census.light_views = self.light_views.len();
+        census.light_view_bytes = self.light_views.values().map(|v| v.heap_bytes()).sum();
+        census.caches = (self.caches)();
+        census
     }
     /// How much work each stage holds: queued jobs, then what is in flight or
     /// waiting at each step from generation to meshing.
@@ -2761,6 +2842,34 @@ fn whole_relight_columns(
     (columns, inline)
 }
 
+/// Drops the pending sections (`meshing`, `compile_started`, `waiting`) of
+/// the `gone` columns: one pass over each store when that is cheaper than a
+/// lookup per section of every column (a far teleport at render distance 32
+/// forgets ~3,700 columns, 1.7 ms of lookups), else by key.
+fn forget_pending_sections(
+    meshing: &mut FxHashMap<(i32, i32, i32), u64>,
+    compile_started: &mut FxHashMap<(i32, i32, i32), u64>,
+    waiting: &mut FxHashSet<(i32, i32, i32)>,
+    gone: &FxHashSet<(i32, i32)>,
+    sections: i32,
+) {
+    let lookups = gone.len().saturating_mul(sections.max(0) as usize);
+    if lookups > meshing.len() + compile_started.len() + waiting.len() {
+        let kept = |&(x, _, z): &(i32, i32, i32)| !gone.contains(&(x, z));
+        meshing.retain(|k, _| kept(k));
+        compile_started.retain(|k, _| kept(k));
+        waiting.retain(kept);
+    } else {
+        for &(x, z) in gone {
+            for sy in 0..sections {
+                meshing.remove(&(x, sy, z));
+                compile_started.remove(&(x, sy, z));
+                waiting.remove(&(x, sy, z));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2906,6 +3015,42 @@ mod tests {
                 .is_none()
         );
         assert!(waiting.elapsed() >= std::time::Duration::from_millis(10));
+    }
+
+    /// Whether the forgotten columns are few (looked up by key) or many
+    /// (one pass over each store), exactly their pending sections go.
+    #[test]
+    fn forgotten_columns_lose_their_pending_sections_either_way() {
+        let pending: Vec<(i32, i32, i32)> = (0..4)
+            .flat_map(|x| (0..3).map(move |sy| (x, sy, -x)))
+            .collect();
+        for gone in [
+            vec![(1, -1)],
+            (0..400)
+                .map(|x| (x, -x))
+                .filter(|&c| c != (2, -2))
+                .collect(),
+        ] {
+            let gone: FxHashSet<(i32, i32)> = gone.into_iter().collect();
+            let mut meshing: FxHashMap<_, u64> = pending.iter().map(|&k| (k, 1)).collect();
+            let mut started = meshing.clone();
+            let mut waiting: FxHashSet<_> = pending.iter().copied().collect();
+            forget_pending_sections(&mut meshing, &mut started, &mut waiting, &gone, 3);
+            let mut left: Vec<_> = waiting.into_iter().collect();
+            left.sort();
+            let expected: Vec<_> = pending
+                .iter()
+                .copied()
+                .filter(|&(x, _, z)| !gone.contains(&(x, z)))
+                .collect();
+            assert_eq!(left, expected, "{} gone", gone.len());
+            let mut left: Vec<_> = meshing.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+            let mut left: Vec<_> = started.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+        }
     }
 
     /// Edits in two neighbouring columns light those and the ten around

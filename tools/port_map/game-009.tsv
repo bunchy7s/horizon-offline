@@ -65,7 +65,7 @@ BreathAirGoal.givesAir	inline	crates/horizon-client/src/mobs/goals.rs::BreathAir
 BreedGoal.getFreePartner	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: minor: the partner's isPanicking is not tested (Seen has no panic flag)
 CatLieOnBlockGoal.isValidTarget	port	crates/horizon-client/src/mobs/tame.rs::can_lie_on	
 CatSitOnBlockGoal.isValidTarget	port	crates/horizon-client/src/mobs/tame.rs::can_sit_on	
-ClimbOnTopOfPowderSnowGoal.canUse	missing		player: rabbits, foxes, silverfish and endermites that end up in powder snow never jump to climb out (goal missing from their registration)
+ClimbOnTopOfPowderSnowGoal.canUse	port	crates/horizon-client/src/mobs/goals.rs::ClimbOnTopOfPowderSnow::can_use	in powder snow and a powder-snow walker, with powder snow or no collision above: foxes, rabbits, silverfish and endermites all register the goal
 DolphinJumpGoal.waterIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_use	water at each step and not a blocks_dolphin_jump block
 DolphinJumpGoal.surfaceIsClear	inline	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_use	two air blocks above each step
 DolphinJumpGoal.canContinueToUse	port	crates/horizon-client/src/mobs/dolphin.rs::Jump::can_continue	
@@ -96,7 +96,7 @@ RangedCrossbowAttackGoal.isValidTarget	inline	crates/horizon-client/src/mobs/ill
 RemoveBlockGoal.getPosWithBlock	inline	crates/horizon-client/src/mobs/undead.rs::AttackTurtleEgg::tick	own cell, below, west, east, north, south, two below
 RunAroundLikeCrazyGoal.start	inline	crates/horizon-client/src/mobs/equine.rs::RunAroundLikeCrazy::can_use	navigation to the random spot starts in can_use
 SpearUseGoal	home	crates/horizon-client/src/mobs/spear_use.rs	
-SpearUseGoal.SpearUseState	missing		player: see SpearUseGoal
+SpearUseGoal.SpearUseState	home	crates/horizon-client/src/mobs/spear_use.rs	the charge's engagement phase, its spear-down timer and the flee state (struct SpearUseState)
 StrollThroughVillageGoal.tick	missing		minor: foxes do not wander through villages at night (goal missing; no village-bound step)
 StrollThroughVillageGoal.moveRandomly	missing		minor: foxes do not wander through villages at night
 TemptGoal.shouldFollow	inline	crates/horizon-client/src/mobs/goals.rs::Tempt::can_use	main hand or off hand holds a tempt item
