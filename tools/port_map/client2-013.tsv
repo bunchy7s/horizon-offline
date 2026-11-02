@@ -99,13 +99,13 @@ AccessibilityOnboardingScreen.setInitialFocus	missing		minor: keyboard focus sta
 AccessibilityOnboardingScreen.closeAndSetScreen	port	crates/horizon-client/src/title.rs::Title::click_action	
 AccessibilityOnboardingScreen.extractRenderState	port	crates/horizon-client/src/title/onboarding.rs::Title::draw_onboarding	
 AccessibilityOnboardingScreen.handleInitialNarrationDelay	skip:other		screen-reader narration; Horizon has no narration output
-AlertScreen	missing		unsure: no alert screen (title, message, OK) found in Horizon; vanilla callers are world-open, recovery and pack errors (WorldOpenFlows.java, RecoverWorldDataScreen.java, PackSelectionScreen.java)
-BackupConfirmScreen	missing		unsure: no backup question before opening a world that needs one (WorldOpenFlows.java:375, EditWorldScreen.java:111); Horizon's backup is only Make Backup (title.rs)
-BanNoticeScreens	missing		unsure: no ban or suspension notice for a multiplayer ban, forced name change or banned skin; Horizon reads no BanDetails or profile action (Gui.java addInitialScreens)
-ChatScreen.removed	missing		player: unfinished chat text is kept when the chat is interrupted or with Save Chat Drafts on; Horizon's close_chat (game/chat.rs) drops it
-ChatScreen.shouldDiscardDraft	missing		player: decides whether closing chat keeps the typed text as a draft; Horizon has no draft state
+AlertScreen	home	crates/horizon-client/src/title.rs	Alert::Incompatible and Alert::Recreate are the two alerts (title at 70, text at 90): their OK and Cancel buttons in Title::buttons, their drawing in Title::draw_with_items, their narration in Title::narration
+BackupConfirmScreen	home	crates/horizon-client/src/title.rs	the backup question before opening a world whose file fixes are due, and Edit World's Optimize World with the Erase Cached Data box; drawn in Title::draw_with_items, Escape runs its cancel in Title::escape
+BanNoticeScreens	home	crates/horizon-client-render/src/ban_notice.rs,crates/horizon-client/src/title.rs	the multiplayer, name and skin bans queued as Notice, each with its title, message (reason, status, duration) and help link; Title::next_ban_notice opens them as ConfirmLinkScreen, Title::click_action handles Open in Browser and Copy
+ChatScreen.removed	port	crates/horizon-client/src/game/chat.rs::Game::keep_chat_draft	the text left in the box becomes the draft unless shouldDiscardDraft; blank text discards it, and a draft still shown unchanged stays as it is
+ChatScreen.shouldDiscardDraft	port	crates/horizon-client/src/game/chat.rs::should_discard_draft	kept on interruption, and on Escape only with Save Chat Drafts; sent text discards it
 ChatScreen.insertText	port	crates/horizon-client-render/src/chat.rs::ChatScreen::type_text	insert at the cursor; replace=true (setValue) is ChatScreen::suggest_command in Horizon
-ChatScreen.formatChat	missing		minor: a restored draft is drawn grey italic; Horizon has no draft state (see ChatScreen.removed)
+ChatScreen.formatChat	missing		minor: the restored draft is typed into the box as plain text; chat_draft_shown is tracked but never colours the input grey italic
 ChatScreen.updateNarrationState	skip:other		screen-reader narration; Horizon has no narration output
 ChatScreen.handleChatInput	port	crates/horizon-client/src/game/chat.rs::Game::handle_chat_input	the message is normalized first (ChatScreen.normalizeChatMessage), then into history, then a command or a chat line
 ChatScreen.normalizeChatMessage	port	crates/horizon-client-render/src/chat.rs::normalize_chat_message	String.trim, then normalizeSpace (one space per whitespace run), then the first 256 UTF-16 units (StringUtil.trimChatMessage)

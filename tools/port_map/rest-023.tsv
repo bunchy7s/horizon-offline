@@ -24,8 +24,8 @@ Util.getRegisteredName	skip:debug		registry key text for logs and debug output (
 Util.allOf	skip:java		predicate combinator
 Util.anyOf	skip:java		predicate combinator
 Util.growByHalf	skip:java		array growth; Rust Vec grows itself
-Util.findNextInIterable	missing		player: an op with a debug stick in creative right-clicks and no block state property cycles to the next value; Horizon has no DebugStickItem behaviour (only datafix and item model names)
-Util.findPreviousInIterable	missing		player: the same debug stick sneak-click does not cycle a property backwards; Horizon has no DebugStickItem behaviour
+Util.findNextInIterable	port	crates/horizon-client/src/game/debug_stick.rs::Game::debug_stick_interact	the debug stick cycles a property forward, and backward while sneaking
+Util.findPreviousInIterable	port	crates/horizon-client/src/game/debug_stick.rs::Game::debug_stick_interact	same function: relative_index walks the value list backward on sneak
 Util.makeEnumMap	skip:java		EnumMap builder
 Util.mapValues	skip:java		map stream helper
 Util.sequence	skip:java		future combinator

@@ -6,6 +6,9 @@
 //! is oversized in the GUI (`GuiItemAtlas` draws each item into a scissored
 //! 16x16 slot; oversized items get a picture-in-picture of their bounds).
 use super::{Foil, Glint, ItemQuad, ItemRenderState, ItemRenderer, SpecialHost};
+use crate::cit::Rule;
+use crate::cit_glint::StackGlint;
+use crate::hud::cit_glint::{GlintTextures, layer_uv, vertex_color};
 use crate::hud::{HudBatch, Rect};
 use glam::{EulerRot, Mat4, Vec2, Vec3};
 use std::{collections::HashMap, f32::consts::PI, sync::Arc};
@@ -125,6 +128,50 @@ fn emit(batch: &mut HudBatch, fan: &[Point], color: impl Fn(Vec2) -> u32, glint:
     }
 }
 
+/// A stack's OptiFine CIT glint layers this frame.
+#[derive(Clone, Copy)]
+struct CitDraw<'a> {
+    glint: &'a StackGlint,
+    textures: &'a GlintTextures,
+    rules: &'a [Rule],
+    millis: f32,
+}
+
+/// The CIT glint layers over the item's clipped faces (`fans`, in draw order), bottom first:
+/// each layer is one run over all of them, blended as its rule says, at its intensity times
+/// the glint strength option (`HudBatch::glint_alpha`).
+fn emit_cit(batch: &mut HudBatch, fans: &[Vec<Point>], cit: CitDraw) {
+    let seconds = f64::from(cit.millis) / 1000.0;
+    for (i, layer) in cit.glint.layers.iter().enumerate() {
+        let Some(slot) = cit.textures.slot_of.get(layer.rule).copied().flatten() else {
+            continue;
+        };
+        let Some(constants) = cit.textures.slots.get(usize::from(slot)) else {
+            continue;
+        };
+        let intensity = cit.glint.intensity(i, seconds) * batch.glint_alpha;
+        if intensity <= 0.0 {
+            continue;
+        }
+        let glint = &cit.rules[layer.rule].glint;
+        let color = vertex_color(slot, intensity);
+        let uv = |v: Point| layer_uv(v.glint_uv, cit.millis, glint.speed, glint.rotation, 8.0);
+        let start = batch.vertices.len();
+        for fan in fans {
+            for k in 1..fan.len().saturating_sub(1) {
+                let corners = [fan[0], fan[k], fan[k + 1], fan[k + 1]];
+                batch.quad_glint(
+                    corners.map(|v| v.p.to_array()),
+                    corners.map(|v| v.uv),
+                    corners.map(uv),
+                    color,
+                );
+            }
+        }
+        batch.blend_since(start, crate::hud::Blend::CitGlint(constants.blend));
+    }
+}
+
 /// Submit, light, cull, sort and clip one item's quads into `batch` at GUI
 /// position `(x, y)`.
 #[allow(clippy::too_many_arguments)]
@@ -236,7 +283,7 @@ impl DrawnKey {
         x: f32,
         y: f32,
     ) -> Option<Self> {
-        if state.animated {
+        if state.animated || state.cit_glint.is_some() {
             return None;
         }
         let layers = state
@@ -316,7 +363,14 @@ fn draw_now(
             scale: 8.0,
         });
     batch.glint_alpha = glint_alpha;
-    draw_quads(&quads, lights, batch, rect, glint.as_ref());
+    let cit = state.cit_glint.as_deref().zip(renderer.cit.as_ref());
+    let cit = cit.map(|(glint, models)| CitDraw {
+        glint,
+        textures: &models.glint_textures,
+        rules: &models.rules.rules,
+        millis: time * 1000.0,
+    });
+    draw_quads_with(&quads, lights, batch, rect, glint.as_ref(), cit);
 }
 
 /// Lights, culls, sorts far to near and clips `quads` (GUI positions) to
@@ -328,6 +382,20 @@ fn draw_quads(
     rect: [f32; 4],
     glint: Option<&Glint>,
 ) {
+    draw_quads_with(quads, lights, batch, rect, glint, None);
+}
+
+/// [`draw_quads`], then a stack's CIT glint layers over every face.
+fn draw_quads_with(
+    quads: &[ItemQuad],
+    lights: (Vec3, Vec3),
+    batch: &mut HudBatch,
+    rect: [f32; 4],
+    glint: Option<&Glint>,
+    cit: Option<CitDraw>,
+) {
+    // The faces the CIT layers go over once the item is drawn.
+    let mut fans = Vec::new();
     for face in depth::sort(quads) {
         let q = &quads[face.quad];
         let points: Vec<_> = face
@@ -350,7 +418,13 @@ fn draw_quads(
             if q.foil != Foil::None {
                 emit(batch, &fan, |_| color, glint);
             }
+            if cit.is_some() {
+                fans.push(fan);
+            }
         }
+    }
+    if let Some(cit) = cit {
+        emit_cit(batch, &fans, cit);
     }
 }
 
@@ -609,6 +683,65 @@ mod tests {
                 color_at(&batch, Vec2::new(4.0, y)),
                 Some(lit_color(&quads[2], (Vec3::Z, Vec3::Z)))
             );
+        }
+    }
+
+    #[test]
+    fn cit_layers_draw_once_over_the_whole_item() {
+        use crate::cit_glint::Global;
+        use crate::hud::Blend;
+        use crate::hud::cit_glint::Slot;
+        use horizon_optifine::Properties;
+        let rule = |name: &str, text: &str| {
+            let path = format!("assets/minecraft/optifine/cit/{name}.properties");
+            let text = format!("type=enchantment\ntexture=glint\n{text}");
+            Rule::parse(&path, &Properties::parse_equals_first(&text), |_| true).unwrap()
+        };
+        let rules = [
+            rule("shown", ""),
+            rule("fire", "layer=1\nenchantments=fire_aspect"),
+        ];
+        // Shared by level, and the stack has no Fire Aspect: that layer is at intensity 0.
+        let global = Global::parse(&Properties::parse_equals_first("method=average"));
+        let glint = StackGlint::new(&rules, &[0, 1], &[("minecraft:sharpness", 3)], &global);
+        assert_eq!(glint.layers.len(), 2);
+        let slot = |blend| Slot {
+            rgba: [1.0; 4],
+            blur: false,
+            blend,
+        };
+        let textures = GlintTextures {
+            width: 1,
+            height: 1,
+            slot_of: vec![Some(1), Some(0)],
+            slots: vec![slot(0), slot(1)],
+            ..GlintTextures::default()
+        };
+        let cit = CitDraw {
+            glint: &glint,
+            textures: &textures,
+            rules: &rules,
+            millis: 0.0,
+        };
+        let mut batch = HudBatch::new([320, 240]);
+        batch.glint_alpha = 0.5;
+        draw_quads_with(
+            &[face(0.0, 8.0, |_| 0.0, 0xFFFF_FFFF)],
+            (Vec3::Z, Vec3::Z),
+            &mut batch,
+            [0.0, 0.0, 16.0, 16.0],
+            None,
+            Some(cit),
+        );
+        // The square's two triangles, then the one layer over both: six vertices a triangle.
+        assert_eq!(batch.vertices.len(), 24);
+        assert_eq!(
+            batch.runs(),
+            [(0..12, Blend::Alpha), (12..24, Blend::CitGlint(1))]
+        );
+        for v in &batch.vertices[12..] {
+            // Slot 1 in red; full intensity at half the glint strength in alpha.
+            assert_eq!(v.color.to_le_bytes(), [1, 0, 0, 128]);
         }
     }
 

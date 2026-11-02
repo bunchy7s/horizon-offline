@@ -89,7 +89,17 @@ impl Game<'_> {
     /// `ItemStack.hurtAndBreak` for the player's `stack`: the wear Unbreaking
     /// leaves, and `ItemDurabilityTrigger` when some is left (`applyDamage`).
     pub(super) fn wear(&mut self, stack: &ItemStack, amount: u32) -> u32 {
-        let loss = self.durability_loss(stack, amount);
+        let mut loss = self.durability_loss(stack, amount);
+        // The mods hear a server player's wear once Unbreaking has had its say,
+        // and may change it or stop it.
+        if loss > 0
+            && let (Some(uuid), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        {
+            let mut points = loss as i32;
+            let mut cancel = false;
+            self.native_item_damaged(uuid, &name, &stack.item, &mut points, &mut cancel);
+            loss = if cancel { 0 } else { points.max(0) as u32 };
+        }
         if loss > 0 {
             self.trigger_item_durability(stack, stack.damage + loss);
         }
@@ -574,9 +584,21 @@ impl Game<'_> {
                 return amount;
             }
             current.damage -= repaired;
+            let item = current.item.to_string();
+            let player = (self.serving.is_some() || self.options.dedicated.is_some())
+                .then(|| self.native_acting_id());
             let remaining = amount.saturating_sub(
                 (u64::from(repaired) * u64::from(amount) / u64::from(to_repair_xp)) as u32,
             );
+            if let Some(player) = player
+                && let Some(name) = self
+                    .native_server_players()
+                    .into_iter()
+                    .find(|p| p.uuid == player)
+                    .map(|p| p.name)
+            {
+                self.native_player_item_mend(player, &name, &item, repaired, amount);
+            }
             if remaining == 0 {
                 return 0;
             }

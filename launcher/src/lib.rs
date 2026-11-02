@@ -3,6 +3,7 @@ pub mod account;
 pub mod agents;
 pub mod backend;
 pub mod browser;
+pub mod build_import;
 pub mod datapacks;
 pub mod desktop;
 pub mod desktop_seams;
@@ -15,6 +16,8 @@ pub mod github_mods;
 pub mod heads;
 pub mod i18n;
 pub mod import;
+#[cfg(windows)]
+pub mod installer;
 pub mod instances;
 pub mod java;
 pub mod java_launch;

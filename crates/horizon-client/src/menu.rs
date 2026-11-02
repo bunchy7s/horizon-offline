@@ -297,6 +297,9 @@ pub struct Menu {
     /// Recipes whose result was taken (`awardUsedRecipes`) and the stacks that
     /// went into each, for the caller.
     pub crafted: Vec<(String, Vec<Option<ItemStack>>)>,
+    /// A crafting grid's result taken (`ResultSlot.onTake`): the recipe and
+    /// the stack taken, for the caller (`native_item_crafted`).
+    pub item_crafted: Vec<(String, ItemStack)>,
     /// Potions taken from a brewing stand's bottle slots
     /// (`PotionSlot.onTake`), for the caller.
     pub brewed: Vec<ItemStack>,
@@ -403,7 +406,7 @@ pub fn native_menu_slot_rules(
     may_place: &mut bool,
     max_stack: &mut u32,
 ) {
-    let _ = (menu, slot, stack, may_place, max_stack);
+    crate::native_client_hooks::menu_slot_rules(menu, slot, stack, may_place, max_stack);
 }
 
 /// An index outside the slot list: vanilla's `IndexOutOfBoundsException`.
@@ -729,6 +732,7 @@ impl Menu {
             sounds: Vec::new(),
             player_sounds: Vec::new(),
             crafted: Vec::new(),
+            item_crafted: Vec::new(),
             brewed: Vec::new(),
             equipped: Vec::new(),
             merchant: None,
@@ -1467,7 +1471,9 @@ impl Menu {
             Role::Plain if self.kind == Kind::Lectern && self.slots[s].container == MAIN => 1,
             Role::Fuel if Self::is_bucket(stack) => return 1,
             Role::Mod | Role::ModResult => self.mod_slot(s, stack).1,
-            _ => CONTAINER_MAX,
+            // `Container.getMaxStackSize` is vanilla's 99, which no data pack's
+            // item reaches; a native mod's item may, and its own size is the cap.
+            _ => u32::MAX,
         };
         own.min(Self::max_stack(env, stack))
     }
@@ -1485,7 +1491,7 @@ impl Menu {
         if (slot.container == MAIN || slot.role == Role::LoomResult)
             && let Some(st) = stack.as_mut()
         {
-            st.count = st.count.min(CONTAINER_MAX.min(Self::max_stack(env, st)));
+            st.count = st.count.min(Self::max_stack(env, st));
             // The beacon's container holds one item (getMaxStackSize 1).
             if self.kind == Kind::Beacon {
                 st.count = st.count.min(1);
@@ -1732,6 +1738,8 @@ impl Menu {
         let grid = self.containers[GRID].clone();
         if let Some((id, _)) = env.recipes.find(&grid, n) {
             self.crafted.push((format!("minecraft:{id}"), grid.clone()));
+            self.item_crafted
+                .push((format!("minecraft:{id}"), taken.clone()));
         }
         let remaining = env
             .recipes
@@ -1867,7 +1875,7 @@ impl Menu {
                 inv[i].as_ref().is_some_and(|have| {
                     have.same_item_same_components(stack)
                         && Self::stackable(env, have)
-                        && have.count < CONTAINER_MAX.min(Self::max_stack(env, have))
+                        && have.count < Self::max_stack(env, have)
                 })
             })
     }
@@ -1885,7 +1893,7 @@ impl Menu {
             empty.count = 0;
             empty
         });
-        let room = CONTAINER_MAX.min(Self::max_stack(env, cell)) - cell.count;
+        let room = Self::max_stack(env, cell).saturating_sub(cell.count);
         let add = stack.count.min(room);
         cell.count += add;
         tidy(&mut self.containers[PLAYER][slot]);
@@ -2535,6 +2543,12 @@ impl Menu {
             }
             Some(_) => false,
         }
+    }
+
+    /// Whether a drag (quick craft) is in progress (`quickcraftStatus != 0`):
+    /// the next click other than a quick craft only ends it.
+    pub fn quick_crafting(&self) -> bool {
+        self.quick_status != 0
     }
 
     fn reset_quick_craft(&mut self) {
@@ -3292,6 +3306,25 @@ pub(crate) mod tests {
         });
     }
 
+    /// A crafting grid's result taken is recorded for `native_item_crafted`:
+    /// the recipe the grid matched and the stack the player took.
+    #[test]
+    fn taking_a_crafting_result_records_the_crafted_stack() {
+        with_menu(Kind::Crafting, |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 1, stack("oak_log", 1));
+            menu.settle(env);
+            menu.click(env, 0, 0, Input::Pickup).unwrap();
+            assert_eq!(
+                menu.item_crafted,
+                vec![(
+                    "minecraft:oak_planks".to_owned(),
+                    stack("oak_planks", 4).unwrap()
+                )]
+            );
+        });
+    }
+
     #[test]
     fn quick_move_landing_routes_plain_containers() {
         for (kind, size) in [
@@ -3432,6 +3465,31 @@ pub(crate) mod tests {
             chest.click(env, 0, 0, Input::QuickMove).unwrap();
             assert!(chest.equipped.is_empty());
         });
+    }
+
+    #[test]
+    fn installed_slot_rules_change_mod_menu_placement() {
+        let installed =
+            crate::native_client_hooks::install(crate::native_client_hooks::NativeClientHooks {
+                menu_slot_rules: |menu, slot, _, may_place, max_stack| {
+                    if menu == "test:rules" && slot == 0 {
+                        *may_place = false;
+                        *max_stack = 7;
+                    }
+                },
+                living_breathe: |_, _, _, _, _| {},
+                ingredient: |_, _, _| {},
+            });
+        assert!(installed.is_ok());
+        let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
+            id: "test:rules",
+            slots: 1,
+            data_slots: 0,
+            results: vec![],
+        })));
+        let menu = Menu::new(kind);
+        let stack = ItemStack::new("minecraft:stone", 1);
+        assert_eq!(menu.mod_slot(0, &stack), (false, 7));
     }
 
     /// A mod menu type: three slots, then a result (slot 3).
@@ -3613,6 +3671,27 @@ pub(crate) mod tests {
             assert_eq!(menu.slot(1).map(|s| s.count), Some(32));
             assert_eq!(menu.carried, None);
             assert_eq!(menu.quick_status, 0);
+        });
+    }
+
+    /// #6907: a drag in progress is seen from outside the menu, and a
+    /// quick move during it only ends the drag (`doClick`'s resetQuickCraft).
+    #[test]
+    fn a_quick_move_during_a_drag_only_ends_it() {
+        with_menu(Kind::Chest(3), |env, menu| {
+            menu.creative = false;
+            menu.set_slot(env, 27, stack("dirt", 10));
+            menu.carried = stack("cobblestone", 64);
+            assert!(!menu.quick_crafting());
+            // Start a left drag, then drag across chest slot 0.
+            menu.click(env, -999, 0, Input::QuickCraft).unwrap();
+            menu.click(env, 0, 1, Input::QuickCraft).unwrap();
+            assert!(menu.quick_crafting());
+            // A shift-click now moves nothing and ends the drag.
+            menu.click(env, 27, 0, Input::QuickMove).unwrap();
+            assert!(!menu.quick_crafting());
+            assert_eq!(menu.slot(27).map(|s| s.count), Some(10));
+            assert_eq!(menu.slot(0), None);
         });
     }
 

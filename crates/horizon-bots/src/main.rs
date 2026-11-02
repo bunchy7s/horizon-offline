@@ -14,7 +14,8 @@
 //!
 //!   horizon-bots --server 127.0.0.1:25565 --bots 25 --behaviour mixed --seconds 360 --report bots.json
 //!
-//! It prints one JSON line a second (bots online, chunks received) and writes a summary with `--report`.
+//! It prints one JSON line a second (bots online, chunks received), one with the first bot's spawn position, and
+//! writes a summary with `--report`.
 //! A bot moves only while it holds the chunk it stands in: vanilla's client stops ticking its player in a chunk
 //! it hasn't received, so a player can't outrun the server's chunk sending, on any server.
 //! Each bot also keeps the chunks it holds, as a client's chunk cache does, so the report tells chunks that
@@ -102,6 +103,8 @@ horizon-bots: load-test bots for a Minecraft Java Edition 26.3 server (offline m
                          to test what a server takes
   --timer F              cheat, to test an anticheat: tick F times as fast as vanilla's client (1.5: 30 Hz)
   --report FILE          a JSON summary at the end (- prints it after the per-second lines)
+  --capture FILE         record the first bot's play packets (milliseconds since it joined, id, body)
+                         for crates/horizon-protocol/examples/net_replay.rs
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -177,6 +180,8 @@ struct Options {
     /// The `minecraft:brand` to send, if any.
     brand: Option<String>,
     report: Option<String>,
+    /// --capture: where the first bot's play packets go.
+    capture: Option<String>,
     /// How many times as fast as vanilla's 20 Hz the bots tick (a timer cheat above 1).
     timer: f64,
 }
@@ -207,6 +212,7 @@ fn options() -> Result<Options, String> {
         click: None,
         name: "Bot".into(),
         report: None,
+        capture: None,
         brand: None,
         timer: 1.0,
     };
@@ -256,6 +262,7 @@ fn options() -> Result<Options, String> {
             "--attack-rounds" => o.attack_rounds = value.parse().map_err(|_| number("a number"))?,
             "--name" => o.name = value,
             "--report" => o.report = Some(value),
+            "--capture" => o.capture = Some(value),
             "--brand" => o.brand = Some(value),
             "--give" => {
                 for part in value.split(',') {
@@ -819,12 +826,53 @@ impl BatchSize {
     }
 }
 
+/// `--capture`: one record per play packet, little-endian: u32 milliseconds since the
+/// bot joined, i32 packet id, u32 body length, then the body (without the id).
+struct Capture {
+    out: std::io::BufWriter<std::fs::File>,
+    start: Instant,
+    /// The second last flushed: the process may end before the reader thread does.
+    flushed: u32,
+}
+impl Capture {
+    fn create(path: &str) -> Option<Self> {
+        match std::fs::File::create(path) {
+            Ok(file) => Some(Self {
+                out: std::io::BufWriter::new(file),
+                start: Instant::now(),
+                flushed: 0,
+            }),
+            Err(e) => {
+                eprintln!("--capture {path}: {e}");
+                None
+            }
+        }
+    }
+    fn record(&mut self, id: i32, body: &[u8]) {
+        use std::io::Write;
+        let ms = self.start.elapsed().as_millis() as u32;
+        let mut head = [0u8; 12];
+        head[..4].copy_from_slice(&ms.to_le_bytes());
+        head[4..8].copy_from_slice(&id.to_le_bytes());
+        head[8..].copy_from_slice(&(body.len() as u32).to_le_bytes());
+        let _ = self
+            .out
+            .write_all(&head)
+            .and_then(|()| self.out.write_all(body));
+        if ms / 1000 != self.flushed {
+            self.flushed = ms / 1000;
+            let _ = self.out.flush();
+        }
+    }
+}
+
 /// Reads the play state: answers what a client must answer, counts chunks, records teleports.
 fn read(
     mut reader: horizon_protocol::connection::ConnReader,
     writer: Arc<Mutex<ConnWriter>>,
     bot: Arc<Bot>,
     track: bool,
+    mut capture: Option<Capture>,
 ) {
     use ids::play::clientbound as cb;
     use ids::play::serverbound as sb;
@@ -848,6 +896,9 @@ fn read(
                 return;
             }
         };
+        if let Some(c) = &mut capture {
+            c.record(id, &body);
+        }
         let mut r = Reader::new(&body);
         let sent = match id {
             cb::KEEP_ALIVE => match r.i64() {
@@ -1007,7 +1058,10 @@ fn run_bot(
     {
         let (writer, bot) = (writer.clone(), bot.clone());
         let track = behaviour == Behaviour::Fight;
-        thread::spawn(move || read(reader, writer, bot, track));
+        let capture = (index == 0)
+            .then(|| o.capture.as_deref().and_then(Capture::create))
+            .flatten();
+        thread::spawn(move || read(reader, writer, bot, track, capture));
     }
     use ids::play::serverbound as sb;
     // Wait for the spawn position.
@@ -1025,6 +1079,10 @@ fn run_bot(
     };
     bot.joined_after_ms
         .store(asked.elapsed().as_millis() as u64, Ordering::SeqCst);
+    if index == 0 {
+        // Where the bots gather, for a client that comes to watch them (tools/perf_bench.py --server-bots).
+        println!("{}", json!({ "spawn": spawn }));
+    }
     let send = |body: Vec<u8>| lock(&writer).send(&body).is_ok();
     if !o.no_loaded {
         send(raw(sb::PLAYER_LOADED, |_| {}));

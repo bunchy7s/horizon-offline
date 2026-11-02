@@ -57,6 +57,8 @@ POSITIONAL = {
     'click_button': ['label'], 'type': ['text'], 'wait': ['ticks'], 'wait_ready': ['seconds'],
     'command': ['command'], 'look_at_block': ['x', 'y', 'z'], 'click': ['id'], 'set': ['id', 'value'],
     'give': ['item', 'count'], 'options_get': ['keys'], 'options_set': ['key', 'value'],
+    'record_start': ['name'], 'record_replay': ['name'], 'repro_export': ['name', 'path'],
+    'turn': ['dyaw', 'dpitch'],
     'wait_for': ['condition', 'value'], 'open': ['world', 'seed', 'mode'], 'select': ['slot'],
     'summon': ['kind', 'x', 'y', 'z'], 'interact_entity': ['id'], 'effect': ['id', 'seconds', 'amplifier'],
     'xp': ['levels'], 'options': ['page'], 'lan': ['action'], 'world_backup': ['folder'],
@@ -447,6 +449,119 @@ def events_scenario(d, out):
     return {'events': len(events)}
 
 
+def repro_scenario(d, out):
+    # Input provenance and the repro recording: who caused what, the recording on disk,
+    # the bundle a bug report carries, and a replay ending where the recording did.
+    import zipfile
+
+    d('click', id='singleplayer')
+    if 'game' not in widgets(d):
+        d('click', id='create-new-world')
+    d('type', field='name', replace=True, text='Repro')
+    d('click', id='create-new-world')
+    d('wait_for', condition='loaded', timeout=400)
+
+    # Everything the control socket does is the agent's input.
+    d('give', item='stone', count=1)
+    # Stand still on the ground first: the world copy's player data and the
+    # recording start from the same place, so the replay can follow.
+    for _ in range(200):
+        state = d('state')
+        player = state['player']
+        # Standing still: gravity keeps a small downward velocity on the ground.
+        if (player['on_ground'] and abs(player['velocity'][0]) < 0.01
+                and abs(player['velocity'][2]) < 0.01):
+            break
+        d('wait', ticks=2)
+    else:
+        raise AssertionError(f'the player never settled: {player}')
+    provenance = state['input']
+    assert provenance['last_origin'] == 'agent', provenance
+    assert provenance['counts']['agent'] >= 1, provenance
+
+    name = 'e2e-repro'
+    started = d('record_start', name=name)
+    record_dir = Path(started['dir'])
+    assert started['ok'] and record_dir.is_dir(), started
+
+    # Walk a moment, so the recording has key events and a state trail.
+    d('key', key='w', action='down')
+    d('wait', ticks=25)
+    d('key', key='w', action='up')
+    # A deterministic change the replay must reproduce even when the spawn is
+    # against a wall and the walk moves nowhere.
+    d('turn', dyaw=45, dpitch=0)
+    d('wait', ticks=5)
+    entries = d('input_log', origin='agent', limit=50)['events']
+    assert any(e.get('line', '').startswith('key w down') for e in entries), entries
+    assert any(e.get('line', '').startswith('key w up') for e in entries), entries
+    # Read-only polls and session commands never reach the input log.
+    assert not any(e.get('line', '').startswith(('state', 'record-stop')) for e in entries), entries
+    status = d('record_status')['recording']
+    assert status and status['inputs'] > 0, status
+    stopped = d('record_stop')
+    assert stopped['inputs'] > 0 and stopped['state'] > 0, stopped
+
+    # On disk: one JSON line per input and the state keyframes the tick wrote,
+    # not only the final one `record-stop` appends.
+    inputs = [json.loads(line) for line in (record_dir / 'inputs.jsonl').read_text().splitlines() if line.strip()]
+    assert inputs and inputs[0]['origin'] == 'agent' and 'tick' in inputs[0], inputs[:2]
+    assert any(e.get('line') == 'key w down' for e in inputs), inputs
+    # Only real input: no read-only polls and no session commands.
+    assert 3 <= len(inputs) <= 10, f'unexpected input log: {inputs[:10]}'
+    states = [json.loads(line) for line in (record_dir / 'state.jsonl').read_text().splitlines() if line.strip()]
+    keyframes = [s for s in states if s['kind'] == 'state']
+    assert len(keyframes) >= 2, f'the tick did not write keyframes: {states[:2]}'
+    first_state = keyframes[0]['state']['player']
+    last_state = keyframes[-1]['state']['player']
+    walked = sum((a - b) ** 2 for a, b in zip(first_state['position'], last_state['position'])) ** 0.5
+    turned = abs((last_state['yaw'] - first_state['yaw'] + 180) % 360 - 180)
+    assert walked >= 2.0 or turned >= 20.0, (
+        f'the recording did not see the input: {walked:.2f} blocks, {turned:.1f} degrees')
+    assert (record_dir / 'events.jsonl').is_file() and (record_dir / 'session.json').is_file()
+    assert (record_dir / 'world' / 'level.dat').is_file(), 'the world copy is missing'
+
+    # The bundle: the recording, the logs and a status in one zip.
+    bundle = d('repro_export', name=name)
+    zip_path = Path(bundle['path'])
+    assert zip_path.is_file() and zip_path.stat().st_size > 0, bundle
+    with zipfile.ZipFile(zip_path) as archive:
+        names = archive.namelist()
+    prefix = record_dir.name
+    for wanted in ('session.json', 'inputs.jsonl', 'state.jsonl', 'events.jsonl', 'README.txt'):
+        assert f'{prefix}/{wanted}' in names, (wanted, names)
+    assert 'status.json' in names and 'logs/latest.log' in names, names
+    assert any(name.endswith('/world/level.dat') for name in names), names
+
+    # The replay: the recording's world opens and its input runs again.
+    replayed = d('record_replay', name=name, timeout=120)
+    assert replayed['ok'] and replayed['events'] > 0, replayed
+    for _ in range(240):
+        state = d('state')
+        if state['input'].get('replay') is None:
+            break
+        time.sleep(0.25)
+    else:
+        raise AssertionError('the replay did not finish')
+    # How it ended, and that every recorded input ran (none skipped: the
+    # recording holds only key/wait commands).
+    ended_event = next((e for e in d('events')['events']
+                        if e.get('event') == 'replay' and e.get('state') in ('done', 'timeout')), None)
+    assert ended_event and ended_event['state'] == 'done', ended_event
+    assert ended_event['skipped'] == 0 and ended_event['sent'] == ended_event['total'], ended_event
+    ended_player = state['player']
+    want_player = keyframes[-1]['state']['player']
+    ended = ended_player['position']
+    want = want_player['position']
+    distance = sum((a - b) ** 2 for a, b in zip(ended, want)) ** 0.5
+    yaw_error = abs((ended_player['yaw'] - want_player['yaw'] + 180) % 360 - 180)
+    assert yaw_error < 10.0, f'the replay ended facing {ended_player["yaw"]}, the recording {want_player["yaw"]}' 
+    # Best effort: the same inputs on the same saved world, not frame-perfect.
+    assert distance < 4.0, f'the replay ended at {ended}, the recording at {want} ({distance:.2f})'
+    return {'inputs': len(inputs), 'keyframes': len(keyframes), 'bundle': zip_path.name,
+            'replay_distance': round(distance, 2)}
+
+
 def consume_scenario(d, out):
     # Consumables finish as vanilla's Consumable.onConsume: always-edible food at full hunger with its
     # effects, milk and honey (no food or drink sounds) with their effects and use remainders, and
@@ -793,7 +908,8 @@ def pause_save_scenario(d, out):
 
 SCENARIOS = {'survival': scenario, 'ui': ui_scenario, 'options': options_scenario, 'events': events_scenario,
              'consume': consume_scenario, 'use-screen': use_screen_scenario, 'pick': pick_scenario,
-             'suggestions': suggestions_scenario, 'manage': manage_scenario, 'pause-save': pause_save_scenario}
+             'suggestions': suggestions_scenario, 'manage': manage_scenario, 'pause-save': pause_save_scenario,
+             'repro': repro_scenario}
 
 
 REFUSAL = "AI features are off: turn off No AI in the launcher's settings"

@@ -117,6 +117,16 @@ fn add_default_block_entities(kinds: &[Option<&str>], out: &mut Chunk, raw: &mut
 }
 
 impl VanillaTerrain {
+    /// A mod's sign takes its template's block entity, whatever its name: a
+    /// feature that places one leaves it with text to edit.
+    pub fn add_mod_signs(&mut self, facts: &crate::blocks::BlockFacts) {
+        for (state, kind) in self.block_entity_types.iter_mut().enumerate() {
+            let state = horizon_world::registry::BlockStateId(state as u32);
+            if let Some(form) = facts.get(state).sign_form() {
+                *kind = Some(form.block_entity_type());
+            }
+        }
+    }
     fn client_surface(&self, surface: SurfaceSample) -> crate::lod::Surface {
         crate::lod::Surface {
             height: surface.height,
