@@ -3917,6 +3917,17 @@ impl Game<'_> {
         let _ = (dimension, chunk, count);
     }
 
+    /// Entities in `chunk` left the active server world and were queued for
+    /// saving. `count` is the number of entity records. @API:native_entities_unload@.
+    pub(super) fn native_entities_unload(
+        &mut self,
+        dimension: &str,
+        chunk: [i32; 2],
+        count: usize,
+    ) {
+        let _ = (dimension, chunk, count);
+    }
+
     /// A click in a menu a mod opened (`native_open_menu`), which moved
     /// nothing: the menu's `slot` (its own first, then the player's
     /// inventory, `native_menu_inventory_slot`; -999 outside), the `button`

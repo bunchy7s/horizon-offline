@@ -1611,8 +1611,15 @@ impl Game<'_> {
         self.spawn_loaded_entities();
         let keys: HashSet<(i32, i32)> = unloaded.iter().map(|c| (c.x, c.z)).collect();
         let chunks = self.entity_chunks(&keys, true);
+        let counts: Vec<_> = chunks
+            .iter()
+            .map(|(key, entities)| (*key, entities.len()))
+            .collect();
         if let Err(e) = self.save.save_entities_later(chunks) {
             log::warn!("Horizon: failed to save entities: {e}");
+        }
+        for (chunk, count) in counts {
+            self.native_entities_unload(self.dim.id(), [chunk.0, chunk.1], count);
         }
     }
     /// Leaving a dimension: its entities are saved with it.
