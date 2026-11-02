@@ -48,6 +48,10 @@ struct Plan {
 }
 const QUADS: u32 = u32::MAX;
 const GROUP_LIMIT: u32 = 65535;
+/// The page keys of the translucent arena (`Renderer::translucent_arena`, Translucent
+/// Batching): its page plus this. The section arena's pages are their own keys, all far
+/// below it. A call names its key: its vertices come from that arena's page.
+pub const TRANSLUCENT_KEYS: u32 = 1 << 10;
 
 struct PageTable {
     /// Section id of every block of the page.
@@ -67,6 +71,7 @@ pub(super) const ALPHA_ONLY: wgpu::BlendState = wgpu::BlendState {
 /// A run of the frame's index list drawn from one arena page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Call {
+    /// The page's key (`TRANSLUCENT_KEYS`).
     pub page: u32,
     pub first: u32,
     pub count: u32,
@@ -98,6 +103,9 @@ pub struct Flat {
     /// The layout of a page's bind group 1 (shader packs' terrain pipelines share it).
     pub(super) draw_layout: wgpu::BindGroupLayout,
     blocks_per_page: u64,
+    /// Blocks of a translucent arena page (`TRANSLUCENT_KEYS`), whose pages are larger.
+    translucent_blocks_per_page: u64,
+    /// Block tables by page key.
     pages: Vec<Option<PageTable>>,
     free_ids: Vec<u32>,
     next_id: u32,
@@ -218,7 +226,14 @@ fn buffer(
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(16),
-        usage: usage | wgpu::BufferUsages::COPY_DST,
+        // Tests read the tables back.
+        usage: usage
+            | wgpu::BufferUsages::COPY_DST
+            | if cfg!(test) {
+                wgpu::BufferUsages::COPY_SRC
+            } else {
+                wgpu::BufferUsages::empty()
+            },
         mapped_at_creation: false,
     })
 }
@@ -242,6 +257,7 @@ fn plan(
     shadow: [usize; 2],
     passes: [usize; 2],
     align: u64,
+    key: impl Fn(u32, Option<u32>) -> u32,
     calls: &mut Vec<Call>,
     ranges: &mut Vec<Range>,
     segments: &mut Vec<(Source, u64, u64)>,
@@ -273,6 +289,7 @@ fn plan(
         }
         let starts =
             i == phase1_draws || i == solid_draws || shadow.contains(&i) || passes.contains(&i);
+        let page = key(page, sorted);
         match calls.last_mut() {
             Some(last) if last.page == page && !starts => last.count += d[0],
             _ => calls.push(Call {
@@ -451,6 +468,7 @@ impl Flat {
             phase2_group: None,
             draw_layout,
             blocks_per_page: page_vertices.div_ceil(GRAIN),
+            translucent_blocks_per_page: page_vertices.div_ceil(GRAIN),
             pages: Vec::new(),
             free_ids: Vec::new(),
             next_id: 0,
@@ -479,8 +497,8 @@ impl Flat {
                 .max(1),
         }
     }
-    /// A section uploaded to `vertices` vertices from `start` of `page`: its
-    /// id, which its blocks now name (written through `uploads` in `encoder`).
+    /// A section uploaded to `vertices` vertices from `start` of the page keyed `page`:
+    /// its id, which its blocks now name (written through `uploads` in `encoder`).
     pub fn add(
         &mut self,
         device: &wgpu::Device,
@@ -494,6 +512,28 @@ impl Flat {
             self.next_id += 1;
             self.next_id - 1
         });
+        self.place(device, encoder, uploads, id, page, start, vertices);
+        id
+    }
+    /// Makes the blocks of `vertices` vertices from `start` of the page keyed `page` name
+    /// `id`: a section's other range (its translucent quads, in the translucent arena), or
+    /// a range that moved.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        uploads: &mut super::upload::Uploads,
+        id: u32,
+        page: u32,
+        start: u64,
+        vertices: u64,
+    ) {
+        let blocks = if page >= TRANSLUCENT_KEYS {
+            self.translucent_blocks_per_page
+        } else {
+            self.blocks_per_page
+        };
         let page = page as usize;
         if self.pages.len() <= page {
             self.pages.resize_with(page + 1, || None);
@@ -502,7 +542,7 @@ impl Flat {
             blocks: buffer(
                 device,
                 "Section ids by block",
-                self.blocks_per_page * 4,
+                blocks * 4,
                 wgpu::BufferUsages::STORAGE,
             ),
             group: None,
@@ -515,7 +555,19 @@ impl Flat {
             first * 4,
             bytemuck::cast_slice(&ids),
         );
-        id
+    }
+    /// The block table of the page keyed `page`, for tests that read it back.
+    #[cfg(test)]
+    pub(super) fn blocks(&self, page: u32) -> &wgpu::Buffer {
+        &self.pages[page as usize]
+            .as_ref()
+            .expect("a page table")
+            .blocks
+    }
+    /// The most vertices a page of the translucent arena holds: its block tables' size.
+    /// Tables made before keep theirs, so this goes with `clear`.
+    pub fn set_translucent_page_vertices(&mut self, vertices: u64) {
+        self.translucent_blocks_per_page = vertices.div_ceil(GRAIN);
     }
     pub fn remove(&mut self, id: u32) {
         self.free_ids.push(id);
@@ -525,7 +577,7 @@ impl Flat {
         self.free_ids.clear();
         self.next_id = 0;
     }
-    /// Forgets the tables of pages the arena released.
+    /// Forgets the tables of pages the arenas released (`live`, by page key).
     pub fn trim(&mut self, live: impl Fn(u32) -> bool) {
         for (i, page) in self.pages.iter_mut().enumerate() {
             if page.is_some() && !live(i as u32) {
@@ -556,6 +608,7 @@ impl Flat {
         shadow: [usize; 2],
         passes: [usize; 2],
         phase2: Option<&wgpu::Buffer>,
+        translucent_arena: bool,
         origins: impl Iterator<Item = (u32, [f32; 4])>,
         sorted_page: impl Fn(u32) -> wgpu::Buffer,
         timing: Option<&mut super::pack_timing::PassTiming>,
@@ -609,6 +662,11 @@ impl Flat {
             shadow,
             passes,
             self.range_align,
+            // Translucent draws, and only they, have sorted indices.
+            |page, sorted| match sorted {
+                Some(_) if translucent_arena => page + TRANSLUCENT_KEYS,
+                _ => page,
+            },
             &mut self.calls,
             &mut self.range_data,
             &mut self.segments,
@@ -801,7 +859,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         self.draw_with(pass, calls, vertices, |_, _| {});
     }
@@ -811,7 +869,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
         page: impl Fn(&mut wgpu::RenderPass<'_>, u32),
     ) {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -828,7 +886,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
         page: impl Fn(&mut wgpu::RenderPass<'_>, u32),
         instances: u32,
     ) {
@@ -842,7 +900,7 @@ impl Flat {
     pub fn draw_phase2<'a>(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         for (k, call) in self.calls[self.phase1_calls..self.solid_calls]
@@ -857,13 +915,13 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         page: u32,
-        vertices: &impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: &impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         let table = self.pages[page as usize]
             .as_ref()
             .and_then(|t| t.group.as_ref())
             .expect("prepared page");
-        pass.set_vertex_buffer(0, vertices(page).slice(..));
+        pass.set_vertex_buffer(0, vertices(page));
         pass.set_bind_group(1, table, &[]);
     }
 }
@@ -912,6 +970,7 @@ mod tests {
             [draws.len(); 2],
             [draws.len(), 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -960,6 +1019,7 @@ mod tests {
             [draws.len(); 2],
             [3, 1],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -995,6 +1055,7 @@ mod tests {
             [camera, camera + 2],
             [camera, 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -1023,6 +1084,7 @@ mod tests {
             [draws.len(); 2],
             [draws.len(), 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -1140,6 +1202,7 @@ mod tests {
                 [draws.len(); 2],
                 [draws.len(), 0],
                 align,
+                |page, _| page,
                 &mut calls,
                 &mut ranges,
                 &mut segments,

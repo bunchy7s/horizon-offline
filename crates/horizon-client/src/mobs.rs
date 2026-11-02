@@ -1212,6 +1212,11 @@ pub struct Mob {
     /// The packs' random texture variants it wears (`random_textures::choose`).
     pub random_textures: random_textures::Choice,
 }
+impl crate::entity_rules::EntityRules for Mob {
+    fn is_no_gravity(&self) -> bool {
+        self.no_gravity
+    }
+}
 /// A mannequin's `description` and `hide_description` (`Mannequin.updateDescription`):
 /// the default `entity.minecraft.mannequin.label`, none at all, or a component.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1279,6 +1284,15 @@ pub enum MobEvent {
     /// (a count of 0 is one particle moving by speed times spread).
     LevelParticles {
         kind: &'static str,
+        at: [f64; 3],
+        spread: [f64; 3],
+        speed: f64,
+        count: u32,
+    },
+    /// `ServerLevel.sendParticles` of an `ItemParticleOption`: `count` crumbs of
+    /// `item`, drawn in this window.
+    ItemParticles {
+        item: &'static str,
         at: [f64; 3],
         spread: [f64; 3],
         speed: f64,
@@ -3048,6 +3062,14 @@ impl Mob {
             if crack(before) != crack(after) {
                 self.outbox
                     .push(MobEvent::Sound("item.wolf_armor.crack", at, 1.0, 1.0));
+                // Twenty scutes fly off, a block above the wolf's feet.
+                self.outbox.push(MobEvent::ItemParticles {
+                    item: "minecraft:armadillo_scute",
+                    at: [at[0], at[1] + 1.0, at[2]],
+                    spread: [0.2, 0.1, 0.2],
+                    speed: 0.1,
+                    count: 20,
+                });
             }
         }
     }

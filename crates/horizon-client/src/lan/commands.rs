@@ -103,6 +103,20 @@ impl CommandTree {
         builtin: &Builtin,
         extra: &Value,
     ) -> Commands {
+        self.packet_with_features(level, dedicated, builtin, extra, &[])
+    }
+
+    pub fn packet_with_features(
+        &self,
+        level: u8,
+        dedicated: bool,
+        builtin: &Builtin,
+        extra: &Value,
+        features: &[String],
+    ) -> Commands {
+        let minecart_improvements = features
+            .iter()
+            .any(|f| f == crate::gamerules::MINECART_IMPROVEMENTS);
         let mut nodes = vec![Node {
             name: String::new(),
             kind: 0,
@@ -123,6 +137,7 @@ impl CommandTree {
                 &mut Vec::new(),
                 level,
                 dedicated,
+                minecart_improvements,
                 &suggestions,
                 &mut nodes,
                 &mut paths,
@@ -183,6 +198,7 @@ fn fill(
     path: &mut Vec<String>,
     level: u8,
     dedicated: bool,
+    minecart_improvements: bool,
     suggestions: &HashMap<&str, &'static str>,
     nodes: &mut Vec<Node>,
     paths: &mut HashMap<Vec<String>, usize>,
@@ -215,6 +231,7 @@ fn fill(
         if required > level
             || path.len() == 1
                 && path[0] == "gamerule"
+                && !minecart_improvements
                 && EXPERIMENTAL_RULES.contains(&name.as_str())
         {
             continue;
@@ -255,6 +272,7 @@ fn fill(
             path,
             level,
             dedicated,
+            minecart_improvements,
             suggestions,
             nodes,
             paths,

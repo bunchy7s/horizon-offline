@@ -196,8 +196,8 @@ impl StateModels {
             // Vanilla's BlockStateModelLoader: a definition that does not
             // read or bind is logged and its block gets no model; the other
             // blocks still load.
-            let loaded = fs::read_to_string(
-                root.join(format!("assets/{namespace}/blockstates/{path}.json")),
+            let loaded = horizon_core::prepared_files::read_to_string(
+                &root.join(format!("assets/{namespace}/blockstates/{path}.json")),
             )
             .map_err(|e| e.to_string())
             .and_then(|text| BlockStateDefinition::from_json(&text).map_err(|e| e.to_string()))
