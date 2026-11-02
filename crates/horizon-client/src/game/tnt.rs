@@ -27,7 +27,7 @@ pub(super) struct PrimedTnt {
     pub no_gravity: bool,
 }
 impl PrimedTnt {
-    const SIZE: f64 = 0.98;
+    pub(super) const SIZE: f64 = 0.98;
     pub(super) fn bounds(&self) -> Aabb {
         let h = Self::SIZE / 2.0;
         Aabb::new(

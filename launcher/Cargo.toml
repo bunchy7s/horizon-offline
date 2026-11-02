@@ -37,6 +37,8 @@ clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 horizon-theme = { path = "../crates/horizon-theme" }
 horizon-core = { path = "../crates/horizon-core" }
+# `horizon-launcher mcp`: the Model Context Protocol, shared with horizon-ctl and horizon-server.
+horizon-mcp = { path = "../crates/horizon-mcp" }
 horizon-prepare = { path = "../crates/horizon-prepare" }
 # Join a friend: invite codes (the game does the joining).
 horizon-friends = { path = "../crates/horizon-friends" }

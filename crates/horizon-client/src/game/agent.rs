@@ -466,7 +466,7 @@ impl Game<'_> {
         json!({ "kind": kind, "block": block, "entity": entity })
     }
 
-    fn state_value(&self) -> Value {
+    pub(super) fn state_value(&self) -> Value {
         let player = self.player.as_ref().map(|p| {
             json!({
                 "position": [p.position.x, p.position.y, p.position.z],
@@ -497,7 +497,7 @@ impl Game<'_> {
                 "effects": self.potions.effects.list.iter().map(|e| json!({ "id": e.id, "duration_ticks": e.duration, "amplifier": e.amplifier })).collect::<Vec<_>>(),
             })
         });
-        json!({
+        let mut state = json!({
             "dialog": self.dialog_status(),
             "screen": self.screen_label(),
             "menu": (self.title.is_some() || self.split_profiles_open() || self.split_setup_open()).then(|| self.title_value()),
@@ -527,7 +527,13 @@ impl Game<'_> {
             "looking_at": self.looking_at(),
             "busy": self.agent.task.as_ref().map(|t| t.name),
             "ticks": self.ticks,
-        })
+        });
+        // Who caused the input, and whether a repro recording runs.
+        let mut input = self.input_trace.summary();
+        self.repro
+            .fill_summary(&mut input, self.input_trace.events());
+        state["input"] = input;
+        state
     }
 
     /// Splitscreen's profile page, a joining player's (`split_profiles`).
@@ -664,7 +670,7 @@ impl Game<'_> {
         }
     }
 
-    fn entities_value(&self, radius: f64, kind: Option<&str>) -> Value {
+    pub(super) fn entities_value(&self, radius: f64, kind: Option<&str>) -> Value {
         let Some(p) = &self.player else {
             return json!({ "entities": [] });
         };
@@ -718,7 +724,7 @@ impl Game<'_> {
         json!({ "entities": list.into_iter().map(|(_, v)| v).collect::<Vec<_>>() })
     }
 
-    fn inventory_value(&self) -> Value {
+    pub(super) fn inventory_value(&self) -> Value {
         let armor = ["head", "chest", "legs", "feet"];
         json!({
             "selected": self.selected + 1,
@@ -1009,6 +1015,7 @@ impl Game<'_> {
                     device_id,
                     position,
                 },
+                super::input_trace::InputOrigin::Agent,
             );
             if i == 0 {
                 self.handle_window_event(
@@ -1019,6 +1026,7 @@ impl Game<'_> {
                         state: ElementState::Pressed,
                         button,
                     },
+                    super::input_trace::InputOrigin::Agent,
                 );
             }
         }
@@ -1030,6 +1038,7 @@ impl Game<'_> {
                 state: ElementState::Released,
                 button,
             },
+            super::input_trace::InputOrigin::Agent,
         );
         Ok(())
     }
@@ -1048,6 +1057,11 @@ impl Game<'_> {
             name,
         });
         Ok(Handled::Deferred)
+    }
+
+    /// A deferred agent action (goto, break, wait...) is still running.
+    pub(super) fn agent_busy(&self) -> bool {
+        self.agent.task.is_some()
     }
 
     /// Agent commands; `Handled::No` when `words[0]` is not one of them.
@@ -1589,6 +1603,7 @@ impl Game<'_> {
                         device_id,
                         position,
                     },
+                    super::input_trace::InputOrigin::Agent,
                 );
                 for _ in 0..steps.abs() as u32 {
                     self.handle_window_event(
@@ -1599,6 +1614,7 @@ impl Game<'_> {
                             delta: MouseScrollDelta::LineDelta(0.0, steps.signum()),
                             phase: TouchPhase::Moved,
                         },
+                        super::input_trace::InputOrigin::Agent,
                     );
                 }
                 ok(json!({ "ok": true, "screen": self.screen_label() }))

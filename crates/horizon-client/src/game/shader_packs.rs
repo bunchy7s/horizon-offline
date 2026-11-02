@@ -140,6 +140,8 @@ pub(super) struct PackIds {
     vignette: bool,
     /// `oldLighting`: `true` keeps the game's face shading in the block colours.
     old_lighting: bool,
+    /// `separateAo`: `true` passes AO factor in vertex alpha and keeps pure tint in RGB.
+    pub(super) separate_ao: bool,
 }
 
 impl Game<'_> {
@@ -156,6 +158,11 @@ impl Game<'_> {
         let pack_lighting = self.pack_ids.as_ref().is_some_and(|ids| !ids.old_lighting);
         if self.streaming.shader_pack_lighting != pack_lighting {
             self.streaming.shader_pack_lighting = pack_lighting;
+            self.all_sections_changed();
+        }
+        let separate_ao = self.pack_ids.as_ref().is_some_and(|ids| ids.separate_ao);
+        if self.streaming.separate_ao != separate_ao {
+            self.streaming.separate_ao = separate_ao;
             self.all_sections_changed();
         }
         let picked = picked_pack(&self.settings).to_owned();
@@ -209,6 +216,10 @@ impl Game<'_> {
                                 note.message
                             );
                         }
+                        let separate_ao = properties
+                            .get("separateAo")
+                            .is_some_and(|v| v.trim() == "true");
+                        renderer.set_separate_ao(separate_ao);
                         let folder = dimension_folder(&pack, dimension);
                         let inputs = renderer.pack_inputs();
                         let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
@@ -246,6 +257,7 @@ impl Game<'_> {
                             old_lighting: properties
                                 .get("oldLighting")
                                 .is_some_and(|v| v.trim() == "true"),
+                            separate_ao,
                             entities: entities.plain(),
                             missing_entity: if text.is_some() { 65535 } else { 0 },
                             missing_block: if ids.is_empty() { 0 } else { 65535 },
