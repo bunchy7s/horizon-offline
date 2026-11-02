@@ -4534,6 +4534,54 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// A mob converted into another type (NeoForge's
+    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
+    /// place. Fires with `native_entity_transform`, after the new mob joined
+    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// API @API:living_conversion_post@.
+    fn living_conversion_post(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingConversionPostEvent<'_>,
+    ) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A mob is about to convert into another type (NeoForge's
+    /// `LivingConversionEvent.Pre`, vanilla's `Mob.convertTo`): a zombie
+    /// drowning, a piglin or hoglin in the Overworld, a tadpole growing, a
+    /// mooshroom sheared by a dispenser, a pig or villager struck by
+    /// lightning. `outcome` is the new type. Set `cancel` to keep the mob as
+    /// it is; a drowning zombie starts its timers again. Not told: a
+    /// mooshroom a player shears, a zombie villager's cure, a villager turned
+    /// by a zombie. API @API:living_conversion_pre@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_conversion_pre(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingConversionPreEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
+    /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
+    /// experience and death message have not run. `entity` is its id and
+    /// `kind` its type (`minecraft:zombie`, `minecraft:player`); `damage_type`
+    /// names the last blow (`minecraft:player_attack`) and `attacker` is the
+    /// mob that dealt it, 0 for none or a player. Set `cancel` to keep it alive:
+    /// Horizon decides death by health, so it stays at 1 health. The hook
+    /// fires once per death attempt. Armor stands, boats and other non-mob
+    /// entities are not told. API @API:living_death@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn living_death(&self, host: &mut dyn Host, event: &mut LivingDeathEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
@@ -13908,6 +13956,98 @@ pub fn dispatch_item_container(
     for mod_hook in super::entered(mods, "item_container") {
         if let Some(replacement) = mod_hook.item_container(host, &mut event) {
             *slots = Some(replacement);
+            break;
+        }
+    }
+}
+/// What [`Hooks::living_conversion_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingConversionPostEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub converted: u32,
+    pub converted_kind: &'a str,
+}
+pub fn dispatch_living_conversion_post(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    converted: u32,
+    converted_kind: &str,
+) {
+    let mut event = LivingConversionPostEvent {
+        entity,
+        kind,
+        converted,
+        converted_kind,
+    };
+    for mod_hook in super::entered(mods, "living_conversion_post") {
+        mod_hook.living_conversion_post(host, &mut event);
+    }
+}
+/// What [`Hooks::living_conversion_pre`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingConversionPreEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub outcome: &'a str,
+}
+pub fn dispatch_living_conversion_pre(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    outcome: &str,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingConversionPreEvent {
+        entity,
+        kind,
+        outcome,
+    };
+    for mod_hook in super::entered(mods, "living_conversion_pre") {
+        if matches!(
+            mod_hook.living_conversion_pre(host, &mut event),
+            Flow::Cancel
+        ) {
+            *cancel = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::living_death`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingDeathEvent<'a> {
+    pub entity: u32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub attacker: u32,
+}
+pub fn dispatch_living_death(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: u32,
+    kind: &str,
+    damage_type: &str,
+    attacker: u32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = LivingDeathEvent {
+        entity,
+        kind,
+        damage_type,
+        attacker,
+    };
+    for mod_hook in super::entered(mods, "living_death") {
+        if matches!(mod_hook.living_death(host, &mut event), Flow::Cancel) {
+            *cancel = true;
             break;
         }
     }
