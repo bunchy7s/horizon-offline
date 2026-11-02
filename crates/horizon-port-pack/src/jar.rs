@@ -42,10 +42,12 @@ pub fn read(path: &Path) -> Result<JarInfo, String> {
         zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
         Some(s)
     };
-    let mut info = if let Some(t) = text(&mut zip, "META-INF/neoforge.mods.toml")
-        .or_else(|| text(&mut zip, "META-INF/mods.toml"))
-    {
-        mods_toml(&t)?
+    let tomls: Vec<String> = ["META-INF/neoforge.mods.toml", "META-INF/mods.toml"]
+        .iter()
+        .filter_map(|n| text(&mut zip, n))
+        .collect();
+    let mut info = if !tomls.is_empty() {
+        metadata(&tomls)?
     } else if let Some(t) = text(&mut zip, "fabric.mod.json") {
         fabric(&t)?
     } else if let Some(t) = text(&mut zip, "mcmod.info") {
@@ -82,6 +84,71 @@ fn manifest_value(manifest: &str, key: &str) -> Option<String> {
         .find_map(|l| l.strip_prefix(key)?.strip_prefix(':'))
         .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty())
+}
+
+/// The jar's mod from its metadata files (`neoforge.mods.toml` first, then
+/// `mods.toml`). A jar built for one loader may carry the other loader's file
+/// as an unfilled template (`modId = "${id}"`, `[[dependencies.${id}]]`), which
+/// its own loader never reads: the first file that parses and names a real mod
+/// id is the one. When none parses, the first file is read line by line
+/// ([`mods_toml_lines`]), as a loader that reads past what it does not need.
+pub fn metadata(tomls: &[String]) -> Result<JarInfo, String> {
+    let real = |i: &JarInfo| !i.mod_id.is_empty() && !i.mod_id.contains("${");
+    let mut first_error = None;
+    for t in tomls {
+        match mods_toml(t) {
+            Ok(i) if real(&i) => return Ok(i),
+            Ok(_) => {}
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    tomls
+        .iter()
+        .map(|t| mods_toml_lines(t))
+        .find(real)
+        .ok_or_else(|| first_error.unwrap_or_else(|| "mods.toml: no [[mods]] modId".into()))
+}
+
+/// The first `[[mods]]` table's `modId`, `displayName` and `version` and the
+/// top-level `license`, read line by line (`key = "value"`, `#` comments), for
+/// a metadata file a TOML parser refuses. Dependencies are not read.
+pub fn mods_toml_lines(text: &str) -> JarInfo {
+    let mut info = JarInfo::default();
+    // 0: top level, 1: the first [[mods]], 2: past it.
+    let mut section = 0;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            let name = line.trim_matches(['[', ']']).trim();
+            section = match (section, name) {
+                (0, "mods") => 1,
+                _ => 2,
+            };
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        let Some(value) = value
+            .strip_prefix('"')
+            .and_then(|v| v.split_once('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.split_once('\'')))
+            .map(|(v, _)| v.to_owned())
+        else {
+            continue;
+        };
+        match (section, key.trim()) {
+            (0, "license") => info.license = value,
+            (1, "modId") if info.mod_id.is_empty() => info.mod_id = value,
+            (1, "displayName") => info.name = value,
+            (1, "version") => info.version = value,
+            _ => {}
+        }
+    }
+    info
 }
 
 /// `[[mods]]` (the first one is the jar's mod), the top-level `license`, and
@@ -293,6 +360,34 @@ mandatory = true
             ("ruby", "1.2.0", "MIT")
         );
         assert_eq!(info.depends, ["geckolib", "curios"]);
+    }
+
+    /// Drip Sounds' Forge jar carries an unfilled NeoForge template beside its
+    /// `mods.toml`; a file no parser reads still gives its id line by line.
+    #[test]
+    fn templates_and_broken_files_are_read_tolerantly() {
+        let template = "license = \"LGPL\"\n[[mods]]\nmodId = \"${id}\"\nversion = \"${version}\"\n\n[[dependencies.${id}]]\nmodId = \"minecraft\"\n";
+        let forge = "license = \"LGPL-3.0-only\"\n[[mods]]\nmodId = \"waterdripsound\"\ndisplayName = \"Drip Sounds\"\nversion = \"0.6.3\"\n[[dependencies.waterdripsound]]\nmodId = \"cloth_config\"\nmandatory = true\n";
+        assert!(mods_toml(template).is_err());
+        let info = metadata(&[template.to_owned(), forge.to_owned()]).unwrap();
+        assert_eq!(
+            (info.mod_id.as_str(), info.version.as_str()),
+            ("waterdripsound", "0.6.3")
+        );
+        assert_eq!(info.depends, ["cloth_config"]);
+        // Nothing parses: the lines still name the mod (a duplicate key is a TOML error).
+        let broken = "license = 'MIT' # x\n[[mods]]\nmodId = \"ruby\"\nmodId = \"ruby\"\nversion = \"2\"\ndisplayName = \"Ruby\"\n[[mods]]\nmodId = \"other\"\n";
+        assert!(mods_toml(broken).is_err());
+        let info = metadata(&[template.to_owned(), broken.to_owned()]).unwrap();
+        assert_eq!(
+            (
+                info.mod_id.as_str(),
+                info.name.as_str(),
+                info.license.as_str()
+            ),
+            ("ruby", "Ruby", "MIT")
+        );
+        assert!(metadata(&[template.to_owned()]).is_err());
     }
 
     #[test]
