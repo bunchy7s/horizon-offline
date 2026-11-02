@@ -20,7 +20,12 @@ use horizon_world::{
     registry::{BlockRegistry, BlockStateId},
 };
 use serde_json::Value;
-use std::{collections::HashMap, f32::consts::PI, path::Path, sync::Mutex};
+use std::{
+    collections::HashMap,
+    f32::consts::PI,
+    path::Path,
+    sync::{Arc, Mutex, PoisonError, RwLock},
+};
 
 /// One baked `ModelPart`: initial pose, textured polygons (pixel units,
 /// normalized UVs) and named children.
@@ -802,15 +807,101 @@ pub struct Scene<'a> {
 /// Empty by default (a dedicated server): no state has a block entity model.
 #[derive(Default)]
 pub struct BlockEntityRenderer {
-    models: HashMap<&'static str, ModelPart>,
+    vanilla: Arc<BlockEntityShapes>,
+    /// What draws: `vanilla`, or the packs' custom entity models over it.
+    shapes: RwLock<Arc<BlockEntityShapes>>,
     kinds: Vec<Kind>,
-    // Closed chest geometry: dimension lighting, chest part, horizontal facing.
-    closed_chests: [[[Vec<Vertex>; 4]; 3]; 2],
     /// Item id to its `PROVIDES_POTTERY_PATTERN` side texture (`Sheets.DECORATED_POT_MAPPER`).
     pot_patterns: HashMap<String, String>,
     /// `Block.shouldRenderFace` for End gateway faces (its occlusion pair cache needs a lock).
     visibility: Option<Mutex<FaceVisibility>>,
     sign_texts: Mutex<SignTexts>,
+}
+/// The block-entity models and what is baked from them: vanilla's, or the packs' custom entity
+/// models over them ([`crate::block_entity_cem`]).
+#[derive(Default)]
+pub struct BlockEntityShapes {
+    models: HashMap<&'static str, ModelPart>,
+    /// Closed chest geometry by chest model: dimension lighting, horizontal facing.
+    closed_chests: HashMap<&'static str, [[Vec<Vertex>; 4]; 2]>,
+    /// A `.jem`'s texture (atlas name) by model, drawn instead of vanilla's.
+    textures: HashMap<&'static str, String>,
+}
+/// The chest models, each baked with its lid closed.
+const CHEST_MODELS: [&str; 7] = [
+    "chest",
+    "double_chest_left",
+    "double_chest_right",
+    "trapped_chest",
+    "trapped_chest_left",
+    "trapped_chest_right",
+    "ender_chest",
+];
+impl BlockEntityShapes {
+    fn new(
+        models: HashMap<&'static str, ModelPart>,
+        textures: HashMap<&'static str, String>,
+    ) -> Self {
+        let closed_chests = CHEST_MODELS
+            .iter()
+            .filter_map(|key| Some((*key, closed_chest(models.get(key)?))))
+            .collect();
+        Self {
+            models,
+            closed_chests,
+            textures,
+        }
+    }
+    /// The texture model `key` draws with: its `.jem`'s when the atlas has it, else `vanilla`.
+    fn texture<'a>(
+        &'a self,
+        key: &str,
+        vanilla: &'a str,
+        sprites: &HashMap<String, Rect>,
+    ) -> &'a str {
+        match self.textures.get(key) {
+            Some(texture) if sprites.contains_key(texture) => texture,
+            _ => vanilla,
+        }
+    }
+}
+/// A chest model with its lid closed, for each dimension lighting and horizontal facing, its UVs
+/// over the whole texture.
+fn closed_chest(model: &ModelPart) -> [[Vec<Vertex>; 4]; 2] {
+    [false, true].map(|nether| {
+        [0.0f32, 90.0, 180.0, 270.0].map(|y_rot| {
+            let mut vertices = Vec::new();
+            draw_part(
+                model,
+                "root",
+                around(
+                    Mat4::from_rotation_y((-y_rot).to_radians()),
+                    Vec3::new(0.5, 0.0, 0.5),
+                ),
+                &|name, p| {
+                    if name == "lid" || name == "lock" {
+                        p[3] = crate::block_entity_anim::chest_lid_x_rot(0.0);
+                    }
+                },
+                Paint {
+                    sprite: Rect {
+                        u0: 0.0,
+                        v0: 0.0,
+                        u1: 1.0,
+                        v1: 1.0,
+                        w: 16,
+                        h: 16,
+                    },
+                    tint: 0xFFFFFF,
+                    light: 0,
+                    lights: diffuse_lights(nether),
+                    glow: None,
+                },
+                &mut vertices,
+            );
+            vertices
+        })
+    })
 }
 /// Laid-out sign text by position. `AbstractSignRenderer` lays the text out
 /// again each frame, glyph by glyph; its vertices only change with what is
@@ -894,6 +985,8 @@ impl BlockEntityRenderer {
             .collect();
         let mut renderer = Self::new(models, registry);
         renderer.visibility = Some(Mutex::new(visibility));
+        // The packs' custom entity models (`.jem` files), before anything draws.
+        renderer.set_shapes(renderer.shapes_for(root));
         // Sherd items: provides_pottery_pattern -> decorated_pot_pattern asset id.
         let items = match horizon_world::item_defaults::read(root) {
             Ok(items) => items,
@@ -920,44 +1013,7 @@ impl BlockEntityRenderer {
         Ok(renderer)
     }
     fn new(models: HashMap<&'static str, ModelPart>, registry: &BlockRegistry) -> Self {
-        let closed_chests = [false, true].map(|nether| {
-            ["chest", "double_chest_left", "double_chest_right"].map(|name| {
-                [0.0f32, 90.0, 180.0, 270.0].map(|y_rot| {
-                    let mut vertices = Vec::new();
-                    if let Some(model) = models.get(name) {
-                        draw_part(
-                            model,
-                            "root",
-                            around(
-                                Mat4::from_rotation_y((-y_rot).to_radians()),
-                                Vec3::new(0.5, 0.0, 0.5),
-                            ),
-                            &|name, p| {
-                                if name == "lid" || name == "lock" {
-                                    p[3] = crate::block_entity_anim::chest_lid_x_rot(0.0);
-                                }
-                            },
-                            Paint {
-                                sprite: Rect {
-                                    u0: 0.0,
-                                    v0: 0.0,
-                                    u1: 1.0,
-                                    v1: 1.0,
-                                    w: 16,
-                                    h: 16,
-                                },
-                                tint: 0xFFFFFF,
-                                light: 0,
-                                lights: diffuse_lights(nether),
-                                glow: None,
-                            },
-                            &mut vertices,
-                        );
-                    }
-                    vertices
-                })
-            })
-        });
+        let vanilla = Arc::new(BlockEntityShapes::new(models, HashMap::new()));
         let kinds = (0..registry.len() as u32)
             .map(|id| {
                 registry.state(BlockStateId(id)).map_or(Kind::None, |s| {
@@ -970,13 +1026,30 @@ impl BlockEntityRenderer {
             })
             .collect();
         Self {
-            models,
+            shapes: RwLock::new(vanilla.clone()),
+            vanilla,
             kinds,
-            closed_chests,
             pot_patterns: HashMap::new(),
             visibility: None,
             sign_texts: Mutex::default(),
         }
+    }
+    /// The models the packs under `root` give, their `.jem` files over vanilla's, for
+    /// [`Self::set_shapes`] (a pack reload): vanilla's own, shared, without any.
+    pub fn shapes_for(&self, root: &Path) -> Arc<BlockEntityShapes> {
+        match crate::block_entity_cem::reshape(root, &self.vanilla.models) {
+            Some((models, textures)) => Arc::new(BlockEntityShapes::new(models, textures)),
+            None => self.vanilla.clone(),
+        }
+    }
+    pub fn set_shapes(&self, shapes: Arc<BlockEntityShapes>) {
+        *self.shapes.write().unwrap_or_else(PoisonError::into_inner) = shapes;
+    }
+    fn shapes(&self) -> Arc<BlockEntityShapes> {
+        self.shapes
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
     fn kind(&self, state: u32) -> &Kind {
         self.kinds.get(state as usize).unwrap_or(&Kind::None)
@@ -1271,6 +1344,7 @@ impl BlockEntityRenderer {
         world_chests: bool,
         out: &mut Vec<Vertex>,
     ) {
+        let shapes = self.shapes();
         let sprite = |name: &str| scene.sprites.get(name).copied();
         let paint = |name: &str, tint: u32, packed: u8| {
             let rect = if crumbling {
@@ -1363,12 +1437,34 @@ impl BlockEntityRenderer {
                 } else {
                     *texture
                 };
-                let model = match part {
-                    ChestPart::Single => "chest",
-                    ChestPart::Left => "double_chest_left",
-                    ChestPart::Right => "double_chest_right",
+                // Trapped and ender chests have models of their own when a `.jem` reshapes
+                // them; copper chests have no CEM name and draw vanilla's chest.
+                let shapes: &BlockEntityShapes =
+                    if matches!(block.as_str(), "chest" | "trapped_chest" | "ender_chest") {
+                        &shapes
+                    } else {
+                        &self.vanilla
+                    };
+                let (own, chest) = match (block.as_str(), part) {
+                    ("trapped_chest", ChestPart::Single) => ("trapped_chest", "chest"),
+                    ("trapped_chest", ChestPart::Left) => {
+                        ("trapped_chest_left", "double_chest_left")
+                    }
+                    ("trapped_chest", ChestPart::Right) => {
+                        ("trapped_chest_right", "double_chest_right")
+                    }
+                    ("ender_chest", _) => ("ender_chest", "chest"),
+                    (_, ChestPart::Single) => ("chest", "chest"),
+                    (_, ChestPart::Left) => ("double_chest_left", "double_chest_left"),
+                    (_, ChestPart::Right) => ("double_chest_right", "double_chest_right"),
                 };
-                let Some(model) = self.models.get(model) else {
+                let key = if shapes.models.contains_key(own) {
+                    own
+                } else {
+                    chest
+                };
+                let texture = shapes.texture(key, texture, scene.sprites);
+                let Some(model) = shapes.models.get(key) else {
                     return;
                 };
                 let (open, other) = self.chest_openness(
@@ -1384,9 +1480,11 @@ impl BlockEntityRenderer {
                     packed = (packed >> 4).max(l >> 4) << 4 | (packed & 15).max(l & 15);
                 }
                 if world_chests && open == 0.0 {
-                    if let Some(paint) = paint(texture, 0xFFFFFF, packed) {
-                        let vertices = &self.closed_chests[usize::from(scene.nether)]
-                            [*part as usize][*y_rot as usize / 90];
+                    if let (Some(paint), Some(closed)) = (
+                        paint(texture, 0xFFFFFF, packed),
+                        shapes.closed_chests.get(key),
+                    ) {
+                        let vertices = &closed[usize::from(scene.nether)][*y_rot as usize / 90];
                         let origin = base.w_axis.truncate();
                         let passes = std::iter::once((paint.sprite, paint.light))
                             .chain(paint.glow.map(|g| (g, FULL_BRIGHT)));
@@ -1421,8 +1519,12 @@ impl BlockEntityRenderer {
             }
             Kind::Shulker { texture, facing } => {
                 let (Some(model), Some(paint)) = (
-                    self.models.get("shulker_box"),
-                    paint(texture, 0xFFFFFF, packed),
+                    shapes.models.get("shulker_box"),
+                    paint(
+                        shapes.texture("shulker_box", texture, scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1446,12 +1548,13 @@ impl BlockEntityRenderer {
                 draw_part(model, "root", m, &lid, paint, out);
             }
             Kind::Banner { color, wall, angle } => {
-                let (main, flag) = if *wall {
+                let (main_key, flag_key) = if *wall {
                     ("wall_banner", "wall_banner_flag")
                 } else {
                     ("standing_banner", "standing_banner_flag")
                 };
-                let (Some(main), Some(flag)) = (self.models.get(main), self.models.get(flag))
+                let (Some(main), Some(flag)) =
+                    (shapes.models.get(main_key), shapes.models.get(flag_key))
                 else {
                     return;
                 };
@@ -1472,8 +1575,13 @@ impl BlockEntityRenderer {
                         p[3] = (-0.0125 + 0.01 * (2.0 * PI * phase).mcos()) * PI;
                     }
                 };
-                if let Some(paint) = paint("entity/banner/banner_base", 0xFFFFFF, packed) {
+                let banner_base = "entity/banner/banner_base";
+                let main_texture = shapes.texture(main_key, banner_base, scene.sprites);
+                if let Some(paint) = paint(main_texture, 0xFFFFFF, packed) {
                     draw_part(main, "root", m, &none, paint, out);
+                }
+                let flag_texture = shapes.texture(flag_key, banner_base, scene.sprites);
+                if let Some(paint) = paint(flag_texture, 0xFFFFFF, packed) {
                     draw_part(flag, "root", m, &wave, paint, out);
                 }
                 // Pattern passes must not multiply the crumbling decal.
@@ -1515,9 +1623,12 @@ impl BlockEntityRenderer {
                     None
                 };
                 let has_profile = skin.is_some();
-                let texture = skin.as_deref().unwrap_or(texture);
+                // A `.jem` texture stands in for the default skin, not a profile's.
+                let texture = skin
+                    .as_deref()
+                    .unwrap_or_else(|| shapes.texture(model, texture, scene.sprites));
                 let (Some(model), Some(paint)) =
-                    (self.models.get(model), paint(texture, 0xFFFFFF, packed))
+                    (shapes.models.get(model), paint(texture, 0xFFFFFF, packed))
                 else {
                     return;
                 };
@@ -1559,8 +1670,12 @@ impl BlockEntityRenderer {
             }
             Kind::Bell => {
                 let (Some(model), Some(paint)) = (
-                    self.models.get("bell"),
-                    paint("entity/bell/bell_body", 0xFFFFFF, packed),
+                    shapes.models.get("bell"),
+                    paint(
+                        shapes.texture("bell", "entity/bell/bell_body", scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1588,8 +1703,8 @@ impl BlockEntityRenderer {
             }
             Kind::DecoratedPot { y_rot } => {
                 let (Some(base_model), Some(sides)) = (
-                    self.models.get("decorated_pot_base"),
-                    self.models.get("decorated_pot_sides"),
+                    shapes.models.get("decorated_pot_base"),
+                    shapes.models.get("decorated_pot_sides"),
                 ) else {
                     return;
                 };
@@ -1617,17 +1732,20 @@ impl BlockEntityRenderer {
                     }
                 }
                 let first = out.len();
-                if let Some(paint) =
-                    paint("entity/decorated_pot/decorated_pot_base", 0xFFFFFF, packed)
-                {
+                let pot_base = "entity/decorated_pot/decorated_pot_base";
+                let pot_base = shapes.texture("decorated_pot_base", pot_base, scene.sprites);
+                if let Some(paint) = paint(pot_base, 0xFFFFFF, packed) {
                     draw_part(base_model, "root", m, &none, paint, out);
                 }
-                // PotDecorations (back, left, right, front); items without a pattern use the blank side.
+                // PotDecorations (back, left, right, front); items without a pattern use the blank
+                // side (a `.jem`'s texture, if any).
+                let blank = "entity/decorated_pot/decorated_pot_side";
+                let blank = shapes.texture("decorated_pot_sides", blank, scene.sprites);
                 for (side, item) in ["back", "left", "right", "front"].iter().zip(&a.sherds) {
                     let texture = item
                         .as_ref()
                         .and_then(|i| self.pot_patterns.get(i))
-                        .map_or("entity/decorated_pot/decorated_pot_side", String::as_str);
+                        .map_or(blank, String::as_str);
                     if let (Some(part), Some(paint)) =
                         (sides.child(side), paint(texture, 0xFFFFFF, packed))
                     {
@@ -1677,11 +1795,14 @@ impl BlockEntityRenderer {
                 let (ticks, active, hunting, raw_rotation) = (scene.anim)(pos).conduit;
                 // ConduitRenderer.extractRenderState.
                 let rotation = (raw_rotation + if active { scene.partial } else { 0.0 }) * -0.0375;
-                let tex = |name: &str| paint(name, 0xFFFFFF, packed);
+                let tex = |key: &str, name: &str| {
+                    paint(shapes.texture(key, name, scene.sprites), 0xFFFFFF, packed)
+                };
                 if !active {
-                    let (Some(model), Some(paint)) =
-                        (self.models.get("conduit_shell"), tex("entity/conduit/base"))
-                    else {
+                    let (Some(model), Some(paint)) = (
+                        shapes.models.get("conduit_shell"),
+                        tex("conduit_shell", "entity/conduit/base"),
+                    ) else {
                         return;
                     };
                     let m = base
@@ -1696,9 +1817,10 @@ impl BlockEntityRenderer {
                 let hh = (anim_time * 0.1).msin() / 2.0 + 0.5;
                 let hh = hh * hh + hh;
                 let lift = Vec3::new(0.5, 0.3 + hh * 0.2, 0.5);
-                if let (Some(model), Some(paint)) =
-                    (self.models.get("conduit_cage"), tex("entity/conduit/cage"))
-                {
+                if let (Some(model), Some(paint)) = (
+                    shapes.models.get("conduit_cage"),
+                    tex("conduit_cage", "entity/conduit/cage"),
+                ) {
                     let axis = Vec3::new(0.5, 1.0, 0.5).normalize();
                     let m = base
                         * Mat4::from_translation(lift)
@@ -1714,7 +1836,9 @@ impl BlockEntityRenderer {
                 } else {
                     "entity/conduit/wind"
                 };
-                if let (Some(model), Some(paint)) = (self.models.get("conduit_wind"), tex(wind)) {
+                if let (Some(model), Some(paint)) =
+                    (shapes.models.get("conduit_wind"), tex("conduit_wind", wind))
+                {
                     let turn = match phase {
                         1 => Mat4::from_rotation_x(PI / 2.0),
                         2 => Mat4::from_rotation_z(PI / 2.0),
@@ -1732,7 +1856,9 @@ impl BlockEntityRenderer {
                 } else {
                     "entity/conduit/closed_eye"
                 };
-                if let (Some(model), Some(paint)) = (self.models.get("conduit_eye"), tex(eye)) {
+                if let (Some(model), Some(paint)) =
+                    (shapes.models.get("conduit_eye"), tex("conduit_eye", eye))
+                {
                     let m = base
                         * Mat4::from_translation(lift)
                         * Mat4::from_scale(Vec3::splat(0.5))
@@ -1743,9 +1869,14 @@ impl BlockEntityRenderer {
                 }
             }
             Kind::EnchantingTable => {
+                let book = "entity/enchantment/enchanting_table_book";
                 let (Some(model), Some(paint)) = (
-                    self.models.get("book"),
-                    paint("entity/enchantment/enchanting_table_book", 0xFFFFFF, packed),
+                    shapes.models.get("book"),
+                    paint(
+                        shapes.texture("book", book, scene.sprites),
+                        0xFFFFFF,
+                        packed,
+                    ),
                 ) else {
                     return;
                 };
@@ -1764,9 +1895,16 @@ impl BlockEntityRenderer {
                 draw_part(model, "root", m, &book_pose(openness, ff1, ff2), paint, out);
             }
             Kind::Lectern { y_rot } => {
+                // Its own `.jem`'s book, else the enchanting table's.
+                let key = if shapes.models.contains_key("lectern_book") {
+                    "lectern_book"
+                } else {
+                    "book"
+                };
+                let book = "entity/enchantment/enchanting_table_book";
                 let (Some(model), Some(paint)) = (
-                    self.models.get("book"),
-                    paint("entity/enchantment/enchanting_table_book", 0xFFFFFF, packed),
+                    shapes.models.get(key),
+                    paint(shapes.texture(key, book, scene.sprites), 0xFFFFFF, packed),
                 ) else {
                     return;
                 };
@@ -1797,7 +1935,7 @@ impl BlockEntityRenderer {
                     _ => "copper_golem",
                 };
                 let (Some(model), Some(paint)) =
-                    (self.models.get(key), paint(texture, 0xFFFFFF, packed))
+                    (shapes.models.get(key), paint(texture, 0xFFFFFF, packed))
                 else {
                     return;
                 };
@@ -2449,7 +2587,8 @@ mod tests {
     #[test]
     fn cached_sign_text_matches_and_follows_changes() {
         let renderer = BlockEntityRenderer {
-            models: HashMap::new(),
+            vanilla: Default::default(),
+            shapes: Default::default(),
             kinds: vec![
                 Kind::Sign {
                     hanging: false,
@@ -2462,7 +2601,6 @@ mod tests {
                     angle: 90.0,
                 },
             ],
-            closed_chests: Default::default(),
             pot_patterns: HashMap::new(),
             visibility: None,
             sign_texts: Mutex::default(),
@@ -2644,6 +2782,133 @@ mod tests {
         assert!(
             verts.iter().all(|v| v.normal == CULL_BACK),
             "entitySolid culls the pot's back faces"
+        );
+    }
+
+    #[test]
+    fn a_chest_jem_reshapes_the_closed_chest_and_paints_its_texture() {
+        use crate::block_entity_cem::tests::{BOX, chest, pack};
+        let vanilla = Arc::new(BlockEntityShapes::new(
+            HashMap::from([("chest", chest())]),
+            HashMap::new(),
+        ));
+        let renderer = BlockEntityRenderer {
+            shapes: RwLock::new(vanilla.clone()),
+            vanilla,
+            kinds: Vec::new(),
+            pot_patterns: HashMap::new(),
+            visibility: None,
+            sign_texts: Mutex::default(),
+        };
+        // No block entity's `.jem` (a mob's only): vanilla's shapes, not a copy.
+        let empty = pack("render-none", &[("optifine/cem/zombie.jem", "{}".into())]);
+        assert!(Arc::ptr_eq(&renderer.shapes_for(&empty), &renderer.vanilla));
+        let root = pack(
+            "render-chest",
+            &[(
+                "optifine/cem/chest.jem",
+                format!(
+                    r#"{{"texture": "textures/entity/chest/fancy.png",
+                        "models": [{{"part": "lid", {BOX}}}]}}"#
+                ),
+            )],
+        );
+        renderer.set_shapes(renderer.shapes_for(&root));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&empty);
+        let rect = |u0: f32| Rect {
+            u0,
+            v0: 0.0,
+            u1: u0 + 0.2,
+            v1: 0.2,
+            w: 16,
+            h: 16,
+        };
+        let sprites: HashMap<String, Rect> = [
+            ("entity/chest/normal", rect(0.0)),
+            ("entity/chest/ender", rect(0.2)),
+            ("entity/chest/fancy", rect(0.4)),
+            ("entity/chest/copper", rect(0.6)),
+        ]
+        .map(|(name, r)| (name.to_owned(), r))
+        .into();
+        let world = World::new(BlockStateId(0), 1);
+        let scene = Scene {
+            camera: DVec3::ZERO,
+            orientation: Quat::IDENTITY,
+            anim: &|_| BlockAnim::default(),
+            texts: None,
+            partial: 0.0,
+            game_time: 0,
+            max_y: 320,
+            world: &world,
+            sprites: &sprites,
+            emissive: &Default::default(),
+            nether: false,
+            lid: &|_| 0.0,
+            sign: &|_| None,
+            banner: &|_| Vec::new(),
+            skull: &|_| None,
+            glyph: &|_| (None, 0.0),
+            glyphs: 0,
+        };
+        // A closed single chest of `block` drawn by `renderer`: positions and UVs.
+        let draw = |renderer: &BlockEntityRenderer, block: &str, texture: &'static str| {
+            let kind = Kind::Chest {
+                block: block.into(),
+                texture,
+                part: ChestPart::Single,
+                y_rot: 0.0,
+                double_with: None,
+            };
+            let mut out = Vec::new();
+            renderer.render_one(
+                &scene,
+                [0; 3],
+                &kind,
+                Mat4::IDENTITY,
+                0xF0,
+                diffuse_lights(false),
+                false,
+                true,
+                &mut out,
+            );
+            out.iter().map(|v| (v.pos, v.uv)).collect::<Vec<_>>()
+        };
+        // The chest's three faces become the bottom's, the lock's and the custom lid's six, in
+        // the `.jem`'s texture. Ender and copper chests have no file of their own: vanilla's
+        // three faces in their own textures. (Trapped chests: `block_entity_cem`'s tests; their
+        // texture turns festive in late December.)
+        for (block, texture, u0, faces) in [
+            ("chest", "entity/chest/normal", 0.4, 8),
+            ("ender_chest", "entity/chest/ender", 0.2, 3),
+            ("copper_chest", "entity/chest/copper", 0.6, 3),
+        ] {
+            let out = draw(&renderer, block, texture);
+            assert_eq!(out.len(), faces * 4, "{block}");
+            assert!(
+                out.iter().all(|(_, uv)| (u0..=u0 + 0.2).contains(&uv[0])),
+                "{block}"
+            );
+        }
+        // A copper chest draws exactly what it draws without any pack.
+        let plain = BlockEntityRenderer {
+            shapes: RwLock::new(renderer.vanilla.clone()),
+            vanilla: renderer.vanilla.clone(),
+            kinds: Vec::new(),
+            pot_patterns: HashMap::new(),
+            visibility: None,
+            sign_texts: Mutex::default(),
+        };
+        assert_eq!(
+            draw(&renderer, "copper_chest", "entity/chest/copper"),
+            draw(&plain, "copper_chest", "entity/chest/copper")
+        );
+        // The atlas has no such texture: vanilla's.
+        let shapes = renderer.shapes();
+        assert_eq!(
+            shapes.texture("chest", "entity/chest/normal", &HashMap::new()),
+            "entity/chest/normal"
         );
     }
 }

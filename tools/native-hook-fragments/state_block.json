@@ -1,0 +1,6 @@
+{
+  "hooks": [],
+  "rust_summary": "a helper that names the block a state belongs to (`native_state_block`).",
+  "doc_summary": "`native_state_block(state)` names the block a state belongs to (`BlockState.getBlock()`), on a server hook's level and on the game: `native_state_for_placement` is asked for every block placed, so a mod compares it with its own block to answer only for it. Bundles that use it need \"hooks\": @API:state_block@.",
+  "comments": ["crates/horizon-client/src/game/native_hooks.rs"]
+}

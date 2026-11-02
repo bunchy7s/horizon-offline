@@ -1461,6 +1461,7 @@ dependencies = [
  "horizon-threads",
  "horizon-world",
  "log",
+ "lz4_flex",
  "miniz_oxide 0.8.9",
  "naga",
  "png",
@@ -1733,6 +1734,7 @@ dependencies = [
  "flate2",
  "horizon-core",
  "libm",
+ "log",
  "lz4_flex",
  "postcard",
  "serde",
@@ -5120,6 +5122,9 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "horizon-theme",
+ "quote",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]

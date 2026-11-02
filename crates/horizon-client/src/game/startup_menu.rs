@@ -293,7 +293,7 @@ impl StartupMenu {
                 | KeyCode::ArrowUp
                 | KeyCode::ArrowDown),
             ) => {
-                title.arrow_key(key, viewport);
+                title.arrow_key(key, viewport, self.modifiers.shift_key());
             }
             _ => {
                 let cleared = !title.has_caret_field()
@@ -1241,9 +1241,28 @@ mod tests {
             delivered: false,
             handle: None,
             shown: false,
+            ui_at: None,
+            title_drawn: false,
             menu: StartupMenu::default(),
             error: None,
         }
+    }
+
+    #[test]
+    fn the_world_renderer_waits_for_the_first_title_frame() {
+        let (_send, receiver) = std::sync::mpsc::channel();
+        let mut loading = loading(receiver);
+        // No menu bundle yet: nothing to wait for.
+        assert!(loading.ready_for_handoff());
+        // The title artwork is up but no frame of it was presented.
+        loading.ui_at = Some(Instant::now());
+        assert!(!loading.ready_for_handoff());
+        loading.title_drawn = true;
+        assert!(loading.ready_for_handoff());
+        // A window never asked to redraw doesn't hold the start for long.
+        loading.title_drawn = false;
+        loading.ui_at = Instant::now().checked_sub(Duration::from_secs(2));
+        assert!(loading.ready_for_handoff());
     }
 
     #[test]

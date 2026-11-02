@@ -4,6 +4,11 @@
 //! framebuffer pixels wide, before the screen is drawn over it. Works in the
 //! frame's own (gamma) values, as vanilla's main target does, and needs a
 //! swapchain that can be copied from.
+//!
+//! On a software adapter (WARP, llvmpipe) the rounds run at half the frame's
+//! width and height with half the radius: the same blur, a quarter of the
+//! pixels. At full size they took 250 ms of a CPU per frame at 1440x900, and
+//! every blurred menu ran at 3 FPS (#5185).
 
 /// `blur.json`: the passes' directions, ping-ponging between the copied
 /// frame and a swap texture; the last one writes the frame.
@@ -27,15 +32,20 @@ pub struct MenuBlur {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
+    /// One per pass, then the half-size copy's.
     uniforms: Vec<wgpu::Buffer>,
-    /// The copied frame (`minecraft:main`) and `swap`.
+    /// The copied frame (`minecraft:main`) and `swap`; at half size, then the
+    /// frame copied at full size.
     targets: Vec<(wgpu::Texture, wgpu::TextureView)>,
     size: [u32; 2],
     format: wgpu::TextureFormat,
+    /// Blur at half size (`new`'s `software`).
+    half: bool,
 }
 impl MenuBlur {
-    /// `format` is the swapchain's; the blur works in its non-sRGB view.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// `format` is the swapchain's; the blur works in its non-sRGB view. `software`:
+    /// the adapter renders on the CPU, so the blur runs at half size.
+    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, software: bool) -> Self {
         let format = format.remove_srgb_suffix();
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Menu blur"),
@@ -111,8 +121,7 @@ impl MenuBlur {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             ..Default::default()
         });
-        let uniforms = PASSES
-            .iter()
+        let uniforms = (0..=PASSES.len())
             .map(|_| {
                 device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("Menu blur pass"),
@@ -130,6 +139,15 @@ impl MenuBlur {
             targets: Vec::new(),
             size: [0, 0],
             format,
+            half: software,
+        }
+    }
+    /// The size the blur's rounds run at for a frame of `size`.
+    fn work_size(&self, size: [u32; 2]) -> [u32; 2] {
+        if self.half {
+            size.map(|s| s.div_ceil(2))
+        } else {
+            size
         }
     }
     fn ensure(&mut self, device: &wgpu::Device, size: [u32; 2]) {
@@ -137,8 +155,15 @@ impl MenuBlur {
             return;
         }
         self.size = size;
-        self.targets = (0..2)
-            .map(|_| {
+        let work = self.work_size(size);
+        let sizes = if self.half {
+            vec![work, work, size]
+        } else {
+            vec![work, work]
+        };
+        self.targets = sizes
+            .into_iter()
+            .map(|size| {
                 let texture = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("Menu blur target"),
                     size: wgpu::Extent3d {
@@ -180,64 +205,111 @@ impl MenuBlur {
         mut timing: Option<&mut crate::gfx::pack_timing::PassTiming>,
     ) {
         self.ensure(device, size);
+        let work = self.work_size(size);
+        let copy = if self.half { 2 } else { 0 };
         encoder.copy_texture_to_texture(
             frame.as_image_copy(),
-            self.targets[0].0.as_image_copy(),
+            self.targets[copy].0.as_image_copy(),
             wgpu::Extent3d {
                 width: size[0],
                 height: size[1],
                 depth_or_array_layers: 1,
             },
         );
+        let radius = if self.half { radius / 2.0 } else { radius };
+        if self.half {
+            // A radius of 0 samples each half-size pixel's 2x2 block at its shared
+            // corner: their mean.
+            let data = Uniform {
+                size_dir: [size[0] as f32, size[1] as f32, 0.0, 0.0],
+                radius: [0.0; 4],
+            };
+            let (source, output) = (&self.targets[2].1, &self.targets[0].1);
+            self.pass(
+                device,
+                queue,
+                encoder,
+                PASSES.len(),
+                data,
+                source,
+                output,
+                None,
+            );
+        }
         for (i, dir) in PASSES.iter().enumerate() {
             let data = Uniform {
-                size_dir: [size[0] as f32, size[1] as f32, dir[0], dir[1]],
+                size_dir: [work[0] as f32, work[1] as f32, dir[0], dir[1]],
                 radius: [radius, 0.0, 0.0, 0.0],
             };
-            queue.write_buffer(&self.uniforms[i], 0, bytemuck::bytes_of(&data));
             let source = &self.targets[i % 2].1;
+            // The last pass writes the frame; from half size it samples up as it blurs.
             let output = if i + 1 == PASSES.len() {
                 target
             } else {
                 &self.targets[(i + 1) % 2].1
             };
-            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Menu blur pass"),
-                layout: &self.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(source),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: self.uniforms[i].as_entire_binding(),
-                    },
-                ],
-            });
-            let attachments = [Some(wgpu::RenderPassColorAttachment {
-                view: output,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })];
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Menu blur pass"),
-                timestamp_writes: timing.as_deref_mut().and_then(|t| t.writes("Menu blur")),
-                color_attachments: &attachments,
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &group, &[]);
-            pass.draw(0..3, 0..1);
+            self.pass(
+                device,
+                queue,
+                encoder,
+                i,
+                data,
+                source,
+                output,
+                timing.as_deref_mut(),
+            );
         }
+    }
+    /// One `box_blur` pass from `source` into `output` with uniform buffer `slot`.
+    #[allow(clippy::too_many_arguments)]
+    fn pass(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        slot: usize,
+        data: Uniform,
+        source: &wgpu::TextureView,
+        output: &wgpu::TextureView,
+        timing: Option<&mut crate::gfx::pack_timing::PassTiming>,
+    ) {
+        queue.write_buffer(&self.uniforms[slot], 0, bytemuck::bytes_of(&data));
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Menu blur pass"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(source),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.uniforms[slot].as_entire_binding(),
+                },
+            ],
+        });
+        let attachments = [Some(wgpu::RenderPassColorAttachment {
+            view: output,
+            resolve_target: None,
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                store: wgpu::StoreOp::Store,
+            },
+        })];
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Menu blur pass"),
+            timestamp_writes: timing.and_then(|t| t.writes("Menu blur")),
+            color_attachments: &attachments,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 
@@ -318,13 +390,51 @@ mod tests {
         else {
             return;
         };
-        let mut blur = MenuBlur::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
+        let mut blur = MenuBlur::new(&device, wgpu::TextureFormat::Rgba8UnormSrgb, false);
         let size = [64, 8];
         let first = blurred(&device, &queue, &mut blur, size);
         // The stripes are blurred into greys.
         assert!(first.chunks(4).any(|p| p[0] != 0 && p[0] != 255));
         blur.release();
         assert_eq!(blurred(&device, &queue, &mut blur, size), first);
+    }
+
+    /// On a software adapter the blur runs at half size and still blurs the
+    /// frame much as at full size: stripes two pixels wide turn to an even grey.
+    #[test]
+    fn the_half_size_blur_blurs_like_the_full_size_one() {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+        let size = [64, 8];
+        let full = blurred(
+            &device,
+            &queue,
+            &mut MenuBlur::new(&device, format, false),
+            size,
+        );
+        let half = blurred(
+            &device,
+            &queue,
+            &mut MenuBlur::new(&device, format, true),
+            size,
+        );
+        // Away from the edges, both are within a few levels of the stripes' mean grey.
+        for row in 0..size[1] as usize {
+            for x in 8..56 {
+                let at = (row * size[0] as usize + x) * 4;
+                for (name, frame) in [("full", &full), ("half", &half)] {
+                    let v = frame[at];
+                    assert!((120..=136).contains(&v), "{name} size: {v} at ({x}, {row})");
+                }
+            }
+        }
     }
 
     #[test]

@@ -29,7 +29,8 @@ enum RocketHit {
 }
 
 pub(super) struct Rocket {
-    /// The entity id a server tracks it by (0 until it is tracked).
+    /// Its entity id: from the entity counter on the server, the server's on
+    /// a client.
     pub id: u32,
     pub(super) position: Vec3,
     pub(super) previous: Vec3,
@@ -223,8 +224,10 @@ impl Game<'_> {
         let lifetime = 10 * (1 + i32::from(flight))
             + r.next_int_bound(6).unwrap_or(0)
             + r.next_int_bound(7).unwrap_or(0);
+        // Entity.<init>: the id comes from the one counter at construction.
+        let id = self.take_entity_id();
         Rocket {
-            id: 0,
+            id,
             position: at,
             previous: at,
             velocity,
@@ -342,6 +345,9 @@ impl Game<'_> {
             self.consume_held();
         }
         self.swing_arm();
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_elytra_boost(player, &name);
+        }
         true
     }
     pub(super) fn tick_rockets(&mut self) {
@@ -514,6 +520,7 @@ impl Game<'_> {
         let v = [r.velocity.x, r.velocity.y, r.velocity.z];
         self.particles
             .fireworks(at, v, r.explosions.clone(), camera);
+        self.native_firework_explode(r.id, at, r.explosions.len());
     }
     fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
         for &(id, amount) in hits {

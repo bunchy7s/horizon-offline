@@ -385,18 +385,41 @@ pub fn scrolling_text_at(
     now_ms: i64,
     color: u32,
 ) {
+    // `acceptScrollingWithDefaultCenter`: `centerX = (left + right) / 2`.
+    let center_x = left + ((right - left) / 2.0).floor();
+    scrolling_text_around_at(
+        batch, atlas, text, center_x, left, right, top, bottom, y, now_ms, color,
+    );
+}
+
+/// [`scrolling_text_at`] around an explicit `center_x`
+/// (`ActiveTextCollector.acceptScrolling`, which `SpriteIconButton.TextAndIcon`
+/// calls with the button's middle): a label that fits is centred on `center_x`
+/// moved as far as it must to stay between `left` and `right`
+/// (`Mth.clamp(centerX, left + lineWidth / 2, right - lineWidth / 2)`), so
+/// beside an icon it ends where the icon's room begins. A wider one is drawn
+/// from the left and slid inside the box.
+#[allow(clippy::too_many_arguments)]
+pub fn scrolling_text_around_at(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    text: &Text,
+    center_x: f32,
+    left: f32,
+    right: f32,
+    top: f32,
+    bottom: f32,
+    y: f32,
+    now_ms: i64,
+    color: u32,
+) {
     let text = text.resolved();
     let width = atlas.font.width_text(&text);
     let room = right - left;
     if width <= room {
-        batch.text_styled(
-            atlas,
-            &text,
-            centered_left(left, room, width),
-            y,
-            color,
-            true,
-        );
+        let half = (width / 2.0).floor();
+        let text_x = center_x.max(left + half).min(right - half);
+        batch.text_styled(atlas, &text, text_x - half, y, color, true);
         return;
     }
     // Scissored to the widget: what does not fit is read as the label
@@ -437,6 +460,37 @@ pub fn scrolling_text(
         y,
         crate::hud_overlays::now_ms(),
         color,
+    );
+}
+
+/// `MenuTabBar.MenuTabButton.renderLabel` for the tab at `x, y`: its label
+/// inside the tab less 1 px on each side, from the tab's top when selected
+/// and 3 px lower when not (`acceptScrollingWithDefaultCenter`, so one wider
+/// than the tab slides instead of running into the next tab). White, gray
+/// for an inactive tab (`WithInactiveMessage`).
+pub fn menu_tab_label(
+    batch: &mut HudBatch,
+    atlas: &HudAtlas,
+    label: &Text,
+    (x, y, width, height): (f32, f32, f32, f32),
+    selected: bool,
+    active: bool,
+    now_ms: i64,
+) {
+    let top = y + if selected { 0.0 } else { 3.0 };
+    let bottom = y + height;
+    scrolling_text_at(
+        batch,
+        atlas,
+        label,
+        x + 1.0,
+        x + width - 1.0,
+        top,
+        bottom,
+        // defaultScrollingHelper: `(top + bottom - lineHeight) / 2 + 1`.
+        ((top + bottom - 9.0) / 2.0).floor() + 1.0,
+        now_ms,
+        if active { u32::MAX } else { 0xFFA0_A0A0 },
     );
 }
 
@@ -1640,6 +1694,51 @@ mod tests {
             hi - lo >= width - 0.001,
             "the whole label is drawn: {lo}..{hi}, {width} wide"
         );
+    }
+
+    /// `MenuTabButton.renderLabel` on a 24 px tab: centred on the tab, its
+    /// text top at `(0 + 24 - 9) / 2 + 1 = 8` when selected and at
+    /// `(3 + 24 - 9) / 2 + 1 = 10` when not; white on an active tab, selected
+    /// or not, `0xA0A0A0` on an inactive one (`WithInactiveMessage`). The
+    /// Statistics tabs drew every label at 8 and an active unselected one gray.
+    #[test]
+    fn a_tab_label_sits_lower_on_an_unselected_tab_and_is_gray_only_when_inactive() {
+        let atlas = atlas();
+        let label = Text::literal("Items");
+        let half = (atlas.font.width_text(&label.resolved()) / 2.0).floor();
+        // A 124 px tab at x = 100: `(left + right) / 2 = (101 + 223) / 2 = 162`.
+        let left = 162.0 - half;
+        for (selected, active, y, color) in [
+            (true, true, 8.0, u32::MAX),
+            (false, true, 10.0, u32::MAX),
+            (false, false, 10.0, 0xFFA0_A0A0),
+        ] {
+            let mut tab = HudBatch::new([640, 480]);
+            menu_tab_label(
+                &mut tab,
+                &atlas,
+                &label,
+                (100.0, 0.0, 124.0, 24.0),
+                selected,
+                active,
+                0,
+            );
+            let mut want = HudBatch::new([640, 480]);
+            want.text_styled(&atlas, &label.resolved(), left, y, color, true);
+            let glyphs = |b: &HudBatch| -> Vec<([u32; 2], u32)> {
+                b.vertices
+                    .iter()
+                    .filter(|v| v.text == 1)
+                    .map(|v| ([v.pos[0].to_bits(), v.pos[1].to_bits()], v.color))
+                    .collect()
+            };
+            assert!(!glyphs(&want).is_empty());
+            assert_eq!(
+                glyphs(&tab),
+                glyphs(&want),
+                "selected {selected}, active {active}"
+            );
+        }
     }
 
     #[test]

@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "player_bed_enter",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_bed_enter",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event; Bukkit's PlayerBedEnterEvent)",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A player about to enter a bed, cancellable (`native_player_bed_enter`).",
+  "doc_summary": "A server player about to enter a bed after its sleep checks pass: `native_player_bed_enter(player, name, pos, cancel)` hears the bed head position. Set `cancel` to keep the player out. The player's state is swapped in, though helpers that look them up through `self.lan` may find nothing during a guest packet. Bundles need \"hooks\": @API:player_bed_enter@."
+}

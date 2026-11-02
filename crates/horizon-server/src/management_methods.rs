@@ -50,6 +50,15 @@ pub fn call(shared: &Shared, client: u32, short: &str, argument: &Value) -> Resu
                     .ok_or_else(|| invalid_params("Not a string"))?,
             ),
         ),
+        "serversettings/game_mode" => game.game_mode(client, None),
+        "serversettings/game_mode/set" => game.game_mode(
+            client,
+            Some(
+                argument
+                    .as_str()
+                    .ok_or_else(|| invalid_params("Not a string"))?,
+            ),
+        ),
         "allowlist" => Ok(lists.allowlist()),
         "bans" => Ok(lists.bans()),
         "ip_bans" => Ok(lists.ip_bans()),
@@ -281,6 +290,29 @@ struct Game<'a> {
 }
 
 impl Game<'_> {
+    /// `MinecraftServerSettingsServiceImpl.getGameMode` and `setGameMode`.
+    fn game_mode(&self, client: u32, value: Option<&str>) -> Result<Value, Failure> {
+        let mut request = json!({ "method": "serversettings/game_mode" });
+        if let Some(value) = value {
+            request["method"] = json!("serversettings/game_mode/set");
+            request["value"] = json!(value);
+        }
+        let reply = self.ask(&format!("management {client} {request}"))?;
+        if let Some(error) = reply["error"].as_str() {
+            return Err((INTERNAL_ERROR, Some(error.to_owned())));
+        }
+        if let Some(value) = value {
+            crate::config::update(
+                &self.shared.dir,
+                "world",
+                "game_mode",
+                toml::Value::String(value.into()),
+            )
+            .map_err(|e| (INTERNAL_ERROR, Some(e)))?;
+        }
+        Ok(reply["value"].clone())
+    }
+
     /// `MinecraftServerSettingsServiceImpl.getMotd` and `setMotd`: the live server-list message.
     fn motd(&self, client: u32, value: Option<&str>) -> Result<Value, Failure> {
         let mut request = json!({ "method": "serversettings/motd" });

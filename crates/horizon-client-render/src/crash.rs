@@ -518,7 +518,8 @@ pub fn panic_report(info: &std::panic::PanicHookInfo, side: &'static str) -> Rep
     }
 }
 
-/// Whether `name` is one of the streaming pool's threads, vanilla's `Util` worker threads.
+/// Whether `name` is one of the shared worker pool's threads (`horizon_threads::jobs`), vanilla's
+/// `Util` worker threads.
 fn is_worker_thread(name: Option<&str>) -> bool {
     name.is_some_and(|n| n.starts_with("horizon-worker-"))
 }

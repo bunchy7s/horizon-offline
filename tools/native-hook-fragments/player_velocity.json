@@ -1,0 +1,15 @@
+{
+  "hooks": [
+    {
+      "name": "player_velocity",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_player_velocity",
+      "side": "server",
+      "neoforge": "none (NeoForge has no such event)",
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "The server synced changed velocity to a player (`native_player_velocity`).",
+  "doc_summary": "The server synced changed motion to a player: `native_player_velocity(player, name, velocity)` fires with velocity in blocks per tick. Guest lookup helpers may find nothing during packet handling. Bundles need \"hooks\": @API:player_velocity@."
+}

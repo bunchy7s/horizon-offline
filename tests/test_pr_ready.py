@@ -98,6 +98,15 @@ class PrReadyTests(unittest.TestCase):
                          " --features horizon-mods/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
+    def test_mod_api_check_tracks_hook_inputs(self):
+        for path in ("xtask/src/mod_api.rs", "native-hooks.json",
+                     "crates/horizon-client/src/game/native_hooks.rs", "README.md"):
+            with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
+                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, PACKAGES, LIBRARIES, DEPENDENCIES)
+                step = {step.name: step for step in steps}["mod API up to date"]
+                self.assertEqual(step.command, "cargo test --locked -p xtask mod_api")
+                self.assertEqual(step.skip, "native hooks untouched" if path == "README.md" else None)
+
     def test_python_tests_always_run(self):
         with mock.patch.object(pr_ready, "affected_here", return_value=[]):
             steps = pr_ready.plan(args(quick=True), "origin/main", {"crates/horizon-core/src/lib.rs"},

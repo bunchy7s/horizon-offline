@@ -1133,7 +1133,7 @@ impl Game<'_> {
             // The hub is the server thread's.
             let status = server
                 .call(|g| g.lan_status())
-                .ok_or("the integrated server stopped")?;
+                .ok_or(super::integrated::NO_ANSWER)?;
             return Ok(Some(status));
         }
         match words.get(1).copied() {
@@ -1225,7 +1225,7 @@ impl Game<'_> {
             // ShareToLanScreen: IntegratedServer.publishServer.
             server
                 .call(move |g| g.publish(settings))
-                .ok_or("the integrated server stopped")??
+                .ok_or(super::integrated::NO_ANSWER)??
         } else if self.serving() {
             return self.publish(settings).map(drop).map_err(Into::into);
         } else {
@@ -1437,7 +1437,7 @@ impl Game<'_> {
         for i in 0..host.hub.guests.len() {
             let mut g = host.hub.guests.remove(i);
             self.take_parent_vehicle(host, &mut g);
-            self.save_guest(host, &g);
+            self.save_guest(host, &mut g);
             host.hub.guests.insert(i, g);
         }
     }
@@ -1445,7 +1445,12 @@ impl Game<'_> {
     /// `take_parent_vehicle`, `PlayerList.save`): an integrated server's owner
     /// into the level (`/data`) and both its files (`playerdata::save_owner`),
     /// anyone else into their own file.
-    pub(super) fn save_guest(&mut self, host: &LanHost, guest: &horizon_client::lan::guest::Guest) {
+    pub(super) fn save_guest(
+        &mut self,
+        host: &LanHost,
+        guest: &mut horizon_client::lan::guest::Guest,
+    ) {
+        self.guest_attachments_into(guest);
         if guest.placed && host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
             playerdata::save_owner(guest, &mut self.level, &self.world_root);
         } else if guest.placed {
@@ -1703,8 +1708,8 @@ impl Game<'_> {
             host.hub.config.guest_commands = effective;
             host.hub.config.force_game_mode = force;
             enforce_guest_game_mode(host, &self.world, self.collision);
-            host.hub.resend_commands();
         }
+        self.resend_commands_filtered();
     }
 
     pub(super) fn lan_port(&self) -> Option<u16> {
@@ -1879,6 +1884,27 @@ impl Game<'_> {
                     }
                 }
                 HostEvent::Joined(conn) => {
+                    // The mods may refuse the login before the player is placed.
+                    if let Some((uuid, name)) =
+                        host.hub.guest(conn).map(|g| (g.uuid, g.name.clone()))
+                    {
+                        let mut cancel = false;
+                        let mut reason = None;
+                        self.native_player_login(uuid, &name, &mut cancel, &mut reason);
+                        if cancel {
+                            let reason = match reason {
+                                Some(text) => {
+                                    horizon_client::lan::data::component_nbt(&text.component())
+                                }
+                                None => horizon_protocol::text::translatable(
+                                    "multiplayer.disconnect.generic",
+                                    &[],
+                                ),
+                            };
+                            host.hub.kick(conn, reason);
+                            continue;
+                        }
+                    }
                     self.lan_guest_joined(&mut host, conn, state, entities, spawn);
                     if self.options.dedicated.is_some()
                         && let Some(g) = host.hub.guest(conn)
@@ -1954,7 +1980,8 @@ impl Game<'_> {
                     }
                     // PlayerList.remove: the vehicle it alone rides goes too.
                     self.take_parent_vehicle(&mut host, &mut guest);
-                    self.save_guest(&host, &guest);
+                    self.save_guest(&host, &mut guest);
+                    self.guest_attachments.remove(&guest.uuid);
                     host.models.remove(&guest.conn);
                     host.play.remove(&guest.conn);
                     self.guest_combat.remove(&guest.conn);
@@ -1989,6 +2016,18 @@ impl Game<'_> {
                 }
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(&mut host, conn, flying);
+                }
+                HostEvent::MainHandChanged(conn, left) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_change_main_hand(uuid, &name, left);
+                    }
+                }
+                HostEvent::LocaleChanged(conn, locale) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_locale_change(uuid, &name, &locale);
+                    }
                 }
                 HostEvent::Packet(conn, packet) => {
                     self.lan_guest_packet(&mut host, conn, *packet);
@@ -2345,6 +2384,8 @@ impl Game<'_> {
             Some(o) => playerdata::load_owner(g, &root, o.saved.take().as_deref()),
             None => playerdata::load(g, &root),
         };
+        self.guest_attachments
+            .insert(g.uuid, std::mem::take(&mut g.attachments));
         if !known || force {
             g.game_mode = default_mode;
         }
@@ -2373,6 +2414,8 @@ impl Game<'_> {
             g.dimension = in_place;
         }
         self.load_guest_records(host, conn);
+        // The mods say which commands the newcomer's tree keeps.
+        self.native_filter_commands(host, Some(conn));
         let mut theirs = States::default();
         let entities = if elsewhere {
             if let Err(e) = self.enter_level(Some(host), level) {
@@ -2849,7 +2892,12 @@ impl Game<'_> {
                 .map(|s| s.as_ref().map(|s| s.item.clone()));
             m.extra.armor = g.armor.clone();
             m.extra.crouching = g.sneaking;
-            m.extra.avatar_pose = g.pose();
+            let from_pose = m.extra.avatar_pose;
+            let to_pose = g.pose();
+            m.extra.avatar_pose = to_pose;
+            if from_pose != to_pose {
+                self.native_entity_pose_change(g.uuid, &g.name, from_pose.name(), to_pose.name());
+            }
             m.extra.sprinting = g.sprinting;
             // Entity.DATA_POSE and the shared and living flags the others
             // get (hub::guest_body): gliding, swimming, Riptide's spin.

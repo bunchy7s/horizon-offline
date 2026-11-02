@@ -41,6 +41,35 @@ struct Out {
     if c.a < 0.004 { discard; }
     return c;
 }
+// OptiFine CIT glint layers (hud/cit_glint.rs): every rule's texture in one array, the slot in
+// the vertex colour's red and the layer's intensity in its alpha. Masked by the item's texture
+// as the vanilla glint is, then blended by the pipeline the rule's `blend` asks for.
+struct CitSlot {
+    rgba: vec4<f32>,
+    // x: linear filtering (`blur`).
+    blur: vec4<f32>,
+}
+struct CitSlots {
+    slots: array<CitSlot, 256>,
+}
+@group(1) @binding(0) var cit_tex: texture_2d_array<f32>;
+@group(1) @binding(1) var cit_blur: sampler;
+@group(1) @binding(2) var cit_nearest: sampler;
+@group(1) @binding(3) var<uniform> cit: CitSlots;
+@fragment fn fs_cit_glint(in: Out) -> @location(0) vec4<f32> {
+    let mask = textureSample(atlas, atlas_sampler, in.uv).a;
+    let index = u32(round(in.color.r * 255.0));
+    let slot = cit.slots[index];
+    let blurred = textureSampleLevel(cit_tex, cit_blur, in.glint_uv, index, 0.0);
+    let sharp = textureSampleLevel(cit_tex, cit_nearest, in.glint_uv, index, 0.0);
+    if mask < 0.1 { discard; }
+    // The layer's colour times its intensity (the glint strength option included) in alpha,
+    // cut where vanilla's glint shader cuts, which CIT Resewn draws through.
+    var t = select(sharp, blurred, slot.blur.x > 0.5) * slot.rgba;
+    t.a *= in.color.a;
+    if t.a < 0.1 { discard; }
+    return t;
+}
 @fragment fn fs_crosshair(in: Out) -> @location(0) vec4<f32> {
     let c = textureSample(atlas, atlas_sampler, in.uv) * in.color;
     if c.a == 0.0 { discard; }

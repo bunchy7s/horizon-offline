@@ -535,15 +535,14 @@ impl Title {
                     u32::MAX,
                 );
             }
-            // The label sits 3 pixels lower on unselected tabs.
-            let top = if selected { 0.0 } else { 3.0 };
-            batch.text_styled(
+            ui::menu_tab_label(
+                batch,
                 atlas,
                 &label,
-                x + (tw / 2.0).floor() - (lw / 2.0).floor(),
-                ((top + TAB_BAR - 9.0) / 2.0).floor() + 1.0,
-                u32::MAX,
+                (x, 0.0, tw, TAB_BAR),
+                selected,
                 true,
+                crate::hud_overlays::now_ms(),
             );
         }
         let (gx, gy) = grid(w, h, o.tab);

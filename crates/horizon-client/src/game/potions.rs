@@ -327,8 +327,9 @@ impl Game<'_> {
         velocity: Vec3,
         owner: Option<Text>,
     ) {
+        let id = self.take_entity_id();
         self.potions.thrown.push(ThrownPotion {
-            id: 0,
+            id,
             stack,
             previous: position,
             position,
@@ -1164,7 +1165,11 @@ impl Game<'_> {
             };
             let thrower = owner.is_some().then_some(Who::Player);
             self.projectile_event("minecraft:projectile_land", thrower, heard);
+            let item = stack.item.to_string();
             self.splash(&stack, at, mob, block, age, owner);
+            if item != "minecraft:experience_bottle" {
+                self.native_potion_splash(&item, [at.x, at.y, at.z]);
+            }
         }
     }
     /// `AreaEffectCloud.tick` for the lingering potions' clouds: the client
@@ -1270,8 +1275,9 @@ impl Game<'_> {
         ambient: Vec<&'static str>,
         color: u32,
     ) {
+        let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
-            id: 0,
+            id,
             at,
             radius: 2.5,
             age: 0,
@@ -1545,6 +1551,7 @@ impl Game<'_> {
             let r = &mut self.world.random;
             let value = 3 + r.next_int_bound(5).unwrap_or(0) + r.next_int_bound(5).unwrap_or(0);
             self.spawn_orbs([at.x, at.y, at.z], value as u32);
+            self.native_exp_bottle([at.x, at.y, at.z], value as u32);
             return;
         }
         // Projectile.onHit calls onHitBlock first, then the potion's
@@ -1601,8 +1608,9 @@ impl Game<'_> {
             // potion with no effects leaves none.
             if !def.effects.is_empty() {
                 let at = mob.unwrap_or(at);
+                let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
-                    id: 0,
+                    id,
                     at: [at.x, at.y, at.z],
                     radius: 3.0,
                     age: 0,
