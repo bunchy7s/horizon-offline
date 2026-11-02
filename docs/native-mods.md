@@ -2151,7 +2151,8 @@ methods with the hook's host and a `Holder`. `T` is `Clone + Send + Sync + 'stat
 `get` returns a clone and inserts the default on first access. `set` runs the optional
 codec before changing the value, returning an `AttachmentError` if it cannot encode.
 Keys are the pair `(namespace, name)`; a key already decoded as another Rust type is
-an error. A missing or non-server holder is an error, not a new phantom holder.
+an error. On a server, a missing holder is an error, not a new phantom holder; a client
+keeps a copy for any holder it is asked about (see the sync paragraph below).
 `AttachmentError` distinguishes `MissingHolder`, `TypeMismatch`, `Decode`, `Encode`,
 `InvalidNamespace` (a malformed saved compound), `InvalidCopyPolicy` (death-copy
 without a codec) and `InvalidSyncPolicy` (sync without a codec).
@@ -2199,7 +2200,9 @@ when it starts seeing it: a chunk sent (with its block entities), a level joined
 re-entered, an entity tracked, and its own player. The wire form is the codec's compound,
 so `sync` requires a codec. On a client, `Host::attachments` returns a copy of what the
 server synced, which `get` decodes; `set` and `remove` change only that copy, which is
-dropped when the chunk, entity or player goes. Only Horizon clients are sent values.
+dropped when the chunk, entity or player goes. Only Horizon clients are sent values. A change whose namespace or name is over 256
+characters, or that would take a message past 1 MiB, is left out of it; the holder's others
+are still sent.
 A client keeps no copy for the level hosts (`LevelRandomHost`): they stay server-only
 there, though their changes on a server are synced.
 

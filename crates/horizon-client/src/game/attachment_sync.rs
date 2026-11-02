@@ -35,17 +35,29 @@ impl Game<'_> {
     /// none still gives one, to drop what the client holds; other holders
     /// with none give no message.
     fn attachment_snapshot(&mut self, holder: Holder) -> Vec<Message> {
-        let mut holders = vec![];
-        if let Holder::Chunk([x, z]) = holder {
+        let changes = match holder {
             // Read in place: a chunk lent to a mod is copied and saved.
-            let changes = self
+            Holder::Chunk([x, z]) => self
                 .world
                 .chunks
                 .get(&(x, z))
                 .and_then(|chunk| chunk.saved.as_ref())
-                .map(|extras| extras.attachments.synced())
-                .unwrap_or_default();
-            holders.push((holder, changes));
+                .map(|extras| extras.attachments.synced()),
+            // Read in place: lending the map would give the entity one.
+            Holder::Entity(id) => self
+                .persist
+                .uuids
+                .get(&id)
+                .and_then(|uuid| self.entity_attachments.get(uuid))
+                .map(|map| map.synced()),
+            _ => self
+                .attachment_map_quiet(holder)
+                .ok()
+                .map(|map| map.synced()),
+        }
+        .unwrap_or_default();
+        let mut holders = vec![(holder, changes)];
+        if let Holder::Chunk([x, z]) = holder {
             holders.extend(
                 self.world
                     .block_entities
@@ -53,22 +65,6 @@ impl Game<'_> {
                     .into_iter()
                     .map(|((x, y, z), map)| (Holder::BlockEntity([x, y, z]), map.synced())),
             );
-        } else if let Holder::Entity(id) = holder {
-            // Read in place: lending the map would give the entity one.
-            let changes = self
-                .persist
-                .uuids
-                .get(&id)
-                .and_then(|uuid| self.entity_attachments.get(uuid))
-                .map(|map| map.synced())
-                .unwrap_or_default();
-            holders.push((holder, changes));
-        } else {
-            let changes = self
-                .attachment_map_quiet(holder)
-                .map(|map| map.synced())
-                .unwrap_or_default();
-            holders.push((holder, changes));
         }
         holders
             .into_iter()

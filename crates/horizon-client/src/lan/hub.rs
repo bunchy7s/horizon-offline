@@ -1882,20 +1882,22 @@ impl Hub {
                 }));
                 g.unacknowledged += 1;
             }
-            for idx in taken.into_iter().rev() {
-                let key = g.chunk_queue.remove(idx);
+            let mut seen: Vec<_> = taken
+                .into_iter()
+                .rev()
+                .map(|idx| g.chunk_queue.remove(idx))
+                .collect();
+            // A far chunk the save doesn't have leaves the queue unsent.
+            seen.extend(far.into_iter().rev().filter_map(|(idx, sent)| {
+                let key = g.far_queue.remove(idx);
+                sent.then_some(key)
+            }));
+            for key in seen {
                 self.attachment_snapshots.push(AttachmentSnapshot {
                     player: g.uuid,
                     holder: Holder::Chunk([key.0, key.1]),
                 });
                 g.sent_chunks.insert(key);
-            }
-            // A far chunk the save doesn't have leaves the queue unsent.
-            for (idx, sent) in far.into_iter().rev() {
-                let key = g.far_queue.remove(idx);
-                if sent {
-                    g.sent_chunks.insert(key);
-                }
             }
         }
     }

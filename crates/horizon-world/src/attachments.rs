@@ -112,8 +112,7 @@ impl<T: Clone + Send + Sync + 'static> AttachmentType<T> {
         host: &mut H,
         holder: Holder,
     ) -> Result<(), AttachmentError> {
-        host.attachments(holder)?.mark_sync(self);
-        Ok(())
+        host.attachments(holder)?.mark_sync(self)
     }
 }
 
@@ -401,10 +400,14 @@ impl Attachments {
         value.map(Some)
     }
     /// Queue a value to be sent to clients again; nothing for an unsynced type.
-    pub fn mark_sync<T: 'static>(&mut self, ty: &AttachmentType<T>) {
+    pub fn mark_sync<T: 'static>(&mut self, ty: &AttachmentType<T>) -> Result<(), AttachmentError> {
+        if ty.sync && ty.codec.is_none() {
+            return Err(AttachmentError::InvalidSyncPolicy);
+        }
         if ty.sync {
             self.pending.insert((ty.namespace.into(), ty.name.into()));
         }
+        Ok(())
     }
     /// The changes to send to clients since the last call: the current value
     /// of each queued key, or `None` for one that is gone.
@@ -574,7 +577,7 @@ mod tests {
         let mut map = Attachments::default();
         map.set(&COUNTER, 1).unwrap();
         map.remove(&COUNTER).unwrap();
-        map.mark_sync(&COUNTER);
+        map.mark_sync(&COUNTER).unwrap();
         assert!(map.take_sync_changes().is_empty());
     }
     #[test]
@@ -590,6 +593,8 @@ mod tests {
         let mut map = Attachments::default();
         assert_eq!(map.get(&broken), Err(AttachmentError::InvalidSyncPolicy));
         assert_eq!(map.set(&broken, 1), Err(AttachmentError::InvalidSyncPolicy));
+        assert_eq!(map.mark_sync(&broken), Err(AttachmentError::InvalidSyncPolicy));
+        assert!(map.take_sync_changes().is_empty());
     }
     #[test]
     fn a_saved_sync_flag_puts_undecoded_values_in_the_snapshot() {

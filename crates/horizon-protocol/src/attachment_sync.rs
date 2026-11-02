@@ -8,7 +8,7 @@
 //! removal.
 use horizon_world::{
     attachments::{AttachmentSync, Holder},
-    nbt::Tag,
+    nbt::{JavaString, Tag},
 };
 
 use crate::{
@@ -34,8 +34,9 @@ pub struct Message {
     pub changes: Vec<AttachmentSync>,
 }
 
-/// A message's payload; an error for a holder or a name it cannot write, or a
-/// payload past [`MAX_PAYLOAD`].
+/// A message's payload; an error for a holder it cannot write. A change with a
+/// name past [`MAX_NAME`], or one that would take the payload past
+/// [`MAX_PAYLOAD`], is left out, so it cannot block the holder's others.
 pub fn encode(message: &Message) -> Result<Vec<u8>> {
     let mut w = Writer::new();
     match message.holder {
@@ -59,25 +60,34 @@ pub fn encode(message: &Message) -> Result<Vec<u8>> {
         _ => return Err(Error::new("attachment sync: unknown holder")),
     }
     w.bool(message.replace);
-    w.varint(message.changes.len() as i32);
+    let mut body = Writer::new();
+    let mut count = 0;
     for change in &message.changes {
-        for name in [&change.namespace, &change.name] {
-            let name = name
-                .to_string()
-                .map_err(|_| Error::new("attachment sync: name is not UTF-16"))?;
-            if name.encode_utf16().count() > MAX_NAME {
-                return Err(Error::new("attachment sync: name too long"));
-            }
-            w.string(&name);
-        }
+        // A name that is not UTF-16 or is too long leaves out only this change.
+        let name = |name: &JavaString| {
+            name.to_string()
+                .ok()
+                .filter(|n| n.encode_utf16().count() <= MAX_NAME)
+        };
+        let (Some(namespace), Some(name)) = (name(&change.namespace), name(&change.name)) else {
+            continue;
+        };
+        let mut entry = Writer::new();
+        entry.string(&namespace);
+        entry.string(&name);
         match &change.value {
-            Some(value) => w.nbt(&Tag::Compound(value.clone())),
-            None => w.nbt(&Tag::End),
+            Some(value) => entry.nbt(&Tag::Compound(value.clone())),
+            None => entry.nbt(&Tag::End),
         }
+        // The count's varint is at most five bytes.
+        if w.data.len() + 5 + body.data.len() + entry.data.len() > MAX_PAYLOAD {
+            continue;
+        }
+        body.data.extend(entry.data);
+        count += 1;
     }
-    if w.data.len() > MAX_PAYLOAD {
-        return Err(Error::new("attachment sync: payload too big"));
-    }
+    w.varint(count);
+    w.data.extend(body.data);
     Ok(w.data)
 }
 
@@ -177,7 +187,7 @@ mod tests {
     }
 
     #[test]
-    fn encode_refuses_a_name_decode_would_refuse() {
+    fn encode_leaves_out_a_name_decode_would_refuse() {
         let mut message = Message {
             holder: Holder::Level,
             replace: false,
@@ -186,6 +196,7 @@ mod tests {
         message.changes[0].name = "n".repeat(MAX_NAME).as_str().into();
         assert!(decode(&encode(&message).unwrap()).is_ok());
         message.changes[0].name = "n".repeat(MAX_NAME + 1).as_str().into();
-        assert!(encode(&message).is_err());
+        let sent = decode(&encode(&message).unwrap()).unwrap();
+        assert_eq!(sent.changes, changes()[1..]);
     }
 }

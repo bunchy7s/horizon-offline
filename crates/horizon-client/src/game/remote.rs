@@ -2302,12 +2302,20 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
+                    self.forget_block_entity_attachments(pos);
                     self.world.block_entities.insert(pos, entity);
                 }
             }
             None => {
+                self.forget_block_entity_attachments(pos);
                 self.world.block_entities.remove(&pos);
             }
+        }
+    }
+    /// The server's synced attachments of a block entity that goes with it.
+    fn forget_block_entity_attachments(&mut self, (x, y, z): (i32, i32, i32)) {
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.remove(&Holder::BlockEntity([x, y, z]));
         }
     }
     /// ClientLevel.setServerVerifiedBlockState: a block the client predicted keeps its
