@@ -2570,6 +2570,28 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// The food level of the server player `player` (`name`) is about to change
+    /// from `from` to `to` (Bukkit's `FoodLevelChangeEvent`):
+    /// eating, hunger and saturation effects, the exhaustion that costs a
+    /// point, starving. Change `to` (kept between 0 and 20; saturation never
+    /// exceeds it) or set `cancel` to leave the level at `from`, saturation
+    /// included. Heard once for the change a player's turn made as a whole, so
+    /// two changes in one tick arrive as one. Not heard: the full food bar a
+    /// respawn gives, the food a player joins with and the host of a LAN
+    /// world. The player's state is swapped in, so `native_acting_player`,
+    /// `native_tell` and the item helpers reach them. On a server.
+    /// @API:native_food_level_changed@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn food_level_changed(
+        &self,
+        host: &mut dyn Host,
+        event: &mut FoodLevelChangedEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// The item `item` of a server player is about to lose `amount` points of
     /// durability (`ItemStack.hurtAndBreak`; Bukkit's `PlayerItemDamageEvent`):
     /// the tool that mines or hits, the armour that takes a hit, a shield, a
@@ -7218,6 +7240,40 @@ pub fn dispatch_item_crafted(
     for mod_hook in mods {
         mod_hook.item_crafted(host, &mut event);
     }
+}
+/// What [`Hooks::food_level_changed`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct FoodLevelChangedEvent<'a> {
+    pub player: u128,
+    pub name: &'a str,
+    pub from: i32,
+    pub to: i32,
+}
+pub fn dispatch_food_level_changed(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: u128,
+    name: &str,
+    from: i32,
+    to: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = FoodLevelChangedEvent {
+        player,
+        name,
+        from,
+        to: *to,
+    };
+    for mod_hook in mods {
+        if matches!(mod_hook.food_level_changed(host, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *to = event.to;
 }
 /// What [`Hooks::item_damaged`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
