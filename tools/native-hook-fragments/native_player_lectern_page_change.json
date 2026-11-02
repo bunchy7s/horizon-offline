@@ -11,5 +11,5 @@
     }
   ],
   "rust_summary": "A server player changed a lectern page (`native_player_lectern_page_change`).",
-  "doc_summary": "A server player changed a lectern page: `native_player_lectern_page_change(player, name, pos, page)` is heard after the page and redstone pulse changed. Bundles need \"hooks\": @API:player_lectern_page_change@."
+  "doc_summary": "A server player changed a lectern page: `native_player_lectern_page_change(player, name, pos, page)` is heard after the page and redstone pulse changed. Bundles need \"hooks\": @API:native_player_lectern_page_change@."
 }
