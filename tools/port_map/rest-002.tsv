@@ -1,4 +1,4 @@
-InputPredicate.matches	missing		minor: the player predicate's input key (forward, back, jump, sneak, sprint) is not read; no vanilla advancement uses it
+InputPredicate.matches	inline	crates/horizon-client/src/advancements.rs::input	gap: only the sneak input is read; forward, back, jump and sprint have no source here yet and count as unconstrained
 ItemPredicate.Builder.of	skip:java		builder for item predicates in code
 LightPredicate.matches	inline	crates/horizon-client/src/advancements.rs::location	the light range inside location()
 LocationPredicate.PositionPredicate.of	skip:java		factory: empty when no bound is set; location() reads the position key directly
@@ -122,7 +122,7 @@ InventoryChangeTrigger.trigger	port	crates/horizon-client/src/game/advancements.
 InventoryChangeTrigger.TriggerInstance.hasItems	skip:java		builder
 InventoryChangeTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::check_inventory_trigger	item predicates: each matched by some stack
 InventoryChangeTrigger.TriggerInstance.Slots.matches	port	crates/horizon-client/src/game/advancements.rs::Game::check_inventory_trigger	occupied, full and empty ranges
-ItemDurabilityTrigger.trigger	missing		player: item_durability_changed never fires; nether/ride_strider cannot complete
+ItemDurabilityTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item_durability	item_durability_changed with the item, the remaining durability and the damage taken, from an enchantment's loss and a mount's riding wear
 ItemDurabilityTrigger.TriggerInstance.changedDurability	skip:java		builder
 ItemDurabilityTrigger.TriggerInstance.matches	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_item_durability	the criterion fires from there; its test is the closure given to `trigger`
 ItemUsedOnLocationTrigger.trigger	port	crates/horizon-client/src/game/advancements.rs::Game::trigger_block	gap: minor: no block entity in the context
