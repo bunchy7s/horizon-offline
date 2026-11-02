@@ -347,3 +347,136 @@ mod tests {
         assert!(v0sq.sqrt() < 1.4);
     }
 }
+#[cfg(test)]
+mod ground_particle_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+
+    fn breeze(at: Vec3) -> Mob {
+        let mut kind = kind();
+        let k = std::sync::Arc::make_mut(&mut kind);
+        k.id = "minecraft:breeze".into();
+        k.species = Species::Breeze;
+        Mob::new(1, kind, at, 0.0)
+    }
+
+    /// `Breeze.tick`'s pose arm: inhaling asks for twenty crumbs and makes no
+    /// draw, standing, shooting and sliding ask for `1 + nextInt(1)` and make
+    /// one, and the long jump asks for none.
+    #[test]
+    fn the_pose_asks_for_its_crumb_count_and_draws_once_or_never() {
+        // The mob's random, advanced the way the pose's arm does it.
+        let advance = |m: &Mob, draw: bool| {
+            let mut probe = m.random.clone();
+            if draw {
+                let _ = probe.next_int_bound(1);
+            }
+            probe.next_int_bound(1_000_000).unwrap_or(0)
+        };
+        for (pose, count, draw) in [
+            (INHALING, 20, false),
+            (STANDING, 1, true),
+            (SHOOTING, 1, true),
+            // `getPose()` is SLIDING here too, which draws the count.
+            (SLIDING, 1, true),
+        ] {
+            let mut m = breeze(Vec3::new(0.5, 64.0, 0.5));
+            set_pose(&mut m, pose);
+            let want = advance(&m, draw);
+            assert_eq!(ground_particle_count(&mut m), Some(count), "pose {pose}");
+            assert_eq!(
+                m.random.next_int_bound(1_000_000).unwrap_or(0),
+                want,
+                "pose {pose}: {} draw(s)",
+                u8::from(draw)
+            );
+        }
+        // The long jump takes the trail arm: no count and no draw.
+        let mut m = breeze(Vec3::new(0.5, 64.0, 0.5));
+        set_pose(&mut m, LONG_JUMPING);
+        let want = advance(&m, false);
+        assert_eq!(ground_particle_count(&mut m), None);
+        assert_eq!(m.random.next_int_bound(1_000_000).unwrap_or(0), want);
+    }
+
+    /// `Breeze.emitGroundParticles`: one `BlockParticleOption(BLOCK, state)` at
+    /// a time, at rest, at the centre of the breeze's box and the height of its
+    /// feet, of the block it stands in or else the one it stands on; none as a
+    /// passenger or over a block that draws nothing (air).
+    #[test]
+    fn a_breeze_crumbles_the_block_under_its_feet() {
+        use crate::mobs::world::with_built_test_world;
+        let ran = with_built_test_world(
+            &[],
+            |world, registry| {
+                world.chunks.insert(
+                    (0, 0),
+                    std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                );
+                let stone = registry.default_state("minecraft:stone").unwrap();
+                for x in 0..16 {
+                    for z in 0..16 {
+                        world.set(x, 63, z, stone).unwrap();
+                    }
+                }
+            },
+            |w, _| {
+                let stone = w.registry.default_state("minecraft:stone").unwrap();
+                let dust = |m: &Mob| {
+                    let mut events = Vec::new();
+                    emit_ground_particles(m, w, 1, &mut events);
+                    events
+                        .into_iter()
+                        .map(|e| match e {
+                            MobEvent::LandingDust {
+                                state,
+                                at,
+                                count,
+                                speed,
+                            } => (state, at, count, speed),
+                            other => panic!("not block crumbs: {other:?}"),
+                        })
+                        .collect::<Vec<_>>()
+                };
+                // Feet at 64.0 over stone at y = 63: the block it stands on.
+                let on_stone = breeze(Vec3::new(4.5, 64.0, 2.5));
+                let crumbs = dust(&on_stone);
+                assert_eq!(crumbs.len(), 1, "one event of crumbs, {crumbs:?}");
+                let (state, at, count, speed) = crumbs[0];
+                assert_eq!(state, stone);
+                // `getBoundingBox().getCenter()` on x and z, `position().y`.
+                assert_eq!(at, [4.5, 64.0, 2.5]);
+                assert_eq!(count, 1);
+                assert_eq!(speed, 0.0, "`addParticle(..., 0, 0, 0)`: at rest");
+                // Twenty a tick while inhaling, all at that one spot.
+                let mut inhaling = breeze(Vec3::new(4.5, 64.0, 2.5));
+                set_pose(&mut inhaling, INHALING);
+                let mut events = Vec::new();
+                let count = ground_particle_count(&mut inhaling).unwrap();
+                emit_ground_particles(&inhaling, w, count, &mut events);
+                assert!(
+                    matches!(
+                        events.as_slice(),
+                        [MobEvent::LandingDust {
+                            state: s,
+                            at: [4.5, 64.0, 2.5],
+                            count: 20,
+                            speed: 0.0,
+                        }] if *s == stone
+                    ),
+                    "{events:?}"
+                );
+                // A passenger crumbles nothing.
+                let mut riding = breeze(Vec3::new(4.5, 64.0, 2.5));
+                riding.extra.passenger = true;
+                assert!(dust(&riding).is_empty());
+                // Over air the state is air, whose render shape draws nothing.
+                let flying = breeze(Vec3::new(4.5, 100.0, 2.5));
+                assert!(dust(&flying).is_empty());
+            },
+        );
+        // Without the vanilla data under .local/horizon-client there is no world
+        // to crumble: the test has nothing to check.
+        let _ = ran;
+    }
+}
