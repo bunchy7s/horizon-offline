@@ -3774,3 +3774,168 @@ fn a_feature_gives_a_mods_sign_its_block_entity() {
     assert_eq!(generate(true), (placed, placed));
     let _ = fs::remove_dir_all(&scratch);
 }
+
+/// A small stand-in for the base root: nested folders, an empty file, an empty folder.
+fn small_base(base: &Path) {
+    for (name, bytes) in [
+        ("items.json", &b"{}"[..]),
+        ("empty.log", &b""[..]),
+        ("assets/minecraft/lang/en_us.json", &b"{\"a\": 1}"[..]),
+        (
+            "data/minecraft/tags/block/logs.json",
+            &b"{\"values\": []}"[..],
+        ),
+    ] {
+        let path = base.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, bytes).unwrap();
+    }
+    fs::create_dir_all(base.join("worldgen/empty-folder")).unwrap();
+}
+
+/// Every folder (`None`) and file (`Some(bytes)`) under `root`, by relative path.
+fn tree(root: &Path) -> BTreeMap<String, Option<Vec<u8>>> {
+    fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, Option<Vec<u8>>>) {
+        for entry in fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            let rel = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            if path.is_dir() {
+                out.insert(rel, None);
+                walk(root, &path, out);
+            } else {
+                out.insert(rel, Some(fs::read(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+/// Writes into a file where it is (same data), not by replacing it: what a link shares and a copy does not.
+fn edit_in_place(path: &Path, bytes: &[u8]) {
+    use std::io::Write;
+    let mut file = fs::File::options()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .unwrap();
+    file.write_all(bytes).unwrap();
+}
+
+/// The overlay looks like the base, and shares its files (a hard link on Windows, a symlink elsewhere) rather than
+/// holding copies of them.
+#[test]
+fn the_overlay_shares_the_base_files() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-share-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let (base, out) = (scratch.join("base"), scratch.join("root"));
+    small_base(&base);
+    Overlay::new(&base, &out).unwrap();
+    assert_eq!(tree(&out), tree(&base));
+    edit_in_place(
+        &base.join("assets/minecraft/lang/en_us.json"),
+        b"{\"a\": 2}",
+    );
+    assert_eq!(
+        fs::read(out.join("assets/minecraft/lang/en_us.json")).unwrap(),
+        b"{\"a\": 2}",
+        "the overlay copied the base file instead of linking it"
+    );
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Writing a file of the overlay replaces the name, so the base file it was linked to keeps its bytes and the other
+/// files of the overlay still follow the base.
+#[test]
+fn writing_into_the_overlay_leaves_the_base_alone() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-write-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    let (base, out) = (scratch.join("base"), scratch.join("root"));
+    small_base(&base);
+    let overlay = Overlay::new(&base, &out).unwrap();
+    let before = tree(&base);
+    overlay
+        .write(
+            "data/minecraft/tags/block/logs.json",
+            b"{\"values\": [\"mod:log\"]}",
+        )
+        .unwrap();
+    overlay.write("items.json", b"{\"mod\": 1}").unwrap();
+    overlay.write("assets/mod/new.json", b"{}").unwrap();
+    assert_eq!(tree(&base), before, "a write reached the base");
+    assert_eq!(
+        fs::read(out.join("data/minecraft/tags/block/logs.json")).unwrap(),
+        b"{\"values\": [\"mod:log\"]}"
+    );
+    assert_eq!(fs::read(out.join("items.json")).unwrap(), b"{\"mod\": 1}");
+    edit_in_place(
+        &base.join("assets/minecraft/lang/en_us.json"),
+        b"{\"a\": 3}",
+    );
+    assert_eq!(
+        fs::read(out.join("assets/minecraft/lang/en_us.json")).unwrap(),
+        b"{\"a\": 3}"
+    );
+    // A rebuild starts by removing the overlay: that removes names, not the base's data.
+    fs::remove_dir_all(&out).unwrap();
+    assert_eq!(fs::read(base.join("items.json")).unwrap(), b"{}");
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// Where a hard link cannot be made (another volume, a filesystem without links) a file is copied, as it always was
+/// on Windows; where it can, the file is linked.
+#[test]
+fn a_file_is_linked_or_else_copied() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-linkfile-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    let target = scratch.join("base.json");
+    fs::write(&target, b"original").unwrap();
+
+    let linked = scratch.join("linked.json");
+    link_file(&target, &linked, |from, to| fs::hard_link(from, to)).unwrap();
+    edit_in_place(&target, b"edited");
+    assert_eq!(fs::read(&linked).unwrap(), b"edited", "not a link");
+
+    let copied = scratch.join("copied.json");
+    fs::write(&target, b"original").unwrap();
+    link_file(&target, &copied, |_, _| {
+        Err(std::io::Error::other("no links here"))
+    })
+    .unwrap();
+    edit_in_place(&target, b"edited");
+    assert_eq!(fs::read(&copied).unwrap(), b"original", "not a copy");
+
+    // A target that is not there is an error whichever way the file is made.
+    let missing = link_file(
+        &scratch.join("missing.json"),
+        &scratch.join("x.json"),
+        |from, to| fs::hard_link(from, to),
+    );
+    assert!(missing.is_err());
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// A symlink in the base is copied through, as before; linked, the overlay's file would be a symlink too.
+#[cfg(unix)]
+#[test]
+fn a_symlink_file_is_copied_through() {
+    let scratch = std::env::temp_dir().join(format!("horizon-mod-symfile-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&scratch);
+    fs::create_dir_all(&scratch).unwrap();
+    fs::write(scratch.join("real.json"), b"real").unwrap();
+    std::os::unix::fs::symlink("real.json", scratch.join("alias.json")).unwrap();
+    let at = scratch.join("copy.json");
+    link_file(&scratch.join("alias.json"), &at, |from, to| {
+        fs::hard_link(from, to)
+    })
+    .unwrap();
+    assert!(!fs::symlink_metadata(&at).unwrap().file_type().is_symlink());
+    assert_eq!(fs::read(&at).unwrap(), b"real");
+    let _ = fs::remove_dir_all(&scratch);
+}

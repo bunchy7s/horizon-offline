@@ -714,12 +714,14 @@ pub trait Hooks: Send + Sync {
     /// back out as if never added, and a `/summon` of it fails. Tells every
     /// kind in the game's entity lists (items, orbs, mobs, boats, minecarts,
     /// armor stands, primed TNT, falling blocks, projectiles, rockets,
-    /// tridents), once each, in the order they were created; check `kind`. A
-    /// gameplay spawn is told when the next tick starts (a drop, an orb, a mob, a
-    /// `/summon` and a chunk's entities are told at once). A mod that
-    /// cancels one of the others sees it removed before it ticks again.
-    /// Not told: end crystals, the dragon, cushions, paintings, item frames and
-    /// the entities Horizon keeps without simulating. Server-side.
+    /// tridents, end crystals, the dragon, cushions, paintings, item frames),
+    /// once each, in the order they were created; check `kind`. A drop, an
+    /// orb, a mob, a `/summon` and a chunk's entities are told at once, any
+    /// other spawn between the tick's phases (it is checked after the blocks,
+    /// the vehicles, the projectiles, the items and the mobs, and at the
+    /// tick's end). A mod that cancels one of the others sees it removed
+    /// before it ticks again. Not told: the entities Horizon keeps without
+    /// simulating (displays, markers, interactions). Server-side.
     ///
     /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
     fn entity_join_level(&self, host: &mut dyn Host, event: &mut EntityJoinLevelEvent<'_>) -> Flow {
@@ -763,8 +765,10 @@ pub trait Hooks: Send + Sync {
     /// a level closing with nobody in it included. Not for the entities still
     /// loaded when the server stops, as in vanilla. `entity` is its ID and
     /// `kind` its type (`minecraft:item`); it is no longer in the level's lists.
-    /// It only hears. 53 tells item entities, experience orbs and mobs (`kind`
-    /// the mob type); later APIs add other kinds, so check `kind`. Server-side.
+    /// It only hears. 53 told item entities, experience orbs and mobs; it now
+    /// tells every kind `native_entity_join_level` does (`kind` is the type), each
+    /// once, when the game next notices it gone (the tick or action that removed
+    /// it). Check `kind`. Server-side.
     fn entity_leave_level(&self, host: &mut dyn Host, event: &mut EntityLeaveLevelEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -4506,6 +4510,57 @@ pub trait Hooks: Send + Sync {
     }
     /// A living entity jumped (`LivingEvent.LivingJumpEvent`). 359.
     fn living_jump(&self, event: &mut LivingJumpEvent<'_>) {
+        let _ = event;
+    }
+    /// Player FOV scale, after vanilla effects and before zoom and easing.
+    /// Invalid values or values outside 0.01..=10 revert to base. API @API:compute_fov_modifier@.
+    fn compute_fov_modifier(&self, host: &dyn Host, event: &mut ComputeFovModifierEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Local player movement input, after reading it and before applying it.
+    fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Additional first-person hand and item pose, including empty arms and maps.
+    /// Add offsets in blocks and pitch, yaw and roll in degrees; multiply scale.
+    /// API @API:render_hand_pose@.
+    fn render_hand_pose(&self, host: &dyn Host, event: &mut RenderHandPoseEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Before a visible item frame's item or map is drawn. Cancel hides the item, not the frame.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn render_item_in_frame(
+        &self,
+        host: &dyn Host,
+        event: &mut RenderItemInFrameEvent<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A screen was observed closing, at most once per frame.
+    fn screen_closing(&self, host: &dyn Host, event: &mut ScreenClosingEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening or changing rectangle, at most once per frame.
+    fn screen_init_post(&self, host: &dyn Host, event: &mut ScreenInitPostEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// A screen was observed opening, at most once per frame.
+    fn screen_opening(&self, host: &dyn Host, event: &mut ScreenOpeningEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Change a tooltip box's background and border gradient colors, as ARGB.
+    /// Stack is None for tooltips not associated with an item.
+    fn tooltip_color(&self, host: &dyn Host, event: &mut TooltipColorEvent<'_>) {
+        let _ = host;
         let _ = event;
     }
 }
@@ -13794,4 +13849,222 @@ pub fn dispatch_living_jump(mods: &[Box<dyn Hooks>], entity: u32, kind: &str) {
     for mod_hook in super::entered(mods, "living_jump") {
         mod_hook.living_jump(&mut event);
     }
+}
+/// What [`Hooks::compute_fov_modifier`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ComputeFovModifierEvent<'a> {
+    pub player: &'a horizon_client::camera::FovPlayer,
+    pub base: f32,
+    pub modifier: f32,
+}
+pub fn dispatch_compute_fov_modifier(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    player: &horizon_client::camera::FovPlayer,
+    base: f32,
+    modifier: &mut f32,
+) {
+    let mut event = ComputeFovModifierEvent {
+        player,
+        base,
+        modifier: *modifier,
+    };
+    for mod_hook in super::entered(mods, "compute_fov_modifier") {
+        mod_hook.compute_fov_modifier(host, &mut event);
+    }
+    *modifier = event.modifier;
+}
+/// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct MovementInputEvent {
+    pub forward: f32,
+    pub strafe: f32,
+    pub jump: bool,
+    pub sneak: bool,
+}
+pub fn dispatch_movement_input(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    forward: &mut f32,
+    strafe: &mut f32,
+    jump: &mut bool,
+    sneak: &mut bool,
+) {
+    let mut event = MovementInputEvent {
+        forward: *forward,
+        strafe: *strafe,
+        jump: *jump,
+        sneak: *sneak,
+    };
+    for mod_hook in super::entered(mods, "movement_input") {
+        mod_hook.movement_input(host, &mut event);
+    }
+    *forward = event.forward;
+    *strafe = event.strafe;
+    *jump = event.jump;
+    *sneak = event.sneak;
+}
+/// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderHandPoseEvent<'a> {
+    pub hand: horizon_client::first_person::Hand,
+    pub stack: Option<&'a ItemStack>,
+    pub partial: f32,
+    pub swing: f32,
+    pub equip: f32,
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub pitch: f32,
+    pub yaw: f32,
+    pub roll: f32,
+    pub scale: f32,
+}
+pub fn dispatch_render_hand_pose(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    hand: horizon_client::first_person::Hand,
+    stack: Option<&ItemStack>,
+    partial: f32,
+    swing: f32,
+    equip: f32,
+    x: &mut f32,
+    y: &mut f32,
+    z: &mut f32,
+    pitch: &mut f32,
+    yaw: &mut f32,
+    roll: &mut f32,
+    scale: &mut f32,
+) {
+    let mut event = RenderHandPoseEvent {
+        hand,
+        stack,
+        partial,
+        swing,
+        equip,
+        x: *x,
+        y: *y,
+        z: *z,
+        pitch: *pitch,
+        yaw: *yaw,
+        roll: *roll,
+        scale: *scale,
+    };
+    for mod_hook in super::entered(mods, "render_hand_pose") {
+        mod_hook.render_hand_pose(host, &mut event);
+    }
+    *x = event.x;
+    *y = event.y;
+    *z = event.z;
+    *pitch = event.pitch;
+    *yaw = event.yaw;
+    *roll = event.roll;
+    *scale = event.scale;
+}
+/// What [`Hooks::render_item_in_frame`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RenderItemInFrameEvent<'a> {
+    pub entity_id: u32,
+    pub pos: [i32; 3],
+    pub stack: &'a ItemStack,
+}
+pub fn dispatch_render_item_in_frame(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity_id: u32,
+    pos: [i32; 3],
+    stack: &ItemStack,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = RenderItemInFrameEvent {
+        entity_id,
+        pos,
+        stack,
+    };
+    for mod_hook in super::entered(mods, "render_item_in_frame") {
+        if matches!(
+            mod_hook.render_item_in_frame(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::screen_closing`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenClosingEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_closing(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenClosingEvent { screen };
+    for mod_hook in super::entered(mods, "screen_closing") {
+        mod_hook.screen_closing(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_init_post`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenInitPostEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_init_post(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenInitPostEvent { screen };
+    for mod_hook in super::entered(mods, "screen_init_post") {
+        mod_hook.screen_init_post(host, &mut event);
+    }
+}
+/// What [`Hooks::screen_opening`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ScreenOpeningEvent<'a> {
+    pub screen: &'a NativeScreenView<'a>,
+}
+pub fn dispatch_screen_opening(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    screen: &NativeScreenView<'_>,
+) {
+    let mut event = ScreenOpeningEvent { screen };
+    for mod_hook in super::entered(mods, "screen_opening") {
+        mod_hook.screen_opening(host, &mut event);
+    }
+}
+/// What [`Hooks::tooltip_color`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct TooltipColorEvent<'a> {
+    pub stack: Option<&'a ItemStack>,
+    pub background: u32,
+    pub border_top: u32,
+    pub border_bottom: u32,
+}
+pub fn dispatch_tooltip_color(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    stack: Option<&ItemStack>,
+    background: &mut u32,
+    border_top: &mut u32,
+    border_bottom: &mut u32,
+) {
+    let mut event = TooltipColorEvent {
+        stack,
+        background: *background,
+        border_top: *border_top,
+        border_bottom: *border_bottom,
+    };
+    for mod_hook in super::entered(mods, "tooltip_color") {
+        mod_hook.tooltip_color(host, &mut event);
+    }
+    *background = event.background;
+    *border_top = event.border_top;
+    *border_bottom = event.border_bottom;
 }

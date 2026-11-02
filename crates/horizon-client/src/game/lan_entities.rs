@@ -596,6 +596,12 @@ impl Game<'_> {
                 Some(g) => g.entity_id,
                 None => owner(p.owner),
             };
+            // Entity.DATA_SHARED_FLAGS_ID's FLAG_ONFIRE: Entity.baseTick's
+            // `setSharedFlagOnFire(remainingFireTicks > 0)`, which a client's
+            // isOnFire reads to draw the flames (a Flame bow's arrow).
+            if p.arrow.as_ref().is_some_and(|a| a.on_fire()) {
+                e.meta.push((0, serializer::BYTE, Value::Byte(1)));
+            }
             match &p.kind {
                 K::Arrow { critical, .. } => {
                     let a = p.arrow.as_deref();

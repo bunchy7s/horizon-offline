@@ -1135,6 +1135,7 @@ mod tests {
         mod horizon_client {
             pub mod camera {
                 pub struct CameraEntity;
+                pub struct FovPlayer;
             }
             pub mod menu {
                 pub struct AnvilCraft;
@@ -1671,16 +1672,23 @@ mod tests {
             "native_item_damaged: the let _ = (…); placeholder needs its dispatch call; run cargo run -p xtask -- mod-api"
         );
         assert_eq!(std::fs::read_to_string(&hooks).unwrap(), placeholder);
-        let fragment = root.join("tools/native-hook-fragments/native_item_damaged.json");
-        let shipped_fragment = std::fs::read_to_string(&fragment).unwrap();
-        let mut json: Value = serde_json::from_str(&shipped_fragment).unwrap();
-        json["hooks"][0].as_object_mut().unwrap().remove("mod_api");
-        std::fs::write(&fragment, json.to_string()).unwrap();
+        // A stamped hook lives in the catalog, not in a fragment.
+        let catalog_path = root.join("native-hooks.json");
+        let shipped_catalog = std::fs::read_to_string(&catalog_path).unwrap();
+        let mut json: Value = serde_json::from_str(&shipped_catalog).unwrap();
+        let hook = json["hooks"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|hook| hook["name"] == "item_damaged")
+            .unwrap();
+        hook.as_object_mut().unwrap().remove("mod_api").unwrap();
+        std::fs::write(&catalog_path, json.to_string()).unwrap();
         assert_eq!(
             super::generate(&root, false).unwrap_err(),
             "hook item_damaged has no mod_api entry: add one"
         );
-        std::fs::write(&fragment, shipped_fragment).unwrap();
+        std::fs::write(&catalog_path, shipped_catalog).unwrap();
         super::generate(&root, false).unwrap();
         // The generator writes LF; a Windows checkout (core.autocrlf) has CRLF.
         let lf = |s: &str| s.replace("\r\n", "\n");

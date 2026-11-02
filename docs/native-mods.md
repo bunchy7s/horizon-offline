@@ -1,5 +1,7 @@
 # Native mods
 
+API @API:compute_fov_modifier@ adds `native_compute_fov_modifier(player, base, modifier)` on the client each tick for the local player's FOV scale, after vanilla effects and before zoom and camera easing. `player` contains the calculation inputs and `base` is the original scale. Non-finite modifiers or values outside 0.01..=10 fall back to `base`. It does not affect a spectator camera on a mob. Bundles need "hooks": @API:compute_fov_modifier@.
+
 Native mods are **mixin bundles** that change the game's own Rust source before it is compiled, with
 [horizon-mixins](https://github.com/horizon-rust/horizon-mixins) (MIT, by levzzz5154, made for Horizon). A bundle
 is a `horizon-mixin.toml` and a few `.rs` helpers that hook into named functions of the game (HEAD, BEFORE_CALL,
@@ -10,6 +12,10 @@ Native mods are native code with the player's rights, not sandboxed. They are al
 switch. The first install shows a trust notice, and every build waits behind a red warning; the registry lists one only
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
+
+## Item frame rendering
+
+`native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame. Bundles need "hooks": @API:render_item_in_frame@.
 
 ## Villager farming
 
@@ -779,6 +785,10 @@ API 86 adds `native_block_highlight(pos, state, partial, canceled)` runs before 
 
 API 87 adds `native_render_hand(hand, stack, partial, swing, equip, canceled)` runs before each visible first-person hand: `Hand::Main` or `Hand::Off`, the displayed stack (None for an empty arm), partial tick, swing progress and inverse equip height including swap animation scale. Set `canceled` to skip the default geometry for that hand (arms and maps included). It runs after the existing spectator, hidden-HUD, sleep and camera gates. It only hides: the hook has no way to draw a replacement. Bundles need "hooks": 87.
 
+`native_render_hand_pose` runs after cancellation for each visible first-person hand, including maps and the empty main-hand arm (the same path as `RenderArmEvent`). Add to `x`, `y`, `z` in blocks and `pitch`, `yaw`, `roll` in degrees, and multiply `scale` to compose with other mods. The pose is applied in hand view space before the ordinary hand and item poses, in translation, pitch, yaw, roll, scale order. Non-finite or out-of-range components are ignored individually: offsets must be within -16..=16 blocks, angles within -3600..=3600 degrees and scale within 0.01..=100. Bundles need "hooks": @API:render_hand_pose@.
+
+`native_screen_opening(screen)`, `native_screen_init_post(screen)` and `native_screen_closing(screen)` observe screens once per frame with `NativeScreenView`, including sign editors, book edit/sign/view and lectern screens, dialogs and prompts. Overlay views use the full window as their rectangle and have no menu or title; anvil rename remains part of its inventory screen. Dialog states share the `dialog` id. Screens opened and closed within one frame are missed; cancelling an opening is not possible because there is no single transition point. Bundles need "hooks": @API:screen_opening@.
+
 API 88 adds `native_client_resources_reloaded()` fires on the render thread after successful client resource-pack application: the atlas, models, renderer and client caches already use the new resources. It covers selection/F3+T and server-pack reloads. Failed staging or application and initial startup do not fire it. This is a completion notification, not a reload-listener registration or staging API. Bundles need "hooks": 88.
 
 API 89 adds `native_item_decorations(stack, x, y, batch)` appends custom GUI drawing after the default bar, cooldown shade and count have been painted for an item icon. The stack is the displayed stack, x/y are its icon's top-left in GUI units, the units the batch takes (no item-local translation remains active). Existing GUI helpers can draw badges, text and overlays. The shared path covers the hotbar, carried stacks, menu slots, recipe book and item tooltip icons, and the item icons of the advancement, beacon, stats and trading screens. `native_item_bar` still controls the bar separately; this hook does not suppress vanilla decorations. Bundles need "hooks": 89.
@@ -840,6 +850,8 @@ loaded terrain with them. Bundles that use it need `"hooks": 107`.
 API 108 adds `native_server_data_loaded(reload)` fires once the server's data tables are built (NeoForge's `TagsUpdatedEvent` with `SERVER_DATA_LOAD`): the recipes, tags, loot and advancements of the world's data packs and of `native_data_pack_files` are what the helpers read from then on. `reload` is false on a world's first open, before its chunks and players are loaded, and true after `/reload`, once the players were sent the new data. It is where a mod drops caches derived from the data and rebinds what depends on it. Server-side, the single player's integrated server included; a client connected to a server never fires it. Bundles need "hooks": 108.
 
 API 109 adds `native_compute_fov(partial, camera, degrees)` receives the computed world FOV after settings, ordinary FOV effects and zoom, before projection/Nausea. `camera` is its world position and `partial` the interpolation fraction. Mods can narrow or widen the angle; only finite values in 1..=179 degrees are accepted, otherwise the original computed angle is used. It runs for world rendering and near-plane overlays, not just once per frame. Hand/HUD FOV and the title panorama keep their existing paths. Bundles need "hooks": 109.
+
+`native_movement_input(forward, strafe, jump, sneak)` runs on the client each local player tick after input is read and before it is applied. Mods may change all four values; positive strafe is left. The server receives direction flags, not scalar magnitudes, so remote servers may correct modified movement. Bundles need "hooks": @API:movement_input@.
 
 API 110 adds mobs drawn by client mods: `native_mob_submit(mob, draw, drawn)` is asked each frame for every mob in view but players,
 with its id, kind, custom name and the frame's body and head turns and walk cycle; a mod draws a model of its own with the
@@ -1943,7 +1955,8 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   `minecraft:water`, `minecraft:lava` or `minecraft:powder_snow`; fish and axolotl buckets pour water) into `pos`,
   right before the fluid is placed. Set `cancel` and nothing is poured. The player's state is swapped in, so
   `native_tell` answers them. `native_fill_bucket` hears the same click without the player and the fluid; dispensers
-  and cauldrons are not heard.
+  and cauldrons are not heard. A fluid or mob bucket is also heard at the block beside the clicked face whenever that
+  block is not `pos`, since a block that refuses the fluid passes it there; the fluid may still go into `pos`.
 - **`native_player_bed_enter(player, name, pos, cancel)`**: a server player passed the sleep checks and is about to
   enter the bed at its head position. Set `cancel` to keep them out; helpers that look them up through `self.lan` may
   find nothing while a guest packet is handled.
@@ -2215,7 +2228,9 @@ For mods that run where the world is simulated: a dedicated server, a LAN host, 
   before any is hit; take out the ones to spare. Entities are hurt as before.
 - **`native_fill_bucket(stack, pos, canceled)`** and **`native_attack_entity(entity, kind, pos, canceled)`** (API 22):
   a player's bucket at a block, and their blow on an entity, with the acting player swapped in. Canceled, the bucket
-  does nothing and the blow does no harm.
+  does nothing and the blow does no harm. A fluid or mob bucket also asks about the block beside the clicked face
+  whenever that block is not its target, since a block that refuses the fluid passes it there; the fluid may still
+  stay in the target.
 
 ### Mobs
 
@@ -2523,6 +2538,13 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
   entity atlas and the shared quad index buffer. Not called on the title screen's panorama.
+- `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
+  entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
+  holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
+  quads (empty when no hand drew: third person, F1, a shader pack's own hand), the hand's clip matrix (its own field
+  of view and the view bob, no jitter), the camera, the entity atlas and the quad index buffer. The hand's depth isn't
+  kept: draw its quads into a depth of your own. A motion blur can match the hand's quads with last frame's for the
+  swing, attack, equip and bob motion, and blur the picture with the hand in it.
 - `native_render_needs(needs)`: set `entity_spans` to have the entity geometry split into runs by entity without a
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
@@ -2940,3 +2962,9 @@ The following catalog hooks are not in the trait yet:
 - Newer upstream hooks `biome_colors`, `camera_distance`, `compute_fog_color`, `compute_fov`,
   `data_pack_files`, `mob_submit`, `mouse_button_pre`, `mouse_button_post`, `player_respawned`
   and `server_data_loaded` will join a later slice.
+
+The client `tooltip_color` hook changes the background and top and bottom border gradient colours as mutable ARGB `u32` values; it does not change text colours. It covers solid-fill item tooltips (including creative, recipe book, chat, trading and bundle-selected item names), screen text boxes, and native panel tooltips. The stack is `None` for text-only boxes, including recipe-book item lines where the stack is discarded before drawing. Sprite-based screen tooltips (including options and title screens) use a separate renderer and are not covered; no texture hook is offered.
+
+# Camera and collision reads
+
+The `native_camera()` helper returns the most recently extracted world frame's camera, or none before one exists. Its position, interpolated eye height, partial tick, angles, final FOV, near/far planes and dimension accompany column-major view and projection matrices. The view is camera-relative and includes bob and spin; projection uses reversed Z. Earlier callbacks in a frame can see the previous frame. `native_block_collision(pos)` returns block-local `[min_x, min_y, min_z, max_x, max_y, max_z]` boxes with an empty collision context; unloaded blocks and collision errors give no boxes.
