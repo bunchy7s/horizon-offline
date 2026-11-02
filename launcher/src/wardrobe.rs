@@ -270,6 +270,11 @@ impl Service {
         }
     }
 
+    /// The service's host, for a failure's details.
+    pub fn host(&self) -> &str {
+        self.base.split_once("://").map_or(&self.base, |(_, h)| h)
+    }
+
     pub fn catalogue(&self) -> Result<Catalogue, Error> {
         parse(self.call("GET", "/v1/catalogue", None, None)?)
     }
