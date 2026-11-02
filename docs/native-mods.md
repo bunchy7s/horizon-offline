@@ -2135,8 +2135,11 @@ The renderer module re-exports the game's wgpu types.
 Every `Host` method defaults to a panic naming it (`not implemented: Host::tell`), so a test double implements
 only what its hook calls, and an unexpected call fails loudly. Drive the hook through
 `horizon_client::mod_api::dispatch_<hook>(&mut host, &mods, args…)`, which builds the event as the game does. The
-events and these `#[non_exhaustive]` values can't be built outside horizon-client: `NativeScreenView` (the
-`dispatch_screen_*` hooks), `NativeLifecycleContext` (`dispatch_world_lifecycle`, `dispatch_server_tick`),
+events and these values can't be built outside horizon-client: `NativeScreenView` (`dispatch_screen_render_post`
+and the `dispatch_screen_*_pre` input hooks; `dispatch_screen`, `dispatch_screen_draw`, `dispatch_screen_click` and
+`dispatch_screen_tooltip` take plain values and can be driven), `BlockEntityDraw` (`dispatch_block_entity_submit`,
+`dispatch_mob_submit`, `dispatch_mob_layer`, `dispatch_player_submit`), `winit::event::KeyEvent`
+(`dispatch_input_key`), `NativeLifecycleContext` (`dispatch_world_lifecycle`, `dispatch_server_tick`),
 `NativeLootDrops` (`dispatch_loot_drops`) and `NativeServerPlayer` (`dispatch_perform_command` takes one as an
 argument). A test outside can't call those dispatches, and a `Host` answer doesn't help; test the logic beneath the
 hook instead. `NativeServerPlayer` is also returned by `Host::server_players` and `Host::acting_player`, which a test
