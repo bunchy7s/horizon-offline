@@ -546,7 +546,11 @@ mod tests {
         write(&root).unwrap();
         let (_, rel) = find(&root.join("data/minecraft/recipe")).unwrap();
         assert_eq!(rel, "data/minecraft/recipe");
-        assert!(find(&root.join("worldgen/structure")).is_none());
+        let (_, rel) = find(&root.join("worldgen/structure/minecraft")).unwrap();
+        assert_eq!(rel, "worldgen/structure/minecraft");
+        // The top-level tables beside the structures stay on the disk.
+        assert!(find(&root.join("worldgen")).is_none());
+        assert!(find(&root.join("worldgen/biomes.json")).is_none());
         let _ = fs::remove_dir_all(&root);
     }
 
