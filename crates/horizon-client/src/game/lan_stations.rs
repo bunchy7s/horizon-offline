@@ -138,6 +138,14 @@ impl Game<'_> {
                 let env = self.menu_env();
                 gs.menu.set_slot(&env, 2, result);
             }
+            if gs.kind == StationKind::Smithing {
+                let guest = &host.hub.guests[gi];
+                let (uuid, name) = (guest.uuid, guest.name.clone());
+                let mut result = gs.menu.slot(3).cloned();
+                self.native_prepare_smithing(uuid, &name, gs.pos, &mut result);
+                let env = self.menu_env();
+                gs.menu.set_slot(&env, 3, result);
+            }
             self.lan_station_sounds(&mut gs);
             if let Some(amount) = gs.menu.ground.take() {
                 self.grindstone_taken(gs.pos, amount);
