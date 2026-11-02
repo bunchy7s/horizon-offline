@@ -2225,6 +2225,8 @@ impl Game<'_> {
             world: &self.world,
             sprites: &self.gui.atlas.sprites,
             emissive: &self.gui.atlas.emissive,
+            translucent_sprites: &self.gui.atlas.translucent,
+            atlas_revision: self.gui.atlas.revision,
             nether: self.dim == super::Dim::Nether,
             lid: &lid,
             sign: &|_| None,
