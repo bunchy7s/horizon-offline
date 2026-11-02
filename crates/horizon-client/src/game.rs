@@ -8138,7 +8138,12 @@ impl Game<'_> {
         // MouseHandler.grabMouse never captures an inactive window, and vanilla
         // grabs only on `setScreen(null)`: the pack prompt and server dialogs
         // are screens over the world that keep the pointer.
-        if capture && (!self.focused || self.server_packs.prompt.is_some() || self.dialog_open()) {
+        if capture
+            && (!self.focused
+                || self.server_packs.prompt.is_some()
+                || self.dialog_open()
+                || self.command_prompt.is_some())
+        {
             return;
         }
         // The container screen's press state belongs to the screen: a screen
@@ -8434,7 +8439,10 @@ impl Game<'_> {
         } else {
             self.hud_layers(size)
         };
-        self.draw_dialog(&mut batch);
+        // Vanilla's confirmation replaces the dialog as the screen.
+        if self.command_prompt.is_none() {
+            self.draw_dialog(&mut batch);
+        }
         self.draw_pack_prompt(&mut batch);
         self.draw_code_of_conduct(&mut batch);
         self.draw_link_prompt(&mut batch);
@@ -17808,9 +17816,9 @@ impl Game<'_> {
                 // ConfirmScreen.keyPressed: Escape answers no.
                 WindowEvent::KeyboardInput { event, .. } if self.command_prompt.is_some() => {
                     if event.state == ElementState::Pressed
-                        && event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                        && let PhysicalKey::Code(key) = event.physical_key
                     {
-                        self.answer_command_prompt(false);
+                        self.command_prompt_key(key);
                     }
                 }
                 WindowEvent::KeyboardInput { event, .. } if self.link_prompt.is_some() => {

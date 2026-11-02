@@ -429,10 +429,10 @@ impl Game<'_> {
                     )
                     .into());
                 }
-                // ConfirmScreen.keyPressed: Escape answers no, nothing else goes past it.
+                // The command confirmation takes the keys; none go past it.
                 if self.command_prompt.is_some() {
-                    if key == KeyCode::Escape && arg(2)? != "up" {
-                        self.answer_command_prompt(false);
+                    if arg(2)? != "up" {
+                        self.command_prompt_key(key);
                     }
                     return ok();
                 }

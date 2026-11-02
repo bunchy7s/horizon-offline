@@ -111,7 +111,7 @@ struct Game {
     captured: bool, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
-    server_packs: ServerPacks, options: Options,
+    server_packs: ServerPacks, command_prompt: Option<()>, options: Options,
 }
 impl Default for Game {
     fn default() -> Self {
@@ -120,7 +120,7 @@ impl Default for Game {
             mouse: Mouse::default(), captured: false, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
             renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default(),
-            options: Options::default() }
+            command_prompt: None, options: Options::default() }
     }
 }
 HELPER
@@ -139,6 +139,16 @@ fn main() {
         game.capture(true);
         assert!(!game.captured);
         game.server_packs.prompt = None;
+        game.capture(true);
+        assert!(game.captured);
+    }
+    // So does a clicked command's confirmation.
+    {
+        let mut game = Game::default();
+        game.command_prompt = Some(());
+        game.capture(true);
+        assert!(!game.captured);
+        game.command_prompt = None;
         game.capture(true);
         assert!(game.captured);
     }
