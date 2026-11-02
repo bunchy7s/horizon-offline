@@ -95,7 +95,7 @@ AbstractHorseRenderer.extractRenderState	port	crates/horizon-client/src/mobs/equ
 AbstractMinecartRenderer.submit	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	gap: player: no hurt tilt when a cart is hit (hurt_time is not read here); minor: no per-cart offset jitter
 AbstractMinecartRenderer.newRender	missing		minor: experimental minecart movement (new render path) is not implemented
 AbstractMinecartRenderer.oldRender	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	rail-based draw is the path Horizon has
-AbstractMinecartRenderer.newExtractState	missing		minor: experimental minecart movement (new render path) is not implemented
+AbstractMinecartRenderer.newExtractState	port	crates/horizon-client/src/game/remote.rs::Game::remote_minecart_lerp	the cart's position and rotation sampled at the frame's partial tick from the steps a NewMinecartBehavior cart has queued; None when the cart has no lerp, and the renderer then keeps the entity's own interpolated position and rotation
 AbstractMinecartRenderer.oldExtractState	port	crates/horizon-client/src/game/minecarts.rs::Game::cart_geometry	rail front and back points are taken from the cart's rail position
 AbstractMinecartRenderer.getRenderOffset	missing		minor: only the new render path offsets the cart
 AbstractSkeletonRenderer.extractRenderState	port	crates/horizon-client/src/mobs/anim.rs::setup	gap: player: a skeleton's freeze-conversion shake (its isShaking) is not drawn; the aggressive and bow flags are read in setup

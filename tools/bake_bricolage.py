@@ -4,7 +4,7 @@
 GPUI picks a font file by family and weight, so the launcher can't use the variable font itself:
 this cuts the instances it uses (docs/design-system.md, "Night"): the UI family at optical size 14
 in Regular, Medium, SemiBold and Bold, and the display family (Bold at optical size 72) under its
-own family name. Upstream: github.com/ateliertriay/bricolage, via google/fonts (SIL OFL 1.1, no
+own family name, with the glass look's SemiBold headings at optical sizes 56 and 28. Upstream: github.com/ateliertriay/bricolage, via google/fonts (SIL OFL 1.1, no
 reserved font name).
 
 Bricolage has no Cyrillic, so each cut also takes Geist's (github.com/vercel/geist-font via
@@ -32,12 +32,17 @@ from fontTools.varLib.instancer import instantiateVariableFont
 OUT = Path(__file__).resolve().parent.parent / "crates/horizon-theme/fonts"
 UI = "Bricolage Grotesque"
 DISPLAY = "Bricolage Grotesque Display"
+# The glass look's headings (docs/design-system.md, "Glass"): SemiBold at the optical sizes a
+# browser picks for them (opsz follows the size in px): page and instance names, then card titles.
+HEADING = "Bricolage Grotesque Heading"
 CUTS = [
     (UI, "Regular", 14, 400),
     (UI, "Medium", 14, 500),
     (UI, "SemiBold", 14, 600),
     (UI, "Bold", 14, 700),
     (DISPLAY, "Bold", 72, 700),
+    (DISPLAY, "SemiBold", 56, 600),
+    (HEADING, "SemiBold", 28, 600),
 ]
 GEIST_COPYRIGHT = "Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)"
 # The Cyrillic block and its supplement.

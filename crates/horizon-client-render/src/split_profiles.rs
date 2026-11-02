@@ -3,10 +3,10 @@
 //! pause menu (Splitscreen Settings), playing on until the new one can join. A profile is a name
 //! (kept in the game folder), with its own options. The
 //! game fills the list when the page opens (`filled`), takes the choice, and says why a pick
-//! can't play (`refused`). Built from vanilla's widgets, as Horizon's own pages are.
+//! can't play (`refused`). Built from vanilla's widgets.
 use crate::{
     gamepad::{Button as PadButton, GlyphStyle},
-    graphics_style::STYLE,
+    graphics_style,
     hud::{HudAtlas, HudBatch, rgba},
     lang,
     text::Text,
@@ -241,7 +241,7 @@ impl SplitProfiles {
         };
         let buttons = self.buttons(w, h);
         if let Some(name) = &self.forgetting {
-            STYLE.title(
+            graphics_style::title(
                 batch,
                 atlas,
                 &Text::literal(tr(
@@ -272,7 +272,7 @@ impl SplitProfiles {
                 line(batch, why, 176.0, rgba(255, 85, 85, 255));
             }
         } else if let Some(field) = &mut self.new {
-            STYLE.title(
+            graphics_style::title(
                 batch,
                 atlas,
                 &Text::literal(tr("horizon.splitscreen.profiles.new_title", "New Profile")),
@@ -293,7 +293,7 @@ impl SplitProfiles {
                 ),
                 None => tr("horizon.pages.split_profiles", "Who's playing?"),
             };
-            STYLE.title(batch, atlas, &Text::literal(title));
+            graphics_style::title(batch, atlas, &Text::literal(title));
             self.draw_bumpers(batch, atlas, style);
             // Under Cancel: where offline profiles live.
             let y = buttons.last().map_or(0.0, |b| b.0[1] + 30.0);

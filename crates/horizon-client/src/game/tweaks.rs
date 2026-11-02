@@ -449,7 +449,7 @@ impl Game<'_> {
     pub(super) fn sort_mouse_press(&mut self, button: MouseButton) -> bool {
         self.sort_input(&keybinds::mouse_name(button))
     }
-    /// The HDR settings key (`Graphics::hdr_key`): opens Graphics: HDR from the game, where
+    /// The HDR settings key (`Graphics::hdr_key`): opens the graphics screen's HDR page from the game, where
     /// the display offers HDR; Done goes back to the game.
     pub(super) fn hdr_key_press(&mut self, key: KeyCode) -> bool {
         keybinds::key_name(key).is_some_and(|name| self.hdr_input(name))

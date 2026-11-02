@@ -492,6 +492,23 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
             f64::from(0.55_f32 * m.eye_height() as f32),
             f64::from(m.width() * 0.4),
         ]
+    } else if let Some(factor) = match m.species() {
+        // Pig.getLeashOffset, Rabbit.getLeashOffset and
+        // Strider.getLeashOffset: 0.6 of the eye height; Parrot.getLeashOffset
+        // and Ocelot.getLeashOffset: half of it.
+        super::Species::Pig | super::Species::Rabbit | super::Species::Strider => Some(0.6_f32),
+        super::Species::Parrot | super::Species::Ocelot => Some(0.5_f32),
+        _ => None,
+    } {
+        [
+            0.0,
+            f64::from(factor * m.eye_height() as f32),
+            f64::from(m.width() * 0.4),
+        ]
+    } else if m.species() == super::Species::HappyGhast {
+        // HappyGhast.getLeashOffset: the origin, so the rope hangs at the
+        // ghast's feet rather than an eye height up.
+        [0.0, 0.0, 0.0]
     } else {
         [0.0, m.eye_height(), f64::from(m.width() * 0.4)]
     }
@@ -627,6 +644,41 @@ mod tests {
                 let z = f64::from(m.width() * forwards as f32);
                 assert!((o[1] - h).abs() < 1e-9, "{kind}: height {} vs {h}", o[1]);
                 assert!((o[2] - z).abs() < 1e-9, "{kind}: forward {} vs {z}", o[2]);
+                assert_eq!(o[0], 0.0, "{kind}: centred");
+            }
+        });
+    }
+    /// `Pig`, `Rabbit`, `Strider`, `Parrot`, `Ocelot` and
+    /// `HappyGhast.getLeashOffset`: 0.6 or half of the eye height, and the
+    /// happy ghast's rope at the origin, against the default eye-height
+    /// height the fallthrough gave them.
+    #[test]
+    fn a_pig_a_rabbit_a_parrot_an_ocelot_and_a_ghast_hang_their_lead_where_vanilla_does() {
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
+            for (kind, factor) in [
+                ("minecraft:pig", 0.6),
+                ("minecraft:rabbit", 0.6),
+                ("minecraft:strider", 0.6),
+                ("minecraft:parrot", 0.5),
+                ("minecraft:ocelot", 0.5),
+                // `Vec3.ZERO`: no eye-height part and no forward shift.
+                ("minecraft:happy_ghast", 0.0),
+            ] {
+                let m = Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                );
+                let o = leash_offset(&m);
+                let h = f64::from(factor * m.eye_height() as f32);
+                let z = f64::from(m.width() * 0.4);
+                assert!((o[1] - h).abs() < 1e-9, "{kind}: height {} vs {h}", o[1]);
+                assert!(
+                    (o[2] - if factor == 0.0 { 0.0 } else { z }).abs() < 1e-9,
+                    "{kind}: forward {} vs {z}",
+                    o[2]
+                );
                 assert_eq!(o[0], 0.0, "{kind}: centred");
             }
         });

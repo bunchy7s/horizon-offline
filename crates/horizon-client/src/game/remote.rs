@@ -2189,19 +2189,6 @@ impl Game<'_> {
             (x - r.chunk_center.0).abs() <= range && (z - r.chunk_center.1).abs() <= range
         })
     }
-    /// A column the client no longer holds; far terrain keeps it as it was
-    /// last (`server_terrain`).
-    fn forget_remote_chunk(
-        &mut self,
-        x: i32,
-        z: i32,
-    ) -> Option<std::sync::Arc<horizon_client::chunk::Chunk>> {
-        let chunk = self.streaming.forget(&mut self.world, x, z)?;
-        if let Some(lod) = &mut self.lod {
-            lod.observe(chunk.clone(), self.res.facts());
-        }
-        Some(chunk)
-    }
     /// The columns a moved or resized storage no longer holds.
     fn drop_remote_chunks_out_of_range(&mut self) {
         let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
@@ -2215,7 +2202,8 @@ impl Game<'_> {
     }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
-    /// entities, each store once for all of them.
+    /// entities, each store once for all of them. Far terrain keeps them as they were last
+    /// (`server_terrain`).
     fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
@@ -2223,9 +2211,11 @@ impl Game<'_> {
         if gone.is_empty() {
             return;
         }
-        let mut freed = Vec::with_capacity(gone.len());
-        for &(x, z) in gone.iter() {
-            freed.extend(self.forget_remote_chunk(x, z));
+        let freed = self.streaming.forget_columns(&mut self.world, gone);
+        if let Some(lod) = &mut self.lod {
+            for chunk in &freed {
+                lod.observe(chunk.clone(), self.res.facts());
+            }
         }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_columns(gone.iter().copied());
@@ -4411,9 +4401,18 @@ impl Game<'_> {
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
             C::PlaceGhostRecipe(p) => self.remote_ghost_recipe(p),
             C::MerchantOffers(p) => self.remote_merchant_offers(p),
-            C::ContainerClose(_) if self.remote_lectern_closed() => {}
             C::ContainerClose(_) => {
-                if self.screen == Screen::Inventory {
+                // `LocalPlayer.clientSideCloseContainer` sets the screen to
+                // null, including dialogs and WaitingForResponseScreen. This
+                // differs from clearDialog, which restores the parent screen.
+                let dialog = self.dialog_open();
+                if dialog {
+                    self.close_dialogs();
+                    self.ui.chat_screen = None;
+                    self.book = None;
+                    self.sign_edit = None;
+                }
+                if !self.remote_lectern_closed() && (self.screen == Screen::Inventory || dialog) {
                     self.remote_close_local();
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -7154,7 +7153,7 @@ impl Game<'_> {
         }
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
-        let entity = self.entity_targeted();
+        let entity = self.remote_use_targets_entity();
         horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
     }
 
@@ -8192,7 +8191,7 @@ impl Game<'_> {
             }
             return;
         }
-        let off_target = if self.entity_targeted() {
+        let off_target = if self.remote_use_targets_entity() {
             self.remote_use_entity(Hand::Off)
         } else {
             self.remote_use_block(Hand::Off)
