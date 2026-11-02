@@ -42,6 +42,7 @@ mod partner;
 mod perf;
 mod plate;
 mod profile_heads;
+mod scene;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
@@ -379,6 +380,9 @@ struct Launcher {
     side_servers: Vec<horizon_launcher::servers::Entry>,
     /// The pixel art made for this window (`art.rs`), and pictures downloaded by URL.
     sky: sky::Sky,
+    /// The pixel sunset of the new design (dark appearance): its own view, so a frame of it
+    /// alone redraws nothing else.
+    scene: gpui::Entity<scene::Scene>,
     /// When the sky next asks for a frame, and the timer that will draw it.
     sky_wake: Option<(Instant, gpui::Task<()>)>,
     /// The window's scale, as of its last frame, for art drawn outside `render`'s reach.
@@ -594,6 +598,7 @@ impl Launcher {
             offline_name: offline_name(),
             side_servers: horizon_launcher::servers::list(),
             sky: sky::Sky::default(),
+            scene: cx.new(|_| scene::Scene::new()),
             sky_wake: None,
             scale: window.scale_factor(),
         };
@@ -4711,16 +4716,23 @@ impl Render for Launcher {
         if self.opening.is_none() && window.focused(cx).is_none() {
             window.focus(&self.root_focus, cx);
         }
-        let (sky, next) = self.sky.render(
-            &t.night,
-            (size.width.into(), size.height.into()),
-            window.scale_factor(),
-            window.is_window_active(),
-            Instant::now(),
-        );
-        if let Some(next) = next {
-            self.wake_sky(next, cx);
-        }
+        // Dark: the new design's scene; Light keeps the dawn sky until the design has a light
+        // look.
+        let sky = if t.dark {
+            self.scene.clone().into_any_element()
+        } else {
+            let (sky, next) = self.sky.render(
+                &t.night,
+                (size.width.into(), size.height.into()),
+                window.scale_factor(),
+                window.is_window_active(),
+                Instant::now(),
+            );
+            if let Some(next) = next {
+                self.wake_sky(next, cx);
+            }
+            sky.into_any_element()
+        };
         let topbar = self.topbar(cx);
         let sidebar = self.sidebar(window, cx);
         let mut root = div()
@@ -4749,6 +4761,11 @@ impl Render for Launcher {
                 cx.notify();
             }))
             .capture_any_mouse_down(|_, _, _| KEYBOARD.store(false, Ordering::Relaxed))
+            .on_mouse_move(cx.listener(|this, ev: &gpui::MouseMoveEvent, window, cx| {
+                let size = window.viewport_size();
+                this.scene
+                    .update(cx, |scene, cx| scene.point(ev.position, size, cx));
+            }))
             .relative()
             .flex()
             .flex_col()
