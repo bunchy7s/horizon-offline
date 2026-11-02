@@ -12133,6 +12133,16 @@ impl Game<'_> {
                 }
             }
         }
+        // IntegratedServer.initServer's line, which other launchers read in `latest.log` to
+        // offer the world again; single player starts here with or without a server thread.
+        horizon_client::logging::write_as(
+            "Server thread",
+            log::Level::Info,
+            &format!(
+                "Starting integrated minecraft server version {}",
+                horizon_core::VANILLA_VERSION
+            ),
+        );
         if self
             .options
             .execution_role
