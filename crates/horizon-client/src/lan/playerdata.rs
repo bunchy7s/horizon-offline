@@ -111,7 +111,10 @@ pub fn save_owner(guest: &Guest, level: &mut Level, world: &Path) {
 
 /// A player new to the world faces the world spawn's angle (`PrepareSpawnTask`:
 /// the saved rotation, else `respawnData.yaw/pitch`).
-pub fn face_world_spawn(guest: &mut Guest, [yaw, pitch]: [f32; 2]) {
+pub fn face_world_spawn(guest: &mut Guest, known: bool, [yaw, pitch]: [f32; 2]) {
+    if known {
+        return;
+    }
     guest.yaw = yaw;
     guest.pitch = pitch;
     guest.head_yaw = yaw;
@@ -363,7 +366,7 @@ mod tests {
     #[test]
     fn a_new_player_faces_the_world_spawn_angle() {
         let mut g = guest();
-        face_world_spawn(&mut g, [90.0, -15.0]);
+        face_world_spawn(&mut g, false, [90.0, -15.0]);
         assert_eq!((g.yaw, g.pitch, g.head_yaw), (90.0, -15.0, 90.0));
     }
 
@@ -375,6 +378,7 @@ mod tests {
             ..Level::default()
         };
         apply(&mut g, &level);
+        face_world_spawn(&mut g, true, [90.0, -15.0]);
         assert_eq!((g.yaw, g.pitch, g.head_yaw), (-135.0, 30.0, -135.0));
     }
 

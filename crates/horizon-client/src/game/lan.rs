@@ -2457,6 +2457,9 @@ impl Game<'_> {
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
+        // PrepareSpawnTask: with no saved rotation the player faces the world
+        // spawn's angle (`/setworldspawn ... <angle>`).
+        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
         }
@@ -2472,9 +2475,6 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
-            // PrepareSpawnTask: with no saved rotation the player faces the
-            // world spawn's angle (`/setworldspawn ... <angle>`).
-            playerdata::face_world_spawn(g, self.level.world_spawn_angle);
             g.health = 20.0;
             g.food = 20;
             g.dimension = super::Dim::Overworld.id().to_owned();
