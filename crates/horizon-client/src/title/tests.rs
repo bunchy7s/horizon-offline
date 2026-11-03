@@ -534,6 +534,56 @@ fn failed_operations_show_error_and_leave_world_intact() {
     }
 }
 
+/// `LevelStorageSource.validateAndCreateAccess`: the world folder's links are
+/// looked for before an access is made, and one is enough to keep the world
+/// closed - `WorldOpenFlows.createWorldAccess` shows the symlink warning in
+/// place of the world (`symlink_warning.title.world`), and the session lock
+/// is never taken, so the world is not held by this instance.
+#[cfg(unix)]
+#[test]
+fn a_world_folder_holding_a_link_is_not_opened() {
+    let mut f = Fixture::new();
+    f.world("World", "World");
+    let outside = f.root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("keep.txt"), "keep").unwrap();
+    std::os::unix::fs::symlink(&outside, f.title.saves.join("World/link")).unwrap();
+    assert_eq!(
+        world_management::symlinks(&f.title.saves, "World")
+            .unwrap()
+            .len(),
+        1
+    );
+    f.select();
+    assert_eq!(
+        f.click("Play Selected World"),
+        Action::None,
+        "the world opened"
+    );
+    assert!(
+        matches!(
+            &f.title.mode,
+            Mode::Error {
+                alert: Some(Alert::Symlink),
+                ..
+            }
+        ),
+        "{:?} is not the symlink warning",
+        f.title.mode
+    );
+    assert!(
+        crate::save::SessionLock::acquire(&f.title.saves.join("World")).is_ok(),
+        "the refused world was left unlocked"
+    );
+    // A world with no links in it still opens.
+    f.world("Clean", "Clean");
+    f.select();
+    assert_eq!(
+        world_management::symlinks(&f.title.saves, "Clean").unwrap(),
+        Vec::<std::path::PathBuf>::new()
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn backup_rejects_symlinks_and_removes_incomplete_archive() {

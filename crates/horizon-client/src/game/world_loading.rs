@@ -700,13 +700,15 @@ pub(super) fn make_streaming(
                 shape,
             )
         });
-    // `FlatLevelSource.createState`: a superflat world whose settings let structure sets
-    // generate runs them on its flat ground.
+    // PlaceCommand.placeJigsaw/placeStructure generate directly, independently
+    // of WorldOptions.generateStructures. Keep their flat locator available
+    // even when automatic structure starts are disabled.
+    let automatic_structures =
+        horizon_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures);
     let flat_structures = (dim == Dim::Overworld)
         .then(|| horizon_client::save::world_gen_settings(world_root))
         .flatten()
-        .and_then(|s| horizon_client::flatgen::FlatTerrain::structure_settings(&s))
-        .filter(|_| horizon_client::save::WorldGen::read(world_root).is_none_or(|w| w.structures));
+        .and_then(|s| horizon_client::flatgen::FlatTerrain::structure_settings(&s));
     // A generator that cannot be built (a layer block the registry lacks, a level shorter
     // than the noise) leaves the world on its flat ground, as it was before.
     let flat_vanilla = flat_structures.and_then(|settings| {
@@ -719,7 +721,7 @@ pub(super) fn make_streaming(
             &biomes,
             seed,
             &settings,
-            true,
+            automatic_structures,
         ) {
             Ok(mut terrain) => {
                 terrain.add_mod_signs(res.facts());
@@ -739,10 +741,14 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
-    } else if let Some(inner) = flat_vanilla {
+    } else if let Some(inner) = flat_vanilla
+        .as_ref()
+        .filter(|_| automatic_structures)
+        .cloned()
+    {
         inner.search_rings_behind();
         inner.set_reference_file(world_root.join("data").join(format!(
             "horizon_structure_references_{}.json",
@@ -762,10 +768,13 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if let Some(inner) = flat {
+        // Keep the existing flat terrain/decorations path when automatic
+        // structures are off; only manual commands use the locator.
+        locator = flat_vanilla;
         Streaming::new(
             Arc::new(Persistent {
                 inner: Arc::new(inner),
@@ -773,7 +782,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else if options.test_terrain && dim == Dim::Overworld {
@@ -785,7 +794,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     } else {
@@ -834,7 +843,7 @@ pub(super) fn make_streaming(
                 registry: pack.assets.clone(),
                 biomes: biomes.clone(),
             }),
-            pack.context.clone(),
+            pack.context_with(biomes.clone()),
             res.threads(),
         )
     };

@@ -78,6 +78,8 @@ impl Game<'_> {
         }
     }
 
+    /// `FallingBlockEntity.tick`: finish a landing, including the placed block
+    /// entity and the carried `TileEntityData` applied through loadWithComponents.
     pub(super) fn finish_falling_block(&mut self, block: FallingBlock, pos: [i32; 3]) {
         let name = self.res.facts().get(block.state).name.clone();
         let anvil = name.ends_with("anvil");
@@ -127,6 +129,27 @@ impl Game<'_> {
                 false,
             )
         });
+        if let Landing::Placed(state) = landing {
+            let name = self.res.facts().get(state).name.clone();
+            // LevelChunk.setBlockState creates the new block entity even when
+            // the falling entity has no supplied data.
+            if let Some(entity) = self.new_block_entity(&name) {
+                let key = (pos[0], pos[1], pos[2]);
+                let mut tag = horizon_client::save::encode_block_entity(key, &entity, &name);
+                self.world.block_entities.insert(key, entity);
+                // FallingBlockEntity.tick copies each supplied field over the
+                // new block entity's saved defaults before loadWithComponents.
+                if let Some(horizon_world::nbt::Tag::Compound(carried)) = block
+                    .saved
+                    .as_ref()
+                    .and_then(|saved| saved.1.get("TileEntityData"))
+                    && let horizon_world::nbt::Tag::Compound(fields) = &mut tag
+                {
+                    fields.extend(carried.clone());
+                    self.load_block_entity_nbt(pos, &horizon_client::snbt::to_snbt(&tag));
+                }
+            }
+        }
         // FallingBlockEntity.tick: the players tracking the entity are told to
         // show the block for a moment, after the block update.
         if let Landing::Placed(state) = landing
