@@ -504,8 +504,9 @@ impl Game<'_> {
                             let mut t = super::trident::ThrownTrident::from_nbt(n);
                             t.id = self.take_entity_id();
                             // One that came through a portal keeps its cooldown.
-                            self.restore_portal_cooldown(t.id, &tag);
+                            let id = t.id;
                             self.tridents.push(t);
+                            self.remember(id, uuid, tag);
                         }
                     }
                     "minecraft:firework_rocket" => {
@@ -1529,10 +1530,14 @@ impl Game<'_> {
             .or_else(|| entity_nbt::fireball_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::throwable_to_nbt(p, uuid, owner, raw.as_ref()))
             .or_else(|| entity_nbt::spit_or_bullet_to_nbt(p, uuid, owner, raw.as_ref()))?;
-        Some((
-            chunk_of(p.position),
-            with_raw(tag, self.persist.raw.get(&p.id)),
-        ))
+        // HasBeenShot is modeled for these projectiles. The generic raw
+        // overlay also serves entity types whose shot flag is still opaque.
+        let shot = tag.get("HasBeenShot").cloned();
+        let mut tag = with_raw(tag, self.persist.raw.get(&p.id));
+        if let (Some(shot), Tag::Compound(map)) = (shot, &mut tag) {
+            map.insert("HasBeenShot".into(), shot);
+        }
+        Some((chunk_of(p.position), tag))
     }
     pub(super) fn save_falling(
         &mut self,
@@ -1581,10 +1586,11 @@ impl Game<'_> {
         i: usize,
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
-        let t = &self.tridents[i];
-        keys.contains(&chunk_of(t.position)).then(|| {
-            let (uuid, raw) = anon_uuid_raw(&self.persist, "minecraft:trident", t.position);
-            (chunk_of(t.position), t.to_nbt(uuid, raw.as_ref()))
+        let (id, at) = (self.tridents[i].id, self.tridents[i].position);
+        keys.contains(&chunk_of(at)).then(|| {
+            let uuid = self.uuid_for(id);
+            let tag = self.tridents[i].to_nbt(uuid, self.persist.raw.get(&id));
+            (chunk_of(at), tag)
         })
     }
     pub(super) fn save_tnt(

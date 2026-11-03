@@ -114,14 +114,14 @@ TrapezoidFloat.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::
 TrapezoidInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	Trapezoid arm
 UniformFloat.of	port	crates/horizon-world/src/worldgen/value_provider.rs::FloatProvider::from_json	Uniform arm rejects max <= min
 VeryBiasedToBottomInt.sample	port	crates/horizon-world/src/worldgen/value_provider.rs::IntProvider::sample	BiasedToBottom arm with the extra draw
-RegionStorageUpgrader.init	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: region folder and storage are set up per call; no progress object
-RegionStorageUpgrader.upgrade	port	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: no progress, cancel or recreate mode
-RegionStorageUpgrader.createStorage	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: in-place storage only; the recreate-region-files option is not ported
-RegionStorageUpgrader.getFilesToProcess	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	lists the .mca files; progress totals are not kept
-RegionStorageUpgrader.getAllChunkPositions	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	walks region files and their chunks
-RegionStorageUpgrader.processOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	per-chunk fix through the closure; counts are not kept
-RegionStorageUpgrader.tryProcessOnePosition	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	gap: minor: every chunk is rewritten, not only the changed ones
-RegionStorageUpgrader.onFileFinished	inline	crates/horizon-world/src/datafix/files.rs::upgrade_regions	rename of the staged file over the old one; recreate mode absent
+RegionStorageUpgrader.init	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::init	the dimension's region folder is resolved and its chunk positions counted into the progress totals
+RegionStorageUpgrader.upgrade	port	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::upgrade	the per-file, per-chunk loop runs until the progress is canceled, counting converted and skipped chunks and setting dimension and total progress
+RegionStorageUpgrader.createStorage	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::upgrade	the reader and writer region files are opened lazily per file; recreate_region_files writes into the new folder
+RegionStorageUpgrader.getFilesToProcess	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::init	all_chunk_positions lists the .mca files and their chunks, and init adds them to the progress totals
+RegionStorageUpgrader.getAllChunkPositions	inline	crates/horizon-world/src/datafix/world_upgrader.rs::all_chunk_positions	walks each region file's header for the chunk positions it holds
+RegionStorageUpgrader.processOnePosition	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::process_one_position	the per-chunk fix; a failed chunk is logged and counted as skipped
+RegionStorageUpgrader.tryProcessOnePosition	port	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::try_process_one_position	only a chunk whose tag changed is written back, or every chunk with recreate_region_files
+RegionStorageUpgrader.onFileFinished	inline	crates/horizon-world/src/datafix/world_upgrader.rs::RegionStorageUpgrader::on_file_finished	the rewritten file replaces the old one, and close drops the recreate folder
 RegionStorageUpgrader.Builder.addTagModifier	skip:java		builder
 RegionStorageUpgrader.Builder.copy	skip:java		builder
 RegionStorageUpgrader.Builder.build	skip:java		builder

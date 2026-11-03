@@ -35,7 +35,7 @@ impl Launcher {
     }
 
     /// Everyone the player can play as, with how each signs in.
-    fn players(&self) -> Vec<(Player, String, &'static str)> {
+    pub(super) fn players(&self) -> Vec<(Player, String, &'static str)> {
         let mut out: Vec<_> = self
             .accounts
             .accounts

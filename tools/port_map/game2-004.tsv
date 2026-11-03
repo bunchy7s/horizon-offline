@@ -100,7 +100,7 @@ Bogged.spawnShearedMushrooms	port	crates/horizon-client/src/game/creatures.rs::G
 WitherSkeleton.registerGoals	port	crates/horizon-client/src/mobs/undead.rs::register	piglin and piglin brute target at priority 3, then the skeleton goals
 WitherSkeleton.canHoldItem	port	crates/horizon-client/src/mobs/equip.rs::wants_to_pick_up	the wither_skeleton_disliked_weapons tag is refused
 WitherSkeleton.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::skeleton	attack damage 4 for wither skeletons
-WitherSkeleton.getArrow	missing		an arrow shot by a wither skeleton is not set on fire for 100 seconds
+WitherSkeleton.getArrow	port	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	the arrow the bow made is `igniteForSeconds(100)` before the shot, so a wither skeleton's arrow burns for 2000 ticks
 Spider.registerGoals	port	crates/horizon-client/src/mobs/hostile.rs::register	spider goals: leap at target and the spider melee that gives up in bright light
 Spider.isClimbing	skip:other		getter; Horizon reads the mob's climbing field
 Spider.setClimbing	inline	crates/horizon-client/src/mobs/ai.rs::ai_step	climbing set from the horizontal collision each tick
@@ -133,7 +133,7 @@ WardenSpawnTracker.copyData	inline	crates/horizon-client-render/src/sculk.rs::Wa
 Drowned.checkDrownedSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	water below, spawner or deep enough, dark enough, frequency roll
 Drowned.isDeepEnoughToSpawn	inline	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	below sea level minus 5
 Drowned.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	10 percent chance of a trident (10 in 16) or fishing rod
-Drowned.canReplaceCurrentItem	missing		no mob item pickup, so the nautilus shell guard never applies
+Drowned.canReplaceCurrentItem	port	crates/horizon-client/src/game/mob_looting.rs::Game::can_replace	the mob pickup compare (armour, toughness, attack damage) with the drowned's nautilus shell guard; called before a mob swaps what it holds
 Drowned.rangedAttackUncertainty	port	crates/horizon-client/src/mobs/undead.rs::drowned_throw	gap: minor: fixed uncertainty 6 (normal difficulty), not 14 minus 4 times the difficulty
 Drowned.rideTick	port	crates/horizon-client/src/game/passengers.rs::position_riders	a rider takes its vehicle's body yaw every tick
 Drowned.wantsToPickUp	port	crates/horizon-client/src/mobs/equip.rs::wants_to_pick_up	spears are refused, then the zombie checks

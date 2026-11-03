@@ -1,0 +1,5 @@
+{
+  "hooks": [{"name": "render_hand_pose", "target": "horizon_client::game::native_hooks::Game<'_>::native_render_hand_pose", "neoforge": "RenderHandEvent (PoseStack) / RenderArmEvent", "side": "client", "cancellable": false, "mod_api": {"contract": "listen"}}],
+  "rust_summary": "an additive first-person hand and item pose (`native_render_hand_pose`).",
+  "doc_summary": "`native_render_hand_pose` adjusts the first-person hand, item, maps and empty main-hand arm. Bundles need \"hooks\": @API:render_hand_pose@."
+}
