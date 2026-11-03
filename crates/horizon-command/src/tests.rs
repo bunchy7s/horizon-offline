@@ -879,3 +879,21 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
         }
     }
 }
+
+#[test]
+fn local_coordinate_missing_after_space_expects_a_coordinate() {
+    // LocalCoordinates.readDouble: nothing left to read is ERROR_EXPECTED_DOUBLE,
+    // with the cursor where it stopped; only a non-'^' character is "mixed".
+    let reg = reg();
+    let parse = |text: &str| {
+        let mut r = Reader::new(text);
+        let e = ArgType::Vec3 { center: true }
+            .parse(&mut r, &reg)
+            .map(|_| ())
+            .unwrap_err();
+        (e.key, e.cursor)
+    };
+    assert_eq!(parse("^1 "), ("argument.pos.missing.double".into(), 3));
+    assert_eq!(parse("^1 ^2 "), ("argument.pos.missing.double".into(), 6));
+    assert_eq!(parse("^1 ~"), ("argument.pos.mixed".into(), 0));
+}
