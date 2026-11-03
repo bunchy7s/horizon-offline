@@ -1927,6 +1927,36 @@ mod tests {
 
     #[test]
     fn dispatch_contracts() {
+        struct Weapon;
+        impl Hooks for Weapon {
+            fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+                assert_eq!(
+                    (event.entity, event.kind, event.attacker),
+                    (12, "minecraft:armor_stand", 7)
+                );
+                assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+                assert_eq!(event.strength, 0.4);
+                event.strength *= 2.0;
+                event.x = -event.x;
+                Flow::Cancel
+            }
+        }
+        let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
+        let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
+        dispatch_living_knockback_v2(
+            &weapon_mods,
+            12,
+            "minecraft:armor_stand",
+            7,
+            None,
+            None,
+            &mut strength,
+            &mut x,
+            &mut z,
+            &mut canceled,
+        );
+        assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
+        assert!(canceled);
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = (1..=2)
             .map(|id| {

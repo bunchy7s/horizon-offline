@@ -7202,6 +7202,38 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    pub(super) fn native_living_knockback_v2(
+        entity: i32,
+        kind: &str,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback_v2(
+            mod_api::mods(),
+            entity,
+            kind,
+            attacker,
+            attacker_main,
+            attacker_off,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
     /// Whether a mod hears projectiles' impacts (`native_projectile_impact`):
     /// set `hears`. Asked once a server tick before the projectiles fly; only
     /// then does the tick keep the copy of each flying projectile that a
@@ -7313,10 +7345,70 @@ impl Game<'_> {
     }
 }
 
+impl Game<'_> {
+    /// `health::knockback_from` that, while a native mod listens, also records what the attacker
+    /// holds (the player's selected and off-hand stacks, a mob's main hand) for
+    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
+    pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
+        use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
+        if mod_api::mods().is_empty() {
+            return knockback_from_holding(attacker, [None, None]);
+        }
+        let held = if attacker != 0 && attacker == knockback_attacker() {
+            knockback_held()
+        } else if self
+            .player
+            .as_ref()
+            .is_some_and(|p| p.entity_id == attacker)
+        {
+            [self.stack_in(self.selected).cloned(), self.offhand.clone()]
+        } else if let Some(mob) = self.mobs.iter().find(|m| m.id as i32 == attacker) {
+            [mob.extra.main_hand_stack().cloned(), None]
+        } else {
+            [None, None]
+        };
+        knockback_from_holding(attacker, held)
+    }
+    /// [`Self::knockback_scope`] for the attacker a damage source names: the player, a mob, or
+    /// (none) whoever the enclosing scope already names.
+    pub(super) fn knockback_scope_for(&self, attacker: Option<Who>) -> impl Drop + use<> {
+        self.knockback_scope(match attacker {
+            Some(Who::Player) => self.player.as_ref().map_or(0, |p| p.entity_id),
+            Some(Who::Mob(id)) => id as i32,
+            None => horizon_client::health::knockback_attacker(),
+        })
+    }
+}
+
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let attacker = match &pushed {
+        Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
+            Some(Who::Mob(id)) => id as i32,
+            _ => horizon_client::health::knockback_attacker(),
+        },
+        Hurting::Player(_, source)
+        | Hurting::Dragon(_, source)
+        | Hurting::ArmorStand(_, source) => {
+            if source.causing != 0 {
+                source.causing
+            } else {
+                horizon_client::health::knockback_attacker()
+            }
+        }
+    };
+    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
+    #[allow(clippy::match_like_matches_macro)]
+    let stand = if let Hurting::ArmorStand(..) = &pushed {
+        true
+    } else {
+        false
+    };
     let (entity, kind, source) = hurt_server_args(pushed);
     let HurtSource {
         damage_type,
@@ -7324,18 +7416,33 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         direct,
     } = source;
     let mut canceled = false;
-    Game::native_living_knockback(
+    if !stand {
+        Game::native_living_knockback(
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
+        );
+    }
+    let mut canceled_v2 = false;
+    let held = horizon_client::health::knockback_held();
+    Game::native_living_knockback_v2(
         entity,
         kind,
-        damage_type,
-        causing,
-        direct,
+        attacker,
+        held[0].as_ref(),
+        held[1].as_ref(),
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,
-        &mut canceled,
+        &mut canceled_v2,
     );
-    canceled
+    canceled || canceled_v2
 }
 
 pub(super) fn block_contact(
@@ -7398,6 +7505,7 @@ fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
         Hurting::Player(entity, source) => (entity, "minecraft:player", source),
         Hurting::Mob(mob, damage) => (mob.id as i32, mob.kind.id.as_str(), mob_source(damage)),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
+        Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
