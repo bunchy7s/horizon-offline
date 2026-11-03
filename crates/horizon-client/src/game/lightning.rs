@@ -563,12 +563,27 @@ impl Game<'_> {
             }
             left -= 1;
             struck.push(self.mob_entity(&self.mobs[i]));
+            // LivingConversionEvent.Pre: a canceled conversion leaves the
+            // mob to the lightning's fire and damage, as `super.thunderHit`.
+            let outcome = match self.mobs[i].species() {
+                Species::Pig if !peaceful => Some("minecraft:zombified_piglin"),
+                Species::Villager if !peaceful => Some("minecraft:witch"),
+                _ => None,
+            };
+            let mut keep = false;
+            if let Some(outcome) = outcome {
+                let (id, kind) = (
+                    self.mobs[i].id,
+                    super::native_hooks::mob_kind(&self.mobs[i]),
+                );
+                self.native_living_conversion_pre(id, &kind, outcome, &mut keep);
+            }
             let m = &mut self.mobs[i];
             b.hit.push(m.id);
             let setup = thunder_mob_spawn_setup;
             let at = [m.position.x, m.position.y, m.position.z];
             match m.species() {
-                Species::Pig if !peaceful => {
+                Species::Pig if !peaceful && !keep => {
                     m.removed = true;
                     events.push(MobEvent::SpawnKind {
                         kind: "minecraft:zombified_piglin".into(),
@@ -577,7 +592,7 @@ impl Game<'_> {
                     });
                     continue;
                 }
-                Species::Villager if !peaceful => {
+                Species::Villager if !peaceful && !keep => {
                     m.removed = true;
                     events.push(MobEvent::SpawnKind {
                         kind: "minecraft:witch".into(),

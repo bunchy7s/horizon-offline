@@ -169,6 +169,8 @@ struct Step {
 pub struct Animation {
     steps: Vec<Step>,
     parts: Vec<Bound>,
+    /// The model's random-model rules, whose matching number feeds `rule_index`.
+    rules: Vec<super::cem::Rule>,
     /// The `var.*` and `varb.*` slots, kept per entity.
     vars: Vec<u32>,
     /// The `global_var.*` and `global_varb.*` slots and their index in `GLOBALS`.
@@ -284,6 +286,8 @@ struct Layout<'a, 'n> {
     vars: Vec<(String, u32)>,
     globals: Vec<(String, u32)>,
     render: Vec<(String, u32)>,
+    /// The slot every name that is nothing reads, handed out once.
+    zero: Option<u32>,
 }
 
 /// The slot of `name` in `list`, the next free one on first sight.
@@ -324,17 +328,29 @@ impl Layout<'_, '_> {
             }
         })
     }
+
+    /// The slot a name that is nothing reads: always zero, as EMF treats a variable it
+    /// doesn't know ("will treat the variable as zero") rather than losing the whole line.
+    fn zero(&mut self) -> u32 {
+        *self.zero.get_or_insert_with(|| {
+            let slot = self.next;
+            self.next += 1;
+            slot
+        })
+    }
 }
 
 /// The most expressions one model's animations may have; the rest are left out.
 const MAX_EXPRESSIONS: usize = 4096;
 
 /// Builds an animation from `entries`: each model entry's `this` and `part` names and its
-/// (target, expression) pairs. An expression that doesn't compile is left out, with a warning.
+/// (target, expression) pairs, under the model's random-model `rules`. An expression that
+/// doesn't compile is left out, with a warning.
 pub(super) fn compile_animation(
     file: &str,
     names: &Names,
     entries: &[(String, String, &[(String, String)])],
+    rules: &[super::cem::Rule],
 ) -> Option<Animation> {
     let mut layout = Layout {
         names,
@@ -343,9 +359,11 @@ pub(super) fn compile_animation(
         vars: Vec::new(),
         globals: Vec::new(),
         render: Vec::new(),
+        zero: None,
     };
     let mut steps = Vec::new();
     let mut count = 0;
+    let mut unknown = std::collections::HashSet::new();
     'entries: for (this, part, pairs) in entries {
         for (target, src) in pairs.iter() {
             count += 1;
@@ -360,7 +378,18 @@ pub(super) fn compile_animation(
                 log::warn!("Horizon: custom entity model {file}: unknown target {target}");
                 continue;
             };
-            let compiled = compile(src, &mut |name: &str| layout.slot(name, this, part));
+            // A name that is nothing reads 0, once named in a warning: the line keeps its
+            // place, as EMF keeps it ("will treat the variable as zero").
+            let compiled = compile(src, &mut |name: &str| {
+                layout.slot(name, this, part).or_else(|| {
+                    if unknown.insert(name.to_owned()) {
+                        log::warn!(
+                            "Horizon: custom entity model {file}: unknown name {name} reads 0"
+                        );
+                    }
+                    Some(layout.zero())
+                })
+            });
             match compiled {
                 Ok(expr) => steps.push(Step { slot, expr }),
                 Err(e) => log::warn!("Horizon: custom entity model {file}: {target}: {e}"),
@@ -374,6 +403,7 @@ pub(super) fn compile_animation(
         steps,
         slots: layout.next as usize,
         parts: layout.parts,
+        rules: rules.to_vec(),
         vars: layout.vars.into_iter().map(|(_, slot)| slot).collect(),
         globals: layout
             .globals
@@ -403,10 +433,12 @@ impl Animation {
 
     /// `run` in `frame`.
     fn run_in(&self, frame: &Frame, m: &Mob, s: &State, poses: &mut Poses) {
+        // The matching random-model rule's number: a grazing cow reads 2.
+        let rule_index = super::cem::rule_index(&self.rules, m);
         self.run_with(
             m.id,
             frame.frame_counter,
-            |slots| params(m, s, frame, slots),
+            |slots| params(m, s, frame, rule_index, slots),
             poses,
         );
     }
@@ -530,7 +562,7 @@ impl Saved {
     }
 }
 
-fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
+fn params(m: &Mob, s: &State, frame: &Frame, rule_index: f32, slots: &mut [f32]) {
     let max_health = super::finalize::max_health(m);
     let (dx, dy, dz) = (
         m.position.x - frame.player[0],
@@ -578,8 +610,10 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             SwingProgress => s.swing,
             Health => m.health,
             MaxHealth => max_health,
-            HurtTime => m.hurt_time.max(0) as f32 - if m.hurt_time > 0 { s.partial } else { 0.0 },
-            DeathTime => m.death_time as f32 + if m.death_time > 0 { s.partial } else { 0.0 },
+            // Whole ticks, as vanilla's `hurtTime` and `deathTime` are ints and EMF reads
+            // them so: an expression comparing exact values stays exact.
+            HurtTime => m.hurt_time.max(0) as f32,
+            DeathTime => m.death_time.max(0) as f32,
             PosX => m.position.x as f32,
             PosY => m.position.y as f32,
             PosZ => m.position.z as f32,
@@ -598,8 +632,9 @@ fn params(m: &Mob, s: &State, frame: &Frame, slots: &mut [f32]) {
             PlayerZ => frame.player[2] as f32,
             PlayerRotX => frame.player_rot[0],
             PlayerRotY => frame.player_rot[1],
-            // Random models' rule (a later change); the model's own rule is 0 until then.
-            RuleIndex => 0.0,
+            // The model's matching random-model rule (`optifine/cem/<name>.properties`),
+            // whose number the animations read: a grazing cow reads 2.
+            RuleIndex => rule_index,
             // A client knows only a wolf's anger end time (as a remaining time taken when it
             // was synced, which doesn't count down) and never the start: 0 for now.
             AngerTime | AngerTimeStart => 0.0,
@@ -731,7 +766,7 @@ mod tests {
             ),
             ("cem#0".to_owned(), "real_head".to_owned(), hat.as_slice()),
         ];
-        let animation = compile_animation("test.jem", &names, &entries).unwrap();
+        let animation = compile_animation("test.jem", &names, &entries, &[]).unwrap();
         let frame = |id: u32, counter: u32, poses: &mut Poses| {
             animation.run_with(
                 id,
@@ -745,7 +780,7 @@ mod tests {
         assert_eq!(poses.get("real_head")[..4], [1.0, 20.0, 3.0, 0.5]);
         assert_eq!(poses.get("cem#1")[2], 1.0);
         assert!((poses.get("cem#0")[4] - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
-        // The expression with an unknown name is left out: the scale stays.
+        // The expression with an unknown name reads 0: nope + 1 sets the scale to 1.
         assert_eq!(poses.get("real_head")[6], 1.0);
         assert!(!poses.is_hidden(&bone("cem#1", vec![])));
         // The next frame starts from the vanilla pose again, with this entity's counter.
@@ -770,7 +805,34 @@ mod tests {
         };
         let bad = pairs(&[("missing.rx", "1"), ("root.rx", "1 +")]);
         let entries = [("root".to_owned(), "root".to_owned(), bad.as_slice())];
-        assert!(compile_animation("test.jem", &names, &entries).is_none());
+        assert!(compile_animation("test.jem", &names, &entries, &[]).is_none());
+    }
+
+    #[test]
+    fn the_matching_random_model_rule_reaches_rule_index() {
+        let model = bone("root", vec![]);
+        let ids = HashMap::new();
+        let names = Names {
+            model: &model,
+            vanilla: &|p| p.to_owned(),
+            ids: &ids,
+        };
+        let list = pairs(&[("root.tx", "rule_index")]);
+        let entries = [("root".to_owned(), "root".to_owned(), list.as_slice())];
+        // Fresh Animations' cow: rule 2 grazes on grass, wheat or hay.
+        let rules =
+            super::super::cem::parse_rules("models.2=1\nblocks.2=grass_block wheat hay_block");
+        let animation = compile_animation("test.jem", &names, &entries, &rules).unwrap();
+        let mut m = mob();
+        m.standing_on = Some("minecraft:grass_block".into());
+        let mut poses = Poses::new(&model);
+        animation.run_in(&Frame::default(), &m, &still(), &mut poses);
+        assert_eq!(poses.get("root")[0], 2.0);
+        // Off the grass: the unconditional base 0.
+        m.standing_on = Some("minecraft:stone".into());
+        let mut poses = Poses::new(&model);
+        animation.run_in(&Frame::default(), &m, &still(), &mut poses);
+        assert_eq!(poses.get("root")[0], 0.0);
     }
 
     /// The animation `list` over a model whose parts keep their own names.
@@ -783,7 +845,7 @@ mod tests {
         };
         let list = pairs(list);
         let entries = [("root".to_owned(), "root".to_owned(), list.as_slice())];
-        compile_animation("test.jem", &names, &entries).unwrap()
+        compile_animation("test.jem", &names, &entries, &[]).unwrap()
     }
 
     #[test]
@@ -889,7 +951,9 @@ mod tests {
         };
         let mut poses = Poses::new(&model);
         animation.run_in(&frame, &m, &s, &mut poses);
-        assert_eq!(poses.get("root")[..6], [4.75, 1.5, 30.0, 7.0, 5.0, 2.0]);
+        // `hurt_time` reads the whole 5 ticks, not the partial-tick 4.75: vanilla's
+        // `hurtTime` is an int and EMF reads it so.
+        assert_eq!(poses.get("root")[..6], [5.0, 1.5, 30.0, 7.0, 5.0, 2.0]);
     }
 
     /// A mob at the origin of the test species.

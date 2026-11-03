@@ -127,7 +127,7 @@ impl Game<'_> {
                     auto_save(state),
                     enabled
                 ));
-                set_auto_save(state, enabled);
+                set_auto_save(&state.lists, enabled);
                 return json!({ "value": auto_save(state) });
             }
             "serversettings/pause_when_empty_seconds" => {

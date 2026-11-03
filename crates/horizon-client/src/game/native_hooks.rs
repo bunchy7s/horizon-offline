@@ -892,7 +892,7 @@ pub(crate) use horizon_client::mod_api::{
 };
 use horizon_client::{
     atlas_sources::qualified,
-    biome::BiomeColors,
+    biome::{BiomeColors, SpawnEntry},
     block_entities::Pos,
     chat::ChatSource,
     containers::{
@@ -4225,6 +4225,25 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// A server player tries to sleep in the bed whose head is at `pos`
+    /// (NeoForge's `CanPlayerSleepEvent`, vanilla's `ServerPlayer.startSleepInBed`).
+    /// `problem` is what vanilla found, first problem only: `too_far_away`,
+    /// `obstructed`, `not_possible_now` (not night or thunder, the bed rule),
+    /// `not_safe` (monsters near), or `None`. A mod may set `None` to let the
+    /// player sleep anyway, or one of those names (`other_problem` refuses
+    /// without a message) to refuse. The spawn point is set before it fires,
+    /// as in vanilla, only when vanilla found no problem. After it,
+    /// `native_player_bed_enter` still fires and may cancel. Server-side.
+    /// API @API:can_player_sleep@.
+    pub(super) fn native_can_player_sleep(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        problem: &mut Option<String>,
+    ) {
+        mod_api::dispatch_can_player_sleep(self, mod_api::mods(), player, name, pos, problem);
+    }
     /// A server player is about to enter a bed after the sleep checks pass.
     /// Set `cancel` to keep them out. The player's state is swapped in, but
     /// helpers that look them up through `self.lan` may find nothing during a
@@ -4355,6 +4374,23 @@ impl Game<'_> {
     /// Server-side. 260.
     pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
+    }
+    /// A server player's experience points are about to change through
+    /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
+    /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
+    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
+    /// an advancement reward gives nothing for a negative amount. Experience
+    /// bottles and furnaces make orbs, so they come through the orb path.
+    /// `native_player_exp_change` is separate and still fires first for an orb
+    /// pickup. Server-side. API @API:player_xp_change@.
+    pub(super) fn native_player_xp_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        amount: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_xp_change(self, mod_api::mods(), player, name, amount, cancel);
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
@@ -5435,6 +5471,29 @@ impl Game<'_> {
         mod_api::dispatch_time_skip(self, mod_api::mods(), dimension, from, to, cause, cancel);
     }
 
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
+    pub(super) fn native_potential_spawns(
+        &self,
+        dimension: &str,
+        category: &str,
+        pos: [i32; 3],
+        entries: &mut Vec<SpawnEntry>,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_potential_spawns(
+            self,
+            mod_api::mods(),
+            dimension,
+            category,
+            pos,
+            entries,
+            canceled,
+        );
+    }
+
     /// The world's spawn point changed to `pos` and `angle`. 244.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, mod_api::mods(), pos, angle);
@@ -5468,6 +5527,26 @@ impl Game<'_> {
     /// already in the world. 286.
     pub(super) fn native_portal_create(&mut self, dimension: &str, pos: [i32; 3]) {
         mod_api::dispatch_portal_create(self, mod_api::mods(), dimension, pos);
+    }
+
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    pub(super) fn native_village_siege(
+        &mut self,
+        dimension: &str,
+        player: u128,
+        attempted_pos: [f64; 3],
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_village_siege(
+            self,
+            mod_api::mods(),
+            dimension,
+            player,
+            attempted_pos,
+            canceled,
+        );
     }
 
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
@@ -5575,6 +5654,81 @@ impl Game<'_> {
             kind,
             transformed,
             transformed_kind,
+        );
+    }
+
+    /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
+    /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
+    /// experience and death message have not run. `entity` is its id and
+    /// `kind` its type (`minecraft:zombie`, `minecraft:player`); `damage_type`
+    /// names the last blow (`minecraft:player_attack`) and `attacker` is the
+    /// mob that dealt it, 0 for none or a player. Set `cancel` to keep it alive:
+    /// Horizon decides death by health, so it stays at 1 health. The hook
+    /// fires once per death attempt. Armor stands, boats and other non-mob
+    /// entities are not told. API @API:living_death@.
+    pub(super) fn native_living_death(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        damage_type: &str,
+        attacker: u32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_death(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            damage_type,
+            attacker,
+            cancel,
+        );
+    }
+
+    /// A mob is about to convert into another type (NeoForge's
+    /// `LivingConversionEvent.Pre`, vanilla's `Mob.convertTo`): a zombie
+    /// drowning, a piglin or hoglin in the Overworld, a tadpole growing, a
+    /// mooshroom sheared by a dispenser, a pig or villager struck by
+    /// lightning. `outcome` is the new type. Set `cancel` to keep the mob as
+    /// it is; a drowning zombie starts its timers again. Not told: a
+    /// mooshroom a player shears, a zombie villager's cure, a villager turned
+    /// by a zombie. API @API:living_conversion_pre@.
+    pub(super) fn native_living_conversion_pre(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        outcome: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_conversion_pre(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            outcome,
+            cancel,
+        );
+    }
+
+    /// A mob converted into another type (NeoForge's
+    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
+    /// place. Fires with `native_entity_transform`, after the new mob joined
+    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// API @API:living_conversion_post@.
+    pub(super) fn native_living_conversion_post(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        converted: u32,
+        converted_kind: &str,
+    ) {
+        mod_api::dispatch_living_conversion_post(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            converted,
+            converted_kind,
         );
     }
 
