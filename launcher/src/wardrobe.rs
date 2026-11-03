@@ -204,6 +204,19 @@ impl Saved {
         std::fs::rename(tmp, path)
     }
 
+    /// The launcher theme worn: its sky (`0xrrggbb`, top to bottom) and accent hue.
+    pub fn theme(&self) -> Option<([u32; 6], f32)> {
+        let id = self.me.as_ref()?.equipped.get("theme")?;
+        let entry = self
+            .catalogue
+            .as_ref()?
+            .items
+            .iter()
+            .find(|e| &e.id == id)?;
+        let theme = entry.theme.as_ref()?;
+        Some((theme.sky()?, theme.accent_hue))
+    }
+
     /// Make `change` here: the outfit shows it at once and it waits to be sent. A newer change of
     /// the same slot (or of visibility) replaces an older one still waiting.
     pub fn change(&mut self, change: Change) {
