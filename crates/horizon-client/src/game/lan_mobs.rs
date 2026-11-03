@@ -527,6 +527,25 @@ mod tests {
         assert_eq!(choose(MOB, false, Some(&host), &guests, Some(7)), None);
     }
 
+    #[test]
+    fn a_leashed_mob_sees_its_holder_even_when_another_player_is_closer() {
+        let Some(mut cow) = mob_of("minecraft:cow") else {
+            return;
+        };
+        let mut holder = view(10.0, true);
+        holder.uuid = [1, 2, 3, 4];
+        let mut nearby = view(1.0, false);
+        nearby.uuid = [5, 6, 7, 8];
+        cow.extra.leash = Some(horizon_client::mobs::leash::Holder::Player);
+        cow.extra.leash_player = Some(holder.uuid);
+        let guests = vec![(7, holder.clone()), (8, nearby.clone())];
+        assert_eq!(player_for(&cow, None, &guests, None), Some(7));
+        assert_eq!(
+            player_for(&cow, Some(&holder), &vec![(8, nearby)], None),
+            None
+        );
+    }
+
     /// The mob of the prepared resources' type `kind` (None without them).
     fn mob_of(kind: &str) -> Option<Mob> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

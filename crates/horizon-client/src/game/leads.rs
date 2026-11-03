@@ -70,8 +70,18 @@ fn resolve_pending_leash(
     match pending {
         Pending::Knot(p) => Some((Holder::Knot(p), None)),
         Pending::Uuid(u) if is_guest(u) || owner_uuid == Some(u) => Some((Holder::Player, Some(u))),
-        Pending::Uuid(u) if u == player_uuid => {
-            Some((Holder::Player, Some(owner_uuid.unwrap_or(player_uuid))))
+        // Old integrated worlds wrote offline_uuid("Player") for every holder.
+        // Only that known sentinel can be mapped to the integrated owner; a
+        // different level player UUID may belong to somebody else. Old guest
+        // leashes lost their real UUID, so this owner recovery is best effort.
+        Pending::Uuid(u)
+            if u == player_uuid
+                && u == horizon_client::lan::playerdata::uuid_ints(
+                    horizon_protocol::crypto::offline_uuid("Player"),
+                )
+                && owner_uuid.is_some() =>
+        {
+            Some((Holder::Player, owner_uuid))
         }
         Pending::Uuid(u) => mob_by_uuid(u)
             .map(|id| (Holder::Mob(id), None))
@@ -808,5 +818,53 @@ mod rope_hold_tests {
             restored_player,
             owner_uuid
         ));
+    }
+
+    #[test]
+    fn an_absent_players_uuid_is_not_reassigned_to_the_owner() {
+        let owner = uuid_ints(offline_uuid("LeashOwner"));
+        let absent = uuid_ints(offline_uuid("Alex"));
+        // Even an imported world's player UUID is not evidence of ownership.
+        for level in [uuid_ints(offline_uuid("Player")), absent] {
+            assert!(
+                resolve_pending_leash(
+                    Pending::Uuid(absent),
+                    level,
+                    Some(owner),
+                    |_| false,
+                    |_| None,
+                    |_| None,
+                )
+                .is_none()
+            );
+        }
+        // An entity with that UUID still resolves as an entity, not the owner.
+        assert_eq!(
+            resolve_pending_leash(
+                Pending::Uuid(absent),
+                absent,
+                Some(owner),
+                |_| false,
+                |u| (u == absent).then_some(17),
+                |_| None,
+            ),
+            Some((Holder::Mob(17), None))
+        );
+    }
+
+    #[test]
+    fn legacy_player_uuid_without_an_integrated_owner_stays_pending() {
+        let legacy = uuid_ints(offline_uuid("Player"));
+        assert!(
+            resolve_pending_leash(
+                Pending::Uuid(legacy),
+                legacy,
+                None,
+                |_| false,
+                |_| None,
+                |_| None,
+            )
+            .is_none()
+        );
     }
 }
