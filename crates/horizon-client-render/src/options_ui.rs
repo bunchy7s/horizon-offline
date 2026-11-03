@@ -125,25 +125,17 @@ impl Opt {
     pub(crate) fn available(self) -> bool {
         !matches!(
             self,
-            Opt::ChatDelay
-                // Stored, but there are no blocked players, signed chat or
-                // chat drafts yet.
-                | Opt::HideMatchedNames
+            // Stored, but there are no blocked players or signed chat yet.
+            Opt::HideMatchedNames
                 | Opt::OnlySecureChat
-                | Opt::SaveChatDrafts
                 // Saved, but no Horizon system reads them yet: no Realms, no
-                // friends list, no directional audio, no now-playing toast.
+                // friends list, no directional audio.
                 | Opt::RealmsNotifications
                 | Opt::InGameNotification
                 | Opt::SharePresence
                 | Opt::DirectionalAudio
-                | Opt::MusicToast
-                // Saved, but nothing in rendering reads them yet.
-                | Opt::ChunkFade
-                | Opt::ImprovedTransparency
+                // Saved, but nothing in rendering reads it yet.
                 | Opt::ChunkBuilder
-                // Saved, but the mouse doesn't read it yet.
-                | Opt::CtrlClickEmulatesRightClick
         )
     }
     fn file_key(self) -> Option<&'static str> {
@@ -2736,7 +2728,17 @@ impl OptionsUi {
                         } else if installed.dev {
                             label = label.append(tr("horizon.mods.dev"));
                         }
-                        let dead = installed.dev || installed.id.is_empty();
+                        // A content mod's set feeds the block-state tables the
+                        // open world's chunks were decoded with: changing it
+                        // mid-world remaps their ids (Forge/Fabric freeze the
+                        // registry before a world opens). A native mod toggles
+                        // live through `native_on`, so it stays available.
+                        let content = installed.native.is_none();
+                        if self.in_world && content {
+                            label = label.append(tr("horizon.mods.in_world"));
+                        }
+                        let dead =
+                            installed.dev || installed.id.is_empty() || self.in_world && content;
                         // Only native mods with actual settings need a second button.
                         if installed
                             .native
@@ -5383,6 +5385,33 @@ mod tests {
         );
     }
 
+    /// The gating is for genuinely unread keys only: every option a system
+    /// already consumes must stay clickable.
+    #[test]
+    fn read_options_are_not_greyed_out() {
+        for opt in [
+            Opt::ChunkFade,
+            Opt::ImprovedTransparency,
+            Opt::ChatDelay,
+            Opt::SaveChatDrafts,
+            Opt::MusicToast,
+            Opt::CtrlClickEmulatesRightClick,
+        ] {
+            assert!(opt.available(), "{opt:?} is read and must be clickable");
+        }
+        for opt in [
+            Opt::HideMatchedNames,
+            Opt::OnlySecureChat,
+            Opt::RealmsNotifications,
+            Opt::InGameNotification,
+            Opt::SharePresence,
+            Opt::DirectionalAudio,
+            Opt::ChunkBuilder,
+        ] {
+            assert!(!opt.available(), "{opt:?} still has no reader");
+        }
+    }
+
     #[test]
     fn operator_items_tab_option_can_be_switched() {
         // The creative screen reads it (CreativeModeInventoryScreen.hasPermissions).
@@ -7117,6 +7146,46 @@ mod tests {
         assert!(events.contains(&Event::Language("de_de".into())));
         assert!(events.contains(&Event::Close));
         assert_eq!(s.language, "de_de");
+    }
+
+    /// A content mod's set builds the block-state tables an open world's
+    /// chunks were decoded with, so its toggle freezes in-world; a native
+    /// mod gates live through `native_on` and stays available.
+    #[test]
+    fn in_a_world_only_native_mod_toggles_stay_active() {
+        let mut s = Settings::default();
+        let installed =
+            |id: &str, native: Option<crate::mod_list::NativePage>| crate::mod_list::Installed {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native,
+            };
+        s.mods.installed = vec![
+            installed("content", None),
+            installed("native", Some(crate::mod_list::NativePage::default())),
+        ];
+        let mut ui = OptionsUi::default();
+        let toggles = |ui: &mut OptionsUi, s: &Settings| {
+            let (widgets, ..) = ui.layout(s, 427.0, 240.0);
+            widgets
+                .iter()
+                .filter_map(|w| match w.kind {
+                    WKind::Button {
+                        act: Act::ToggleMod(i),
+                        active,
+                        ..
+                    } => Some((i, active)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        ui.open_at(false, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, true), (1, true)]);
+        ui.open_at(true, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, false), (1, true)]);
     }
 
     #[test]

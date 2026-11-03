@@ -224,6 +224,8 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - riding:    the host and the guest each saddle and ride a horse (walk, jump), a pig and a strider
              (with their sticks), a camel and a donkey, sit on a llama and fly a happy ghast, and
              get off by sneaking; the other side sees the animal move.
+- cart_portal_rider: the host and the guest each ride a minecart along rails into a Nether portal: the
+             cart carries the player, who arrives in the Nether still riding the same cart (#6021).
 - portal_rider: a survival guest rides a horse into a Nether portal: the horse goes
              through at once and carries it, so it arrives in the Nether still riding the same horse.
 - riding_teleport: the host and the guest each /tp through chat while riding a horse; after 60
@@ -9291,6 +9293,73 @@ def check_portal_rider(host, guest, out):
 
 CHECKS += ['portal_rider']
 CHECK_FNS.update(portal_rider=check_portal_rider)
+
+
+def check_cart_portal_rider(host, guest, out):
+    """#6021: a player rides a minecart along rails into a Nether portal. The cart goes through at once
+    (Entity.handlePortal: a vehicle's transition time is 0; the passenger has no portal process of its
+    own) and takes its rider (Entity.teleportCrossDimension), so the player arrives in the Nether still
+    on the same cart, the cart under it and out of the Overworld. The host (the window of the
+    single-player server) and the guest each ride."""
+    spots = apart(host, guest)
+    tag = 'cart_portal_rider'
+    home = 'execute in minecraft:overworld run'
+    result = {}
+    for label, player in (('host', host), ('guest', guest)):
+        x, y, z = spots[label]
+        # Rails run east from the player's spot into a portal in the plane x = rx + 8 (axis z).
+        rx, pz = x + 1, z + 1
+        px = rx + 8
+        player('command', command='clear @s')
+        player('command', command='gamemode survival')
+        player('command', command=f'fill {rx - 1} {y - 1} {pz - 2} {px + 2} {y - 1} {pz + 3} minecraft:stone')
+        player('command', command=f'fill {rx - 1} {y} {pz - 2} {px + 2} {y + 4} {pz + 3} minecraft:air')
+        player('command', command=f'fill {rx} {y} {pz} {px - 1} {y} {pz} minecraft:powered_rail[powered=false,shape=east_west]')
+        player('command', command=f'setblock {rx - 1} {y} {pz} minecraft:stone')
+        player('command', command=f'fill {px} {y - 1} {pz - 1} {px} {y + 3} {pz + 2} minecraft:obsidian')
+        player('command', command=f'fill {px} {y} {pz} {px} {y + 2} {pz + 1} minecraft:nether_portal[axis=z]')
+        player('command', command=f'summon minecraft:minecart {rx + 0.5} {y} {pz + 0.5} {{Tags:["{tag}"]}}')
+        player('command', command=f'tp @s {rx + 0.5} {y} {pz - 0.5} 0 0')
+        player.wait(30)
+        try:
+            cart = board(player, 'minecart', (rx + 0.5, y, pz + 0.5))
+            # The rails come alive: a cart at rest on powered rails is pushed off the stone behind it.
+            player('command', command=f'setblock {rx + 1} {y} {pz + 1} minecraft:redstone_block')
+            left = None
+            for waited in range(0, 200, 5):
+                if player('state').get('dimension') == NETHER:
+                    left = waited
+                    break
+                player.wait(5)
+            carts = [o for o in player('status')['objects'] if o['kind'].endswith('minecart')]
+            assert left is not None, (f'the {label} on its minecart did not go through the portal in 200 ticks: '
+                                      f'riding {player("status").get("riding")}, at {pos_of(player)}, carts {carts}')
+            wait_dimension(player, NETHER, 600)
+            seen = None
+            for _ in range(30):
+                player.wait(20)
+                seen = {'riding': player('status').get('riding'), 'at': pos_of(player)}
+                if seen['riding'] == cart['id']:
+                    break
+            assert seen['riding'] == cart['id'], f'the {label} arrived on foot, not on the cart: {seen}'
+            near = [o for o in player('status')['objects'] if o['id'] == cart['id']]
+            assert near, f'the cart {cart["id"]} did not come to the Nether with its rider'
+            assert math.dist(near[0]['position'], seen['at']) < 3, f'the cart is not under its rider: {near[0]} {seen}'
+            result[label] = {'left_after_ticks': left, 'riding': seen['riding'], 'cart': near[0]['position'],
+                             'player': seen['at']}
+        finally:
+            back_to_game(player)
+            player('command', command=f'kill @e[tag={tag}]')
+            player('command', command=f'{home} fill {rx - 1} {y - 1} {pz - 2} {px + 2} {y + 4} {pz + 3} minecraft:air')
+            player('command', command=f'{home} fill {rx - 1} {y - 1} {pz - 2} {px + 2} {y - 1} {pz + 3} minecraft:stone')
+            player('command', command=f'{home} tp @s {x + 0.5} {y} {z + 0.5} 0 0')
+            wait_dimension(player, OVERWORLD, 600)
+            player.wait(20)
+    return result
+
+
+CHECKS += ['cart_portal_rider']
+CHECK_FNS.update(cart_portal_rider=check_cart_portal_rider)
 
 
 def check_recipe_removal(host, guest, out):

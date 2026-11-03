@@ -3225,7 +3225,8 @@ fn a_shape_and_the_state_count_cover_every_combination() {
 }
 
 /// A base root of one block with three biomes, two biome tags (one nesting
-/// the other) and three vanilla placed features: what biome modifiers read.
+/// the other), three vanilla placed features and entity types: what biome
+/// modifiers read.
 fn biome_base(tag: &str) -> PathBuf {
     let (base, _) = block_base(tag, &[]);
     let worldgen = base.join("worldgen");
@@ -3240,7 +3241,7 @@ fn biome_base(tag: &str) -> PathBuf {
             bundle(&[
                 (
                     "minecraft:plains",
-                    r#"{"temperature":0.8,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]]}"#,
+                    r#"{"temperature":0.8,"features":[[],["minecraft:lake"],[],[],[],[],["minecraft:ore_coal"]],"attributes":{"minecraft:gameplay/natural_mob_spawns":{"argument":{"spawn_costs":{"minecraft:skeleton":{"energy_budget":0.7,"charge":0.15}},"spawns_by_category":{"monster":[{"type":"minecraft:zombie","count":4,"weight":95},{"type":"minecraft:skeleton","count":4,"weight":100}]}},"modifier":"overlay"}}}"#,
                 ),
                 ("minecraft:desert", r#"{"features":[["minecraft:fossil"]]}"#),
                 (
@@ -3275,6 +3276,18 @@ fn biome_base(tag: &str) -> PathBuf {
     for (name, text) in files {
         fs::write(worldgen.join(name), text).unwrap();
     }
+    fs::write(
+        base.join("entity-types.json"),
+        r#"{"minecraft:zombie":{"category":"monster"},"minecraft:skeleton":{"category":"monster"},"minecraft:stray":{"category":"monster"},"minecraft:rabbit":{"category":"creature"}}"#,
+    )
+    .unwrap();
+    let entity_tags = base.join("data/minecraft/tags/entity_type");
+    fs::create_dir_all(&entity_tags).unwrap();
+    fs::write(
+        entity_tags.join("skeletons.json"),
+        r#"{"values":["minecraft:skeleton","minecraft:stray",{"id":"othermod:bone","required":false}]}"#,
+    )
+    .unwrap();
     base
 }
 
@@ -3429,14 +3442,14 @@ fn biome_modifiers_none_keep_the_vanilla_biomes() {
     let _ = fs::remove_dir_all(&scratch);
 }
 
-/// An unknown biome, biome tag, feature, step or modifier type fails the
-/// build with the mod and file named.
+/// An unknown biome, biome tag, feature, entity type, step or modifier type is
+/// skipped with a warning or fails the build with the mod and file named.
 #[test]
 fn biome_modifiers_refuse_unknown_names() {
     let base = biome_base("biome-modifiers-errors");
     let scratch = base.parent().unwrap().to_owned();
     // A name the root doesn't have, or a type not read yet: that modifier is
-    // skipped with a warning (another mod's ids, `#c:` tags and `add_spawns`
+    // skipped with a warning (another mod's ids, `#c:` tags and `add_carvers`
     // are common in real mods), and the mods still load.
     for (i, (modifier, warning)) in [
         (
@@ -3455,8 +3468,18 @@ fn biome_modifiers_refuse_unknown_names() {
             "unknown placed feature zinc:ore_tin",
         ),
         (
-            r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains","spawners":[]}"#,
-            "biome modifier type \"add_spawns\" skipped",
+            r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains",
+                "spawners":{"type":"zinc:goblin","weight":10,"minCount":1,"maxCount":2}}"#,
+            "unknown entity type zinc:goblin",
+        ),
+        (
+            r##"{"type":"neoforge:remove_spawns","biomes":"minecraft:plains",
+                "entity_types":"#minecraft:is_goblin"}"##,
+            "unknown entity type tag #minecraft:is_goblin",
+        ),
+        (
+            r#"{"type":"neoforge:add_carvers","biomes":"minecraft:plains","carvers":[]}"#,
+            "biome modifier type \"add_carvers\" skipped",
         ),
     ]
     .into_iter()
@@ -3471,21 +3494,147 @@ fn biome_modifiers_refuse_unknown_names() {
         );
     }
     // A malformed modifier of a type Horizon reads is the mod's error.
-    let m = zinc_mod(
-        &scratch.join("zinc-step"),
-        &[(
-            "bad",
+    for (i, (modifier, err)) in [
+        (
             r#"{"type":"neoforge:add_features","biomes":"minecraft:plains",
                 "features":"zinc:ore_zinc","step":"ores"}"#,
-        )],
+            "unknown generation step \"ores\"",
+        ),
+        (
+            r#"{"type":"neoforge:add_spawns","biomes":"minecraft:plains",
+                "spawners":{"type":"minecraft:zombie","weight":10,"minCount":5,"maxCount":2}}"#,
+            "minCount (5) > maxCount (2)",
+        ),
+        (
+            r#"{"type":"neoforge:add_spawn_costs","biomes":"minecraft:plains",
+                "entity_types":"minecraft:zombie","spawn_cost":{"energy_budget":0.7}}"#,
+            "spawn_cost: no charge",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let m = zinc_mod(&scratch.join(format!("zinc-err{i}")), &[("bad", modifier)]);
+        let e = build(&base, &[m], &scratch.join(format!("out-err{i}")))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(err), "{e}");
+        assert!(
+            e.contains("mod zinc: data/zinc/neoforge/biome_modifier/bad.json"),
+            "{e}"
+        );
+    }
+    let _ = fs::remove_dir_all(&scratch);
+}
+
+/// `add_spawns`, `remove_spawns`, `add_spawn_costs` and `remove_spawn_costs`
+/// rewrite `minecraft:gameplay/natural_mob_spawns` in the biomes they name:
+/// additions before removals regardless of file order, spawners placed under
+/// their entity type's category with `minCount`/`maxCount` converted to
+/// `count`, and untouched biomes left byte for byte as they were.
+#[test]
+fn biome_modifiers_change_mob_spawns_and_spawn_costs() {
+    let base = biome_base("biome-modifiers-spawns");
+    let scratch = base.parent().unwrap().to_owned();
+    let m = zinc_mod(
+        &scratch.join("zinc"),
+        &[
+            // Listed before `add_spawns`, but removals run after additions:
+            // takes out vanilla's `minecraft:skeleton` and the added
+            // `minecraft:stray` via `#minecraft:skeletons`.
+            (
+                "a_no_skeletons",
+                r##"{"type":"neoforge:remove_spawns","biomes":"#minecraft:is_overworld",
+                    "entity_types":"#minecraft:skeletons"}"##,
+            ),
+            (
+                "a_no_skeleton_cost",
+                r##"{"type":"neoforge:remove_spawn_costs","biomes":"minecraft:plains",
+                    "entity_types":"#minecraft:skeletons"}"##,
+            ),
+            // Single spawner object (`minCount == maxCount` -> integer `count`)
+            // on a biome that had no `attributes` at all (`desert`), and on `plains`.
+            (
+                "add_rabbits",
+                r##"{"type":"neoforge:add_spawns","biomes":"#minecraft:is_overworld",
+                    "spawners":{"type":"minecraft:rabbit","weight":12,"minCount":3,"maxCount":3}}"##,
+            ),
+            // Array of spawners (`minCount < maxCount` -> `minecraft:uniform`).
+            (
+                "add_monsters",
+                r#"{"type":"forge:add_spawns","biomes":"plains",
+                    "spawners":[
+                        {"type":"stray","weight":80,"minCount":1,"maxCount":4},
+                        {"type":"minecraft:zombie","weight":20,"minCount":2,"maxCount":5}
+                    ]}"#,
+            ),
+            (
+                "add_zombie_cost",
+                r#"{"type":"neoforge:add_spawn_costs","biomes":["minecraft:plains","minecraft:desert"],
+                    "entity_types":["minecraft:zombie","minecraft:stray"],
+                    "spawn_cost":{"energy_budget":0.85,"charge":0.2}}"#,
+            ),
+        ],
     );
-    let e = build(&base, &[m], &scratch.join("out-step"))
-        .unwrap_err()
-        .to_string();
-    assert!(e.contains("unknown generation step \"ores\""), "{e}");
-    assert!(
-        e.contains("mod zinc: data/zinc/neoforge/biome_modifier/bad.json"),
-        "{e}"
+    let out = scratch.join("out");
+    let warnings = build(&base, &[m], &out).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    let text = |root: &Path| -> BTreeMap<String, String> {
+        serde_json::from_slice(&fs::read(root.join("worldgen/biomes.json")).unwrap()).unwrap()
+    };
+    let out_biomes = text(&out);
+    // Untouched biome keeps its exact bytes.
+    assert_eq!(
+        out_biomes["minecraft:nether_wastes"],
+        text(&base)["minecraft:nether_wastes"]
+    );
+
+    let plains: serde_json::Value = serde_json::from_str(&out_biomes["minecraft:plains"]).unwrap();
+    let plains_spawns = &plains["attributes"]["minecraft:gameplay/natural_mob_spawns"]["argument"];
+    // `minecraft:skeleton` and the added `minecraft:stray` were removed by
+    // `remove_spawns`, while vanilla's zombie, the second zombie spawner, and
+    // the rabbit in `creature` remain.
+    assert_eq!(
+        plains_spawns["spawns_by_category"],
+        serde_json::json!({
+            "monster": [
+                {"type": "minecraft:zombie", "count": 4, "weight": 95},
+                {
+                    "type": "minecraft:zombie",
+                    "count": {"type": "minecraft:uniform", "min_inclusive": 2, "max_inclusive": 5},
+                    "weight": 20
+                }
+            ],
+            "creature": [
+                {"type": "minecraft:rabbit", "count": 3, "weight": 12}
+            ]
+        })
+    );
+    // `skeleton` and `stray` costs were removed on `plains`; `zombie` cost remains.
+    assert_eq!(
+        plains_spawns["spawn_costs"],
+        serde_json::json!({
+            "minecraft:zombie": {"energy_budget": 0.85, "charge": 0.2}
+        })
+    );
+
+    let desert: serde_json::Value = serde_json::from_str(&out_biomes["minecraft:desert"]).unwrap();
+    let desert_spawns = &desert["attributes"]["minecraft:gameplay/natural_mob_spawns"]["argument"];
+    assert_eq!(
+        desert_spawns["spawns_by_category"],
+        serde_json::json!({
+            "creature": [
+                {"type": "minecraft:rabbit", "count": 3, "weight": 12}
+            ]
+        })
+    );
+    assert_eq!(
+        desert_spawns["spawn_costs"],
+        serde_json::json!({
+            "minecraft:zombie": {"energy_budget": 0.85, "charge": 0.2},
+            "minecraft:stray": {"energy_budget": 0.85, "charge": 0.2}
+        })
     );
     let _ = fs::remove_dir_all(&scratch);
 }

@@ -127,8 +127,25 @@ impl Game<'_> {
                     auto_save(state),
                     enabled
                 ));
-                set_auto_save(state, enabled);
+                set_auto_save(&state.lists, enabled);
                 return json!({ "value": auto_save(state) });
+            }
+            "serversettings/pause_when_empty_seconds" => {
+                return json!({ "value": state.pause_when_empty_seconds });
+            }
+            "serversettings/pause_when_empty_seconds/set" => {
+                let Some(seconds) = body["value"]
+                    .as_i64()
+                    .and_then(|value| i32::try_from(value).ok())
+                else {
+                    return json!({ "error": "pause when empty seconds must be an integer" });
+                };
+                rpc(format!(
+                    "Update pause when empty from {} seconds to {} seconds",
+                    state.pause_when_empty_seconds, seconds
+                ));
+                self.set_pause_when_empty_seconds(state, seconds);
+                return json!({ "value": state.pause_when_empty_seconds });
             }
             "serversettings/motd" => {
                 return json!({

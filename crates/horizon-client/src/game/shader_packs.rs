@@ -348,7 +348,7 @@ impl Game<'_> {
             height: self.world.shape.height,
             logical_height: self.world.shape.logical_height,
             has_skylight: self.world.shape.sky_light,
-            has_ceiling: self.dim == Dim::Nether,
+            has_ceiling: self.world.shape.has_ceiling,
             elytra_flying: self.player.as_ref().is_some_and(|p| p.fall_flying),
             cloud_height: horizon_client::gfx::pack_uniforms::cloud_height(
                 sky.cloud_color[3],
