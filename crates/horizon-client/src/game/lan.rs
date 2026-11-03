@@ -2232,6 +2232,9 @@ impl Game<'_> {
         // drops remain absent from the snapshot until the following tick.
         if !paused {
             self.tick_guests(&mut host);
+            // The vehicles the guests just moved enter their portals now.
+            let ridden: Vec<u32> = host.hub.guests.iter().filter_map(|g| g.vehicle).collect();
+            self.find_ridden_vehicle_portals(&ridden);
         }
         {
             let has_guests = !host.hub.guests.is_empty();

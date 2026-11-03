@@ -169,9 +169,10 @@ fork's pull request: the Team member decides whether to run it, and a skipped ru
 Most pull requests merge on `verify` alone and leave the vanilla harnesses to `.github/workflows/parity-main.yml`,
 which runs them on main a batch of merges at a time, on the Mac mini's runner:
 
-- It starts on every push to main, one run at a time (`concurrency: parity-main`). Merges that land while a run
-  goes on wait in one pending run: GitHub keeps only the newest and cancels the others, so the next run takes them
-  all.
+- It starts on every push to main, one run at a time (`concurrency: parity-main`). A run that started always
+  finishes; merges that land while it goes on wait in one pending run: GitHub keeps only the newest and cancels the
+  others, so the next run takes them all. The many `cancelled` runs in the list are those pending ones, plus runs
+  whose bisect outgrew the job's 240 minutes.
 - `tools/parity_main.py base` gives the newest commit main contains whose parity-main passed (else the last
   merge's parent), and the run is `tools/parity.py --changed <that commit>`: the union of the harnesses every merge
   since then can affect, once, with every earlier pass reused.
@@ -180,8 +181,11 @@ which runs them on main a batch of merges at a time, on the Mac mini's runner:
   (`🤖 Agent: parity-main found that this merge breaks ...`). Fix it with a pull request as usual; the next
   run checks from the last green commit again.
 - Nightlies build only on a commit both `checks` and `parity-main` passed on (`tools/release_train.py`,
-  `tools/ci/nightly.py`, see below), so a broken merge holds them instead of reaching players. `release.yml` also
-  starts when a parity-main run finishes. A forced run (`force=true`) doesn't wait for parity-main.
+  `tools/ci/nightly.py`, see below), so a broken merge holds them instead of reaching players. They take the
+  newest such commit even when a later batch failed: that failure is in merges the green commit doesn't contain, so
+  a broken or flaky harness holds only what landed after the last green run, never the whole Nightly (before
+  2026-11-03, any later failure held every Nightly until a run passed again: 30 h without one). `release.yml`
+  also starts when a parity-main run finishes. A forced run (`force=true`) doesn't wait for parity-main.
 
 A pull request still runs its own parity job when it changes a harness script, an oracle
 (`mods/horizon/src/test/`), a probe (`crates/*/examples/`, `game/*_fixture.rs`, `game/*_harness.rs`), the runner
@@ -231,8 +235,8 @@ commits) since the commit the published Nightly was built on:
 - One Nightly build at a time: while one runs or waits, the train starts none. At most 12 builds a UTC day (the
   reviewers' `/nightly` builds count): past that the train waits for the next day, except for `release-now` and
   `force=true`.
-- A scheduled run takes main's newest commit where `checks` and `parity-main` passed; after a run of either, the
-  commit it passed on, once both passed there.
+- A scheduled run takes main's newest commit where `checks` and `parity-main` passed (a later failed
+  parity-main batch doesn't change it); after a run of either, the commit it passed on, once both passed there.
 
 ### Nightly only
 

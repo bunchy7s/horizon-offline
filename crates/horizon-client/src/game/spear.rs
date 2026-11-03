@@ -201,6 +201,7 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref() else {
             return false;
         };
+        let _attacker = self.knockback_scope(p.entity_id);
         let from = [p.position.x, p.position.y, p.position.z];
         // The enchantments' share, scaled by the attack strength unless the
         // weapon is in use.
