@@ -816,6 +816,7 @@ mod tests {
 
     fn player(x: f64, y: f64, z: f64, spectator: bool) -> LevelPlayer {
         LevelPlayer {
+            uuid: 0,
             position: Vec3::new(x, y, z),
             bounds: Aabb::new(Vec3::new(x, y, z), Vec3::new(x, y, z)),
             alive: true,
