@@ -195,13 +195,13 @@ const STAR_PERIODS: [f32; 4] = [4., 6., 8., 10.];
 /// `HORIZON_LAUNCHER_MOTION=off`; while the window is in front (and 10 s after); or always, with
 /// `HORIZON_LAUNCHER_MOTION=always`, for recordings.
 #[derive(Clone, Copy, PartialEq)]
-enum Motion {
+pub(crate) enum Motion {
     Still,
     InFront,
     Always,
 }
 
-fn motion() -> Motion {
+pub(crate) fn motion() -> Motion {
     static MOTION: LazyLock<Motion> = LazyLock::new(|| {
         match std::env::var("HORIZON_LAUNCHER_MOTION").as_deref() {
             Ok("off" | "reduced") => return Motion::Still,
@@ -221,17 +221,17 @@ fn motion() -> Motion {
 /// The animation's own time: it runs only while the sky moves, so a window that comes back
 /// picks up where it stopped instead of jumping.
 #[derive(Default)]
-struct Clock {
+pub(crate) struct Clock {
     banked: Duration,
     running: Option<Instant>,
 }
 
 impl Clock {
-    fn at(&self, now: Instant) -> Duration {
+    pub(crate) fn at(&self, now: Instant) -> Duration {
         self.banked + self.running.map_or(Duration::ZERO, |since| now - since)
     }
 
-    fn set(&mut self, run: bool, now: Instant) {
+    pub(crate) fn set(&mut self, run: bool, now: Instant) {
         match (run, self.running) {
             (true, None) => self.running = Some(now),
             (false, Some(since)) => {

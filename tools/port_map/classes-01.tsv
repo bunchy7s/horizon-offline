@@ -70,7 +70,7 @@ StopAdmiringIfTiredOfTryingToReachItem.create	inline	crates/horizon-client/src/m
 Parched.getArrow	inline	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	Parched arrows carry weakness for 600 ticks
 Stray.checkStraySpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::Stray arm: powder snow skipped, sky must be visible
 Stray.getArrow	inline	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	Stray arrows carry slowness for 600 ticks
-CaveSpider.getVehicleAttachmentPoint	port	crates/horizon-client/src/mobs/riders.rs::vehicle_attachment	gap: minor: rides at 0 height; vanilla uses 0.21875 when the vehicle is not wider
+CaveSpider.getVehicleAttachmentPoint	port	crates/horizon-client/src/mobs/riders.rs::vehicle_attachment	0.21875 of the scale when the vehicle's box is no wider than the spider's; the wider case falls to the type default
 VillagerDataHolder.finalizeVillagerType	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::villager_type	
 Abilities.apply	port	crates/horizon-client/src/game/remote.rs::Game::apply_remote_abilities	gap: minor: invulnerable, flying, may fly and flying speed only; instabuild, may build and walk speed are not applied
 Abilities.pack	skip:java		record copy for the abilities packet; the flags are read in remote.rs

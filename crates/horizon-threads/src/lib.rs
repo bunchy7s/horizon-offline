@@ -4,6 +4,7 @@
 /// The game window's boot screen, before wgpu's first frame paints over it.
 #[cfg(target_os = "windows")]
 pub mod boot_paint;
+pub mod capped;
 pub mod heap_census;
 pub mod jobs;
 pub mod memory_limit;
@@ -231,7 +232,10 @@ pub fn catch_stop_signals() {}
 /// World generation, meshing and the tick allocate and free small blocks on
 /// every worker at once; the system heaps serialise them (Windows' heap was
 /// 16% of a chunk's generation time), mimalloc keeps a heap per thread.
-pub use mimalloc::MiMalloc as Allocator;
+///
+/// It sits behind [`capped`]'s hard ceiling: with none set, every request is
+/// passed on unchanged and only the byte counter moves.
+pub use capped::{ALLOCATOR, Allocator};
 
 /// The global allocator of a build with the `alloc-census` feature: live
 /// heap bytes by startup step and thread, for `horizon-ctl memory`.

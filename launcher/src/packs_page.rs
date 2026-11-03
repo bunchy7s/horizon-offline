@@ -10,13 +10,13 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(super) struct Packs {
     home: Option<PathBuf>,
-    resource: Vec<(Pack, Option<Arc<Image>>)>,
-    shader: Vec<Pack>,
+    pub(super) resource: Vec<(Pack, Option<Arc<Image>>)>,
+    pub(super) shader: Vec<Pack>,
     fresh: bool,
     /// The pack waiting for its removal to be confirmed: its kind and file.
-    confirm_remove: Option<(PackKind, String)>,
+    pub(super) confirm_remove: Option<(PackKind, String)>,
     /// What the last action did, or why it failed.
-    note: Option<Result<String, String>>,
+    pub(super) note: Option<Result<String, String>>,
 }
 
 impl Packs {
@@ -26,7 +26,7 @@ impl Packs {
 }
 
 impl Launcher {
-    fn load_packs_list(&mut self, home: PathBuf) {
+    pub(super) fn load_packs_list(&mut self, home: PathBuf) {
         if self.game_packs.home.as_ref() != Some(&home) {
             self.game_packs = Packs {
                 home: Some(home.clone()),
@@ -51,7 +51,10 @@ impl Launcher {
         self.game_packs.fresh = true;
     }
 
-    fn pack_action(&mut self, act: impl FnOnce(&std::path::Path) -> Result<String, String>) {
+    pub(super) fn pack_action(
+        &mut self,
+        act: impl FnOnce(&std::path::Path) -> Result<String, String>,
+    ) {
         let Some(home) = self.game_packs.home.clone() else {
             return;
         };
@@ -61,7 +64,7 @@ impl Launcher {
     }
 
     /// Copies dropped or picked files into the instance's pack folders.
-    fn add_packs(&mut self, files: Vec<PathBuf>) {
+    pub(super) fn add_packs(&mut self, files: Vec<PathBuf>) {
         self.pack_action(|home| {
             let mut added = Vec::new();
             for file in &files {
@@ -74,7 +77,7 @@ impl Launcher {
         });
     }
 
-    fn choose_packs(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn choose_packs(&mut self, cx: &mut Context<Self>) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,

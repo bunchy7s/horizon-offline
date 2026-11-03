@@ -646,20 +646,42 @@ fn sunrise_weight(d: vec3<f32>) -> f32 {
 // The sky's colour along the view ray `d` (a shader pack's sky stage gets it as its input:
 // gfx/native_sky.rs builds that stage from this section).
 fn sky_along_ray(d: vec3<f32>) -> vec3<f32> {
-    var color = globals.fog_color.rgb;
-    let dist = disc_distance(d, 16.0);
-    if dist.x >= 0.0 {
-        color = sky_fog(globals.sky_color.rgb, dist);
-    }
+    var color = sky_along_ray_base(d);
     let w = sunrise_weight(d);
     if w > 0.0 {
         color = mix(color, globals.sunrise.rgb, w * globals.sunrise.a);
     }
     return color;
 }
+// The sky without the sunrise fan: the renderer rasterizes the fan's sixteen
+// triangles over this colour instead of testing them in every sky pixel.
+fn sky_along_ray_base(d: vec3<f32>) -> vec3<f32> {
+    var color = globals.fog_color.rgb;
+    let dist = disc_distance(d, 16.0);
+    if dist.x >= 0.0 {
+        color = sky_fog(globals.sky_color.rgb, dist);
+    }
+    return color;
+}
 @fragment fn fs_sky(in: SkyOut) -> @location(0) vec4<f32> {
     // `hdr_scene_alpha`, spelled out: this part of the file also goes into shader packs' skies.
     return vec4(sky_along_ray(view_ray(in.ndc)), 1.0 - 0.24 * globals.hdr_light.y);
+}
+@fragment fn fs_sky_base(in: SkyOut) -> @location(0) vec4<f32> {
+    return vec4(sky_along_ray_base(view_ray(in.ndc)), 1.0 - 0.24 * globals.hdr_light.y);
+}
+// The sunrise/sunset fan as geometry: the clip position is projected by the
+// CPU with the sky's unjittered view, and the apex weight (1 at the apex, 0 at
+// the rim) interpolates exactly the barycentric the per-pixel test computed.
+struct SunriseOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) weight: f32,
+}
+@vertex fn vs_sunrise(@location(0) clip: vec4<f32>, @location(1) weight: f32) -> SunriseOut {
+    return SunriseOut(clip, weight);
+}
+@fragment fn fs_sunrise(in: SunriseOut) -> @location(0) vec4<f32> {
+    return vec4(globals.sunrise.rgb, in.weight * globals.sunrise.a);
 }
 // The first-person hand's depth clear inside the world pass: `vs_sky`'s triangle lies at the
 // far plane, written over the whole depth target with no colour.

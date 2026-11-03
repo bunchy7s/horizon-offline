@@ -863,6 +863,11 @@ fn age_boundary_reached(m: &mut Mob) {
         Species::Goat => set_base(m, Attr::AttackDamage, if baby { 1.0 } else { 2.0 }),
         Species::Hoglin => set_base(m, Attr::AttackDamage, if baby { 0.5 } else { 6.0 }),
         Species::SulfurCube if !baby => sulfur_size(m, 2),
+        // HappyGhast.ageBoundaryReached: adultGhastSetup or babyGhastSetup,
+        // then Animal's no-op. A hatched ghastling needs it before it is in
+        // the level (DriedGhastBlock.spawnGhastling sets the baby age before
+        // addFreshEntity), or its first tick flies the adult goals.
+        Species::HappyGhast => super::happy_ghast::ensure_setup(m),
         _ => {}
     }
 }
@@ -2438,6 +2443,43 @@ mod tests {
             "minecraft:cow"
         ));
         assert!(!spawn_egg_is_for("minecraft:stick", "minecraft:cow"));
+    }
+    /// #7877: `/attribute <mob> movement_speed|attack_damage base set` goes
+    /// through `AttributeInstance.setBaseValue`, so the value survives the
+    /// next refresh (an effect's modifier) instead of snapping back.
+    #[test]
+    fn a_set_base_survives_a_later_modifier_refresh() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let data = crate::mobs::MobTypes::load(&root).unwrap();
+        let kind = std::sync::Arc::new(data.types.get("minecraft:zombie").unwrap().clone());
+        let mut m = crate::mobs::Mob::new(
+            2,
+            kind,
+            horizon_core::geometry::Vec3::new(0.0, 4.0, 0.0),
+            0.0,
+        );
+        set_base(&mut m, Attr::MovementSpeed, 0.5);
+        set_base(&mut m, Attr::AttackDamage, 7.0);
+        // Refresh through another attribute's change and a modifier.
+        set_base(&mut m, Attr::MaxHealth, 30.0);
+        add_modifier(
+            &mut m,
+            Attr::MovementSpeed,
+            "test:x",
+            0.5,
+            Op::AddMultipliedTotal,
+        );
+        assert_eq!(base_value(&m, Attr::MovementSpeed), 0.5);
+        assert_eq!(m.attrs.speed, 0.75);
+        remove_modifier(&mut m, Attr::MovementSpeed, "test:x");
+        assert_eq!(m.attrs.speed, 0.5);
+        assert_eq!(base_value(&m, Attr::AttackDamage), 7.0);
+        assert_eq!(m.attrs.attack_damage, 7.0);
     }
     /// #3887: Weakness and Slowness (and Health Boost) carry attribute
     /// modifiers in vanilla (`MobEffects`), and every effect's amount is

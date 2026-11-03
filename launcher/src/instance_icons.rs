@@ -8,14 +8,12 @@ use horizon_launcher::browser::images;
 use horizon_launcher::instances::{self, Instance, Kind as InstanceKind};
 use std::sync::Arc;
 
-/// Quilt's mini icon (CC0) and NeoForge's (CC BY 4.0), from their own art repositories: see
-/// THIRD_PARTY_NOTICES.md.
+/// The loaders' logos as the launcher mockup on playhorizon.dev shows them, each its project's
+/// own: see THIRD_PARTY_NOTICES.md.
+const FABRIC: &[u8] = include_bytes!("../assets/logos/fabric.png");
 const QUILT: &[u8] = include_bytes!("../assets/logos/quilt.png");
 const NEOFORGE: &[u8] = include_bytes!("../assets/logos/neoforge.png");
-/// Fabric and Forge publish no licence for their logos: their own icons, fetched from their own
-/// sites into the image cache, never shipped.
-const FABRIC: &str = "https://raw.githubusercontent.com/FabricMC/fabric-loader/master/src/main/resources/assets/fabricloader/icon.png";
-const FORGE: &str = "https://files.minecraftforge.net/static/images/favicon-32x32.png";
+const FORGE: &[u8] = include_bytes!("../assets/logos/forge.png");
 /// The loaders a logo is drawn for.
 const LOADERS: [&str; 4] = ["fabric", "quilt", "forge", "neoforge"];
 
@@ -63,27 +61,17 @@ impl Launcher {
         self.icon_image("mark:horizon".into(), size, false, horizon)
     }
 
-    /// A mod loader's logo by its id (`fabric`, `quilt`, `forge`, `neoforge`): None while a
-    /// fetched one is on its way, or for another id.
+    /// A mod loader's logo by its id (`fabric`, `quilt`, `forge`, `neoforge`): None for another
+    /// id.
     pub(super) fn loader_logo(&mut self, loader: &str, size: f32) -> Option<Arc<RenderImage>> {
-        let bundled = |png: &'static [u8]| move || Some(png.to_vec());
-        let key = format!("mark:{loader}");
-        match loader {
-            "quilt" => self.icon_image(key, size, false, bundled(QUILT)),
-            "neoforge" => self.icon_image(key, size, false, bundled(NEOFORGE)),
-            "fabric" | "forge" => {
-                let url = if loader == "fabric" { FABRIC } else { FORGE };
-                let file = self.mods_image(url, images::ICON)?;
-                self.icon_image(key, size, false, || std::fs::read(file).ok())
-            }
-            _ => None,
-        }
+        let png = logo_png(loader)?;
+        self.icon_image(format!("mark:{loader}"), size, false, || Some(png.to_vec()))
     }
 
     /// The image under `key` at `size` points, made from `bytes` the first time. A missing one is
     /// remembered only when `remember_missing` (a file that may never exist); else it is asked
     /// again next frame (a logo still downloading).
-    fn icon_image(
+    pub(super) fn icon_image(
         &mut self,
         key: String,
         size: f32,
@@ -112,6 +100,25 @@ fn fitted(bytes: Vec<u8>, size: f32, scale: f32) -> Option<Arc<RenderImage>> {
     let texels: Vec<[u8; 4]> = image.pixels().map(|p| p.0).collect();
     let whole = (side as usize / w.max(h)).max(1) as f32;
     Some(art::bake(&texels, w, h, whole / scale, scale))
+}
+
+/// A loader's logo file by its id.
+pub(super) fn logo_png(loader: &str) -> Option<&'static [u8]> {
+    match loader {
+        "fabric" => Some(FABRIC),
+        "quilt" => Some(QUILT),
+        "neoforge" => Some(NEOFORGE),
+        "forge" => Some(FORGE),
+        _ => None,
+    }
+}
+
+/// An image file's bytes as a picture chosen in the instance dialog: a loader's logo, Minecraft's
+/// grass block.
+pub(super) fn chosen(bytes: Vec<u8>, scale: f32) -> Option<Chosen> {
+    let png = instances::picture(bytes).ok()?;
+    let preview = fitted(png.clone(), 28., scale)?;
+    Some(Chosen { png, preview })
 }
 
 /// An image made by [`fitted`], centred in a `size` points square.
@@ -176,6 +183,7 @@ impl Launcher {
                     match made {
                         Ok(chosen) => {
                             d.picture = Some(Some(chosen));
+                            d.logo = None;
                             d.error = None;
                         }
                         Err(e) => d.error = Some(e),
