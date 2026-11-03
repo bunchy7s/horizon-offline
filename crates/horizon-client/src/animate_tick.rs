@@ -1895,9 +1895,17 @@ pub fn campfire_particles<'a>(
         };
         let r = engine.random();
         if r.next_float() < 0.11 {
-            let count = next_int(r, 2) + 2;
-            for _ in 0..count {
+            // `for (int i = 0; i < random.nextInt(2) + 2; i++)`: the iteration
+            // bound is drawn again on every pass, so the loop keeps asking the
+            // random whether to make one more puff.
+            let mut made = 0;
+            loop {
+                let count = next_int(engine.random(), 2) + 2;
+                if made >= count {
+                    break;
+                }
                 make_campfire_smoke(engine, pos, signal, false);
+                made += 1;
             }
         }
         // The smoke over each cooking item, at the slot's corner of the fire.

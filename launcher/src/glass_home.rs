@@ -62,14 +62,17 @@ impl Launcher {
                         ))
                         .children(self.folder_group(java.is_none(), cx)),
                 );
+        // The mockup's `xl:flex-row`: under 1280 px the invite code goes under the actions, as
+        // wide as the page.
+        let wide = self.window_width >= 1280.;
         div()
             .flex()
-            .items_end()
-            .justify_between()
+            .when(wide, |d| d.items_end().justify_between())
+            .when(!wide, |d| d.flex_col())
             .gap(px(32.))
             .pt(px(64.))
             .child(left)
-            .child(self.glass_join_friend(tag, cx))
+            .child(self.glass_join_friend(tag, wide, cx))
     }
 
     /// The edition tabs (`Tabs`, size `sm`): the instance's own lit. An instance's edition is
@@ -702,9 +705,9 @@ impl Launcher {
         Some(wrap)
     }
 
-    /// The invite code field (`JoinFriend`): 340 wide, the icon inside on the left, Join inside
-    /// on the right.
-    fn glass_join_friend(&self, tag: &str, cx: &mut Context<Self>) -> Div {
+    /// The invite code field (`JoinFriend`): 340 wide (`wide`), else the page's width; the icon
+    /// inside on the left, Join inside on the right.
+    fn glass_join_friend(&self, tag: &str, wide: bool, cx: &mut Context<Self>) -> Div {
         let t = self.theme;
         let focused = self.friend_focused;
         let field = div()
@@ -759,7 +762,8 @@ impl Launcher {
         div()
             .relative()
             .flex_none()
-            .w(px(340.))
+            .when(wide, |d| d.w(px(340.)))
+            .when(!wide, |d| d.w_full())
             .h(px(TALL))
             .child(field)
             .child(

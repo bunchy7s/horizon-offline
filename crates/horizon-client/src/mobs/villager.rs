@@ -182,10 +182,10 @@ pub fn sleep_pose(m: &Mob) -> Option<(f32, [f32; 2])> {
         _ => return None,
     })
 }
-/// `Villager.tick`: the unhappy counter and the gossip decay; a sleeper
-/// hurt or without its bed wakes up (`LivingEntity.hurtServer`,
-/// `LivingEntity.checkBedExists`), and lies the way its bed faces
-/// (`getBedOrientation`). The brain does the rest.
+/// `Villager.tick`: the unhappy counter and the gossip decay; a hurt
+/// sleeper wakes up (`LivingEntity.hurtServer`; the `checkBedExists` wake
+/// runs earlier in `LivingEntity.tick`, for AI-less mobs too), and lies the
+/// way its bed faces (`getBedOrientation`). The brain does the rest.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.extra.ints[0] > 0 {
         m.extra.ints[0] -= 1;
@@ -198,7 +198,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if let Some(p) = bed {
             m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
         }
-        if m.hurt_time > 0 || bed.is_none() {
+        if m.hurt_time > 0 {
             stop_sleeping(m, w, events);
             super::villager_brain::woken(m, w.game_time);
         }
@@ -877,7 +877,7 @@ mod tests {
 
     fn villager() -> Mob {
         use crate::mobs::{Anim, Brain, Flags, MobType, Part, Species};
-        use std::{collections::HashMap, sync::Arc};
+        use std::sync::Arc;
         let kind = Arc::new(MobType {
             id: "minecraft:villager".into(),
             species: Species::Villager,
@@ -910,7 +910,7 @@ mod tests {
             ambient_interval: 80,
             flags: Flags::default(),
             model: Arc::new(Part::parse("root", &serde_json::json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Villager,

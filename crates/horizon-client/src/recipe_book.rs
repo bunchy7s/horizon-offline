@@ -11,6 +11,66 @@ use horizon_world::loot::PackOverlay;
 use horizon_world::nbt::Tag;
 use std::collections::{BTreeSet, HashMap};
 
+/// A native mod's book category for one custom recipe type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RecipeBookCategory {
+    /// A namespaced category id outside `minecraft:`.
+    pub id: String,
+    /// A custom type present in the current recipe table.
+    pub recipe_type: String,
+    /// A registered item id used as the category's icon.
+    pub icon: String,
+}
+
+/// Validate declarations once per recipe table. The first valid declaration
+/// owns its category id and recipe type; vanilla categories are never replaced.
+pub fn mod_categories(
+    declarations: Vec<RecipeBookCategory>,
+    recipes: &Recipes,
+    items: &Items,
+) -> HashMap<String, RecipeBookCategory> {
+    let valid_id = |id: &str| {
+        id.split_once(':').is_some_and(|(namespace, path)| {
+            !namespace.is_empty()
+                && !path.is_empty()
+                && namespace.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_.-".contains(&byte)
+                })
+                && path.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"/_.-".contains(&byte)
+                })
+        })
+    };
+    let mut categories = HashMap::new();
+    let mut ids = BTreeSet::new();
+    for category in declarations {
+        let reason = if !valid_id(&category.id) || category.id.starts_with("minecraft:") {
+            Some("invalid or reserved category id")
+        } else if !valid_id(&category.recipe_type)
+            || category.recipe_type.starts_with("minecraft:")
+            || !recipes.custom.contains_key(&category.recipe_type)
+        {
+            Some("unknown or vanilla recipe type")
+        } else if !valid_id(&category.icon)
+            || category.icon == "minecraft:air"
+            || items.get(&category.icon).is_none()
+        {
+            Some("missing or unknown icon item")
+        } else if ids.contains(&category.id) || categories.contains_key(&category.recipe_type) {
+            Some("duplicate category id or recipe type")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            log::warn!("recipe book category {:?} skipped: {reason}", category);
+            continue;
+        }
+        ids.insert(category.id.clone());
+        categories.insert(category.recipe_type.clone(), category);
+    }
+    categories
+}
+
 /// `RecipeBookType`: the menus with a recipe book and their own settings.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BookType {
@@ -415,7 +475,7 @@ impl Book {
     /// `ingredient`'s items as its display resolves them (the cycling order
     /// of ghost slots and the overlay).
     pub fn items_of(&self, ingredient: &Ingredient) -> Vec<String> {
-        ingredient.1.clone()
+        ingredient.order.clone()
     }
     /// `RecipeBookComponent.fillGhostRecipe` of a book type: the result and the
     /// ingredients faded into the menu's slots, in the order the component
@@ -983,6 +1043,83 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn mod_category_mapping_validates_ids_icons_and_conflicts() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-book-categories-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("items.json"),
+            r#"{"minecraft:stone":{},"mymod:crusher":{},"minecraft:air":{}}"#,
+        )
+        .unwrap();
+        let items = Items::catalog(&root, &PackOverlay::NONE).unwrap();
+        let recipes = Recipes::from_sources(
+            &root,
+            &items,
+            &PackOverlay::NONE,
+            vec![
+                (
+                    "mymod:crush".into(),
+                    serde_json::json!({"type":"mymod:crusher"}),
+                ),
+                (
+                    "mymod:mix".into(),
+                    serde_json::json!({"type":"mymod:mixer"}),
+                ),
+            ],
+        )
+        .unwrap();
+        let declare = |id: &str, recipe_type: &str, icon: &str| RecipeBookCategory {
+            id: id.into(),
+            recipe_type: recipe_type.into(),
+            icon: icon.into(),
+        };
+        let crusher = declare("mymod:crushing", "mymod:crusher", "mymod:crusher");
+        let mixer = declare("mymod:mixing", "mymod:mixer", "minecraft:stone");
+        let mapped = mod_categories(
+            vec![
+                declare("mymod:crushing", "mymod:crusher", ""),
+                crusher.clone(),
+                declare("mymod:duplicate", "mymod:crusher", "minecraft:stone"),
+                declare("mymod:crushing", "mymod:mixer", "minecraft:stone"),
+                mixer.clone(),
+            ],
+            &recipes,
+            &items,
+        );
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped.get("mymod:crusher"), Some(&crusher));
+        assert_eq!(mapped.get("mymod:mixer"), Some(&mixer));
+        assert!(!mapped.contains_key("minecraft:crafting"));
+        for invalid in [
+            declare(
+                "minecraft:crafting_misc",
+                "mymod:crusher",
+                "minecraft:stone",
+            ),
+            declare("bare", "mymod:crusher", "minecraft:stone"),
+            declare("mymod:", "mymod:crusher", "minecraft:stone"),
+            declare(":category", "mymod:crusher", "minecraft:stone"),
+            declare("mymod:Bad", "mymod:crusher", "minecraft:stone"),
+            declare("mymod:bad:id", "mymod:crusher", "minecraft:stone"),
+            declare("mymod:crushing", "mymod:absent", "minecraft:stone"),
+            declare("mymod:crushing", "minecraft:smelting", "minecraft:stone"),
+            declare("mymod:crushing", "mymod:crusher", ""),
+            declare("mymod:crushing", "mymod:crusher", "minecraft:absent"),
+            declare("mymod:crushing", "mymod:crusher", "minecraft:air"),
+        ] {
+            assert!(
+                mod_categories(vec![invalid.clone()], &recipes, &items).is_empty(),
+                "{invalid:?}"
+            );
+        }
+        assert!(mod_categories(Vec::new(), &recipes, &items).is_empty());
+        let vanilla = Recipes::from_sources(&root, &items, &PackOverlay::NONE, Vec::new()).unwrap();
+        assert!(mod_categories(vec![crusher], &vanilla, &items).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     fn ing(items: &[&str]) -> Ingredient {
         Ingredient::of(items.iter().map(|s| (*s).to_owned()).collect())

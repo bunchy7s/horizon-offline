@@ -462,7 +462,7 @@ def main():
     print(f'{len(all_cases) - total - skipped}/{len(all_cases) - skipped} cases match ({skipped} oracle errors; '
           f'{unseeded} spawning cases compared without the final level random)')
     (work / 'differences.json').write_text(json.dumps({k: [[c, a, b] for c, a, b in v[:5]] for k, v in groups.items()}))
-    h.finish(total)
+    h.finish(total + skipped)
 
 
 def describe(case, facts):

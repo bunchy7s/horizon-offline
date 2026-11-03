@@ -111,11 +111,11 @@ fi
 languages="$shared/languages/$version/assets"
 if [ -d "$languages/minecraft/lang" ] && [ -d "$assets" ]; then
   mkdir -p "$assets/lang"
-  if [ "$(uname)" = Darwin ]; then
-    cp -cRn "$languages/minecraft/lang/." "$assets/lang/"
-  else
-    cp -R --reflink=auto -n "$languages/minecraft/lang/." "$assets/lang/"
-  fi
+  # File by file: `cp -n` exits 1 on macOS (and on some coreutils) when it skips one, which ends the script.
+  for file in "$languages/minecraft/lang/"*; do
+    [ -e "$assets/lang/${file##*/}" ] && continue
+    if [ "$(uname)" = Darwin ]; then cp -c "$file" "$assets/lang/"; else cp --reflink=auto "$file" "$assets/lang/"; fi
+  done
   if [ ! -e "$assets/../pack.mcmeta" ]; then
     if [ "$(uname)" = Darwin ]; then
       cp -c "$languages/pack.mcmeta" "$assets/../"

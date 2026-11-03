@@ -24,6 +24,30 @@ fn world_path(saves: &Path, folder: &str) -> crate::Result<PathBuf> {
     Ok(path)
 }
 
+/// `DirectoryValidator.validateDirectory`: every symbolic link under the
+/// world folder, never following one. `LevelStorageSource.validateAndCreateAccess`
+/// asks this before it makes an access, and a world holding any link is not
+/// opened at all (`ContentValidationException`), so a link planted in a
+/// downloaded world cannot point the game at the rest of the disk.
+pub fn symlinks(saves: &Path, folder: &str) -> crate::Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    collect_symlinks(&world_path(saves, folder)?, &mut found)?;
+    Ok(found)
+}
+
+fn collect_symlinks(dir: &Path, found: &mut Vec<PathBuf>) -> crate::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            found.push(entry.path());
+        } else if kind.is_dir() {
+            collect_symlinks(&entry.path(), found)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn rename(saves: &Path, folder: &str, name: &str) -> crate::Result<()> {
     let path = world_path(saves, folder)?.join("level.dat");
     let mut root = read_dat(&path).ok_or("Could not read level.dat")?;

@@ -46,3 +46,35 @@ fn movement_input_writes_back_all_fields() {
     );
     assert_eq!((forward, strafe, jump, sneak), (-0.5, 0.25, true, true));
 }
+
+#[test]
+fn recipe_book_categories_accept_mod_declarations() {
+    use horizon_client::mod_api::{
+        RecipeBookCategoriesEvent, RecipeBookCategory, dispatch_recipe_book_categories,
+    };
+    struct TestHost;
+    impl Host for TestHost {}
+    struct Categories;
+    impl Hooks for Categories {
+        fn recipe_book_categories(
+            &self,
+            _host: &dyn Host,
+            event: &mut RecipeBookCategoriesEvent<'_>,
+        ) {
+            event.categories.push(RecipeBookCategory {
+                id: "mymod:crushing".into(),
+                recipe_type: "mymod:crusher".into(),
+                icon: "minecraft:stone".into(),
+            });
+        }
+    }
+    let mut declarations = Vec::new();
+    dispatch_recipe_book_categories(&TestHost, &[], &mut declarations);
+    assert!(declarations.is_empty());
+    let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Categories)];
+    dispatch_recipe_book_categories(&TestHost, &mods, &mut declarations);
+    assert_eq!(declarations.len(), 1);
+    assert_eq!(declarations[0].id, "mymod:crushing");
+    assert_eq!(declarations[0].recipe_type, "mymod:crusher");
+    assert_eq!(declarations[0].icon, "minecraft:stone");
+}
