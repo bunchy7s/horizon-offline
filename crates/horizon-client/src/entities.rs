@@ -297,11 +297,13 @@ impl ItemEntity {
         if self.health > 0 {
             return None;
         }
-        // `ItemStack.onDestroyed` runs the item's own arm. A bundle's
-        // (`BundleItem.onDestroyed`) empties its `bundle_contents` and hands
-        // them back; only a bundle holds that component, so the component is
-        // the dispatch (a mod's own bundle carries one too).
-        Some(crate::bundle::destroyed(&mut self.stack))
+        // `ItemStack.onDestroyed` runs the item's own arm, and the component
+        // the stack holds is the dispatch: a bundle's (`BundleItem.onDestroyed`)
+        // `bundle_contents` and a container item's (`BlockItem.onDestroyed`)
+        // `container`, which a mod's own item carries in the same way.
+        let mut spilled = crate::bundle::destroyed(&mut self.stack);
+        spilled.extend(crate::item_data::destroyed_container(&mut self.stack));
+        Some(spilled)
     }
     /// `ItemEntity.tick` on a server: an item whose box is inside a block
     /// (one placed where it lay) has no physics this tick
@@ -3357,5 +3359,34 @@ mod item_destroyed_tests {
         // nothing never reports any.
         assert_eq!(bundle.hurt(1), Some(Vec::new()));
         assert_eq!(item("minecraft:stone", &[]).hurt(5), Some(Vec::new()));
+    }
+
+    /// `BlockItem.onDestroyed`: the same death path spills a container item's
+    /// `container` — a shulker box's stacks — in slot order, and the box keeps
+    /// no slot filled.
+    #[test]
+    fn a_destroyed_shulker_box_spills_its_container() {
+        let mut box_item = item("minecraft:shulker_box", &[]);
+        box_item.stack.data_mut().container = vec![
+            (20, ItemStack::new("minecraft:diamond", 4)),
+            (0, ItemStack::new("minecraft:oak_log", 8)),
+            (3, ItemStack::new("minecraft:cobblestone", 64)),
+        ];
+        let spent = box_item.hurt(5).expect("the hit that destroys it");
+        assert_eq!(
+            spent
+                .iter()
+                .map(|s| (&*s.item, s.count))
+                .collect::<Vec<_>>(),
+            [
+                ("minecraft:oak_log", 8),
+                ("minecraft:cobblestone", 64),
+                ("minecraft:diamond", 4),
+            ]
+        );
+        assert!(
+            box_item.stack.data().is_none_or(|d| d.container.is_empty()),
+            "the destroyed box keeps no slot filled"
+        );
     }
 }
