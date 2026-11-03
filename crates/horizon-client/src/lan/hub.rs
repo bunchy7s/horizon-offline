@@ -3102,6 +3102,7 @@ impl Hub {
                 | S::ChunkBatchReceived(_)
                 | S::ClientInformation(_)
                 | S::RecipeBookChangeSettings(_)
+                | S::RecipeBookSeenRecipe(_)
                 | S::ClientTickEnd(_)
                 | S::KeepAlive(_)
                 | S::Pong(_) => false,
@@ -3224,6 +3225,19 @@ impl Hub {
                     }
                     g.position_this_tick = false;
                     self.anticheat_tick_end(i, events);
+                }
+                // ServerGamePacketListenerImpl.handleRecipeBookSeenRecipePacket:
+                // the display the player looked at stops being a new one, so
+                // the next `RecipeBookAdd` it is sent does not animate.
+                S::RecipeBookSeenRecipe(p) => {
+                    let seen = self
+                        .sync
+                        .advancements
+                        .recipe_of_display(p.recipe)
+                        .map(str::to_owned);
+                    if let Some(id) = seen {
+                        self.guests[i].recipe_book.remove_highlight(&id);
+                    }
                 }
                 // ServerGamePacketListenerImpl.handleRecipeBookChangeSettingsPacket.
                 S::RecipeBookChangeSettings(p) => {

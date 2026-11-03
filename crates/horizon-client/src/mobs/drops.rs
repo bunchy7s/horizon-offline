@@ -432,6 +432,14 @@ pub fn orb_value(amount: i32) -> i32 {
     1
 }
 
+/// What a mob clears on itself in `LivingEntity.die`, before any loot is
+/// rolled: `Wolf.die` drops the wet flag and the shake animation, so a wolf
+/// killed mid-shake does not shake on the ground.
+pub fn death_state(m: &mut Mob) {
+    if m.species() == Species::Wolf {
+        super::tame::die(m);
+    }
+}
 /// `LivingEntity.die`'s drops for `m` (equipment it loses is removed from
 /// it). Returns the drops in spawn order and whether a charged creeper
 /// killer dropped a head (`Creeper.droppedSkulls`).
@@ -444,6 +452,7 @@ pub fn die(
     level_random: &mut LegacyRandom,
 ) -> (Vec<Drop>, bool) {
     let mut out = Vec::new();
+    death_state(m);
     let this = loot_entity(m, d.vehicle.clone());
     let mut skulls = false;
     // Creeper.killedEntity: a charged creeper's victim drops its head.

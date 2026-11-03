@@ -80,6 +80,11 @@ impl Stats {
         self.events
             .push((format!("minecraft:{ty}"), key.to_owned(), None));
     }
+    /// `ServerPlayer.die`'s `resetStat` of `TIME_SINCE_DEATH` and `TIME_SINCE_REST`.
+    pub(super) fn reset_death_timers(&mut self) {
+        self.reset("custom", "minecraft:time_since_death");
+        self.reset("custom", "minecraft:time_since_rest");
+    }
     pub(super) fn custom(&mut self, key: &str, n: i32) {
         namespaced(key, |key| self.add("custom", key, n));
     }
@@ -454,6 +459,21 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ServerPlayer.die zeroes the two timers (and only them) and sends the new zero.
+    #[test]
+    fn death_resets_the_timers_since_death_and_rest() {
+        let mut s = Stats::default();
+        s.custom("time_since_death", 700);
+        s.custom("time_since_rest", 900);
+        s.custom("deaths", 2);
+        s.events.clear();
+        s.reset_death_timers();
+        assert_eq!(s.get("custom", "minecraft:time_since_death"), 0);
+        assert_eq!(s.get("custom", "minecraft:time_since_rest"), 0);
+        assert_eq!(s.get("custom", "minecraft:deaths"), 2);
+        assert_eq!(s.events.len(), 2);
+    }
 
     #[test]
     fn counters_events_and_dirty_entries() {

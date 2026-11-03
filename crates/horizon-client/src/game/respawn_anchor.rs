@@ -581,7 +581,7 @@ impl Game<'_> {
         Some((stand, look_at_yaw(stand, head)))
     }
     /// The bed's `facing`, as a step.
-    fn bed_forward(&self, state: BlockStateId) -> [i32; 3] {
+    pub(super) fn bed_forward(&self, state: BlockStateId) -> [i32; 3] {
         let facing = self
             .pack
             .assets
