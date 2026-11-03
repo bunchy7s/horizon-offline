@@ -432,6 +432,10 @@ pub(super) struct Lists {
     pub enforce_whitelist: bool,
     /// `op-permission-level`: what `/op` grants (operatorUserPermissions).
     pub op_level: i32,
+    /// `MinecraftServer.playerIdleTimeout`: the minutes of idleness after
+    /// which a player is kicked, `player-idle-timeout` at the start and
+    /// `/setidletimeout` after it.
+    pub player_idle_timeout: i32,
 }
 impl Lists {
     fn load() -> Self {
@@ -443,6 +447,7 @@ impl Lists {
             use_whitelist: false,
             enforce_whitelist: false,
             op_level: 4,
+            player_idle_timeout: 0,
         };
         // Each list tells the event stream what changes in it, as vanilla's tell their `NotificationService`.
         l.ops.watch(|change| {
@@ -839,6 +844,7 @@ impl Game<'_> {
         lists.use_whitelist = props.white_list;
         lists.enforce_whitelist = props.enforce_whitelist;
         lists.op_level = props.op_permission_level;
+        lists.player_idle_timeout = props.player_idle_timeout;
         let lists = Arc::new(Mutex::new(lists));
         self.server_lists = Some(lists.clone());
         log("INFO", &format!("Preparing level \"{level_name}\""));
@@ -1067,7 +1073,6 @@ impl Game<'_> {
             max_players: props.max_players.max(0) as usize,
         };
         let pause_after = props.pause_when_empty_seconds * 20;
-        let idle_timeout = props.player_idle_timeout;
         let mut next = Instant::now();
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
@@ -1153,6 +1158,9 @@ impl Game<'_> {
             {
                 host.hub.send_low_disk_space_warning();
             }
+            // `PlayerList.tick` reads `MinecraftServer.playerIdleTimeout`
+            // every tick, so `/setidletimeout` changes it while the server runs.
+            let idle_timeout = state.lists.lock().unwrap().player_idle_timeout;
             if idle_timeout > 0 {
                 self.kick_idle(idle_timeout);
             }
