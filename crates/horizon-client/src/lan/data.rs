@@ -611,6 +611,7 @@ fn changed_dimension_type(name: &str, json: &Value, levels: &LevelShapes) -> Opt
     json["height"] = shape.height.into();
     json["logical_height"] = shape.logical_height.into();
     json["has_skylight"] = shape.sky_light.into();
+    json["has_ceiling"] = shape.has_ceiling.into();
     Some(json)
 }
 
@@ -741,12 +742,13 @@ mod tests {
             changed_dimension_type("minecraft:overworld", &vanilla, &levels),
             None
         );
-        levels.overworld = crate::chunk::LevelShape::new(-64, 2096, 2096, true).unwrap();
+        levels.overworld = crate::chunk::LevelShape::new(-64, 2096, 2096, true, true).unwrap();
         let sent = changed_dimension_type("minecraft:overworld", &vanilla, &levels).unwrap();
         assert_eq!(
             (sent["min_y"].as_i64(), sent["height"].as_i64()),
             (Some(-64), Some(2096))
         );
+        assert_eq!(sent["has_ceiling"], true);
         assert_eq!(sent["ultrawarm"], false, "the rest of the type is kept");
         assert_eq!(
             changed_dimension_type("minecraft:the_nether", &vanilla, &levels),

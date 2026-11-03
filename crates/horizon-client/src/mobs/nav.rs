@@ -397,9 +397,15 @@ impl Mob {
             self.ai.nav.delayed_recompute = false;
         }
     }
-    /// `GroundPathNavigation.trimPath` with `avoidSun`: a mob that is out of
-    /// the sun keeps only the nodes before the first one the sky sees.
+    /// `PathNavigation.trimPath` for cauldrons, then
+    /// `GroundPathNavigation.trimPath` with `avoidSun`: a mob that is out of the
+    /// sun keeps only the nodes before the first one the sky sees.
     fn trim_path(&mut self, w: &MobWorld) {
+        if let Some(path) = &mut self.ai.nav.path {
+            path.raise_cauldron_nodes(|x, y, z| {
+                w.has_tag("minecraft:cauldrons", w.block_name(x, y, z))
+            });
+        }
         if !self.ai.nav.avoid_sun
             || !matches!(self.ai.nav.kind, NavKind::Ground | NavKind::WallClimber)
         {

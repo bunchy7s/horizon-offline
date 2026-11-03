@@ -11,15 +11,25 @@ depend on world generation.
 """
 
 
-def cmd(command, record=True):
+def cmd(command, record=True, expect_result=None):
     op = {'op': 'cmd', 'cmd': command}
     if not record:
         op['record'] = False
+    if expect_result is not None:
+        op['expect_result'] = expect_result
     return op
 
 
 def setup(*commands):
     return [cmd(c, False) for c in commands]
+
+
+def predicate_selector_fixtures(group_names):
+    if 'selector missing predicates' not in group_names:
+        return {}
+    sheep = {'type': 'minecraft:entity_properties', 'entity': 'this',
+             'predicate': {'minecraft:entity_type': 'minecraft:sheep'}}
+    return {'h124_selector:sheep': sheep, 'minecraft:h124_selector_sheep': sheep}
 
 
 BASE = (0, 200, 0)
@@ -292,6 +302,14 @@ def entities():
         cmd('/data get entity @e[tag=h,type=minecraft:cow,limit=1] CustomName'),
         cmd('/data merge entity @e[tag=h,type=minecraft:pig,limit=1] {Tags:["a","c"]}'),
         cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base set 0.5'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect give @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed 10 1'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect clear @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base reset'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
         cmd('/effect give @e[tag=h] minecraft:glowing 10'),
         cmd('/damage @e[tag=h,type=minecraft:cow,limit=1] 1'),
         cmd('/ride @s mount @e[tag=h,type=minecraft:pig,limit=1]'),
@@ -552,6 +570,36 @@ def scores():
         cmd('/bossbar remove harness:bar'),
         cmd('/bossbar remove harness:bar'),
     ]
+
+
+def selector_missing_predicates():
+    """Missing named predicates reject both signs before negation (#7794)."""
+    missing = 'h124_missing_873b04b1:absent'
+    missing_default = 'h124_missing_default_873b04b1'
+    defined = ('h124_selector:sheep', 'minecraft:h124_selector_sheep', 'h124_selector_sheep')
+    ops = setup('/tick freeze')
+    for i, kind in enumerate(('sheep', 'cow', 'pig', 'chicken')):
+        custom = ',CustomName:{text:"Named pig"}' if kind == 'pig' else ''
+        ops += setup(f'/summon minecraft:{kind} {6 + i * 2}.5 220 4.5 '
+                     f'{{Tags:["h124","h124_{kind}"],NoAI:1b,NoGravity:1b,'
+                     f'PersistenceRequired:1b{custom}}}')
+    for kind in ('sheep', 'cow', 'pig', 'chicken'):
+        base = f'@e[tag=h124_{kind}'
+        ops.append(cmd(f'/execute if entity {base}]', expect_result=1))
+        for predicate in (missing, missing_default):
+            for sign in ('', '!'):
+                ops.append(cmd(f'/execute if entity {base},predicate={sign}{predicate}]'))
+        for predicate in defined:
+            ops += [cmd(f'/execute if entity {base},predicate={predicate}]',
+                        expect_result=1 if kind == 'sheep' else None),
+                    cmd(f'/execute if entity {base},predicate=!{predicate}]',
+                        expect_result=1 if kind != 'sheep' else None)]
+        ops += [cmd(f'/execute if entity {base},predicate={defined[0]},predicate=!{missing}]'),
+                cmd(f'/execute if entity {base},predicate=!{missing},predicate={defined[0]}]')]
+    ops += [cmd(f'/execute if entity @e[tag=h124,predicate={defined[0]}]', expect_result=1),
+            cmd(f'/execute if entity @e[tag=h124,predicate=!{defined[0]}]', expect_result=3),
+            cmd(f'/execute if entity @e[tag=h124_unrelated,predicate=!{missing}]')]
+    return ops + setup('/kill @e[tag=h124]', '/tick unfreeze')
 
 
 def execute():
@@ -1802,6 +1850,82 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def armor_stand_climbing():
+    ops = setup('/gamerule random_tick_speed 0', '/forceload add 0 0 31 31',
+                '/fill 0 198 0 31 199 31 stone',
+                '/fill 0 200 0 31 214 31 air', '/fill 10 200 9 10 212 11 stone')
+    for block, below in [
+            ('air', False), ('ladder[facing=west]', False),
+            ('vine[east=true]', False), ('twisting_vines_plant', False),
+            ('weeping_vines_plant', False),
+            ('oak_trapdoor[open=true,facing=west]', True),
+            ('oak_trapdoor[open=true,facing=east]', True)]:
+        ops += setup('/fill 9 200 10 9 213 10 air',
+                     f'/fill 9 200 10 9 210 10 {block}')
+        if block == 'weeping_vines_plant':
+            ops += setup('/fill 9 200 10 9 212 10 weeping_vines_plant',
+                         '/setblock 9 213 10 stone')
+        if below:
+            ops += setup('/setblock 9 209 10 ladder[facing=west]')
+        for x, motion in [(9.5, '[0.0d,0.0d,0.0d]'), (8.5, '[1.0d,0.0d,0.0d]'),
+                          (8.5, '[2.0d,0.0d,0.0d]')]:
+            y = 210 if x == 9.5 else 200
+            ops += setup(f'/summon armor_stand {x} {y} 10.5 {{Silent:1b,Tags:["climb"],Motion:{motion}}}')
+            previous = 0
+            for tick in (1, 2, 3, 5, 10, 20, 30, 40):
+                ops.append({'op': 'tick', 'n': tick - previous})
+                previous = tick
+                for path in ('Pos', 'Motion', 'OnGround', 'Health'):
+                    ops.append(cmd(f'/data get entity @e[tag=climb,limit=1] {path}'))
+            ops += setup('/kill @e[tag=climb]')
+    ops += setup('/fill 0 198 0 31 214 31 air', '/forceload remove 0 0 31 31',
+                 '/gamerule random_tick_speed 3')
+    return ops
+
+
+
+def creeper_cloud_selectors():
+    """Creeper clouds are command targets for their actual lifetime (#7438)."""
+    generated = '@e[type=minecraft:area_effect_cloud,tag=!direct]'
+    direct = '@e[type=minecraft:area_effect_cloud,tag=direct]'
+    creeper = ('/summon minecraft:creeper 4.5 220 4.5 '
+               '{NoAI:1b,NoGravity:1b,ignited:1b,Tags:["source"],'
+               'active_effects:[{id:"minecraft:speed",duration:1000,amplifier:1b}]}')
+    ops = [*setup('/gamerule mob_griefing false', creeper,
+                  '/summon minecraft:area_effect_cloud 14.5 220 4.5 '
+                  '{Tags:["direct"],Duration:300,Radius:2.5f}'),
+           cmd('/execute if entity @e[type=minecraft:creeper,tag=source]')]
+    # The default fuse is intentional: custom Fuse is a separate regression.
+    for ticks in (30, 10):
+        ops += [{'op': 'tick', 'n': ticks},
+                cmd(f'/execute if entity {generated}'),
+                cmd(f'/execute if entity {direct}')]
+    cloud = '@e[type=minecraft:area_effect_cloud,tag=!direct,limit=1]'
+    ops += [
+        cmd(f'/data get entity {cloud} Pos'),
+        cmd(f'/data get entity {cloud} Duration'),
+        cmd(f'/data get entity {cloud} WaitTime'),
+        cmd(f'/tag {generated} add generated'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,tag=generated]'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,nbt={Tags:["generated"],Duration:300}]'),
+        cmd('/scoreboard objectives add cloud_seen dummy'),
+        cmd(f'/execute as {generated} run scoreboard players set @s cloud_seen 7'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,scores={cloud_seen=7}]'),
+        # Past its maximum lifetime, the generated cloud must be gone.
+        {'op': 'tick', 'n': 330},
+        cmd(f'/execute if entity {generated}'),
+        # A second generated cloud exercises explicit removal independently.
+        *setup(creeper),
+        {'op': 'tick', 'n': 30},
+        cmd(f'/execute if entity {generated}'),
+        cmd(f'/kill {generated}'),
+        cmd(f'/execute if entity {generated}'),
+        *setup('/scoreboard objectives remove cloud_seen', '/kill @e[tag=direct]',
+               '/gamerule mob_griefing true'),
+    ]
+    return ops
+
+
 def mob_armor_damage():
     """Attribute commands must change runtime mob damage, not only getters (#7494)."""
     cases = [(armor, toughness, amount, 'cactus')
@@ -1824,6 +1948,7 @@ def mob_armor_damage():
                 cmd(f'/data get entity {target} Health 1000'),
                 *setup(f'/kill {target}')]
     return ops + [{'op': 'tick', 'n': 25}]
+
 
 
 def bossbar_list_order():
@@ -1899,6 +2024,64 @@ def mob_max_health_bounds():
     ]
     return ops
 
+def setblock_destroy_air():
+    """Destroy-to-air skips placement, including already-air targets (#7691)."""
+    pos = '24 220 10'
+    # Keep this section nonempty so strict placement can retain air variants.
+    out = setup('/tick freeze', '/gamerule block_drops true',
+                '/scoreboard objectives add destroy_air dummy',
+                '/setblock 24 219 11 minecraft:stone strict')
+    for before, after, mode in [
+        ('stone', 'air', 'destroy'),
+        ('air', 'air', 'destroy'),
+        ('stone', 'cave_air', 'destroy'),
+        ('cave_air', 'air', 'destroy'),
+        ('cave_air', 'cave_air', 'destroy'),
+        ('stone', 'void_air', 'destroy'),
+        ('void_air', 'air', 'destroy'),
+        ('water', 'air', 'destroy'),
+        ('stone', 'dirt', 'destroy'),
+        ('stone', 'stone', 'destroy'),
+        ('air', 'dirt', 'destroy'),
+        ('air', 'air', 'replace'),
+        ('stone', 'air', 'replace'),
+    ]:
+        out += setup('/kill @e[type=minecraft:item]',
+                     f'/setblock {pos} minecraft:{before} strict',
+                     '/scoreboard players set result destroy_air -99',
+                     '/scoreboard players set success destroy_air -99')
+        out += [
+            cmd(f'/execute if block {pos} minecraft:{before}'),
+            cmd('/execute store success score success destroy_air '
+                'store result score result destroy_air run '
+                f'setblock {pos} minecraft:{after} {mode}'),
+            cmd('/scoreboard players get success destroy_air'),
+            cmd('/scoreboard players get result destroy_air'),
+            *[cmd(f'/execute if block {pos} minecraft:{air}')
+              for air in ('air', 'cave_air', 'void_air')],
+            cmd('/execute if entity @e[type=minecraft:item]'),
+            cmd('/execute as @e[type=minecraft:item] run data get entity @s Item'),
+        ]
+    # Skipping BlockInput.place must still notify neighbours. A strict write
+    # leaves this unsupported power value intact until a neighbour updates it.
+    out += setup(f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:stone strict',
+                 '/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]'),
+            cmd(f'/setblock {pos} minecraft:air destroy'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=0]'),
+            cmd(f'/execute if block {pos} minecraft:air')]
+    out += setup('/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd(f'/setblock {pos} minecraft:air replace'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]')]
+    out += setup('/kill @e[type=minecraft:item]', f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 220 10 minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:air strict',
+                 '/setblock 24 219 11 minecraft:air strict',
+                 '/scoreboard objectives remove destroy_air', '/tick unfreeze')
+    return out
+
+
 def forceload_query_order():
     """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
     return [
@@ -1946,10 +2129,19 @@ def groups():
         ('player state', player_state()),
         ('experience level boundaries', experience_level_boundaries()),
         ('blocks and border', world_blocks()),
+        ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('aquatic FromBucket', aquatic_from_bucket()),
+
+
+
+        ('armor stand climbing', armor_stand_climbing()),
+
+
+
         ('mob armor damage', mob_armor_damage()),
+
         ('mob max health bounds', mob_max_health_bounds()),
         ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
@@ -1960,6 +2152,7 @@ def groups():
         ('scores, teams and bossbars', scores()),
         ('bossbar list order', bossbar_list_order()),
         ('execute', execute()),
+        ('selector missing predicates', selector_missing_predicates()),
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
@@ -1982,4 +2175,5 @@ def groups():
         ('piglin pickups', piglin_pickups()),
         ('experience orb stuck', experience_orb_stuck()),
         ('summoned potions', summoned_potions()),
+        ('creeper cloud selectors', creeper_cloud_selectors()),
     ]

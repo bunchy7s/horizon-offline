@@ -132,7 +132,7 @@ BannerPatternLayers.removeLast	inline	crates/horizon-client/src/cauldron.rs::int
 BannerPatternLayers.Builder	skip:java		builder for banner pattern layers
 BannerPatterns	skip:data		registry bootstrap
 BarrelBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only, no load step of its own
-BarrelBlockEntity.recheckOpen	missing		the lid's periodic recheck of whether its viewers are still there; Horizon draws no barrel lid at all (containers.rs holds its 27 slots), so nothing rechecks one, where a golem's openers are rechecked on a timer
+BarrelBlockEntity.recheckOpen	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	openCount is recounted on the barrel's scheduled tick; zero crossings set the open property
 BarrelBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only
 BarrelBlockEntity.startOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
 BarrelBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	

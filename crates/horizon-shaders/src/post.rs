@@ -495,11 +495,48 @@ impl Post {
     }
 }
 
-/// The folder a dimension reads its programs from: `world<id>` when the pack has it, else the
-/// base folder `""` (1.2). `id` is the legacy number: 0 the Overworld, -1 the Nether, 1 the End.
+/// The folder for one of Minecraft's legacy dimension numbers. Named mappings use the
+/// corresponding Minecraft identifier; callers with an identifier should use
+/// [`dimension_folder_named`] instead.
 pub fn dimension_folder(pack: &Pack, id: i32) -> String {
-    let folder = format!("world{id}");
-    if pack.list("").iter().any(|f| f == &folder) || !pack.list(&folder).is_empty() {
+    let name = match id {
+        -1 => "minecraft:the_nether",
+        1 => "minecraft:the_end",
+        0 => "minecraft:overworld",
+        _ => "",
+    };
+    dimension_folder_named(pack, name, id)
+}
+
+/// Selects a dimension's program folder. `dimension.properties` mappings take precedence
+/// over legacy folders: explicit identifiers beat `*`, and an unmapped identifier uses the
+/// base folder. Without that file, preserve the `world<legacy_id>` selection.
+pub fn dimension_folder_named(pack: &Pack, id: &str, legacy_id: i32) -> String {
+    if let Some(text) = pack.read_text("dimension.properties") {
+        let mappings = Properties::parse(&text, &Macros::default());
+        let mut fallback = "";
+        for entry in &mappings.entries {
+            let Some(folder) = entry.key.strip_prefix("dimension.") else {
+                continue;
+            };
+            // A folder must stay inside shaders/, including on folder-backed packs.
+            let Some(path) = crate::pack::normalize(folder).filter(|p| !p.is_empty()) else {
+                continue;
+            };
+            for name in entry.value.split_whitespace() {
+                if name == "*" {
+                    fallback = folder;
+                } else if name == id
+                    || (!name.contains(':') && id.strip_prefix("minecraft:") == Some(name))
+                {
+                    return path;
+                }
+            }
+        }
+        return crate::pack::normalize(fallback).unwrap_or_default();
+    }
+    let folder = format!("world{legacy_id}");
+    if !pack.list(&folder).is_empty() {
         folder
     } else {
         String::new()
@@ -1324,6 +1361,115 @@ fn flips(properties: &Properties, program: &str) -> Vec<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_dimension_folder_reaches_the_program_loader() {
+        let pack = Pack::from_zip_bytes(
+            "original-dimension-control",
+            crate::pack::tests::zip(&[
+                (
+                    "shaders/dimension.properties",
+                    "dimension.netherShaders = minecraft:the_nether\n",
+                ),
+                (
+                    "shaders/final.vsh",
+                    "#version 120\nvoid main() { gl_Position = gl_Vertex; }",
+                ),
+                (
+                    "shaders/final.fsh",
+                    "#version 120\n/* DRAWBUFFERS:0 */\nvoid main() { gl_FragColor = vec4(0.0); }",
+                ),
+                (
+                    "shaders/netherShaders/final.vsh",
+                    "#version 120\nvoid main() { gl_Position = gl_Vertex; }",
+                ),
+                (
+                    "shaders/netherShaders/final.fsh",
+                    "#version 120\n/* DRAWBUFFERS:3 */\nvoid main() { gl_FragColor = vec4(1.0); }",
+                ),
+            ]),
+        )
+        .unwrap();
+        let folder = dimension_folder_named(&pack, "minecraft:the_nether", -1);
+        assert_eq!(folder, "netherShaders");
+        let post = load_post(
+            &pack,
+            &folder,
+            &Properties::default(),
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(post.programs.len(), 1);
+        assert_eq!(post.programs[0].buffers, [3]);
+    }
+
+    #[test]
+    fn named_dimensions_precede_wildcards_and_legacy_folders() {
+        for mappings in [
+            "dimension.other = *\ndimension.specific = the_nether example:moon\n",
+            "dimension.specific = the_nether example:moon\ndimension.other = *\n",
+        ] {
+            let pack = Pack::from_zip_bytes(
+                "t",
+                crate::pack::tests::zip(&[
+                    ("shaders/dimension.properties", mappings),
+                    ("shaders/world-1/final.fsh", "legacy"),
+                ]),
+            )
+            .unwrap();
+            assert_eq!(dimension_folder(&pack, -1), "specific");
+            assert_eq!(dimension_folder_named(&pack, "example:moon", 0), "specific");
+            assert_eq!(
+                dimension_folder_named(&pack, "example:the_nether", -1),
+                "other"
+            );
+            assert_eq!(dimension_folder(&pack, 1), "other");
+        }
+        let pack = Pack::from_zip_bytes(
+            "t",
+            crate::pack::tests::zip(&[
+                (
+                    "shaders/dimension.properties",
+                    "dimension.specific = the_end\ndimension.../../escape = *\n",
+                ),
+                ("shaders/world-1/final.fsh", "legacy"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(dimension_folder(&pack, -1), "");
+        assert_eq!(dimension_folder(&pack, 1), "specific");
+        let legacy = Pack::from_zip_bytes(
+            "t",
+            crate::pack::tests::zip(&[("shaders/world-1/final.fsh", "legacy")]),
+        )
+        .unwrap();
+        assert_eq!(dimension_folder(&legacy, -1), "world-1");
+        assert_eq!(dimension_folder(&legacy, 0), "");
+    }
+
+    #[test]
+    fn dimension_mapping_paths_and_unknown_legacy_ids() {
+        let mapped = |rules: &str| {
+            Pack::from_zip_bytes(
+                "t",
+                crate::pack::tests::zip(&[("shaders/dimension.properties", rules)]),
+            )
+            .unwrap()
+        };
+        let pack =
+            mapped("dimension.over = minecraft:overworld\ndimension.nested/./fallback = *\n");
+        assert_eq!(dimension_folder(&pack, 0), "over");
+        assert_eq!(dimension_folder(&pack, 2), "nested/fallback");
+        assert_eq!(
+            dimension_folder_named(&pack, "mod:moon", 2),
+            "nested/fallback"
+        );
+        let pack = mapped("dimension.over = overworld\ndimension.../escape = *\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+        let pack = mapped("dimension.over = overworld\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+    }
 
     #[test]
     fn image_dimensions_expand_default_and_chosen_options() {
