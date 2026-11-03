@@ -955,8 +955,13 @@ struct GameLevel<'w> {
     /// Where the chunk tickets let blocks tick.
     tickets: horizon_client::ticket_levels::Levels,
     random_tick_sections: &'w mut horizon_client::random_tick_sections::RandomTickSections,
-    /// Players with each chest open (a trapped chest's signal).
-    lid_openers: &'w HashMap<(i32, i32, i32), i32>,
+    /// Players with each chest open (a trapped chest's signal), also what a
+    /// recount of the openers replaces (`ContainerOpenersCounter.recheckOpeners`).
+    lid_openers: &'w mut HashMap<(i32, i32, i32), i32>,
+    /// The containers players have open at this moment, by position: the local
+    /// player's and the guests' (`getEntitiesWithContainerOpen`). A double
+    /// chest is in it as both halves.
+    open_containers: &'w [(i32, i32, i32)],
     /// `Level.isClientSide`: a client's copy of the level (a guest of a LAN
     /// world, a window on its server thread, a dedicated server's client).
     client_side: bool,
@@ -1435,6 +1440,24 @@ impl LevelAccess for GameLevel<'_> {
     fn is_raining_at(&self, pos: BlockPos) -> bool {
         self.behaviours.is_raining_at(self, pos)
     }
+    /// `ContainerOpenersCounter.recheckOpeners` for the block entity at `pos`,
+    /// through `ChestBlock.tick`, `EnderChestBlock.tick` and `BarrelBlock.tick`:
+    /// the count a recount of the players with that container open finds, and
+    /// the count it replaces. Only the block entities that keep a counter and
+    /// a scheduled recheck answer; anything else is `None`.
+    fn recheck_container_openers(&mut self, pos: BlockPos) -> Option<(i32, i32)> {
+        use horizon_world::level::classes::Class;
+        let data = self.behaviours.data(self.world.block(pos.x, pos.y, pos.z));
+        if !(data.is(Class::Chest) || data.is(Class::EnderChest) || data.is(Class::Barrel)) {
+            return None;
+        }
+        Some(crate::game::block_entity_anims::recheck_opener_count(
+            self.lid_openers,
+            self.open_containers,
+            (pos.x, pos.y, pos.z),
+        ))
+    }
+
     fn block_entity_analog_signal(
         &self,
         pos: BlockPos,
@@ -4348,6 +4371,27 @@ impl Game<'_> {
             .iter()
             .map(|b| point_box(b.at, 0.0, 0.0))
             .collect();
+        // `ContainerOpenersCounter.getEntitiesWithContainerOpen`: the players
+        // whose menu still holds a container of the block at a position. A
+        // double chest answers for both halves (`ChestBlockEntity$1` takes a
+        // `CompoundContainer`), and a spectator's menu counts for nothing.
+        let mut open_containers: Vec<(i32, i32, i32)> = Vec::new();
+        for key in self.container.into_iter().filter(|_| !spectator).chain(
+            self.lan
+                .iter()
+                .flat_map(|h| {
+                    h.hub
+                        .guests
+                        .iter()
+                        .filter(|g| h.hub.here(g) && !g.spectator())
+                })
+                .filter_map(|g| g.menu.as_ref().and_then(|m| m.pos)),
+        ) {
+            open_containers.push(key);
+            if let Some(other) = self.chest_other_half(key) {
+                open_containers.push(other);
+            }
+        }
         let native_authoritative = self.native_authoritative();
         let mut level = GameLevel {
             redstone_experiments: self
@@ -4403,7 +4447,8 @@ impl Game<'_> {
             spill: &mut self.spill,
             tickets: self.tickets.levels(),
             random_tick_sections: &mut self.random_tick_sections,
-            lid_openers: &self.lid_openers,
+            lid_openers: &mut self.lid_openers,
+            open_containers: &open_containers,
             client_side: self.remote.is_some(),
             native_authoritative,
             native_player: self.lan_acting_uuid,
