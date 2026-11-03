@@ -104,6 +104,32 @@ pub fn inputs() -> horizon_shaders::GbuffersInputs {
     }
 }
 
+/// What a shadow program with a geometry stage reads of entities and block entities: the
+/// inputs of [`inputs`], each vertex read from set 1 (`hz_entity_vertices`), as `Vertex` lays
+/// it out. The draw's corners walk its quads two triangles each, as `quad_indices` does: corner
+/// `c` of a draw from vertex `first` (a whole quad) is drawn as vertex `first / 4 * 6 + c`.
+pub fn geometry_inputs() -> horizon_shaders::GeometryInputs {
+    let words = std::mem::size_of::<Vertex>() / 4;
+    let pull = format!(
+        "        uint hz_pw = hz_vertex_index * {words}u;\n        \
+         hz_v_pos = uintBitsToFloat(uvec3(hz_entity_vertices[hz_pw], hz_entity_vertices[hz_pw + 1u], hz_entity_vertices[hz_pw + 2u]));\n        \
+         hz_v_uv = uintBitsToFloat(uvec2(hz_entity_vertices[hz_pw + 3u], hz_entity_vertices[hz_pw + 4u]));\n        \
+         hz_v_overlay = hz_entity_vertices[hz_pw + 5u];\n        \
+         hz_v_color = unpackUnorm4x8(hz_entity_vertices[hz_pw + 6u]);\n        \
+         uint hz_pl = hz_entity_vertices[hz_pw + 7u];\n        \
+         hz_v_light = uvec4(hz_pl & 255u, (hz_pl >> 8u) & 255u, (hz_pl >> 16u) & 255u, hz_pl >> 24u);\n        \
+         hz_v_normal = unpackSnorm4x8(hz_entity_vertices[hz_pw + 8u]);\n"
+    );
+    horizon_shaders::GeometryInputs {
+        inputs: inputs(),
+        pull,
+        // Quad `c / 6`, corner 0, 1, 2, 0, 2, 3 of it.
+        index:
+            "((@) / 6u * 4u + ((@) % 6u < 3u ? (@) % 6u : ((@) % 6u == 3u ? 0u : (@) % 6u - 2u)))"
+                .to_owned(),
+    }
+}
+
 /// What `gbuffers_clouds` reads from the clouds' mesh (entity vertices, `vs_cloud`): the
 /// position moved by the clouds' offset, the colour of the face's shade from their palette,
 /// full light, the face's normal. Set 1 holds the clouds' uniform (`clouds::Uniform`).
