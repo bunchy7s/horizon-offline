@@ -122,6 +122,11 @@ impl Navigation {
         )
     }
 }
+/// `LivingEntity.getComfortableFallDistance`: the drop an entity accepts on
+/// top of what it was asked for.
+fn comfortable_fall_distance(f: f32) -> i32 {
+    (f + 3.0).floor() as i32
+}
 impl Mob {
     pub fn path_mob(&self) -> PathMob {
         PathMob {
@@ -140,14 +145,19 @@ impl Mob {
             stands_on_lava: self.kind.flags.lava_walker,
         }
     }
-    /// Mob.getMaxFallDistance (normal difficulty).
+    /// `Mob.getMaxFallDistance` (normal difficulty), with `Creeper`'s
+    /// override: a creeper that has a target falls by its own health, so a
+    /// full-health one walks off a 22-block drop instead of 3.
     pub fn max_fall_distance(&self) -> i32 {
         if self.ai.target.is_none() {
-            return 3;
+            return comfortable_fall_distance(0.0);
+        }
+        if self.species() == super::Species::Creeper {
+            return comfortable_fall_distance(self.health - 1.0);
         }
         let mut sacrifice = (self.health - self.attrs.max_health * 0.33) as i32;
         sacrifice -= 4;
-        sacrifice.max(0) + 3
+        comfortable_fall_distance(sacrifice.max(0) as f32)
     }
     pub fn malus(&self, t: PathType) -> f32 {
         self.ai.malus[t as usize].unwrap_or_else(|| t.malus())
@@ -170,7 +180,13 @@ impl Mob {
     }
     fn can_update_path(&self) -> bool {
         match self.ai.nav.kind {
-            NavKind::Ground | NavKind::WallClimber => self.on_ground || self.is_in_liquid(),
+            // GroundPathNavigation.canUpdatePath: onGround() || isInLiquid() ||
+            // isPassenger(). A mob riding a vehicle keeps making and following
+            // paths where it sits (`create_path_raw` and `recompute_path` refuse
+            // without this).
+            NavKind::Ground | NavKind::WallClimber => {
+                self.on_ground || self.is_in_liquid() || self.extra.mount.is_some()
+            }
             NavKind::Water { breach } => breach || self.is_in_liquid(),
             NavKind::Flying | NavKind::Amphibious { .. } => true,
         }
@@ -381,9 +397,15 @@ impl Mob {
             self.ai.nav.delayed_recompute = false;
         }
     }
-    /// `GroundPathNavigation.trimPath` with `avoidSun`: a mob that is out of
-    /// the sun keeps only the nodes before the first one the sky sees.
+    /// `PathNavigation.trimPath` for cauldrons, then
+    /// `GroundPathNavigation.trimPath` with `avoidSun`: a mob that is out of the
+    /// sun keeps only the nodes before the first one the sky sees.
     fn trim_path(&mut self, w: &MobWorld) {
+        if let Some(path) = &mut self.ai.nav.path {
+            path.raise_cauldron_nodes(|x, y, z| {
+                w.has_tag("minecraft:cauldrons", w.block_name(x, y, z))
+            });
+        }
         if !self.ai.nav.avoid_sun
             || !matches!(self.ai.nav.kind, NavKind::Ground | NavKind::WallClimber)
         {
@@ -743,5 +765,46 @@ mod tests {
                 prefers_shallow: false
             }
         ));
+    }
+
+    /// `Creeper.getMaxFallDistance` replaces the shared
+    /// `health - a third` formula with its own `health - 1`: a creeper
+    /// chasing something drops 22 blocks at full health and 6 at four,
+    /// where the shared formula would have given 3.
+    #[test]
+    fn a_creeper_falls_by_its_own_health_while_it_has_a_target() {
+        // Skipped without the extracted vanilla data (CI's verify has none).
+        crate::mobs::world::with_test_world(&[], |_, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:creeper"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            assert_eq!(m.max_fall_distance(), 3, "no target");
+            m.ai.target = Some(crate::mobs::Who::Player);
+            m.health = 20.0;
+            assert_eq!(m.max_fall_distance(), 22, "full health, has a target");
+            m.health = 4.0;
+            assert_eq!(m.max_fall_distance(), 6, "hurt, has a target");
+        });
+    }
+
+    /// `GroundPathNavigation.canUpdatePath`: `onGround() || isInLiquid() ||
+    /// isPassenger()`. A pig riding a vehicle - a chicken jockey, a husk on a
+    /// camel, a piglin on a hoglin - can still ask for a path and follow it.
+    #[test]
+    fn a_mob_riding_a_vehicle_keeps_its_ground_navigation() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        std::sync::Arc::make_mut(&mut kind).species = crate::mobs::Species::Pig;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        m.on_ground = true;
+        assert!(m.can_update_path(), "standing on the ground");
+        m.on_ground = false;
+        assert!(
+            !m.can_update_path(),
+            "in the air with no vehicle: no path is made or followed"
+        );
+        m.extra.mount = Some(7);
+        assert!(m.can_update_path(), "riding a vehicle: isPassenger()");
+        m.extra.mount = None;
+        m.fluids.in_water = true;
+        assert!(m.can_update_path(), "in a liquid");
     }
 }

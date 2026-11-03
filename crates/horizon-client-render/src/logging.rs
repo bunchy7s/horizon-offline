@@ -59,6 +59,55 @@ pub fn set_game_home(home: PathBuf) {
     let _ = HOME.set(home);
 }
 
+/// `--player-dir DIR` (#4952), set once at start: one player's own files, when several games
+/// play in one game folder at the same time (the launcher's `play --account`).
+static PLAYER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Makes [`player_dir`] return `dir` for the rest of the run (`--player-dir`), creating it.
+/// What is a player's own goes there: `options.txt` and the settings files beside it,
+/// `logs/`, `crash-reports/`, `horizon-player.txt`, `servers.dat`, `hotbar.nbt` and
+/// `screenshots/`. What the game folder's players share stays in it: saves, resource and
+/// shader packs, mods and their config, caches.
+pub fn set_player_dir(dir: PathBuf) {
+    let _ = fs::create_dir_all(&dir);
+    let _ = PLAYER.set(dir);
+}
+
+/// The folder of this player's own files: `--player-dir`, else the game folder (the working
+/// directory, where the launcher runs the game).
+pub fn player_dir() -> PathBuf {
+    PLAYER
+        .get()
+        .cloned()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+}
+
+/// `--player-dir`, if given.
+pub fn player_dir_override() -> Option<&'static Path> {
+    PLAYER.get().map(PathBuf::as_path)
+}
+
+/// Where the files all players share live, for settings kept beside `options.txt` in
+/// `options_dir` (the enabled mods): that folder, unless `--player-dir` moved `options.txt`
+/// out of the game folder.
+pub fn shared_dir(options_dir: &Path) -> PathBuf {
+    shared_dir_of(PLAYER.get().map(PathBuf::as_path), options_dir, || {
+        std::env::current_dir().unwrap_or_default()
+    })
+}
+
+/// [`shared_dir`] for a given `--player-dir` and game folder.
+fn shared_dir_of(
+    player: Option<&Path>,
+    options_dir: &Path,
+    game_dir: impl FnOnce() -> PathBuf,
+) -> PathBuf {
+    match player {
+        Some(player) if player == options_dir => game_dir(),
+        _ => options_dir.to_path_buf(),
+    }
+}
+
 /// Where the launcher runs the game and keeps its saves: `--home`, else `HORIZON_HOME`, else
 /// `horizon` in the platform data folder (launcher/src/backend.rs `game_home`).
 pub fn game_home() -> PathBuf {
@@ -566,6 +615,20 @@ pub fn newest_crash_report(home: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_player_dir_keeps_the_shared_files_in_the_game_folder() {
+        let (game, player) = (Path::new("/games/shared"), Path::new("/games/players/alex"));
+        // options.txt moved to the player's folder: the enabled mods stay the game folder's.
+        assert_eq!(shared_dir_of(Some(player), player, || game.into()), game);
+        // No --player-dir, or a splitscreen profile's own folder: beside options.txt as before.
+        assert_eq!(shared_dir_of(None, game, || unreachable!()), game);
+        let profile = Path::new("/games/shared/splitscreen/profiles/P2");
+        assert_eq!(
+            shared_dir_of(Some(player), profile, || unreachable!()),
+            profile
+        );
+    }
 
     #[test]
     fn a_warning_repeated_every_packet_is_counted_past_a_hundred_a_minute() {

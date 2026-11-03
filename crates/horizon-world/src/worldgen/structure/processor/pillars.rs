@@ -788,7 +788,7 @@ impl StairPillar {
     fn stair(
         resources: &StructureResources,
         block: &str,
-        from: &std::collections::BTreeMap<String, String>,
+        from: &crate::chunk::BlockProperties,
         facing: Option<&str>,
     ) -> Option<BlockStateId> {
         let registry = resources.registry;

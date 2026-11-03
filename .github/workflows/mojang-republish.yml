@@ -1,0 +1,31 @@
+name: mojang republish
+# Hourly: does Mojang's version manifest list a pinned-version JSON that research-lock.json does not know?
+# If so, one issue "Mojang republished <version>: <sha8>" with the hashes and a lock snippet
+# (tools/ci/mojang_republish.py). Reads only Mojang's public manifest.
+#   gh workflow run "mojang republish" -f dry_run=true
+on:
+  schedule:
+    - cron: '23 * * * *'  # hourly: a republished JSON breaks horizon-prepare for every new player until accepted
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only print what it would do with issues
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: mojang-republish
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci/mojang_republish.py ${{ inputs.dry_run && '--dry-run' || '' }}

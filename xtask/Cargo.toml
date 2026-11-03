@@ -7,6 +7,7 @@ publish = false
 description = "Repository tasks: cargo run -p xtask -- package BINARY OUTDIR | tokens"
 
 [dependencies]
+horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
 horizon-theme = { path = "../crates/horizon-theme" }
 
 [lints]

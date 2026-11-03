@@ -28,7 +28,10 @@ fn parse_state(text: &str) -> Result<BlockState> {
         let (k, v) = pair.split_once('=').ok_or("properties are key=value")?;
         properties.insert(k.to_owned(), v.to_owned());
     }
-    Ok(BlockState { name, properties })
+    Ok(BlockState {
+        name,
+        properties: properties.into(),
+    })
 }
 
 impl Game<'_> {
@@ -73,7 +76,7 @@ impl Game<'_> {
                     let words: Vec<&str> = owned.iter().map(String::as_str).collect();
                     g.in_owner_level(|g| g.block_command(&words).map_err(|e| e.to_string()))
                 })
-                .ok_or("the integrated server stopped")?
+                .ok_or(super::integrated::NO_ANSWER)?
                 .map_err(Into::into);
         }
         // Another server's world changes only through its own commands, which

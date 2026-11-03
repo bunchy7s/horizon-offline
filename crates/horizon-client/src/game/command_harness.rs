@@ -6,7 +6,9 @@
 //! system message it produced, as styled spans, with the results reported to
 //! the player's `CommandResultCallback`; `tick` advances the game; `settle`
 //! waits until the terrain and entities around the player are loaded;
-//! `portal` sends the player through the nether portal it stands in.
+//! `break` destroys a block as the server player; `portal` sends the player
+//! through the nether portal it stands in; `falling` counts physical falling
+//! blocks by dimension, block and gravity.
 use super::Game;
 use horizon_client::{Result, text::Text};
 use serde_json::{Value, json};
@@ -208,6 +210,12 @@ impl Game<'_> {
                         out.push('\n');
                     }
                 }
+                "mobs" => {
+                    // Observe authoritative AI state without a control-socket race.
+                    let record = self.harness_owner(|g| Ok(g.control_mobs(128.0)))?;
+                    out.push_str(&record.to_string());
+                    out.push('\n');
+                }
                 "tick" => {
                     self.chat_capture = Some(Vec::new());
                     for _ in 0..op["n"].as_u64().unwrap_or(1) {
@@ -244,7 +252,36 @@ impl Game<'_> {
                     }
                     self.harness_owner(|g| g.harness_settle(deadline))?;
                 }
+                "break" => {
+                    let pos = std::array::from_fn(|i| op["pos"][i].as_i64().unwrap_or(0) as i32);
+                    self.harness_owner(|g| g.break_block(pos))?;
+                }
                 "portal" => self.harness_portal()?,
+                "falling" => {
+                    // Physical falling blocks are not command-selector targets
+                    // yet. Inspect the actual level rather than that unrelated gap.
+                    let dimension = op["dimension"].as_str().unwrap_or("minecraft:overworld");
+                    let block = op["block"].as_str().unwrap_or("minecraft:sand");
+                    let no_gravity = op["no_gravity"].as_bool().unwrap_or(false);
+                    let back = self.dim;
+                    self.enter_level(None, super::Dim::from_id(dimension))?;
+                    let facts = self.res.facts();
+                    let matches = |f: &super::FallingBlock| {
+                        &*facts.get(f.state).name == block && f.no_gravity == no_gravity
+                    };
+                    let count = self.falling.iter().filter(|f| matches(f)).count();
+                    if op["discard"].as_bool() == Some(true) {
+                        self.falling.retain(|f| !matches(f));
+                    }
+                    self.enter_level(None, back)?;
+                    let record = json!({
+                        "cmd": format!("#falling {dimension} {block} {no_gravity}"),
+                        "messages": [],
+                        "results": [[true, count]],
+                    });
+                    out.push_str(&record.to_string());
+                    out.push('\n');
+                }
                 other => return Err(format!("command harness: unknown op {other}").into()),
             }
         }

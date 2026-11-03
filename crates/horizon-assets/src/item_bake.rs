@@ -7,7 +7,7 @@ use crate::{
     json::Result,
     math::{Mat4, quaternion_xyz},
     model::{Direction, DisplayTransform, GuiLight, ItemTransform, Material},
-    resolve::ModelLibrary,
+    resolve::{ModelLibrary, ResolvedCuboidModel},
 };
 use std::{collections::BTreeSet, f32::consts::PI};
 
@@ -110,6 +110,15 @@ pub fn bake_item_model(
     let model = library
         .resolve(name)
         .or_else(|_| library.resolve(crate::resolve::MISSING_MODEL))?;
+    bake_resolved(&model, sprites)
+}
+
+/// Bake an already resolved model, e.g. one from
+/// [`ModelLibrary::resolve_with_textures`].
+pub fn bake_resolved(
+    model: &ResolvedCuboidModel,
+    sprites: &dyn SpriteLookup,
+) -> Result<BakedItemModel> {
     let known = |sprite: &str| sprite == MISSING_SPRITE || sprites.mask(sprite).is_some();
     let material = |m: &Material| {
         if known(&m.sprite) {
@@ -143,7 +152,7 @@ pub fn bake_item_model(
         quads
     } else {
         let mut quads =
-            bake_block_model(&model, crate::bake::BlockModelTransform::new([0; 3], false))?;
+            bake_block_model(model, crate::bake::BlockModelTransform::new([0; 3], false))?;
         for q in &mut quads {
             q.material = material(&q.material);
         }
@@ -297,4 +306,88 @@ fn extrude_layer(mask: &SpriteMask, material: &Material, layer: i32) -> Result<V
         )?);
     }
     Ok(quads)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{CuboidModel, TextureSlot};
+    use std::collections::BTreeMap;
+
+    /// The stick: 2x2 with one transparent pixel. `item/cit`: one opaque pixel, so a bake
+    /// shows whose mask it extruded.
+    struct Sprites;
+    impl SpriteLookup for Sprites {
+        fn mask(&self, sprite: &str) -> Option<SpriteMask> {
+            match sprite {
+                "minecraft:item/stick" => Some(SpriteMask {
+                    width: 2,
+                    height: 2,
+                    frames: vec![vec![true, false, false, false]],
+                }),
+                "horizon_cit:item/cit" => Some(SpriteMask {
+                    width: 1,
+                    height: 1,
+                    frames: vec![vec![false]],
+                }),
+                _ => None,
+            }
+        }
+    }
+    fn library() -> ModelLibrary {
+        ModelLibrary::with_item_generator(BTreeMap::from(
+            [
+                ("item/generated", r#"{"parent":"builtin/generated","display":{"gui":{"scale":[2,2,2]}}}"#),
+                ("item/stick", r#"{"parent":"item/generated","textures":{"layer0":"item/stick"}}"#),
+                ("horizon:loop", r#"{"parent":"horizon:loop2"}"#),
+                ("horizon:loop2", r#"{"parent":"horizon:loop"}"#),
+                ("block/slab", r##"{"textures":{"particle":"#side","side":"block/absent"},"elements":[{"from":[0,0,0],"to":[16,8,16],"faces":{"up":{"texture":"#side"},"down":{"texture":"#side","cullface":"down"}}}]}"##),
+            ]
+            .map(|(name, json)| (name.to_owned(), CuboidModel::from_json(json).unwrap())),
+        ))
+        .unwrap()
+    }
+    #[test]
+    fn baking_by_name_falls_back_to_the_missing_model() {
+        let library = library();
+        // Front, back, and the 8 unit edges around the L of 3 opaque pixels.
+        let stick = bake_item_model(&library, &Sprites, "item/stick").unwrap();
+        assert_eq!(stick.quads.len(), 10);
+        // An unknown sprite bakes as the missing sprite.
+        let slab = bake_item_model(&library, &Sprites, "block/slab").unwrap();
+        assert_eq!(slab.quads.len(), 2);
+        assert_eq!(slab.particle.sprite, MISSING_SPRITE);
+        // A cyclic chain, an error to `resolve`, bakes as the missing cube.
+        let cyclic = bake_item_model(&library, &Sprites, "horizon:loop").unwrap();
+        assert_eq!(cyclic.quads.len(), 6);
+        assert!(
+            cyclic
+                .quads
+                .iter()
+                .all(|q| q.material.sprite == MISSING_SPRITE)
+        );
+    }
+    #[test]
+    fn replaced_layer_bakes_with_its_own_sprite() {
+        let library = library();
+        let child = BTreeMap::from([(
+            "layer0".to_owned(),
+            TextureSlot::Material(Material {
+                sprite: "horizon_cit:item/cit".to_owned(),
+                force_translucent: false,
+            }),
+        )]);
+        let model = library.resolve_with_textures("item/stick", &child).unwrap();
+        let baked = bake_resolved(&model, &Sprites).unwrap();
+        // The CIT sprite's own mask, one opaque pixel: front, back and 4 edges.
+        assert_eq!(baked.quads.len(), 6);
+        assert!(
+            baked
+                .quads
+                .iter()
+                .all(|q| q.material.sprite == "horizon_cit:item/cit")
+        );
+        assert_eq!(baked.particle.sprite, "horizon_cit:item/cit");
+        assert_eq!(baked.transforms[5].as_ref().unwrap().scale, [2.0; 3]);
+    }
 }

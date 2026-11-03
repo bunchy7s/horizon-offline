@@ -155,6 +155,9 @@ class ReleaseTrainTests(unittest.TestCase):
                 if "--commit" in arguments:
                     sha = arguments[arguments.index("--commit") + 1]
                     return [{"status": s, "conclusion": c} for h, s, c in table if h == sha]
+                if "--status" in arguments:
+                    wanted = arguments[arguments.index("--status") + 1]
+                    table = [(h, s, c) for h, s, c in table if c == wanted]
                 return [{"headSha": h, "status": s, "conclusion": c} for h, s, c in table]
             return mock.patch.object(train, "gh_json", gh_json)
         checks = [("c", "in_progress", ""), ("b", "completed", "success"), ("a", "completed", "success")]
@@ -164,9 +167,18 @@ class ReleaseTrainTests(unittest.TestCase):
             self.assertTrue(train.passed_on("parity-main", "a"))
             self.assertFalse(train.passed_on("parity-main", "b"))
         with runs([("b", "completed", "failure"), ("a", "completed", "success")], checks):
-            self.assertIsNone(train.green_main_head(parity=True), "a failed batch holds releases until fixed")
+            self.assertEqual(train.green_main_head(parity=True), "a",
+                             "a later failed batch holds only its own merges, not the commit before it")
         with runs([("c", "completed", "success")], checks):
             self.assertIsNone(train.green_main_head(parity=True), "its checks must pass too")
+        with runs([("c", "completed", "success"), ("a", "completed", "success")], checks):
+            self.assertEqual(train.green_main_head(parity=True), "a", "the newest green commit whose checks passed")
+        with runs([("c", "completed", "failure"), ("b", "completed", "cancelled")], checks):
+            self.assertIsNone(train.green_main_head(parity=True), "nothing parity-main passed")
+        with runs([("c", "completed", "success")], [("c", "completed", "success")]):
+            self.assertEqual(train.green_main_head(), "c")
+        with runs([], [("c", "completed", "failure"), ("b", "completed", "success")]):
+            self.assertIsNone(train.green_main_head(), "checks alone: main's newest finished checks must pass")
 
     def test_a_release_is_published_only_after_its_smoke_test_and_with_no_blocker(self):
         drew = {"error": None, "frames": 12710, "chunks": 81, "meshed_sections": 550, "player": [160.5, 71.0, 156.5]}

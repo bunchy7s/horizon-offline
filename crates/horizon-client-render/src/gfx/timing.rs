@@ -30,6 +30,8 @@ const DONE: u8 = 2;
 /// Resolved and on its way back.
 const PENDING: u8 = 3;
 const MAPPED: u8 = 4;
+/// Readback failed; stop timing rather than reuse an invalid buffer.
+const FAILED: u8 = 5;
 
 struct Slot {
     buffer: wgpu::Buffer,
@@ -131,6 +133,14 @@ impl GpuTimer {
         })
     }
     pub fn begin(&mut self, encoder: &mut wgpu::CommandEncoder) {
+        if self
+            .slots
+            .iter()
+            .any(|slot| slot.state.load(Ordering::Acquire) == FAILED)
+        {
+            self.current = None;
+            return;
+        }
         if self.markers.is_some() {
             for slot in 0..SLOTS {
                 if self.slots[slot].state.load(Ordering::Acquire) == DONE {
@@ -216,7 +226,7 @@ impl GpuTimer {
                 .slice(..)
                 .map_async(wgpu::MapMode::Read, move |result| {
                     state.store(
-                        if result.is_ok() { MAPPED } else { FREE },
+                        if result.is_ok() { MAPPED } else { FAILED },
                         Ordering::Release,
                     );
                 });
@@ -233,13 +243,21 @@ impl GpuTimer {
     }
     /// GPU milliseconds of frames whose timestamps have arrived, oldest first.
     pub fn collect(&mut self, device: &wgpu::Device, out: &mut Vec<f32>) {
-        let _ = device.poll(wgpu::PollType::Poll);
+        if device.poll(wgpu::PollType::Poll).is_err() {
+            return;
+        }
         for i in 0..SLOTS {
             let slot = &self.slots[(self.next + i) % SLOTS];
             if slot.state.load(Ordering::Acquire) != MAPPED {
                 continue;
             }
-            if let Ok(data) = slot.buffer.slice(..).get_mapped_range() {
+            {
+                let Ok(data) = slot.buffer.slice(..).get_mapped_range() else {
+                    // Device loss can destroy a buffer after its mapping succeeded.
+                    // Unmapping it would turn the failed readback into a panic.
+                    slot.state.store(FAILED, Ordering::Release);
+                    continue;
+                };
                 // Read unaligned: the mapping isn't guaranteed to be 8-byte aligned.
                 let stamps: [u64; 2] = bytemuck::pod_read_unaligned(&data[..16]);
                 // A start marker that ran late (rare on Metal) leaves the frame untimed.
@@ -284,4 +302,75 @@ pub(super) fn end_pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mapped_timer() -> Option<(wgpu::Device, wgpu::Queue, GpuTimer)> {
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        // WGL can hang while creating a test instance on Windows (#5238).
+        descriptor.backends = wgpu::Backends::PRIMARY;
+        let instance = wgpu::Instance::new(descriptor);
+        let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
+        if !adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return None;
+        }
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_features: GpuTimer::features(&adapter),
+            ..Default::default()
+        }))
+        .unwrap();
+        let mut timer = GpuTimer::new(&device, &queue).unwrap();
+        queue.write_buffer(
+            &timer.slots[0].buffer,
+            0,
+            bytemuck::cast_slice(&[10_u64, 20]),
+        );
+        queue.submit([]);
+        timer.resolved.push(0);
+        timer.submitted(&queue);
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert_eq!(timer.slots[0].state.load(Ordering::Acquire), MAPPED);
+        Some((device, queue, timer))
+    }
+
+    #[test]
+    fn successful_readback_releases_slot() {
+        let Some((device, _queue, mut timer)) = mapped_timer() else {
+            eprintln!("Skipping GPU timer test: no timestamp-capable adapter");
+            return;
+        };
+        let mut samples = Vec::new();
+        timer.collect(&device, &mut samples);
+        assert_eq!(
+            samples,
+            vec![(10.0 * f64::from(timer.period_ns) / 1e6) as f32]
+        );
+        assert_eq!(timer.slots[0].state.load(Ordering::Acquire), FREE);
+    }
+
+    #[test]
+    fn destroyed_readback_stops_timing_without_unmapping() {
+        let Some((device, queue, mut timer)) = mapped_timer() else {
+            eprintln!("Skipping GPU timer test: no timestamp-capable adapter");
+            return;
+        };
+        // Reproduce a buffer destroyed after its successful map callback (#6320).
+        timer.slots[0].buffer.destroy();
+        let mut samples = Vec::new();
+        timer.collect(&device, &mut samples);
+        assert!(samples.is_empty());
+        assert_eq!(timer.slots[0].state.load(Ordering::Acquire), FAILED);
+        // Later frames must not resolve or copy into the failed readback buffer.
+        let mut encoder = device.create_command_encoder(&Default::default());
+        timer.begin(&mut encoder);
+        assert!(timer.current.is_none());
+        assert!(timer.resolved.is_empty());
+        queue.submit([encoder.finish()]);
+        timer.submitted(&queue);
+        timer.collect(&device, &mut samples);
+        assert!(samples.is_empty());
+    }
 }

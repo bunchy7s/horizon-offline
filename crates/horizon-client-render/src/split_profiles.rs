@@ -3,15 +3,20 @@
 //! pause menu (Splitscreen Settings), playing on until the new one can join. A profile is a name
 //! (kept in the game folder), with its own options. The
 //! game fills the list when the page opens (`filled`), takes the choice, and says why a pick
-//! can't play (`refused`). Built from vanilla's widgets, as Horizon's own pages are.
+//! can't play (`refused`). Built from vanilla's widgets.
 use crate::{
     gamepad::{Button as PadButton, GlyphStyle},
-    graphics_style::STYLE,
+    graphics_style,
     hud::{HudAtlas, HudBatch, rgba},
     lang,
     text::Text,
     ui,
 };
+
+/// A string of this page: the language table's, or the English text.
+fn tr(key: &str, english: &str) -> String {
+    lang::get_or(key, english)
+}
 
 /// Leave room for navigation, creation and cancellation in a 240-pixel menu.
 const SHOWN: usize = 4;
@@ -132,7 +137,12 @@ impl SplitProfiles {
         };
         if let Some(name) = &self.forgetting {
             return vec![
-                button(120.0, "Forget".into(), self.editable(name), Target::Forget),
+                button(
+                    120.0,
+                    tr("horizon.splitscreen.profiles.forget", "Forget"),
+                    self.editable(name),
+                    Target::Forget,
+                ),
                 button(
                     144.0,
                     lang::get_or("gui.cancel", "Cancel"),
@@ -147,7 +157,12 @@ impl SplitProfiles {
             let ok = valid_name(name) && !self.names.iter().any(|n| n.eq_ignore_ascii_case(name));
             let top = field_top(h);
             return vec![
-                button(top + 25.0, "Create".into(), ok, Target::Create),
+                button(
+                    top + 25.0,
+                    tr("horizon.splitscreen.profiles.create", "Create"),
+                    ok,
+                    Target::Create,
+                ),
                 button(
                     top + 50.0,
                     lang::get_or("gui.back", "Back"),
@@ -166,7 +181,7 @@ impl SplitProfiles {
         {
             let mut label = name.clone();
             if self.current.as_ref() == Some(name) {
-                label.push_str(" - you");
+                label.push_str(&tr("horizon.splitscreen.profiles.you", " - you"));
             }
             let y = 44.0 + (i % SHOWN) as f32 * 24.0;
             buttons.push((
@@ -177,7 +192,8 @@ impl SplitProfiles {
             ));
             buttons.push((
                 [x + 180.0, y, 20.0, 20.0],
-                format!("Forget {name}"),
+                tr("horizon.splitscreen.profiles.forget_named", "Forget %s")
+                    .replacen("%s", name, 1),
                 self.editable(name),
                 Target::Remove(i),
             ));
@@ -186,19 +202,24 @@ impl SplitProfiles {
         if self.names.len() > SHOWN {
             buttons.push((
                 [x, y, 98.0, 20.0],
-                "Previous".into(),
+                tr("horizon.splitscreen.profiles.previous", "Previous"),
                 self.page() > 0,
                 Target::Previous,
             ));
             buttons.push((
                 [x + 102.0, y, 98.0, 20.0],
-                "Next".into(),
+                tr("horizon.splitscreen.profiles.next", "Next"),
                 (self.page() + 1) * SHOWN < self.names.len(),
                 Target::Next,
             ));
             y += 24.0;
         }
-        buttons.push(button(y, "New Profile...".into(), true, Target::New));
+        buttons.push(button(
+            y,
+            tr("horizon.splitscreen.profiles.new_button", "New Profile..."),
+            true,
+            Target::New,
+        ));
         let cancel = lang::get_or("gui.cancel", "Cancel");
         buttons.push(button(y + 24.0, cancel, true, Target::Cancel));
         buttons
@@ -220,30 +241,71 @@ impl SplitProfiles {
         };
         let buttons = self.buttons(w, h);
         if let Some(name) = &self.forgetting {
-            STYLE.title(batch, atlas, &Text::literal("Forget profile?"));
+            graphics_style::title(
+                batch,
+                atlas,
+                &Text::literal(tr(
+                    "horizon.splitscreen.profiles.forget_title",
+                    "Forget profile?",
+                )),
+            );
             line(batch, name, 52.0, u32::MAX);
-            line(batch, "It leaves this instance's list.", 76.0, grey);
-            line(batch, "World progress and settings are kept.", 90.0, grey);
+            line(
+                batch,
+                &tr(
+                    "horizon.splitscreen.profiles.forget_leaves",
+                    "It leaves this instance's list.",
+                ),
+                76.0,
+                grey,
+            );
+            line(
+                batch,
+                &tr(
+                    "horizon.splitscreen.profiles.forget_kept",
+                    "World progress and settings are kept.",
+                ),
+                90.0,
+                grey,
+            );
             if let Some(why) = &self.refused {
                 line(batch, why, 176.0, rgba(255, 85, 85, 255));
             }
         } else if let Some(field) = &mut self.new {
-            STYLE.title(batch, atlas, &Text::literal("New Profile"));
+            graphics_style::title(
+                batch,
+                atlas,
+                &Text::literal(tr("horizon.splitscreen.profiles.new_title", "New Profile")),
+            );
             let (x, top) = ((w / 2.0).floor() - 100.0, field_top(h));
-            let label = "Name (3 to 16 letters, digits, _)";
-            batch.text(atlas, label, x, top - 14.0, grey, true);
+            let label = tr(
+                "horizon.splitscreen.profiles.name_hint",
+                "Name (3 to 16 letters, digits, _)",
+            );
+            batch.text(atlas, &label, x, top - 14.0, grey, true);
             (field.x, field.y, field.width, field.height) = (x, top, 200.0, 20.0);
             field.draw(batch, atlas, None);
         } else {
             let title = match self.current {
-                Some(_) => "Switch profile",
-                None => "Who's playing?",
+                Some(_) => tr(
+                    "horizon.splitscreen.profiles.switch_title",
+                    "Switch profile",
+                ),
+                None => tr("horizon.pages.split_profiles", "Who's playing?"),
             };
-            STYLE.title(batch, atlas, &Text::literal(title));
+            graphics_style::title(batch, atlas, &Text::literal(title));
             self.draw_bumpers(batch, atlas, style);
             // Under Cancel: where offline profiles live.
             let y = buttons.last().map_or(0.0, |b| b.0[1] + 30.0);
-            line(batch, "Offline profiles belong to this instance", y, grey);
+            line(
+                batch,
+                &tr(
+                    "horizon.splitscreen.profiles.offline_note",
+                    "Offline profiles belong to this instance",
+                ),
+                y,
+                grey,
+            );
             // Why the last pick can't play, wrapped to the view (a quarter of a window is narrow).
             let width = |text: &str| HudBatch::text_width(atlas, text).ceil();
             let why = self.refused.as_deref().unwrap_or_default();
@@ -308,8 +370,12 @@ impl SplitProfiles {
     fn draw_bumpers(&self, batch: &mut HudBatch, atlas: &HudAtlas, style: GlyphStyle) {
         let width = |text: &str| HudBatch::text_width(atlas, text).ceil();
         let words = match &self.place {
-            Some(place) => format!("Move where you play: {place}"),
-            None => "Move where you play".to_owned(),
+            Some(place) => tr(
+                "horizon.splitscreen.profiles.move_place",
+                "Move where you play: %s",
+            )
+            .replacen("%s", place, 1),
+            None => tr("horizon.splitscreen.profiles.move", "Move where you play"),
         };
         let keys = [PadButton::LeftBumper, PadButton::RightBumper];
         let key_width = |b: PadButton| width(b.label(style)) + 4.0;

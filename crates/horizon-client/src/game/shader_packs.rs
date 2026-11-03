@@ -5,10 +5,10 @@
 //! dimension changes (spec 1.2).
 
 use horizon_client::camera::CameraFluid;
-use horizon_client::gfx::pack_uniforms::PackInputs;
+use horizon_client::gfx::pack_uniforms::{PackInputs, PlayerStatus};
 use horizon_client::shader_options::ShaderOptions;
 use horizon_client::text::Text;
-use horizon_shaders::{BlockIds, Macros, Pack, Properties, dimension_folder, load_post};
+use horizon_shaders::{BlockIds, Macros, Pack, Properties, dimension_folder_named, load_post};
 
 use super::{Dim, Game};
 use horizon_client::gfx::pack_draw::EntitySpan;
@@ -68,6 +68,33 @@ pub(super) fn write_shader_options(options: &ShaderOptions) {
     }
 }
 
+/// The pack that runs over the world ("": none): `HORIZON_SHADER_PACK`, else the pick
+/// (`active_pack`).
+fn picked_pack(settings: &horizon_client::settings::Settings) -> &str {
+    static DEV_PACK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let dev = DEV_PACK.get_or_init(|| std::env::var("HORIZON_SHADER_PACK").ok());
+    active_pack(
+        dev.as_deref().unwrap_or(&settings.horizon.shader_pack),
+        &settings.mods,
+    )
+}
+
+/// Whether the pack picked (`picked_pack`) draws flat where the device can (`pack_draws_flat`):
+/// a renderer made now lays the sections out for it before the first world frame loads it
+/// (`Renderer::new`).
+pub(super) fn picked_pack_draws_flat(settings: &horizon_client::settings::Settings) -> bool {
+    let picked = picked_pack(settings);
+    !picked.is_empty() && pack_draws_flat(&Game::shader_packs_dir().join(picked))
+}
+
+/// Whether the pack at `path` has passes that draw the terrain flat where the device can,
+/// reading translucent quads beside their section's solid ones: a `shaders/` pack, taken to
+/// draw terrain, or one of Horizon's own with a `[shadow]` pass.
+fn pack_draws_flat(path: &std::path::Path) -> bool {
+    !horizon_shader_api::package::is_pack(path)
+        || horizon_shader_api::Pack::read(path).is_ok_and(|p| p.manifest.shadow.is_some())
+}
+
 // A native mod can bundle a pack as `native-<mod-id>`; its Mods toggle controls it too.
 fn active_pack<'a>(picked: &'a str, mods: &horizon_client::mod_list::ModList) -> &'a str {
     if picked.strip_prefix("native-").is_some_and(|id| {
@@ -109,14 +136,23 @@ pub(super) struct PackIds {
     missing_item: i32,
     /// `oldHandLight` (3.2): the first held item and light are those of the brighter hand.
     old_hand_light: bool,
+    /// `vignette`: `false` hides the game's vignette over the pack's image.
+    vignette: bool,
     /// `oldLighting`: `true` keeps the game's face shading in the block colours.
     old_lighting: bool,
+    /// `separateAo`: `true` passes AO factor in vertex alpha and keeps pure tint in RGB.
+    pub(super) separate_ao: bool,
 }
 
 impl Game<'_> {
     /// Loads the pack for the current dimension when it changed, and returns this frame's
     /// inputs to the pack's uniforms.
-    pub(super) fn shader_pack_inputs(&mut self, camera: glam::DVec3, partial: f32) -> PackInputs {
+    pub(super) fn shader_pack_inputs(
+        &mut self,
+        camera: glam::DVec3,
+        partial: f32,
+        sky: &horizon_client::environment::Sky,
+    ) -> PackInputs {
         // A `shaders/` pack lights the faces itself unless `oldLighting=true`: sections mesh
         // without the game's face shading (the pack loaded or dropped below shows next frame).
         let pack_lighting = self.pack_ids.as_ref().is_some_and(|ids| !ids.old_lighting);
@@ -124,15 +160,16 @@ impl Game<'_> {
             self.streaming.shader_pack_lighting = pack_lighting;
             self.all_sections_changed();
         }
-        static DEV_PACK: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-        let dev = DEV_PACK.get_or_init(|| std::env::var("HORIZON_SHADER_PACK").ok());
-        let picked = active_pack(
-            dev.as_deref().unwrap_or(&self.settings.horizon.shader_pack),
-            &self.settings.mods,
-        );
+        let separate_ao = self.pack_ids.as_ref().is_some_and(|ids| ids.separate_ao);
+        if self.streaming.separate_ao != separate_ao {
+            self.streaming.separate_ao = separate_ao;
+            self.all_sections_changed();
+        }
+        let picked = picked_pack(&self.settings).to_owned();
         if self.native_shaders.picked != picked {
             // Another pack, or none: drop what ran.
-            self.native_shaders = super::native_shaders::NativeShaders::picking(picked);
+            self.native_shaders = super::native_shaders::NativeShaders::picking(&picked);
+            self.set_translucent_layers(Vec::new());
             self.pack_ids = None;
             if let Some(renderer) = &mut self.renderer {
                 renderer.drop_shader_packs();
@@ -141,7 +178,7 @@ impl Game<'_> {
         if picked.is_empty() {
             return PackInputs::default();
         }
-        let name = picked.to_owned();
+        let name = picked;
         let dimension = match self.dim {
             Dim::Overworld => 0,
             Dim::Nether => -1,
@@ -163,13 +200,10 @@ impl Game<'_> {
                     Ok(pack) => {
                         let mut macros = Macros::standard();
                         renderer.define_pack_macros(&mut macros);
-                        let text = pack.read_text("shaders.properties").unwrap_or_default();
                         // Its conditionals test the pack's options too.
-                        let properties = Properties::parse(
-                            &text,
-                            &horizon_shaders::with_options(&pack, &macros),
-                        );
-                        for note in macros.define_features(&properties) {
+                        let (properties, notes) =
+                            horizon_shaders::read_properties(&pack, &mut macros);
+                        for note in notes {
                             log::warn!("shader pack {name}: {note}");
                         }
                         for note in &properties.notes {
@@ -179,9 +213,22 @@ impl Game<'_> {
                                 note.message
                             );
                         }
-                        let folder = dimension_folder(&pack, dimension);
+                        let separate_ao = properties
+                            .get("separateAo")
+                            .is_some_and(|v| v.trim() == "true");
+                        renderer.set_separate_ao(separate_ao);
+                        let folder = dimension_folder_named(&pack, self.dim.id(), dimension);
                         let inputs = renderer.pack_inputs();
                         let mut post = load_post(&pack, &folder, &properties, &macros, &inputs);
+                        // Textures that name one of the game's: from the resource packs over
+                        // the game's own resources.
+                        let resources = self.options.resources.clone();
+                        let read = |namespace: &str, path: &str| {
+                            std::fs::read(resources.join("assets").join(namespace).join(path)).ok()
+                        };
+                        for note in horizon_shaders::resolve_resources(&mut post.textures, &read) {
+                            log::warn!("shader pack {name}: {note}");
+                        }
                         let biomes = world_biomes!(self);
                         let names: Vec<&str> =
                             biomes.list.iter().map(|b| b.name.as_str()).collect();
@@ -208,10 +255,15 @@ impl Game<'_> {
                             old_hand_light: properties
                                 .get("oldHandLight")
                                 .is_none_or(|v| v.trim() != "false"),
+                            // On unless the pack turns it off (`vignette=false`).
+                            vignette: properties
+                                .get("vignette")
+                                .is_none_or(|v| v.trim() != "false"),
                             // Off unless the pack turns it on (Iris shades no faces by default).
                             old_lighting: properties
                                 .get("oldLighting")
                                 .is_some_and(|v| v.trim() == "true"),
+                            separate_ao,
                             entities: entities.plain(),
                             missing_entity: if text.is_some() { 65535 } else { 0 },
                             missing_block: if ids.is_empty() { 0 } else { 65535 },
@@ -219,11 +271,14 @@ impl Game<'_> {
                             block_states: RefCell::default(),
                         });
                         let started_ids = std::time::Instant::now();
-                        let table = block_id_table(&self.pack, &ids);
+                        let table = terrain_table(
+                            &block_id_table(&self.pack, &ids),
+                            &block_emission_table(&self.pack),
+                        );
                         log::info!(
                             "shader pack {name}: mc_Entity for {} of {} block sprites in {} ms",
-                            table.chunks(2).filter(|p| p[0] != -1).count(),
-                            table.len() / 2,
+                            table.chunks(3).filter(|p| p[0] != -1).count(),
+                            table.len() / 3,
                             started_ids.elapsed().as_millis()
                         );
                         if let Some((programs, notes)) =
@@ -260,9 +315,18 @@ impl Game<'_> {
             .get(&(at.x >> 4, at.z >> 4))
             .map(|c| c.biome(at.x, at.y, at.z));
         let (held_items, held_light) = self.held_for_pack();
+        let status = self.pack_player_status();
+        let (end_flash, end_flash_direction) = self.end_flash_for_pack(partial);
         let info = biome.map(|b| world_biomes!(self).get(b));
+        let dimension = self.remote.as_ref().map(|r| &r.dimension);
         PackInputs {
-            day_time: self.world.day_time,
+            // `Level.getDefaultClockTime`: 0 in a dimension type with no default clock (the
+            // Nether's has none), as Iris 1.11.7 reads `worldTime` there (probe pack).
+            day_time: if dimension.is_some_and(|d| d.default_clock.is_none()) {
+                0
+            } else {
+                self.world.day_time
+            },
             rain: lerp(self.world.weather.rain_level),
             thunder: lerp(self.world.weather.thunder_level),
             eye_in: match self.camera_fluid(camera.to_array()) {
@@ -275,7 +339,10 @@ impl Game<'_> {
             eye_light: [i32::from(light & 15), i32::from(light >> 4)],
             hide_gui: self.ui.hide_gui,
             brightness: self.settings.gamma,
-            biome: biome.map_or(-1, i32::from),
+            biome: info.map_or(-1, |b| {
+                let names = world_biomes!(self).list.iter().map(|b| b.name.as_str());
+                horizon_shaders::biome_pack_id(&b.name, names)
+            }),
             biome_known: biome.is_some(),
             biome_category: info.map_or(0, |b| horizon_shaders::biome_category(&b.name)),
             biome_precipitation: info.map_or(0, |b| {
@@ -285,7 +352,62 @@ impl Game<'_> {
             rainfall: info.map_or(0.0, |b| b.downfall),
             held_items,
             held_light,
+            right_handed: !self.settings.main_hand_left,
+            on_ground: self.player.as_ref().is_some_and(|p| p.ground.on_ground),
+            min_y: self.world.shape.min_y,
+            height: self.world.shape.height,
+            logical_height: self.world.shape.logical_height,
+            has_skylight: self.world.shape.sky_light,
+            has_ceiling: self.world.shape.has_ceiling,
+            elytra_flying: self.player.as_ref().is_some_and(|p| p.fall_flying),
+            cloud_height: horizon_client::gfx::pack_uniforms::cloud_height(
+                sky.cloud_color[3],
+                sky.cloud_height,
+            ),
+            // Vanilla's drift in float, times its 0.030000001F blocks a tick.
+            cloud_time: horizon_client::clouds::drift(
+                self.world.game_time,
+                f64::from(partial),
+                self.pack.clouds.0,
+            ) as f32
+                * 0.030_000_001,
             mod_params: self.native_shader_params_now(partial),
+            status,
+            end_flash,
+            end_flash_direction,
+            ambient_light: dimension.map_or(0.0, |d| d.ambient_light),
+            mood: self.ambience.moodiness,
+        }
+    }
+
+    /// The local player's state for Iris's status uniforms, read as the HUD reads it.
+    fn pack_player_status(&mut self) -> PlayerStatus {
+        let spectator = self.spectator();
+        let survival = !self.creative && !spectator;
+        let invisible = self.own_invisible();
+        let riding = self.riding.is_some();
+        let Some(p) = &mut self.player else {
+            return PlayerStatus::default();
+        };
+        PlayerStatus {
+            survival,
+            health: p.health.health(),
+            max_health: p.attribute("minecraft:max_health").unwrap_or(20.0) as f32,
+            food: p.health.food.food as f32,
+            air: p.air as f32,
+            armor: p
+                .attribute("minecraft:armor")
+                .or_else(|_| p.attribute("armor"))
+                .unwrap_or(0.0) as f32,
+            spectator,
+            riding,
+            feet_in_water: p.fluids.was_touching_water,
+            swimming: p.pose == horizon_client::pose::Pose::Swimming,
+            burning: p.fire_ticks > 0 && !spectator,
+            hurt: p.health.hurt_animation_time > 0,
+            invisible,
+            sneaking: p.pose == horizon_client::pose::Pose::Crouching,
+            sprinting: p.sprinting,
         }
     }
 
@@ -330,18 +452,18 @@ impl Game<'_> {
         ));
     }
 
+    /// Whether the game's vignette draws: the option, unless the loaded pack turns it off.
+    pub(super) fn vignette_shown(&self) -> bool {
+        self.settings.vignette && self.pack_ids.as_ref().is_none_or(|ids| ids.vignette)
+    }
+
     /// `heldItemId(2)` and `heldBlockLightValue(2)`: main hand, then off hand (5.2, 5.3).
     fn held_for_pack(&mut self) -> ([i32; 2], [i32; 2]) {
         if self.pack_ids.is_none() {
             return ([0; 2], [0; 2]);
         }
-        if self.luminance.is_none() {
-            self.luminance = Some(horizon_client::dynamic_light::Luminance::new(
-                self.res.facts(),
-                self.pack.assets.registry,
-            ));
-        }
-        let (Some(ids), Some(lum)) = (&self.pack_ids, &self.luminance) else {
+        let lum = self.luminance();
+        let Some(ids) = &self.pack_ids else {
             return ([0; 2], [0; 2]);
         };
         let hands = [self.selected, super::shield::OFFHAND_SLOT].map(|slot| {
@@ -386,6 +508,9 @@ impl Game<'_> {
         self.push_span(start, "ENTITIES", id);
         if let Some(last) = self.entity_spans.borrow_mut().last_mut() {
             last.translucent = translucent;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.translucent = translucent;
+            }
         }
     }
 
@@ -419,6 +544,9 @@ impl Game<'_> {
             .emission;
         if let Some(last) = self.entity_spans.borrow_mut().last_mut() {
             last.emissive = emission > 0;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.emissive = emission > 0;
+            }
         }
     }
 
@@ -431,6 +559,10 @@ impl Game<'_> {
         {
             last.player = true;
             last.hidden = hidden;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.player = true;
+                gpu.hidden = hidden;
+            }
         }
     }
 
@@ -455,6 +587,17 @@ impl Game<'_> {
             id,
             ..Default::default()
         };
+        if self.pack_ids.is_some() && self.skinning() {
+            let mut skin = self.skin_frame.borrow_mut();
+            let gpu = EntitySpan {
+                start: skin.vertices,
+                ..span
+            };
+            match skin.spans.last_mut() {
+                Some(last) if last.start == gpu.start => *last = gpu,
+                _ => skin.spans.push(gpu),
+            }
+        }
         // A span that drew nothing gives way to the next.
         match spans.last_mut() {
             Some(last) if last.start == span.start => *last = span,
@@ -483,7 +626,7 @@ fn name_id(name: &str) -> i32 {
 /// their sprite layer, not their block. A layer takes the id of the block named like its sprite
 /// (`block/oak_leaves` for `oak_leaves`), else the id most blocks drawing it share (ties: the
 /// lowest); -1 when no block drawing it has one. y is 1 for the fluid sprites, -1 otherwise.
-fn block_id_table(pack: &super::PackResources, ids: &BlockIds) -> Vec<i32> {
+pub(super) fn block_id_table(pack: &super::PackResources, ids: &BlockIds) -> Vec<i32> {
     use std::collections::{BTreeMap, BTreeSet};
     let layers = pack
         .render
@@ -560,10 +703,157 @@ fn block_id_table(pack: &super::PackResources, ids: &BlockIds) -> Vec<i32> {
     table
 }
 
+/// `at_midBlock.w` of each block sprite layer: the light the block drawing it gives (Iris's
+/// `BLOCK_EMISSION_ATTRIBUTE`; 0 to 15, as Iris 1.11.7 passes it). Terrain vertices carry their
+/// sprite layer, not their block, so as for `mc_Entity` a layer takes the light of the block
+/// named like its sprite, else the light most block states drawing it give (ties: the lowest).
+pub(super) fn block_emission_table(pack: &super::PackResources) -> Vec<i32> {
+    use std::collections::BTreeMap;
+    let layers = pack
+        .render
+        .sprite_layers
+        .values()
+        .max()
+        .map_or(0, |l| l + 1) as usize;
+    let registry = pack.assets.registry;
+    let catalog = &pack.render.model_catalog;
+    let sprite = |name: &str| pack.render.sprite_layers.get(name).copied();
+    // (layer, light) -> (a block named like the sprite draws it, how many states do).
+    let mut votes: BTreeMap<(u32, u8), (bool, usize)> = BTreeMap::new();
+    for i in 0..registry.len() {
+        let state_id = horizon_world::registry::BlockStateId(i as u32);
+        let Some(state) = registry.state(state_id) else {
+            continue;
+        };
+        let light = pack
+            .context
+            .tables
+            .facts(state_id)
+            .map_or(0, |f| f.emission);
+        let block = state.name.strip_prefix("minecraft:").unwrap_or(&state.name);
+        let mut vote = |layer: u32| {
+            let named = pack
+                .layer_names
+                .get(&layer)
+                .and_then(|n| n.strip_prefix("block/"))
+                == Some(block);
+            let v = votes.entry((layer, light)).or_default();
+            v.0 |= named;
+            v.1 += 1;
+        };
+        let fluid = match block {
+            "water" => ["water_still", "water_flow"],
+            "lava" => ["lava_still", "lava_flow"],
+            _ => ["", ""],
+        };
+        for f in fluid.iter().filter(|f| !f.is_empty()) {
+            if let Some(l) = sprite(&format!("minecraft:block/{f}")) {
+                vote(l);
+            }
+        }
+        let origin = horizon_core::position::BlockPos::new(0, 0, 0);
+        for (_, model) in catalog.collect(state_id, origin).unwrap_or_default() {
+            for face in &model.faces {
+                vote(face.layer);
+            }
+        }
+    }
+    layer_lights(&votes, layers)
+}
+
+/// Each of `layers` sprite layers' light from `votes`, (layer, light) -> (a block named like the
+/// sprite draws it, how many states do): the named block's, else the most states', ties the
+/// lowest; 0 for a layer no block draws.
+fn layer_lights(
+    votes: &std::collections::BTreeMap<(u32, u8), (bool, usize)>,
+    layers: usize,
+) -> Vec<i32> {
+    let mut best: std::collections::BTreeMap<u32, (bool, usize, i32)> = Default::default();
+    for (&(layer, light), &(named, states)) in votes {
+        let candidate = (named, states, -i32::from(light));
+        let b = best.entry(layer).or_insert(candidate);
+        if candidate > *b {
+            *b = candidate;
+        }
+    }
+    let mut table = vec![0; layers];
+    for (layer, (_, _, light)) in best {
+        if let Some(slot) = table.get_mut(layer as usize) {
+            *slot = -light;
+        }
+    }
+    table
+}
+
+/// The table a `shaders/` pack's terrain reads per sprite layer: `mc_Entity`'s (id, fluid) pair
+/// from `ids` (`block_id_table`), then `at_midBlock.w` from `emission`.
+fn terrain_table(ids: &[i32], emission: &[i32]) -> Vec<i32> {
+    ids.chunks(2)
+        .enumerate()
+        .flat_map(|(layer, pair)| [pair[0], pair[1], emission.get(layer).copied().unwrap_or(0)])
+        .collect()
+}
+
+#[cfg(test)]
+mod emission_tests {
+    use super::{layer_lights, terrain_table};
+
+    /// A sprite's light: the block named like it gives its own (a torch, 14, over a wall
+    /// torch's); a shared one takes what most states drawing it give (a furnace's side: as
+    /// many lit states, 13, as unlit, 0: the lowest), and a layer no block draws stays 0.
+    #[test]
+    fn a_sprite_takes_the_light_of_its_block() {
+        let votes = std::collections::BTreeMap::from([
+            ((0, 14), (true, 1)),
+            ((0, 0), (false, 5)),
+            ((1, 13), (false, 4)),
+            ((1, 0), (false, 4)),
+            ((2, 15), (false, 4)),
+            ((2, 0), (false, 5)),
+            ((3, 7), (false, 2)),
+        ]);
+        assert_eq!(layer_lights(&votes, 5), [14, 0, 0, 7, 0]);
+    }
+
+    /// The table `shaders/` packs' terrain reads: three values a layer, `mc_Entity`'s pair
+    /// then the light.
+    #[test]
+    fn the_terrain_table_holds_ids_then_light() {
+        assert_eq!(
+            terrain_table(&[10, -1, 20, 1], &[14, 0]),
+            [10, -1, 14, 20, 1, 0]
+        );
+    }
+}
+
 #[cfg(test)]
 mod native_pack_tests {
-    use super::active_pack;
+    use super::{active_pack, pack_draws_flat};
     use horizon_client::mod_list::{Installed, ModList, NativePage};
+
+    #[test]
+    fn shaders_packs_and_packs_with_a_shadow_pass_draw_flat() {
+        let root = std::env::temp_dir().join(format!("horizon-flat-packs-{}", std::process::id()));
+        // A folder without a manifest is a `shaders/` pack; with one, a pack of Horizon's own.
+        let pack = |name: &str, manifest: Option<&str>| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            if let Some(extra) = manifest {
+                std::fs::write(dir.join("material.wgsl"), "").unwrap();
+                let text = format!(
+                    "schema = 1\nid = \"{name}\"\nname = \"{name}\"\nversion = \"1\"\napi = \"{}\"\n\
+                     [material]\nfile = \"material.wgsl\"\n{extra}",
+                    horizon_shader_api::API
+                );
+                std::fs::write(dir.join(horizon_shader_api::MANIFEST), text).unwrap();
+            }
+            dir
+        };
+        assert!(pack_draws_flat(&pack("shaders_pack", None)));
+        assert!(!pack_draws_flat(&pack("unshadowed", Some(""))));
+        assert!(pack_draws_flat(&pack("shadowed", Some("[shadow]\n"))));
+        std::fs::remove_dir_all(&root).ok();
+    }
 
     #[test]
     fn native_shader_follows_its_mod_without_affecting_other_packs() {

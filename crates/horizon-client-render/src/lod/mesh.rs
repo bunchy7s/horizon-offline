@@ -160,7 +160,14 @@ impl Mesher {
                 for slot in &mut faces {
                     let Some(face) = matching.next() else { break };
                     *slot = Some(Style {
-                        layer: face.layer as u16 | if leaves { OPAQUE_LAYER } else { 0 },
+                        // As the mesher marks them: opaque leaves and faces over opaque
+                        // texels skip the cutout and draw in the opaque pass.
+                        layer: face.layer as u16
+                            | if leaves || face.opaque {
+                                OPAQUE_LAYER
+                            } else {
+                                0
+                            },
                         tint: if face.quad.tint_index >= 0 {
                             tint
                         } else {
@@ -207,7 +214,12 @@ impl Mesher {
                     Paint {
                         layer: face.layer,
                         light: span.light,
-                        color: channel(16) | channel(8) << 8 | channel(0) << 16 | 0xff000000,
+                        // The HDR tier, as the section mesher writes it, so a light source
+                        // keeps shining across the LOD boundary.
+                        color: crate::mesher::emitting(
+                            channel(16) | channel(8) << 8 | channel(0) << 16 | 0xff000000,
+                            context.tables.hdr_tier(span.state),
+                        ),
                         translucent: face.translucent,
                     }
                 })

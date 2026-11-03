@@ -201,6 +201,7 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref() else {
             return false;
         };
+        let _attacker = self.knockback_scope(p.entity_id);
         let from = [p.position.x, p.position.y, p.position.z];
         // The enchantments' share, scaled by the attack strength unless the
         // weapon is in use.
@@ -227,9 +228,10 @@ impl Game<'_> {
         // causeExtraKnockback: a push of 0.4, then the weapon's Knockback.
         if deals_knockback {
             let (xd, zd) = self.extra_knockback_direction();
-            self.mobs[index].knockback(0.4, xd, zd);
+            let source = Damage::spear(from);
+            self.mobs[index].knockback(0.4, xd, zd, &source);
             let (strength, _) = self.extra_knockback(&kind, 0.0);
-            self.mobs[index].knockback(f64::from(strength), xd, zd);
+            self.mobs[index].knockback(f64::from(strength), xd, zd, &source);
             // ...and the attacker stops sprinting.
             self.stop_sprint_after_extra_knockback();
         }
@@ -254,7 +256,7 @@ impl Game<'_> {
         // itemAttackInteraction: hurtEnemy (statistic, wear), and the
         // post-attack enchantments when the target was hurt.
         if let Some(stack) = self.held().cloned() {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
             if hurt {
                 self.post_attack(index);
             }
@@ -262,8 +264,7 @@ impl Game<'_> {
         }
         // damageStatsAndHearts.
         let actual = old_health - self.mobs[index].health;
-        self.stats
-            .custom("damage_dealt", (actual * 10.0).round() as i32);
+        self.award_custom_stat("damage_dealt", (actual * 10.0).round() as i32);
         if actual > 2.0 {
             let indicator = horizon_client::particles::ParticleOptions::simple(
                 horizon_client::particles::ParticleType::DamageIndicator,
@@ -275,6 +276,17 @@ impl Game<'_> {
                 0.2,
                 (actual * 0.5) as u32,
             );
+            // The players a server serves are sent them too (the window of the server thread).
+            self.lan_send_particles(super::lan_particles::QueuedParticle {
+                dimension: self.dim.id(),
+                options: indicator,
+                state: None,
+                at: [feet[0], feet[1] + height * 0.5, feet[2]],
+                spread: [0.1, 0.0, 0.1],
+                speed: 0.2,
+                count: (actual * 0.5) as u32 as i32,
+                randomization: 0,
+            });
         }
         if hurt {
             self.last_hurt_by_player.insert(id, self.lan_acting);

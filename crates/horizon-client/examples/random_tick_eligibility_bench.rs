@@ -1,5 +1,6 @@
 //! Selection cost only (not block simulation). Run with prepared client resources.
 //! cargo run --profile fast -p horizon-client --example random_tick_eligibility_bench -- RESOURCES
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     blocks::BlockFacts,
     chunk::{Chunk, MIN_Y, Section},

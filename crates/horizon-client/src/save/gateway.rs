@@ -45,11 +45,12 @@ impl SaveDir {
                 std::collections::btree_map::Entry::Occupied(e) => e.into_mut(),
                 std::collections::btree_map::Entry::Vacant(e) => {
                     // Propagate damaged/unreadable regions; never discard their legacy exits.
-                    let Some(root) =
+                    let Some(mut root) =
                         read_region_record(&self.root, &self.regions, "region", key.0, key.1)?
                     else {
                         continue;
                     };
+                    self.upgrade_record(Folder::Region, &mut root)?;
                     e.insert(root)
                 }
             };
@@ -194,7 +195,7 @@ mod tests {
                 BlockPos::new(1, 75, 1),
                 BlockState {
                     name: "minecraft:air".into(),
-                    properties: BTreeMap::new(),
+                    properties: Default::default(),
                 },
             )
             .unwrap();

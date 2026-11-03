@@ -1,7 +1,7 @@
 //! The resource pack screen for tools/test_pack_screen_parity.py: reads one
-//! JSON case per line (packs, selection, GUI size, actions, mouse), runs
-//! `horizon_client::pack_screen` through the actions and writes the shown
-//! screen's GUI calls in the oracle's JSON form.
+//! JSON case per line (packs, selection, GUI size, actions, mouse, language,
+//! clock), runs `horizon_client::pack_screen` through the actions and writes
+//! the shown screen's GUI calls in the oracle's JSON form.
 //!
 //! usage: pack_screen_fixture RESOURCES CASES OUTPUT
 use horizon_client::{
@@ -72,14 +72,20 @@ pub fn main() -> horizon_client::Result<()> {
         return Err("usage: pack_screen_fixture RESOURCES CASES OUTPUT".into());
     };
     let atlas = HudAtlas::build(root)?;
-    lang::set(lang::Language::load(&[root], lang::DEFAULT));
     let m = Measure(&atlas.font);
     let mut out = String::new();
+    let mut language = String::new();
     for line in fs::read_to_string(inputs)?
         .lines()
         .filter(|l| !l.is_empty())
     {
         let c: Value = serde_json::from_str(line)?;
+        // The case's language, before the screen lays anything out.
+        let code = c["lang"].as_str().unwrap_or(lang::DEFAULT);
+        if code != language {
+            lang::set(lang::Language::load(&[root], code));
+            language = code.to_owned();
+        }
         let int = |v: &Value| v.as_i64().unwrap_or(0) as i32;
         let packs: Vec<PackInfo> = c["packs"]
             .as_array()
@@ -149,7 +155,12 @@ pub fn main() -> horizon_client::Result<()> {
             }
         }
         let mouse = (int(&c["mouse"][0]), int(&c["mouse"][1]));
-        let draws = screen.draw(&m, mouse, c["blink"].as_u64().unwrap_or(0));
+        let draws = screen.draw(
+            &m,
+            mouse,
+            c["blink"].as_u64().unwrap_or(0),
+            c["now"].as_i64().unwrap_or(0),
+        );
         let screen_name = if screen.confirming() {
             "confirm"
         } else {

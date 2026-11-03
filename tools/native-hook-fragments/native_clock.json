@@ -1,5 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "the world's clock on a client (`native_clock`).",
-  "doc_summary": "the world's clock for client mods: `native_clock()` is the shown world's game time and time of day in ticks (`i64`; the day time counts on past 24000), none on the title screen. Bundles need `\"hooks\": @API:native_clock@`."
-}

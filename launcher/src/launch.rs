@@ -34,6 +34,11 @@ pub struct Launch {
     /// Environment variables for the game (and the two commands above).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env: BTreeMap<String, String>,
+    /// The most RAM Horizon may hold that the player chose, in MiB; none (the default): no
+    /// limit, so big worlds and modpacks keep their render distance. Read it with
+    /// [`Launch::memory_limit`]. A Java instance has `-Xmx` instead (`instances::Java::memory_mb`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_limit_mb: Option<u32>,
     /// Linux: run the game through Feral's GameMode (`gamemoderun`), when it is installed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub gamemode: bool,
@@ -47,6 +52,92 @@ pub struct Launch {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// Tells the game its limit (`HORIZON_MEMORY_LIMIT_MB`). Horizon's only: a Java instance has `-Xmx`.
+/// Before [`wrap`], so the player's own variable wins.
+pub fn limit_memory(cmd: &mut Command, launch: &Launch) {
+    if let Some(mb) = launch.memory_limit() {
+        cmd.env("HORIZON_MEMORY_LIMIT_MB", mb.to_string());
+    }
+}
+
+/// The memory slider's stops, in MiB.
+const SLIDER_STEP: u32 = 64;
+/// The slider's top when the computer's memory is not known.
+const UNKNOWN_TOTAL_MB: u32 = 64 * 1024;
+
+/// The value at `fraction` of a slider over `total_mb`: none at its very end (no limit), and at
+/// the start the smallest value there is, as nothing keeps a player from going that low.
+pub fn memory_at(fraction: f32, total_mb: u32) -> Option<u32> {
+    if fraction >= 1. {
+        return None;
+    }
+    let mb = fraction.max(0.) * total_mb as f32;
+    Some(((mb / SLIDER_STEP as f32).round() as u32 * SLIDER_STEP).max(1))
+}
+
+/// What [`parse_memory`] says of text that isn't a memory limit.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NotMemory;
+
+/// A memory limit as a player types it: a number of MB, or of GB with `gb`, and nothing or `off`
+/// for no limit. Nothing keeps a player from going low. Err when it is none of those.
+pub fn parse_memory(typed: &str) -> Result<Option<u32>, NotMemory> {
+    let typed = typed.trim().to_ascii_lowercase();
+    if typed.is_empty() || typed == "off" {
+        return Ok(None);
+    }
+    let (number, scale) = if let Some(gb) = typed.strip_suffix("gb").or(typed.strip_suffix('g')) {
+        (gb, 1024)
+    } else {
+        let mb = typed.strip_suffix("mb").or(typed.strip_suffix('m'));
+        (mb.unwrap_or(&typed), 1)
+    };
+    let number: u32 = number.trim().parse().map_err(|_| NotMemory)?;
+    number.checked_mul(scale).map(Some).ok_or(NotMemory)
+}
+
+/// Where `mb` sits on a slider over `total_mb`; [`memory_at`]'s inverse.
+pub fn memory_fraction(mb: Option<u32>, total_mb: u32) -> f32 {
+    mb.map_or(1., |mb| (mb as f32 / total_mb.max(1) as f32).min(1.))
+}
+
+/// This computer's memory in MiB, the top of the slider.
+pub fn total_memory_mb() -> u32 {
+    system_memory_bytes()
+        .map(|bytes| (bytes >> 20) as u32)
+        .filter(|mb| *mb > 0)
+        .unwrap_or(UNKNOWN_TOTAL_MB)
+}
+
+#[cfg(windows)]
+fn system_memory_bytes() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: all-zero is a valid value of this plain C struct, its length is set as the call
+    // requires, and the call only writes into it.
+    unsafe {
+        let mut status: MEMORYSTATUSEX = std::mem::zeroed();
+        status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+        (GlobalMemoryStatusEx(&mut status) != 0).then_some(status.ullTotalPhys)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn system_memory_bytes() -> Option<u64> {
+    let out = Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn system_memory_bytes() -> Option<u64> {
+    let info = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = info.lines().find(|l| l.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024)
 }
 
 /// What this Linux computer has for the three switches. Elsewhere, nothing.
@@ -149,6 +240,16 @@ pub fn switch_env(launch: &Launch, found: &Found) -> Vec<(&'static str, &'static
 }
 
 impl Launch {
+    /// The most RAM Horizon may hold, in MiB; none: no limit.
+    pub fn memory_limit(&self) -> Option<u32> {
+        self.memory_limit_mb
+    }
+
+    /// Keeps the player's choice; none: no limit.
+    pub fn set_memory_limit(&mut self, limit: Option<u32>) {
+        self.memory_limit_mb = limit;
+    }
+
     pub fn is_empty(&self) -> bool {
         self == &Launch::default()
     }
@@ -157,27 +258,45 @@ impl Launch {
     pub fn summary(&self) -> Option<String> {
         let mut parts = Vec::new();
         if !self.pre_launch.trim().is_empty() {
-            parts.push(format!("runs {} first", self.pre_launch.trim()));
+            parts.push(crate::i18n::trf(
+                "runs {command} first",
+                &[("command", self.pre_launch.trim())],
+            ));
         }
         if !self.wrapper.trim().is_empty() {
-            parts.push(format!("through {}", self.wrapper.trim()));
+            parts.push(crate::i18n::trf(
+                "through {wrapper}",
+                &[("wrapper", self.wrapper.trim())],
+            ));
         }
         if !self.post_exit.trim().is_empty() {
-            parts.push(format!("runs {} after", self.post_exit.trim()));
+            parts.push(crate::i18n::trf(
+                "runs {command} after",
+                &[("command", self.post_exit.trim())],
+            ));
+        }
+        if let Some(mb) = self.memory_limit_mb {
+            parts.push(crate::i18n::trf(
+                "limited to {mb} MB",
+                &[("mb", &mb.to_string())],
+            ));
         }
         if self.gamemode {
-            parts.push("with GameMode".into());
+            parts.push(crate::i18n::tr("with GameMode").to_string());
         }
         if self.mangohud {
-            parts.push("with MangoHud".into());
+            parts.push(crate::i18n::tr("with MangoHud").to_string());
         }
         if self.dedicated_gpu {
-            parts.push("on the dedicated GPU".into());
+            parts.push(crate::i18n::tr("on the dedicated GPU").to_string());
         }
         match self.env.len() {
             0 => {}
-            1 => parts.push("with 1 variable".into()),
-            n => parts.push(format!("with {n} variables")),
+            1 => parts.push(crate::i18n::tr("with 1 variable").to_string()),
+            n => parts.push(crate::i18n::trf(
+                "with {count} variables",
+                &[("count", &n.to_string())],
+            )),
         }
         (!parts.is_empty()).then(|| parts.join(", "))
     }

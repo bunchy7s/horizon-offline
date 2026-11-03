@@ -1,6 +1,8 @@
 //! `Level.setBlock`, `LevelChunk.setBlockState` and the
 //! `CollectingNeighborUpdater` that orders neighbour and shape updates.
-use super::{LevelAccess, LevelEvent, Sim, classes::Class, flags, states::BlockId};
+use super::{
+    LevelAccess, LevelEvent, Sim, classes::Class, flags, orientation::Orientation, states::BlockId,
+};
 use crate::{fluid::FluidState, registry::BlockStateId};
 use horizon_core::{
     geometry::Direction,
@@ -61,16 +63,19 @@ enum Update {
     Simple {
         pos: BlockPos,
         block: BlockId,
+        orientation: Option<Orientation>,
     },
     Full {
         state: BlockStateId,
         pos: BlockPos,
         block: BlockId,
+        orientation: Option<Orientation>,
         moved: bool,
     },
     Multi {
         source: BlockPos,
         block: BlockId,
+        orientation: Option<Orientation>,
         skip: Option<Direction>,
         index: usize,
     },
@@ -89,6 +94,7 @@ enum Step {
         state: Option<BlockStateId>,
         pos: BlockPos,
         block: BlockId,
+        orientation: Option<Orientation>,
         moved: bool,
     },
 }
@@ -102,7 +108,7 @@ pub(crate) struct NeighborUpdater {
 
 impl Update {
     /// `runNext`: the update to execute now and whether more remain.
-    fn next(&mut self) -> (Step, bool) {
+    fn next(&mut self, level: &mut (impl LevelAccess + ?Sized)) -> (Step, bool) {
         match *self {
             Self::Shape {
                 direction,
@@ -122,11 +128,16 @@ impl Update {
                 },
                 false,
             ),
-            Self::Simple { pos, block } => (
+            Self::Simple {
+                pos,
+                block,
+                orientation,
+            } => (
                 Step::Neighbor {
                     state: None,
                     pos,
                     block,
+                    orientation,
                     moved: false,
                 },
                 false,
@@ -135,12 +146,14 @@ impl Update {
                 state,
                 pos,
                 block,
+                orientation,
                 moved,
             } => (
                 Step::Neighbor {
                     state: Some(state),
                     pos,
                     block,
+                    orientation,
                     moved,
                 },
                 false,
@@ -149,18 +162,31 @@ impl Update {
                 source,
                 block,
                 skip,
+                ref mut orientation,
                 ref mut index,
             } => {
                 let direction = UPDATE_ORDER[*index];
+                let state = level.block_state(rel(source, direction));
+                let context = if level.redstone_experiments() {
+                    let initial = orientation.get_or_insert_with(|| {
+                        let initial = Orientation::random(level.random())
+                            .with_side_bias(super::orientation::SideBias::Left);
+                        skip.map_or(initial, |d| initial.with_front(d.opposite()))
+                    });
+                    Some(initial.with_front(direction))
+                } else {
+                    None
+                };
                 *index += 1;
                 if *index < UPDATE_ORDER.len() && Some(UPDATE_ORDER[*index]) == skip {
                     *index += 1;
                 }
                 (
                     Step::Neighbor {
-                        state: None,
+                        state: Some(state),
                         pos: rel(source, direction),
                         block,
+                        orientation: context,
                         moved: false,
                     },
                     *index < UPDATE_ORDER.len(),
@@ -316,10 +342,13 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         let block_changed = self.block_of(old) != new_block;
         if block_changed && self.block_of(old) == self.b.named.moving_piston {
             // PistonMovingBlockEntity.preRemoveSideEffects -> finalTick; the
-            // block is already replaced, so only the entity goes away.
+            // block is already replaced, so only the entity goes away. The
+            // extended base is MovingPistonBlock.destroy's, which only the
+            // player-break path calls (player_destroy).
             self.remove_moving_piston(pos);
         } else if block_changed
-            && self.b.has_flag(old, super::data::state_flags::BLOCK_ENTITY)
+            && (self.b.has_flag(old, super::data::state_flags::BLOCK_ENTITY)
+                || self.level.has_mod_block_entity(pos))
             && !self.keeps_block_entity(state, old)
         {
             // BlockEntity.preRemoveSideEffects (unless UPDATE_SKIP_BLOCK_ENTITY_SIDEEFFECTS)
@@ -358,6 +387,22 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         (tags.copper_chests.contains(new) && tags.copper_chests.contains(old))
             || (tags.copper_golem_statues.contains(new) && tags.copper_golem_statues.contains(old))
     }
+    /// `MovingPistonBlock.destroy`: a `moving_piston` that goes away takes the
+    /// piston base behind it with it when that base is extended (a head that was
+    /// still moving over a base that finished extending). An unextended base, or
+    /// no piston base at all, stays.
+    pub(crate) fn destroy_moving_piston_base(&mut self, pos: BlockPos, state: BlockStateId) {
+        let b = self.b;
+        let Some(facing) = b.table.dir(state, b.props.facing) else {
+            return;
+        };
+        let base = rel(pos, facing.opposite());
+        let base_state = self.state(base);
+        if b.data(base_state).is(Class::PistonBase) && b.table.bool(base_state, b.props.extended) {
+            self.remove_block(base, false);
+        }
+    }
+
     /// `Level.removeBlock`.
     pub fn remove_block(&mut self, pos: BlockPos, moved_by_piston: bool) -> bool {
         let fluid = self.fluid_at(pos);
@@ -462,24 +507,53 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
 
     // ---- neighbour updater ----
     pub fn update_neighbors_at(&mut self, pos: BlockPos, block: BlockId) {
+        let orientation = self.initial_orientation(None, None);
+        self.update_neighbors_at_oriented(pos, block, orientation);
+    }
+    pub fn update_neighbors_at_oriented(
+        &mut self,
+        pos: BlockPos,
+        block: BlockId,
+        orientation: Option<Orientation>,
+    ) {
         self.add_and_run(Update::Multi {
             source: pos,
             block,
+            orientation,
             skip: None,
             index: 0,
         });
     }
-    pub fn update_neighbors_at_except(&mut self, pos: BlockPos, block: BlockId, skip: Direction) {
+    pub fn update_neighbors_at_except_oriented(
+        &mut self,
+        pos: BlockPos,
+        block: BlockId,
+        skip: Direction,
+        orientation: Option<Orientation>,
+    ) {
         let index = usize::from(UPDATE_ORDER[0] == skip);
         self.add_and_run(Update::Multi {
             source: pos,
             block,
+            orientation,
             skip: Some(skip),
             index,
         });
     }
     pub fn neighbor_changed_at(&mut self, pos: BlockPos, block: BlockId) {
-        self.add_and_run(Update::Simple { pos, block });
+        self.neighbor_changed_at_oriented(pos, block, None);
+    }
+    pub fn neighbor_changed_at_oriented(
+        &mut self,
+        pos: BlockPos,
+        block: BlockId,
+        orientation: Option<Orientation>,
+    ) {
+        self.add_and_run(Update::Simple {
+            pos,
+            block,
+            orientation,
+        });
     }
     pub fn neighbor_changed_full(
         &mut self,
@@ -488,10 +562,21 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         block: BlockId,
         moved: bool,
     ) {
+        self.neighbor_changed_full_oriented(state, pos, block, None, moved);
+    }
+    pub fn neighbor_changed_full_oriented(
+        &mut self,
+        state: BlockStateId,
+        pos: BlockPos,
+        block: BlockId,
+        orientation: Option<Orientation>,
+        moved: bool,
+    ) {
         self.add_and_run(Update::Full {
             state,
             pos,
             block,
+            orientation,
             moved,
         });
     }
@@ -539,7 +624,7 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 updater.stack.push(update);
             }
             while let Some(top) = self.ticks.updater.stack.last_mut() {
-                let (step, more) = top.next();
+                let (step, more) = top.next(self.level);
                 self.execute(step);
                 if !more {
                     self.ticks.updater.stack.pop();
@@ -578,10 +663,11 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 state,
                 pos,
                 block,
+                orientation,
                 moved,
             } => {
                 let state = state.unwrap_or_else(|| self.state(pos));
-                self.neighbor_changed(state, pos, block, moved);
+                self.neighbor_changed_oriented(state, pos, block, orientation, moved);
             }
         }
     }

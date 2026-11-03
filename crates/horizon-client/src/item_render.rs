@@ -6,6 +6,7 @@
 //! and the special model renderers submit, in pose space. A sink then draws
 //! them: [`gui`] into the HUD batch with the GUI item lighting, [`WorldSink`]
 //! into entity vertices with the level's lighting.
+pub mod cit;
 pub mod gui;
 mod special;
 
@@ -201,6 +202,13 @@ pub struct ItemRenderState {
     pub layers: Vec<LayerRender>,
     pub oversized_in_gui: bool,
     pub animated: bool,
+    /// The OptiFine CIT glint layers the stack draws in the GUI (`cit_glint`).
+    pub cit_glint: Option<Arc<crate::cit_glint::StackGlint>>,
+    /// HDR output's tier of an item that glows (`dynamic_light::Luminance::hdr_tier`).
+    pub hdr_tier: u8,
+    /// In HDR output, the block light of an item that glows: its block's, as a placed one has
+    /// it, so a torch doesn't go dark in the shade while it shines. 0 for the rest.
+    pub hdr_light: u8,
 }
 impl ItemRenderState {
     pub fn is_empty(&self) -> bool {
@@ -256,6 +264,96 @@ impl ItemRenderState {
             }
         }
     }
+    /// [`Self::submit`] into a [`WorldSink`] of `light`, `lights` and `tier`,
+    /// posed on the GPU (`gfx::entity_skin`): the same vertices in the same
+    /// order. False, with nothing drawn, when a layer cannot take that path: a
+    /// special model, a glint, or a quad that glows or is translucent (another
+    /// material).
+    pub fn submit_skinned(
+        &self,
+        renderer: &ItemRenderer,
+        sprites: &HashMap<String, Rect>,
+        pose: Mat4,
+        (light, lights, tier): (u32, Option<(Vec3, Vec3)>, u8),
+        skin: &mut crate::mobs::skin::Skin,
+    ) -> bool {
+        use crate::gfx::entity_skin::{SkinJob, SkinPart};
+        // The axes' order in a stored vertex (`SkinVertex::axis`).
+        const AXES: [Direction; 6] = [
+            Direction::East,
+            Direction::Up,
+            Direction::South,
+            Direction::West,
+            Direction::Down,
+            Direction::North,
+        ];
+        for layer in &self.layers {
+            let LayerGeometry::Quads(baked) = &layer.geometry else {
+                return false;
+            };
+            if layer.foil != FoilType::None {
+                return false;
+            }
+            let Some(stored) = skin.models.item(baked, skin.frame) else {
+                return false;
+            };
+            let translucent = |run: &crate::mobs::skin::ItemRun| {
+                let sprite = &baked.quads[run.quad].material.sprite;
+                renderer.sprites.translucent(sprite_name(sprite))
+            };
+            if stored.runs.iter().any(translucent) {
+                return false;
+            }
+        }
+        for layer in &self.layers {
+            let LayerGeometry::Quads(baked) = &layer.geometry else {
+                continue;
+            };
+            let m = pose * layer.matrix;
+            let mut normals = FaceNormals::new(m);
+            let Some(stored) = skin.models.item(baked, skin.frame) else {
+                continue;
+            };
+            for run in &stored.runs {
+                // `submit_quads`' sprite and tint, once for the run's quads.
+                let q = &baked.quads[run.quad];
+                let Some(r) = sprites
+                    .get(sprite_name(&q.material.sprite))
+                    .or_else(|| sprites.get("misc/missingno"))
+                    .or_else(|| sprites.get("horizon/missingno"))
+                else {
+                    continue;
+                };
+                let color = if run.tint_index >= 0 {
+                    layer
+                        .tints
+                        .get(run.tint_index as usize)
+                        .copied()
+                        .unwrap_or(-1)
+                } else {
+                    -1
+                };
+                let colors = AXES.map(|d| shaded(argb(color), normals.face(d), lights));
+                let frame = &mut *skin.frame;
+                frame.jobs.push(SkinJob {
+                    first: run.first,
+                    count: run.count,
+                    part: frame.parts.len() as u32,
+                    dst: frame.vertices,
+                    rect: [r.u0, r.v0, r.u1, r.v1],
+                    light,
+                    overlay: u32::from(tier) << 16,
+                    mode: SkinJob::ITEM,
+                    ..Default::default()
+                });
+                frame.parts.push(SkinPart::item(m, colors));
+                frame.vertices += run.count;
+            }
+            let bounds = stored.bounds;
+            skin.grow_bounds(m, bounds);
+        }
+        true
+    }
 }
 
 /// The atlas name of a sprite identifier (`minecraft:item/apple` -> `item/apple`).
@@ -275,8 +373,34 @@ pub fn direction_vector(d: Direction) -> Vec3 {
 }
 /// `PoseStack.Pose.transformNormal`: the normal matrix, renormalized.
 pub fn transform_normal(m: Mat4, n: Vec3) -> Vec3 {
-    let normal = Mat3::from_mat4(m).inverse().transpose();
-    (normal * n).normalize_or_zero()
+    FaceNormals::new(m).transform(n)
+}
+/// [`transform_normal`] of one pose for many quads: its normal matrix inverted once, and
+/// the normal of each of the six facings worked out the first time a quad uses it.
+pub struct FaceNormals {
+    normal: Mat3,
+    faces: [Option<Vec3>; 6],
+}
+impl FaceNormals {
+    pub fn new(m: Mat4) -> Self {
+        Self {
+            normal: Mat3::from_mat4(m).inverse().transpose(),
+            faces: [None; 6],
+        }
+    }
+    fn transform(&self, n: Vec3) -> Vec3 {
+        (self.normal * n).normalize_or_zero()
+    }
+    /// The pose's normal of a face pointing `d`.
+    pub fn face(&mut self, d: Direction) -> Vec3 {
+        let i = d as usize;
+        if let Some(n) = self.faces[i] {
+            return n;
+        }
+        let n = self.transform(direction_vector(d));
+        self.faces[i] = Some(n);
+        n
+    }
 }
 /// An `ARGB` int as the `u32` colour of an [`ItemQuad`].
 pub fn argb(color: i32) -> u32 {
@@ -299,15 +423,25 @@ fn submit_quads(
         FoilType::Special => Foil::Special,
     };
     let _ = display;
-    // Quads of one layer mostly share a sprite: look its translucency up once.
+    let mut normals = FaceNormals::new(m);
+    // Quads of one layer mostly share a sprite: look its rect and its
+    // translucency up once.
     let mut last: Option<(&str, bool)> = None;
+    let mut last_rect: Option<(&str, Option<Rect>)> = None;
     for q in &baked.quads {
-        let Some(r) = sprites
-            .get(sprite_name(&q.material.sprite))
-            .or_else(|| sprites.get("misc/missingno"))
-            .or_else(|| sprites.get("horizon/missingno"))
-            .copied()
-        else {
+        let rect = match last_rect {
+            Some((sprite, rect)) if sprite == q.material.sprite => rect,
+            _ => {
+                let rect = sprites
+                    .get(sprite_name(&q.material.sprite))
+                    .or_else(|| sprites.get("misc/missingno"))
+                    .or_else(|| sprites.get("horizon/missingno"))
+                    .copied();
+                last_rect = Some((&q.material.sprite, rect));
+                rect
+            }
+        };
+        let Some(r) = rect else {
             continue;
         };
         // `getLayerColorSafe`: an untinted quad, or a tint index past the
@@ -346,7 +480,7 @@ fn submit_quads(
             pos,
             uv,
             foil_uv: q.uv,
-            normal: transform_normal(m, direction_vector(q.facing)),
+            normal: normals.face(q.facing),
             color: argb(color),
             foil,
             light_emission: q.light_emission,
@@ -425,11 +559,12 @@ impl FileSprites {
             cache.insert(sprite.to_owned(), translucent);
         }
         let alpha: Vec<u8> = argb.iter().map(|p| (p >> 24) as u8).collect();
-        let animation = fs::read_to_string(png.with_extension("png.mcmeta"))
-            .ok()
-            .and_then(|m| serde_json::from_str::<Value>(&m).ok())
-            .and_then(|m| m.get("animation").map(Value::to_string))
-            .and_then(|a| AnimationMetadata::from_json(&a).ok());
+        let animation =
+            horizon_core::prepared_files::read_to_string(&png.with_extension("png.mcmeta"))
+                .ok()
+                .and_then(|m| serde_json::from_str::<Value>(&m).ok())
+                .and_then(|m| m.get("animation").map(Value::to_string))
+                .and_then(|a| AnimationMetadata::from_json(&a).ok());
         let (w, h) = match &animation {
             Some(a) => {
                 let [w, h] = a.frame_size(iw as i32, ih as i32);
@@ -493,42 +628,37 @@ pub struct ItemRenderer {
     grass: Vec<i32>,
     /// `minecraft:item` registry ids (`Item.getId`).
     item_ids: HashMap<String, i32>,
+    /// The enabled packs' OptiFine CIT rules and their swapped bakes; `None`
+    /// without rules.
+    pub cit: Option<cit::CitModels>,
 }
 
-/// Every `items/**/*.json` client item definition, by identifier.
+/// Every `items/**/*.json` client item definition, by identifier. Through
+/// `json_folder`: from the prepared data file when the root has one.
 fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
-    fn walk(dir: &Path, rel: &str, namespace: &str, out: &mut BTreeMap<String, ClientItem>) {
-        let Ok(entries) = fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
-                continue;
-            };
-            let rel = if rel.is_empty() {
-                name
-            } else {
-                format!("{rel}/{name}")
-            };
-            if path.is_dir() {
-                walk(&path, &rel, namespace, out);
-            } else if let Some(id) = rel.strip_suffix(".json")
-                && let Some(item) = fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|t| ClientItem::from_json(&t).ok())
-            {
-                out.insert(format!("{namespace}:{id}"), item);
-            }
-        }
-    }
     let mut out = BTreeMap::new();
     let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
         return out;
     };
     for ns in namespaces.flatten() {
+        let Ok(folder) = horizon_world::json_folder::read(&ns.path().join("items")) else {
+            continue;
+        };
         let namespace = ns.file_name().to_string_lossy().into_owned();
-        walk(&ns.path().join("items"), "", &namespace, &mut out);
+        for file in &folder.files {
+            let Some(text) = file.bytes().ok().and_then(|b| std::str::from_utf8(b).ok()) else {
+                continue;
+            };
+            match ClientItem::from_json(text) {
+                Ok(item) => {
+                    out.insert(format!("{namespace}:{}", file.name), item);
+                }
+                Err(e) => log::warn!(
+                    "Horizon: item definition {namespace}:{} not loaded: {e}",
+                    file.name
+                ),
+            }
+        }
     }
     out
 }
@@ -548,23 +678,52 @@ impl ItemRenderer {
         root: &Path,
         library: std::result::Result<Arc<ModelLibrary>, String>,
     ) -> crate::Result<Self> {
+        Self::load_tables(root, library, true)
+    }
+    /// What a dedicated server reads: the item prototypes (the stacks'
+    /// default components) and ids, without the client item definitions,
+    /// the special renderers' entity models and the grass colormap, which
+    /// only drawing reads (1.4 MB and ~1,500 files).
+    pub fn load_for_server(
+        root: &Path,
+        library: std::result::Result<Arc<ModelLibrary>, String>,
+    ) -> crate::Result<Self> {
+        Self::load_tables(root, library, false)
+    }
+    fn load_tables(
+        root: &Path,
+        library: std::result::Result<Arc<ModelLibrary>, String>,
+        drawn: bool,
+    ) -> crate::Result<Self> {
         let prototypes: BTreeMap<String, Components> = horizon_world::item_defaults::read(root)?
             .into_iter()
             .map(|(item, components)| Ok((item, serde_json::from_value(components)?)))
             .collect::<serde_json::Result<_>>()?;
         let models = ItemModels {
-            definitions: load_definitions(root),
+            definitions: if drawn {
+                load_definitions(root)
+            } else {
+                BTreeMap::new()
+            },
             prototypes,
         };
-        let library = library?;
+        let (library, cit) = cit::load(root, library?);
         let permutations = PalettedPermutations::from_atlas(
             &fs::read_to_string(root.join("assets/minecraft/atlases/items.json"))
                 .unwrap_or_default(),
         );
-        let parts = special::load_parts(root);
-        let grass = crate::hud::decode(&root.join("assets/minecraft/textures/colormap/grass.png"))
-            .map(|(_, _, rgba)| argb_pixels(&rgba).into_iter().map(|p| p as i32).collect())
-            .unwrap_or_default();
+        let parts = if drawn {
+            special::load_parts(root)
+        } else {
+            HashMap::new()
+        };
+        let grass = if drawn {
+            crate::hud::decode(&root.join("assets/minecraft/textures/colormap/grass.png"))
+                .map(|(_, _, rgba)| argb_pixels(&rgba).into_iter().map(|p| p as i32).collect())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let item_ids = horizon_protocol::registry::Builtin::find(root)
             .and_then(|p| horizon_protocol::registry::Builtin::load(&p).ok())
             .and_then(|b| {
@@ -592,6 +751,7 @@ impl ItemRenderer {
             gui_drawn: Mutex::default(),
             parts,
             grass,
+            cit,
         })
     }
     /// `ModelBakery` item baking, cached per model.
@@ -627,16 +787,7 @@ impl ItemRenderer {
         {
             return hit.clone();
         }
-        let mut out: Vec<Vec3> = Vec::new();
-        for q in &baked.quads {
-            for p in q.positions {
-                let p = Vec3::from(p);
-                if !out.contains(&p) {
-                    out.push(p);
-                }
-            }
-        }
-        let out = Arc::new(out);
+        let out = Arc::new(corners(baked));
         if let Ok(mut cache) = self.extents.lock() {
             cache.insert(model.to_owned(), out.clone());
         }
@@ -665,6 +816,22 @@ impl ItemRenderer {
         seed: i32,
         env: &dyn ItemEnv,
     ) -> ItemRenderState {
+        self.resolve_with_rule(stack, display, owner, level, seed, env, None)
+    }
+    /// [`Self::resolve`] for a stack OptiFine CIT item rule `rule` (an index
+    /// into `cit.rules.rules`) matched: its model layers draw what the rule
+    /// swaps them for.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_with_rule(
+        &self,
+        stack: &StackView,
+        display: DisplayContext,
+        owner: Option<&OwnerState>,
+        level: Option<&LevelState>,
+        seed: i32,
+        env: &dyn ItemEnv,
+        rule: Option<usize>,
+    ) -> ItemRenderState {
         let ctx = Context {
             display,
             owner,
@@ -679,8 +846,13 @@ impl ItemRenderer {
             .map(|layer| {
                 let (geometry, baked, extents) = match layer.content {
                     LayerContent::Model { model } => {
-                        let baked = self.bake(&model);
-                        let extents = self.quad_extents(&model, &baked);
+                        let (baked, extents) = rule
+                            .and_then(|rule| self.cit_layer(rule, &model))
+                            .unwrap_or_else(|| {
+                                let baked = self.bake(&model);
+                                let extents = self.quad_extents(&model, &baked);
+                                (baked, extents)
+                            });
                         (LayerGeometry::Quads(baked.clone()), baked, extents)
                     }
                     LayerContent::Missing => {
@@ -717,6 +889,9 @@ impl ItemRenderer {
             layers,
             oversized_in_gui: resolved.oversized_in_gui,
             animated,
+            cit_glint: None,
+            hdr_tier: 0,
+            hdr_light: 0,
         }
     }
     /// `GrassColor.get` over the loaded colormap.
@@ -749,6 +924,19 @@ impl ItemRenderer {
     pub(crate) fn part(&self, key: &str) -> Option<&ModelPart> {
         self.parts.get(key)
     }
+}
+/// `CuboidItemModelWrapper.computeExtents`: the distinct quad corners.
+fn corners(baked: &BakedItemModel) -> Vec<Vec3> {
+    let mut out: Vec<Vec3> = Vec::new();
+    for q in &baked.quads {
+        for p in q.positions {
+            let p = Vec3::from(p);
+            if !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    }
+    out
 }
 /// A `horizon-assets` (row-major, JOML-exact) matrix as glam's.
 pub fn glam_matrix(m: &horizon_assets::math::Mat4) -> Mat4 {
@@ -816,13 +1004,20 @@ pub struct WorldSink<'a> {
     pub lights: Option<(Vec3, Vec3)>,
     /// The `GLINT_TEXTURING` sample for foil quads (`None` leaves them unglinted).
     pub glint: Option<Glint>,
+    /// HDR output's tier (`ItemRenderState::hdr_tier`): rides in the layer's high bits.
+    pub tier: u8,
+}
+/// The vertex colour [`WorldSink`] gives a quad of `color` (ARGB) facing `normal`:
+/// shaded by `lights` (`None`: unshaded), as ABGR bytes.
+fn shaded(color: u32, normal: Vec3, lights: Option<(Vec3, Vec3)>) -> u32 {
+    let brightness = lights.map_or(1.0, |l| diffuse(normal, l));
+    let [a, r, g, b] = color.to_be_bytes();
+    let c = |v: u8| (f32::from(v) * brightness) as u32;
+    u32::from(a) << 24 | c(b) << 16 | c(g) << 8 | c(r)
 }
 impl ItemSink for WorldSink<'_> {
     fn quad(&mut self, q: ItemQuad) {
-        let brightness = self.lights.map_or(1.0, |l| diffuse(q.normal, l));
-        let [a, r, g, b] = q.color.to_be_bytes();
-        let c = |v: u8| (f32::from(v) * brightness) as u32;
-        let color = u32::from(a) << 24 | c(b) << 16 | c(g) << 8 | c(r);
+        let color = shaded(q.color, q.normal, self.lights);
         // `LightCoordsUtil.lightCoordsWithEmission`: block light at least the emission.
         let emission = u32::from(q.light_emission) * 16;
         let light = if (self.light >> 8 & 0xFF) < emission {
@@ -853,7 +1048,7 @@ impl ItemSink for WorldSink<'_> {
                 normal: if q.cull_back { CULL_BACK } else { [0; 4] },
                 pos: p.to_array(),
                 uv,
-                layer: overlay | oit,
+                layer: overlay | oit | u32::from(self.tier) << 16,
                 color,
                 light,
                 glint_uv,
@@ -993,6 +1188,31 @@ mod tests {
         Ok(())
     }
 
+    /// A dedicated server keeps the stacks' default components but reads
+    /// none of the client item definitions.
+    #[test]
+    fn a_server_keeps_prototypes_without_definitions() -> crate::Result<()> {
+        let root = std::env::temp_dir().join(format!("horizon-item-server-{}", std::process::id()));
+        let definitions = root.join("assets/horizon/items");
+        fs::create_dir_all(&definitions)?;
+        fs::write(
+            definitions.join("top.json"),
+            r#"{"model":{"type":"minecraft:empty"}}"#,
+        )?;
+        fs::write(
+            root.join("items.json"),
+            r#"{"horizon:top":{"minecraft:max_stack_size":16}}"#,
+        )?;
+        let library = crate::model_library::ParsedModels::load(&root).into_item_library();
+        let client = ItemRenderer::load_with_library(&root, library.clone())?;
+        let server = ItemRenderer::load_for_server(&root, library)?;
+        let _ = fs::remove_dir_all(&root);
+        assert!(client.models.definitions.contains_key("horizon:top"));
+        assert!(server.models.definitions.is_empty());
+        assert_eq!(server.models.prototypes, client.models.prototypes);
+        Ok(())
+    }
+
     #[test]
     fn rendered_amounts_follow_the_count_bands() {
         let bands: Vec<u32> = [0, 1, 2, 16, 17, 32, 33, 48, 49, 64]
@@ -1042,5 +1262,178 @@ mod tests {
         assert_eq!(transform_normal(m, Vec3::X), Vec3::X);
         let r = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
         assert!((transform_normal(r, Vec3::Z) - Vec3::X).length() < 1e-6);
+    }
+
+    /// Every vanilla item on the ground, held in either hand, framed and worn on the
+    /// head, turned, shaded and unshaded: the GPU path's vertices (its jobs expanded as
+    /// `entity_skin.wgsl` does) are the CPU path's, to the bit and in the same order, for
+    /// each state it takes. Needs the prepared resources.
+    #[test]
+    fn items_posed_on_the_gpu_draw_what_the_cpu_draws() {
+        use crate::gfx::entity_skin::{SkinFrame, expand};
+        use crate::mobs::skin::{Skin, SkinModels};
+        use horizon_assets::item_model::{NoEnv, StackView};
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-models.json").exists() {
+            eprintln!("no prepared resources: skipped");
+            return;
+        }
+        let r = ItemRenderer::load(&root).unwrap();
+        let resolve = |id: &str| {
+            let view = StackView::new(id, 1);
+            r.resolve(&view, DisplayContext::Ground, None, None, 7, &NoEnv)
+        };
+        // Each display context's transforms (`ItemTransform`s) pose the same quads.
+        let contexts = [
+            DisplayContext::Ground,
+            DisplayContext::ThirdPersonRightHand,
+            DisplayContext::ThirdPersonLeftHand,
+            DisplayContext::Fixed,
+            DisplayContext::Head,
+        ];
+        let states: Vec<_> = r
+            .models
+            .definitions
+            .keys()
+            .flat_map(|id| {
+                contexts.map(|context| {
+                    let view = StackView::new(id, 1);
+                    (id, r.resolve(&view, context, None, None, 7, &NoEnv))
+                })
+            })
+            .collect();
+        // Each sprite its own rect, so a run drawn with another's shows.
+        let mut sprites: HashMap<String, Rect> = HashMap::new();
+        for (_, state) in &states {
+            for layer in &state.layers {
+                if let LayerGeometry::Quads(baked) = &layer.geometry {
+                    for q in &baked.quads {
+                        let n = sprites.len() as f32;
+                        sprites
+                            .entry(sprite_name(&q.material.sprite).to_owned())
+                            .or_insert(Rect {
+                                u0: n / 4096.0,
+                                v0: 0.5 - n / 8192.0,
+                                u1: n / 4096.0 + 0.003,
+                                v1: 0.5 - n / 8192.0 + 0.007,
+                                w: 16,
+                                h: 16,
+                            });
+                    }
+                }
+            }
+        }
+        let pose = Mat4::from_translation(Vec3::new(-2.3, 0.7, 5.1))
+            * Mat4::from_rotation_y(2.1)
+            * Mat4::from_scale(Vec3::splat(0.5));
+        let mut models = SkinModels::default();
+        let mut frame = SkinFrame::default();
+        let (mut taken, mut left) = (0, 0);
+        for lights in [
+            Some(crate::block_entity_render::diffuse_lights(false)),
+            None,
+        ] {
+            for (id, state) in &states {
+                let mut cpu = Vec::new();
+                let mut sink = WorldSink {
+                    out: &mut cpu,
+                    light: 0x50_a0,
+                    lights,
+                    glint: None,
+                    tier: 1,
+                };
+                state.submit(&r, &sprites, &NoHost, pose, &mut sink);
+                frame.clear_draws();
+                let mut skin = Skin::new(&mut models, &mut frame);
+                if !state.submit_skinned(&r, &sprites, pose, (0x50_a0, lights, 1), &mut skin) {
+                    assert!(frame.jobs.is_empty(), "{id}: left to the CPU after drawing");
+                    left += 1;
+                    continue;
+                }
+                taken += 1;
+                let bounds = skin.bounds;
+                let gpu = expand(&frame.new_model, &frame);
+                assert_eq!(gpu.len(), cpu.len(), "{id}");
+                for (i, (g, c)) in gpu.iter().zip(&cpu).enumerate() {
+                    assert_eq!(
+                        bytemuck::bytes_of(g),
+                        bytemuck::bytes_of(c),
+                        "{id} vertex {i}: {g:?} != {c:?}"
+                    );
+                }
+                if let (Some((lo, hi)), false) = (bounds, cpu.is_empty()) {
+                    for v in &cpu {
+                        let p = Vec3::from_array(v.pos);
+                        assert!(
+                            p.cmpge(lo - 1e-4).all() && p.cmple(hi + 1e-4).all(),
+                            "{id}: {p} outside"
+                        );
+                    }
+                }
+            }
+        }
+        // The 8 kinds of the `stress_items` scene all take it, and resolved again (as
+        // every frame does) they draw the models already stored.
+        let stored = frame.new_model.len();
+        for id in [
+            "stone",
+            "oak_log",
+            "diamond",
+            "apple",
+            "iron_sword",
+            "bread",
+            "redstone",
+            "torch",
+        ] {
+            frame.clear_draws();
+            let mut skin = Skin::new(&mut models, &mut frame);
+            let state = resolve(&format!("minecraft:{id}"));
+            assert!(
+                state.submit_skinned(&r, &sprites, pose, (0, None, 0), &mut skin),
+                "{id}"
+            );
+        }
+        assert_eq!(frame.new_model.len(), stored, "models stored again");
+        eprintln!("{taken} item states on the GPU path, {left} on the CPU");
+        assert!(taken > left, "{taken} taken, {left} left");
+    }
+
+    #[test]
+    fn face_normals_of_a_pose_are_its_inverse_transpose() {
+        // A dropped item's pose: spun, squashed and moved. Each face's normal is the
+        // inverse transpose of the pose's 3x3 applied to the face's axis, renormalized,
+        // here worked out in f64 from the cofactors.
+        let m = Mat4::from_translation(Vec3::new(3.0, -1.0, 7.5))
+            * Mat4::from_rotation_y(0.7)
+            * Mat4::from_rotation_x(-0.3)
+            * Mat4::from_scale(Vec3::new(0.5, 0.25, 2.0));
+        let c = m.to_cols_array();
+        let a = |row: usize, col: usize| f64::from(c[col * 4 + row]);
+        let cofactor = |row: usize, col: usize| {
+            let (r0, r1) = ((row + 1) % 3, (row + 2) % 3);
+            let (c0, c1) = ((col + 1) % 3, (col + 2) % 3);
+            a(r0, c0) * a(r1, c1) - a(r0, c1) * a(r1, c0)
+        };
+        let mut normals = FaceNormals::new(m);
+        // Twice each: a cached face gives what it gave the first time.
+        for d in Direction::ALL.into_iter().chain(Direction::ALL) {
+            let axis = direction_vector(d).to_array().map(f64::from);
+            // inverse^T = cofactors / det: the det's sign is the only part that survives
+            // renormalizing, and it is positive here.
+            let n: Vec<f64> = (0..3)
+                .map(|row| (0..3).map(|col| cofactor(row, col) * axis[col]).sum())
+                .collect();
+            let len = n.iter().map(|v| v * v).sum::<f64>().sqrt();
+            let got = normals.face(d);
+            for (g, e) in got.to_array().into_iter().zip(&n) {
+                assert!(
+                    (f64::from(g) - e / len).abs() < 1e-6,
+                    "{d:?}: {got} vs {n:?}"
+                );
+            }
+            assert_eq!(got, transform_normal(m, direction_vector(d)), "{d:?}");
+        }
     }
 }

@@ -9,7 +9,7 @@ use crate::{
     font::Patch,
     hud::{HudAtlas, PACK_ICON_SIZE, PACK_ICON_SLOTS},
     packs::{Position, Selectable, SelectionModel},
-    screen_draw::{self as d, Draw, Measure, TextField},
+    screen_draw::{self as d, Backdrop, Draw, Measure, TextField},
     text::{Style, Text},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -98,7 +98,14 @@ impl PackInfo {
 /// sampled into its 32x32 square. None when it does not decode, where
 /// `loadPackIcon` falls back to `unknown_pack`.
 pub fn load_icon(png: &[u8]) -> Option<Arc<[u8]>> {
-    let (w, h, rgba) = crate::hud::decode_bytes(png).ok()?;
+    scale_icon(crate::hud::decode_bytes(png).ok()?)
+}
+/// A project icon Modrinth served (PNG, WebP or JPEG,
+/// [`crate::hud::decode_image_bytes`]), scaled as [`load_icon`] scales a pack's.
+pub fn load_fetched_icon(bytes: &[u8]) -> Option<Arc<[u8]>> {
+    scale_icon(crate::hud::decode_image_bytes(bytes).ok()?)
+}
+fn scale_icon((w, h, rgba): (u32, u32, Vec<u8>)) -> Option<Arc<[u8]>> {
     if w == 0 || h == 0 {
         return None;
     }
@@ -313,6 +320,9 @@ pub enum Action {
     OpenFolder,
     /// The Done button (`onClose`: commit).
     Done,
+    /// Horizon's own: a Modrinth hit the player picked, to download into the
+    /// packs folder. The screen does not know where that is.
+    BrowsePick(usize),
 }
 
 /// The pack screen and its state.
@@ -332,13 +342,67 @@ pub struct PackScreen {
     confirm: Option<Confirm>,
     /// The selection changed since the screen opened.
     pub changed: bool,
-    /// The packs' icons by their [`icon_texture`].
-    icons: HashMap<String, Arc<[u8]>>,
+    /// The packs' icons by their [`icon_texture`], and the browser's.
+    pub icons: HashMap<String, Arc<[u8]>>,
+    /// Horizon's own Add button and its Modrinth list, when the player has
+    /// turned `packBrowser` on. Off, the screen stays vanilla's exactly
+    /// (tools/test_pack_screen_parity.py).
+    pub browser: Option<crate::pack_browser::Browser>,
+    /// Which backdrop this screen wants drawn behind it this frame
+    /// ([`Backdrop`]). Vanilla's own pack screen never asks for one.
+    pub backdrop: Backdrop,
+    /// The `icons` keys that came from the browser rather than from an
+    /// installed pack. Each decoded icon is `PACK_ICON_SIZE` squared in RGBA
+    /// (64 KiB), and a search brings twenty, so without this they piled up in
+    /// `icons` for the rest of the session: every search added twenty more
+    /// and none were ever freed.
+    browser_icons: Vec<String>,
+    /// Whether that button is drawn at all.
+    pub browsing_allowed: bool,
+    /// The browser's own search box, separate from the one that filters the
+    /// player's installed packs.
+    browser_search: TextField,
+    /// The browser's search box has the keyboard.
+    browser_focus: bool,
 }
 
 fn tr(key: &str) -> Text {
     Text::translate(key, &[])
 }
+
+/// The Add button is square. The button sprite is a nine-slice built for a
+/// height of 20; drawn shorter, neither it nor its label sits right, so the
+/// button keeps that height and is centred on the shorter search box.
+const ADD_SIZE: i32 = 20;
+/// A card in the grid: its icon beside its name, author and description.
+const ROW_H: i32 = 74;
+/// The air around a card's contents.
+const CARD_PAD: i32 = 6;
+/// The sidebar of filters down the left.
+const SIDEBAR_W: i32 = 108;
+/// The bar across the top holding Back and the search box.
+const TOPBAR_H: i32 = 30;
+/// A filter row in the sidebar.
+const FILTER_H: i32 = 15;
+/// The panels' colours, dark over whatever is behind them.
+const PANEL: i32 = 0xF0_14_17_22u32 as i32;
+const CARD: i32 = 0xFF_1E_22_30u32 as i32;
+const CARD_HOVER: i32 = 0xFF_2A_30_42u32 as i32;
+const SIDEBAR_BG: i32 = 0xFF_10_12_1Bu32 as i32;
+/// The Install button: Modrinth's green, dimmed once a pack is in.
+const GREEN: i32 = 0xFF_1B_D9_6Au32 as i32;
+const GREEN_HOVER: i32 = 0xFF_3B_E8_85u32 as i32;
+const INSTALLED_GREEN: i32 = 0xFF_2A_5E_3Fu32 as i32;
+const GREEN_EDGE: i32 = 0xFF_0E_7A_3Cu32 as i32;
+/// The icon drawn at the left of a row.
+const ICON: i32 = 34;
+/// The browser's search box and the button beside it.
+const BROWSER_SEARCH_W: i32 = 200;
+const SEARCH_BTN_W: i32 = 56;
+/// The Back and Install buttons.
+const BACK_W: i32 = 60;
+const BACK_H: i32 = 20;
+const INSTALL_W: i32 = 70;
 
 impl PackScreen {
     /// `PackSelectionScreen.init`: the lists filled, the search box focused.
@@ -374,6 +438,20 @@ impl PackScreen {
             focus: Focus::None,
             lists: [List::new(false, height - 66), List::new(true, height - 66)],
             confirm: None,
+            browser: None,
+            browsing_allowed: false,
+            backdrop: Backdrop::None,
+            browser_icons: Vec::new(),
+            browser_search: {
+                let mut field = TextField::new(0, 0, BROWSER_SEARCH_W, 18);
+                field.hint = Some(tr("horizon.pack.searchHint").with_style(&Style {
+                    color: Some(d::GRAY),
+                    italic: Some(true),
+                    ..Style::default()
+                }));
+                field
+            },
+            browser_focus: false,
             changed: false,
         };
         s.reposition(m);
@@ -527,6 +605,9 @@ impl PackScreen {
     pub fn click(&mut self, m: &Measure, x: f64, y: f64) -> Action {
         if self.confirm.is_some() {
             return self.confirm_click(m, x, y);
+        }
+        if let Some(action) = self.browser_click(m, x, y) {
+            return action;
         }
         if self.search.contains(x, y) {
             self.search.click(m, x, false);
@@ -754,6 +835,10 @@ impl PackScreen {
     }
     /// Typed text, when the search box has the focus.
     pub fn type_text(&mut self, m: &Measure, s: &str) {
+        if self.browser.is_some() {
+            self.browser_search.insert_text(m, s);
+            return;
+        }
         if self.confirm.is_none() && self.focus == Focus::Search && self.search.insert_text(m, s) {
             self.filter(None);
         }
@@ -775,6 +860,10 @@ impl PackScreen {
     }
     /// Backspace in the search box.
     pub fn erase(&mut self, m: &Measure, count: isize) {
+        if self.browser.is_some() {
+            self.browser_search.delete_chars(m, -count);
+            return;
+        }
         if self.confirm.is_none()
             && self.focus == Focus::Search
             && self.search.delete_chars(m, -count)
@@ -782,8 +871,41 @@ impl PackScreen {
             self.filter(None);
         }
     }
+    /// Keeps a browser icon, remembering it so [`Self::release_browser_icons`]
+    /// can free it again. The installed packs' own icons are not touched.
+    pub fn keep_browser_icon(&mut self, key: String, icon: Arc<[u8]>) {
+        if self.icons.insert(key.clone(), icon).is_none() {
+            self.browser_icons.push(key);
+        }
+    }
+    /// Frees every icon the browser downloaded. Called when it closes: the
+    /// pack lists behind it never drew these.
+    pub fn release_browser_icons(&mut self) {
+        for key in self.browser_icons.drain(..) {
+            self.icons.remove(&key);
+        }
+        self.icons.shrink_to_fit();
+    }
+    /// Runs the browser's search on what is typed in its box. The screen
+    /// calls this for the Search button and for Enter.
+    pub fn browser_submit(&mut self) {
+        let query = self.browser_search.value.clone();
+        if let Some(browser) = &mut self.browser {
+            browser.query = query;
+            browser.search();
+        }
+    }
+    /// Whether the browser's own search box has the keyboard, so the game
+    /// sends it typing rather than treating it as a hotkey.
+    pub fn browser_typing(&self) -> bool {
+        // The browser has one text field, so it always takes typing. Clearing
+        // it on a click elsewhere made typing after picking a filter or a card
+        // go nowhere, and Search then submitted stale text.
+        self.browser.is_some()
+    }
     pub fn search_focused(&self) -> bool {
-        self.confirm.is_none() && self.focus == Focus::Search
+        // The browser's own box counts: the game routes typing by this.
+        self.browser_typing() || (self.confirm.is_none() && self.focus == Focus::Search)
     }
     /// Resize (`Screen.init` on a new size: `repositionElements`).
     pub fn resize(&mut self, m: &Measure, width: i32, height: i32) {
@@ -827,7 +949,7 @@ impl PackScreen {
 
     /// The shown screen's calls (`Screen.extractRenderState`); `blink_ms`
     /// is the time since the search box took the focus.
-    pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64) -> Vec<Draw> {
+    pub fn draw(&self, m: &Measure, mouse: (i32, i32), blink_ms: u64, now_ms: i64) -> Vec<Draw> {
         let mut out = Vec::new();
         // PackSelectionScreen, or the ConfirmScreen over it (its title and
         // its message).
@@ -845,7 +967,7 @@ impl PackScreen {
             for ((bx, by), key) in buttons.into_iter().zip(["gui.yes", "gui.no"]) {
                 let hover = d::inside(mouse, bx, by, 150, 20);
                 crate::widgets::widget_cursor(hover, true);
-                d::button(&mut out, m, &tr(key), bx, by, 150, 20, true, hover);
+                d::button(&mut out, m, &tr(key), bx, by, 150, 20, true, hover, now_ms);
             }
             return out;
         }
@@ -863,25 +985,409 @@ impl PackScreen {
         for side in 0..2 {
             self.draw_list(&mut out, m, side, mouse);
         }
-        for (i, (bx, by)) in self.footer().into_iter().enumerate() {
-            let hover = d::inside(mouse, bx, by, 150, 20);
-            let label = tr(if i == 0 {
-                "pack.openFolder"
+        self.draw_footer(
+            &mut out,
+            m,
+            mouse,
+            now_ms,
+            [&tr("pack.openFolder"), &tr("gui.done")],
+        );
+        self.draw_browser(&mut out, m, mouse, now_ms);
+        out
+    }
+    /// The Add button and the screen it opens. `None` leaves the click to
+    /// the vanilla screen beneath.
+    fn browser_click(&mut self, m: &Measure, x: f64, y: f64) -> Option<Action> {
+        if !self.browsing_allowed {
+            return None;
+        }
+        let point = (x as i32, y as i32);
+        if self.browser.is_some() {
+            let (bx, by) = self.back_button();
+            if d::inside(point, bx, by, BACK_W, BACK_H) {
+                self.browser = None;
+                self.browser_focus = false;
+                // Back to the vanilla pack screen, which wants no backdrop.
+                self.backdrop = Backdrop::None;
+                self.release_browser_icons();
+                return Some(Action::None);
+            }
+            let (qx, qy) = self.browser_search_box();
+            if d::inside(point, qx, qy, BROWSER_SEARCH_W, 18) {
+                self.browser_search.x = qx;
+                self.browser_search.y = qy;
+                self.browser_search.click(m, x, false);
+                self.browser_focus = true;
+                return Some(Action::None);
+            }
+            let (sx2, sy2) = self.browser_search_button();
+            if d::inside(point, sx2, sy2, SEARCH_BTN_W, 18) {
+                self.browser_submit();
+                return Some(Action::None);
+            }
+            for i in 0..crate::pack_browser::FILTERS.len() as i32 {
+                let (fx, fy, fw, fh) = self.filter_box(i);
+                if d::inside(point, fx, fy, fw, fh) {
+                    let query = self.browser_search.value.clone();
+                    if let Some(browser) = &mut self.browser {
+                        if !browser.filters.insert(i as usize) {
+                            browser.filters.remove(&(i as usize));
+                        }
+                        // A filter is only meaningful once it is searched on.
+                        browser.query = query;
+                        browser.search();
+                    }
+                    return Some(Action::None);
+                }
+            }
+            let fits = self.browser_row_count();
+            let busy = self.browser.as_ref().is_some_and(|b| b.busy);
+            let hits = self.browser.as_ref().map_or(0, |b| b.hits.len() as i32);
+            for i in 0..hits.min(fits) {
+                let (ix, iy) = self.install_button(i);
+                if d::inside(point, ix, iy, INSTALL_W, BACK_H) {
+                    if busy {
+                        return Some(Action::None);
+                    }
+                    return Some(Action::BrowsePick(i as usize));
+                }
+            }
+            // The screen is modal: nothing beneath it takes the click.
+            return Some(Action::None);
+        }
+        let (bx, by) = self.add_button(m);
+        if d::inside(point, bx, by, ADD_SIZE, ADD_SIZE) {
+            let mut browser = crate::pack_browser::Browser::new();
+            // Opens on the text already in the search box, so a player who
+            // searched their own packs first keeps the term; it is then the
+            // browser's box that carries it.
+            browser.query = self.search.value.clone();
+            browser.search();
+            self.browser_search.set_value(m, &self.search.value);
+            self.browser_focus = true;
+            self.browser = Some(browser);
+            // Horizon's own screen, so it may ask for the menu panorama.
+            self.backdrop = Backdrop::Panorama;
+            return Some(Action::None);
+        }
+        None
+    }
+    /// The Back button, top left of the browser.
+    fn back_button(&self) -> (i32, i32) {
+        (8, 8)
+    }
+    /// The browser's search box and the button beside it.
+    fn browser_search_box(&self) -> (i32, i32) {
+        let total = BROWSER_SEARCH_W + 4 + SEARCH_BTN_W;
+        let left = BACK_W + 16;
+        let centred = (self.width - total) / 2;
+        (centred.max(left), 5)
+    }
+    fn browser_search_button(&self) -> (i32, i32) {
+        let (x, y) = self.browser_search_box();
+        (x + BROWSER_SEARCH_W + 4, y)
+    }
+    /// The Install button of row `i`.
+    fn install_button(&self, i: i32) -> (i32, i32) {
+        // Top right, beside the name. It used to sit bottom right, where the
+        // description ran under it.
+        let (cx, cy, cw, _) = self.card_box(i);
+        (cx + cw - INSTALL_W - CARD_PAD, cy + CARD_PAD)
+    }
+    /// The browser's content column: centred, and never wider than it reads
+    /// comfortably.
+    fn browser_area(&self) -> (i32, i32, i32, i32) {
+        let x = SIDEBAR_W + 6;
+        let top = TOPBAR_H + 6;
+        let w = (self.width - x - 6).max(120);
+        let h = (self.height - top - 6).max(ROW_H);
+        (x, top, w, h)
+    }
+    /// Two columns where there is room for them, otherwise one.
+    fn browser_columns(&self) -> i32 {
+        let (_, _, w, _) = self.browser_area();
+        if w >= 360 { 2 } else { 1 }
+    }
+    /// The card at `i`: its box in the grid.
+    fn card_box(&self, i: i32) -> (i32, i32, i32, i32) {
+        let (px, py, pw, _) = self.browser_area();
+        let cols = self.browser_columns();
+        let cw = (pw - 6 * (cols - 1)) / cols;
+        let (cx, cy) = (i % cols, i / cols);
+        (px + cx * (cw + 6), py + cy * (ROW_H + 6), cw, ROW_H)
+    }
+    /// The filter row `i` in the sidebar.
+    fn filter_box(&self, i: i32) -> (i32, i32, i32, i32) {
+        (6, TOPBAR_H + 18 + i * FILTER_H, SIDEBAR_W - 12, FILTER_H)
+    }
+    /// How many rows fit the column.
+    fn browser_row_count(&self) -> i32 {
+        let (_, _, _, ph) = self.browser_area();
+        (((ph + 6) / (ROW_H + 6)) * self.browser_columns()).max(0)
+    }
+    /// Horizon's Add button, and the screen it opens. Nothing is drawn
+    /// unless the player turned `packBrowser` on, so the screen's vanilla
+    /// parity is untouched by default.
+    fn draw_browser(&self, out: &mut Vec<Draw>, m: &Measure, mouse: (i32, i32), now_ms: i64) {
+        if !self.browsing_allowed {
+            return;
+        }
+        let Some(browser) = &self.browser else {
+            let (bx, by) = self.add_button(m);
+            let hover = d::inside(mouse, bx, by, ADD_SIZE, ADD_SIZE);
+            d::button(
+                out,
+                m,
+                &tr("horizon.pack.add"),
+                bx,
+                by,
+                ADD_SIZE,
+                ADD_SIZE,
+                true,
+                hover,
+                now_ms,
+            );
+            if hover {
+                d::tooltip(out, m, &tr("horizon.pack.addInfo"), mouse);
+            }
+            return;
+        };
+        // Modal and opaque: vanilla's own menu background tiled over the
+        // whole screen, then a wash, so none of the pack lists shows through.
+        d::sprite(out, "gui/menu_background", 0, 0, self.width, self.height);
+        d::fill(out, 0, 0, self.width, self.height, PANEL);
+        // The sidebar of filters, and the bar across the top.
+        d::fill(out, 0, 0, SIDEBAR_W, self.height, SIDEBAR_BG);
+        d::fill(out, 0, 0, self.width, TOPBAR_H, SIDEBAR_BG);
+        let (bx, by) = self.back_button();
+        let back_hover = d::inside(mouse, bx, by, BACK_W, BACK_H);
+        d::button(
+            out,
+            m,
+            &tr("gui.back"),
+            bx,
+            by,
+            BACK_W,
+            BACK_H,
+            true,
+            back_hover,
+            now_ms,
+        );
+        // The search row: its box and the button that runs it.
+        let (qx, qy) = self.browser_search_box();
+        let mut field = self.browser_search.clone();
+        field.x = qx;
+        field.y = qy;
+        field.draw(out, m, 0, None);
+        let (sbx, sby) = self.browser_search_button();
+        d::button(
+            out,
+            m,
+            &tr("horizon.pack.search"),
+            sbx,
+            sby,
+            SEARCH_BTN_W,
+            18,
+            !browser.busy,
+            d::inside(mouse, sbx, sby, SEARCH_BTN_W, 18),
+            now_ms,
+        );
+        // The sidebar's heading and its filters.
+        let heading = tr("horizon.pack.filters").with_style(&Style {
+            bold: Some(true),
+            ..Style::default()
+        });
+        d::string_widget(out, m, &heading, 6, TOPBAR_H + 5, 0);
+        for (i, (key, _, _)) in crate::pack_browser::FILTERS.iter().enumerate() {
+            let i = i as i32;
+            let (fx, fy, fw, fh) = self.filter_box(i);
+            let on = browser.filters.contains(&(i as usize));
+            let hover = d::inside(mouse, fx, fy, fw, fh);
+            if hover {
+                d::fill(out, fx - 2, fy - 1, fx + fw + 2, fy + fh - 1, CARD_HOVER);
+            }
+            // A small box, filled when the filter is on.
+            d::fill(out, fx, fy, fx + 7, fy + 7, 0xFF_44_4C_63u32 as i32);
+            if on {
+                d::fill(out, fx + 1, fy + 1, fx + 6, fy + 6, 0xFF_6C_C6_4Bu32 as i32);
+            }
+            let label = tr(key).with_color(if on { d::WHITE as u32 } else { d::GRAY });
+            d::string_widget(out, m, &label, fx + 11, fy - 1, 0);
+        }
+        let (px, py, pw, ph) = self.browser_area();
+        let message = if browser.busy && browser.installing.is_none() {
+            Some(tr("horizon.pack.addWorking"))
+        } else if let Some(status) = &browser.status {
+            Some(Text::translate(
+                "horizon.pack.addFailed",
+                &[Text::literal(status.clone())],
+            ))
+        } else if browser.hits.is_empty() {
+            Some(tr("horizon.pack.addNone"))
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            let lines = d::label_lines(
+                m,
+                &message.with_color(d::GRAY),
+                pw - 8,
+                6,
+                &Style::default(),
+            );
+            d::label(out, &lines, px + 4, py + 20, pw - 8, true);
+            return;
+        }
+        let fits = self.browser_row_count();
+        for (i, hit) in browser.hits.iter().enumerate() {
+            let i = i as i32;
+            if i >= fits {
+                break;
+            }
+            let (cx, cy, cw, ch) = self.card_box(i);
+            if cy + ch > py + ph {
+                break;
+            }
+            let over = d::inside(mouse, cx, cy, cw, ch);
+            d::fill(
+                out,
+                cx,
+                cy,
+                cx + cw,
+                cy + ch,
+                if over { CARD_HOVER } else { CARD },
+            );
+            // The icon, once one has arrived: `bind_icons` swaps the texture
+            // for the atlas slot it patched the PNG into.
+            let texture = icon_texture(&hit.id);
+            if self.icons.contains_key(&texture) {
+                out.push(Draw::Blit {
+                    texture,
+                    x: cx + CARD_PAD,
+                    y: cy + CARD_PAD,
+                    w: ICON,
+                    h: ICON,
+                    u: 0.0,
+                    v: 0.0,
+                    src: [PACK_ICON_SIZE as i32, PACK_ICON_SIZE as i32],
+                    tex: [PACK_ICON_SIZE as i32, PACK_ICON_SIZE as i32],
+                    color: d::WHITE,
+                });
+            }
+            // The name and author sit in the column between the icon and
+            // the Install button; the description runs the card's full width
+            // under both, so no two of them can overlap.
+            let text_x = cx + CARD_PAD + ICON + CARD_PAD;
+            let text_w = (cx + cw - CARD_PAD - INSTALL_W - CARD_PAD - text_x).max(20);
+            let name = d::label_lines(
+                m,
+                &Text::literal(hit.title.clone()).with_style(&Style {
+                    bold: Some(true),
+                    ..Style::default()
+                }),
+                text_w,
+                1,
+                &Style::default(),
+            );
+            d::label(out, &name, text_x, cy + CARD_PAD + 1, text_w, false);
+            if !hit.author.is_empty() {
+                let author = d::label_lines(
+                    m,
+                    &Text::literal(hit.author.clone()).with_color(d::GRAY),
+                    text_w,
+                    1,
+                    &Style::default(),
+                );
+                d::label(out, &author, text_x, cy + CARD_PAD + 12, text_w, false);
+            }
+            let body_w = (cw - 2 * CARD_PAD).max(20);
+            let lines = d::label_lines(
+                m,
+                &Text::literal(hit.description.clone()).with_color(d::GRAY),
+                body_w,
+                2,
+                &Style::default(),
+            );
+            // Below the icon, which is the tallest thing in the top row.
+            d::label(
+                out,
+                &lines,
+                cx + CARD_PAD,
+                cy + CARD_PAD + ICON + 5,
+                body_w,
+                false,
+            );
+            let (ix, iy) = self.install_button(i);
+            let done = browser.installed.contains(&(i as usize));
+            let running = browser.installing == Some(i as usize);
+            let label = if done {
+                tr("horizon.pack.installed")
+            } else if running {
+                tr("horizon.pack.installing")
             } else {
-                "gui.done"
-            });
+                tr("horizon.pack.install")
+            };
+            // Drawn rather than the vanilla button sprite, so it can be the
+            // green the design asks for.
+            let hovered = d::inside(mouse, ix, iy, INSTALL_W, BACK_H);
+            let face = if done {
+                INSTALLED_GREEN
+            } else if hovered && !browser.busy {
+                GREEN_HOVER
+            } else {
+                GREEN
+            };
+            d::fill(out, ix, iy, ix + INSTALL_W, iy + BACK_H, GREEN_EDGE);
+            d::fill(
+                out,
+                ix + 1,
+                iy + 1,
+                ix + INSTALL_W - 1,
+                iy + BACK_H - 1,
+                face,
+            );
+            let lw = m.width(&label);
+            d::string_widget(
+                out,
+                m,
+                &label,
+                ix + (INSTALL_W - lw) / 2,
+                iy + (BACK_H - 8) / 2,
+                0,
+            );
+        }
+    }
+    /// The Add button, just right of the search box.
+    fn add_button(&self, m: &Measure) -> (i32, i32) {
+        let (sx, sy) = self.header(m)[2];
+        // The search box is 15 tall: centre the taller button on it.
+        (sx + 204, sy - (ADD_SIZE - 15) / 2)
+    }
+    /// The footer's two buttons, "Open Pack Folder" and "Done", over their
+    /// labels; a label wider than its button scrolls with the clock.
+    fn draw_footer(
+        &self,
+        out: &mut Vec<Draw>,
+        m: &Measure,
+        mouse: (i32, i32),
+        now_ms: i64,
+        labels: [&Text; 2],
+    ) {
+        for (i, ((bx, by), label)) in self.footer().into_iter().zip(labels).enumerate() {
+            let hover = d::inside(mouse, bx, by, 150, 20);
             // The cursor follows the mouse; the highlight also keyboard focus.
             crate::widgets::widget_cursor(hover, true);
             d::button(
-                &mut out,
+                out,
                 m,
-                &label,
+                label,
                 bx,
                 by,
                 150,
                 20,
                 true,
                 hover || self.focus == Focus::Button(i),
+                now_ms,
             );
             if i == 0 {
                 crate::widgets::last_narratable(|n| {
@@ -889,10 +1395,9 @@ impl PackScreen {
                 });
             }
             if i == 0 && hover {
-                d::tooltip(&mut out, m, &tr("pack.folderInfo"), mouse);
+                d::tooltip(out, m, &tr("pack.folderInfo"), mouse);
             }
         }
-        out
     }
     fn draw_list(&self, out: &mut Vec<Draw>, m: &Measure, side: usize, mouse: (i32, i32)) {
         let l = &self.lists[side];
@@ -1151,7 +1656,7 @@ mod icon_tests {
             pack("file/Iconless", None),
         ];
         let screen = PackScreen::new(&m, tr("resourcePack.title"), 480, 320, false, packs, &[]);
-        let mut draws = screen.draw(&m, (0, 0), 0);
+        let mut draws = screen.draw(&m, (0, 0), 0, 0);
         let mut patches = Vec::new();
         screen.bind_icons(&mut draws, &atlas, &mut patches);
         let icons: Vec<&str> = draws
@@ -1190,6 +1695,85 @@ mod icon_tests {
 #[cfg(test)]
 mod click_sound_tests {
     use super::*;
+
+    #[test]
+    fn a_cards_parts_do_not_overlap_each_other() {
+        let atlas =
+            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
+                .unwrap();
+        let m = Measure(&atlas.font);
+        // Both a wide window (two columns) and a narrow one (one column).
+        for (w, h) in [(480, 320), (260, 320)] {
+            let mut screen =
+                PackScreen::new(&m, tr("resourcePack.title"), w, h, false, Vec::new(), &[]);
+            screen.browsing_allowed = true;
+            let (cx, cy, cw, ch) = screen.card_box(0);
+            let (ix, iy) = screen.install_button(0);
+            // Install stays inside its card.
+            assert!(
+                ix >= cx && ix + INSTALL_W <= cx + cw,
+                "install escapes the card"
+            );
+            assert!(
+                iy >= cy && iy + BACK_H <= cy + ch,
+                "install escapes the card"
+            );
+            // The name column ends before Install begins, so the two cannot
+            // be drawn over one another.
+            let text_x = cx + CARD_PAD + ICON + CARD_PAD;
+            let text_w = (cx + cw - CARD_PAD - INSTALL_W - CARD_PAD - text_x).max(20);
+            assert!(
+                text_x + text_w <= ix || text_w == 20,
+                "the name column runs under Install"
+            );
+            // The description starts below the icon rather than across it.
+            let description_top = cy + CARD_PAD + ICON + 5;
+            assert!(
+                description_top >= cy + CARD_PAD + ICON,
+                "text over the icon"
+            );
+            // And it still fits in the card with both its lines.
+            assert!(description_top + 18 <= cy + ch, "the description overflows");
+        }
+    }
+
+    #[test]
+    fn the_browsers_search_button_submits_what_was_typed() {
+        let atlas =
+            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
+                .unwrap();
+        let m = Measure(&atlas.font);
+        let mut screen = PackScreen::new(
+            &m,
+            tr("resourcePack.title"),
+            480,
+            320,
+            false,
+            Vec::new(),
+            &[],
+        );
+        screen.browsing_allowed = true;
+        // The Add button opens the browser.
+        let (ax, ay) = screen.add_button(&m);
+        screen.click(&m, f64::from(ax) + 2.0, f64::from(ay) + 2.0);
+        assert!(screen.browser.is_some(), "the Add button opens the browser");
+        // Typing reaches the browser's own box, not the pack filter.
+        screen.type_text(&m, "blue");
+        assert_eq!(screen.browser_search.value, "blue");
+        assert_eq!(screen.search.value, "", "the pack filter is left alone");
+        // The Search button sends it to the browser.
+        let (sx, sy) = screen.browser_search_button();
+        screen.click(&m, f64::from(sx) + 2.0, f64::from(sy) + 2.0);
+        assert_eq!(
+            screen.browser.as_ref().map(|b| b.query.as_str()),
+            Some("blue"),
+            "the Search button submits the box's text"
+        );
+        // The box and the button must not overlap, or one eats the other's
+        // clicks.
+        let (qx, _) = screen.browser_search_box();
+        assert!(sx >= qx + BROWSER_SEARCH_W, "{sx} overlaps the box at {qx}");
+    }
 
     #[test]
     fn only_footer_and_confirmation_buttons_request_a_click_sound() {
@@ -1240,5 +1824,133 @@ mod click_sound_tests {
             Action::None
         );
         assert!(!screen.confirming());
+    }
+}
+
+#[cfg(test)]
+mod footer_label_tests {
+    use super::*;
+    use crate::lang::{self, Language};
+
+    /// The footer drawn with these labels (no global language involved) and
+    /// the footer buttons' positions.
+    fn footer(
+        atlas: &HudAtlas,
+        open_folder: &Text,
+        done: &Text,
+        now_ms: i64,
+    ) -> (Vec<Draw>, [(i32, i32); 2]) {
+        let m = Measure(&atlas.font);
+        let screen = PackScreen::new(&m, Text::literal("Packs"), 480, 320, false, Vec::new(), &[]);
+        let mut out = Vec::new();
+        screen.draw_footer(&mut out, &m, (0, 0), now_ms, [open_folder, done]);
+        (out, screen.footer())
+    }
+    /// Every label drawn in `[bx + 2, bx + 148] x [by, by + 20]` of its button:
+    /// the scissor of a scrolling one is that box, and the text sits between
+    /// the scissor's calls.
+    fn assert_labels_stay_in_their_buttons(draws: &[Draw], buttons: &[(i32, i32)]) -> usize {
+        let mut scissors = 0;
+        let mut open = None;
+        let mut button = 0;
+        for d in draws {
+            match d {
+                Draw::Sprite { x, y, .. } => {
+                    button = buttons.iter().position(|b| *b == (*x, *y)).unwrap();
+                }
+                Draw::Scissor { x0, y0, x1, y1 } => {
+                    let (bx, by) = buttons[button];
+                    assert_eq!([*x0, *y0, *x1, *y1], [bx + 2, by, bx + 148, by + 20]);
+                    assert!(open.replace(()).is_none());
+                    scissors += 1;
+                }
+                Draw::NoScissor => assert!(open.take().is_some()),
+                _ => {}
+            }
+        }
+        assert!(open.is_none());
+        scissors
+    }
+
+    /// The Resource Packs footer with a label wider than its 150 px button
+    /// does not panic and scrolls; the short "Done" keeps its centre.
+    #[test]
+    fn a_footer_label_wider_than_its_button_scrolls() {
+        let atlas =
+            crate::hud::HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets"))
+                .unwrap();
+        let m = Measure(&atlas.font);
+        let wide = Text::literal("Otvori papku s paketami resursov, i jos nesto");
+        assert!(m.width(&wide) > 146);
+        let (draws, buttons) = footer(&atlas, &wide, &Text::literal("Done"), 0);
+        assert_eq!(assert_labels_stay_in_their_buttons(&draws, &buttons), 1);
+        // The clock moves it.
+        let x = |draws: &[Draw]| {
+            draws
+                .iter()
+                .find_map(|d| match d {
+                    Draw::Text { x, .. } => Some(*x),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        let (later, _) = footer(&atlas, &wide, &Text::literal("Done"), 2000);
+        assert_ne!(x(&draws), x(&later));
+        // Both too wide: both scroll.
+        let (draws, buttons) = footer(&atlas, &wide, &wide, 0);
+        assert_eq!(assert_labels_stay_in_their_buttons(&draws, &buttons), 2);
+    }
+
+    /// The real language files: the Resource Packs footer in each of the 143
+    /// languages draws without a panic, and in the ones whose "Open Pack
+    /// Folder" is wider than the button (Afrikaans and Macedonian among them,
+    /// the crash of #6129) it scrolls. A local `Language` per file: the global
+    /// language stays as it was.
+    #[test]
+    #[ignore = "requires prepared language data in HORIZON_TEST_RESOURCES or .local/horizon-client/26.3"]
+    fn the_footer_draws_in_every_language_file() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client/26.3")
+            });
+        let atlas = crate::hud::HudAtlas::build(&root).unwrap();
+        let m = Measure(&atlas.font);
+        let before = lang::code();
+        let mut codes: Vec<String> = std::fs::read_dir(root.join("assets/minecraft/lang"))
+            .unwrap()
+            .filter_map(|e| {
+                let name = e.ok()?.file_name().into_string().ok()?;
+                name.strip_suffix(".json").map(str::to_owned)
+            })
+            .collect();
+        codes.sort();
+        assert!(codes.len() >= 143, "{}", codes.len());
+        let mut scrolling = Vec::new();
+        for code in &codes {
+            let language = Language::load(&[&root], code);
+            let label = |key| Text::literal(language.get(key).unwrap_or(key));
+            let (open_folder, done) = (label("pack.openFolder"), label("gui.done"));
+            for now_ms in [0, 700, 1300, 5000] {
+                let (draws, buttons) = footer(&atlas, &open_folder, &done, now_ms);
+                let n = assert_labels_stay_in_their_buttons(&draws, &buttons);
+                assert_eq!(
+                    n,
+                    [&open_folder, &done]
+                        .iter()
+                        .filter(|t| m.width(t) > 146)
+                        .count(),
+                    "{code}"
+                );
+                if now_ms == 0 && n > 0 {
+                    scrolling.push(code.as_str());
+                }
+            }
+        }
+        for code in ["af_za", "mk_mk"] {
+            assert!(scrolling.contains(&code), "{code} not in {scrolling:?}");
+        }
+        assert_eq!(lang::code(), before, "the global language was left alone");
     }
 }

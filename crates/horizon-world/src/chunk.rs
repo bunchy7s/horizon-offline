@@ -1,5 +1,6 @@
 //! Saved section palettes and storage-level chunk access. Changes here do not
 //! run block behavior, lighting, heightmaps, neighbor updates or scheduled ticks.
+pub use crate::block_state_properties::BlockProperties;
 use crate::{
     DATA_VERSION,
     compression::invalid,
@@ -12,7 +13,7 @@ use horizon_core::{
     storage::PackedStorage,
     ticks::{ChunkTicks, SavedTick, TickTypeId},
 };
-use std::{collections::BTreeMap, io};
+use std::io;
 
 fn key(value: &str) -> JavaString {
     JavaString::from(value)
@@ -161,7 +162,7 @@ impl PalettedContainer {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BlockState {
     pub name: String,
-    pub properties: BTreeMap<String, String>,
+    pub properties: BlockProperties,
 }
 impl BlockState {
     pub fn to_nbt(&self) -> Tag {
@@ -184,13 +185,13 @@ impl BlockState {
         if let Tag::String(name) = tag {
             return Ok(Self {
                 name: name.to_string().map_err(|e| invalid(e.to_string()))?,
-                properties: BTreeMap::new(),
+                properties: BlockProperties::new(),
             });
         }
         let Some(Tag::String(name)) = tag.get("id") else {
             return Err(invalid("block state is missing id"));
         };
-        let mut properties = BTreeMap::new();
+        let mut properties = Vec::new();
         if let Some(tag) = tag.get("properties") {
             let Tag::Compound(map) = tag else {
                 return Err(invalid("block properties are not a compound"));
@@ -199,15 +200,15 @@ impl BlockState {
                 let Tag::String(v) = v else {
                     return Err(invalid("block property is not a string"));
                 };
-                properties.insert(
+                properties.push((
                     k.to_string().map_err(|e| invalid(e.to_string()))?,
                     v.to_string().map_err(|e| invalid(e.to_string()))?,
-                );
+                ));
             }
         }
         Ok(Self {
             name: name.to_string().map_err(|e| invalid(e.to_string()))?,
-            properties,
+            properties: properties.into_iter().collect(),
         })
     }
 }
@@ -378,6 +379,20 @@ pub struct BlockSection<'r> {
     extra: Compound,
 }
 impl<'r> BlockSection<'r> {
+    /// The section's heap bytes: its packed storage, and its palette, counts
+    /// and free list (`horizon-ctl memory`; extra NBT not counted).
+    pub fn heap_bytes(&self) -> [usize; 2] {
+        [
+            self.storage.as_ref().map_or(0, PackedStorage::heap_bytes),
+            self.palette.capacity() * std::mem::size_of::<BlockStateId>()
+                + self.counts.capacity() * std::mem::size_of::<u16>()
+                + self.free.capacity() * std::mem::size_of::<u32>(),
+        ]
+    }
+    /// Bits per block of its packed storage, 0 for a single-state section.
+    pub fn storage_bits(&self) -> u8 {
+        self.storage.as_ref().map_or(0, PackedStorage::bits)
+    }
     pub fn registry(&self) -> &'r BlockRegistry {
         self.registry
     }
@@ -758,7 +773,7 @@ mod tests {
                 Tag::compound([("id", Tag::String(format!("minecraft:b{i}").as_str().into()))])
             })
             .collect();
-        let defaults: BTreeMap<_, _> = (0..states)
+        let defaults: std::collections::BTreeMap<_, _> = (0..states)
             .map(|i| {
                 (
                     JavaString::from(format!("minecraft:b{i}").as_str()),

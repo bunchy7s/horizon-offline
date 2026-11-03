@@ -10,8 +10,8 @@
 //! priorities and vectors) and fill the game field's holes from a pyramid; mask what each
 //! frame can't see; blend the two frames along both fields; fill what is left from a
 //! pyramid of the result. What differs from AMD's, all forced by WGSL or by Horizon:
-//! the game's motion vectors are computed from the depth and `Inputs::reproject` (the
-//! camera's, so what moves on its own relies on the optical flow); textures AMD updates
+//! the game's motion vectors are the camera's, from the depth and `Inputs::reproject`,
+//! except where `Inputs::object_motion` has an entity's own; textures AMD updates
 //! with image atomics are storage buffers; SPD's single-pass pyramids are a pass per
 //! level; and there is no HUD-less pass, as Horizon draws its HUD over the made frame.
 
@@ -33,6 +33,9 @@ pub struct Inputs<'a> {
     /// `world_post::reprojection`): the motion vectors are the camera's, from this and
     /// the depth.
     pub reproject: Mat4,
+    /// What moved on its own: `motion::FORMAT` at `render_size`, xy its motion vector
+    /// (FSR's convention, in UV) where z is 1, used over the camera's.
+    pub object_motion: &'a wgpu::TextureView,
     pub near: f32,
     pub far: f32,
     /// Vertical field of view, radians.
@@ -442,6 +445,7 @@ impl Interpolation {
             &[
                 (0, params()),
                 (2, view(inputs.depth)),
+                (34, view(inputs.object_motion)),
                 (5, view(&r.dilated_depth)),
                 (6, view(&r.dilated_mv)),
                 (9, whole(&r.rec_prev_depth)),
@@ -644,10 +648,12 @@ mod tests {
     /// Runs `frames` (pattern shifts) through the optical flow and the interpolation with
     /// a camera that moves by `reproject` each frame, and returns the mean error of the
     /// last made frame's interior against `expected`, and the last two real frames'.
+    /// `object`: every pixel's own motion vector (UV), as if all of it moved on its own.
     fn interpolate(
         seed: u32,
         shifts: &[[i32; 2]],
         reproject: Mat4,
+        object: Option<[f32; 2]>,
         expected: [i32; 2],
     ) -> Option<[f32; 3]> {
         let (device, queue) = of::device()?;
@@ -682,6 +688,35 @@ mod tests {
             ..Default::default()
         });
         queue.submit([encoder.finish()]);
+        let object_motion = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: size[0],
+                height: size[1],
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: super::super::motion::FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        if let Some(mv) = object {
+            let texel = [mv[0], mv[1], 1.0, 0.0].map(|v| half::f16::from_f32(v).to_bits());
+            let texels: Vec<u16> = (0..size[0] * size[1]).flat_map(|_| texel).collect();
+            queue.write_texture(
+                object_motion.as_image_copy(),
+                bytemuck::cast_slice(&texels),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size[0] * 8),
+                    rows_per_image: None,
+                },
+                object_motion.size(),
+            );
+        }
+        let object_motion = object_motion.create_view(&Default::default());
         let mut flow = OpticalFlow::new(&device, size);
         let mut interpolation = Interpolation::new(&device, size);
         let frames: Vec<_> = shifts
@@ -731,6 +766,7 @@ mod tests {
                     render_size: size,
                     jitter: [0.0; 2],
                     reproject: if i == 0 { Mat4::IDENTITY } else { reproject },
+                    object_motion: &object_motion,
                     near: 0.05,
                     far: 512.0,
                     fov_y: 1.2,
@@ -776,7 +812,8 @@ mod tests {
     fn moves_what_the_optical_flow_follows_halfway() {
         let mut shifts = vec![[0, 0]; 20];
         shifts.push([16, 8]);
-        let Some([made, previous, current]) = interpolate(100, &shifts, Mat4::IDENTITY, [8, 4])
+        let Some([made, previous, current]) =
+            interpolate(100, &shifts, Mat4::IDENTITY, None, [8, 4])
         else {
             return;
         };
@@ -795,7 +832,26 @@ mod tests {
         // What is at a pixel now was 16 pixels to its right last frame.
         let reproject = Mat4::from_translation(glam::Vec3::new(32.0 / size[0], 0.0, 0.0));
         let shifts = [[0, 0], [-16, 0], [-32, 0], [-48, 0]];
-        let Some([made, previous, current]) = interpolate(1, &shifts, reproject, [-40, 0]) else {
+        let Some([made, previous, current]) = interpolate(1, &shifts, reproject, None, [-40, 0])
+        else {
+            return;
+        };
+        assert!(
+            made * 4.0 < previous.min(current),
+            "{made} against {previous} and {current}"
+        );
+    }
+
+    /// Something moving on its own with its own motion vectors (the camera still): the
+    /// made frame is halfway, as with the camera's.
+    #[test]
+    fn moves_what_has_its_own_motion_vectors_halfway() {
+        let size = [512.0, 288.0];
+        let shifts = [[0, 0], [16, 8], [32, 16], [48, 24]];
+        let mv = [-16.0 / size[0], -8.0 / size[1]];
+        let Some([made, previous, current]) =
+            interpolate(1, &shifts, Mat4::IDENTITY, Some(mv), [40, 20])
+        else {
             return;
         };
         assert!(

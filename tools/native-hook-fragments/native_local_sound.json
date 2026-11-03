@@ -1,5 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "client sounds that wait (`native_play_local_sound`).",
-  "doc_summary": "client sounds that wait: `native_play_local_sound(sound, at, volume, pitch, delay)` plays a sound event, vanilla's or\nthe mod's own from its `assets/<id>/sounds.json`, for this player only and up to a minute later, so a client mod\ncan time a blast's sound to its shock wave. Bundles that use it need `\"hooks\": @API:native_local_sound@`."
-}

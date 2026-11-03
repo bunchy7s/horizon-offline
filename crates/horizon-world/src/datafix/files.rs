@@ -700,8 +700,9 @@ pub fn current_world_gen_settings(base: &Path) -> io::Result<Option<Tag>> {
 
 // ------------------------------------------------------------------ the read-time upgrades
 
-/// Chunk generator types per dimension from `world_gen_settings.dat`.
-pub(super) fn generators(base: &Path) -> io::Result<Vec<(String, String)>> {
+/// Chunk generator types per dimension from `world_gen_settings.dat`, the
+/// `generator` of the context the chunk fixes read.
+pub fn generators(base: &Path) -> io::Result<Vec<(String, String)>> {
     let Some(tag) = read_dat(&base.join("data/minecraft/world_gen_settings.dat"))? else {
         return Ok(Vec::new());
     };

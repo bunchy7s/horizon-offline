@@ -8,32 +8,12 @@
 //! players (the hub's: a dedicated server's, a LAN host's, single player's
 //! server thread's), never on a client's.
 use super::{Dim, Game, commands::execute, lan::LanHost};
+// Their old home, for mixin code that names them here.
+pub(crate) use horizon_client::mod_api::{NativeCommand, NativeServerPlayer};
 use horizon_client::{items::ItemStack, lan::data::component_nbt, text::Text};
 use horizon_protocol::packets::play::{self, Clientbound as C};
 use serde_json::{Map, Value, json};
 use std::{collections::HashMap, path::PathBuf};
-
-/// A player on the server, as a server hook sees them.
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct NativeServerPlayer {
-    pub(crate) uuid: u128,
-    pub(crate) name: String,
-    /// The operator level, 0 to 4 (`ops.json`; single player's owner with
-    /// cheats on is 4).
-    pub(crate) permission: u8,
-    /// `minecraft:overworld`, `minecraft:the_nether`, `minecraft:the_end`.
-    pub(crate) dimension: String,
-    pub(crate) position: [f64; 3],
-    /// 0 survival, 1 creative, 2 adventure, 3 spectator.
-    pub(crate) game_mode: i32,
-    /// Health points, 20 at full; 0 once dead. API 21.
-    pub(crate) health: f32,
-    /// Where they look, in degrees (`yRot`, `xRot`), as their last move told
-    /// the server. API 49.
-    pub(crate) yaw: f32,
-    pub(crate) pitch: f32,
-}
 
 /// A sidebar a server mod shows one player (`native_sidebar`): its title and
 /// up to 15 lines, top first, each a text on the left and, where the score's
@@ -48,39 +28,6 @@ pub(crate) struct NativeSidebar {
 /// The objective a mod's sidebar is sent as: the player's client only; the
 /// server's scoreboard never holds it.
 const SIDEBAR_OBJECTIVE: &str = "horizon:native_sidebar";
-
-/// A command a native mod adds, as one usage: words, then arguments
-/// `<name:kind>`, optional ones last in brackets `[name:kind]`:
-/// `pay <player:player> <amount:integer>`, `balance [player:player]`,
-/// `eco give <player:player> <amount:integer>`. Kinds: `word`, `text` (the
-/// rest of the line, last), `integer`, `number`, `boolean`, `player`,
-/// `item`, `block_pos`. Usages of one command share their words; the
-/// server merges them into one tree.
-#[allow(dead_code)]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NativeCommand {
-    pub(crate) usage: String,
-    /// The operator level a player needs to see and run it (0: everyone).
-    pub(crate) level: u8,
-}
-
-#[allow(dead_code)]
-impl NativeCommand {
-    /// A usage every player may run.
-    pub(crate) fn new(usage: &str) -> Self {
-        Self {
-            usage: usage.to_owned(),
-            level: 0,
-        }
-    }
-    /// The same, for operators of `level` and above.
-    pub(crate) fn op(usage: &str, level: u8) -> Self {
-        Self {
-            usage: usage.to_owned(),
-            level: level.min(4),
-        }
-    }
-}
 
 /// The brigadier parser of an argument kind, and its properties.
 fn parser(kind: &str) -> Option<(&'static str, Value)> {
@@ -291,7 +238,7 @@ impl Game<'_> {
     }
     /// Sends `packet` to that player, also when they are the acting player
     /// (their packets then go after the hook); false when they aren't on.
-    fn native_send(&mut self, uuid: u128, packet: C) -> bool {
+    pub(super) fn native_send(&mut self, uuid: u128, packet: C) -> bool {
         self.native_send_all(uuid, vec![packet])
     }
     fn native_send_all(&mut self, uuid: u128, packets: Vec<C>) -> bool {
@@ -396,6 +343,26 @@ impl Game<'_> {
         }
         true
     }
+    /// Hides that player (a vanish) from the players below permission
+    /// `level`, or shows them again (None): from the next tick those players
+    /// lose them from the Tab list and the world (their client stops
+    /// tracking the player, as it does a spectator), and don't read their
+    /// joining or leaving; players of `level` or more still see them, and
+    /// a player made an operator meanwhile sees them again. By UUID: kept
+    /// for a player who is off (who joins hidden), until a mod sets it again
+    /// or the server stops. Works anywhere on a server, inside a player's
+    /// hook too; false on a client and in a world nobody else can join.
+    /// API 314.
+    pub(super) fn native_hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
+        let Some(host) = &mut self.lan else {
+            return false;
+        };
+        match level {
+            Some(level) => host.hub.hidden.insert(uuid, level),
+            None => host.hub.hidden.remove(&uuid),
+        };
+        true
+    }
     /// Shows `nickname` in place of that player's name in chat (their
     /// messages, `/me`, `/msg`) and in the Tab list; None shows their name
     /// again. Hovering the shown name gives the real one, which stays in the
@@ -428,7 +395,12 @@ impl Game<'_> {
         )
     }
     /// A system line in every player's chat and the server's log.
-    pub(super) fn native_broadcast(&self, line: Text) {
+    pub(super) fn native_broadcast(&self, mut line: Text) {
+        let mut cancel = false;
+        self.native_broadcast_message(&mut line, &mut cancel);
+        if cancel {
+            return;
+        }
         let plain = line.plain();
         if self.options.dedicated.is_some() {
             super::dedicated::log("INFO", &plain);
@@ -442,6 +414,19 @@ impl Game<'_> {
         for g in host.hub.guests.iter().filter(|g| g.placed) {
             host.hub.send_to(g.conn, &packet);
         }
+    }
+    /// Posts a line to the dedicated server's event stream (`GET /api/v1/events`)
+    /// as an `announce` event, which horizon-server's Discord bridge relays when
+    /// `[discord] events` lists `announce`: `name` and `uuid` say who it is
+    /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
+    /// Only on a dedicated server; false elsewhere and for an empty message.
+    /// API 163.
+    pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
+        if self.options.dedicated.is_none() || message.trim().is_empty() {
+            return false;
+        }
+        super::dedicated::events::record("announce", name, uuid, json!({ "message": message }));
+        true
     }
     /// A line of the command's answer, inside `native_perform_command`:
     /// sent to the player whose command it is after the call, as vanilla
@@ -628,7 +613,8 @@ fn add_to(
 /// screen as any change to their inventory does.
 #[allow(dead_code)]
 impl Game<'_> {
-    /// The main hand's stack: its item, count, and whether it is plain.
+    /// The main hand's stack: its item, count, and whether it is plain. On a
+    /// client, the player's own.
     pub(super) fn native_held(&self) -> Option<(String, u32, bool)> {
         let s = self.inventory.get(self.selected)?.as_ref()?;
         Some((s.item.to_string(), s.count, plain(s)))
@@ -703,7 +689,7 @@ impl Game<'_> {
     /// another player's (inside that player's hook, only they are reached).
     /// The player's screen follows as for any change to their inventory.
     /// What an auto-pickup or a machine's output to a player needs, from any
-    /// server hook. API @API:give_stack@.
+    /// server hook. API 98.
     pub(super) fn native_give_stack(
         &mut self,
         uuid: u128,
@@ -762,9 +748,8 @@ impl Game<'_> {
 
 /// An experience orb as a server mod reads it (`native_experience_orbs`).
 /// Read by mods only.
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(super) struct NativeExperienceOrb {
+pub struct NativeExperienceOrb {
     /// The entity's ID, as `native_entity_join_level` names it.
     pub id: u32,
     pub position: [f64; 3],
@@ -785,7 +770,7 @@ fn orb_meets(position: [f64; 3], min: [f64; 3], max: [f64; 3]) -> bool {
         && position[2] + 0.25 > min[2]
 }
 
-/// Experience for server mods. API @API:give_experience@.
+/// Experience for server mods. API 101.
 #[allow(dead_code)]
 impl Game<'_> {
     /// The experience orbs of the server level `dimension` whose box meets
@@ -815,6 +800,34 @@ impl Game<'_> {
             })
             .filter(|o| orb_meets(o.position, min, max))
             .collect()
+    }
+    /// Writes the experience orb `id`'s `value` (the points a pickup gives), `count`
+    /// (orbs merged into it, each worth `value`) and `age` (ticks lived; an orb
+    /// despawns at 6000); a `None` is left as it is. API 128.
+    /// False, and nothing written, for an orb not in the server level `dimension`, a
+    /// `value` or `count` of 0, and on a client of a server.
+    pub(super) fn native_set_experience_orb(
+        &mut self,
+        dimension: &str,
+        id: u32,
+        value: Option<u32>,
+        count: Option<u32>,
+        age: Option<u32>,
+    ) -> bool {
+        if (self.serving.is_none() && self.options.dedicated.is_none())
+            || dimension != self.dim.id()
+            || value == Some(0)
+            || count == Some(0)
+        {
+            return false;
+        }
+        let Some(orb) = self.orbs.iter_mut().find(|o| o.id == id) else {
+            return false;
+        };
+        orb.value = value.unwrap_or(orb.value);
+        orb.count = count.unwrap_or(orb.count);
+        orb.age = age.unwrap_or(orb.age);
+        true
     }
     /// Gives `points` of experience to the player `uuid` as an orb they touch
     /// does (`ExperienceOrb.playerTouch`): Mending repairs their damaged items
@@ -903,6 +916,49 @@ impl Game<'_> {
         }
         host.hub.set_mod_commands(0, tree);
         host.native_commands = Some(levels);
+    }
+
+    /// Asks the mods what root commands each player's tree keeps
+    /// (`native_player_commands_sent`) and stores the answer in the hub,
+    /// which sends the trees without what the mods took out: for `only`, or
+    /// for every placed player.
+    pub(super) fn native_filter_commands(&mut self, host: &mut LanHost, only: Option<u32>) {
+        let players: Vec<(u32, u128, String)> = host
+            .hub
+            .guests
+            .iter()
+            .filter(|g| only.map_or(g.placed, |conn| g.conn == conn))
+            .map(|g| (g.conn, g.uuid, g.name.clone()))
+            .collect();
+        for (conn, uuid, name) in players {
+            let names = host.hub.command_names(conn);
+            let mut kept = names.clone();
+            let placed = host.hub.guest(conn).is_some_and(|g| g.placed);
+            if !placed {
+                // A joining player has no world yet: nothing can be told them.
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else if self.lan_acting == Some(conn) {
+                self.native_player_commands_sent(uuid, &name, &mut kept);
+            } else {
+                self.as_guest(host, conn, |g| {
+                    g.native_player_commands_sent(uuid, &name, &mut kept);
+                });
+            }
+            if let Some(g) = host.hub.guest_mut(conn) {
+                g.hidden_commands = names.into_iter().filter(|n| !kept.contains(n)).collect();
+            }
+        }
+    }
+
+    /// `Hub::resend_commands` with the mods' say on each tree.
+    pub(super) fn resend_commands_filtered(&mut self) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        host.hub.refresh_permissions();
+        self.native_filter_commands(&mut host, None);
+        host.hub.resend_commands();
+        self.lan = Some(host);
     }
 
     /// The level a guest needs for a mod's command (`line`, without its

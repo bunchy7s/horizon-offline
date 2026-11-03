@@ -4,7 +4,7 @@ use wgpu::util::DeviceExt;
 #[test]
 #[ignore = "requires a Vulkan/Metal/DX12 adapter"]
 fn crack_samples_stay_aligned_between_stages() {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let instance = crate::gfx::test_gpu::instance();
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
             .unwrap();

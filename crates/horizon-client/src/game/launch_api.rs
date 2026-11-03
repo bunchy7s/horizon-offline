@@ -1,6 +1,6 @@
 //! The game's side of the Launch API (docs/api/launch.md): the options another launcher may pass,
 //! `--launch-api`'s reply, the exit codes, and docs/api/launch-reference.md, generated from them.
-//! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api`.
+//! Update it with: `HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api`.
 
 /// The Launch API's version (docs/api/stability.md): an addition makes the next patch.
 pub const VERSION: &str = "0.1.0";
@@ -39,6 +39,11 @@ pub const OPTIONS: &[LaunchOption] = &[
         "--home",
         Some("DIR"),
         "Logs (`logs/latest.log`) and crash reports (`crash-reports/`). Default: `HORIZON_HOME`, else `horizon` in the platform data folder.",
+    ),
+    option(
+        "--player-dir",
+        Some("DIR"),
+        "One player's own files, for several games playing in one game folder at the same time: `options.txt` and the settings beside it, `logs/`, `crash-reports/`, `horizon-player.txt`, `servers.dat`, `hotbar.nbt`, `screenshots/`. Saves, packs, mods and their config, the chat's command history and Play with Friends' relay settings stay in the game folder. A relative path is taken from the folder the game starts in. Created when missing. Default: the game folder, and `--home` for logs. Crash telemetry still follows `--home`'s consent, and `horizon-ctl logs` and the launcher read `--home`'s logs.",
     ),
     option(
         "--width",
@@ -150,7 +155,7 @@ pub fn markdown() -> String {
     let w = &mut out;
     let _ = writeln!(
         w,
-        "<!-- Generated from crates/horizon-client/src/game/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api -->"
+        "<!-- Generated from crates/horizon-client/src/game/launch_api.rs; a test fails when this file is out of date. Update it with: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api -->"
     );
     let _ = writeln!(w, "# Launch API reference\n");
     let _ = writeln!(
@@ -260,7 +265,7 @@ mod tests {
             .replace("\r\n", "\n");
         assert!(
             have == want,
-            "docs/api/launch-reference.md is out of date: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --bin horizon-client launch_api"
+            "docs/api/launch-reference.md is out of date: HORIZON_WRITE_DOCS=1 cargo test -p horizon-client --lib launch_api"
         );
     }
 }

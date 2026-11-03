@@ -6,17 +6,31 @@ use crate::{
     save::{Level, put, read_dat, uuid_from_tag, write_dat},
 };
 use horizon_protocol::crypto::uuid_string;
-use horizon_world::nbt::Tag;
+use horizon_world::{
+    attachments::{ATTACHMENTS_KEY, attachment_compound},
+    nbt::Tag,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
 
+/// `PlayerDataStorage`'s player directory (`players/data`), created on first use
+/// as its constructor does with `mkdirs`.
+pub fn directory(world: &Path) -> PathBuf {
+    let dir = directory_path(world);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::warn!("Horizon: {} is not created: {e}", dir.display());
+    }
+    dir
+}
+
+fn directory_path(world: &Path) -> PathBuf {
+    world.join("players").join("data")
+}
+
 pub fn path(world: &Path, uuid: u128) -> PathBuf {
-    world
-        .join("players")
-        .join("data")
-        .join(format!("{}.dat", uuid_string(uuid)))
+    directory_path(world).join(format!("{}.dat", uuid_string(uuid)))
 }
 
 /// `UUIDUtil.uuidToIntArray`.
@@ -85,9 +99,25 @@ pub fn load_owner(guest: &mut Guest, world: &Path, saved: Option<&Level>) -> boo
 /// then to the file level.dat names, which it loads ([`load_owner`]), and to
 /// its own file, so that the one it loads is never the older of the two.
 pub fn save_owner(guest: &Guest, level: &mut Level, world: &Path) {
+    // `MinecraftServer.saveAllChunks`: `singleplayer_uuid` is the integrated server's own profile,
+    // never another player's file the world happened to hold.
+    level.player_uuid.get_or_insert(uuid_ints(guest.uuid));
     store(guest, level, None);
-    let _ = level.write_player(world);
+    if let Err(e) = level.write_player(world) {
+        log::warn!("Horizon: the owner's playerdata is not saved: {e}");
+    }
     save(guest, world);
+}
+
+/// A player new to the world faces the world spawn's angle (`PrepareSpawnTask`:
+/// the saved rotation, else `respawnData.yaw/pitch`).
+pub fn face_world_spawn(guest: &mut Guest, known: bool, [yaw, pitch]: [f32; 2]) {
+    if known {
+        return;
+    }
+    guest.yaw = yaw;
+    guest.pitch = pitch;
+    guest.head_yaw = yaw;
 }
 
 /// Give a guest the player state read into `level`.
@@ -121,6 +151,15 @@ pub fn apply(guest: &mut Guest, level: &Level) {
         .map(|s| [s[0] + 0.5, s[1], s[2] + 0.5]);
     guest.respawn_elsewhere = level.respawn_elsewhere.clone();
     guest.saved = level.player_extra.clone();
+    guest.attachments = match attachment_compound(
+        guest
+            .saved
+            .as_ref()
+            .and_then(|tag| tag.get(ATTACHMENTS_KEY)),
+    ) {
+        Ok(Some(data)) => horizon_world::attachments::Attachments::from_nbt(data.clone()),
+        _ => Default::default(),
+    };
     guest.seen_credits = level.seen_credits;
     guest.post_effects.clone_from(&level.post_effects);
     guest.last_death = level.last_death.clone();
@@ -166,19 +205,177 @@ pub fn apply(guest: &mut Guest, level: &Level) {
     }
 }
 
-/// Save a guest (PlayerDataStorage.save) who has left: the vehicle it took
-/// along is in its `saved` compound already (`take_parent_vehicle`).
-pub fn save(guest: &Guest, world: &Path) {
+/// The shared player compound for logout and autosave snapshots.
+fn player_tag(guest: &Guest) -> Tag {
     let mut level = Level {
         player_uuid: Some(uuid_ints(guest.uuid)),
         ..Level::default()
     };
     store(guest, &mut level, None);
-    let file = path(world, guest.uuid);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    level.player_tag()
+}
+
+/// Save a leaving guest, including its saved vehicle tree.
+pub fn save(guest: &Guest, world: &Path) {
+    if let Err(e) = write_dat(&path(world, guest.uuid), player_tag(guest)) {
+        log::warn!(
+            "Horizon: {} is not saved: {e}",
+            path(world, guest.uuid).display()
+        );
     }
-    let _ = write_dat(&file, level.player_tag());
+}
+
+/// An immutable player snapshot. Compression and all filesystem work belong to
+/// the writer; native callbacks are delivered by the server after completion.
+struct Snapshot {
+    uuid: u128,
+    name: String,
+    file: PathBuf,
+    tag: Tag,
+}
+
+pub struct SavedPlayer {
+    pub uuid: u128,
+    pub name: String,
+}
+
+fn write_snapshot(snapshot: Snapshot) -> Result<SavedPlayer, String> {
+    write_dat(&snapshot.file, snapshot.tag)
+        .map(|()| SavedPlayer {
+            uuid: snapshot.uuid,
+            name: snapshot.name,
+        })
+        .map_err(|e| format!("{} is not saved: {e}", snapshot.file.display()))
+}
+
+struct PlayerWriter {
+    send: std::sync::mpsc::Sender<Snapshot>,
+    done: std::sync::mpsc::Receiver<Result<SavedPlayer, String>>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+/// One FIFO writer for a server's player autosaves. Synchronous logout writes
+/// must follow a barrier, so an older autosave can never replace them later.
+#[derive(Default)]
+pub struct Autosaves {
+    writer: Option<PlayerWriter>,
+    pending: usize,
+    error: Option<String>,
+    ready: Vec<SavedPlayer>,
+}
+
+impl Autosaves {
+    pub fn enqueue(&mut self, guest: &Guest, world: &Path) {
+        let snapshot = Snapshot {
+            uuid: guest.uuid,
+            name: guest.name.clone(),
+            file: path(world, guest.uuid),
+            tag: player_tag(guest),
+        };
+        if self.writer.is_none() {
+            let (send, receive) = std::sync::mpsc::channel::<Snapshot>();
+            let (complete, done) = std::sync::mpsc::channel();
+            match std::thread::Builder::new()
+                .name("horizon-player-writer".into())
+                .spawn(move || {
+                    for snapshot in receive {
+                        let _ = complete.send(write_snapshot(snapshot));
+                    }
+                }) {
+                Ok(thread) => self.writer = Some(PlayerWriter { send, done, thread }),
+                Err(error) => {
+                    log::warn!("Horizon: cannot start player writer, saving inline: {error}")
+                }
+            }
+        }
+        let snapshot = if let Some(writer) = &self.writer {
+            match writer.send.send(snapshot) {
+                Ok(()) => {
+                    self.pending += 1;
+                    return;
+                }
+                Err(error) => {
+                    let completed = self.completed(true);
+                    self.ready.extend(completed);
+                    if let Some(writer) = self.writer.take() {
+                        drop(writer.send);
+                        let _ = writer.thread.join();
+                    }
+                    error.0
+                }
+            }
+        } else {
+            snapshot
+        };
+        match write_snapshot(snapshot) {
+            Ok(player) => self.ready.push(player),
+            Err(error) => {
+                log::warn!("Horizon: {error}");
+                self.error = Some(error);
+            }
+        }
+    }
+
+    /// Serialize a newer logout snapshot after every queued autosave.
+    pub fn save_after(&mut self, guest: &Guest, world: &Path) -> Vec<SavedPlayer> {
+        let saved = self.completed(true);
+        save(guest, world);
+        saved
+    }
+
+    /// Drain completions on the tick thread; `wait` is the durability barrier
+    /// for explicit saves, logout, and shutdown. Failures remain visible.
+    pub fn completed(&mut self, wait: bool) -> Vec<SavedPlayer> {
+        let mut saved = std::mem::take(&mut self.ready);
+        while self.pending > 0 {
+            let done = &self.writer.as_ref().unwrap().done;
+            let result = if wait {
+                done.recv()
+                    .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected)
+            } else {
+                done.try_recv()
+            };
+            match result {
+                Ok(result) => {
+                    self.pending -= 1;
+                    match result {
+                        Ok(player) => saved.push(player),
+                        Err(error) => {
+                            log::warn!("Horizon: {error}");
+                            self.error = Some(error);
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.error = Some("the player writer stopped".into());
+                    log::warn!("Horizon: the player writer stopped");
+                    self.pending = 0;
+                    if let Some(writer) = self.writer.take() {
+                        drop(writer.send);
+                        let _ = writer.thread.join();
+                    }
+                }
+            }
+        }
+        saved
+    }
+
+    pub fn writes_finished(&mut self) -> crate::Result<bool> {
+        match self.error.take() {
+            Some(error) => Err(error.into()),
+            None => Ok(self.pending == 0),
+        }
+    }
+}
+
+impl Drop for Autosaves {
+    fn drop(&mut self) {
+        if let Some(writer) = self.writer.take() {
+            drop(writer.send);
+            let _ = writer.thread.join();
+        }
+    }
 }
 
 /// Put a guest's state in `level`'s player fields; `vehicle` is the
@@ -213,6 +410,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     level.post_effects.clone_from(&guest.post_effects);
     level.last_death = guest.last_death.clone();
     level.player_extra = guest.saved.clone();
+    let extra = level
+        .player_extra
+        .get_or_insert_with(|| Tag::Compound(Default::default()));
+    if let Tag::Compound(map) = extra
+        && attachment_compound(map.get(&ATTACHMENTS_KEY.into())).is_ok()
+    {
+        let data = guest.attachments.to_nbt();
+        if data.is_empty() {
+            map.remove(&ATTACHMENTS_KEY.into());
+        } else {
+            map.insert(ATTACHMENTS_KEY.into(), Tag::Compound(data));
+        }
+    }
     // The vehicle the player rides (`ServerPlayer.saveParentVehicle`), or
     // the one its file names that has not come back yet (kept in `saved`).
     level.root_vehicle = guest.saved_vehicle;
@@ -243,12 +453,19 @@ pub fn store(guest: &Guest, level: &mut Level, vehicle: Option<Tag>) {
     }
     // LivingEntity.addAdditionalSaveData: the live body's AttributeMap.pack,
     // or the list the file had while the player has no body yet.
-    if let Some(m) = guest.motion.as_deref() {
+    // A player between two bodies (a respawn, a change of level) saves what
+    // the next one takes over.
+    let attributes = guest
+        .motion
+        .as_deref()
+        .map(crate::motion::PlayerMotion::saved_attributes)
+        .or_else(|| guest.carried_attributes.clone());
+    if let Some(attributes) = attributes {
         let extra = level
             .player_extra
             .get_or_insert_with(|| horizon_world::nbt::Tag::Compound(Default::default()));
         if let horizon_world::nbt::Tag::Compound(map) = extra {
-            map.insert("attributes".into(), m.saved_attributes());
+            map.insert("attributes".into(), attributes);
         }
     }
     level.recipe_book = guest.recipe_book.clone();
@@ -302,6 +519,25 @@ mod tests {
         )
     }
 
+    #[test]
+    fn a_new_player_faces_the_world_spawn_angle() {
+        let mut g = guest();
+        face_world_spawn(&mut g, false, [90.0, -15.0]);
+        assert_eq!((g.yaw, g.pitch, g.head_yaw), (90.0, -15.0, 90.0));
+    }
+
+    #[test]
+    fn a_saved_rotation_beats_the_world_spawn_angle() {
+        let mut g = guest();
+        let level = Level {
+            rotation: [-135.0, 30.0],
+            ..Level::default()
+        };
+        apply(&mut g, &level);
+        face_world_spawn(&mut g, true, [90.0, -15.0]);
+        assert_eq!((g.yaw, g.pitch, g.head_yaw), (-135.0, 30.0, -135.0));
+    }
+
     fn holding(uuid: u128, item: &str, count: u32) -> Guest {
         let mut g = guest();
         g.uuid = uuid;
@@ -319,6 +555,130 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("horizon-owner-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn autosaves_keep_snapshots_and_order_before_logout() {
+        let dir = world("async-batch");
+        let mut saves = Autosaves::default();
+        for uuid in 1..=150 {
+            let mut g = holding(uuid, "minecraft:diamond", 5);
+            saves.enqueue(&g, &dir);
+            // Subsequent live changes cannot alter the queued snapshot.
+            g.inventory[0] = None;
+        }
+        let completed = saves.completed(true);
+        assert!(saves.writes_finished().unwrap());
+        assert!(completed.iter().map(|p| p.uuid).eq(1..=150));
+        for uuid in 1..=150 {
+            let mut loaded = guest();
+            loaded.uuid = uuid;
+            assert!(load(&mut loaded, &dir));
+            assert_eq!(first_item(&loaded), Some(("minecraft:diamond", 5)));
+        }
+        saves.enqueue(&holding(1, "minecraft:gold_ingot", 7), &dir);
+        saves.enqueue(&holding(1, "minecraft:emerald", 9), &dir);
+        assert_eq!(saves.completed(true).len(), 2);
+        assert!(saves.writes_finished().unwrap());
+        let mut loaded = guest();
+        loaded.uuid = 1;
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:emerald", 9)));
+        // The barrier protects the synchronous, newer logout snapshot.
+        for uuid in 1..=150 {
+            saves.enqueue(&holding(uuid, "minecraft:diamond", 5), &dir);
+        }
+        saves.save_after(&holding(1, "minecraft:iron_ingot", 11), &dir);
+        drop(saves);
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:iron_ingot", 11)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn autosave_failures_recover_and_drop_drains_writes() {
+        let dir = world("async-error");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("players"), b"not a directory").unwrap();
+        let mut saves = Autosaves::default();
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        assert!(saves.completed(true).is_empty());
+        assert!(saves.writes_finished().is_err());
+        assert!(saves.completed(false).is_empty());
+        assert!(saves.writes_finished().unwrap());
+        drop(saves);
+        std::fs::remove_file(dir.join("players")).unwrap();
+        let mut saves = Autosaves::default();
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        for uuid in 2..=150 {
+            saves.enqueue(&holding(uuid, "minecraft:diamond", 5), &dir);
+        }
+        drop(saves);
+        for uuid in 1..=150 {
+            let mut g = guest();
+            g.uuid = uuid;
+            assert!(load(&mut g, &dir));
+            assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
+        }
+        let mut loaded = guest();
+        loaded.uuid = 1;
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:diamond", 5)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mixed_autosaves_keep_successes_and_match_logout_files() {
+        let bad = world("mixed-bad");
+        let good = world("mixed-good");
+        let reference = world("mixed-reference");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("players"), b"not a directory").unwrap();
+        let mut saves = Autosaves::default();
+        let g = holding(2, "minecraft:emerald", 9);
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &bad);
+        saves.enqueue(&g, &good);
+        saves.enqueue(&holding(3, "minecraft:diamond", 5), &bad);
+        let saved = saves.completed(true);
+        assert_eq!(saved.iter().map(|p| p.uuid).collect::<Vec<_>>(), vec![2]);
+        assert!(saves.writes_finished().is_err());
+        assert!(saves.writes_finished().unwrap());
+        save(&g, &reference);
+        assert_eq!(
+            read_dat(&path(&good, 2)).unwrap(),
+            read_dat(&path(&reference, 2)).unwrap()
+        );
+        std::fs::remove_file(bad.join("players")).unwrap();
+        saves.enqueue(&g, &bad);
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().unwrap());
+        for dir in [bad, good, reference] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_disconnected_writer_is_restarted() {
+        let dir = world("restart");
+        let (send, receive) = std::sync::mpsc::channel();
+        drop(receive);
+        let (complete, done) = std::sync::mpsc::channel();
+        drop(complete);
+        let mut saves = Autosaves::default();
+        saves.writer = Some(PlayerWriter {
+            send,
+            done,
+            thread: std::thread::spawn(|| {}),
+        });
+        saves.pending = 1;
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().is_err());
+        saves.enqueue(&holding(2, "minecraft:emerald", 9), &dir);
+        assert!(saves.writer.is_some());
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn first_item(g: &Guest) -> Option<(&str, u32)> {
@@ -362,6 +722,35 @@ mod tests {
         assert!(load_owner(&mut g, &dir, Some(&saved)));
         assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn player_attachments_survive_playerdata_and_respawn() {
+        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        let keep = AttachmentType {
+            namespace: "test",
+            name: "keep",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("count".into(), Tag::Int(*n))].into()),
+                decode: |c| match c.get(&"count".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: true,
+            sync: false,
+        };
+        let dir = world("attachments");
+        let mut original = guest();
+        original.attachments.set(&keep, 31).unwrap();
+        save(&original, &dir);
+        let mut loaded = guest();
+        loaded.uuid = original.uuid;
+        assert!(load(&mut loaded, &dir));
+        loaded.attachments = loaded.attachments.copy_on_death().unwrap();
+        assert_eq!(loaded.attachments.get(&keep), Ok(31));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
@@ -483,6 +872,89 @@ mod tests {
         Some((assets, resources))
     }
 
+    /// A body at scale 0.1 with a permanent +0.4 on its step height, such as
+    /// a command or a datapack gives.
+    fn small_body(resources: &crate::motion::MotionResources) -> crate::motion::PlayerMotion {
+        use horizon_world::attributes::{Modifier, Operation};
+        let mut m = crate::motion::PlayerMotion::new(resources, horizon_core::geometry::Vec3::ZERO)
+            .expect("a body");
+        let key = m.attributes.key("minecraft:scale").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.set_base_value(0.1, o))
+            .unwrap();
+        let key = m.attributes.key("minecraft:step_height").unwrap();
+        let handle = m.attributes.get_instance(Some(key)).unwrap().unwrap();
+        let step = Modifier::new("test:step", 0.4, Operation::AddValue).unwrap();
+        m.attributes
+            .edit(&handle, |a, o| a.add_permanent(step, o))
+            .unwrap();
+        m
+    }
+
+    #[test]
+    fn a_new_body_takes_the_scale_of_the_old_one() {
+        // #3684: ServerPlayer.restoreFrom copies the base values to the body
+        // that follows a death (assignBaseValues) and, for the same player in
+        // another level, the permanent modifiers too (assignPermanentModifiers).
+        // The body Horizon made on a respawn or a level change started from
+        // the defaults: a player at /attribute scale 0.1 was 1.0 again.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let next = |g: &Guest| {
+            let mut m =
+                crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                    .expect("a body");
+            m.apply_saved_attributes(g.carried_attributes.as_ref())
+                .unwrap();
+            m
+        };
+        for (restore_all, step) in [(false, 0.6), (true, 1.0)] {
+            let mut g = guest();
+            g.motion = Some(Box::new(small_body(&resources)));
+            g.new_body(restore_all);
+            assert!(g.motion.is_none());
+            let mut m = next(&g);
+            assert_eq!(m.attribute("minecraft:scale").unwrap(), 0.1);
+            assert!((m.attribute("minecraft:step_height").unwrap() - step).abs() < 1e-9);
+            // The tick that follows rebuilds the box at that scale.
+            m.refresh_attributes().unwrap();
+            assert_eq!(m.dimensions.width, 0.6 * 0.1);
+            assert_eq!(m.dimensions.height, 1.8 * 0.1);
+        }
+        // No body before: nothing to hand over.
+        let mut g = guest();
+        g.new_body(true);
+        assert!(g.carried_attributes.is_none());
+    }
+
+    #[test]
+    fn a_player_between_two_bodies_saves_the_attributes_the_next_one_takes() {
+        // #3684: logging out after a respawn, before the new body has ticked,
+        // must not write the file's older list over the scale.
+        let Some((_assets, resources)) = resources() else {
+            eprintln!("skipped: prepared resources unavailable");
+            return;
+        };
+        let mut g = guest();
+        g.motion = Some(Box::new(small_body(&resources)));
+        g.new_body(false);
+        let mut level = Level::default();
+        store(&g, &mut level, None);
+        let tag = level.player_tag();
+        let mut read = Level::default();
+        read.read_player(&tag);
+        read.player_extra = Some(tag);
+        let mut back =
+            crate::motion::PlayerMotion::new(&resources, horizon_core::geometry::Vec3::ZERO)
+                .expect("a body");
+        back.apply_saved_attributes(read.player_extra.as_ref().and_then(|t| t.get("attributes")))
+            .unwrap();
+        assert_eq!(back.attribute("minecraft:scale").unwrap(), 0.1);
+    }
+
     #[test]
     fn a_saved_air_comes_back() {
         // A player saved underwater (#1321): the file keeps the remaining air
@@ -585,5 +1057,36 @@ mod tests {
         apply(&mut other, &level);
         assert_eq!(other.flying_speed, 0.05);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_world_without_singleplayer_uuid_gives_the_owner_a_new_player_not_anothers() {
+        // A world from a vanilla server: no `singleplayer_uuid`, and the players' files are other
+        // people's. The owner has none: vanilla starts them new (PlayerList.loadPlayerData).
+        let owner = horizon_protocol::crypto::offline_uuid("Owner");
+        let friend = horizon_protocol::crypto::offline_uuid("Friend");
+        let dir = world("server-world");
+        save(&holding(friend, "minecraft:netherite_ingot", 9), &dir);
+        let mut level = Level::default();
+        level.write(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join("level.dat_old"));
+        let mut tag = read_dat(&dir.join("level.dat")).unwrap();
+        if let Some(Tag::Compound(data)) = tag.get_mut("Data") {
+            data.remove(&"singleplayer_uuid".into());
+        }
+        write_dat(&dir.join("level.dat"), tag).unwrap();
+        let read = Level::read(&dir).unwrap();
+        let mut g = holding(owner, "minecraft:dirt", 1);
+        g.inventory[0] = None;
+        let known = load_owner(&mut g, &dir, Some(&read));
+        assert!(!known, "the owner has not been here before");
+        assert_eq!(first_item(&g), None, "no inventory of the friend's");
+        // The owner's save names the owner, and leaves the friend's file alone.
+        let before = std::fs::read(path(&dir, friend)).unwrap();
+        let mut level = read;
+        save_owner(&g, &mut level, &dir);
+        assert_eq!(level.player_uuid, Some(uuid_ints(owner)));
+        assert_eq!(std::fs::read(path(&dir, friend)).unwrap(), before);
+        assert!(exists(&dir, owner));
     }
 }

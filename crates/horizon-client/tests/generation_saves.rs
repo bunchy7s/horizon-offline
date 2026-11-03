@@ -3,6 +3,7 @@
 //! after its own decoration and its eight neighbours', and chunks that
 //! decoration wrote to are saved rather than generated again without those
 //! writes. Bastions lost whole chunks of pieces this way.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
@@ -155,7 +156,7 @@ impl Session {
             let before = (self.streaming.generated_total, self.world.chunks.len());
             self.update();
             thread::sleep(Duration::from_millis(5));
-            let idle = self.streaming.pending() == 0
+            let idle = !self.streaming.busy()
                 && before == (self.streaming.generated_total, self.world.chunks.len());
             quiet = if idle { quiet + 1 } else { 0 };
         }

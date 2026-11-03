@@ -100,22 +100,36 @@ pub fn enchant_offers(
         }
     }
     for i in 0..3 {
-        if offers.costs[i] > 0 {
-            // getEnchantmentList reseeds the menu random; the clue draws continue from it.
-            let mut list_random = LegacyRandom::new(i64::from(seed.wrapping_add(i as i32)));
-            let pool = e.tag("minecraft:in_enchanting_table").to_vec();
-            let mut list = e.select(items, &mut list_random, &stack.item, offers.costs[i], &pool);
-            if &*stack.item == "minecraft:book" && list.len() > 1 {
-                let r = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
-                list.remove(r);
-            }
-            if !list.is_empty() {
-                let pick = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
-                offers.clues[i] = Some(list[pick].clone());
-            }
-        }
+        offers.clues[i] = enchant_clue(e, items, seed, i, offers.costs[i], stack);
     }
     offers
+}
+/// `EnchantmentMenu.slotsChanged`'s clue for offer `slot` at `cost`: one
+/// enchantment of the list that cost would give, or None for no offer.
+pub fn enchant_clue(
+    e: &Enchantments,
+    items: &Items,
+    seed: i32,
+    slot: usize,
+    cost: i32,
+    stack: &ItemStack,
+) -> Option<(Arc<str>, u32)> {
+    if cost <= 0 {
+        return None;
+    }
+    // getEnchantmentList reseeds the menu random; the clue draws continue from it.
+    let mut list_random = LegacyRandom::new(i64::from(seed.wrapping_add(slot as i32)));
+    let pool = e.tag("minecraft:in_enchanting_table").to_vec();
+    let mut list = e.select(items, &mut list_random, &stack.item, cost, &pool);
+    if &*stack.item == "minecraft:book" && list.len() > 1 {
+        let r = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
+        list.remove(r);
+    }
+    if list.is_empty() {
+        return None;
+    }
+    let pick = list_random.next_int_bound(list.len() as i32).unwrap_or(0) as usize;
+    Some(list[pick].clone())
 }
 /// `EnchantmentMenu.clickMenuButton` result: the enchanted item, or None.
 pub fn apply_enchantment(
@@ -503,18 +517,16 @@ impl StationRecipes {
         };
         for namespace in namespaces {
             let dir = root.join(format!("data/{namespace}/recipe"));
-            let more = crate::crafting::recipe_files(&dir).unwrap_or_default();
-            files.extend(
-                more.into_iter()
-                    .map(|(name, p)| (namespace.clone(), name, p)),
-            );
+            if let Ok(folder) = crate::json_folder::read(&dir) {
+                files.push((namespace, folder));
+            }
         }
         let mut sources: Vec<(String, Value)> = files
             .iter()
-            .filter_map(|(namespace, name, p)| {
-                let bytes = fs::read(p).ok()?;
-                let v = serde_json::from_slice::<Value>(&bytes).ok()?;
-                Some((format!("{namespace}:{name}"), v))
+            .flat_map(|(namespace, folder)| folder.files.iter().map(move |f| (namespace, f)))
+            .filter_map(|(namespace, file)| {
+                let v = serde_json::from_slice::<Value>(file.bytes().ok()?).ok()?;
+                Some((format!("{namespace}:{}", file.name), v))
             })
             .collect();
         // The world's packs' recipes over the game's own: the top pack's
@@ -530,7 +542,9 @@ impl StationRecipes {
                 None => sources.push((id.to_owned(), v)),
             }
         }
-        sources.retain(|(_, v)| conditions_hold(v));
+        // The data's recipe filters, over the final set.
+        let filters = horizon_items::recipe_filters::RecipeFilters::load(root, overlay);
+        sources.retain_mut(|(id, v)| conditions_hold(v) && filters.apply(id, v));
         let mut smithing = Vec::new();
         let mut stonecutting = Vec::new();
         for (id, v) in sources {
@@ -694,7 +708,7 @@ impl StationRecipes {
                 addition,
                 pattern,
                 ..
-            } if i == id => Some((&base.1, &addition.1, pattern)),
+            } if i == id => Some((&base.order, &addition.order, pattern)),
             _ => None,
         })?;
         if base.is_empty() || addition.is_empty() {
@@ -1027,13 +1041,13 @@ mod tests {
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
         let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
-        assert_eq!(a.1, vec!["minecraft:diamond_sword"]);
+        assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
         );
         assert_eq!(
-            b.1,
+            b.order,
             vec!["minecraft:diamond_sword", "minecraft:diamond_axe"]
         );
     }

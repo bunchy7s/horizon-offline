@@ -34,7 +34,7 @@ from vanilla 26.3's own methods, and the hooks stay Horizon's own Rust.
    ([Events](https://docs.neoforged.net/docs/concepts/events/), "Sided Events"); the rest fire on whichever
    side runs the method. Horizon has one binary with several
    `Game`s (the window, the server thread, a dedicated server), so each hook says its side:
-   - `server`: the server's `Game` (single player's server thread, LAN host, dedicated) and the in-frame path.
+   - `server`: the server's `Game` (single player's server thread, LAN host, dedicated).
    - `client`: the window's `Game`.
    - `both`: both, with the `Game`'s role available (`native_window`). Interactions are `both`: the client
      predicts, the server acts, and a mod that claims a use on one side only gets the two out of step.
@@ -77,6 +77,16 @@ Main's catalog (`native-hooks.json`) is the list; this page does not copy it. Ea
 has under a NeoForge-like name: `server_tick`, `level_tick_pre`, `level_tick_post`, `right_click_block`,
 `block_entity_tick`, `destroy_block`, `place_block`, `attack_entity`. Per rule 6 none of them is renamed:
 a rename is a new hook with a new name, if ever wanted.
+
+Hooks added since their own PRs carry their event here too.
+
+### Data reload
+
+`data_pack_files` is `AddReloadListenerEvent`: server-side and not cancellable, fired while the server
+assembles its data tables — a world's first open and every `/reload` — before the recipes, tags, loot and
+advancements are built. A mod adds `(path, bytes)` pack files to the hook's out parameter; they join the
+load below the world's own data packs, so a pack's file for the same path still overrides them. A mod that
+adds nothing leaves the tables as they were.
 
 ## Next hooks
 

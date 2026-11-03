@@ -24,10 +24,38 @@ fn zombie_kind(s: Species) -> bool {
     )
 }
 
+/// Which `finalizeSpawn` mounts a mob may roll for its spawn reason.
+#[derive(Debug, PartialEq, Eq)]
+struct MountRolls {
+    zombie_horse_rider: bool,
+    camel_husk: bool,
+    nautilus: bool,
+}
+
+/// `ZombieHorse.finalizeSpawn` (NATURAL only), `Husk.finalizeSpawn`
+/// (`triedToSpawnCamelHusk = reason != NATURAL`) and `Drowned.finalizeSpawn`
+/// (never a baby; vanilla also allows STRUCTURE, which comes from worldgen and
+/// never reaches `spawn_jockeys`, so only `natural` is modelled here).
+fn mount_rolls(species: Species, baby: bool, natural: bool) -> MountRolls {
+    MountRolls {
+        zombie_horse_rider: natural && species == Species::ZombieHorse,
+        camel_husk: natural && species == Species::Husk,
+        nautilus: natural && species == Species::Drowned && !baby,
+    }
+}
+
 impl Game<'_> {
     /// `Entity.startRiding` for two mobs.
     pub(super) fn mount_mob(&mut self, rider: u32, vehicle: u32) {
+        self.try_mount_mob(rider, vehicle);
+    }
+    /// `Entity.startRiding` for two mobs: false when a mod canceled it.
+    pub(super) fn try_mount_mob(&mut self, rider: u32, vehicle: u32) -> bool {
+        if !self.native_mob_may_ride(rider, vehicle, true) {
+            return false;
+        }
         riders::link(&mut self.mobs, rider, vehicle);
+        true
     }
     /// Riders sit on their vehicles (`Entity.positionRider`), mobs or boats,
     /// and let go when the vehicle dies or is gone.
@@ -40,6 +68,12 @@ impl Game<'_> {
         }
         let boats: std::collections::HashSet<u32> = self.boats.iter().map(|b| b.id).collect();
         let carts: std::collections::HashSet<u32> = self.carts.iter().map(|c| c.id).collect();
+        let tnts: std::collections::HashSet<u32> = self
+            .tnts
+            .iter()
+            .map(|t| t.id)
+            .filter(|&id| id != 0)
+            .collect();
         let index: HashMap<u32, usize> = self
             .mobs
             .iter()
@@ -57,6 +91,7 @@ impl Game<'_> {
                 && !self.mobs[i].removed
                 && (boats.contains(&v)
                     || carts.contains(&v)
+                    || tnts.contains(&v)
                     || index
                         .get(&v)
                         .is_some_and(|&j| self.mobs[j].alive() && !self.mobs[j].removed));
@@ -79,6 +114,7 @@ impl Game<'_> {
     pub(super) fn position_riders(&mut self) {
         self.seat_boat_mobs();
         self.seat_cart_mobs();
+        self.seat_tnt_mobs();
         let index: HashMap<u32, usize> = self
             .mobs
             .iter()
@@ -104,7 +140,8 @@ impl Game<'_> {
                         continue;
                     };
                     let m = &mut self.mobs[i];
-                    let offset = riders::vehicle_attachment(m);
+                    // EntityType.TEXT_DISPLAY's box is zero wide.
+                    let offset = riders::vehicle_attachment(m, 0.0);
                     m.position = Vec3::new(at.x, at.y - offset, at.z);
                     m.previous = Vec3::new(before.x, before.y - offset, before.z);
                     m.velocity = Vec3::ZERO;
@@ -115,12 +152,28 @@ impl Game<'_> {
                     continue;
                 };
                 let vehicle = &self.mobs[j];
-                let attach = riders::passenger_attachment(vehicle);
+                let mut attach = riders::passenger_attachment(vehicle);
+                if horizon_client::mobs::camel::is_camel(vehicle.species()) {
+                    // Camel.getPassengerAttachmentPoint: the seat follows the
+                    // rider's place in `getPassengers` (load order).
+                    let aboard: Vec<usize> = (0..self.mobs.len())
+                        .filter(|&k| self.mobs[k].extra.mount == Some(v))
+                        .collect();
+                    let seat = aboard.iter().position(|&k| k == i).unwrap_or(0);
+                    let animal = horizon_client::mobs::drops::is_animal(self.mobs[i].species());
+                    attach = horizon_client::mobs::camel::passenger_attachment_at(
+                        vehicle,
+                        seat,
+                        aboard.len(),
+                        animal,
+                    );
+                }
                 let (pos, prev) = (vehicle.position, vehicle.previous);
                 let (yaw, prev_yaw) = (vehicle.yaw, vehicle.previous_yaw);
                 let (body, prev_body) = (vehicle.body_yaw, vehicle.previous_body_yaw);
+                let vehicle_width = vehicle.width();
                 let m = &mut self.mobs[i];
-                let offset = riders::vehicle_attachment(m);
+                let offset = riders::vehicle_attachment(m, vehicle_width);
                 m.position = riders::seat(attach, offset, pos, yaw);
                 m.previous = riders::seat(attach, offset, prev, prev_yaw);
                 m.velocity = Vec3::ZERO;
@@ -302,6 +355,7 @@ impl Game<'_> {
         };
         let (species, baby) = (m.species(), m.is_baby());
         let at = [m.position.x, m.position.y, m.position.z];
+        let mounts = mount_rolls(species, baby, natural);
         match species {
             s if zombie_kind(s) && baby => {
                 if self.world.random.next_float() < CHICKEN_JOCKEY_ODDS {
@@ -327,7 +381,7 @@ impl Game<'_> {
             // comes from EntityType.create, which makes no zombie in peaceful
             // (canSpawn), so a peaceful zombie horse spawns without one.
             Species::ZombieHorse
-                if natural
+                if mounts.zombie_horse_rider
                     && (self.ui.difficulty != 0
                         || horizon_client::mobs::spawn_rules::allowed_in_peaceful(
                             Species::Zombie,
@@ -344,8 +398,8 @@ impl Game<'_> {
         }
         // After Zombie.finalizeSpawn's chickens: Husk and Drowned mounts.
         match species {
-            Species::Husk if natural => self.spawn_camel_husk_jockey(id, at),
-            Species::Drowned if natural && !baby => self.spawn_zombie_nautilus_jockey(id, at),
+            Species::Husk if mounts.camel_husk => self.spawn_camel_husk_jockey(id, at),
+            Species::Drowned if mounts.nautilus => self.spawn_zombie_nautilus_jockey(id, at),
             _ => {}
         }
     }
@@ -539,5 +593,36 @@ impl Game<'_> {
             }
         }
         Some(id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spawner_and_reinforcement_spawns_get_no_mounts() {
+        for (species, baby) in [
+            (Species::ZombieHorse, false),
+            (Species::Husk, false),
+            (Species::Drowned, false),
+        ] {
+            let none = MountRolls {
+                zombie_horse_rider: false,
+                camel_husk: false,
+                nautilus: false,
+            };
+            assert_eq!(mount_rolls(species, baby, false), none, "{species:?}");
+        }
+    }
+
+    #[test]
+    fn natural_spawns_roll_their_own_mount() {
+        let r = |s, b| mount_rolls(s, b, true);
+        assert!(r(Species::ZombieHorse, false).zombie_horse_rider);
+        assert!(r(Species::Husk, false).camel_husk);
+        assert!(r(Species::Drowned, false).nautilus);
+        assert!(!r(Species::Drowned, true).nautilus);
+        assert!(!r(Species::Zombie, false).camel_husk);
     }
 }

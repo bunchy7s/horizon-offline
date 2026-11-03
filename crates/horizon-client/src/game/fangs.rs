@@ -10,9 +10,9 @@ pub(super) struct Fangs {
     pub id: u32,
     pub pos: [f64; 3],
     pub yaw: f32,
-    warmup: i32,
+    pub warmup: i32,
     pub life: i32,
-    owner: u32,
+    pub owner: u32,
     pub started: bool,
 }
 #[derive(Default)]
@@ -28,11 +28,7 @@ impl Game<'_> {
 
     pub(super) fn insert_fangs(&mut self, id: u32, at: [f64; 3], yaw: f32, delay: i32, owner: u32) {
         if self.fangs.model.is_none() {
-            self.fangs.model = horizon_client::mobs::load_model(
-                &self.options.resources,
-                "minecraft:evoker_fangs#main",
-            )
-            .map(Arc::new);
+            self.fangs.model = self.entity_models.evoker_fangs.clone();
         }
         self.fangs.list.push(Fangs {
             id,
@@ -43,6 +39,24 @@ impl Game<'_> {
             owner,
             started: false,
         });
+    }
+    pub(super) fn fangs_to_nbt(&self, f: &Fangs, uuid: [i32; 4]) -> horizon_world::nbt::Tag {
+        horizon_client::entity_nbt::evoker_fangs_to_nbt(
+            Vec3::new(f.pos[0], f.pos[1], f.pos[2]),
+            f.yaw,
+            f.warmup,
+            self.persist.uuids.get(&f.owner).copied(),
+            uuid,
+            self.persist.raw.get(&f.id),
+        )
+    }
+    pub(super) fn loaded_fangs_owner(&self, tag: &horizon_world::nbt::Tag) -> u32 {
+        match tag.get("Owner") {
+            Some(horizon_world::nbt::Tag::IntArray(v)) => v.as_slice().try_into().ok(),
+            _ => None,
+        }
+        .and_then(|u| self.mob_by_uuid(u))
+        .unwrap_or(0)
     }
     /// `EvokerFangs.handleEntityEvent`: only event 4 starts a client attack.
     pub(super) fn remote_fangs_event(&mut self, id: u32, event: i8) {
@@ -72,7 +86,7 @@ impl Game<'_> {
     pub(super) fn tick_fangs(&mut self) {
         let mut list = std::mem::take(&mut self.fangs.list);
         list.retain_mut(|f| {
-            f.warmup -= 1;
+            f.warmup = f.warmup.wrapping_sub(1);
             if f.warmup >= 0 {
                 return true;
             }

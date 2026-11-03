@@ -61,7 +61,7 @@ StandingSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place
 StandingSignBlock.mirror	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::mirror	
 StandingSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
 StandingSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-StemBlock.getCloneItemStack	missing		unsure: minor: middle-click on a stem may not return its seed item; no stem case found in the pick code
+StemBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::clone_item	a pumpkin or melon stem, attached or not, picks the seed it grew from; any other block picks its own item
 StemBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	
 StemBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	
 StemBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::stem_random_tick	
@@ -75,8 +75,8 @@ SuspiciousEffectHolder.tryGet	port	crates/horizon-items/src/flowers.rs::stew_eff
 TallSeagrassBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 TallSeagrassBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
 TallSeagrassBlock.mayPlaceOn	port	crates/horizon-world/src/level/survive.rs::Sim::may_place_on	
-TestBlock	missing		minor: game-test block for operators; Horizon keeps only its NBT
-TestInstanceBlock	missing		minor: game-test instance block; Horizon keeps only its NBT
+TestBlock	skip:debug		game-test tooling: an operator's test block runs a structure when triggered and Horizon keeps only its block entity NBT
+TestInstanceBlock	skip:debug		game-test tooling: the instance block runs and exports a test structure; Horizon keeps its NBT
 TintedParticleLeavesBlock.spawnFallingLeavesParticle	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	falling tinted leaf particle
 TorchBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::block_animate_tick	torch flame
 TorchflowerCropBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::random_tick_block	growth arm
@@ -100,11 +100,11 @@ WallHangingSignBlock.canAttachTo	inline	crates/horizon-world/src/level/place.rs:
 WallHangingSignBlock.canPlace	port	crates/horizon-world/src/level/place.rs::Sim::wall_hanging_sign_can_place	
 WallHangingSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
 WallHangingSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
-WallHangingSignBlock.isHittingEditableSide	missing		unsure: player: a hanging sign clicked on its side may not chain onto a wall hanging sign
+WallHangingSignBlock.isHittingEditableSide	inline	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	the face the sign faces and its opposite are the editable sides (a wall sign's FACING is horizontal, so that is getDirection().getAxis() == FACING.getAxis()); a hanging sign aimed at any other face passes
 WallHangingSignBlock.rotate	port	crates/horizon-world/src/worldgen/structure.rs::StateTransforms::rotate	
-WallHangingSignBlock.shouldTryToChainAnotherHangingSign	missing		unsure: player: a second hanging sign used on a wall sign may not chain on
+WallHangingSignBlock.shouldTryToChainAnotherHangingSign	inline	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	gap: player: the HangingSignItem and isHittingEditableSide halves are there, canExecuteClickCommands is read as false because the world sees no sign text; a waxed wall hanging sign whose faced side runs a click command therefore chains a new sign here where vanilla opens its editor (Game::sign_can_execute_click_commands answers it on the client)
 WallHangingSignBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	
-WallHangingSignBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	gap: player: chaining a hanging sign onto a wall hanging sign is not ported here
+WallHangingSignBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Sim::block_use_item_on	gap: player: chaining is there; the click-command condition of shouldTryToChainAnotherHangingSign is not, see that row
 WallSignBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::can_survive_class	
 WallSignBlock.createBlockStateDefinition	skip:data		states come from the generated block state table
 WallSignBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	
@@ -132,7 +132,7 @@ BannerPatternLayers.removeLast	inline	crates/horizon-client/src/cauldron.rs::int
 BannerPatternLayers.Builder	skip:java		builder for banner pattern layers
 BannerPatterns	skip:data		registry bootstrap
 BarrelBlockEntity.loadAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only, no load step of its own
-BarrelBlockEntity.recheckOpen	missing		unsure: player: a barrel lid may stay open after a player walks away; only golem openers are rechecked on a timer
+BarrelBlockEntity.recheckOpen	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	openCount is recounted on the barrel's scheduled tick; zero crossings set the open property
 BarrelBlockEntity.saveAdditional	port	crates/horizon-client-core/src/block_entity_nbt.rs::canonical	gap: minor: canonical NBT form only
 BarrelBlockEntity.startOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
 BarrelBlockEntity.stopOpen	port	crates/horizon-client/src/game/block_entity_anims.rs::Game::barrel_openers_changed	
@@ -151,26 +151,26 @@ PotDecorations.addSideDetailsToTooltip	port	crates/horizon-client/src/item_toolt
 PotDecorations.allBrick	skip:data		constant brick decoration set
 PotentSulfurBlockEntity.applyNauseaEffect	port	crates/horizon-client/src/game/potent_sulfur.rs::apply_nausea_effect_to_mob	ticked in #3516; `PotentSulfurBlockEntity.applyNauseaEffect` is cited at crates/horizon-client/src/game/potent_sulfur.rs:86
 PotentSulfurBlockEntity.canBeReachedByNoxiousGas	port	crates/horizon-client-render/src/potent_sulfur.rs::can_be_reached_by_noxious_gas	ticked in #3516; `PotentSulfurBlockEntity.canBeReachedByNoxiousGas` is cited at crates/horizon-client-render/src/potent_sulfur.rs:73
-PotentSulfurBlockEntity.findNoxiousGasSourceBlock	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.getNearbyLivingEntities	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.getUnobstructedBlockCount	missing		minor: helper of the geyser gas, not ported
+PotentSulfurBlockEntity.findNoxiousGasSourceBlock	port	crates/horizon-client-render/src/potent_sulfur.rs::find_noxious_gas_source_block	the first block above the sulfur that the gas can leave through, capped at the geyser's reach
+PotentSulfurBlockEntity.getNearbyLivingEntities	inline	crates/horizon-client/src/game/potent_sulfur.rs::nearby_living_area	the source block's box grown 2.5 blocks sideways, which the nausea and launch tickers ask for entities in
+PotentSulfurBlockEntity.getUnobstructedBlockCount	port	crates/horizon-client-render/src/potent_sulfur.rs::unobstructed_block_count	how many blocks of the column above the source the gas is unobstructed through
 PotentSulfurBlockEntity.geyserPositional	port	crates/horizon-client/src/game/potent_sulfur.rs::geyser_positional	ticked in #3516; `PotentSulfurBlockEntity.geyserPositional` is cited at crates/horizon-client/src/game/potent_sulfur.rs:55
-PotentSulfurBlockEntity.haveLineOfSight	missing		minor: helper of the geyser gas, not ported
-PotentSulfurBlockEntity.isGeyserPassableBlock	missing		minor: helper of the geyser, not ported
-PotentSulfurBlockEntity.loadAdditional	missing		minor: the eruption timer is not loaded; Horizon keeps only the countdown in NBT
-PotentSulfurBlockEntity.setLevel	missing		minor: the eruption timer is not started on load
+PotentSulfurBlockEntity.haveLineOfSight	port	crates/horizon-client-render/src/potent_sulfur.rs::have_line_of_sight	a clip over the collider shapes between the two points, water and passable blocks let through
+PotentSulfurBlockEntity.isGeyserPassableBlock	port	crates/horizon-client-render/src/potent_sulfur.rs::is_geyser_passable_block	air, water, or a block the gas passes through
+PotentSulfurBlockEntity.loadAdditional	port	crates/horizon-client/src/save.rs::decode_block_entity	the countdown is read back, the only field vanilla's tag carries (eruptionTick is transient, and saveAdditional writes countdown alone)
+PotentSulfurBlockEntity.setLevel	inline	crates/horizon-client/src/game/potent_sulfur.rs::client_tick_potent_sulfur	the eruption tick is set to the level's game time while it is still -1, as setLevel does when the entity learns its level
 PotentSulfurBlockEntity.spawnGeyserParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_geyser_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnGeyserParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:380
 PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle	port	crates/horizon-client/src/game/potent_sulfur.rs::Game::spawn_noxious_gas_cloud_particle	ticked in #3516; `PotentSulfurBlockEntity.spawnNoxiousGasCloudParticle` is cited at crates/horizon-client/src/game/potent_sulfur.rs:395
-RandomizableContainerBlockEntity.applyImplicitComponents	missing		minor: a chest item does not hand its loot table back to the block
-RandomizableContainerBlockEntity.canOpen	missing		unsure: minor: the spectator and loot-table open checks were not found
-RandomizableContainerBlockEntity.collectImplicitComponents	missing		minor: a container does not save its loot table onto the item it drops
+RandomizableContainerBlockEntity.applyImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::place	the item's minecraft:container_loot hands the block its LootTable and LootTableSeed
+RandomizableContainerBlockEntity.canOpen	inline	crates/horizon-client/src/game/advancements.rs::Game::container_locked_for	the negative of it: a spectator opens any container, and otherwise the lock decides (LockCode.canUnlock)
+RandomizableContainerBlockEntity.collectImplicitComponents	port	crates/horizon-client/src/block_entity_item.rs::collect	the block's LootTable and LootTableSeed leave on the item as minecraft:container_loot
 RandomizableContainerBlockEntity.createMenu	port	crates/horizon-client/src/game.rs::Game::open_menu	gap: minor: the spectator and loot-table checks are not ported here
 SculkSensorBlockEntity.loadAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::load	
 SculkSensorBlockEntity.saveAdditional	port	crates/horizon-client-render/src/sculk.rs::SculkEntity::to_nbt	
 SculkSensorBlockEntity.VibrationUser.canReceiveVibration	port	crates/horizon-client-render/src/sculk.rs::valid_vibration	
 SculkSensorBlockEntity.VibrationUser.onReceiveVibration	port	crates/horizon-client-render/src/sculk.rs::Data::schedule	
-TestBlockEntity	missing		minor: game-test block entity; reset, trigger and logging are not ported, NBT only
-TestInstanceBlockEntity	missing		minor: game-test structure tooling; export and chunk forcing are not ported
+TestBlockEntity	skip:debug		game-test tooling: reset, trigger and logging belong to the test runner, which Horizon does not have; its NBT is kept
+TestInstanceBlockEntity	skip:debug		game-test tooling: export and chunk forcing belong to the test runner, which Horizon does not have
 TrialSpawnerConfig.calculateTargetSimultaneousMobs	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialConfig::target_simultaneous_mobs	
 TrialSpawnerConfig.calculateTargetTotalMobs	port	crates/horizon-client/src/mobs/trial_spawner.rs::TrialConfig::target_total_mobs	
 TrialSpawnerConfig.withSpawning	skip:java		builder-style setter on the config record
@@ -204,7 +204,7 @@ ImposterProtoChunk	skip:other		wrapper so the vanilla status pipeline can read a
 LinearPalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 PalettedContainerFactory	skip:java		factory for palette storage; Horizon's chunk.rs keeps block ids in plain arrays
 SingleValuePalette	skip:java		palette storage; Horizon's chunk.rs keeps block ids in plain arrays
-UpgradeData	missing		unsure: minor: block upgrades of old chunks on load are not ported
+UpgradeData	missing		the block upgrades an old chunk takes when it loads (the Sides bits a save carries); the datafix writes and keeps UpgradeData (datafix/chunk_leaves.rs) but no load path applies the upgrades
 ChunkDependencies.getRadiusOf	inline	crates/horizon-client-render/src/streaming.rs::Ranges::margins	fixed margins instead of a per-status radius
 ChunkPyramid.Builder	skip:java		builder for the status pyramid; Horizon uses fixed margins
 ChunkStatusTasks.buildTerrain	inline	crates/horizon-world/src/worldgen/generator.rs::Pipeline::generate_with_context	terrain pass

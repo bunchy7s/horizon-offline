@@ -24,7 +24,7 @@ use horizon_client::{
     text::Text,
 };
 use horizon_core::{
-    geometry::{Aabb, Direction, Vec3},
+    geometry::{Aabb, Axis, Direction, Vec3},
     random::{LegacyRandom, RandomSource},
 };
 
@@ -42,6 +42,44 @@ pub(super) struct ThrownPotion {
     /// `Projectile.getOwner`'s display name: the player who threw it (none
     /// for a dispenser's).
     owner: Option<Text>,
+    /// `Projectile.getOwner` as a target: the thrower (`Who::Player`, a
+    /// guest's with `guest` set), none for a dispenser's or a server's.
+    thrower: Option<Who>,
+    /// On a server, the guest (by connection) who threw it.
+    guest: Option<u32>,
+    /// `Projectile.leftOwner`: until then it can't hit its thrower.
+    left_owner: bool,
+}
+/// The player (not one of `skip`, the thrower and who rides with them before
+/// it has left them) whose box, grown by `margin` (`ProjectileUtil.computeMargin`),
+/// holds `p` (`Projectile.canHitEntity`).
+fn thrown_player_at<'a>(
+    players: &'a [(Who, Aabb)],
+    skip: &[Who],
+    p: Vec3,
+    margin: f64,
+) -> Option<&'a (Who, Aabb)> {
+    players.iter().find(|(who, b)| {
+        !skip.contains(who) && b.inflate(Vec3::new(margin, margin, margin)).contains(p)
+    })
+}
+/// `ProjectileUtil.computeMargin`: how far the pick box is grown at `age`.
+fn thrown_margin(age: u32) -> f64 {
+    ((f64::from(age) - 2.0) / 20.0).clamp(0.0, 0.3)
+}
+/// `Projectile.isOutsideOwnerCollisionRange` (`checkLeftOwner`): none of the
+/// boxes of the thrower's vehicle tree (`owner.getRootVehicle().getSelfAndPassengers()`,
+/// here `ridden`) is within a block of the potion's (0.25 wide) grown by its
+/// motion; true too when there is no thrower (`ridden` empty).
+fn thrown_left_owner(ridden: &[Aabb], position: Vec3, velocity: Vec3) -> bool {
+    let h = 0.125;
+    let reach = Aabb::new(
+        Vec3::new(position.x - h, position.y, position.z - h),
+        Vec3::new(position.x + h, position.y + 2.0 * h, position.z + h),
+    )
+    .expand_towards(velocity)
+    .inflate(Vec3::new(1.0, 1.0, 1.0));
+    !ridden.iter().any(|b| b.intersects(reach))
 }
 /// `AreaEffectCloud` wait time set by `ThrownLingeringPotion.onHitAsPotion`.
 pub(super) const LINGERING_WAIT: i32 = 10;
@@ -78,6 +116,21 @@ impl PotionCloud {
         let c = |shift: u32| (self.color >> shift & 255) as f32 / 255.0;
         ParticleOptions::colored(ParticleType::EntityEffect, [c(16), c(8), c(0), 1.0])
     }
+}
+/// `Projectile.getOwner` of a thrown potion: what its `indirectMagic` damage
+/// is named after and who it counts against. Nothing for a dispenser's or a
+/// summoned potion nobody owns, the potion itself then naming the death
+/// message.
+#[derive(Clone, Debug, Default)]
+pub(super) struct PotionOwner {
+    /// The thrower's name, when it has one.
+    name: Option<Text>,
+    /// The mob that threw it (a witch): the hurt is its kill credit, as
+    /// `indirectMagic(potion, owner)` gives it. A player's throw is the
+    /// potion's own and only `name`s the message.
+    attacker: Option<u32>,
+    /// A player threw it: the water damage `indirectMagic` deals is theirs.
+    player: bool,
 }
 /// A mob's effect ids carry the `minecraft:` namespace; a mod's has its own.
 pub(super) fn mob_effect_id(id: &str) -> Option<&'static str> {
@@ -289,14 +342,18 @@ impl Game<'_> {
         velocity: Vec3,
         owner: Option<Text>,
     ) {
+        let id = self.take_entity_id();
         self.potions.thrown.push(ThrownPotion {
-            id: 0,
+            id,
             stack,
             previous: position,
             position,
             velocity,
             age: 0,
+            thrower: owner.is_some().then_some(Who::Player),
+            guest: self.lan_acting.filter(|_| owner.is_some()),
             owner,
+            left_owner: false,
         });
     }
 }
@@ -378,6 +435,9 @@ impl PotionState {
             velocity,
             age: 0,
             owner: None,
+            thrower: None,
+            guest: None,
+            left_owner: false,
         });
     }
     /// ThrowableItemProjectile.DATA_ITEM_STACK: the potion it shows.
@@ -543,7 +603,7 @@ impl Game<'_> {
         if let Some(mud) = self.pack.assets.registry.default_state("minecraft:mud") {
             self.level_set(pos, mud)?;
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         Ok(true)
     }
@@ -569,19 +629,34 @@ impl Game<'_> {
         if &*stack.item != "minecraft:potion" && !ominous {
             return false;
         }
+        // the duration the use started with (32, as a mod's Start or Tick left it).
+        let duration = self.use_duration;
         let ticks = ticks + 1;
-        let remaining = 32u32.saturating_sub(ticks);
+        let remaining = duration.saturating_sub_unsigned(ticks).max(0);
         let eye = self.eye_position().unwrap_or_default();
         // Consumable.emitParticlesAndSounds: the drink sound every 4 ticks near the end.
-        if remaining <= 25 && remaining.is_multiple_of(4) {
+        if remaining <= 25 && remaining % 4 == 0 {
             let pitch = self.world.random.next_float() * 0.1 + 0.9;
             self.audio
                 .play("minecraft:entity.generic.drink", Some(eye), 0.5, pitch);
         }
-        if ticks < 32 {
+        // ItemStack.onUseTick: the item's own tick after the consumable's.
+        self.item_on_use_tick(stack, ticks - 1);
+        if i64::from(ticks) < i64::from(duration) {
             self.using = Some((slot, ticks));
             return true;
         }
+        self.finish_drinking(slot, stack);
+        true
+    }
+    /// `PotionItem.finishUsingItem` (and `OminousBottleItem`'s) of `stack` in
+    /// `slot`, the use complete: false for anything else.
+    pub(super) fn finish_drinking(&mut self, slot: usize, stack: &ItemStack) -> bool {
+        let ominous = &*stack.item == "minecraft:ominous_bottle";
+        if &*stack.item != "minecraft:potion" && !ominous {
+            return false;
+        }
+        let eye = self.eye_position().unwrap_or_default();
         self.using = None;
         self.send_use_item_complete();
         self.post_entity_event("minecraft:drink", horizon_client::mobs::Who::Player);
@@ -686,8 +761,7 @@ impl Game<'_> {
                             if (effect == "instant_damage") != inverted {
                                 m.damage((6 << amp.min(30)) as f32, Damage::of(DamageKind::Magic));
                             } else {
-                                m.health =
-                                    (m.health + (4 << amp.min(30)) as f32).min(m.attrs.max_health);
+                                m.heal((4 << amp.min(30)) as f32);
                             }
                         }
                         _ => {
@@ -705,6 +779,23 @@ impl Game<'_> {
         }
     }
     pub(super) fn apply_effect_action(&mut self, action: EffectAction) {
+        let action = match action {
+            EffectAction::Heal(mut amount) => {
+                if let Some(player) = self.player.as_ref() {
+                    let mut cancel = false;
+                    horizon_client::hunger::native_living_heal(
+                        player.entity_id as u32,
+                        &mut amount,
+                        &mut cancel,
+                    );
+                    if cancel {
+                        return;
+                    }
+                }
+                EffectAction::Heal(amount)
+            }
+            action => action,
+        };
         let creative = self.creative;
         let rules = self.world.health_rules;
         let Some(p) = self.player.as_mut() else {
@@ -959,14 +1050,86 @@ impl Game<'_> {
             p.status = status;
         }
     }
+    /// The players a thrown potion can hit (`Projectile.canHitEntity`): the
+    /// host and the guests, but not a spectator or a dead one.
+    fn thrown_player_targets(&self) -> Vec<(Who, Aabb)> {
+        let mut targets = Vec::new();
+        if let Some(p) = self.player_view()
+            && p.alive
+            && !self.spectator()
+        {
+            targets.push((Who::Player, p.bounds));
+        }
+        targets.extend(self.lan_projectile_targets());
+        targets
+    }
+    /// The thrower's vehicle tree as `Projectile` sees it
+    /// (`owner.getRootVehicle().getSelfAndPassengers()`): the players in it (the
+    /// thrower and who shares their vehicle), the mob that is the vehicle, and
+    /// the boxes of all of them. Until the potion has left it, none can be hit
+    /// (`canHitEntity`: `isPassengerOfSameVehicle`) and any one near keeps it
+    /// from leaving (`isOutsideOwnerCollisionRange`).
+    fn thrown_ridden(
+        &self,
+        owner: Option<Who>,
+        players: &[(Who, Aabb)],
+    ) -> (Vec<Who>, Option<u32>, Vec<Aabb>) {
+        let Some(owner) = owner else {
+            return (Vec::new(), None, Vec::new());
+        };
+        let vehicle_of = |who: Who| match who {
+            Who::Player => self.riding,
+            Who::Mob(id) => self
+                .lan
+                .as_ref()
+                .and_then(|h| h.hub.guests.iter().find(|g| g.entity_id as u32 == id))
+                .and_then(|g| g.vehicle),
+        };
+        let vehicle = vehicle_of(owner);
+        let mut who = vec![owner];
+        let mut boxes = Vec::new();
+        for (w, b) in players {
+            if *w == owner || (vehicle.is_some() && vehicle_of(*w) == vehicle) {
+                if *w != owner {
+                    who.push(*w);
+                }
+                boxes.push(*b);
+            }
+        }
+        if let Some(v) = vehicle {
+            if let Some(m) = self.mobs.iter().find(|m| m.id == v) {
+                boxes.push(m.bounds());
+            }
+            if let Some(b) = self.boats.iter().find(|b| b.id == v) {
+                boxes.push(b.bounds());
+            }
+        }
+        (who, vehicle, boxes)
+    }
     /// `ThrowableProjectile.tick` for the potions in flight: the motion, then
-    /// the first block or mob the step meets (`ProjectileUtil.getHitResultOnMoveVector`),
-    /// where the potion splashes (`Projectile.onHit`).
+    /// the first block, mob or player the step meets
+    /// (`ProjectileUtil.getHitResultOnMoveVector`), where the potion splashes
+    /// (`Projectile.onHit`). Its thrower is not met until it has left them
+    /// (`Projectile.leftOwner`, checked before the move like `Projectile.tick`),
+    /// nor anything else in their vehicle tree.
     fn tick_thrown_potions(&mut self) {
         let mut thrown = std::mem::take(&mut self.potions.thrown);
+        let players = if thrown.is_empty() {
+            Vec::new()
+        } else {
+            self.thrown_player_targets()
+        };
         let mut landed = Vec::new();
         thrown.retain_mut(|t| {
             t.age += 1;
+            // Projectile.tick: whether it has left its thrower's vehicle tree,
+            // before it moves.
+            let owner = self.shooter_who(t.thrower, t.guest);
+            let (ridden, vehicle, boxes) = self.thrown_ridden(owner, &players);
+            if !t.left_owner {
+                t.left_owner = thrown_left_owner(&boxes, t.position, t.velocity);
+            }
+            let skip: &[Who] = if t.left_owner { &[] } else { &ridden };
             t.previous = t.position;
             self.thrown_potion_motion(t);
             let next = Vec3::new(
@@ -974,7 +1137,9 @@ impl Game<'_> {
                 t.position.y + t.velocity.y,
                 t.position.z + t.velocity.z,
             );
-            // Hit a block along the step (sampled), a mob, or fell out of the world.
+            // Hit a block along the step (sampled), a mob, a player, or fell out
+            // of the world.
+            let margin = thrown_margin(t.age);
             let steps = 4;
             let mut hit = None;
             for i in 1..=steps {
@@ -989,18 +1154,27 @@ impl Game<'_> {
                         .block(p.x.floor() as i32, p.y.floor() as i32, p.z.floor() as i32);
                 let mob = self.mobs.iter().find(|m| {
                     m.alive()
+                        && (t.left_owner || Some(m.id) != vehicle)
                         && (m.position.x - p.x).abs() < m.kind.width / 2.0 + 0.125
                         && (m.position.z - p.z).abs() < m.kind.width / 2.0 + 0.125
                         && p.y >= m.position.y
                         && p.y <= m.position.y + m.kind.height
                 });
-                if self.res.facts().get(state).full_collision || mob.is_some() {
+                // A player (`canHitEntity`: not the thrower before it has left
+                // them), the box grown by the 0.3 pick margin.
+                let player = thrown_player_at(&players, skip, p, margin);
+                if self.res.facts().get(state).full_collision || mob.is_some() || player.is_some() {
                     // A block hit has the face it came in by
-                    // (`onHitBlock`); a mob hit has none.
-                    let block = mob
-                        .is_none()
+                    // (`onHitBlock`); an entity hit has none.
+                    let block = (mob.is_none() && player.is_none())
                         .then(|| thrown_block_hit(t.position, p, t.velocity));
-                    hit = Some((p, mob.map(|m| m.position), block));
+                    let at = mob.map(|m| m.position).or_else(|| {
+                        player.map(|(_, b)| {
+                            let c = b.center();
+                            Vec3::new(c.x, b.min(Axis::Y), c.z)
+                        })
+                    });
+                    hit = Some((p, at, block));
                     break;
                 }
             }
@@ -1013,7 +1187,26 @@ impl Game<'_> {
         });
         self.potions.thrown = thrown;
         for (stack, at, mob, block, age, owner) in landed {
-            self.splash(&stack, at, mob, block, age, owner);
+            // Projectile.onHit (super.onHit of AbstractThrownPotion): a block
+            // is heard at its centre, an entity at the hit.
+            let heard = if mob.is_some() {
+                [at.x, at.y, at.z]
+            } else {
+                [at.x.floor() + 0.5, at.y.floor() + 0.5, at.z.floor() + 0.5]
+            };
+            let thrower = owner.is_some().then_some(Who::Player);
+            self.projectile_event("minecraft:projectile_land", thrower, heard);
+            let item = stack.item.to_string();
+            // A potion a dispenser threw has nobody to name.
+            let owner = PotionOwner {
+                player: owner.is_some(),
+                name: owner,
+                attacker: None,
+            };
+            self.splash(&stack, at, mob, block, age, &owner);
+            if item != "minecraft:experience_bottle" {
+                self.native_potion_splash(&item, [at.x, at.y, at.z]);
+            }
         }
     }
     /// `AreaEffectCloud.tick` for the lingering potions' clouds: the client
@@ -1119,8 +1312,9 @@ impl Game<'_> {
         ambient: Vec<&'static str>,
         color: u32,
     ) {
+        let id = self.take_entity_id();
         self.breath_clouds.push(Breath {
-            id: 0,
+            id,
             at,
             radius: 2.5,
             age: 0,
@@ -1148,6 +1342,12 @@ impl Game<'_> {
         at: [f64; 3],
         source: &Text,
     ) {
+        // `indirectMagic(cloud, owner)` names the cloud in the death message
+        // (it gives no kill credit).
+        let cloud_owner = PotionOwner {
+            name: Some(source.clone()),
+            ..Default::default()
+        };
         // MobEffectInstance.withScaledDuration: floor(duration * scale), at least 1; an infinite
         // effect stays infinite.
         let scaled = |duration: i32| {
@@ -1165,7 +1365,7 @@ impl Game<'_> {
                     };
                     if e.instant {
                         if let Some(a) = horizon_client::effects::instant(id, *amp, 0.5) {
-                            g.apply_indirect_effect_action(a, source);
+                            g.apply_indirect_effect_action(a, &cloud_owner);
                         }
                     } else {
                         let mut instance = EffectInstance::new(e.id, scaled(*duration), *amp);
@@ -1198,7 +1398,7 @@ impl Game<'_> {
                                 let harm = m.potion_harm(amount(6));
                                 m.hurt(harm, Some(at), &mut self.world.random);
                             } else {
-                                m.health = (m.health + amount(4)).min(m.kind.max_health);
+                                m.heal(amount(4));
                             }
                         }
                         _ => {
@@ -1323,11 +1523,22 @@ impl Game<'_> {
         }
     }
     /// `HealOrHarmMobEffect.applyInstantaneousEffect` with a source (a
-    /// potion or a cloud): indirectMagic, not plain magic.
-    fn apply_indirect_effect_action(&mut self, a: EffectAction, source: &Text) {
+    /// potion or a cloud): indirectMagic, not plain magic, credited to the
+    /// mob that threw it when there is one.
+    fn apply_indirect_effect_action(&mut self, a: EffectAction, owner: &PotionOwner) {
         let a = match a {
             EffectAction::Hurt("minecraft:magic", amount) => {
-                self.note_direct_entity("minecraft:indirect_magic", source.clone());
+                match (owner.attacker, &owner.name) {
+                    (Some(id), Some(name)) => {
+                        self.note_named_attacker("minecraft:indirect_magic", id, name.clone())
+                    }
+                    _ => {
+                        let name = owner.name.clone().unwrap_or_else(|| {
+                            Text::translate("entity.minecraft.splash_potion", &[])
+                        });
+                        self.note_direct_entity("minecraft:indirect_magic", name);
+                    }
+                }
                 EffectAction::Hurt("minecraft:indirect_magic", amount)
             }
             a => a,
@@ -1340,7 +1551,7 @@ impl Game<'_> {
         effects: &'static [(&'static str, i32, i32)],
         at: Vec3,
         age: u32,
-        source: &Text,
+        owner: &PotionOwner,
     ) {
         if let Some(p) = self.player.as_ref() {
             let w = f64::from(p.dimensions.width) / 2.0;
@@ -1358,7 +1569,7 @@ impl Game<'_> {
                     let instant = brewing::effect(id).is_some_and(|e| e.instant);
                     if instant {
                         if let Some(a) = horizon_client::effects::instant(id, *amp, intensity) {
-                            self.apply_indirect_effect_action(a, source);
+                            self.apply_indirect_effect_action(a, owner);
                         }
                     } else {
                         let d = (intensity * f64::from(*duration) + 0.5) as i32;
@@ -1372,18 +1583,36 @@ impl Game<'_> {
             }
         }
     }
+    /// `Projectile.getOwner` of a thrown potion, as [`splash`](Self::splash)
+    /// names it: a player's, a mob's (a witch keeps the kill credit), or
+    /// nobody's (a dispenser's, a summoned potion's).
+    pub(super) fn potion_owner(&self, owner: Option<Who>) -> PotionOwner {
+        match owner {
+            Some(Who::Player) => PotionOwner {
+                name: Some(self.player_display_text()),
+                attacker: None,
+                player: true,
+            },
+            Some(Who::Mob(id)) => PotionOwner {
+                name: self.mob_display_name(id),
+                attacker: Some(id),
+                player: false,
+            },
+            None => PotionOwner::default(),
+        }
+    }
     /// `AbstractThrownPotion.onHit` with `ThrownSplashPotion.onHitAsPotion`, or
     /// `ThrownLingeringPotion.onHitAsPotion` for a lingering potion, read from
     /// the stack's `potion_contents`; `mob` is where it hit a mob, `hit` the
     /// block and face it hit, `age` its age.
-    fn splash(
+    pub(super) fn splash(
         &mut self,
         stack: &ItemStack,
         at: Vec3,
         mob: Option<Vec3>,
         hit: Option<([i32; 3], Direction)>,
         age: u32,
-        owner: Option<Text>,
+        owner: &PotionOwner,
     ) {
         let block = [at.x, at.y, at.z].map(|v| v.floor() as i32);
         if &*stack.item == "minecraft:experience_bottle" {
@@ -1394,6 +1623,7 @@ impl Game<'_> {
             let r = &mut self.world.random;
             let value = 3 + r.next_int_bound(5).unwrap_or(0) + r.next_int_bound(5).unwrap_or(0);
             self.spawn_orbs([at.x, at.y, at.z], value as u32);
+            self.native_exp_bottle([at.x, at.y, at.z], value as u32);
             return;
         }
         // Projectile.onHit calls onHitBlock first, then the potion's
@@ -1401,7 +1631,7 @@ impl Game<'_> {
         if let Some((cell, face)) = hit {
             self.potion_hit_block(stack, cell, face);
         }
-        self.affect_entities_around(stack, at, owner.is_some());
+        self.affect_entities_around(stack, at, owner.player);
         let lingering = &*stack.item == "minecraft:lingering_potion";
         // AbstractThrownPotion.onHit: level event 2007 and sound 1054 for a
         // potion with instant effects, 2002 and 1053 otherwise.
@@ -1450,8 +1680,9 @@ impl Game<'_> {
             // potion with no effects leaves none.
             if !def.effects.is_empty() {
                 let at = mob.unwrap_or(at);
+                let id = self.take_entity_id();
                 self.breath_clouds.push(Breath {
-                    id: 0,
+                    id,
                     at: [at.x, at.y, at.z],
                     radius: 3.0,
                     age: 0,
@@ -1464,7 +1695,7 @@ impl Game<'_> {
                         radius_per_tick: -3.0 / 600.0,
                         color,
                         victims: Vec::new(),
-                        source: owner.unwrap_or_else(|| {
+                        source: owner.name.clone().unwrap_or_else(|| {
                             Text::translate("entity.minecraft.area_effect_cloud", &[])
                         }),
                     }),
@@ -1474,11 +1705,7 @@ impl Game<'_> {
         }
         // Every player in range (`ThrownSplashPotion.applySplash` over
         // `LivingEntity`s, the players among them).
-        // Instant damage is indirectMagic(potion, owner), which the death
-        // message names by the owner, else by the potion.
-        let source =
-            owner.unwrap_or_else(|| Text::translate("entity.minecraft.splash_potion", &[]));
-        self.for_each_player(|g| g.splash_on_player(def.effects, at, age, &source));
+        self.for_each_player(|g| g.splash_on_player(def.effects, at, age, owner));
         // Mobs take the instant effects (undead invert healing and harming).
         let undead = &self.stations().enchantments.entity_tags;
         let mut hits = Vec::new();
@@ -1514,8 +1741,7 @@ impl Game<'_> {
                     let harm = m.potion_harm((intensity * f64::from(6 << amp) + 0.5) as i32 as f32);
                     m.hurt(harm, Some([at.x, at.y, at.z]), &mut self.world.random);
                 } else {
-                    m.health = (m.health + (intensity * f64::from(4 << amp) + 0.5) as i32 as f32)
-                        .min(m.kind.max_health);
+                    m.heal((intensity * f64::from(4 << amp) + 0.5) as i32 as f32);
                 }
             }
         }
@@ -1614,6 +1840,55 @@ mod tests {
     use super::super::sculk::darkness_blend_added;
     use super::*;
     use horizon_client::screen_effects::nausea_blend_added;
+
+    /// #5876: a potion thrown straight up from inside its thrower's box does
+    /// not hit them while it climbs out, then hits them on the way down;
+    /// another player in its path is hit at once.
+    #[test]
+    fn a_thrown_potion_hits_its_thrower_only_after_leaving_them() {
+        // A player's box: 0.6 wide, 1.8 high, feet at the origin.
+        let body = |x: f64| Aabb::new(Vec3::new(x - 0.3, 0.0, -0.3), Vec3::new(x + 0.3, 1.8, 0.3));
+        let thrower = Who::Mob(1);
+        let players = [(thrower, body(0.0)), (Who::Mob(2), body(5.0))];
+        let ridden = [body(0.0)];
+        let eye = Vec3::new(0.0, 1.52, 0.0);
+        let up = Vec3::new(0.0, 0.5, 0.0);
+        let m = thrown_margin(10);
+        assert!((m - 0.3).abs() < 1e-12 && thrown_margin(1) == 0.0);
+        // Thrown from the eye: still within a block of its thrower.
+        assert!(!thrown_left_owner(&ridden, eye, up));
+        assert!(thrown_player_at(&players, &[thrower], eye, m).is_none());
+        // Without the gate the thrower's box does hold it.
+        assert_eq!(
+            thrown_player_at(&players, &[], eye, m).map(|t| t.0),
+            Some(thrower)
+        );
+        // Four blocks up and rising: clear of the box grown by a block.
+        let high = Vec3::new(0.0, 5.0, 0.0);
+        assert!(thrown_left_owner(&ridden, high, up));
+        // Falling back (left_owner now set), the thrower is hit at their head.
+        let head = Vec3::new(0.0, 2.0, 0.0);
+        assert_eq!(
+            thrown_player_at(&players, &[], head, m).map(|t| t.0),
+            Some(thrower)
+        );
+        // Another player is hit though the thrower has not left; a miss is none.
+        let beside = Vec3::new(5.2, 1.0, 0.0);
+        assert_eq!(
+            thrown_player_at(&players, &[thrower], beside, m).map(|t| t.0),
+            Some(Who::Mob(2))
+        );
+        assert!(thrown_player_at(&players, &[thrower], Vec3::new(2.5, 1.0, 0.0), m).is_none());
+        // A passenger sharing the thrower's vehicle is skipped like the thrower.
+        assert!(thrown_player_at(&players, &[thrower, Who::Mob(2)], beside, m).is_none());
+        // The vehicle's box keeps it from leaving: a mount 2 blocks wide.
+        let mount = Aabb::new(Vec3::new(-1.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0));
+        let beside_mount = Vec3::new(1.9, 0.0, 0.0);
+        assert!(thrown_left_owner(&[body(0.0)], beside_mount, up));
+        assert!(!thrown_left_owner(&[body(0.0), mount], beside_mount, up));
+        // No thrower (a dispenser's potion): it has left them already.
+        assert!(thrown_left_owner(&[], eye, up));
+    }
 
     /// A server's client (multiplayer and the default single player) fades
     /// the darkness effect in over its 22 blend ticks, holds it, and fades

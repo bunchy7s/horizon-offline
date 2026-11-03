@@ -162,6 +162,22 @@ impl Game<'_> {
                 u32::MAX,
             );
         }
+        // A native mod's own icons (`native_map_decorations`).
+        for d in self.mod_map_decorations(id, true) {
+            let Some(s) = self.gui.atlas.sprites.get(d.sprite.as_str()).copied() else {
+                continue;
+            };
+            batch.quad(
+                pose_corners(
+                    super::maps::decoration_pose_at(d.x, d.y, d.rot, 0.0),
+                    x,
+                    y,
+                    scale,
+                ),
+                [[s.u0, s.v0], [s.u1, s.v0], [s.u1, s.v1], [s.u0, s.v1]],
+                u32::MAX,
+            );
+        }
     }
 }
 
@@ -169,9 +185,14 @@ impl Game<'_> {
 /// `scale` GUI pixels per map pixel: (-1, 1), (1, 1), (1, -1), (-1, -1)
 /// under `MapRenderer.render`'s pose.
 fn decoration_corners(d: &super::maps::Decoration, x: f32, y: f32, scale: f32) -> [[f32; 2]; 4] {
+    pose_corners(super::maps::decoration_pose(d, 0.0), x, y, scale)
+}
+/// The corners of a decoration drawn under `pose` (`decoration_pose`), like
+/// [`decoration_corners`].
+fn pose_corners(pose: glam::Mat4, x: f32, y: f32, scale: f32) -> [[f32; 2]; 4] {
     let m = glam::Mat4::from_translation(glam::Vec3::new(x, y, 0.0))
         * glam::Mat4::from_scale(glam::Vec3::new(scale, scale, 1.0))
-        * super::maps::decoration_pose(d, 0.0);
+        * pose;
     [(-1.0, 1.0), (1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)].map(|(cx, cy)| {
         let p = m.transform_point3(glam::Vec3::new(cx, cy, 0.0));
         [p.x, p.y]

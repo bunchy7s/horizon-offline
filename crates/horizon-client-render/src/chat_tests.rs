@@ -40,6 +40,61 @@ fn add(chat: &mut Chat, font: &Font, content: Text) {
 }
 
 #[test]
+fn smooth_chat_slides_a_line_in_and_can_hide_the_indicator() {
+    let mut chat = Chat {
+        smooth: true,
+        ..Chat::default()
+    };
+    chat.lines.push(Line {
+        added: 0,
+        content: Text::literal("hi"),
+        tag: Some(std::sync::Arc::new(Tag::system_single_player(
+            SYSTEM_INDICATOR,
+        ))),
+    });
+    let text_alpha = |draws: &[GuiDraw]| {
+        draws.iter().find_map(|d| match d {
+            GuiDraw::Text { color, .. } => Some(color >> 24),
+            _ => None,
+        })
+    };
+    // The slide is the negative translate the line carries while it moves.
+    let slide = |draws: &[GuiDraw]| {
+        draws.iter().find_map(|d| match d {
+            GuiDraw::Push(ops) => ops.iter().find_map(|op| match op {
+                PoseOp::Translate(x, _) if *x < 0.0 => Some(*x),
+                _ => None,
+            }),
+            _ => None,
+        })
+    };
+    // The tick it arrives: fully faded out, so nothing is drawn.
+    assert_eq!(text_alpha(&chat.layout(361, 0.0, false)), None);
+    // Halfway through the intro: left of its place and still faint.
+    let halfway = chat.layout(361, INTRO_TICKS / 2.0, false);
+    assert!(slide(&halfway).is_some_and(|x| (-INTRO_WIDTH..0.0).contains(&x)));
+    let faded = text_alpha(&halfway).expect("the line shows halfway through");
+    // Settled: in place and as opaque as vanilla's line.
+    let settled = chat.layout(361, INTRO_TICKS, false);
+    assert_eq!(slide(&settled), None);
+    assert!(text_alpha(&settled).expect("settled") > faded);
+    // The extra off draws the line whole on the tick it arrives, as vanilla.
+    chat.smooth = false;
+    let plain = chat.layout(361, 0.0, false);
+    assert_eq!(slide(&plain), None);
+    assert_eq!(text_alpha(&plain), text_alpha(&settled));
+    // The indicator bar is the -4 to -2 fill at the left of the line.
+    let bar = |draws: &[GuiDraw]| {
+        draws
+            .iter()
+            .any(|d| matches!(d, GuiDraw::Fill { x0: -4, x1: -2, .. }))
+    };
+    assert!(bar(&plain));
+    chat.hide_indicator = true;
+    assert!(!bar(&chat.layout(361, 0.0, false)));
+}
+
+#[test]
 fn clicking_seed_copies_the_raw_value_only_inside_the_link() {
     let font = font();
     for seed in [1, -42, i64::MIN, i64::MAX] {
@@ -95,7 +150,7 @@ fn click_targets_match_rendered_spans_when_scaled_wrapped_and_scrolled() {
             for scroll in [0, 3, 12] {
                 chat.scroll = scroll;
                 let mut links = 0;
-                for draw in chat.layout(361, 0, true) {
+                for draw in chat.layout(361, 0.0, true) {
                     if let GuiDraw::Text { text, x, y, .. } = draw {
                         let mut at = x as f64;
                         for (c, style) in text.chars() {
@@ -489,7 +544,7 @@ fn the_chat_option_filters_the_lines_both_ways() {
     assert_eq!(shown(&chat), ["client", "server", "player"]);
 }
 
-/// The in-frame LAN host's chat: a guest's line is a player message, so the
+/// A server's own chat: a guest's line is a player message, so the
 /// Chat option's player-message permission hides it at Commands Only and
 /// Hidden; command feedback (`/list`, `/tp`) is a system message and stays
 /// at Commands Only.

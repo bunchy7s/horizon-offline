@@ -13,7 +13,7 @@ ClientAdvancements.get	port	crates/horizon-client/src/advancements.rs::Tree::get
 ClientChunkCache.isValidChunk	skip:other		chunks are stored by position, so there is no ring slot to check
 ClientChunkCache.drop	port	crates/horizon-client-render/src/streaming.rs::Streaming::forget	gap: minor: no ChunkEvent unload hook; block entities and renderer columns are cleared in Game::handle_packet
 ClientChunkCache.getChunk	skip:java		lookup of a loaded chunk; Horizon reads world.chunks directly
-ClientChunkCache.replaceBiomes	missing		minor: ChunksBiomes (id 13) has no arm in Game::handle_packet, so server biome changes (e.g. /fillbiome) do not reach the client until the chunk is resent
+ClientChunkCache.replaceBiomes	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_chunks_biomes	each loaded column takes the packet's biomes per section, then it and its neighbours are marked dirty so their sections are drawn again (/fillbiome reaches the client)
 ClientChunkCache.flipUpdateTrackingSets	skip:other		double-buffered change lists for LevelRenderer; Horizon hands changed columns to the renderer directly
 ClientChunkCache.Storage.getIndex	skip:java		ring-buffer index into the view range; Horizon keys chunks by position
 ClientChunkCache.Storage.replace	port	crates/horizon-client/src/game/remote_chunks.rs::Game::remote_chunk	gap: minor: old chunk unload is in Streaming::forget, not here
@@ -33,7 +33,7 @@ ClientCommonPacketListenerImpl.handleKeepAlive	port	crates/horizon-client/src/ne
 ClientCommonPacketListenerImpl.handleCustomPayload	port	crates/horizon-client/src/net.rs::receive_brand	gap: minor: reads the brand only; other custom payloads go to the game and are ignored
 ClientCommonPacketListenerImpl.handleResourcePackPush	port	crates/horizon-client/src/game/server_packs.rs::Game::handle_pack_push	
 ClientCommonPacketListenerImpl.handleResourcePackPop	port	crates/horizon-client/src/game/server_packs.rs::Game::handle_pack_pop	
-ClientCommonPacketListenerImpl.handlePostEffects	missing		player: a server's screen post effect (ClientboundPostEffectsPacket, set by /posteffect and on join) is not drawn on remote servers; Horizon's /posteffect only works in its own game
+ClientCommonPacketListenerImpl.handlePostEffects	inline	crates/horizon-client/src/game/remote.rs::Game::handle_packet	
 ClientCommonPacketListenerImpl.preparePackPrompt	port	crates/horizon-client/src/game/server_packs.rs::PackPrompt::texts	builds the server prompt line from the header and the server's prompt
 ClientCommonPacketListenerImpl.handleStoreCookie	port	crates/horizon-client/src/net.rs::receive_play	stores the cookie for a later transfer or cookie request
 ClientCommonPacketListenerImpl.handleCustomReportDetails	skip:debug		extra lines for crash reports only
@@ -48,10 +48,10 @@ ClientCommonPacketListenerImpl.addOrUpdatePackPrompt	port	crates/horizon-client/
 ClientCommonPacketListenerImpl.PackConfirmScreen.<init>	port	crates/horizon-client/src/game/server_packs.rs::Game::handle_pack_push	creates the prompt with its pending requests
 ClientCommonPacketListenerImpl.PackConfirmScreen.update	port	crates/horizon-client/src/game/server_packs.rs::Game::handle_pack_push	adds the new request to the open prompt
 ClientConfigurationPacketListenerImpl.handleRegistryData	port	crates/horizon-client/src/net.rs::configure	registry entries are collected in configuration
-ClientConfigurationPacketListenerImpl.handleUpdateTags	missing		minor: UpdateTags is not read in configure (net.rs); Horizon uses its built-in tags, which match vanilla unless a datapack changes them
+ClientConfigurationPacketListenerImpl.handleUpdateTags	port	crates/horizon-client/src/net.rs::configure	UpdateTags fills the registry's tags before the play state, so a datapack's tags are the server's
 ClientConfigurationPacketListenerImpl.handleSelectKnownPacks	port	crates/horizon-client/src/net.rs::configure	gap: minor: always answers with no known packs, so the server sends every registry entry
 ClientConfigurationPacketListenerImpl.runWithResources	skip:data		resource loading for known packs; Horizon reads its data from tables
-ClientConfigurationPacketListenerImpl.handleCodeOfConduct	port	crates/horizon-client/src/net.rs::configure	gap: player: accepts the server's code of conduct at once; the player never sees its text or can decline
+ClientConfigurationPacketListenerImpl.handleCodeOfConduct	port	crates/horizon-client/src/net.rs::configure	the screen shows the text with the not-again box, Acknowledge and Disconnect before the connection continues (game/code_of_conduct.rs)
 ClientConfigurationPacketListenerImpl.handleConfigurationFinished	port	crates/horizon-client/src/net.rs::configure	gap: minor: no registry filter for an integrated server (see filterRegistries)
 ClientConfigurationPacketListenerImpl.filterRegistries	skip:data		Horizon's registries come from its own data; nothing to filter
 ClientDebugSubscriber.requestedSubscriptions	missing		minor: Horizon never requests debug subscriptions; vanilla asks for server tick time while the F3+2 chart is on
@@ -71,7 +71,7 @@ ClientDebugSubscriber.ValueMap.forEach	skip:java		iteration helper
 ClientDebugSubscriber.ValueMaps.purgeExpired	missing		minor: expiry of server debug values; none are received
 ClientDebugSubscriber.ValueMaps.dropChunkAndBlocks	missing		minor: drops server debug values per chunk; none are received
 ClientDebugSubscriber.ValueWrapper.hasExpired	skip:java		timestamp check on a debug value wrapper
-ClientExplosionTracker.track	inline	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion	gap: minor: the debris is thrown at once instead of queued for later ticks
+ClientExplosionTracker.track	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::track_explosion	gap: minor: queues explosions for debris generation during ClientExplosionTracker.tick
 ClientExplosionTracker.addParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::explosion_blocks	gap: minor: always the default poof and smoke list; the explode packet's own block particle list is not read
 ClientHandshakePacketListenerImpl.switchState	inline	crates/horizon-client/src/net.rs::run	login steps run in packet order in run(); no state machine
 ClientHandshakePacketListenerImpl.handleHello	port	crates/horizon-client/src/net.rs::run	gap: minor: the session join and server check are in auth.rs (join_server); the encryption setup is in run
@@ -88,7 +88,7 @@ ClientLevel.setBlock	port	crates/horizon-client/src/game/remote.rs::Game::set_bl
 ClientLevel.<init>	port	crates/horizon-client/src/game/remote.rs::Game::enter_remote_dimension	gap: minor: the environment layers are applied in Game::render
 ClientLevel.addEnvironmentAttributeLayers	port	crates/horizon-client/src/game.rs::Game::render	sky colour and sky light move during a lightning flash
 ClientLevel.pollLightUpdates	skip:other		light is applied when it arrives or relit at once (light.rs relight); there is no queue to poll
-ClientLevel.getPrecipitationAt	port	crates/horizon-client/src/game.rs::GameLevel::precipitation	gap: minor: no check that the chunk is loaded; vanilla answers none for an unloaded column
+ClientLevel.getPrecipitationAt	port	crates/horizon-client/src/game.rs::GameLevel::precipitation	the column's biome decides; no column, no answer (the chunk lookup fails, as vanilla answers none for an unloaded column)
 ClientLevel.removeBlockBreakingProgress	inline	crates/horizon-client/src/game.rs::Game::destroy_block_progress	minor: the 400-tick expiry runs on every update, not every 20 ticks
 ClientLevel.removeProgress	inline	crates/horizon-client/src/game.rs::Game::destroy_block_progress	cracks are keyed by breaker id, so there are no per-position sets to tidy
 ClientLevel.shouldTickDeath	missing		minor: death animations tick for every remote mob held; no simulation-distance check
@@ -104,7 +104,7 @@ ClientLevel.spawnParticle	port	crates/horizon-client/src/animate_tick.rs::try_sp
 ClientLevel.spawnFluidParticle	port	crates/horizon-client/src/animate_tick.rs::try_spawn_drip	drip particle over a solid top (doAnimateTick)
 ClientLevel.fillReportDetails	skip:debug		crash report details only
 ClientLevel.playPlayerSound	skip:other		no caller in the 26.3 client sources
-ClientLevel.playSound	missing		player: distance-delayed sounds (over 10 blocks, sqrt(distance)/40 s) play at once, so far fireworks and similar sounds arrive early; audio.rs has no delay
+ClientLevel.playSound	port	crates/horizon-client-render/src/audio.rs::Audio::play_distance_delayed	a sound over 10 blocks from the camera starts sqrt(distance)/40 s later (Audio::play_after)
 ClientLevel.getRelativeTickSpeed	skip:other		no caller in the 26.3 client sources
 ClientLevel.destroyBlockProgress	port	crates/horizon-client/src/game.rs::Game::destroy_block_progress	sets or clears another player's crack on a block
 ClientLevel.addAlwaysVisibleParticle	port	crates/horizon-client-render/src/particles.rs::ParticleEngine::add_with	always-show flag set

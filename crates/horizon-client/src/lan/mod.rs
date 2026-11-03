@@ -21,11 +21,12 @@ pub mod entity;
 pub mod far;
 pub mod forwarding;
 pub mod guest;
+pub mod handoff;
 pub mod hub;
 pub mod menu;
 pub mod playerdata;
 pub mod prediction;
-mod recipes;
+pub mod recipes;
 pub mod scoreboard;
 pub mod tracking;
 pub mod waypoints;
@@ -37,16 +38,16 @@ use horizon_protocol::{
     text::translatable,
 };
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     io,
-    net::{SocketAddr, TcpListener, TcpStream},
+    net::{IpAddr, SocketAddr, TcpListener, TcpStream},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         mpsc::{Receiver, Sender, channel},
     },
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 /// IntegratedServer.MAX_PLAYERS.
@@ -198,6 +199,10 @@ pub struct NetConfig {
     /// client whose `minecraft:brand` isn't Horizon's is turned away during
     /// configuration. A brand can be spoofed: a gate, not security.
     pub horizon_clients_only: bool,
+    /// `horizon-lod-distance` (Horizon's own server.properties key, 64): how
+    /// far, in chunks, the server samples far terrain for Horizon clients
+    /// (`lod_net`); 0 serves none.
+    pub lod_distance: u32,
     /// The shapes of the world's levels: their dimension types go to
     /// clients when the world's data packs changed them.
     pub levels: crate::chunk::LevelShapes,
@@ -232,6 +237,7 @@ impl NetConfig {
             code_of_conducts: Vec::new(),
             server_links: Vec::new(),
             horizon_clients_only: false,
+            lod_distance: crate::lod_net::DEFAULT_DISTANCE,
             levels: crate::chunk::LevelShapes::VANILLA,
             owner_profile: None,
         }
@@ -332,13 +338,20 @@ pub struct Shared {
     max_players: AtomicUsize,
     /// PlayerList.players in join order: profile id and name.
     online: Mutex<Vec<(u128, String)>>,
-    /// Profiles held by the host (the LAN host's own name).
-    reserved: Mutex<HashSet<u128>>,
     next: AtomicU32,
     stop: AtomicBool,
     random: Mutex<u64>,
     /// Connections accepted from the network whose thread still runs.
     connections: AtomicUsize,
+    /// Those connections by address.
+    by_address: Mutex<HashMap<IpAddr, usize>>,
+    /// Those not playing yet (handshake, status, login, configuration), oldest first.
+    waiting: Mutex<Vec<Waiting>>,
+    next_connection: AtomicU64,
+    /// Those whose play ended, waiting for their writer to finish.
+    closing: AtomicUsize,
+    /// Connections turned away since the last report of them, and when that was.
+    turned_away: Mutex<(usize, Option<Instant>)>,
 }
 impl Shared {
     /// The registries and tags a new connection is sent.
@@ -366,13 +379,10 @@ impl Shared {
         {
             return Some(reason);
         }
-        if self.reserved.lock().unwrap().contains(&uuid) {
-            return Some(translatable("multiplayer.disconnect.duplicate_login", &[]));
-        }
         {
             let online = self.online.lock().unwrap();
             let bypass = self.config.bypasses_limit.as_ref().is_some_and(|b| b(uuid));
-            let taken = online.len() + self.reserved.lock().unwrap().len();
+            let taken = online.len();
             if taken >= self.max_players() && !bypass {
                 return Some(translatable("multiplayer.disconnect.server_full", &[]));
             }
@@ -396,14 +406,21 @@ impl Shared {
     pub fn motd(&self) -> String {
         self.motd.lock().unwrap().clone()
     }
+    pub fn set_motd(&self, motd: String) {
+        *self.motd.lock().unwrap() = motd;
+    }
     pub fn max_players(&self) -> usize {
         self.max_players.load(Ordering::Relaxed)
+    }
+    /// `PlayerList.setMaxPlayers`: change the limit used by new logins and status responses.
+    pub fn set_max_players(&self, max_players: usize) {
+        self.max_players.store(max_players, Ordering::Relaxed);
     }
     pub fn release(&self, uuid: u128) {
         self.online.lock().unwrap().retain(|(u, _)| *u != uuid);
     }
     pub fn online(&self) -> usize {
-        self.online.lock().unwrap().len() + self.reserved.lock().unwrap().len()
+        self.online.lock().unwrap().len()
     }
     fn next_random(&self, bound: usize) -> usize {
         let mut r = self.random.lock().unwrap();
@@ -535,10 +552,14 @@ impl Lan {
             motd: Mutex::new(config.motd.clone()),
             max_players: AtomicUsize::new(config.max_players),
             online: Mutex::new(Vec::new()),
-            reserved: Mutex::new(HashSet::new()),
             next: AtomicU32::new(1),
             stop: AtomicBool::new(false),
             connections: AtomicUsize::new(0),
+            by_address: Mutex::new(HashMap::new()),
+            waiting: Mutex::new(Vec::new()),
+            next_connection: AtomicU64::new(0),
+            closing: AtomicUsize::new(0),
+            turned_away: Mutex::new((0, None)),
             random: Mutex::new(crate::server::java_properties::now_millis() as u64 | 1),
             config,
         });
@@ -634,10 +655,6 @@ impl Lan {
     pub fn poll(&self) -> Vec<NetEvent> {
         self.events.try_iter().collect()
     }
-    /// Reserve a uuid for the host so a guest cannot take the name.
-    pub fn reserve(&self, uuid: u128) {
-        self.shared.reserved.lock().unwrap().insert(uuid);
-    }
     pub fn stop(&mut self) {
         self.shared.stop.store(true, Ordering::Relaxed);
         self.stop_listening();
@@ -652,11 +669,182 @@ impl Drop for Lan {
 /// Connections from the network accepted beyond the server's player limit.
 const SPARE_CONNECTIONS: usize = 64;
 
+/// Connections from one address at once (a household or a school behind one address plays well
+/// under it): past it a new one is closed, so that one machine can't take the places
+/// [`SPARE_CONNECTIONS`] leaves for everyone's logins and server-list pings. Not for a local or
+/// private address: a proxy, a tunnel or a container's port forward hands every player over from
+/// one of those.
+const PER_ADDRESS: usize = 10;
+
+/// Whether connections from `ip` may be many: it is this machine or the local network's.
+fn shared_address(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        IpAddr::V6(v6) => {
+            v6.is_loopback()
+                || v6.is_unique_local()
+                || v6.is_unicast_link_local()
+                || v6
+                    .to_ipv4_mapped()
+                    .is_some_and(|v4| shared_address(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// How often the log says how many connections were turned away, and who held the places.
+const TURNED_AWAY_EVERY: Duration = Duration::from_secs(60);
+
+/// How long a connection may wait before a full server closes it for a new one.
+const MAKE_ROOM_AFTER: Duration = Duration::from_secs(2);
+
+/// A network connection not playing yet.
+struct Waiting {
+    id: u64,
+    since: Instant,
+    stream: TcpStream,
+}
+
+thread_local! {
+    /// The [`Waiting`] connection this thread serves.
+    static WAITING: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
 /// An accepted connection, uncounted once its thread ends (or couldn't start).
-struct Counted(Arc<Shared>);
+struct Counted(Arc<Shared>, IpAddr, u64);
 impl Drop for Counted {
     fn drop(&mut self) {
+        self.0
+            .waiting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|w| w.id != self.2);
+        let mut by = self.0.by_address.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = by.get_mut(&self.1) {
+            *n -= 1;
+            if *n == 0 {
+                by.remove(&self.1);
+            }
+        }
         self.0.connections.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl Shared {
+    /// Counts a connection from `ip`, or None when `ip` holds its own most, or the server its
+    /// most and no connection that waits could be closed to make room ([`Shared::make_room`]).
+    fn count(self: &Arc<Self>, ip: IpAddr) -> Option<Counted> {
+        let most = self.max_players().saturating_add(SPARE_CONNECTIONS);
+        let here = |by: &HashMap<IpAddr, usize>| by.get(&ip).copied().unwrap_or(0);
+        let by = self.by_address.lock().unwrap_or_else(|e| e.into_inner());
+        if here(&by) >= PER_ADDRESS && !shared_address(ip) {
+            return None;
+        }
+        // make_room logs, which reads by_address: never call it holding that lock.
+        drop(by);
+        if self.connections.load(Ordering::Acquire) >= most && !self.make_room() {
+            return None;
+        }
+        let mut by = self.by_address.lock().unwrap_or_else(|e| e.into_inner());
+        let n = here(&by) + 1;
+        by.insert(ip, n);
+        self.connections.fetch_add(1, Ordering::AcqRel);
+        let id = self.next_connection.fetch_add(1, Ordering::Relaxed);
+        Some(Counted(self.clone(), ip, id))
+    }
+
+    /// Notes `stream`, counted as `counted`, as waiting until it plays.
+    fn wait(&self, counted: &Counted, stream: &TcpStream) {
+        if let Ok(stream) = stream.try_clone() {
+            let w = Waiting {
+                id: counted.2,
+                since: Instant::now(),
+                stream,
+            };
+            self.waiting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(w);
+        }
+    }
+
+    /// The connection this thread serves plays now: a full server no longer closes it.
+    pub(crate) fn entered_play(&self) {
+        if let Some(id) = WAITING.take() {
+            self.waiting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|w| w.id != id);
+        }
+    }
+
+    /// The server is full: closes the connection that has waited longest, if for more than
+    /// [`MAKE_ROOM_AFTER`] (a login or a server-list ping takes a fraction of that), so that a
+    /// crowd of sockets that never finish can't keep players out. Its thread ends at once. A
+    /// player in the game is never closed.
+    fn make_room(&self) -> bool {
+        let mut waiting = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(oldest) = waiting
+            .first()
+            .filter(|w| w.since.elapsed() > MAKE_ROOM_AFTER)
+        else {
+            return false;
+        };
+        let _ = oldest.stream.shutdown(std::net::Shutdown::Both);
+        waiting.remove(0);
+        drop(waiting);
+        self.turned_away();
+        true
+    }
+
+    /// A connection was turned away: once a minute the log says how many, how many places were
+    /// taken and by which addresses most.
+    fn turned_away(&self) {
+        let mut away = self.turned_away.lock().unwrap_or_else(|e| e.into_inner());
+        away.0 += 1;
+        let now = Instant::now();
+        if away.1.is_some_and(|last| now < last + TURNED_AWAY_EVERY) {
+            return;
+        }
+        let count = std::mem::take(&mut away.0);
+        away.1 = Some(now);
+        drop(away);
+        let Some(log) = &self.config.log else {
+            return;
+        };
+        let most = self.max_players().saturating_add(SPARE_CONNECTIONS);
+        let before_play = self.waiting.lock().unwrap_or_else(|e| e.into_inner()).len();
+        let closing = self.closing.load(Ordering::Acquire);
+        let mut held: Vec<(IpAddr, usize)> = self
+            .by_address
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .map(|(&ip, &n)| (ip, n))
+            .collect();
+        held.sort_by_key(|a| std::cmp::Reverse(a.1));
+        let addresses = held.len();
+        let top = held
+            .iter()
+            .take(5)
+            .map(|(ip, n)| {
+                if log.log_ips {
+                    format!("{ip} ({n})")
+                } else {
+                    format!("<ip address withheld> ({n})")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        (log.write)(
+            "Server Connection Thread",
+            "WARN",
+            &format!(
+                "Turned away {count} connection(s), or closed one that waited to make room: {} of \
+                 {most} places taken ({before_play} before play, {closing} closing), by \
+                 {addresses} address(es), most by {top} (at most {PER_ADDRESS} an address)",
+                self.connections.load(Ordering::Acquire)
+            ),
+        );
     }
 }
 
@@ -668,16 +856,18 @@ fn accept_loop(listener: TcpListener, shared: Arc<Shared>, stop: &AtomicBool) {
                 // the server takes and [`SPARE_CONNECTIONS`] more (logins, server-list pings), a
                 // new one is closed at once, so that a flood of sockets can't use up the threads a
                 // container allows and crash the server.
-                let most = shared.max_players().saturating_add(SPARE_CONNECTIONS);
-                if shared.connections.fetch_add(1, Ordering::AcqRel) >= most {
-                    shared.connections.fetch_sub(1, Ordering::AcqRel);
+                let Some(counted) = shared.count(addr.ip()) else {
                     drop(stream);
+                    shared.turned_away();
                     continue;
-                }
-                let counted = Counted(shared.clone());
+                };
+                shared.wait(&counted, &stream);
                 let _ = std::thread::Builder::new()
                     .name("horizon-lan-conn".into())
-                    .spawn(move || handle(stream, addr, counted.0.clone()));
+                    .spawn(move || {
+                        WAITING.set(Some(counted.2));
+                        handle(stream, addr, counted.0.clone());
+                    });
             }
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(25));
@@ -752,5 +942,87 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// One public address takes at most [`PER_ADDRESS`] places, its own coming back as they end;
+    /// another address, or a local one (a proxy hands everyone over from it), still gets one.
+    #[test]
+    fn one_address_takes_at_most_its_share() {
+        let config = NetConfig {
+            announce: false,
+            listen: false,
+            ..NetConfig::lan(0, "Share".into(), 20)
+        };
+        let lan = Lan::start_with(Arc::new(data::SyncData::empty()), config).unwrap();
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let mut one: Vec<Counted> = (0..PER_ADDRESS)
+            .map(|_| lan.shared.count(ip("203.0.113.7")).unwrap())
+            .collect();
+        assert!(lan.shared.count(ip("203.0.113.7")).is_none());
+        assert!(lan.shared.count(ip("198.51.100.2")).is_some());
+        let local: Vec<Counted> = (0..PER_ADDRESS + 5)
+            .map(|_| lan.shared.count(ip("127.0.0.1")).unwrap())
+            .collect();
+        assert!(lan.shared.count(ip("172.17.0.1")).is_some());
+        one.pop();
+        assert!(lan.shared.count(ip("203.0.113.7")).is_some());
+        drop((one, local));
+        assert!(lan.shared.by_address.lock().unwrap().is_empty());
+        assert_eq!(lan.shared.connections.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn a_full_server_closes_the_connection_that_waited_longest() {
+        use std::io::Read;
+        // With a log writer, as on a dedicated server: making room logs, and must not deadlock.
+        let lines = Arc::new(Mutex::new(Vec::<String>::new()));
+        let into = lines.clone();
+        let config = NetConfig {
+            announce: false,
+            listen: false,
+            log: Some(NetLog {
+                write: Arc::new(move |_, _, line| into.lock().unwrap().push(line.to_owned())),
+                lang: Arc::new(Default::default()),
+                log_ips: true,
+            }),
+            ..NetConfig::lan(0, "Room".into(), 1)
+        };
+        let lan = Lan::start_with(Arc::new(data::SyncData::empty()), config).unwrap();
+        let shared = &lan.shared;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (server_side, _) = listener.accept().unwrap();
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        let most = shared.max_players() + SPARE_CONNECTIONS;
+        let mut held: Vec<Counted> = (0..most).map(|_| shared.count(ip).unwrap()).collect();
+        // A player who reached the game, and a socket that never finished its login.
+        let playing = shared.count(ip);
+        assert!(playing.is_none(), "full");
+        shared.wait(&held[1], &server_side);
+        assert!(shared.count(ip).is_none(), "a fresh wait isn't closed");
+        shared.waiting.lock().unwrap()[0].since -= MAKE_ROOM_AFTER * 2;
+        let newcomer = shared.count(ip).expect("room made");
+        let mut byte = [0u8; 1];
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        assert_eq!(
+            client.read(&mut byte).unwrap(),
+            0,
+            "the waiting socket was closed"
+        );
+        assert!(shared.waiting.lock().unwrap().is_empty());
+        assert!(shared.count(ip).is_none(), "nothing else to close");
+        let logged = lines.lock().unwrap().clone();
+        assert_eq!(logged.len(), 1, "one report a minute: {logged:?}");
+        assert!(logged[0].contains("127.0.0.1"), "{logged:?}");
+        // Its thread ends and uncounts it; a connection that plays is never closed.
+        held.remove(1);
+        shared.wait(&newcomer, &server_side);
+        WAITING.set(Some(newcomer.2));
+        shared.entered_play();
+        assert!(shared.waiting.lock().unwrap().is_empty());
+        drop((held, newcomer));
+        assert_eq!(shared.connections.load(Ordering::Acquire), 0);
     }
 }

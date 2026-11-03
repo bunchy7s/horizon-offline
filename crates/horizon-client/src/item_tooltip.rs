@@ -285,12 +285,24 @@ pub fn name_line(stack: &ItemStack, translate: &dyn Fn(&str) -> Option<String>) 
         .unwrap_or_else(|| path.replace('_', " "))
 }
 
-/// ItemStack.getRarity: the ominous banner override, then the enchantment upgrade.
+/// ItemStack.getRarity: the stack's `minecraft:rarity` (the item's default
+/// unless a command or server set it; the ominous banner's uncommon), then
+/// the enchantment upgrade.
 pub fn rarity<'a>(stack: &ItemStack, default: &'a str) -> &'a str {
+    let set = match stack.data().and_then(|d| d.other("minecraft:rarity")) {
+        Some(Tag::String(s)) => match &*s.to_string_lossy() {
+            "common" => Some("common"),
+            "uncommon" => Some("uncommon"),
+            "rare" => Some("rare"),
+            "epic" => Some("epic"),
+            _ => None,
+        },
+        _ => None,
+    };
     let rarity = if stack.data().is_some_and(|d| d.ominous_banner) {
         "uncommon"
     } else {
-        default
+        set.unwrap_or(default)
     };
     if stack.enchantments().is_empty() {
         rarity
@@ -1041,7 +1053,7 @@ pub fn lines(
 /// `ItemLore.addToTooltip`: each lore component under dark purple italic, with
 /// the component's own styles (including explicit `false`) winning on children.
 pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
-    let Some(Tag::List(entries)) = stack.data().and_then(|d| d.other("minecraft:lore")) else {
+    let Some(raw) = stack.data().and_then(|d| d.other("minecraft:lore")) else {
         return Vec::new();
     };
     let base = crate::text::Style {
@@ -1049,10 +1061,19 @@ pub fn lore_texts(stack: &ItemStack) -> Vec<crate::text::Text> {
         italic: Some(true),
         ..Default::default()
     };
-    entries
-        .iter()
-        .map(|entry| {
-            let mut text = crate::entity_nbt::name_text(entry).resolve_legacy();
+    let lines: Vec<crate::text::Text> = match raw {
+        Tag::List(entries) => entries
+            .iter()
+            .map(|entry| crate::entity_nbt::name_text(entry).resolve_legacy())
+            .collect(),
+        Tag::Compound(_) | Tag::String(_) => {
+            vec![crate::entity_nbt::name_text(raw).resolve_legacy()]
+        }
+        _ => Vec::new(),
+    };
+    lines
+        .into_iter()
+        .map(|mut text| {
             for span in &mut text.spans {
                 span.style.inherit(&base);
             }
@@ -1325,6 +1346,52 @@ mod tests {
         let plain = ItemStack::new("minecraft:white_banner", 1);
         assert_eq!(name_line(&plain, &translate), "White Banner");
         assert_eq!(rarity(&plain, "common"), "common");
+    }
+
+    /// `/give @a stick[rarity=epic,enchantments={aqua_affinity:1}]`: the
+    /// stack's rarity wins over the item's, and stays epic when enchanted.
+    #[test]
+    fn a_stacks_rarity_component_sets_its_rarity() {
+        let mut stick = ItemStack::new("minecraft:stick", 1);
+        stick
+            .data_mut()
+            .other
+            .push(("minecraft:rarity".into(), Tag::String("epic".into())));
+        assert_eq!(rarity(&stick, "common"), "epic");
+        stick.enchant("minecraft:aqua_affinity", 1);
+        assert_eq!(rarity(&stick, "common"), "epic");
+        let mut sword = ItemStack::new("minecraft:diamond_sword", 1);
+        sword
+            .data_mut()
+            .other
+            .push(("minecraft:rarity".into(), Tag::String("uncommon".into())));
+        sword.enchant("minecraft:sharpness", 1);
+        assert_eq!(rarity(&sword, "common"), "rare");
+    }
+
+    #[test]
+    fn lore_texts_handles_compound_lists() {
+        // Direct command components from issue #6405
+        let cmd = r#"[custom_name=[{"text":"Simple Custom Name","italic":false}],lore=[[{"text":"Simple Custom Lore","italic":false}]],rarity=epic,enchantments={aqua_affinity:1},unbreakable={}]"#;
+        let comp = horizon_items::item_data::command_components(cmd).unwrap();
+        let (damage, extra) = horizon_items::item_data::decode_components(Some(&comp));
+        let stack = ItemStack {
+            item: "minecraft:stick".into(),
+            count: 1,
+            damage,
+            extra,
+        };
+        assert_eq!(rarity(&stack, "common"), "epic");
+        let name = styled_name(&stack, || "fallback".into());
+        assert_eq!(name.plain(), "Simple Custom Name");
+        assert_eq!(name.spans[0].style.italic, Some(false));
+
+        let lore = lore_texts(&stack);
+        assert_eq!(lore.len(), 1);
+        assert_eq!(lore[0].plain(), "Simple Custom Lore");
+        assert_eq!(lore[0].spans[0].style.italic, Some(false));
+        assert_eq!(lore[0].spans[0].style.color, Some(crate::text::DARK_PURPLE));
+        assert!(TooltipDisplay::for_stack(&stack).shows("minecraft:lore"));
     }
 
     #[test]

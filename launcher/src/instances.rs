@@ -79,6 +79,57 @@ impl Icon {
     }
 }
 
+/// An instance's own picture, in its game folder: one the player chose, or its modpack's icon.
+/// Drawn instead of [`Meta::icon`] while it is there.
+pub const PICTURE: &str = "icon.png";
+/// How many pixels a side a picture is kept at: twice the largest it is drawn.
+pub const PICTURE_SIDE: u32 = 128;
+
+/// Any image file's `bytes` as a picture: PNG, scaled down to fit [`PICTURE_SIDE`].
+pub fn picture(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    crate::browser::images::fit_png(bytes, PICTURE_SIDE, 8192, 256 << 20).ok_or_else(|| {
+        "That file isn't a picture the launcher can read (PNG, JPEG, GIF, WebP).".into()
+    })
+}
+
+/// Keeps `png` (made by [`picture`]) as the picture of the instance playing in `home`, or, with
+/// None, gives its picture to `to_trash`.
+pub fn set_picture(
+    home: &Path,
+    png: Option<&[u8]>,
+    to_trash: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let target = home.join(PICTURE);
+    let Some(png) = png else {
+        return if target.is_file() {
+            to_trash(&target)
+        } else {
+            Ok(())
+        };
+    };
+    fs::create_dir_all(home).map_err(|e| format!("{}: {e}", home.display()))?;
+    let part = home.join("icon.png.part");
+    fs::write(&part, png).map_err(|e| format!("{}: {e}", part.display()))?;
+    fs::rename(&part, &target).map_err(|e| format!("{}: {e}", target.display()))
+}
+
+/// Makes the icon at `url` (a modpack's, from the source it was installed from) the picture of the
+/// instance playing in `home`, unless it has one already. Best effort: a pack without its icon
+/// still plays.
+pub fn adopt_icon(home: &Path, url: &str) {
+    if home.join(PICTURE).exists() {
+        return;
+    }
+    let image = crate::browser::images::fetch(&backend::data_dir(), url, PICTURE_SIDE);
+    let png = image
+        .ok()
+        .and_then(|f| fs::read(f).ok())
+        .and_then(|b| picture(b).ok());
+    if let Some(png) = png {
+        let _ = set_picture(home, Some(&png), &|_| Ok(()));
+    }
+}
+
 /// The player's choices about one instance.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Meta {
@@ -260,7 +311,9 @@ fn list_in(game_home: &Path, data: &Path) -> Vec<Instance> {
             .instances
             .retain(|id, _| id == DEFAULT || id.contains(':') || own.contains(id));
         if store.instances.len() != before {
-            let _ = store.save(data);
+            if let Err(e) = store.save(data) {
+                eprintln!("Horizon: instances.json is not saved: {e}");
+            }
         }
     }
     for slug in own {
@@ -327,6 +380,13 @@ fn find_in(all: &[Instance], query: &str) -> Result<Instance, String> {
 /// and forgets it: its choices, and the selection when Play started it. Horizon's own instance,
 /// the game's home, stays.
 pub fn delete(query: &str) -> Result<Instance, String> {
+    let (gone, saved) = delete_with_selection(query)?;
+    saved?;
+    Ok(gone)
+}
+
+/// A completed deletion stays completed even if saving the new selection fails.
+pub fn delete_with_selection(query: &str) -> Result<(Instance, Result<(), String>), String> {
     let gone = delete_in(
         &backend::game_home(),
         &backend::data_dir(),
@@ -334,11 +394,13 @@ pub fn delete(query: &str) -> Result<Instance, String> {
         &crate::desktop_seams::to_trash,
     )?;
     let mut settings = backend::Settings::load();
-    if settings.instance.as_ref() == Some(&gone.id) {
+    let saved = if settings.instance.as_ref() == Some(&gone.id) {
         settings.instance = None;
-        settings.save();
-    }
-    Ok(gone)
+        settings.save()
+    } else {
+        Ok(())
+    };
+    Ok((gone, saved))
 }
 
 fn delete_in(
@@ -376,7 +438,7 @@ pub fn select(query: &str) -> Result<Instance, String> {
     let instance = find(query)?;
     let mut settings = backend::Settings::load();
     settings.instance = (instance.kind != Kind::Default).then(|| instance.id.clone());
-    settings.save();
+    settings.save()?;
     Ok(instance)
 }
 
@@ -392,6 +454,8 @@ const NOT_COPIED: &[&str] = &[
     "telemetry",
     "mod-browser",
     ".horizon-cache",
+    // Far terrain's copies of what servers sent, rebuilt as the instance plays.
+    "server-terrain",
 ];
 
 /// Files of the player, not of one instance, that a new instance starts with: the keys and video

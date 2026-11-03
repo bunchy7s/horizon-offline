@@ -4,14 +4,19 @@ SpreadPlayersCommand.Position.getLength	inline	crates/horizon-client/src/game/co
 SpreadPlayersCommand.Position.moveAway	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
 SpreadPlayersCommand.Position.clamp	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
 SpreadPlayersCommand.Position.randomize	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_spreadplayers	helper folded into the spread loop
+SpreadPlayersCommand.Position.getSpawnY	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::spread_spawn_y	the first solid block under two air blocks, searched down from max_y; max_y + 1 when there is none
+SpreadPlayersCommand.Position.isSafe	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::spread_safe	spawn y minus one under max_y, not a liquid and in the entities_can_teleport_to tag
 StopCommand.register	port	crates/horizon-client/src/game/dedicated.rs::Game::console_command	gap: minor: /stop only from the dedicated console; no in-game /stop node
 StopSoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	/stopsound command tree
+StopSoundCommand.stopSound	inline	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_stopsound	the StopSound packet is built once and sent to each target's connection there; the local player's own sounds stop through Audio::stop_sounds
 StopwatchCommand.createStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.create arm
 StopwatchCommand.queryStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.query arm
 StopwatchCommand.restartStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	stopwatch.restart arm
 StopwatchCommand.removeStopwatch	port	crates/horizon-client/src/game/commands/misc.rs::Game::cmd_stopwatch	default arm: remove
+StopwatchCommand.register	port	crates/horizon-command/src/tree_misc.rs::stopwatch	create, query, restart and remove under the stopwatch literal
 SummonCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	root summon node
 SummonCommand.spawnEntity	port	crates/horizon-client/src/game/commands.rs::Game::cmd_summon	commands.summon.success
+SummonCommand.createEntity	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_summon	plain and NBT summons share EntityType.isAllowedInPeaceful admission through mobs::finalize::allowed_in_peaceful
 SwingCommand.register	port	crates/horizon-command/src/tree_world.rs::rotate_swing	/swing command tree
 SwingCommand.handSwing	port	crates/horizon-command/src/tree_world.rs::rotate_swing	gap: minor: hand literal is parsed but cmd_swing ignores it; only the main-hand swing plays
 SwingCommand.swing	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_swing	gap: minor: ignores hand, animation and duration; mobs get the swing flag, the player swings the main arm

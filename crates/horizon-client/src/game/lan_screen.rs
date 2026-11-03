@@ -561,7 +561,17 @@ impl Game<'_> {
         else {
             return;
         };
-        let mut rules = horizon_client::gamerules::GameRules::default();
+        // The response itself lists the server's available rules; the client
+        // may not own this world's level.dat (including on the server thread).
+        let features = if entries.iter().any(|e| {
+            horizon_client::gamerules::rule(&e.name)
+                .is_some_and(|r| r.name == horizon_client::gamerules::MAX_MINECART_SPEED.name)
+        }) {
+            vec![horizon_client::gamerules::MINECART_IMPROVEMENTS.to_owned()]
+        } else {
+            Vec::new()
+        };
+        let mut rules = horizon_client::gamerules::GameRules::with_features(&features);
         for entry in entries {
             rules.set_string(&entry.name, &entry.value);
         }
@@ -1188,7 +1198,7 @@ impl Game<'_> {
         let PhysicalKey::Code(key) = event.physical_key else {
             return;
         };
-        let ctrl = self.keys.contains(&winit::keyboard::KeyCode::ControlLeft);
+        let ctrl = self.has_control_down_with_quirk();
         let shortcut = self.edit_shortcut(event);
         let types_text = self.types_text();
         let shift = self.has_shift_down();

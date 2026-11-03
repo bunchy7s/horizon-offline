@@ -9,10 +9,11 @@
 //! here with the rider's input (`ServerPlayer.getLastClientMoveIntent`).
 //! Sneaking gets out (`Player.rideTick`: `wantsToStopRiding`), and the client
 //! is teleported where the player lands (`ServerPlayer.dismountTo`).
-use super::{Game, Keys, lan::LanHost, minecarts::SEAT};
+use super::{Dim, Game, Keys, lan::LanHost, minecarts::SEAT};
 use horizon_client::collisions::SceneCollisions;
+use horizon_client::lan::hub::no_blocks_in;
 use horizon_client::mobs::equine;
-use horizon_core::geometry::{Aabb, Vec3};
+use horizon_core::geometry::{Aabb, Axis, Vec3};
 use horizon_protocol::{
     packets::play::{self, Clientbound as C},
     text::translatable,
@@ -37,7 +38,116 @@ fn corners(b: Aabb) -> ([f64; 3], [f64; 3]) {
     ([lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z])
 }
 
+/// A boat or minecart a server player rode, followed for
+/// `native_vehicle_moved`.
+pub(super) struct WatchedVehicle {
+    id: u32,
+    dim: Dim,
+    /// The server player it carries now.
+    rider: Option<u128>,
+    /// Where the hook last heard of it.
+    at: [f64; 3],
+    /// Ticks it has stood still.
+    still: u32,
+}
+
 impl Game<'_> {
+    /// Where the boat or minecart `id` of this level is.
+    fn watched_vehicle_position(&self, id: u32) -> Option<[f64; 3]> {
+        let at = |v: Vec3| [v.x, v.y, v.z];
+        self.boats
+            .iter()
+            .find(|b| b.id == id)
+            .map(|b| at(b.position))
+            .or_else(|| {
+                self.carts
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| at(c.position))
+            })
+    }
+
+    /// `VehicleMoveEvent` for the boats and minecarts server players ride
+    /// (and left less than ten seconds ago): once a tick, after they moved.
+    pub(super) fn tick_vehicle_watch(&mut self) {
+        let riders: Vec<(u32, u32, u128)> = self.lan.as_ref().map_or_else(Vec::new, |h| {
+            h.hub
+                .guests
+                .iter()
+                .filter_map(|g| Some((g.vehicle?, g.conn, g.uuid)))
+                .collect()
+        });
+        if riders.is_empty() && self.watched_vehicles.is_empty() {
+            return;
+        }
+        let dim = self.dim;
+        for &(id, _, uuid) in &riders {
+            let Some(at) = self.watched_vehicle_position(id) else {
+                continue;
+            };
+            match self.watched_vehicles.iter_mut().find(|w| w.id == id) {
+                Some(w) => (w.dim, w.rider) = (dim, Some(uuid)),
+                None => self.watched_vehicles.push(WatchedVehicle {
+                    id,
+                    dim,
+                    rider: Some(uuid),
+                    at,
+                    still: 0,
+                }),
+            }
+        }
+        let mut kept = Vec::new();
+        // (rider's connection and UUID, vehicle type, from, to)
+        let mut moved = Vec::new();
+        for mut w in std::mem::take(&mut self.watched_vehicles) {
+            // Another level's vehicle is told of on that level's tick.
+            if w.dim != dim {
+                kept.push(w);
+                continue;
+            }
+            // Broken, or gone from this level.
+            let Some(now) = self.watched_vehicle_position(w.id) else {
+                continue;
+            };
+            let rider = riders.iter().find(|r| r.0 == w.id);
+            w.rider = rider.map(|r| r.2);
+            if now != w.at {
+                let from = std::mem::replace(&mut w.at, now);
+                w.still = 0;
+                let kind = self.target_type(
+                    self.level_entity(w.id as i32)
+                        .unwrap_or(super::commands::Target::Boat(w.id)),
+                );
+                moved.push((rider.map(|r| (r.1, r.2)), kind, from, now));
+            } else {
+                w.still += 1;
+                if w.rider.is_none() && w.still > 200 {
+                    continue;
+                }
+            }
+            kept.push(w);
+        }
+        self.watched_vehicles = kept;
+        // The rider's state is swapped in for the call, so the helpers reach
+        // them; a vehicle nobody rides is told of with nobody swapped in.
+        for (rider, kind, from, to) in moved {
+            let Some((conn, uuid)) = rider else {
+                self.native_vehicle_moved(None, &kind, from, to);
+                continue;
+            };
+            let Some(mut host) = self.lan.take() else {
+                continue;
+            };
+            let hook = |game: &mut Self| game.native_vehicle_moved(Some(uuid), &kind, from, to);
+            if self.lan_acting == Some(conn) {
+                hook(self);
+            } else {
+                self.as_guest(&mut host, conn, hook);
+            }
+            self.lan = Some(host);
+        }
+    }
+
     /// The box of a boat, minecart, armor stand, item frame or painting, and
     /// the point an interact packet's location is measured from (the
     /// client's `remote_object_hit` uses the same points).
@@ -133,8 +243,9 @@ impl Game<'_> {
             let b = &mut self.boats[i];
             b.hurt_time = (b.hurt_time - 1).max(0);
             b.damage = (b.damage - 1.0).max(0.0);
-            // AbstractBoat.tickBubbleColumn: a down column ejects the rider.
-            ejected = std::mem::take(&mut b.eject_riders);
+            // `Entity.ejectPassengers`: every player in the boat must see
+            // the request; the common boat tick clears it once nobody rides.
+            ejected = b.eject_riders;
         }
         // ServerGamePacketListenerImpl.tick: the vehicle's last good position
         // is where it is now, so a move the server made (a piston, a push)
@@ -366,7 +477,31 @@ impl Game<'_> {
             back(host, old, yaw);
             return;
         }
-        host.hub.guests[gi].vehicle_good = Some([target.x, target.y, target.z]);
+        // clientVehicleIsFloating: the move didn't go down a step, the vehicle hadn't come down onto
+        // something on its last move (`verticalCollisionBelow` before this one), and nothing but air is
+        // around its box grown by 0.0625 and stretched 0.55 down (water holds a boat up). A flying or
+        // no-gravity mount, and a server that allows flight, never float.
+        let (gravity, no_gravity) = match mount {
+            Some(i) => (0.08, self.mobs[i].no_gravity),
+            None => (0.04, false),
+        };
+        let around = moved_box
+            .inflate(Vec3::new(0.0625, 0.0625, 0.0625))
+            .expand_towards(Vec3::new(0.0, -0.55, 0.0));
+        let corner = |max: bool| {
+            [Axis::X, Axis::Y, Axis::Z].map(|a| if max { around.max(a) } else { around.min(a) })
+        };
+        let no_blocks = no_blocks_in(&self.world, corner(false), corner(true));
+        let allow_flight = host.hub.config.allow_flight;
+        let g = &mut host.hub.guests[gi];
+        g.vehicle_good = Some([target.x, target.y, target.z]);
+        let rested = std::mem::replace(
+            &mut g.vehicle_rests,
+            wanted.y < 0.0 && resolved.y != wanted.y,
+        );
+        g.vehicle_floating =
+            wanted.y >= -0.03125 && !rested && !allow_flight && !no_gravity && no_blocks;
+        g.vehicle_gravity = gravity;
         if let Some(i) = mount {
             // absSnapTo: where and how its rider's client turned it; the
             // rider sits on it from its own ride tick.
@@ -393,7 +528,25 @@ impl Game<'_> {
         g.position = [seat.x, seat.y, seat.z];
     }
 
-    /// `handlePaddleBoat`: the paddles of the boat the player drives.
+    /// `Entity.getControllingPassenger` of a vehicle a server player rides: a
+    /// boat has two seats, and only its first player passenger drives it. The
+    /// window player sits first when it rides; of the server's players it is
+    /// the one that got in first.
+    pub(super) fn guest_controls_vehicle(&self, host: &LanHost, conn: u32, vehicle: u32) -> bool {
+        if self.riding == Some(vehicle) {
+            return false;
+        }
+        host.hub
+            .guests
+            .iter()
+            .filter(|g| g.vehicle == Some(vehicle))
+            .min_by_key(|g| g.vehicle_order)
+            .is_some_and(|g| g.conn == conn)
+    }
+
+    /// `handlePaddleBoat`: the paddles of the boat the player controls
+    /// (`player.getControlledVehicle()`); a passenger in the second seat moves
+    /// no paddle.
     pub(super) fn guest_paddle_boat(&mut self, host: &LanHost, conn: u32, paddles: [bool; 2]) {
         let vehicle = host
             .hub
@@ -401,7 +554,10 @@ impl Game<'_> {
             .iter()
             .find(|g| g.conn == conn)
             .and_then(|g| g.vehicle);
-        if let Some(b) = self.boats.iter_mut().find(|b| Some(b.id) == vehicle) {
+        let Some(vehicle) = vehicle.filter(|&v| self.guest_controls_vehicle(host, conn, v)) else {
+            return;
+        };
+        if let Some(b) = self.boats.iter_mut().find(|b| b.id == vehicle) {
             b.paddling = paddles;
         }
     }

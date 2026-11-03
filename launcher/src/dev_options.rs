@@ -30,7 +30,7 @@ impl Launcher {
         let toggle = switch("dev-offline", self.settings.dev_offline, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.dev_offline = !this.settings.dev_offline;
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));
@@ -45,13 +45,13 @@ impl Launcher {
                 )
                 .child(index_row(
                     0,
-                    "Offline names without an account",
+                    tr("Offline names without an account"),
                     Some(
                         div()
-                            .child(
+                            .child(tr(
                                 "Offline names play without a Microsoft account that owns the game. \
                                  Minecraft still comes from your own install.",
-                            )
+                            ))
                             .into_any_element(),
                     ),
                     Some(toggle.into_any_element()),

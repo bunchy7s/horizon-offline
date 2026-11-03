@@ -33,7 +33,8 @@ impl Hub {
         }
     }
 
-    /// Send to every placed guest within `range` blocks of `at`.
+    /// Send to every placed guest within `range` blocks of `at`
+    /// (`PlayerList.broadcast`, which leaves out a player exactly at `range`).
     pub fn broadcast_near(&self, at: [f64; 3], range: f64, packet: &C, except: Option<u32>) {
         let body = packet.encode();
         for g in self
@@ -41,8 +42,7 @@ impl Hub {
             .iter()
             .filter(|g| self.here(g) && Some(g.conn) != except)
         {
-            let d: f64 = (0..3).map(|k| (g.position[k] - at[k]).powi(2)).sum();
-            if d <= range * range {
+            if within_range(at, g.position, range) {
                 g.sender.send(body.clone());
             }
         }
@@ -264,8 +264,7 @@ impl Hub {
             drag: None,
             sent_data: Vec::new(),
             hidden: Vec::new(),
-            results: mod_type.map_or_else(Vec::new, |t| t.results.clone()),
-            data_slots: mod_type.map(|t| t.data_slots),
+            mod_type,
         });
         self.send_menu_content(i, items);
     }
@@ -324,8 +323,7 @@ impl Hub {
             drag: None,
             sent_data: Vec::new(),
             hidden: Vec::new(),
-            results: Vec::new(),
-            data_slots: None,
+            mod_type: None,
         });
         self.send_menu_content(i, items);
         Some(window)
@@ -562,11 +560,6 @@ impl Hub {
             .as_ref()
             .filter(|_| in_menu)
             .map_or_else(Vec::new, |m| m.hidden.clone());
-        let results = self.guests[i]
-            .menu
-            .as_ref()
-            .filter(|_| in_menu)
-            .map_or_else(Vec::new, |m| m.results.clone());
         let guest = &mut self.guests[i];
         let mut items = source.and_then(|s| s.read(world, guest));
         if in_menu && items.is_none() {
@@ -577,7 +570,6 @@ impl Hub {
             container: items.as_deref_mut(),
             shulker,
             hidden: &hidden,
-            results: &results,
         };
         let (drops, changed) = menu::click(
             &mut view,
@@ -805,10 +797,10 @@ impl Hub {
             // A mod's menu: the data slots its tick set. A mod menu type's
             // `ContainerData` has as many as it declares, all sent on open
             // (`sendInitialData`), 0 where the tick set none.
-            Some(BlockEntity::Mod(e)) if m.data_slots.is_some() || !e.data.is_empty() => {
+            Some(BlockEntity::Mod(e)) if m.mod_type.is_some() || !e.data.is_empty() => {
                 let mut data = e.data.clone();
-                if let Some(n) = m.data_slots {
-                    data.resize(n, 0);
+                if let Some(t) = m.mod_type {
+                    data.resize(t.data_slots, 0);
                 }
                 data
             }
@@ -894,9 +886,16 @@ fn next_sound_seed(g: &mut impl RandomSource) -> i64 {
     g.next_long()
 }
 
+/// `PlayerList.broadcast`'s distance test: the summed squared axis distances
+/// against the squared radius, and a player exactly at the radius is out.
+fn within_range(at: [f64; 3], pos: [f64; 3], range: f64) -> bool {
+    let d: f64 = (0..3).map(|k| (pos[k] - at[k]).powi(2)).sum();
+    d < range * range
+}
+
 #[cfg(test)]
 mod tests {
-    use super::next_sound_seed;
+    use super::{next_sound_seed, within_range};
     use horizon_core::random::LegacyRandom;
 
     #[test]
@@ -914,5 +913,16 @@ mod tests {
         let ticks = 12i64;
         let mut g = LegacyRandom::new(0);
         assert_ne!(next_sound_seed(&mut g), ticks);
+    }
+
+    /// `PlayerList.broadcast` compares the squared distances with `ifge`, so a
+    /// player exactly on the radius gets no packet while one a hair inside does.
+    #[test]
+    fn a_guest_exactly_on_the_radius_hears_nothing() {
+        let at = [10.0, 64.0, -3.0];
+        let at_radius = [at[0] + 16.0, at[1], at[2]];
+        assert!(!within_range(at, at_radius, 16.0));
+        assert!(within_range(at, [at[0] + 15.99, at[1], at[2]], 16.0));
+        assert!(within_range(at, at, 16.0));
     }
 }

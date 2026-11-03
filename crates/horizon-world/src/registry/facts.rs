@@ -1,11 +1,14 @@
 //! The part of `facts.json` the block registry reads, deserialized as it
 //! streams: each row's state (its fifth column) and the defaults.
-use crate::chunk::BlockState;
+use crate::{
+    block_state_properties::SharedStrings,
+    chunk::{BlockProperties, BlockState},
+};
 use serde::{
     Deserialize, Deserializer,
-    de::{self, IgnoredAny, SeqAccess, Visitor},
+    de::{self, IgnoredAny, MapAccess, SeqAccess, Visitor},
 };
-use std::{collections::BTreeMap, fmt};
+use std::{cell::RefCell, collections::BTreeMap, fmt};
 
 #[derive(Deserialize)]
 pub(super) struct Facts {
@@ -48,31 +51,101 @@ impl<'de> Deserialize<'de> for Row {
     }
 }
 
+thread_local! {
+    /// The strings the states being read share (`with_shared_strings`).
+    static STRINGS: RefCell<Option<SharedStrings>> = const { RefCell::new(None) };
+}
+
+/// Runs `read` with the states it reads sharing their property strings.
+pub(super) fn with_shared_strings<T>(read: impl FnOnce() -> T) -> T {
+    STRINGS.with(|s| *s.borrow_mut() = Some(SharedStrings::default()));
+    let out = read();
+    STRINGS.with(|s| s.borrow_mut().take());
+    out
+}
+
+/// A property name or value, shared with the other states' equal ones.
+struct Shared(&'static String);
+impl<'de> Deserialize<'de> for Shared {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct SharedVisitor;
+        impl Visitor<'_> for SharedVisitor {
+            type Value = Shared;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a string")
+            }
+            fn visit_str<E: de::Error>(self, text: &str) -> Result<Shared, E> {
+                Ok(Shared(STRINGS.with(|s| match s.borrow_mut().as_mut() {
+                    Some(strings) => strings.get(text),
+                    None => SharedStrings::default().get(text),
+                })))
+            }
+        }
+        deserializer.deserialize_str(SharedVisitor)
+    }
+}
+
+/// A state's `properties` object, read straight into shared strings.
+struct Properties(BlockProperties);
+impl<'de> Deserialize<'de> for Properties {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct PropertiesVisitor;
+        impl<'de> Visitor<'de> for PropertiesVisitor {
+            type Value = Properties;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("block state properties")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Properties, A::Error> {
+                let mut pairs = Vec::new();
+                while let Some((Shared(k), Shared(v))) = map.next_entry()? {
+                    pairs.push((k, v));
+                }
+                Ok(Properties(BlockProperties::from_shared(pairs)))
+            }
+        }
+        deserializer.deserialize_map(PropertiesVisitor)
+    }
+}
+
 /// A state as BlockState::from_nbt reads it: a name, or `{"id", "properties"}`.
 struct State(BlockState);
 
 impl<'de> Deserialize<'de> for State {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Shape {
-            Name(String),
-            Full {
-                id: String,
-                #[serde(default)]
-                properties: BTreeMap<String, String>,
-            },
+        struct StateVisitor;
+        impl<'de> Visitor<'de> for StateVisitor {
+            type Value = State;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a block state name or {\"id\", \"properties\"}")
+            }
+            fn visit_str<E: de::Error>(self, name: &str) -> Result<State, E> {
+                Ok(State(BlockState {
+                    name: name.to_owned(),
+                    properties: BlockProperties::new(),
+                }))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<State, A::Error> {
+                let (mut id, mut properties) = (None, None);
+                while let Some(key) = map.next_key::<std::borrow::Cow<'de, str>>()? {
+                    match &*key {
+                        "id" if id.is_some() => return Err(de::Error::duplicate_field("id")),
+                        "id" => id = Some(map.next_value::<String>()?),
+                        "properties" if properties.is_some() => {
+                            return Err(de::Error::duplicate_field("properties"));
+                        }
+                        "properties" => properties = Some(map.next_value::<Properties>()?.0),
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(State(BlockState {
+                    name: id.ok_or_else(|| de::Error::missing_field("id"))?,
+                    properties: properties.unwrap_or_default(),
+                }))
+            }
         }
-        Ok(State(match Shape::deserialize(deserializer)? {
-            Shape::Name(name) => BlockState {
-                name,
-                properties: BTreeMap::new(),
-            },
-            Shape::Full { id, properties } => BlockState {
-                name: id,
-                properties,
-            },
-        }))
+        deserializer.deserialize_any(StateVisitor)
     }
 }
 

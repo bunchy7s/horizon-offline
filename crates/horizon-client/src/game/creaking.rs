@@ -4,6 +4,7 @@
 use super::{Game, creatures::seen};
 use horizon_client::{
     Result,
+    chunk_map::{ChunkMap, ChunkMembershipDelta},
     containers::{BlockEntity, CreakingHeart},
     mobs::{
         Mob, MobType,
@@ -302,24 +303,30 @@ impl Game<'_> {
             && self.ui.rules.bool("spawn_monsters")
     }
     /// Hearts that came with generated or loaded chunks get their block
-    /// entity (`newBlockEntity`) the first time their chunk is seen.
+    /// entity (`newBlockEntity`) the first time their chunk is seen lit.
+    /// Only the chunks that arrived since are looked at: a server holds tens
+    /// of thousands, and reading each one every tick cost milliseconds.
     pub(super) fn scan_for_hearts(&mut self) {
-        let Some(heart) = self
+        if self
             .pack
             .assets
             .registry
             .default_state("minecraft:creaking_heart")
-        else {
+            .is_none()
+        {
             return;
-        };
-        let keys: Vec<(i32, i32)> = self
-            .world
-            .chunks
+        }
+        self.creaking.follow_chunks(&self.world.chunks);
+        let mut keys: Vec<(i32, i32)> = self
+            .creaking
+            .unscanned
             .iter()
-            .filter(|(k, c)| c.lit && !self.creaking.scanned.contains(k))
-            .map(|(k, _)| *k)
+            .copied()
+            .filter(|k| self.world.chunks.get(k).is_some_and(|c| c.lit))
             .collect();
+        keys.sort_unstable();
         for key in keys {
+            self.creaking.unscanned.remove(&key);
             self.creaking.scanned.insert(key);
             let Some(chunk) = self.world.chunks.get(&key).cloned() else {
                 continue;
@@ -334,7 +341,6 @@ impl Game<'_> {
                     .collect();
             }
             let hearts = &self.creaking.hearts;
-            let _ = heart;
             let is_heart = |id: u32| hearts.get(id as usize).copied().unwrap_or(false);
             for (si, section) in chunk.sections.iter().enumerate() {
                 // Only a section whose palette holds a heart state can have
@@ -359,8 +365,6 @@ impl Game<'_> {
                 }
             }
         }
-        let chunks = &self.world.chunks;
-        self.creaking.scanned.retain(|k| chunks.contains_key(k));
     }
 }
 
@@ -369,6 +373,10 @@ impl Game<'_> {
 pub(super) struct CreakingState {
     /// Chunks already scanned for heart blocks.
     scanned: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    /// Resident chunks not scanned yet (not lit yet, or just arrived).
+    unscanned: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
+    /// The chunk map's membership revision the two sets follow.
+    revision: Option<u64>,
     /// Which block states are creaking hearts, by state id.
     hearts: Vec<bool>,
 }
@@ -378,5 +386,100 @@ impl CreakingState {
     /// (game/levels.rs).
     pub(super) fn swap_level(&mut self, other: &mut Self) {
         std::mem::swap(&mut self.scanned, &mut other.scanned);
+        std::mem::swap(&mut self.unscanned, &mut other.unscanned);
+        std::mem::swap(&mut self.revision, &mut other.revision);
+    }
+    /// Bring `scanned` and `unscanned` up to the chunks resident now: a
+    /// chunk that left is forgotten (it is scanned again if it comes back
+    /// later), one that arrived waits to be scanned. From the map's
+    /// membership changes, or from all its keys when they can't be replayed.
+    fn follow_chunks(&mut self, chunks: &ChunkMap) {
+        let revision = chunks.membership_revision();
+        if self.revision == Some(revision) {
+            return;
+        }
+        let deltas = self.revision.and_then(|r| chunks.deltas_since(r));
+        match deltas {
+            Some(deltas) => {
+                for (_, delta) in deltas {
+                    match delta {
+                        ChunkMembershipDelta::Added(key) => {
+                            if chunks.contains_key(&key) && !self.scanned.contains(&key) {
+                                self.unscanned.insert(key);
+                            }
+                        }
+                        ChunkMembershipDelta::Removed(key) => {
+                            if !chunks.contains_key(&key) {
+                                self.scanned.remove(&key);
+                                self.unscanned.remove(&key);
+                            }
+                        }
+                        ChunkMembershipDelta::Reset => {}
+                    }
+                }
+            }
+            None => {
+                self.scanned.retain(|k| chunks.contains_key(k));
+                self.unscanned = chunks
+                    .keys()
+                    .filter(|k| !self.scanned.contains(k))
+                    .copied()
+                    .collect();
+            }
+        }
+        self.revision = Some(revision);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CreakingState;
+    use horizon_client::{chunk::Chunk, chunk_map::ChunkMap};
+    use std::sync::Arc;
+
+    fn add(chunks: &mut ChunkMap, key: (i32, i32)) {
+        chunks.insert(key, Arc::new(Chunk::empty(key.0, key.1)));
+    }
+    fn sorted(set: &horizon_client::fast_hash::FxHashSet<(i32, i32)>) -> Vec<(i32, i32)> {
+        let mut keys: Vec<_> = set.iter().copied().collect();
+        keys.sort_unstable();
+        keys
+    }
+
+    /// The heart scan follows the chunks that come and go, as the scan of
+    /// every resident chunk each tick did: an arrival waits, a scanned chunk
+    /// that stayed is not scanned again, and one that left is forgotten.
+    #[test]
+    fn the_heart_scan_follows_arrivals_and_departures() {
+        let mut chunks = ChunkMap::default();
+        let mut state = CreakingState::default();
+        add(&mut chunks, (0, 0));
+        add(&mut chunks, (1, 0));
+        state.follow_chunks(&chunks);
+        assert_eq!(sorted(&state.unscanned), [(0, 0), (1, 0)]);
+        // Scanned, as scan_for_hearts does once a chunk is lit.
+        state.unscanned.remove(&(0, 0));
+        state.scanned.insert((0, 0));
+        add(&mut chunks, (2, 0));
+        chunks.remove(&(1, 0));
+        // Gone and back between two ticks: still scanned, as before.
+        chunks.remove(&(0, 0));
+        add(&mut chunks, (0, 0));
+        state.follow_chunks(&chunks);
+        assert_eq!(sorted(&state.scanned), [(0, 0)]);
+        assert_eq!(sorted(&state.unscanned), [(2, 0)]);
+        // Gone over a tick: forgotten, and scanned again when it returns.
+        chunks.remove(&(0, 0));
+        state.follow_chunks(&chunks);
+        assert!(state.scanned.is_empty());
+        add(&mut chunks, (0, 0));
+        state.follow_chunks(&chunks);
+        assert_eq!(sorted(&state.unscanned), [(0, 0), (2, 0)]);
+        // A cleared map can't be replayed: rebuilt from its keys.
+        chunks.clear();
+        add(&mut chunks, (5, 5));
+        state.follow_chunks(&chunks);
+        assert_eq!(sorted(&state.unscanned), [(5, 5)]);
+        assert!(state.scanned.is_empty());
     }
 }

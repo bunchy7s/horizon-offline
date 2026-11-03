@@ -81,7 +81,10 @@ impl Config {
             return Err("REGISTRY_SESSION_KEY needs at least 32 characters".into());
         }
         Ok(Config {
-            public_url: var("REGISTRY_PUBLIC_URL")?.trim_end_matches('/').to_owned(),
+            public_url: var("REGISTRY_PUBLIC_URL")?
+                .trim()
+                .trim_end_matches('/')
+                .to_owned(),
             session_key: key.into_bytes(),
             github: GitHub::new(
                 github::Endpoints::default(),
@@ -528,11 +531,29 @@ fn take(window: &mut VecDeque<Instant>, max: usize) -> bool {
     window.len() < max
 }
 
+/// The origin a URL names: `scheme://host[:port]`, without a path. An
+/// `Origin` is a page's origin and never carries a path, while
+/// `REGISTRY_PUBLIC_URL` may: the form's pages are below the site's root.
+fn url_origin(url: &str) -> &str {
+    let host = url.find("://").map_or(0, |scheme| scheme + 3);
+    url[host..]
+        .find('/')
+        .map_or(url, |path| &url[..host + path])
+}
+
+/// Whether a change comes from the site's own pages: its `Origin` is the
+/// origin of `REGISTRY_PUBLIC_URL`, which is what its pages are. A page on
+/// another site can't send its origin, so this is a whole origin's match,
+/// case folded the way a host name is.
+fn from_the_site(public_url: &str, origin: Option<&str>) -> bool {
+    origin.is_some_and(|origin| origin.eq_ignore_ascii_case(url_origin(public_url)))
+}
+
 /// A change sent by the site's own pages: from its origin, signed in, with
 /// the session's CSRF token. The account: (login, id).
 fn signed_in_here(app: &Inner, headers: &HeaderMap) -> Result<(String, u64), Refusal> {
     let origin = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok());
-    if origin != Some(app.config.public_url.as_str()) {
+    if !from_the_site(&app.config.public_url, origin) {
         return Err(Refusal::new(
             StatusCode::FORBIDDEN,
             "send it from the registry's pages",
@@ -1234,5 +1255,58 @@ mod tests {
         let payload = format!("submission\n{branch}\n{login}");
         let cookie = format!("{}.{}", URL_SAFE_NO_PAD.encode(payload), tag);
         assert_eq!(unsign(&config.session_key, &cookie), None);
+    }
+
+    #[test]
+    fn a_page_is_known_by_its_origin() {
+        // An `Origin` has no path, though REGISTRY_PUBLIC_URL may: the site's
+        // pages are below its root (#6159).
+        assert_eq!(
+            url_origin("https://playhorizon.dev/mods"),
+            "https://playhorizon.dev"
+        );
+        assert_eq!(
+            url_origin("https://playhorizon.dev/mods/submit/"),
+            "https://playhorizon.dev"
+        );
+        assert_eq!(
+            url_origin("https://playhorizon.dev"),
+            "https://playhorizon.dev"
+        );
+        assert_eq!(
+            url_origin("http://localhost:8080/mods"),
+            "http://localhost:8080"
+        );
+        // The configured site's origin, path or no path, and a host name's
+        // case folded as a browser folds it.
+        assert!(from_the_site(
+            "https://playhorizon.dev/mods",
+            Some("https://playhorizon.dev")
+        ));
+        assert!(from_the_site(
+            "https://playhorizon.dev/hub/",
+            Some("https://PlayHorizon.dev")
+        ));
+        // The scheme, the host and the port are all the origin's.
+        assert!(!from_the_site(
+            "https://playhorizon.dev",
+            Some("http://playhorizon.dev")
+        ));
+        assert!(!from_the_site(
+            "https://playhorizon.dev",
+            Some("https://playhorizon.dev:8443")
+        ));
+        // Another site's page, a page with no origin to give, and a name
+        // that only starts like the host.
+        assert!(!from_the_site(
+            "https://playhorizon.dev",
+            Some("https://evil.test")
+        ));
+        assert!(!from_the_site("https://playhorizon.dev", None));
+        assert!(!from_the_site(
+            "https://playhorizon.dev",
+            Some("https://playhorizon.dev.evil.test")
+        ));
+        assert!(!from_the_site("::", Some("null")));
     }
 }

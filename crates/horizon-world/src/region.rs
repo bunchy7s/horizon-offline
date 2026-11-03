@@ -11,7 +11,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::atomic::{AtomicU32, Ordering},
 };
 
 const SECTOR: usize = 4096;
@@ -234,7 +234,11 @@ impl RegionFile {
         if external {
             let temporary = directory.join(format!(".c.{}.{}.mcc.tmp", chunk.x, chunk.z));
             let written = File::create(&temporary)
-                .and_then(|mut f| f.write_all(&record.compressed))
+                .and_then(|mut f| {
+                    f.write_all(&record.compressed)?;
+                    // The region's sync only covers the stub, not this external payload.
+                    f.sync_all()
+                })
                 .and_then(|_| fs::rename(&temporary, &external_file));
             if let Err(e) = written {
                 let _ = fs::remove_file(&temporary);
@@ -387,7 +391,7 @@ impl RegionFile {
 }
 type BTreeChanges<'a> = std::collections::BTreeMap<usize, Option<&'a ChunkRecord>>;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+static NEXT_TEMP: AtomicU32 = AtomicU32::new(0);
 
 /// Writes a complete new region to a temporary sibling, then publishes it with
 /// an atomic, non-overwriting hard link. Drop rolls back unpublished files.

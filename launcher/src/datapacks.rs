@@ -76,7 +76,11 @@ fn check(file: &Path) -> Result<(), String> {
     if zip.index_for_name("pack.mcmeta").is_none() {
         return Err(format!("{name} is not a pack: it has no pack.mcmeta."));
     }
-    if !zip.file_names().any(|n| n.starts_with("data/")) {
+    let names: Vec<_> = zip
+        .file_names()
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("{name} has an entry whose name can't be read: {e}"))?;
+    if !names.iter().any(|n| n.starts_with("data/")) {
         return Err(format!(
             "{name} has no data folder: it is a resource pack, not a data pack."
         ));
@@ -212,7 +216,11 @@ pub fn coverage(file: &Path) -> Result<Coverage, String> {
         .and_then(|f| zip::ZipArchive::new(f).ok())
         .ok_or_else(|| format!("{} is not a zip file that can be read.", file.display()))?;
     let mut kinds = std::collections::BTreeMap::<String, usize>::new();
-    for name in zip.file_names().filter(|n| !n.ends_with('/')) {
+    let names: Vec<_> = zip
+        .file_names()
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    for name in names.iter().filter(|n| !n.ends_with('/')) {
         let parts: Vec<&str> = name.split('/').collect();
         let kind = match parts.as_slice() {
             ["data", _, "tags", tag, _, ..] => format!("{tag} tag"),

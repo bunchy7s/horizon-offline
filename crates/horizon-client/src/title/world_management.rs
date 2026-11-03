@@ -3,7 +3,8 @@
 use crate::save::{read_dat, write_dat};
 use horizon_world::nbt::Tag;
 use std::{
-    fs, io,
+    fs,
+    io::{self, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -21,6 +22,30 @@ fn world_path(saves: &Path, folder: &str) -> crate::Result<PathBuf> {
         return Err("World folder is not a directory".into());
     }
     Ok(path)
+}
+
+/// `DirectoryValidator.validateDirectory`: every symbolic link under the
+/// world folder, never following one. `LevelStorageSource.validateAndCreateAccess`
+/// asks this before it makes an access, and a world holding any link is not
+/// opened at all (`ContentValidationException`), so a link planted in a
+/// downloaded world cannot point the game at the rest of the disk.
+pub fn symlinks(saves: &Path, folder: &str) -> crate::Result<Vec<PathBuf>> {
+    let mut found = Vec::new();
+    collect_symlinks(&world_path(saves, folder)?, &mut found)?;
+    Ok(found)
+}
+
+fn collect_symlinks(dir: &Path, found: &mut Vec<PathBuf>) -> crate::Result<()> {
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            found.push(entry.path());
+        } else if kind.is_dir() {
+            collect_symlinks(&entry.path(), found)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn rename(saves: &Path, folder: &str, name: &str) -> crate::Result<()> {
@@ -150,11 +175,24 @@ pub fn backup(saves: &Path, folder: &str) -> crate::Result<u64> {
     result
 }
 
-fn write_tree(
-    zip: &mut zip::ZipWriter<fs::File>,
+fn write_tree<W: Write + Seek>(
+    zip: &mut zip::ZipWriter<W>,
     root: &Path,
     dir: &Path,
     folder: &str,
+) -> crate::Result<()> {
+    write_tree_skipping(zip, root, dir, folder, &["session.lock"])
+}
+
+/// Every regular file under `root` (named `<prefix>/<relative>` in the zip),
+/// except the names in `skip`. Symlinks are refused. The repro bundle zips a
+/// whole recording with it.
+pub fn write_tree_skipping<W: Write + Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    root: &Path,
+    dir: &Path,
+    prefix: &str,
+    skip: &[&str],
 ) -> crate::Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
@@ -163,11 +201,14 @@ fn write_tree(
         if kind.is_symlink() {
             return Err(format!("Cannot back up symbolic link: {}", path.display()).into());
         }
+        let skipped = skip.iter().any(|name| entry.file_name() == *name);
         if kind.is_dir() {
-            write_tree(zip, root, &path, folder)?;
-        } else if kind.is_file() && entry.file_name() != "session.lock" {
+            if !skipped {
+                write_tree_skipping(zip, root, &path, prefix, skip)?;
+            }
+        } else if kind.is_file() && !skipped {
             let relative = path.strip_prefix(root)?;
-            let name = format!("{folder}/{}", relative.to_string_lossy().replace('\\', "/"));
+            let name = format!("{prefix}/{}", relative.to_string_lossy().replace('\\', "/"));
             zip.start_file(
                 name,
                 zip::write::SimpleFileOptions::default()

@@ -52,6 +52,11 @@ impl DirtySections {
     }
 }
 pub struct World {
+    /// Server-owned mod data attached to this dimension.
+    pub attachments: horizon_world::attachments::Attachments,
+    /// The holders lent to mods since the last flush, whose synced changes
+    /// `flush_attachment_sync` sends.
+    pub attachment_syncs: FxHashSet<horizon_world::attachments::Holder>,
     /// The level's build range and skylight (its dimension type); its
     /// chunks hold `shape.column()`.
     pub shape: LevelShape,
@@ -100,6 +105,9 @@ pub struct World {
     /// for `ServerLevel.sendBlockUpdated`'s path recomputing; kept only while
     /// the mobs of this world tick (`game/creatures.rs`).
     pub path_writes: Option<Vec<((i32, i32, i32), u32, u32)>>,
+    /// The chunks changed in bulk (`edit_runs`) since the log was last
+    /// drained, kept while `block_log` is: sent to the players whole.
+    pub bulk_log: FxHashSet<(i32, i32)>,
     /// The sections whose light changed since the log was last drained, as
     /// a bit per section of each column, kept while `block_log` is
     /// (`ChunkHolder.sectionLightChanged`).
@@ -197,6 +205,8 @@ impl World {
             loaded_entities: Vec::new(),
             loaded_chunks: Vec::new(),
             modified: FxHashSet::default(),
+            attachments: Default::default(),
+            attachment_syncs: FxHashSet::default(),
             block_entities: Default::default(),
             chest_openers: FxHashMap::default(),
             block_names: FxHashMap::default(),
@@ -208,6 +218,7 @@ impl World {
             weather: Weather::default(),
             block_log: None,
             path_writes: None,
+            bulk_log: Default::default(),
             light_log: None,
             moving_piston_fallback: Vec::new(),
             moving_pistons: Vec::new(),

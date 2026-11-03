@@ -1,5 +1,5 @@
 EquineSaddleModel.createSaddleLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
-EquineSaddleModel.setupAnim	missing		player: a saddled horse with nobody riding it shows its reins (left and right saddle lines); vanilla hides them until it is ridden (render.rs draws the whole #saddle layer)
+EquineSaddleModel.setupAnim	inline	crates/horizon-client/src/mobs/anim.rs::setup	the saddle lines are visible only while a player or mob rides
 AdultFelineModel.createBodyMesh	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 BabyFelineModel.createBabyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 CodModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
@@ -40,9 +40,9 @@ CopperGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.js
 CopperGolemModel.createRunningPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 CopperGolemModel.createSittingPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 CopperGolemModel.createStarPoseBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
-CopperGolemModel.translateToHand	missing		player: an item a copper golem holds sits at the humanoid hand offset; vanilla turns it (IDLE) or scales it to 0.55 with its own grip (mobs/render.rs hand_base has only the vex case)
+CopperGolemModel.translateToHand	port	crates/horizon-client/src/mobs/render.rs::hand_base	
 CopperGolemModel.translateToHead	skip:other		only CustomHeadLayer calls it, and a copper golem has no head slot (its only extra slot is the antenna)
-CopperGolemModel.applyBlockOnAntennaTransform	missing		player: a block or flower on the copper golem antenna is not drawn; vanilla draws it with BlockDecorationLayer (nothing in mobs/render.rs draws the antenna item)
+CopperGolemModel.applyBlockOnAntennaTransform	port	crates/horizon-client/src/game/mob_blocks.rs::antenna_block_matrix	the unit cube's bottom centre to the antenna centre, then the 1.75 drop
 IronGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 SnowGolemModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 LlamaSpitModel.createBodyLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
@@ -83,8 +83,8 @@ BabyWolfModel.shakeOffWater	port	crates/horizon-client/src/mobs/tame.rs::anim	sh
 BabyWolfModel.setSittingPose	port	crates/horizon-client/src/mobs/tame.rs::anim	baby sitting pose: body xRot minus pi/2
 WolfModel.setSittingPose	port	crates/horizon-client/src/mobs/tame.rs::anim	sitting pose, adult and baby
 EvokerFangsModel.setupAnim	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	jaws, base sink and pre-scale
-SpearAnimations.thirdPersonAttackHand	missing		player: a spear stab shows the whack swing on other players and mobs; the arm does not thrust (STAB arm pose absent, only WHACK in mobs/anim.rs)
-SpearAnimations.firstPersonAttack	missing		player: when you stab with a spear your own hand does not thrust forward; the default swing plays instead (first_person.rs has no STAB pose)
+SpearAnimations.thirdPersonAttackHand	port	crates/horizon-client/src/spear.rs::third_person_attack_arm	what a STAB swing adds to the swinging arm's x rotation
+SpearAnimations.firstPersonAttack	port	crates/horizon-client/src/spear.rs::first_person_attack	the first-person jab, applied after the arm transform
 SpearAnimations.UseParams.fromKineticWeapon	port	crates/horizon-client/src/spear.rs::UseParams::of	the charge timeline and sway values
 SpinAttackEffectModel.createLayer	skip:data		geometry baked into entity-models.json, which Horizon loads as a resource
 EntityModelSet.bakeLayer	skip:data		baking a layer; Horizon loads each layer from entity-models.json via load_model

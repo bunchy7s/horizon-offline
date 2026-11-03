@@ -64,8 +64,36 @@ pub fn register(m: &mut Mob) {
             m.ai.targets.add(1, HurtByTarget::new().alert());
             m.ai.targets.add(2, NearestTarget::player(true));
         }
+        // Endermite.registerGoals: the silverfish's list without the stone
+        // tricks, at vanilla's priorities (stroll 1.0, alert others on hurt).
+        S::Endermite => {
+            let g = &mut m.ai.goals;
+            g.add(1, Float);
+            g.add(1, ClimbOnTopOfPowderSnow);
+            g.add(2, MeleeAttack::new(1.0, false));
+            g.add(3, Stroll::avoiding_water(1.0));
+            g.add(7, LookAtPlayer::new(8.0));
+            g.add(8, RandomLookAround::default());
+            m.ai.targets.add(1, HurtByTarget::new().alert());
+            m.ai.targets.add(2, NearestTarget::player(true));
+        }
         _ => {}
     }
+}
+/// `InfestedBlock.isCompatibleHostBlock`: the blocks an infested block can
+/// be hidden in, i.e. the host side of vanilla's host-to-infested map. A
+/// silverfish prefers these as a walking target.
+pub fn is_infested_host(name: &str) -> bool {
+    matches!(
+        name,
+        "minecraft:stone"
+            | "minecraft:cobblestone"
+            | "minecraft:stone_bricks"
+            | "minecraft:mossy_stone_bricks"
+            | "minecraft:cracked_stone_bricks"
+            | "minecraft:chiseled_stone_bricks"
+            | "minecraft:deepslate"
+    )
 }
 /// `Silverfish.hurtServer`: a hit by an entity (or magic damage) starts the
 /// countdown of its wake-up goal, kept in `extra.counter`.
@@ -303,9 +331,9 @@ pub fn creeper_client_tick(m: &mut Mob) {
     if m.extra.flag {
         m.extra.counter = 1;
     }
-    m.swell = (m.swell + m.extra.counter).clamp(0, 30);
+    m.swell = (m.swell + m.extra.counter).max(0).min(m.max_swell);
 }
-/// Creeper.tick: advance the fuse and explode at 30.
+/// Creeper.tick: advance the fuse and explode at maxSwell.
 pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if !m.alive() {
         return;
@@ -324,8 +352,8 @@ pub fn creeper_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
         ));
     }
     m.swell = (m.swell + dir).max(0);
-    if m.swell >= 30 {
-        m.swell = 30;
+    if m.swell >= m.max_swell {
+        m.swell = m.max_swell;
         let radius = if m.extra.charged { 6.0 } else { 3.0 };
         let name = match &m.custom_name {
             Some(name) => crate::text::Text::literal(name.clone()),

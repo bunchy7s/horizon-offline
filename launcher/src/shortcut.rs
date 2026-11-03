@@ -112,7 +112,7 @@ fn sh_quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
-fn xml(text: &str) -> String {
+pub(crate) fn xml(text: &str) -> String {
     text.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -246,6 +246,51 @@ pub fn lnk(exe: &str, args: &str, comment: &str) -> Vec<u8> {
     out
 }
 
+/// A Windows shortcut written by the shell itself (`IShellLinkW`), as Explorer and every installer
+/// make one. `lnk` above lays the bytes out from the format's specification, which tests can check
+/// anywhere, but it has no target ID list, and the shell reads the target from that list: Explorer
+/// shows an empty target and starts nothing. So on Windows this writes the shortcuts that are used.
+/// The icon is the program's own, which is also how an uninstall finds shortcuts made for it.
+#[cfg(windows)]
+pub fn write_windows_link(
+    path: &Path,
+    exe: &Path,
+    args: &str,
+    comment: &str,
+) -> Result<(), String> {
+    use windows::core::{Interface, HSTRING};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    // SAFETY: plain COM calls on interfaces created and dropped here; COM is initialised for this
+    // thread first and released after, when this call is the one that initialised it.
+    unsafe {
+        let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let made = (|| -> windows::core::Result<()> {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            link.SetPath(&HSTRING::from(exe.as_os_str()))?;
+            link.SetArguments(&HSTRING::from(args))?;
+            if let Some(dir) = exe.parent() {
+                link.SetWorkingDirectory(&HSTRING::from(dir.as_os_str()))?;
+            }
+            link.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
+            link.SetDescription(&HSTRING::from(comment))?;
+            let file: IPersistFile = link.cast()?;
+            file.Save(&HSTRING::from(path.as_os_str()), true)
+        })();
+        if init.is_ok() {
+            CoUninitialize();
+        }
+        made.map_err(|e| format!("{}: {e}", path.display()))
+    }
+}
+
 /// Whether the shortcut at `path` plays the instance `id`.
 fn plays(path: &Path, id: &str) -> bool {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -323,15 +368,16 @@ pub fn make_in(
                 write(&path.join(inside), &bytes, program)?;
             }
         }
-        System::Windows => write(
-            &path,
-            &lnk(
-                &exe.to_string_lossy(),
-                &windows_args(id),
-                &format!("Play {name} in Horizon"),
-            ),
-            false,
-        )?,
+        System::Windows => {
+            let args = windows_args(id);
+            let comment = format!("Play {name} in Horizon");
+            // On Windows the shell writes the shortcut (`write_windows_link`); elsewhere, and in
+            // tests for the other systems, it is laid out from the format.
+            #[cfg(windows)]
+            write_windows_link(&path, exe, &args, &comment)?;
+            #[cfg(not(windows))]
+            write(&path, &lnk(&exe.to_string_lossy(), &args, &comment), false)?;
+        }
     }
     Ok(made)
 }

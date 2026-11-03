@@ -167,7 +167,7 @@ fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
                 block,
                 BlockState {
                     name: args[6].clone(),
-                    properties,
+                    properties: properties.into(),
                 },
             )?;
             let timestamp = std::time::SystemTime::now()

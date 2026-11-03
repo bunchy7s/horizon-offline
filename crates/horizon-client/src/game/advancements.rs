@@ -4,12 +4,13 @@
 use super::{Dim, Game};
 use horizon_client::{
     advancements::{self as adv, EntityView, Frame, ItemView, Progress, Tree},
-    hud::HudBatch,
+    hud::{HudBatch, rgba},
     items::ItemStack,
     text::{self, Style, Text},
     toasts::Slide,
 };
 use horizon_core::geometry::Vec3;
+use horizon_protocol::packets::play::Clientbound as C;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -326,13 +327,19 @@ impl Game<'_> {
             return;
         }
         let data = self.options.resources.join("data");
-        // The world's packs' advancements go over the game's own.
-        let files = super::functions::content_overlay(
-            &self.world_root,
-            &self.options.resources,
-            self.cmds.vanilla_disabled,
-            &self.level.enabled_features,
-        );
+        // The world's packs' advancements go over the game's own, and a
+        // native mod's contributed files are already among them: the tables
+        // were built for this open (`build_world_tables`), so the hook is
+        // asked once, not again here.
+        let files = match &self.world_tables {
+            Some(tables) => tables.files.clone(),
+            None => super::functions::content_overlay(
+                &self.world_root,
+                &self.options.resources,
+                self.cmds.vanilla_disabled,
+                &self.level.enabled_features,
+            ),
+        };
         self.adv.pending_tree = std::thread::Builder::new()
             .name("horizon-advancements".into())
             .spawn(move || Tree::shared(&data, &horizon_world::loot::PackOverlay { files: &files }))
@@ -525,22 +532,18 @@ impl Game<'_> {
             i.as_ref().map(|id| item_view(&ItemStack::new(id, 1)))
         };
         let mut equipment: [Option<ItemView>; 7] = Default::default();
-        if !horizon_client::mobs::equine::is_equine(m.species()) {
-            equipment[0] = slot(&m.extra.main_hand);
-            equipment[1] = slot(&m.extra.off_hand);
-            equipment[2] = slot(&m.extra.head);
-            equipment[3] = slot(&m.extra.chest);
-            equipment[4] = slot(&m.extra.legs);
-            equipment[5] = slot(&m.extra.feet);
-        }
-        // A wolf's armor is its body slot, with its durability.
-        if m.species() == horizon_client::mobs::Species::Wolf {
-            equipment[6] = m.extra.head.as_ref().map(|id| {
-                let mut armor = ItemStack::new(id, 1);
-                armor.damage = m.extra.body_damage.max(0) as u32;
-                item_view(&armor)
-            });
-        }
+        equipment[0] = slot(&m.extra.main_hand);
+        equipment[1] = slot(&m.extra.off_hand);
+        equipment[2] = slot(&m.extra.head);
+        equipment[3] = slot(&m.extra.chest);
+        equipment[4] = slot(&m.extra.legs);
+        equipment[5] = slot(&m.extra.feet);
+        // The body slot (a wolf's armor, a horse's), with its durability.
+        equipment[6] = m.extra.body.as_ref().map(|id| {
+            let mut armor = ItemStack::new(id, 1);
+            armor.damage = m.extra.body_damage.max(0) as u32;
+            item_view(&armor)
+        });
         EntityView {
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],
@@ -604,10 +607,42 @@ impl Game<'_> {
         for (ai, ci) in hits {
             let a = &tree.list[ai];
             let was = self.adv.progress.done(a);
-            self.adv.progress.grant(&a.id, &a.criteria[ci].name, &date);
+            let criterion = &a.criteria[ci].name;
+            if self.adv.progress.grant(&a.id, criterion, &date) {
+                self.advancement_progress(&a.id, criterion, true);
+                if let (Some(player), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone())
+                {
+                    self.native_player_advancement_criterion_grant(player, &name, &a.id, criterion);
+                }
+            }
             self.progress_changed(ai);
             if !was && self.adv.progress.done(a) {
                 self.award(ai);
+            }
+        }
+    }
+    /// `PlayerAdvancements.award` / `revoke` after a criterion's progress changed.
+    fn advancement_progress(&mut self, advancement: &str, criterion: &str, granted: bool) {
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_advancement_progress(player, &name, advancement, criterion, granted);
+        }
+    }
+    /// The criteria `CriteriaTriggers.TICK` granted network players in the hub
+    /// (their first tick and a reload), told to the mods.
+    pub(super) fn run_native_advancement_grants(&mut self) {
+        let Some(host) = self.lan.as_mut() else {
+            return;
+        };
+        for batch in std::mem::take(&mut host.hub.native_advancement_grants) {
+            for grant in batch.grants {
+                self.native_player_advancement_progress(
+                    batch.player,
+                    &batch.name,
+                    &grant.advancement,
+                    &grant.criterion,
+                    true,
+                );
             }
         }
     }
@@ -620,18 +655,44 @@ impl Game<'_> {
     /// After `ServerRecipeBook.addRecipes`: the toast and the
     /// `recipe_unlocked` trigger of each recipe now known.
     pub(super) fn recipe_unlocked(&mut self, unlocked: &[String]) {
+        let mut allowed = Vec::with_capacity(unlocked.len());
+        let mut refused = Vec::new();
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            for recipe in unlocked {
+                let mut cancel = false;
+                self.native_player_recipe_discovered(player, &name, recipe, &mut cancel);
+                if cancel {
+                    refused.push(recipe.clone());
+                } else {
+                    allowed.push(recipe.clone());
+                }
+            }
+            if !refused.is_empty() {
+                let removed = self
+                    .level
+                    .recipe_book
+                    .remove_recipes(&world_stations!(self).recipe_index, &refused);
+                if self.lan_acting.is_some() && !removed.is_empty() {
+                    self.guest_packets.push(C::RecipeBookRemove(
+                        horizon_protocol::packets::recipes::RecipeBookRemove { ids: removed },
+                    ));
+                }
+            }
+        } else {
+            allowed.extend_from_slice(unlocked);
+        }
         if self.lan_acting.is_some() {
             // A network player's client gets them in ClientboundRecipeBookAddPacket.
-            self.adv.unlocked.extend_from_slice(unlocked);
+            self.adv.unlocked.extend_from_slice(&allowed);
         } else {
-            self.recipe_toast(unlocked);
+            self.recipe_toast(&allowed);
         }
-        if unlocked.is_empty() || self.remote.is_some() || self.no_player_here() {
+        if allowed.is_empty() || self.remote.is_some() || self.no_player_here() {
             return;
         }
         self.load_advancements();
         let tree = self.adv.tree.clone();
-        for r in unlocked {
+        for r in &allowed {
             let list = tree.recipe_criteria(r);
             self.trigger_criteria(&tree, &list, |c, _| {
                 c["recipes"].as_str() == Some(r.as_str())
@@ -659,7 +720,7 @@ impl Game<'_> {
         match result {
             Ok(unlocked) => {
                 self.recipe_unlocked(&unlocked);
-                self.stats.add("used", &stack.item, 1);
+                self.award_stat("used", &stack.item, 1);
                 self.swing_arm();
                 true
             }
@@ -675,9 +736,15 @@ impl Game<'_> {
     fn award(&mut self, index: usize) {
         let tree = self.adv.tree.clone();
         let a = &tree.list[index];
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_advancement_done(player, &name, &a.id);
+        }
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
-            self.experience.give(a.rewards.experience);
+            let old_level = self.experience.level;
+            let points = self.xp_change(a.rewards.experience).map_or(0, |p| p.max(0));
+            self.experience.give(points);
+            self.native_player_level_changed(old_level);
         }
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.
         let rewards: Vec<String> = a
@@ -1821,11 +1888,7 @@ impl Game<'_> {
         }
         let atlas = &self.gui.atlas;
         batch.sprite(atlas, "gui/sprites/toast/advancement", x, y);
-        let (key, color) = match frame {
-            Frame::Task => ("advancements.toast.task", 0xFFFF_FF00),
-            Frame::Goal => ("advancements.toast.goal", 0xFFFF_FF00),
-            Frame::Challenge => ("advancements.toast.challenge", 0xFFFF_88FF),
-        };
+        let (key, color) = toast_label(frame);
         // AdvancementToast.extractRenderState: a title of one line sits under
         // the frame's label; a longer one is wrapped at 125, the label fading
         // out first (to 1.5 s) and the lines fading in after it over 0.3 s.
@@ -1860,6 +1923,15 @@ impl Game<'_> {
             }
         }
         self.draw_item(batch, &ItemStack::new(&icon, 1), x + 8.0, y + 8.0);
+    }
+}
+/// The toast's frame label and its colour (`AdvancementToast`: -30465, pink,
+/// for a challenge, else -256, yellow), packed as `hud::rgba` for the batch.
+fn toast_label(frame: Frame) -> (&'static str, u32) {
+    match frame {
+        Frame::Task => ("advancements.toast.task", rgba(255, 255, 0, 255)),
+        Frame::Goal => ("advancements.toast.goal", rgba(255, 255, 0, 255)),
+        Frame::Challenge => ("advancements.toast.challenge", rgba(255, 136, 255, 255)),
     }
 }
 /// `Advancement.name`: the bracketed title in the frame's colour, with the
@@ -1921,6 +1993,7 @@ impl Game<'_> {
             let was = self.adv.progress.done(a);
             if self.adv.progress.grant(&a.id, c, &date) {
                 changed = true;
+                self.advancement_progress(&a.id, c, true);
                 self.progress_changed(index);
                 if !was && self.adv.progress.done(a) {
                     self.award(index);
@@ -1935,15 +2008,24 @@ impl Game<'_> {
         let a = &tree.list[index];
         self.progress_changed(index);
         match criterion {
-            Some(c) => self.adv.progress.revoke(&a.id, c),
+            Some(c) => self.revoke_criterion(&a.id, c),
             None => {
                 let mut any = false;
                 for c in &a.criteria {
-                    any |= self.adv.progress.revoke(&a.id, &c.name);
+                    any |= self.revoke_criterion(&a.id, &c.name);
                 }
                 any
             }
         }
+    }
+    /// `PlayerAdvancements.revoke(holder, criterion)`: the progress change and
+    /// the hook for it.
+    fn revoke_criterion(&mut self, advancement: &str, criterion: &str) -> bool {
+        let revoked = self.adv.progress.revoke(advancement, criterion);
+        if revoked {
+            self.advancement_progress(advancement, criterion, false);
+        }
+        revoked
     }
 }
 impl Game<'_> {
@@ -1995,7 +2077,7 @@ impl Game<'_> {
                     criteria.push(adv::Criterion {
                         name: name.clone(),
                         trigger: String::new(),
-                        conditions: Value::Null,
+                        conditions: Value::Null.into(),
                     });
                 }
             }
@@ -2058,6 +2140,18 @@ pub(super) fn text_of(v: &Value) -> Text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toast_labels_are_yellow_or_pink() {
+        // The batch takes colours as `rgba`: 0xFFFF_FF00 there is cyan (#5850).
+        for frame in [Frame::Task, Frame::Goal] {
+            assert_eq!(toast_label(frame).1.to_le_bytes(), [255, 255, 0, 255]);
+        }
+        assert_eq!(
+            toast_label(Frame::Challenge).1.to_le_bytes(),
+            [255, 136, 255, 255]
+        );
+    }
 
     fn recipes(n: usize) -> Toast {
         Toast::recipe(

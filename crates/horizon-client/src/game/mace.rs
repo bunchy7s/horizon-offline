@@ -15,7 +15,6 @@ use horizon_core::{
     position::BlockPos,
     random::RandomSource,
 };
-use horizon_world::registry::BlockStateId;
 
 /// `MaceItem.SMASH_ATTACK_FALL_THRESHOLD`.
 const FALL_THRESHOLD: f64 = 1.5;
@@ -183,9 +182,33 @@ impl Game<'_> {
     /// `LivingEntity.hurtServer` of the mob at `index` by the player's hit:
     /// the weapon's `armor_effectiveness` enchantments (Breach) thin its armor.
     pub(super) fn hurt_by_player(&mut self, index: usize, amount: f32, source: Damage) -> bool {
+        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
         let held = self.held().cloned();
         let aim = self.attacker_aim(source.attacker);
         let kind = self.mobs[index].kind.id.clone();
+        let mut amount = amount;
+        // After the invulnerability guard, as `LivingIncomingDamageEvent` fires.
+        if !crate::mod_api::mods().is_empty() && !self.mobs[index].refuses_damage(&source) {
+            let victim = &self.mobs[index];
+            let position = victim.position;
+            let view = super::view_vector(victim.head_yaw, victim.head_pitch);
+            let mut canceled = false;
+            self.native_living_incoming_damage_v2(
+                victim.id as i32,
+                &kind,
+                super::creatures::source_damage_type(source),
+                self.player.as_ref().map_or(0, |player| player.entity_id),
+                source.from,
+                [position.x, position.y, position.z],
+                view,
+                held.as_ref(),
+                &mut amount,
+                &mut canceled,
+            );
+            if canceled {
+                return false;
+            }
+        }
         let ctx = EffectContext {
             this: Some(&kind),
             attacker: Some("minecraft:player"),
@@ -241,7 +264,7 @@ impl Game<'_> {
             self.mace_hurt_enemy(index);
         }
         if weapon.is_some() {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack(index);
         // MaceItem.postHurtEnemy
@@ -324,7 +347,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:player");
         // MaceItem.postHurtEnemy
@@ -353,7 +376,7 @@ impl Game<'_> {
             .get(&stack.item)
             .is_some_and(|i| i.weapon_damage.is_some())
         {
-            self.stats.add("used", &stack.item, 1);
+            self.award_stat("used", &stack.item, 1);
         }
         self.post_attack_bursts(&stack, "minecraft:armor_stand");
         // MaceItem.postHurtEnemy
@@ -384,13 +407,8 @@ impl Game<'_> {
         for m in self.mobs.iter_mut().filter(|m| {
             target != Spared::Mob(m.id) && m.alive() && !m.removed && !ally_of_player(m, player)
         }) {
-            smash_push(
-                center,
-                heavy,
-                m.position,
-                &mut m.velocity,
-                m.attrs.knockback_resistance,
-            );
+            let resistance = m.knockback_resistance();
+            smash_push(center, heavy, m.position, &mut m.velocity, resistance);
         }
         for s in self
             .armor_stands
@@ -462,6 +480,7 @@ impl Game<'_> {
         let Some(player) = self.player.as_ref() else {
             return;
         };
+        let _attacker = self.knockback_scope(player.entity_id);
         let from = [player.position.x, player.position.y, player.position.z];
         let area = target.inflate(Vec3::new(1.0, 0.25, 1.0));
         let near = |at: Vec3| {
@@ -536,7 +555,24 @@ impl Game<'_> {
                 if !self.punch_armor_stand(i) {
                     continue;
                 }
-                let (mut kx, mut kz) = (xd, zd);
+                let mut knock = horizon_client::health::Knock {
+                    strength: 0.4,
+                    x: xd,
+                    z: zd,
+                };
+                let source = horizon_client::health::HurtSource {
+                    damage_type: "minecraft:player_attack",
+                    causing: horizon_client::health::knockback_attacker(),
+                    direct: horizon_client::health::knockback_attacker(),
+                };
+                if horizon_client::health::knockback_canceled(
+                    horizon_client::health::Hurting::ArmorStand(id as i32, source),
+                    &mut knock,
+                ) || knock.strength <= 0.0
+                {
+                    continue;
+                }
+                let (mut kx, mut kz) = (knock.x, knock.z);
                 while kx * kx + kz * kz < f64::from(1.0e-5_f32) {
                     let r = &mut self.world.random;
                     kx = (r.next_double() - r.next_double()) * 0.01;
@@ -545,13 +581,13 @@ impl Game<'_> {
                 let len = (kx * kx + kz * kz).sqrt();
                 if let Some(s) = self.armor_stands.iter_mut().find(|s| s.id == id) {
                     s.velocity = Vec3::new(
-                        s.velocity.x / 2.0 - kx / len * 0.4,
+                        s.velocity.x / 2.0 - kx / len * knock.strength,
                         if s.on_ground {
-                            (s.velocity.y / 2.0 + 0.4).min(0.4)
+                            (s.velocity.y / 2.0 + knock.strength).min(0.4)
                         } else {
                             s.velocity.y
                         },
-                        s.velocity.z / 2.0 - kz / len * 0.4,
+                        s.velocity.z / 2.0 - kz / len * knock.strength,
                     );
                 }
                 continue;
@@ -570,7 +606,7 @@ impl Game<'_> {
                 if old_health > 0.0 && !self.mobs[i].alive() {
                     self.native_kill_event(i);
                 }
-                self.mobs[i].knockback(0.4, xd, zd);
+                self.mobs[i].knockback(0.4, xd, zd, &source);
                 self.last_hurt_by_player
                     .insert(self.mobs[i].id, self.lan_acting);
                 self.post_attack(i);
@@ -584,31 +620,6 @@ impl Game<'_> {
             _ => None,
         };
         self.sweep_other_players(sweep);
-    }
-    /// `ServerPlayer.checkFallDamage` after a smash on a grounded target:
-    /// the landing block's particles, 50 for every block fallen (200 at most).
-    pub(super) fn smash_landing_particles(
-        &mut self,
-        state: BlockStateId,
-        pos: BlockPos,
-        fall_distance: f64,
-    ) {
-        let Some((sprite, tint)) = self.particle_sprite(state, [pos.x, pos.y, pos.z]) else {
-            return;
-        };
-        let count = (50.0 * fall_distance).clamp(0.0, 200.0) as u32;
-        let spread = f64::from(0.3f32);
-        self.particles.send_particles(
-            &ParticleOptions::block(ParticleType::Block, sprite, tint),
-            [
-                f64::from(pos.x) + 0.5,
-                f64::from(pos.y) + 1.0,
-                f64::from(pos.z) + 0.5,
-            ],
-            [spread; 3],
-            f64::from(0.15f32),
-            count,
-        );
     }
     /// Level event 2013 (`ParticleUtils.spawnSmashAttackParticles`): dust
     /// pillars of the block at `pos`, a cluster over it and a ring 3.5 out.

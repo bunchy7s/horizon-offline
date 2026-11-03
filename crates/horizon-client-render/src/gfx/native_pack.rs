@@ -21,6 +21,10 @@ pub struct NativePack {
     pub weather: Option<wgpu::RenderPipeline>,
     /// The draw of the shadow map the stages read, if the pack asks for one.
     pub shadow: Option<NativeShadow>,
+    /// `[[particle_lights]]`.
+    pub particle_lights: Vec<horizon_shader_api::manifest::ParticleLight>,
+    /// `[[lights]]`, for the colour of held and dropped items' light.
+    pub light_colors: Vec<horizon_shader_api::manifest::LightColor>,
     /// GPU time of each pass, while the renderer asks for it (`pack_timing.rs`).
     pub timing: Option<PassTiming>,
 }
@@ -48,7 +52,17 @@ impl NativePack {
         let shadow = report
             .shadow
             .as_ref()
-            .map(|s| NativeShadow::new(device, terrain, &frame, &s.solid_materials))
+            .map(|s| {
+                let vertex = report.stages.iter().find(|s| s.kind == StageKind::Vertex);
+                NativeShadow::new(
+                    device,
+                    terrain,
+                    &frame,
+                    &s.solid_materials,
+                    vertex,
+                    constants,
+                )
+            })
             .transpose()?;
         // The mirror is drawn for a material that reads it, while `[reflection] option` is on.
         let option = report.reflection.as_ref().and_then(|r| r.option.as_ref());
@@ -91,6 +105,7 @@ impl NativePack {
             .iter()
             .find(|s| s.kind == StageKind::Weather)
             .map(|s| s.label.clone());
+        let has_vertex = report.stages.iter().any(|s| s.kind == StageKind::Vertex);
         let (post, others): (Vec<_>, Vec<_>) = report
             .stages
             .into_iter()
@@ -103,7 +118,9 @@ impl NativePack {
         let material = others
             .iter()
             .find(|s| s.kind == StageKind::Material)
-            .map(|stage| NativeMaterial::new(device, terrain, &frame, stage, constants, fog))
+            .map(|stage| {
+                NativeMaterial::new(device, terrain, &frame, stage, constants, fog, has_vertex)
+            })
             .transpose()?;
         let post = (!post.is_empty())
             .then(|| NativePost::new(device, post, &report.manifest, constants, format, &frame))
@@ -120,6 +137,8 @@ impl NativePack {
             labels.extend(post.labels().into_iter().map(str::to_owned));
         }
         let pack = Self {
+            particle_lights: report.manifest.particle_lights.clone(),
+            light_colors: report.manifest.lights.clone(),
             frame,
             sky,
             material,

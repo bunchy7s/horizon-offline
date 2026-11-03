@@ -34,7 +34,7 @@ impl Game<'_> {
             loved = true;
         }
         if m.health < m.attrs.max_health {
-            m.health = (m.health + heal).min(m.attrs.max_health);
+            m.heal(heal);
             used = true;
         }
         let mut happy = false;
@@ -61,8 +61,11 @@ impl Game<'_> {
         }
         // Animal.setInLove: entity event 18.
         if loved {
-            self.love_cause.insert(self.mobs[index].id, self.lan_acting);
-            self.mob_event_particles(self.mobs[index].id, 18);
+            let id = self.mobs[index].id;
+            self.love_cause.insert(id, self.lan_acting);
+            let kind = self.mobs[index].kind.id.clone();
+            self.native_entity_enter_love_mode(id, &kind, self.lan_acting_uuid);
+            self.mob_event_particles(id, 18);
         }
         self.llama_sound(index, "entity.llama.eat", 1.0);
         self.consume_held();
@@ -107,18 +110,18 @@ impl Game<'_> {
         let m = &self.mobs[index];
         let carpet = |i: &str| i.ends_with("_carpet") && i.starts_with("minecraft:");
         if !item.is_empty() {
-            if item == "minecraft:shears" && m.extra.head.as_deref().is_some_and(carpet) {
+            if item == "minecraft:shears" && m.extra.body.as_deref().is_some_and(carpet) {
                 // Equippable.canBeSheared: the carpet comes off.
                 let at = m.center();
-                let carpet = self.mobs[index].extra.head.take().unwrap_or_default();
+                let carpet = self.mobs[index].extra.body.take().unwrap_or_default();
                 self.audio
                     .play("minecraft:item.llama_carpet.unequip", Some(at), 1.0, 1.0);
                 self.spawn_item(ItemStack::new(&carpet, 1), at, [0.0, 0.2, 0.0], 10);
                 self.damage_held_tool();
                 return true;
             }
-            if carpet(item) && m.extra.head.is_none() {
-                self.mobs[index].extra.head = Some(item.into());
+            if carpet(item) && m.extra.body.is_none() {
+                self.mobs[index].extra.body = Some(item.into());
                 self.llama_sound(index, "entity.llama.swag", 1.0);
                 self.consume_held();
                 return true;
@@ -130,6 +133,9 @@ impl Game<'_> {
         }
         // doPlayerRide; mounting drops a lead.
         let id = self.mobs[index].id;
+        if !self.native_may_board(id) {
+            return true;
+        }
         self.break_leash(id, true, false);
         let m = &mut self.mobs[index];
         m.extra.flag = false;

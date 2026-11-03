@@ -562,11 +562,7 @@ fn pack_lighting(
                     }
                 }
             }
-            if data.iter().all(|&v| v == data[0]) {
-                Light::Uniform(data[0])
-            } else {
-                Light::Full(data)
-            }
+            Light::packed(data)
         })
         .collect()
 }
@@ -592,18 +588,21 @@ pub fn apply_relighting(chunk: &mut Chunk, lights: Vec<Light>, changed: &mut Lig
     changed.keyed(chunk.layout());
     for (sy, (section, light)) in chunk.sections.iter_mut().zip(lights).enumerate() {
         let old = &section.light;
-        if let (Light::Uniform(a), Light::Uniform(b)) = (old, &light)
-            && a == b
-        {
-            continue;
-        }
-        let mut classes = 0;
-        for i in 0..4096 {
-            if old.get(i) != light.get(i) {
-                let (x, y, z) = (i as i32 & 15, (i >> 8) as i32, (i >> 4) as i32 & 15);
-                classes |= 1 << LightChanges::class(x, y, z);
+        let classes = match (old, &light) {
+            (Light::Uniform(a), Light::Uniform(b)) if a == b => continue,
+            // (most sections of a chunk relit for a neighbour's edit keep their light: one comparison of the whole)
+            (Light::Full(a), Light::Full(b)) => LightChanges::classes_differing(a, b),
+            _ => {
+                let mut classes = 0;
+                for i in 0..4096 {
+                    if old.get(i) != light.get(i) {
+                        let (x, y, z) = (i as i32 & 15, (i >> 8) as i32, (i >> 4) as i32 & 15);
+                        classes |= 1 << LightChanges::class(x, y, z);
+                    }
+                }
+                classes
             }
-        }
+        };
         if classes != 0 {
             changed.add((chunk.x, sy as i32, chunk.z), classes);
             Arc::make_mut(section).light = light;
@@ -807,10 +806,9 @@ impl<'w> Region<'w> {
             return;
         };
         let slot = &mut self.slots[slot];
-        let light = slot.light.get_or_insert_with(|| match &slot.section.light {
-            Light::Uniform(v) => Box::new([*v; 4096]),
-            Light::Full(a) => a.clone(),
-        });
+        let light = slot
+            .light
+            .get_or_insert_with(|| slot.section.light.to_array());
         let i = index(x, y, z);
         light[i] = f(light[i]);
     }
@@ -827,7 +825,7 @@ impl<'w> Region<'w> {
             drop(slot.section);
             let (cx, s, cz) = slot.key;
             self.world
-                .set_section_light(cx, s as usize, cz, Light::Full(light));
+                .set_section_light(cx, s as usize, cz, Light::packed(light));
         }
     }
 }
@@ -847,7 +845,7 @@ pub struct LightChanges {
 impl LightChanges {
     /// Changes in chunks of `layout`: what the relighter or a light job adds
     /// after this (they all come from one level).
-    fn keyed(&mut self, layout: ColumnLayout) {
+    pub fn keyed(&mut self, layout: ColumnLayout) {
         debug_assert!(self.sections.is_empty() || self.layout == layout);
         self.layout = layout;
     }
@@ -858,7 +856,7 @@ impl LightChanges {
         *self.sections.entry(key).or_default() |= 1 << Self::class(x, y, z);
     }
     /// Cells of section `key` (x, section index, z) in the given classes.
-    fn add(&mut self, key: Pos, classes: u32) {
+    pub fn add(&mut self, key: Pos, classes: u32) {
         *self.sections.entry(key).or_default() |= classes;
     }
     /// The class of a cell in its section: per axis 0 on the low face, 1
@@ -870,6 +868,25 @@ impl LightChanges {
             _ => 1,
         };
         axis(x) + 3 * axis(y) + 9 * axis(z)
+    }
+    /// The classes (bit `class`) of the cells, in a section's index order (`y << 8 | z << 4 | x`), where `a` and
+    /// `b` differ.
+    pub fn classes_differing<T: PartialEq>(a: &[T; 4096], b: &[T; 4096]) -> u32 {
+        let mut classes = 0;
+        // (a row of 16 along x at a time: the rows alike, most of them, cost one comparison)
+        let (rows_a, rows_b) = (a.as_chunks::<16>().0, b.as_chunks::<16>().0);
+        for (row, (ra, rb)) in rows_a.iter().zip(rows_b).enumerate() {
+            if ra == rb {
+                continue;
+            }
+            let (y, z) = ((row >> 4) as i32, (row & 15) as i32);
+            for x in 0..16 {
+                if ra[x] != rb[x] {
+                    classes |= 1 << Self::class(x as i32, y, z);
+                }
+            }
+        }
+        classes
     }
     pub fn is_empty(&self) -> bool {
         self.sections.is_empty()
@@ -1155,6 +1172,31 @@ fn relight_layer(
 mod tests {
     use super::*;
     use crate::chunk::{HEIGHT, MIN_Y, SECTIONS};
+
+    #[test]
+    fn changed_cells_dirty_only_the_sections_within_a_block() {
+        let dirty = |cells: &[(usize, usize, usize)]| {
+            let a = [0u8; 4096];
+            let mut b = a;
+            for &(x, y, z) in cells {
+                b[y << 8 | z << 4 | x] = 1;
+            }
+            let mut changes = LightChanges::default();
+            changes.add((0, 5, 0), LightChanges::classes_differing(&a, &b));
+            let mut out = Vec::new();
+            changes.dirty_sections(|p| out.push(p));
+            out.sort_unstable();
+            out
+        };
+        assert_eq!(dirty(&[]), Vec::<Pos>::new());
+        assert_eq!(dirty(&[(5, 5, 5), (9, 1, 14)]), vec![(0, 5, 0)]);
+        assert_eq!(dirty(&[(0, 5, 5)]), vec![(-1, 5, 0), (0, 5, 0)]);
+        assert_eq!(
+            dirty(&[(15, 15, 5)]),
+            vec![(0, 5, 0), (0, 6, 0), (1, 5, 0), (1, 6, 0)]
+        );
+        assert_eq!(dirty(&[(0, 0, 0)]).len(), 8);
+    }
 
     const AIR: u32 = 0;
     const STONE: u32 = 1;
@@ -1577,21 +1619,20 @@ mod tests {
         current.set(8, MIN_Y, 8, TORCH);
         let region = [[None; 3], [None, Some(&current), None], [None; 3]];
         let lights = light_chunk(&region, &tables(), true);
-        let Light::Full(data) = &lights[0] else {
-            panic!("torch light varies");
+        let storage = |light: &Light| match light {
+            Light::Full(data) => data.as_ptr(),
+            Light::Sky(layer, _) | Light::Block(layer, _) => layer.as_ptr(),
+            Light::Uniform(_) => panic!("torch light varies"),
         };
-        let result_storage = data.as_ptr();
+        let result_storage = storage(&lights[0]);
         let snapshot = current.clone();
         current.set(8, MIN_Y, 8, STONE);
         Arc::make_mut(&mut current.sections[0]).biomes.set(0, 3);
         let edited_snapshot = current.clone();
         apply_lighting(&mut current, lights);
-        let Light::Full(data) = &current.sections[0].light else {
-            panic!("torch light varies");
-        };
         assert_eq!(
             result_storage,
-            data.as_ptr(),
+            storage(&current.sections[0].light),
             "returned light storage moves without cloning"
         );
         current.lit = true;

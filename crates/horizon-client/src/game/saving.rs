@@ -71,9 +71,10 @@ impl Game<'_> {
             });
         } else {
             self.close_container();
-            self.stats.custom("leave_game", 1);
+            self.award_custom_stat("leave_game", 1);
             self.lan_close(false);
             self.free_player_beds()?;
+            self.streaming.abort_generation();
             self.pending_save = Some(ClosingSave {
                 quit,
                 close: true,
@@ -186,13 +187,17 @@ impl Game<'_> {
                     if keys.is_empty() {
                         self.prune_entity_memory();
                         self.save_raids();
+                        self.save.save_attachments(&self.world.attachments)?;
                         self.save.save_forced_chunks(&self.streaming.forced)?;
                         self.save_game_metadata()?;
                         save.stage = Stage::Writes;
                     }
                     Ok(false)
                 }
-                Stage::Writes => self.save.writes_finished(),
+                Stage::Writes => {
+                    let players = self.finish_player_autosaves(false)?;
+                    Ok(self.save.writes_finished()? && players)
+                }
             }
         })();
         match result {

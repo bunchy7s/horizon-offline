@@ -10,7 +10,16 @@ use crate::{
     ui,
 };
 
+/// The English title: the fallback of [`title`], and what the screen's widgets are named by.
 pub const TITLE: &str = "Play with Friends";
+/// A string of this screen: the language table's, or the English text.
+fn tr(key: &str, english: &str) -> String {
+    crate::lang::get_or(key, english)
+}
+/// The title in the current language.
+pub fn title() -> String {
+    tr("horizon.friends.title", TITLE)
+}
 /// What the screen shows (game/friends.rs fills it).
 #[derive(Clone, Debug, Default)]
 pub struct FriendsView {
@@ -47,13 +56,18 @@ fn grey() -> u32 {
     rgba(160, 160, 160, 255)
 }
 const WHITE: u32 = u32::MAX;
-const HINT: &str = "Friends paste the code after the title screen's Friends button, in Direct Connection, or on the launcher's Play page.";
+fn hint() -> String {
+    tr(
+        "horizon.friends.hint",
+        "Friends paste the code after the title screen's Friends button, in Direct Connection, or on the launcher's Play page.",
+    )
+}
 
 struct Button {
     x: f32,
     y: f32,
     w: f32,
-    label: &'static str,
+    label: String,
     action: Action,
     active: bool,
 }
@@ -76,7 +90,11 @@ fn layout(
     };
     let mut buttons = Vec::new();
     if view.sharing {
-        lines.push(("Invite Code".to_owned(), grey(), y));
+        lines.push((
+            tr("horizon.multiplayer.invite_code", "Invite Code"),
+            grey(),
+            y,
+        ));
         y += 12.0;
         match &view.code {
             Some(code) => {
@@ -92,7 +110,11 @@ fn layout(
             x: cx - 154.0,
             y,
             w: 150.0,
-            label: if view.copied { "Copied" } else { "Copy Code" },
+            label: if view.copied {
+                tr("horizon.friends.copied", "Copied")
+            } else {
+                tr("horizon.friends.copy_code", "Copy Code")
+            },
             action: Action::Copy,
             active: view.code.is_some(),
         });
@@ -100,7 +122,7 @@ fn layout(
             x: cx + 4.0,
             y,
             w: 150.0,
-            label: "Stop Sharing",
+            label: tr("horizon.friends.stop_sharing", "Stop Sharing"),
             action: Action::Stop,
             active: true,
         });
@@ -113,32 +135,40 @@ fn layout(
             y += 4.0;
         }
         let here = if view.guests.is_empty() {
-            "No friends here yet.".to_owned()
+            tr("horizon.friends.none_yet", "No friends here yet.")
         } else {
-            format!("Here now: {}", view.guests.join(", "))
+            tr("horizon.friends.here_now", "Here now: %s").replacen(
+                "%s",
+                &view.guests.join(", "),
+                1,
+            )
         };
         add(&mut lines, &here, grey(), &mut y);
         if let Some(notice) = &view.notice {
             add(&mut lines, notice, WHITE, &mut y);
         }
         // Where friends paste the code, while it fits above the footer.
-        if y + 10.0 * wrap(HINT, width, atlas).len() as f32 <= h - 33.0 {
-            add(&mut lines, HINT, grey(), &mut y);
+        let hint = hint();
+        if y + 10.0 * wrap(&hint, width, atlas).len() as f32 <= h - 33.0 {
+            add(&mut lines, &hint, grey(), &mut y);
         }
     } else {
         add(
             &mut lines,
-            "Share this world behind an invite code: it opens to LAN, and friends on the internet join with the code. No server of ours is involved.",
+            &tr(
+                "horizon.friends.share_intro",
+                "Share this world behind an invite code: it opens to LAN, and friends on the internet join with the code. No server of ours is involved.",
+            ),
             WHITE,
             &mut y,
         );
         y += 4.0;
-        add(&mut lines, HINT, grey(), &mut y);
+        add(&mut lines, &hint(), grey(), &mut y);
         buttons.push(Button {
             x: cx - 100.0,
             y: y + 8.0,
             w: 200.0,
-            label: "Start Sharing",
+            label: tr("horizon.friends.start_sharing", "Start Sharing"),
             action: Action::Share,
             active: view.shown,
         });
@@ -150,7 +180,7 @@ fn layout(
             x: cx - 154.0,
             y: h - 27.0,
             w: 150.0,
-            label: "Troubleshooting...",
+            label: tr("horizon.friends.troubleshooting", "Troubleshooting..."),
             action: Action::Help,
             active: true,
         });
@@ -158,7 +188,7 @@ fn layout(
             x: cx + 4.0,
             y: h - 27.0,
             w: 150.0,
-            label: "gui.done",
+            label: "gui.done".to_owned(),
             action: Action::Done,
             active: true,
         });
@@ -167,7 +197,7 @@ fn layout(
             x: cx - 100.0,
             y: h - 27.0,
             w: 200.0,
-            label: "gui.done",
+            label: "gui.done".to_owned(),
             action: Action::Done,
             active: true,
         });
@@ -204,7 +234,7 @@ pub fn draw(
 ) {
     let (w, h) = (batch.width, batch.height);
     ui::menu_background(batch, atlas, 0.0, 0.0, w, h, in_world);
-    let title = Text::literal(TITLE);
+    let title = Text::literal(title());
     let tw = atlas.font.width_text(&title);
     batch.text_styled(atlas, &title, ((w - tw) / 2.0).floor(), 15.0, WHITE, true);
     let (lines, buttons) = layout(atlas, (w, h), view);
@@ -221,7 +251,7 @@ pub fn draw(
             b.y,
             b.w,
             20.0,
-            &label(b.label),
+            &label(&b.label),
             b.active,
             hover,
         );

@@ -1,11 +1,13 @@
 //! A level taller than vanilla's (To The Max's Overworld: -64..2032, 131
 //! sections) streams, lights and meshes to its top, and edits near the top
 //! relight and remesh it.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
     blocks::BlockFacts,
     chunk::{Chunk, ColumnLayout, LevelShape},
+    graphics::LeafCullingMode,
     light::LightTables,
     mesher::{MeshTables, Mesher, Region, SectionMesh, borrow},
     models,
@@ -60,7 +62,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
     let Some(root) = resources() else {
         return;
     };
-    let shape = LevelShape::new(-64, 2096, 2096, true).unwrap();
+    let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
     let layout = shape.column();
     let assets = Arc::new(Assets::load(&root).unwrap());
     let render = Arc::new(assets.reload(&root).unwrap());
@@ -88,7 +90,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         while quiet < 40 {
             assert!(Instant::now() < deadline, "streaming never settled");
             let (uploads, _) = streaming.update(world);
-            let idle = uploads.is_empty() && streaming.pending() == 0;
+            let idle = uploads.is_empty() && !streaming.busy();
             meshes.extend(uploads);
             thread::sleep(Duration::from_millis(5));
             quiet = if idle { quiet + 1 } else { 0 };
@@ -127,10 +129,13 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             zoom: BiomeZoom::new(0),
             blend_radius: 2,
             smooth_lighting: true,
             cutout_leaves: true,
+            translucent_layers: &[],
+            leaf_culling: LeafCullingMode::Off,
             assets: &context.assets,
             render: &context.render,
             tables: &context.tables,

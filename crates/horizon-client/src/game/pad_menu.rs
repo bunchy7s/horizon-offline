@@ -112,6 +112,17 @@ pub(super) struct MenuCursor {
     key_restart: Option<u64>,
 }
 
+impl MenuCursor {
+    /// `Screen.clearFocus`: nothing is focused any more, and no click focus
+    /// is kept for the next Tab (`ComponentPath.applyFocus(false)`).
+    fn clear_focus(&mut self) {
+        self.focus = None;
+        self.origin = None;
+        self.slider_edit = false;
+        self.pending = None;
+    }
+}
+
 impl Game<'_> {
     /// A menu, a screen, the title, a sign or a book is open: the pad drives
     /// it instead of the player.
@@ -328,7 +339,7 @@ impl Game<'_> {
         event: WindowEvent,
     ) {
         let was = std::mem::replace(&mut self.pad.menu.synthetic, true);
-        self.handle_window_event(event_loop, id, event);
+        self.handle_window_event(event_loop, id, event, super::input_trace::InputOrigin::Game);
         self.pad.menu.synthetic = was;
     }
 
@@ -413,6 +424,26 @@ impl Game<'_> {
             }
             return self.handle_option_events(vec![Event::Changed]);
         }
+        // Splitscreen Setup: A picks up the focused player's tile, then left/right (or LB/RB)
+        // cycle where it goes, A drops it, B puts it back (`split_ui`).
+        if self.screen == Screen::Options && self.ui.options.page() == Page::SplitSetup {
+            let setup = &mut self.ui.options.split_setup;
+            if setup.pad_button(button) {
+                // Dropped or put back: the focus follows the player to its tile.
+                if let Some(rect) = setup.take_refocus() {
+                    let kind = Kind::Button;
+                    self.pad_focus_on(event_loop, Target { rect, kind });
+                }
+                return Ok(());
+            }
+            if button == Button::South
+                && self.pad_focusing()
+                && let Some(focus) = self.pad.menu.focus
+                && self.ui.options.split_setup.pad_pick_up(focus.center())
+            {
+                return Ok(());
+            }
+        }
         // The on-screen keyboard takes every button while it is open.
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
             if let Some(out) = keyboard.button(button) {
@@ -455,6 +486,14 @@ impl Game<'_> {
             Button::South | Button::West => {
                 self.pad_take_pointer(event_loop);
                 self.pad_pointer_button(event_loop, button == Button::West, true);
+                // A on a text field in pointer mode opens the keyboard, as
+                // in focus mode (not the right click).
+                if button == Button::South
+                    && !self.pad_focusing()
+                    && field_at(&self.pad_targets(), self.cursor)
+                {
+                    self.pad_open_keyboard();
+                }
             }
             // Y in an inventory: a shift-click (quick move).
             Button::North if matches!(self.screen, Screen::Inventory | Screen::Creative) => {
@@ -489,7 +528,7 @@ impl Game<'_> {
                 if all {
                     self.physical_keys.insert(KeyCode::ControlLeft);
                 }
-                let result = self.key_pressed(KeyCode::KeyQ);
+                let result = self.key_pressed(KeyCode::KeyQ, KeyCode::KeyQ);
                 if all && !ctrl {
                     self.physical_keys.remove(&KeyCode::ControlLeft);
                 }
@@ -513,6 +552,14 @@ impl Game<'_> {
     fn pad_step(&mut self, event_loop: &dyn EventLoopCtl, button: Button) {
         if let Some(keyboard) = self.pad.menu.osk.as_mut() {
             keyboard.step(button);
+            return;
+        }
+        // Splitscreen Setup with a player held: the stick cycles it as the D-pad does.
+        if self.screen == Screen::Options
+            && self.ui.options.page() == Page::SplitSetup
+            && self.ui.options.split_setup.holding()
+        {
+            self.ui.options.split_setup.pad_button(button);
             return;
         }
         if self.pad_focus_mode() {
@@ -1005,11 +1052,21 @@ impl Game<'_> {
                     || self.ui.options.selected_pad_action.is_some()))
     }
 
+    /// `Screen.clearFocus`, which `Gui.setScreen` runs on the screen it takes
+    /// down: the keyboard's focus belongs to that screen. A key bound to the
+    /// container's own close key can move the focus and close the screen in
+    /// one press (Tab bound to the inventory), and vanilla clears the focus
+    /// before the next frame, so nothing stays highlighted.
+    pub(super) fn pad_clear_focus(&mut self) {
+        self.pad.menu.clear_focus();
+    }
+
     /// A key pressed in a menu, before the screen takes it
     /// (`Screen.keyPressed`): Tab, Shift+Tab and the arrows move the focus,
     /// Enter, Space and keypad Enter press the focused widget; the focused
     /// widget's own keys come first (a text field's caret, a slider's
-    /// value). Whether the key was used; when not, the screen has it.
+    /// value). Whether the key was used; when not, the screen has it (a
+    /// container also has Tab and the arrows once they moved the focus).
     pub(super) fn key_focus_key(&mut self, event_loop: &dyn EventLoopCtl, key: KeyCode) -> bool {
         let Some(nav) = key_focus::nav_of(key, self.has_shift_down()) else {
             return false;
@@ -1094,7 +1151,9 @@ impl Game<'_> {
                 InputType::KeyboardArrow
             });
         }
-        true
+        let container =
+            self.title.is_none() && matches!(self.screen, Screen::Inventory | Screen::Creative);
+        !key_focus::passes_on(act, container)
     }
 
     /// Which screen is open, as far as the keyboard's focus cares.
@@ -1111,7 +1170,7 @@ impl Game<'_> {
             .hash(&mut hasher);
         (self.sign_edit.is_some(), self.book.is_some()).hash(&mut hasher);
         (
-            self.link_prompt.is_some(),
+            self.link_prompt.is_some() || self.command_prompt.is_some(),
             self.server_packs.prompt.is_some(),
         )
             .hash(&mut hasher);
@@ -1311,17 +1370,17 @@ impl Game<'_> {
         self.pad.menu.osk = Some(Keyboard::default());
     }
 
-    /// Chat or a sign opened by the pad in focus mode: the keyboard opens
-    /// with it (once per screen; B closes it for good).
+    /// Chat or a sign opened by the pad (either menu mode): the keyboard
+    /// opens with it (once per screen; B closes it for good).
     fn pad_auto_keyboard(&mut self) {
         let menu = &self.pad.menu;
-        if menu.osk.is_none()
-            && !menu.osk_dismissed
-            && self.pad.in_use
-            && menu.open_polls >= 3
-            && self.pad_focus_mode()
-            && (self.screen == Screen::Chat || self.sign_edit.is_some())
-        {
+        if osk_auto_opens(
+            menu.osk.is_some(),
+            menu.osk_dismissed,
+            self.pad.in_use,
+            menu.open_polls,
+            self.screen == Screen::Chat || self.sign_edit.is_some(),
+        ) {
             self.pad.menu.osk_dismissed = true;
             self.pad_open_keyboard();
         }
@@ -1466,5 +1525,73 @@ impl Game<'_> {
     /// `EditBox`'s highlighted border).
     fn draw_pad_focus(&self, batch: &mut HudBatch, focus: Target) {
         key_focus::draw_outline(&self.gui.atlas, batch, focus);
+    }
+}
+
+/// Whether the keyboard opens by itself over chat or a sign: the pad is in
+/// use and the screen has been open for a few polls, and it is neither
+/// open nor dismissed already. Independent of the menu mode.
+fn osk_auto_opens(
+    osk_open: bool,
+    dismissed: bool,
+    pad_in_use: bool,
+    polls: u32,
+    typing_screen: bool,
+) -> bool {
+    !osk_open && !dismissed && pad_in_use && polls >= 3 && typing_screen
+}
+
+/// Whether a text field in `targets` contains the point `at` (GUI pixels).
+fn field_at(targets: &[Target], at: (f32, f32)) -> bool {
+    targets.iter().any(|t| {
+        let [x, y, w, h] = t.rect;
+        t.kind == Kind::Field && at.0 >= x && at.0 < x + w && at.1 >= y && at.1 < y + h
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keyboard_auto_opens_for_pad_on_typing_screen() {
+        assert!(osk_auto_opens(false, false, true, 3, true));
+        assert!(!osk_auto_opens(false, false, true, 2, true));
+        assert!(!osk_auto_opens(false, false, false, 5, true));
+        assert!(!osk_auto_opens(false, true, true, 5, true));
+        assert!(!osk_auto_opens(true, false, true, 5, true));
+        assert!(!osk_auto_opens(false, false, true, 5, false));
+    }
+
+    #[test]
+    fn clear_focus_leaves_nothing_focused() {
+        let mut menu = MenuCursor {
+            focus: Some(Target {
+                rect: [229.0, 98.0, 20.0, 18.0],
+                kind: Kind::Button,
+            }),
+            origin: Some([229.0, 98.0, 20.0, 18.0]),
+            slider_edit: true,
+            ..MenuCursor::default()
+        };
+        menu.clear_focus();
+        assert!(menu.focus.is_none());
+        assert!(menu.origin.is_none());
+        assert!(!menu.slider_edit);
+    }
+
+    #[test]
+    fn field_hit_test() {
+        let t = |rect, kind| Target { rect, kind };
+        let targets = [
+            t([0.0, 0.0, 50.0, 20.0], Kind::Button),
+            t([10.0, 30.0, 100.0, 20.0], Kind::Field),
+        ];
+        assert!(field_at(&targets, (10.0, 30.0)));
+        assert!(field_at(&targets, (109.0, 49.0)));
+        assert!(!field_at(&targets, (110.0, 40.0)));
+        assert!(!field_at(&targets, (50.0, 29.0)));
+        assert!(!field_at(&targets, (5.0, 5.0)), "a button is not a field");
+        assert!(!field_at(&[], (5.0, 5.0)));
     }
 }

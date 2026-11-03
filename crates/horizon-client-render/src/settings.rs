@@ -341,9 +341,10 @@ impl Settings {
             .parent()
             .map(crate::extras::Extras::load)
             .unwrap_or_default();
+        // The enabled mods are the game folder's, shared by its players (`--player-dir`).
         let mods = path
             .parent()
-            .map(crate::mod_list::ModList::load)
+            .map(|dir| crate::mod_list::ModList::load(&crate::logging::shared_dir(dir)))
             .unwrap_or_default();
         let settings = match fs::read(path) {
             Ok(bytes) => Self {
@@ -650,7 +651,7 @@ impl Settings {
             self.horizon.save(dir);
             self.controller.save(dir);
             self.extras.save(dir);
-            self.mods.save(dir);
+            self.mods.save(&crate::logging::shared_dir(dir));
         }
     }
     /// Volume of a sound source (master excluded).

@@ -31,6 +31,9 @@ fn vanilla(kind: StageKind) -> &'static str {
             "fn material(input: MaterialInput) -> Surface {\n    \
              return Surface(input.albedo * input.tint * vec4<f32>(input.lightmap, 1.0));\n}\n"
         }
+        StageKind::Vertex => {
+            "fn vertex(input: VertexInput) -> vec3<f32> { return input.position; }\n"
+        }
         StageKind::Weather => {
             "fn weather(input: WeatherInput) -> vec4<f32> { return input.color; }\n"
         }

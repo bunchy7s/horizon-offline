@@ -20,6 +20,14 @@ impl InteractionResult {
     pub fn consumes_action(self) -> bool {
         !matches!(self, Self::Pass)
     }
+
+    /// Whether the interaction swings the player's arm.
+    ///
+    /// In vanilla, InteractionResult.SUCCESS swings (swing source CLIENT),
+    /// while CONSUME consumes the action without swinging (swing source SERVER).
+    pub fn should_swing(self) -> bool {
+        matches!(self, Self::Success)
+    }
 }
 /// Which part of `BlockState` answered a use on a block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,8 +235,29 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 Class::Note => {
                     let next = table.cycle(state, p.note);
+                    let old_note = table.int(state, p.note);
+                    let new_note = table.int(next, p.note);
+                    let instrument = table.text(state, p.instrument);
+                    let Some(note) = self
+                        .level
+                        .note_block_change(pos, instrument, old_note, new_note)
+                    else {
+                        return Success;
+                    };
+                    let next = table.set_int(
+                        next,
+                        p.note,
+                        if (0..=24).contains(&note) {
+                            note
+                        } else {
+                            new_note
+                        },
+                    );
+                    if !self.note_play_allowed(pos, next) {
+                        return Success;
+                    }
                     self.set_block_and_update(pos, next);
-                    self.note_play(pos, next);
+                    self.note_play_unchecked(pos, next);
                     Success
                 }
                 Class::RedstoneWire => self.wire_use(pos, state, player),
@@ -426,6 +455,18 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                 }
                 // DecoratedPotBlock.useWithoutItem: the wobble always succeeds.
                 Class::DecoratedPot => Success,
+                // MovingPistonBlock.useWithoutItem: a moving piston whose block
+                // entity is gone (`Level.getBlockEntity` null) is removed by the
+                // click on a server; one still in flight passes it on.
+                Class::MovingPiston => {
+                    if !self.level.is_client_side() && self.moving_piston(pos).is_none() {
+                        self.remove_block(pos, false);
+                        // CONSUME: the action is used, the arm does not swing.
+                        Consume
+                    } else {
+                        Pass
+                    }
+                }
                 // JukeboxBlock.useWithoutItem: ejecting a disc is SUCCESS (the
                 // insert is useItemOn). An empty jukebox passes.
                 Class::Jukebox if table.bool(state, p.has_record) => Success,
@@ -478,13 +519,19 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
             return InteractionResult::Pass;
         }
         self.set_block_and_update(pos, next);
+        let orientation = self.initial_orientation(None, Some(Direction::Up));
         for direction in horizontal {
             let relative = super::update::rel(pos, direction);
             if connected(state, direction) != connected(next, direction)
                 && self.is_redstone_conductor(self.state(relative), relative)
             {
                 let block = b.block(next);
-                self.update_neighbors_at_except(relative, block, direction.opposite());
+                self.update_neighbors_at_except_oriented(
+                    relative,
+                    block,
+                    direction.opposite(),
+                    orientation.map(|o| o.with_front(direction)),
+                );
             }
         }
         InteractionResult::Success

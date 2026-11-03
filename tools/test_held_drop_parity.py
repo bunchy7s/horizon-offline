@@ -34,7 +34,7 @@ def main():
     subprocess.run(['java', '-Xmx512M', '-cp', str(classes) + os.pathsep + classpath,
                     'dev.horizonlab.parity.VanillaHeldDropOracle', str(build / 'vanilla.txt')], check=True)
     with (build / 'rust.txt').open('w') as out:
-        subprocess.run(['cargo', 'run', '--quiet', '-p', 'horizon-client', '--example',
+        subprocess.run(['cargo', 'run', '--quiet', '-p', 'horizon-client-lib', '--example',
                         'client_probe', '--', 'held_drop_fixture'], cwd=lab.ROOT, stdout=out, check=True)
     matched = base.compare(build / 'vanilla.txt', build / 'rust.txt')
     print(f'Held drop parity passed: {matched} inventory/drop/swing/packet snapshots match vanilla')

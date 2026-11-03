@@ -79,6 +79,28 @@ impl Behaviours {
         self.implements(state, Interface::LiquidBlockContainer)
             || self.implements(state, Interface::SimpleWaterlogged)
     }
+    /// `LiquidBlockContainer.canPlaceLiquid(user, level, pos, state, fluid)`
+    /// for a liquid container: `creative` is whether `user` is a creative
+    /// player (a bucket in creative mode); a dispenser or a flowing fluid
+    /// passes none (`false`).
+    pub fn can_place_liquid(&self, state: BlockStateId, fluid: FluidKind, creative: bool) -> bool {
+        let data = self.data(state);
+        if data.is(Class::Kelp)
+            || data.is(Class::KelpPlant)
+            || data.is(Class::Seagrass)
+            || data.is(Class::TallSeagrass)
+        {
+            return false;
+        }
+        // `BarrierBlock.canPlaceLiquid`: only a creative player may waterlog.
+        if data.is(Class::Barrier) && !creative {
+            return false;
+        }
+        if data.is(Class::Slab) && self.table.text(state, self.props.kind) == "double" {
+            return false;
+        }
+        fluid == FluidKind::Water
+    }
 }
 
 impl<L: LevelAccess + ?Sized> Sim<'_, L> {
@@ -203,32 +225,14 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
     pub(super) fn is_liquid_container(&self, state: BlockStateId) -> bool {
         self.b.is_liquid_container(state)
     }
-    /// `LiquidBlockContainer.canPlaceLiquid(user, level, pos, state, fluid)`:
-    /// `creative` is whether `user` is a creative player (a bucket in creative
-    /// mode); a dispenser or a flowing fluid passes none (`false`).
+    /// `LiquidBlockContainer.canPlaceLiquid` (`Behaviours::can_place_liquid`).
     pub(crate) fn can_place_liquid(
         &self,
         state: BlockStateId,
         fluid: FluidKind,
         creative: bool,
     ) -> bool {
-        let b = self.b;
-        let data = b.data(state);
-        if data.is(Class::Kelp)
-            || data.is(Class::KelpPlant)
-            || data.is(Class::Seagrass)
-            || data.is(Class::TallSeagrass)
-        {
-            return false;
-        }
-        // `BarrierBlock.canPlaceLiquid`: only a creative player may waterlog.
-        if data.is(Class::Barrier) && !creative {
-            return false;
-        }
-        if data.is(Class::Slab) && b.table.text(state, b.props.kind) == "double" {
-            return false;
-        }
-        fluid == FluidKind::Water
+        self.b.can_place_liquid(state, fluid, creative)
     }
     /// `LiquidBlockContainer.placeLiquid`.
     pub(crate) fn place_liquid(
@@ -617,6 +621,21 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
         if !fluid.is_source() {
             let new_fluid = self.new_liquid(kind, pos, state);
             let delay = self.spread_delay(kind, pos, fluid, new_fluid);
+            if new_fluid != fluid {
+                let name = match kind {
+                    FluidKind::Water | FluidKind::FlowingWater => "water",
+                    FluidKind::Lava | FluidKind::FlowingLava => "lava",
+                    FluidKind::Empty => return,
+                };
+                if !self.level.allow_fluid_level_change(
+                    pos,
+                    name,
+                    i32::from(fluid.amount()),
+                    i32::from(new_fluid.amount()),
+                ) {
+                    return;
+                }
+            }
             if new_fluid.kind() == FluidKind::Empty {
                 fluid = new_fluid;
                 state = self.b.air();
@@ -718,6 +737,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                         .into_iter()
                         .any(|d| self.lava_flammable(rel(test, d)))
                     {
+                        if !self.level.allow_block_ignite(test, "lava") {
+                            return;
+                        }
                         let fire = self.fire_state_for(test);
                         self.set_block_and_update(test, fire);
                         return;
@@ -739,6 +761,9 @@ impl<L: LevelAccess + ?Sized> Sim<'_, L> {
                     return;
                 }
                 if self.is_empty_block(above(test)) && self.lava_flammable(test) {
+                    if !self.level.allow_block_ignite(above(test), "lava") {
+                        continue;
+                    }
                     let fire = self.fire_state_for(test);
                     self.set_block_and_update(above(test), fire);
                 }

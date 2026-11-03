@@ -281,6 +281,13 @@ pub struct Player {
     pub ground: Option<(u64, f64)>,
     /// The client ticks the prediction plays again (only while it runs).
     pub record: Option<Box<prediction::Record>>,
+    /// Sprinting as the client's own commands left it (ServerboundPlayerCommandPacket's
+    /// START_SPRINTING and STOP_SPRINTING: LocalPlayer.wasSprinting), which the record's ticks take.
+    /// Not the server's player: a hit with extra knockback stops its sprint
+    /// (Player.causeExtraKnockback), the client's own `Player.attack` doesn't (a mob's `hurtClient`
+    /// is false), and once the server's flag reaches it LocalPlayer.aiStep starts the sprint again
+    /// while the sprint key is held, with nothing to say: wasSprinting never changed.
+    pub sprinting: bool,
     /// The attacks of the client tick being heard.
     pub attacks: combat::Attacks,
 }

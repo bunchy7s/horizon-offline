@@ -6,8 +6,13 @@ edition.workspace = true
 license.workspace = true
 rust-version = "1.90"
 description = "Horizon native development client"
+autobins = false
+autoexamples = false
+autotests = false
 
 [dependencies]
+horizon-cosmetics = { path = "../horizon-cosmetics" }
+horizon-client-lib = { path = "../horizon-client-lib", default-features = false }
 horizon-assets = { path = "../horizon-assets" }
 horizon-client-core = { path = "../horizon-client-core" }
 horizon-client-input = { path = "../horizon-client-input" }
@@ -15,6 +20,8 @@ horizon-client-render = { path = "../horizon-client-render" }
 horizon-command = { path = "../horizon-command" }
 horizon-items = { path = "../horizon-items" }
 horizon-core = { path = "../horizon-core" }
+# OptiFine-format pack files: custom entity models, random entity textures.
+horizon-optifine = { path = "../horizon-optifine" }
 # The server thread ahead of the workers (MinecraftServer.spin's Thread.setPriority).
 horizon-threads = { path = "../horizon-threads" }
 horizon-hdr = { path = "../horizon-hdr" }
@@ -103,20 +110,40 @@ winresource = "0.1"
 default = ["audio", "controllers"]
 # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
 # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
-audio = ["horizon-client-render/audio"]
+audio = ["horizon-client-render/audio", "horizon-client-lib/audio"]
 # Controllers: gilrs, and the DualSense's own output. Without it only `horizon-ctl pad`'s virtual pad.
-controllers = ["dep:gilrs", "dep:horizon-dualsense", "horizon-client-input/controllers"]
+controllers = ["horizon-client-lib/controllers", "dep:gilrs", "dep:horizon-dualsense", "horizon-client-input/controllers"]
 # Records the call sites of mob random draws (`mob_ai_probe` traces).
-rng-trace = ["horizon-core/rng-trace"]
+rng-trace = ["horizon-core/rng-trace", "horizon-client-lib/rng-trace"]
+# Rust's allocations go to the system heap instead of mimalloc, where heap profilers that replace
+# malloc (heaptrack, valgrind's massif) see them. For profiling only: mimalloc is faster.
+system-allocator = []
+# mimalloc with a tag on each block: `horizon-ctl memory` lists the live heap by startup step and
+# thread (`heap_by_tag_mb`). For measuring only: each block costs 16 bytes more.
+alloc-census = ["horizon-threads/alloc-census"]
 # Compatibility with earlier experiment commands: main already uses mimalloc.
 windows-mimalloc = []
 # Opt-in Windows heap experiment; see docs/windows-allocators.md.
 windows-segment-heap = []
 
-# Its own name, not `probe`: Cargo copies every crate's examples into one target/<profile>/examples.
-[[example]]
-name = "client_probe"
-path = "examples/probe/main.rs"
+[[bin]]
+name = "horizon-client"
+path = "src/main.rs"
+
+[[test]]
+name = "datapack_biome_sync"
+path = "tests/datapack_biome_sync.rs"
+
+[[test]]
+name = "launch_api"
+path = "tests/launch_api.rs"
+
+[[test]]
+name = "mod_api_hooks"
+path = "tests/mod_api_hooks.rs"
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [lints]
 workspace = true

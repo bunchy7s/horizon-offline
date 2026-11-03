@@ -1,0 +1,16 @@
+[package]
+name = "horizon-mod-api-gen-tests"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Generated mod API dispatch contract tests"
+
+[dependencies]
+serde_json = "1"
+
+[build-dependencies]
+horizon-mod-api-gen = { path = ".." }
+
+[lints]
+workspace = true

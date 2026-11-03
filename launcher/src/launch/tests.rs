@@ -23,6 +23,68 @@ fn variables_are_read_and_written_back() {
 }
 
 #[test]
+fn the_memory_slider_has_no_lowest_value_and_ends_in_no_limit() {
+    assert_eq!(memory_at(1., 16384), None);
+    assert_eq!(memory_at(0., 16384), Some(1));
+    assert_eq!(memory_at(0.25, 16384), Some(4096));
+    assert_eq!(memory_at(0.5, 8000), Some(4032));
+    assert_eq!(memory_fraction(None, 16384), 1.);
+    assert_eq!(memory_fraction(Some(4096), 16384), 0.25);
+    // Saved on a computer with more memory.
+    assert_eq!(memory_fraction(Some(32768), 16384), 1.);
+}
+
+#[test]
+fn a_typed_memory_limit_is_read_in_mb_or_gb_with_no_lowest_value() {
+    assert_eq!(parse_memory("2048"), Ok(Some(2048)));
+    assert_eq!(parse_memory(" 512 MB "), Ok(Some(512)));
+    assert_eq!(parse_memory("4gb"), Ok(Some(4096)));
+    assert_eq!(parse_memory("2 G"), Ok(Some(2048)));
+    assert_eq!(parse_memory("1"), Ok(Some(1)));
+    assert_eq!(parse_memory(""), Ok(None));
+    assert_eq!(parse_memory("off"), Ok(None));
+    for bad in ["lots", "-5", "1.5gb", "4 tb", "99999999999", "9999999gb"] {
+        assert_eq!(parse_memory(bad), Err(NotMemory), "{bad}");
+    }
+}
+
+fn memory_variable(launch: &Launch) -> Option<String> {
+    let mut cmd = Command::new("game");
+    limit_memory(&mut cmd, launch);
+    wrap(cmd, launch)
+        .get_envs()
+        .find(|(k, _)| *k == "HORIZON_MEMORY_LIMIT_MB")
+        .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+}
+
+#[test]
+fn the_game_has_no_limit_until_the_player_chooses_one() {
+    let mut launch = Launch::default();
+    assert_eq!(launch.memory_limit(), None);
+    assert_eq!(memory_variable(&launch), None);
+
+    launch.set_memory_limit(Some(1024));
+    assert_eq!(memory_variable(&launch).as_deref(), Some("1024"));
+    let saved = serde_json::to_string(&launch).unwrap();
+    let loaded: Launch = serde_json::from_str(&saved).unwrap();
+    assert_eq!(loaded.memory_limit(), Some(1024));
+
+    launch.set_memory_limit(None);
+    assert_eq!(memory_variable(&launch), None);
+    let none: Launch = serde_json::from_str("{}").unwrap();
+    assert_eq!(none.memory_limit(), None);
+}
+
+#[test]
+fn the_players_own_memory_variable_wins() {
+    let own = Launch {
+        env: parse_env("HORIZON_MEMORY_LIMIT_MB=4096").unwrap(),
+        ..Launch::default()
+    };
+    assert_eq!(memory_variable(&own).as_deref(), Some("4096"));
+}
+
+#[test]
 fn a_summary_says_what_runs() {
     assert_eq!(Launch::default().summary(), None);
     let launch = Launch {

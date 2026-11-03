@@ -29,7 +29,8 @@ AbstractSpreadingStructurePlacement.legacyPillagerOutpostReducer	port	crates/hor
 AbstractSpreadingStructurePlacement.legacyProbabilityReducerWithDouble	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Legacy3 arm
 AbstractSpreadingStructurePlacement.probabilityReducer	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Default arm
 ConcentricRingsStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	ConcentricRings arm: chunk must be in the set's ring positions
-DimensionOriginStructurePlacement	missing		minor: dimension_origin placement decodes as Unsupported in start.rs, so such a structure never places; no bundled structure file in the repo uses it
+DimensionOriginStructurePlacement.isStructureChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	DimensionOrigin arm: the generator's origin chunk alone, and no frequency reduction or exclusion zone, since the type is no AbstractSpreadingStructurePlacement
+DimensionOriginStructurePlacement	home	crates/horizon-world/src/worldgen/structure/start.rs	the dimension_origin placement type; the origin is ChunkGenerator.getOrigin: chunk 0 0, or for a noise generator the chunk of the NoiseSpawnFinder column (generator.rs::Pipeline::spawn_column)
 RandomSpreadType.evaluate	inline	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::potential_chunk	spread closure: linear, or triangular as the mean of two draws
 StructurePlacements	skip:data		registers placement codecs; Horizon decodes placement type names in start.rs
 FeaturePoolElement.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::bounding_box	Feature arm, zero size
@@ -180,10 +181,10 @@ CollectingNeighborUpdater.addAndRun	port	crates/horizon-world/src/level/update.r
 CollectingNeighborUpdater.neighborChanged	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_changed_at	Simple update
 CollectingNeighborUpdater.runUpdates	port	crates/horizon-world/src/level/update.rs::Sim::run_updates	
 CollectingNeighborUpdater.shapeUpdate	port	crates/horizon-world/src/level/update.rs::Sim::neighbor_shape_changed	
-CollectingNeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except	
+CollectingNeighborUpdater.updateNeighborsAtExceptFromFacing	port	crates/horizon-world/src/level/update.rs::Sim::update_neighbors_at_except_oriented	the Multi update with one side skipped; the orientation is threaded through here (callers pass the one they have)
 CollectingNeighborUpdater.FullNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Full arm
 CollectingNeighborUpdater.MultiNeighborUpdate.forEachUpdatedPos	inline	crates/horizon-world/src/level/update.rs::Update::next	Multi arm steps the index and skips the facing side
 CollectingNeighborUpdater.MultiNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Multi arm
 CollectingNeighborUpdater.ShapeUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Shape arm
 CollectingNeighborUpdater.SimpleNeighborUpdate.runNext	port	crates/horizon-world/src/level/update.rs::Update::next	Simple arm
-ExperimentalRedstoneUtils.initialOrientation	skip:other		returns null unless the Redstone Experiments feature flag is on; Horizon has no such flag
+ExperimentalRedstoneUtils.initialOrientation	port	crates/horizon-world/src/level/orientation.rs::Sim::initial_orientation	world feature flag gates the random orientation, then up and front transforms

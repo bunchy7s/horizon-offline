@@ -36,6 +36,10 @@ pub(super) enum Field {
     /// The instance dialog's (`instances_page.rs`).
     InstanceName,
     InstanceGroup,
+    /// Its search in Mojang's versions (`new_instance.rs`).
+    InstanceVersion,
+    /// Home's Mods tab's filter (`instance_mods.rs`).
+    InstanceModsFilter,
     /// Home's Multiplayer section's (`multiplayer_page.rs`).
     ServerName,
     ServerAddress,
@@ -46,13 +50,15 @@ pub(super) enum Field {
     Wrapper,
     LaunchEnv,
     PostExit,
+    /// Home's memory row (`launch_page.rs`).
+    MemoryLimit,
     /// Settings' new offline name (`switch_page.rs`).
     OfflineName,
     DeleteServer,
 }
 
 impl Field {
-    const ALL: [Field; 20] = [
+    const ALL: [Field; 23] = [
         Field::Name,
         Field::Seed,
         Field::Players,
@@ -64,6 +70,8 @@ impl Field {
         Field::Email,
         Field::InstanceName,
         Field::InstanceGroup,
+        Field::InstanceVersion,
+        Field::InstanceModsFilter,
         Field::ServerName,
         Field::ServerAddress,
         Field::ConsoleSearch,
@@ -71,6 +79,7 @@ impl Field {
         Field::Wrapper,
         Field::LaunchEnv,
         Field::PostExit,
+        Field::MemoryLimit,
         Field::OfflineName,
         Field::DeleteServer,
     ];
@@ -261,10 +270,15 @@ impl Servers {
         self.texts.get(&f).map_or("", LineEdit::text)
     }
 
+    /// Whether this field has the keyboard, as of this frame.
+    pub(super) fn has_focus(&self, f: Field) -> bool {
+        self.focused == Some(f)
+    }
+
     /// Which field has the keyboard, read every frame.
-    pub(super) fn note_focus(&mut self, window: &mut Window) {
+    pub(super) fn note_focus(&mut self, window: &mut Window, cx: &mut App) {
         if let Some(h) = self.focus_soon.take().and_then(|f| self.focus.get(&f)) {
-            window.focus(h);
+            window.focus(h, cx);
         }
         self.focused = Field::ALL
             .into_iter()
@@ -797,7 +811,7 @@ impl Launcher {
             difficulty: "normal",
             max_players: 10,
             friends_only: true,
-            check_accounts: false,
+            check_accounts: true,
             eula: false,
             eula_missing: false,
         });
@@ -884,26 +898,64 @@ impl Launcher {
         let selected = focused && self.servers.selected == Some(f);
         let invalid = self.servers.invalid.is_some_and(|(g, _)| g == f);
         self.servers.text(f).show(((width - 24.) / 7.5) as usize);
-        let field = div()
+        // Home's Add server line is in the glass look already; the other fields follow with
+        // their pages.
+        let glass = t.dark
+            && matches!(
+                f,
+                Field::ServerName
+                    | Field::ServerAddress
+                    | Field::InstanceModsFilter
+                    | Field::ConsoleSearch
+                    | Field::InstanceName
+                    | Field::InstanceGroup
+                    | Field::InstanceVersion
+            );
+        let base = if glass {
+            // The mods filter and the log search sit by buttons: the mockup's small `FIELD`, as
+            // tall as they are.
+            crate::glass_ui::field(focused, invalid)
+                .when(
+                    matches!(f, Field::InstanceModsFilter | Field::ConsoleSearch),
+                    |d| d.h(px(36.)).px(px(12.)).rounded(px(10.)),
+                )
+                // The instance dialog's are the large `FIELD_LG`: 48 px, 15 px text, white at 6 %,
+                // 10 % while typed in.
+                .when(
+                    !invalid
+                        && matches!(
+                            f,
+                            Field::InstanceName | Field::InstanceGroup | Field::InstanceVersion
+                        ),
+                    |d| {
+                        d.h(px(48.))
+                            .text_size(px(15.))
+                            .bg(crate::glass_ui::white(if focused { 0.1 } else { 0.06 }))
+                    },
+                )
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .h(px(theme::FIELD))
+                .px(px(12.))
+                .overflow_hidden()
+                .rounded(px(theme::RADIUS))
+                .border_1()
+                .border_color(if invalid {
+                    t.danger
+                } else if focused {
+                    t.accent
+                } else {
+                    t.rule
+                })
+                .bg(t.surface)
+                .text_size(px(theme::UI.px))
+        };
+        let field = base
             .id(SharedString::from(format!("field-{f:?}")))
             .track_focus(&handle)
-            .flex()
-            .items_center()
             .w(px(width))
-            .h(px(theme::FIELD))
-            .px(px(12.))
-            .overflow_hidden()
-            .rounded(px(theme::RADIUS))
-            .border_1()
-            .border_color(if invalid {
-                t.danger
-            } else if focused {
-                t.accent
-            } else {
-                t.rule
-            })
-            .bg(t.surface)
-            .text_size(px(theme::UI.px))
             .cursor_text()
             .child(line_edit::content(
                 self.servers.text(f),
@@ -919,7 +971,7 @@ impl Launcher {
                     this.servers.selected = None;
                 }
                 if let Some(h) = this.servers.focus.get(&f) {
-                    window.focus(h);
+                    window.focus(h, cx);
                 }
                 cx.notify();
             }))
@@ -944,7 +996,7 @@ impl Launcher {
                             this.servers.create = None;
                         }
                         this.instance_escape();
-                        window.blur();
+                        window.blur(cx);
                     }
                     // Tab and the rest go on to the window: Tab moves the focus.
                     Key::Pass => return,
@@ -995,11 +1047,14 @@ impl Launcher {
             Field::Email => self.invite_friend(),
             Field::InstanceName
             | Field::InstanceGroup
+            | Field::InstanceVersion
+            | Field::InstanceModsFilter
             | Field::ConsoleSearch
             | Field::DeleteServer => {}
             Field::PreLaunch | Field::Wrapper | Field::LaunchEnv | Field::PostExit => {
                 self.save_launch()
             }
+            Field::MemoryLimit => self.memory_enter(),
             Field::OfflineName => self.offline_name_enter(),
             Field::ServerName | Field::ServerAddress => self.add_server(),
         }
@@ -1036,7 +1091,7 @@ impl Launcher {
     }
 
     /// A player's face, from the default skin their UUID picks (the server knows no other).
-    fn head(&mut self, uuid: &str, size: f32) -> Div {
+    pub(super) fn head(&mut self, uuid: &str, size: f32) -> Div {
         let resources = servers::game_files(&servers::runtime_root(), "26.3");
         let face = self
             .servers
@@ -1152,12 +1207,34 @@ impl Launcher {
         {
             page = page.child(self.problem_notice(p, cx));
         }
-        if self.servers.list.is_empty() {
-            return page.child(centered(
-                "No server yet. Create one: it takes a few seconds, and with the defaults \
-                 (tick the EULA, press Create) you get a friends-only survival world.",
+        // The banner, with a "Hide" once it has been on screen a while: hiding it hides the
+        // sidebar's card too, for good. Nothing at all once hidden.
+        let partner = (!self.settings.partner_hidden).then(|| {
+            let mut slot = div().relative().w(px(600.)).child(super::partner::banner(
+                "partner-servers",
+                600.,
                 &t,
             ));
+            if self.settings.partner_seen_secs >= super::partner::SEEN_BEFORE_HIDE {
+                slot = slot.child(
+                    super::partner::hide_button("partner-servers-hide", &t).on_click(cx.listener(
+                        |this, _: &ClickEvent, _, cx| {
+                            this.settings.partner_hidden = true;
+                            this.save_settings();
+                            cx.notify();
+                        },
+                    )),
+                );
+            }
+            slot
+        });
+        if self.servers.list.is_empty() {
+            return page
+                .child(centered(
+                    tr("No server yet. Create one: it takes a few seconds, and with the defaults (tick the EULA, press Create) you get a friends-only survival world."),
+                    &t,
+                ))
+                .children(partner);
         }
         let mut list = div().flex().flex_col().border_t_1().border_color(t.rule);
         for (i, e) in self.servers.list.clone().into_iter().enumerate() {
@@ -1169,10 +1246,15 @@ impl Launcher {
                 .unwrap_or_else(Status::stopped);
             let detail = if status.running() {
                 format!(
-                    "{} · {} of {} players",
+                    "{} · {}",
                     phase_label(&status),
-                    status.players.len(),
-                    status.max_players.unwrap_or(0)
+                    trf(
+                        "{online} of {max} players",
+                        &[
+                            ("online", &status.players.len().to_string()),
+                            ("max", &status.max_players.unwrap_or(0).to_string()),
+                        ]
+                    )
                 )
             } else {
                 format!("{} · {}", phase_label(&status), short(&e.dir))
@@ -1198,7 +1280,7 @@ impl Launcher {
                 &t,
             ));
         }
-        page.child(list)
+        page.child(list).children(partner)
     }
 
     fn add_server_folder(&mut self, cx: &mut Context<Self>) {
@@ -1295,7 +1377,7 @@ impl Launcher {
         if self.servers.list.len() > 1 || self.servers.create.is_none() {
             top = top.child(
                 div().flex().child(
-                    caps("← All servers")
+                    caps(tr("← All servers"))
                         .id("servers-back")
                         .text_color(t.muted)
                         .cursor_pointer()
@@ -1454,11 +1536,11 @@ impl Launcher {
             );
         }
         if running && !self.servers.restart_needed.is_empty() {
-            let names: Vec<&str> = self
+            let names: Vec<String> = self
                 .servers
                 .restart_needed
                 .iter()
-                .map(|k| setting_name(k))
+                .map(|k| tr(setting_name(k)).to_string())
                 .collect();
             page = page.child(
                 plate(&t)
@@ -1472,7 +1554,10 @@ impl Launcher {
                             .flex_1()
                             .text_size(px(theme::UI.px))
                             .text_color(t.ink)
-                            .child(format!("Saved. Restart to apply: {}.", names.join(", "))),
+                            .child(trf(
+                                "Saved. Restart to apply: {settings}.",
+                                &[("settings", &names.join(", "))],
+                            )),
                     )
                     .child({
                         let b =
@@ -1523,7 +1608,7 @@ impl Launcher {
                 .gap(px(4.))
                 .p(px(16.))
                 .child(text(theme::TITLE).text_color(t.ink).child(value))
-                .child(caps(label).text_color(t.muted))
+                .child(caps(tr(label)).text_color(t.muted))
         };
         let dash = || "–".to_string();
         let on = status.running();
@@ -1588,7 +1673,7 @@ impl Launcher {
             .flex_col()
             .gap(px(10.))
             .p(px(20.))
-            .child(caps("Address on this network").text_color(t.muted))
+            .child(caps(tr("Address on this network")).text_color(t.muted))
             .child(
                 div()
                     .flex()
@@ -1617,13 +1702,12 @@ impl Launcher {
                         })),
                     ),
             )
-            .child(text(theme::CAPTION).text_color(t.ink_soft).child(
+            .child(text(theme::CAPTION).text_color(t.ink_soft).child(tr(
                 "Friends on the same Wi-Fi: Multiplayer, Add Server, then paste this address.",
-            ))
-            .child(text(theme::CAPTION).text_color(t.muted).child(format!(
-                "Friends elsewhere can't reach it as it is: use Tailscale (free, nothing to change \
-                 on your router, only people you invite), or forward TCP port {port} on your router \
-                 to this computer."
+            )))
+            .child(text(theme::CAPTION).text_color(t.muted).child(trf(
+                "Friends elsewhere can't reach it as it is: use Tailscale (free, nothing to change on your router, only people you invite), or forward TCP port {port} on your router to this computer.",
+                &[("port", &port.to_string())],
             )));
         let mut tab = div().flex().flex_col().gap(px(20.)).child(address_plate);
         if !status.players.is_empty() {
@@ -1643,7 +1727,7 @@ impl Launcher {
                     .flex()
                     .flex_col()
                     .gap(px(10.))
-                    .child(caps("Online now").text_color(t.muted))
+                    .child(caps(tr("Online now")).text_color(t.muted))
                     .child(row),
             );
         }
@@ -1676,9 +1760,9 @@ impl Launcher {
             .text_color(t.ink_soft)
             .when(empty, |d| {
                 d.child(div().text_color(t.muted).child(if running {
-                    "Waiting for the server's log…"
+                    tr("Waiting for the server's log…")
                 } else {
-                    "The server's log shows here while it runs."
+                    tr("The server's log shows here while it runs.")
                 }))
             })
             .children(lines);
@@ -1704,7 +1788,7 @@ impl Launcher {
                 .items_center()
                 .text_size(px(theme::CAPTION.px))
                 .text_color(t.muted)
-                .child("Start the server to type commands")
+                .child(tr("Start the server to type commands"))
                 .into_any_element()
         };
         plate(&t)
@@ -1719,7 +1803,7 @@ impl Launcher {
                     .px(px(20.))
                     .border_b_1()
                     .border_color(t.rule)
-                    .child(caps("Console").text_color(t.muted)),
+                    .child(caps(tr("Console")).text_color(t.muted)),
             )
             .child(log)
             .child(
@@ -1781,10 +1865,12 @@ impl Launcher {
                     cx,
                     move |this| this.api_command(format!("ban {n3}")),
                 ));
-            let ping = p.ping.map(|ms| format!("{ms} ms ping"));
+            let ping = p
+                .ping
+                .map(|ms| trf("{ms} ms ping", &[("ms", &ms.to_string())]));
             let about = match (op, ping) {
-                (true, Some(ping)) => Some(format!("Operator · {ping}")),
-                (true, None) => Some("Operator".to_string()),
+                (true, Some(ping)) => Some(trf("Operator · {ping}", &[("ping", &ping)])),
+                (true, None) => Some(tr("Operator").to_string()),
                 (false, ping) => ping,
             };
             online = online.child(
@@ -1815,18 +1901,17 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .gap(px(10.))
-                .child(
-                    text(theme::HEADING)
-                        .text_color(t.ink)
-                        .child(format!("Online now ({})", status.players.len())),
-                )
+                .child(text(theme::HEADING).text_color(t.ink).child(trf(
+                    "Online now ({count})",
+                    &[("count", &status.players.len().to_string())],
+                )))
                 .child(if status.players.is_empty() {
                     text(theme::UI)
                         .text_color(t.muted)
                         .child(if running {
-                            "Nobody is playing right now."
+                            tr("Nobody is playing right now.")
                         } else {
-                            "The server is stopped."
+                            tr("The server is stopped.")
                         })
                         .into_any_element()
                 } else {
@@ -1850,7 +1935,7 @@ impl Launcher {
             .flex()
             .items_center()
             .gap(px(8.))
-            .child(self.field(Field::AddPlayer, "A player's name", 240., cx))
+            .child(self.field(Field::AddPlayer, tr("A player's name"), 240., cx))
             .child({
                 let b = button("player-add", "Let in", Kind::Secondary, &t);
                 if idle {
@@ -1907,8 +1992,8 @@ impl Launcher {
                 self.head(&uuid, 24.)
             };
             let about = match (op, listed) {
-                (true, true) => Some("Operator: can run every command"),
-                (true, false) => Some("Operator (not on the list: can join anyway)"),
+                (true, true) => Some(tr("Operator: can run every command")),
+                (true, false) => Some(tr("Operator (not on the list: can join anyway)")),
                 _ => None,
             };
             allowed = allowed.child(
@@ -1939,7 +2024,11 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .gap(px(14.))
-                .child(text(theme::HEADING).text_color(t.ink).child("Who may join"))
+                .child(
+                    text(theme::HEADING)
+                        .text_color(t.ink)
+                        .child(tr("Who may join")),
+                )
                 .child(
                     div()
                         .flex()
@@ -1950,12 +2039,12 @@ impl Launcher {
                             div()
                                 .flex()
                                 .flex_col()
-                                .child(text(theme::UI).text_color(t.ink).child("Friends only"))
+                                .child(text(theme::UI).text_color(t.ink).child(tr("Friends only")))
                                 .child(text(theme::CAPTION).text_color(t.muted).child(
                                     if friends_only {
-                                        "On: only the players below can join."
+                                        tr("On: only the players below can join.")
                                     } else {
-                                        "Off: anyone who has the address can join."
+                                        tr("Off: anyone who has the address can join.")
                                     },
                                 )),
                         ),
@@ -1963,7 +2052,7 @@ impl Launcher {
                 .child(add)
                 .children(self.servers.invalid.and_then(|(f, e)| {
                     (f == Field::AddPlayer)
-                        .then(|| text(theme::CAPTION).text_color(t.danger).child(e))
+                        .then(|| text(theme::CAPTION).text_color(t.danger).child(tr(e)))
                 }))
                 .child(allowed),
         );
@@ -1995,12 +2084,12 @@ impl Launcher {
                     .flex()
                     .flex_col()
                     .gap(px(10.))
-                    .child(text(theme::HEADING).text_color(t.ink).child("Banned"))
+                    .child(text(theme::HEADING).text_color(t.ink).child(tr("Banned")))
                     .when(!running, |d| {
                         d.child(
                             text(theme::CAPTION)
                                 .text_color(t.muted)
-                                .child("Start the server to unban someone."),
+                                .child(tr("Start the server to unban someone.")),
                         )
                     })
                     .child(list),
@@ -2040,7 +2129,7 @@ impl Launcher {
                     .gap(px(2.))
                     .child(text(theme::UI).text_color(t.ink).child(name.to_string()))
                     .child(match error {
-                        Some(e) => text(theme::CAPTION).text_color(t.danger).child(e),
+                        Some(e) => text(theme::CAPTION).text_color(t.danger).child(tr(e)),
                         None => text(theme::CAPTION).text_color(t.muted).child(about),
                     }),
             )
@@ -2121,10 +2210,12 @@ impl Launcher {
         if self.servers.config.is_none() {
             return div().child(centered(
                 if self.older_horizon() {
-                    "This server's Horizon is too old to show its settings here. Update it on \
-                     the Backups tab, then they appear."
+                    tr(
+                        "This server's Horizon is too old to show its settings here. Update it on \
+                     the Backups tab, then they appear.",
+                    )
                 } else {
-                    "Reading the settings…"
+                    tr("Reading the settings…")
                 },
                 &t,
             ));
@@ -2152,7 +2243,7 @@ impl Launcher {
         let motd = div()
             .flex()
             .gap(px(8.))
-            .child(self.field(Field::Motd, "A Minecraft Server", 260., cx))
+            .child(self.field(Field::Motd, tr("A Minecraft Server"), 260., cx))
             .child(save("motd-save", Field::Motd, cx))
             .into_any_element();
         let port = div()
@@ -2183,14 +2274,14 @@ impl Launcher {
             }))
             .into_any_element();
         let live = if running {
-            "Applies at once."
+            tr("Applies at once.")
         } else {
-            "Used from the next start."
+            tr("Used from the next start.")
         };
         let later = if running {
-            "Saved now, used after a restart."
+            tr("Saved now, used after a restart.")
         } else {
-            "Used from the next start."
+            tr("Used from the next start.")
         };
         let form = div()
             .flex()
@@ -2199,12 +2290,15 @@ impl Launcher {
             .border_color(t.rule)
             .child(self.setting_row(
                 "Message in the server list",
-                format!("What players see under the server's name (the MOTD). {later}"),
+                format!(
+                    "{} {later}",
+                    tr("What players see under the server's name (the MOTD).")
+                ),
                 motd,
             ))
             .child(self.setting_row(
                 "Game mode",
-                format!("For players who join for the first time. {live}"),
+                format!("{} {live}", tr("For players who join for the first time.")),
                 self.choice("set-mode", "world.game_mode", &MODES, cx),
             ))
             .child(self.setting_row(
@@ -2215,33 +2309,40 @@ impl Launcher {
             .child(self.setting_row(
                 "Players can hurt each other (PvP)",
                 if running {
-                    "A rule of the world. Applies at once.".into()
+                    tr("A rule of the world. Applies at once.").into()
                 } else {
-                    "A rule of the world: start the server to change it.".into()
+                    tr("A rule of the world: start the server to change it.").into()
                 },
                 pvp,
             ))
             .child(self.setting_row(
                 "Most players at once",
-                format!("Operators can always join. {later}"),
+                format!("{} {later}", tr("Operators can always join.")),
                 self.stepper("server.max_players", 1..=100, cx),
             ))
             .child(self.setting_row(
                 "View distance",
-                format!("How far players see, in chunks (2 to 32). Lower is lighter. {later}"),
+                format!(
+                    "{} {later}",
+                    tr("How far players see, in chunks (2 to 32). Lower is lighter.")
+                ),
                 self.stepper("server.view_distance", 2..=32, cx),
             ))
             .child(self.setting_row(
                 "Simulation distance",
-                format!("How far from players crops grow and mobs move, in chunks. {later}"),
+                format!(
+                    "{} {later}",
+                    tr("How far from players crops grow and mobs move, in chunks.")
+                ),
                 self.stepper("server.simulation_distance", 2..=32, cx),
             ))
             .child(
                 self.setting_row_checked(
                     "Port",
                     format!(
-                    "1024 to 65535. Friends type it after the address unless it's 25565. {later}"
-                ),
+                        "{} {later}",
+                        tr("1024 to 65535. Friends type it after the address unless it's 25565.")
+                    ),
                     self.servers
                         .invalid
                         .and_then(|(f, e)| (f == Field::Port).then_some(e)),
@@ -2251,9 +2352,15 @@ impl Launcher {
             .child(self.setting_row(
                 "Check Minecraft accounts",
                 if accounts {
-                    format!("On: players must own Minecraft and sign in with Microsoft. {later}")
+                    format!(
+                        "{} {later}",
+                        tr("On: players must own Minecraft and sign in with Microsoft.")
+                    )
                 } else {
-                    format!("Off: anyone can play under any name, so keep Friends only on. {later}")
+                    format!(
+                        "{} {later}",
+                        tr("Off: anyone can play under any name, so keep Friends only on.")
+                    )
                 },
                 accounts_switch,
             ))
@@ -2263,10 +2370,10 @@ impl Launcher {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .child(text(theme::CAPTION).text_color(t.muted).child(
+            .child(text(theme::CAPTION).text_color(t.muted).child(tr(
                 "Changes save as you make them. Those the game can't take while it runs wait for \
                  a restart, and the page says so.",
-            ))
+            )))
             .child(form)
     }
 
@@ -2285,11 +2392,11 @@ impl Launcher {
             && self.servers.queued.is_empty()
             && self.servers.service == Some(false);
         let hint = if status.running() {
-            Some("Stop the server before deleting it.")
+            Some(tr("Stop the server before deleting it."))
         } else if self.servers.service == Some(true) {
-            Some("Turn off running in the background before deleting it.")
+            Some(tr("Turn off running in the background before deleting it."))
         } else if !ready {
-            Some("Wait for the current operation to finish.")
+            Some(tr("Wait for the current operation to finish."))
         } else {
             None
         };
@@ -2302,7 +2409,7 @@ impl Launcher {
             .gap(px(12.));
         if self.servers.confirm_delete {
             let matches = self.servers.value(Field::DeleteServer) == name && !name.is_empty();
-            let field = self.field(Field::DeleteServer, "Server name", 225., cx);
+            let field = self.field(Field::DeleteServer, tr("Server name"), 225., cx);
             let confirm = button(
                 "server-delete-confirm",
                 "Move to trash",
@@ -2325,11 +2432,15 @@ impl Launcher {
             } else {
                 disabled(confirm)
             };
+            let line = tr("Type {name} to confirm.");
+            let (before, after) = line.split_once("{name}").unwrap_or((line, ""));
+            let confirm_text = format!("{before}{name}{after}");
+            let lit = before.len()..before.len() + name.len();
             controls = controls
                 .child(field)
                 .child(text(theme::CAPTION).text_color(t.muted).child(
-                    gpui::StyledText::new(format!("Type {name} to confirm.")).with_highlights([(
-                        5..5 + name.len(),
+                    gpui::StyledText::new(confirm_text).with_highlights([(
+                        lit,
                         gpui::HighlightStyle {
                             font_weight: Some(FontWeight::BOLD),
                             ..Default::default()
@@ -2377,7 +2488,7 @@ impl Launcher {
         }
         self.setting_row(
             "Delete server",
-            "Remove this server from Horizon and move its worlds, settings and backups to the trash.".into(),
+            tr("Remove this server from Horizon and move its worlds, settings and backups to the trash.").into(),
             controls.into_any_element(),
         )
         .items_start()
@@ -2409,11 +2520,13 @@ impl Launcher {
         self.setting_row(
             "Run in the background and at login",
             if on {
-                "On: starts when you log in to this computer, keeps running when the launcher \
-                 closes, and comes back by itself if the computer restarts."
-                    .into()
+                tr(
+                    "On: starts when you log in to this computer, keeps running when the launcher \
+                 closes, and comes back by itself if the computer restarts.",
+                )
+                .into()
             } else {
-                "Off: the server stops when you close the launcher.".into()
+                tr("Off: the server stops when you close the launcher.").into()
             },
             toggle.into_any_element(),
         )
@@ -2440,11 +2553,12 @@ impl Launcher {
                 .and_then(|u| u["newest"].as_str().map(str::to_string))
         });
         let about = match (&available, &check, &status.update_last) {
-            (Some(tag), _, _) => format!(
+            (Some(tag), _, _) => trf(
                 "Update available: Horizon {tag} (this server runs {release}). Updating backs up \
-                 the world first, and goes back by itself if the new version doesn't start."
+                 the world first, and goes back by itself if the new version doesn't start.",
+                &[("tag", tag), ("release", &release)],
             ),
-            (None, Some(_), _) => format!("Up to date: Horizon {release}."),
+            (None, Some(_), _) => trf("Up to date: Horizon {release}.", &[("release", &release)]),
             (None, None, Some((last, _))) => format!("Horizon {release}. {last}"),
             (None, None, None) => format!("Horizon {release}."),
         };
@@ -2504,8 +2618,8 @@ impl Launcher {
         if self.servers.setting("updates", "keep").is_some() {
             rows = rows.child(self.setting_row(
                 "Older versions kept",
-                "Downloaded versions kept besides the one in use and the one an update can go back \
-                 to."
+                tr("Downloaded versions kept besides the one in use and the one an update can go back \
+                 to.")
                     .into(),
                 self.stepper("updates.keep", 0..=5, cx),
             ));
@@ -2514,7 +2628,7 @@ impl Launcher {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .child(text(theme::HEADING).text_color(t.ink).child("Updates"))
+            .child(text(theme::HEADING).text_color(t.ink).child(tr("Updates")))
             .child(rows)
     }
 
@@ -2619,18 +2733,18 @@ impl Launcher {
                 text(theme::CAPTION)
                     .text_color(t.muted)
                     .child(if status.running() {
-                        "Players stay online: the world is saved, then zipped."
+                        tr("Players stay online: the world is saved, then zipped.")
                     } else {
-                        "Zips the world and the server's settings into its backups folder."
+                        tr("Zips the world and the server's settings into its backups folder.")
                     }),
             ),
         );
         if self.older_horizon() {
             return tab
-                .child(text(theme::UI).text_color(t.muted).child(
+                .child(text(theme::UI).text_color(t.muted).child(tr(
                     "This server's Horizon is too old to list its backups here: they're in its \
                      backups folder. Update it below.",
-                ))
+                )))
                 .child(self.updates_section(status, cx));
         }
         tab = tab.child(
@@ -2646,29 +2760,36 @@ impl Launcher {
                         .child(
                             text(theme::UI)
                                 .text_color(t.ink)
-                                .child("Back up automatically"),
+                                .child(tr("Back up automatically")),
                         )
                         .child(text(theme::CAPTION).text_color(t.muted).child(if auto {
-                            format!(
+                            trf(
                                 "On: every {every} while the server runs, keeping the last \
-                                     {keep}. Backups you make yourself are never deleted."
+                                     {keep}. Backups you make yourself are never deleted.",
+                                &[("every", &every), ("keep", &keep)],
                             )
                         } else {
-                            "Off: only the backups you make.".to_string()
+                            tr("Off: only the backups you make.").to_string()
                         })),
                 ),
         );
         if self.servers.confirm_restore.is_some() {
             tab = tab.child(notice(
-                "Restoring replaces the world with this backup. The world as it is now isn't \
+                tr(
+                    "Restoring replaces the world with this backup. The world as it is now isn't \
                  deleted: it's moved into the backups folder. A running server stops and starts \
-                 again with the restored world."
-                    .into(),
+                 again with the restored world.",
+                )
+                .into(),
                 &t,
             ));
         }
         tab = if self.servers.backups.is_empty() {
-            tab.child(text(theme::UI).text_color(t.muted).child("No backup yet."))
+            tab.child(
+                text(theme::UI)
+                    .text_color(t.muted)
+                    .child(tr("No backup yet.")),
+            )
         } else {
             tab.child(list)
         };
@@ -2682,8 +2803,7 @@ impl Launcher {
         let c = self.servers.create.as_ref()?;
         let (new_world, copy, worlds) = (c.new_world, c.copy.clone(), c.worlds.clone());
         let (mode, difficulty, max_players) = (c.mode, c.difficulty, c.max_players);
-        let (friends_only, check_accounts, eula, eula_missing) =
-            (c.friends_only, c.check_accounts, c.eula, c.eula_missing);
+        let (friends_only, eula, eula_missing) = (c.friends_only, c.eula, c.eula_missing);
         let creating = self.servers.creating;
         let row = |label: &'static str, control: AnyElement| {
             div()
@@ -2830,36 +2950,6 @@ impl Launcher {
                 .cursor_pointer()
                 .when(on, |d| d.child("✓"))
         };
-        let accounts = div()
-            .flex()
-            .items_start()
-            .gap(px(10.))
-            .child(
-                checkbox("create-accounts", check_accounts).on_click(cx.listener(
-                    |this, _: &ClickEvent, _, cx| {
-                        if let Some(c) = &mut this.servers.create {
-                            c.check_accounts = !c.check_accounts;
-                        }
-                        cx.notify();
-                    },
-                )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        text(theme::UI)
-                            .text_color(t.ink)
-                            .child("Check Minecraft accounts"),
-                    )
-                    .child(text(theme::CAPTION).text_color(t.muted).child(
-                        "Only if every player signs in with Microsoft. Leave it off for Horizon \
-                         players without an account: Friends only keeps strangers out.",
-                    )),
-            );
         let eula_line = div()
             .flex()
             .items_center()
@@ -2950,7 +3040,6 @@ impl Launcher {
                             "The first one becomes an operator. Add more later on the Players tab.",
                         ))
                     })
-                    .child(accounts)
                     .into_any_element(),
             ))
             .child(eula_line);
@@ -3038,7 +3127,7 @@ impl Launcher {
                 .px(px(32.))
                 .py(px(24.))
                 .bg(t.page.opacity(0.92))
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 .occlude()
                 .child(card),
         )
@@ -3048,16 +3137,16 @@ impl Launcher {
 /// The state, in a few words.
 fn phase_label(status: &Status) -> String {
     if let Some(busy) = &status.update_busy {
-        return format!("Updating: {busy}");
+        return trf("Updating: {step}", &[("step", busy)]);
     }
     match status.phase.as_str() {
-        "running" if status.crashes > 0 => "Running · restarted after a crash".into(),
-        "running" if status.paused => "Running · paused while nobody plays".into(),
-        "running" => "Running".into(),
-        "starting" => "Starting".into(),
-        "restarting" => "Restarting".into(),
-        "stopping" => "Stopping".into(),
-        _ => "Stopped".into(),
+        "running" if status.crashes > 0 => tr("Running · restarted after a crash").into(),
+        "running" if status.paused => tr("Running · paused while nobody plays").into(),
+        "running" => tr("Running").into(),
+        "starting" => tr("Starting").into(),
+        "restarting" => tr("Restarting").into(),
+        "stopping" => tr("Stopping").into(),
+        _ => tr("Stopped").into(),
     }
 }
 

@@ -119,7 +119,7 @@ fn parse_state(spec: &str) -> BlockState {
         .collect();
     BlockState {
         name: name.to_owned(),
-        properties,
+        properties: properties.into(),
     }
 }
 

@@ -1,8 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "experience for server mods: reading orbs (`native_experience_orbs`), giving points as an orb does (`native_give_experience`) and giving or taking levels (`native_give_levels`).",
-  "doc_summary": "`native_experience_orbs(dimension, min, max)`, the experience orbs in a box; `native_give_experience(uuid, points)`, points given to any player as an orb they touch gives them (Mending first); and `native_give_levels(uuid, levels)`, levels given or, negative, taken. Bundles need \"hooks\": @API:give_experience@.",
-  "comments": [
-    "crates/horizon-client/src/game/native_server.rs"
-  ]
-}

@@ -1,6 +1,6 @@
 //! `check`: the sample pack passes, and each kind of mistake is reported
 //! with the pack's own file and line.
-use horizon_shader_api::{MANIFEST, Pack, Problem, check};
+use horizon_shader_api::{MANIFEST, Pack, Problem, StageKind, check};
 use std::path::Path;
 
 fn sample() -> Pack {
@@ -191,4 +191,71 @@ fn a_stages_files_are_its_own() {
     assert!(other.parts.iter().all(|p| p.0 != "only_post.wgsl"));
     assert!(pack.manifest.files().contains(&"only_post.wgsl"));
     check(&pack).unwrap();
+}
+
+#[test]
+fn a_vertex_stage_checks_alone_and_joins_the_material() {
+    let mut files = sample().files;
+    let manifest = String::from_utf8(files[MANIFEST].clone()).unwrap();
+    files.insert(
+        MANIFEST.into(),
+        format!("{manifest}\n[vertex]\nfile = \"wave.wgsl\"\n").into_bytes(),
+    );
+    files.insert(
+        "wave.wgsl".into(),
+        b"fn vertex(input: VertexInput) -> vec3<f32> {
+    return input.position + vec3(0.0, sin(frame.time) * f32(input.material), 0.0);
+}
+"
+        .to_vec(),
+    );
+    let report = check(&Pack::from_files(files).unwrap()).unwrap();
+    let source = |kind| {
+        let stage = report.stages.iter().find(|s| s.kind == kind).unwrap();
+        stage.source.contains("fn vertex(input: VertexInput)")
+    };
+    assert!(source(StageKind::Vertex));
+    assert!(source(StageKind::Material));
+}
+
+#[test]
+fn a_material_reads_its_block_texture() {
+    let mut files = sample().files;
+    let pack = Pack::from_files(files.clone()).unwrap();
+    let file = pack.manifest.material.as_ref().unwrap().file.clone();
+    files.insert(
+        file,
+        b"override reflections: bool = true;
+fn material(input: MaterialInput) -> Surface {
+    let lod = block_texture_lod() + block_texture_size().x;
+    return Surface(block_texture(input.uv) + block_texture_level(input.uv, lod));
+}
+"
+        .to_vec(),
+    );
+    check(&Pack::from_files(files).unwrap()).unwrap();
+}
+
+#[test]
+fn only_a_material_that_calls_set_surface_needs_its_target() {
+    let calls = |pack: &Pack| {
+        let report = check(pack).unwrap();
+        let material = report.stages.iter().find(|s| s.kind == StageKind::Material);
+        horizon_shader_api::stages::calls_set_surface(&material.unwrap().source)
+    };
+    let mut files = sample().files;
+    let pack = Pack::from_files(files.clone()).unwrap();
+    assert!(!calls(&pack));
+    let material = pack.manifest.material.as_ref().unwrap().file.clone();
+    files.insert(
+        material,
+        b"override reflections: bool = true;
+fn material(input: MaterialInput) -> Surface {
+    set_surface(input.normal, 0.5, 7.0);
+    return Surface(input.albedo);
+}
+"
+        .to_vec(),
+    );
+    assert!(calls(&Pack::from_files(files).unwrap()));
 }

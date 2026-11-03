@@ -39,10 +39,12 @@ struct HorizonMaterialOut {
     @location(8) @interpolate(flat) face: u32,
     @location(9) @interpolate(flat) fluid_quad: u32,
     @location(10) @interpolate(flat) emission: f32,
+    // terrain.wgsl's `emission`, for HDR output's mark.
+    @location(11) @interpolate(flat) hdr_code: u32,
 }
 fn horizon_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f32>,
     light: vec2<u32>, origin: vec3<f32>) -> HorizonMaterialOut {
-    let pos = position + origin;
+    let pos = horizon_material_displace(position + origin, uv, layer, color, light);
     var out: HorizonMaterialOut;
     out.clip = horizon_terrain_globals.view_proj * vec4(pos, 1.0);
     out.uv = uv;
@@ -67,7 +69,9 @@ fn horizon_material_vertex(position: vec3<f32>, uv: vec2<f32>, layer: u32, color
     out.fluid_quad = u32(fluid);
     // The tier (0 none, 1 low, 2 incandescent, 3 bright, 4 very bright) as how strongly the
     // face shines: a redstone torch 7/15, a torch 14/15, glowstone 1.
-    let tier = 15u - (flags & 15u);
+    out.hdr_code = 15u - (flags & 15u);
+    // Codes above 4 are the same tiers, shining all over rather than in their bright parts.
+    let tier = select(out.hdr_code, out.hdr_code - 4u, out.hdr_code > 4u);
     out.emission = select(min(f32(tier) * 7.0 / 15.0, 1.0), 0.0, tier == 0u);
     return out;
 }
@@ -102,32 +106,88 @@ fn horizon_block_pbr(uv: vec2<f32>, layer: u32, lod: f32, map: u32) -> vec4<f32>
         return select(vec4<f32>(0.5, 0.5, 1.0, 1.0), vec4<f32>(0.0), map == 1u);
     }
     let s = horizon_terrain_sprite_sampler;
+    // The maps may be smaller than the colour: the same footprint is fewer of their texels.
+    let scale = f32(textureDimensions(horizon_terrain_sprites).x)
+        / f32(textureDimensions(horizon_pbr_normals).x);
+    let l = max(lod - log2(scale), 0.0);
     if map == 0u {
-        return textureSampleLevel(horizon_pbr_normals, s, uv, i32(layer), lod);
+        return textureSampleLevel(horizon_pbr_normals, s, uv, i32(layer), l);
     }
-    return textureSampleLevel(horizon_pbr_specular, s, uv, i32(layer), lod);
+    return textureSampleLevel(horizon_pbr_specular, s, uv, i32(layer), l);
+}
+// The prelude's `block_texture`: a sprite of the terrain's arrays at a mip level.
+fn horizon_block_size() -> vec2<f32> {
+    return vec2<f32>(textureDimensions(horizon_terrain_sprites).xy);
+}
+fn horizon_block_sample(uv: vec2<f32>, layer: u32, lod: f32) -> vec4<f32> {
+    let s = horizon_terrain_sprite_sampler;
+    let l = i32(layer % horizon_terrain_SPRITE_SPLIT);
+    switch layer / horizon_terrain_SPRITE_SPLIT {
+        case 0u: { return textureSampleLevel(horizon_terrain_sprites, s, uv, l, lod); }
+        case 1u: { return textureSampleLevel(horizon_terrain_sprites_1, s, uv, l, lod); }
+        case 2u: { return textureSampleLevel(horizon_terrain_sprites_2, s, uv, l, lod); }
+        case 3u: { return textureSampleLevel(horizon_terrain_sprites_3, s, uv, l, lod); }
+        case 4u: { return textureSampleLevel(horizon_terrain_sprites_4, s, uv, l, lod); }
+        case 5u: { return textureSampleLevel(horizon_terrain_sprites_5, s, uv, l, lod); }
+        case 6u: { return textureSampleLevel(horizon_terrain_sprites_6, s, uv, l, lod); }
+        default: { return textureSampleLevel(horizon_terrain_sprites_7, s, uv, l, lod); }
+    }
 }
 fn horizon_material_color(in: HorizonMaterialOut, translucent: bool) -> vec4<f32> {
     let albedo = horizon_terrain_sprite(in.uv, in.layer & 0x7fffu);
     horizon_block_layer = in.layer & 0x7fffu;
-    // The mip level of this point in the maps: their own texels, as the sampler would pick.
-    let texels = in.uv * horizon_block_pbr_size();
+    // The mip level of this point in the texture: its texels, as the sampler would pick.
+    let texels = in.uv * horizon_block_size();
     let footprint = max(dot(dpdx(texels), dpdx(texels)), dot(dpdy(texels), dpdy(texels)));
     horizon_block_lod = max(0.5 * log2(max(footprint, 1e-8)), 0.0);
     // Water draws translucent and lava solid, so the pass resolves the fluid kind.
     let fluid = select(0u, select(2u, 1u, translucent), in.fluid_quad != 0u);
     let normal = horizon_material_normal(in.position);
+    horizon_material_face_normal = normal;
+    horizon_surface = vec4<f32>(0.0);
     let tangent = horizon_material_tangent(in.position, in.uv, normal);
     return material(MaterialInput(albedo, in.tint, in.light, in.lightmap, in.position, in.uv,
         translucent, horizon_sprite_tags(in.layer & 0x7fffu),
         horizon_sprite_material(in.layer & 0x7fffu), in.clip.xy / frame.resolution,
-        in.face, fluid, in.emission, normal, tangent)).color;
+        in.face, fluid, in.emission, normal, tangent,
+        horizon_terrain_native_colored_light(in.position))).color;
 }
-@fragment fn horizon_material_fs_solid(in: HorizonMaterialOut) -> @location(0) vec4<f32> {
+var<private> horizon_material_face_normal: vec3<f32>;
+struct HorizonMaterialSolid {
+    @location(0) color: vec4<f32>,
+    // The surface target's data: `set_surface`'s, then the fragment's depth, which the post
+    // stage's `surface_at` compares with the final depth.
+    @location(1) surface: vec4<f32>,
+}
+// What `fs_solid` leaves in the frame's alpha for HDR output, from the sprite before the pack's
+// material: the pack decides the colour, Horizon still knows which pixels are light sources.
+fn horizon_material_mark(in: HorizonMaterialOut, texel: vec4<f32>) -> f32 {
+    if in.hdr_code > 0u {
+        let whole = in.hdr_code > 4u;
+        let tier = select(in.hdr_code, in.hdr_code - 4u, whole);
+        let l = in.layer & 0x7fffu;
+        let t = textureLoad(horizon_terrain_emission_thresholds,
+            vec2(i32(l % horizon_terrain_SPRITE_SPLIT), i32(l / horizon_terrain_SPRITE_SPLIT)), 0);
+        let y = horizon_terrain_brightness(texel.rgb);
+        if whole || y >= t.r {
+            return horizon_terrain_hdr_mark(tier, y);
+        }
+    }
+    return 1.0;
+}
+@fragment fn horizon_material_fs_solid(in: HorizonMaterialOut) -> HorizonMaterialSolid {
     let color = horizon_material_color(in, false);
+    let texel = horizon_terrain_sprite(in.uv, in.layer & 0x7fffu);
     // Bit 15 of the layer marks opaque leaves (forceOpaque): no alpha cutout.
     if color.a < 0.5 && (in.layer & 0x8000u) == 0u { discard; }
-    return horizon_material_fogged(vec4(color.rgb, 1.0), in.spherical, in.cylindrical);
+    if horizon_surface.w == 0.0 {
+        set_surface(horizon_material_face_normal, 0.0, 0.0);
+    }
+    var out: HorizonMaterialSolid;
+    let mark = horizon_material_mark(in, texel);
+    out.color = horizon_material_fogged(vec4(color.rgb, mark), in.spherical, in.cylindrical);
+    out.surface = vec4(horizon_surface.xyz, in.clip.z);
+    return out;
 }
 @fragment fn horizon_material_fs_translucent(in: HorizonMaterialOut) -> @location(0) vec4<f32> {
     let color = horizon_material_color(in, true);
@@ -167,6 +227,8 @@ pub struct NativeMaterial {
     pub solid: wgpu::RenderPipeline,
     pub translucent: wgpu::RenderPipeline,
     pub flat: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    /// The stage calls `set_surface`: its solid pipelines also write the surface target.
+    pub writes_surface: bool,
 }
 
 /// terrain.wgsl's terrain section (its globals, bindings, sampling, lighting and fog), with
@@ -181,7 +243,7 @@ fn vanilla_terrain() -> String {
 /// The function `name(layer)`, the value of each sprite layer in `table` and 0 for the rest:
 /// `horizon_sprite_tags` (`MaterialInput.tags`) and `horizon_sprite_material`
 /// (`MaterialInput.material`).
-fn layer_table(name: &str, table: &[(u32, u32)]) -> String {
+pub(super) fn layer_table(name: &str, table: &[(u32, u32)]) -> String {
     let mut out = format!("fn {name}(layer: u32) -> u32 {{\n    switch layer {{\n");
     let mut table = table.to_vec();
     table.sort_unstable_by_key(|&(layer, value)| (value, layer));
@@ -196,12 +258,47 @@ fn layer_table(name: &str, table: &[(u32, u32)]) -> String {
     out + "        default: { return 0u; }\n    }\n}\n"
 }
 
+/// Where a corner of terrain is drawn without a vertex stage.
+pub(super) const DISPLACE_VANILLA: &str = "
+fn horizon_material_displace(pos: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f32>,
+    light: vec2<u32>) -> vec3<f32> {
+    return pos;
+}
+";
+
+/// The vertex stage's call, with its inputs from terrain's vertex.
+pub(super) const DISPLACE_PACK: &str = "
+fn horizon_material_displace(pos: vec3<f32>, uv: vec2<f32>, layer: u32, color: vec4<f32>,
+    light: vec2<u32>) -> vec3<f32> {
+    let flags = u32(round(color.a * 255.0));
+    let high = flags >> 4u;
+    let fluid = high >= 8u && (high & 7u) < 6u;
+    let lit = min(vec2(f32(light.y), f32(light.x)) / 240.0, vec2(1.0));
+    return vertex(VertexInput(pos, uv, horizon_sprite_material(layer & 0x7fffu), lit,
+        vec4(color.rgb, 1.0), select(0u, high & 7u, fluid), u32(fluid)));
+}
+";
+
+/// The surface target (the post stage's `scene_surface`): x the normal (two snorm16 in its
+/// bits), y smoothness, z the pack's data, w the fragment's depth.
+pub const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
+
 /// The terrain shader for the pack's material stage `source`, with its sprite `tags` and
-/// `materials`.
-fn shader_source(source: &str, tags: &[(u32, u32)], materials: &[(u32, u32)]) -> String {
+/// `materials`, and the vertex stage in its module when `vertex`.
+fn shader_source(
+    source: &str,
+    tags: &[(u32, u32)],
+    materials: &[(u32, u32)],
+    vertex: bool,
+) -> String {
     format!(
-        "{source}\n// Horizon's terrain (terrain.wgsl)\n{}{}{}{ENTRIES}",
+        "{source}\n// Horizon's terrain (terrain.wgsl)\n{}{}{}{}{ENTRIES}",
         vanilla_terrain(),
+        if vertex {
+            DISPLACE_PACK
+        } else {
+            DISPLACE_VANILLA
+        },
         layer_table("horizon_sprite_tags", tags),
         layer_table("horizon_sprite_material", materials)
     )
@@ -212,8 +309,9 @@ fn module(
     stage: &CheckedStage,
     tags: &[(u32, u32)],
     materials: &[(u32, u32)],
+    vertex: bool,
 ) -> Result<naga::Module, String> {
-    let text = shader_source(&stage.source, tags, materials);
+    let text = shader_source(&stage.source, tags, materials, vertex);
     naga::front::wgsl::parse_str(&text)
         .map_err(|e| format!("{}: {}", stage.file, e.emit_to_string(&text)))
 }
@@ -227,8 +325,10 @@ impl NativeMaterial {
         stage: &CheckedStage,
         constants: &[(String, f64)],
         fog: bool,
+        vertex: bool,
     ) -> Result<Self, String> {
-        let module = module(stage, shape.sprite_tags, shape.sprite_materials)?;
+        let writes_surface = horizon_shader_api::stages::calls_set_surface(&stage.source);
+        let module = module(stage, shape.sprite_tags, shape.sprite_materials, vertex)?;
         let mut constants = present_constants(&module, constants);
         let sprite_names = [
             "horizon_terrain_SPRITE_ARRAYS",
@@ -274,6 +374,18 @@ impl NativeMaterial {
                 constants: &constants,
                 ..Default::default()
             };
+            let solid_targets = [
+                Some(wgpu::ColorTargetState {
+                    format: shape.format,
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                Some(wgpu::ColorTargetState {
+                    format: SURFACE_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+            ];
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(&stage.label),
                 layout: Some(layout),
@@ -299,11 +411,11 @@ impl NativeMaterial {
                     module: &module,
                     entry_point: Some(fragment),
                     compilation_options: options,
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: shape.format,
-                        blend,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: if fragment == "horizon_material_fs_solid" && writes_surface {
+                        &solid_targets
+                    } else {
+                        &solid_targets[..1]
+                    },
                 }),
                 multiview_mask: None,
                 cache: None,
@@ -348,6 +460,7 @@ impl NativeMaterial {
             solid,
             translucent,
             flat,
+            writes_surface,
         })
     }
 }
@@ -402,7 +515,7 @@ mod tests {
         let tags = [(7, 1), (3, 1), (9, 2)];
         let materials = [(5, 1000)];
         assert!(layer_table("t", &tags).contains("case 3u, 7u: { return 1u; }"));
-        let module = module(&stage, &tags, &materials).unwrap();
+        let module = module(&stage, &tags, &materials, false).unwrap();
         let info = naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::all(),
@@ -411,7 +524,7 @@ mod tests {
         .unwrap_or_else(|e| {
             panic!(
                 "{}",
-                e.emit_to_string(&shader_source(&stage.source, &tags, &materials))
+                e.emit_to_string(&shader_source(&stage.source, &tags, &materials, false))
             )
         });
         let entries: Vec<&str> = module

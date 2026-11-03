@@ -91,7 +91,7 @@ impl Stacked {
             let mut max = 0;
             for (key, &count) in self.keys.iter().zip(&self.amounts) {
                 if count > max {
-                    if ing.0.contains(&**key) {
+                    if ing.items.contains(&**key) {
                         max = count;
                     }
                     if max >= min {
@@ -146,14 +146,16 @@ impl<'a> Picker<'a> {
         let items: Vec<usize> = (0..stacked.keys.len())
             .filter(|&i| {
                 stacked.amounts[i] > 0
-                    && ingredients.iter().any(|g| g.0.contains(&*stacked.keys[i]))
+                    && ingredients
+                        .iter()
+                        .any(|g| g.items.contains(&*stacked.keys[i]))
             })
             .collect();
         let (ni, nt) = (ingredients.len(), items.len());
         let mut connection = vec![false; ni * nt];
         for (g, ing) in ingredients.iter().enumerate() {
             for (t, &key) in items.iter().enumerate() {
-                if ing.0.contains(&*stacked.keys[key]) {
+                if ing.items.contains(&*stacked.keys[key]) {
                     connection[t * ni + g] = true;
                 }
             }
@@ -580,9 +582,7 @@ impl Menu {
                 count: 0,
                 ..stack.clone()
             });
-            let room = super::CONTAINER_MAX
-                .min(Self::max_stack(env, cell))
-                .saturating_sub(cell.count);
+            let room = Self::max_stack(env, cell).saturating_sub(cell.count);
             let add = stack.count.min(room);
             cell.count += add;
             stack.count -= add;

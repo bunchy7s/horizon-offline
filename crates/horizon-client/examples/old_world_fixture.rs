@@ -5,6 +5,7 @@
 //! generated around them blend with them (`Blender.of`).
 //!
 //! old_world_fixture <source world> <destination world> <x0,z0,x1,z1>
+extern crate horizon_client_lib as horizon_client;
 use horizon_core::position::ChunkPos;
 use horizon_world::{
     nbt::{Limits, Tag},

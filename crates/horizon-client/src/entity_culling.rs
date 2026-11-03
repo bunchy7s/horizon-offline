@@ -40,23 +40,39 @@ impl Culler {
         start: usize,
         opaque: impl FnMut([i32; 3]) -> bool,
     ) -> bool {
-        if start >= vertices.len() || self.remaining.get() == 0 {
+        if self.remaining.get() == 0 {
             return false;
+        }
+        let Some((min, max)) = Self::bounds(self.camera, vertices, start) else {
+            return false;
+        };
+        self.occluded(min, max, opaque)
+    }
+
+    /// Camera-relative bounds grown to include floating-point and rasterization
+    /// edges. The asynchronous path sends these small queries to its worker.
+    pub fn bounds(
+        camera: [f64; 3],
+        vertices: &[crate::mesher::Vertex],
+        start: usize,
+    ) -> Option<([f64; 3], [f64; 3])> {
+        if start >= vertices.len() {
+            return None;
         }
         let mut min = [f64::INFINITY; 3];
         let mut max = [f64::NEG_INFINITY; 3];
         for vertex in &vertices[start..] {
             for a in 0..3 {
-                let value = f64::from(vertex.pos[a]) + self.camera[a];
+                let value = f64::from(vertex.pos[a]) + camera[a];
                 if !value.is_finite() {
-                    return false;
+                    return None;
                 }
                 min[a] = min[a].min(value);
                 max[a] = max[a].max(value);
             }
         }
         // Cover floating-point and rasterization edges as well as the vertices.
-        self.occluded(min.map(|v| v - 0.05), max.map(|v| v + 0.05), opaque)
+        Some((min.map(|v| v - 0.05), max.map(|v| v + 0.05)))
     }
 
     /// Returns true only when a complete opaque block plane covers the bounds.

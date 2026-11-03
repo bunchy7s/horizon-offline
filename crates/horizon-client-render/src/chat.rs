@@ -29,6 +29,10 @@ pub type Signature = horizon_protocol::secure_chat::Signature;
 /// How long a message shows before a deletion replaces it
 /// (`ChatComponent.deleteMessageOrDelay`: `addedTime + 60`).
 const DELETION_DELAY: u64 = 60;
+/// The smooth chat extra: the ticks a new line takes to slide in and fade in,
+/// and how far left of its place it starts (GUI pixels).
+const INTRO_TICKS: f32 = 5.0;
+const INTRO_WIDTH: f32 = 12.0;
 
 /// `ChatVisiblity`: the Chat option's three values.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -233,14 +237,10 @@ impl Tag {
 
 /// `ChatComponent.AlphaCalculator.timeBased`: opaque for 180 ticks, then
 /// fading out quadratically over 20.
-fn time_alpha(ticks: u64, added: u64) -> f32 {
-    let delta = ticks as i64 - added as i64;
-    let mut t = delta as f64 / 200.0;
-    t = 1.0 - t;
-    t *= 10.0;
-    t = t.clamp(0.0, 1.0);
-    t *= t;
-    t as f32
+fn time_alpha(ticks: f32, added: u64) -> f32 {
+    let mut t = 1.0 - (ticks - added as f32) / 200.0;
+    t = (t * 10.0).clamp(0.0, 1.0);
+    t * t
 }
 #[derive(Default)]
 pub struct Chat {
@@ -256,6 +256,11 @@ pub struct Chat {
     scroll: usize,
     new_since_scroll: bool,
     pub options: ChatOptions,
+    /// The smooth chat extra: a new line slides in from the left while it
+    /// fades in, instead of appearing whole.
+    pub smooth: bool,
+    /// The smooth chat extra: no indicator bar at the left of a line.
+    pub hide_indicator: bool,
     /// Messages printed to stdout as `[CHAT]` (vanilla logs them).
     pub log: bool,
     /// Messages added since the start, for the control socket's events.
@@ -555,7 +560,7 @@ impl Chat {
     }
     /// `ChatComponent.extractRenderState` (background mode unless `focused`)
     /// on a screen `height` GUI pixels tall at `Hud.tickCount` `ticks`.
-    pub fn layout(&self, height: i32, ticks: u64, focused: bool) -> Vec<GuiDraw> {
+    pub fn layout(&self, height: i32, ticks: f32, focused: bool) -> Vec<GuiDraw> {
         let total = self.lines.len();
         if total == 0 {
             return Vec::new();
@@ -569,28 +574,47 @@ impl Chat {
         let entry_height = o.line_height();
         let bottom_to_text =
             (8.0 * (o.line_spacing + 1.0) - 4.0 * o.line_spacing + 0.5).floor() as i32;
+        // Vanilla's 200-tick fade reads the whole GUI ticks
+        // (`Gui.getGuiTicks`); only the smooth chat extra eases it per frame.
+        let fade_ticks = if self.smooth { ticks } else { ticks.floor() };
         let alpha_of = |line: &Line| {
             if focused {
                 1.0
             } else {
-                time_alpha(ticks, line.added)
+                time_alpha(fade_ticks, line.added)
             }
+        };
+        // The smooth chat extra: how far into its intro a line is, 0 at the
+        // tick it was added and 1 once it has arrived, as (alpha, offset x).
+        let intro_of = |line: &Line| {
+            if focused || !self.smooth {
+                return (1.0, 0.0);
+            }
+            let t = ((ticks - line.added as f32) / INTRO_TICKS).clamp(0.0, 1.0);
+            let eased = 1.0 - (1.0 - t) * (1.0 - t);
+            (eased, (eased - 1.0) * INTRO_WIDTH)
         };
         let visible = total
             .saturating_sub(self.scroll)
             .min(self.lines_per_page(focused));
-        let lines: Vec<(usize, &Line, f32)> = (0..visible)
+        let lines: Vec<(usize, &Line, f32, f32)> = (0..visible)
             .rev()
             .map(|i| (i, &self.lines[i + self.scroll]))
-            .map(|(i, line)| (i, line, alpha_of(line)))
-            .filter(|(_, _, alpha)| *alpha > 1.0e-5)
+            .map(|(i, line)| {
+                let (eased, slide) = intro_of(line);
+                (i, line, alpha_of(line) * eased, slide)
+            })
+            .filter(|(_, _, alpha, _)| *alpha > 1.0e-5)
             .collect();
         let mut out = vec![GuiDraw::Push(vec![
             PoseOp::Scale(scale, scale),
             PoseOp::Translate(4.0, 0.0),
         ])];
-        for &(i, _, alpha) in &lines {
+        for &(i, _, alpha, slide) in &lines {
             let bottom = chat_bottom - i as i32 * entry_height;
+            if slide != 0.0 {
+                out.push(GuiDraw::Push(vec![PoseOp::Translate(slide, 0.0)]));
+            }
             out.push(hud_layout::fill(
                 -4,
                 bottom - entry_height,
@@ -598,9 +622,15 @@ impl Chat {
                 bottom,
                 hud_layout::as8(alpha * background_opacity) << 24,
             ));
+            if slide != 0.0 {
+                out.push(GuiDraw::Pop);
+            }
         }
-        for &(i, line, alpha) in &lines {
+        for &(i, line, alpha, slide) in &lines {
             let bottom = chat_bottom - i as i32 * entry_height;
+            if slide != 0.0 {
+                out.push(GuiDraw::Push(vec![PoseOp::Translate(slide, 0.0)]));
+            }
             let opacity = alpha * text_opacity;
             let color = hud_layout::white(opacity);
             if color >> 24 != 0 {
@@ -612,7 +642,7 @@ impl Chat {
                     shadow: true,
                 });
             }
-            if let Some(tag) = &line.tag {
+            if let Some(tag) = line.tag.as_ref().filter(|_| !self.hide_indicator) {
                 let color = hud_layout::as8(opacity) << 24 | tag.color & 0xFF_FFFF;
                 out.push(hud_layout::fill(
                     -4,
@@ -621,6 +651,9 @@ impl Chat {
                     bottom,
                     color,
                 ));
+            }
+            if slide != 0.0 {
+                out.push(GuiDraw::Pop);
             }
         }
         if focused {
@@ -658,7 +691,7 @@ impl Chat {
     }
     /// Draws [`Chat::layout`] into the HUD batch, and with the chat screen
     /// open the restricted prompt above the lines.
-    pub fn draw(&self, batch: &mut HudBatch, atlas: &HudAtlas, ticks: u64, focused: bool) {
+    pub fn draw(&self, batch: &mut HudBatch, atlas: &HudAtlas, ticks: f32, focused: bool) {
         let draws = self.layout(batch.height as i32, ticks, focused);
         hud_layout::paint(batch, atlas, &draws);
         if focused && self.abilities.any_restriction() {

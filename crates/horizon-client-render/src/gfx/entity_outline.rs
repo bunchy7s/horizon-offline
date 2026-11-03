@@ -29,6 +29,8 @@ pub(super) struct EntityOutline {
     vertices: wgpu::Buffer,
     capacity: u64,
     quads: u32,
+    /// The silhouettes posed on the GPU: first vertex in the entity buffer, quads.
+    posed: (u32, u32),
     targets: Option<Targets>,
 }
 
@@ -159,6 +161,7 @@ impl EntityOutline {
             vertices: Self::vertex_buffer(device, 256),
             capacity: 256,
             quads: 0,
+            posed: (0, 0),
             targets: None,
         }
     }
@@ -173,17 +176,23 @@ impl EntityOutline {
     }
 
     /// Uploads this frame's silhouettes (`LevelRenderer.currentFrameRendersEntityOutline`
-    /// when there are any) and sizes the targets like the window.
+    /// when there are any) and sizes the targets like the window. A frame with
+    /// none gives the targets' video memory back until an entity glows again.
+    /// `posed`: where the silhouettes posed on the GPU start in the entity
+    /// buffer (`entity_skin`'s outline jobs), and how many quads they are.
     pub(super) fn prepare(
         &mut self,
         device: &wgpu::Device,
         uploads: &mut super::upload::Uploads,
         encoder: &mut wgpu::CommandEncoder,
         silhouettes: &[Vertex],
+        posed: (u32, u32),
         size: [u32; 2],
     ) {
         self.quads = (silhouettes.len() / 4) as u32;
-        if self.quads == 0 {
+        self.posed = posed;
+        if self.quads == 0 && posed.1 == 0 {
+            self.targets = None;
             return;
         }
         let vertices = silhouettes.len() as u64;
@@ -191,12 +200,14 @@ impl EntityOutline {
             self.capacity = vertices.next_power_of_two();
             self.vertices = Self::vertex_buffer(device, self.capacity);
         }
-        uploads.buffer(
-            encoder,
-            &self.vertices,
-            0,
-            bytemuck::cast_slice(silhouettes),
-        );
+        if !silhouettes.is_empty() {
+            uploads.buffer(
+                encoder,
+                &self.vertices,
+                0,
+                bytemuck::cast_slice(silhouettes),
+            );
+        }
         if self.targets.as_ref().is_some_and(|t| t.size == size) {
             return;
         }
@@ -258,18 +269,37 @@ impl EntityOutline {
         frame: &wgpu::TextureView,
         entity_group: &wgpu::BindGroup,
         indices: &wgpu::Buffer,
+        entities: &wgpu::Buffer,
+        mut timing: Option<&mut super::pack_timing::PassTiming>,
     ) {
-        let Some(t) = self.targets.as_ref().filter(|_| self.quads > 0) else {
+        let Some(t) = self
+            .targets
+            .as_ref()
+            .filter(|_| self.quads > 0 || self.posed.1 > 0)
+        else {
             return;
         };
         let clear = wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT);
         {
-            let mut pass = begin(encoder, "Entity outline", &t.outline, clear);
+            let mut pass = begin(
+                encoder,
+                "Entity outline",
+                &t.outline,
+                clear,
+                timing.as_deref_mut(),
+            );
             pass.set_pipeline(&self.silhouette);
             pass.set_bind_group(0, entity_group, &[]);
             pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.set_vertex_buffer(0, self.vertices.slice(..));
-            pass.draw_indexed(0..self.quads * 6, 0, 0..1);
+            if self.quads > 0 {
+                pass.set_vertex_buffer(0, self.vertices.slice(..));
+                pass.draw_indexed(0..self.quads * 6, 0, 0..1);
+            }
+            let (first, quads) = self.posed;
+            if quads > 0 {
+                pass.set_vertex_buffer(0, entities.slice(..));
+                pass.draw_indexed(0..quads * 6, first as i32, 0..1);
+            }
         }
         // post_effect/entity_outline.json; its last pass only copies swap back to the
         // outline target, so the blit reads swap.
@@ -280,7 +310,7 @@ impl EntityOutline {
             ("Entity outline blit", frame, wgpu::LoadOp::Load),
         ];
         for (i, (label, view, load)) in steps.into_iter().enumerate() {
-            let mut pass = begin(encoder, label, view, load);
+            let mut pass = begin(encoder, label, view, load, timing.as_deref_mut());
             pass.set_pipeline(&self.passes[i]);
             pass.set_bind_group(0, &t.groups[i], &[]);
             pass.draw(0..3, 0..1);
@@ -293,6 +323,7 @@ fn begin<'e>(
     label: &str,
     view: &wgpu::TextureView,
     load: wgpu::LoadOp<wgpu::Color>,
+    timing: Option<&mut super::pack_timing::PassTiming>,
 ) -> wgpu::RenderPass<'e> {
     let attachments = [Some(wgpu::RenderPassColorAttachment {
         view,
@@ -305,6 +336,7 @@ fn begin<'e>(
     })];
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(label),
+        timestamp_writes: timing.and_then(|t| t.writes(label)),
         color_attachments: &attachments,
         ..Default::default()
     })

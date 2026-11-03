@@ -419,6 +419,31 @@ pub enum CameraFluid {
     PowderSnow,
 }
 
+/// `Camera.NearPlane`: the near plane's centre and its half extents toward
+/// the camera's left and up, relative to the camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NearPlane {
+    pub forward: [f64; 3],
+    pub left: [f64; 3],
+    pub up: [f64; 3],
+}
+impl NearPlane {
+    /// `forward`, `getTopLeft`, `getTopRight`, `getBottomLeft`, `getBottomRight`:
+    /// the points `Camera.getFluidInCamera` looks for lava and powder snow at.
+    pub fn points(&self) -> [[f64; 3]; 5] {
+        let corner = |up: f64, left: f64| -> [f64; 3] {
+            std::array::from_fn(|i| self.forward[i] + self.up[i] * up + self.left[i] * left)
+        };
+        [
+            self.forward,
+            corner(1.0, 1.0),
+            corner(1.0, -1.0),
+            corner(-1.0, 1.0),
+            corner(-1.0, -1.0),
+        ]
+    }
+}
+
 /// `Camera`: the eye-height and field-of-view easing and the view placement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
@@ -481,6 +506,19 @@ impl Camera {
         self.up = self.rotation.transform([0.0, 1.0, 0.0]);
         self.left = self.rotation.transform([-1.0, 0.0, 0.0]);
     }
+    /// `Camera.getNearPlane(fov)` for a `width` x `height` window, at the
+    /// projection's `zNear` of 0.05.
+    pub fn near_plane(&self, fov: f32, width: f32, height: f32) -> NearPlane {
+        let z_near = f64::from(0.05f32);
+        let aspect = f64::from(width) / f64::from(height);
+        let plane_height = horizon_core::jmath::tan(f64::from(fov * DEG_TO_RAD) / 2.0) * z_near;
+        let scale = |v: [f32; 3], by: f64| v.map(|c| f64::from(c) * by);
+        NearPlane {
+            forward: scale(self.forwards, z_near),
+            left: scale(self.left, plane_height * aspect),
+            up: scale(self.up, plane_height),
+        }
+    }
     /// `Camera.move(forwards, up, right)`.
     pub fn move_by(&mut self, forwards: f32, up: f32, right: f32) {
         let offset = self.rotation.transform([right, up, -forwards]);
@@ -501,6 +539,19 @@ impl Camera {
         entity: &CameraEntity,
         partial: f32,
         camera_type: CameraType,
+        clip: impl FnMut([f64; 3], [f64; 3]) -> Option<[f64; 3]>,
+    ) {
+        self.align_with_entity_distance(entity, partial, camera_type, |distance| distance, clip);
+    }
+    /// Adjust the detached distance after entity/mount scaling, before collision clipping.
+    /// Only finite overrides in 0..=1024 blocks are accepted (within the game's ray budget).
+    /// First-person views do not call `adjust_distance`.
+    pub fn align_with_entity_distance(
+        &mut self,
+        entity: &CameraEntity,
+        partial: f32,
+        camera_type: CameraType,
+        adjust_distance: impl FnOnce(f32) -> f32,
         mut clip: impl FnMut([f64; 3], [f64; 3]) -> Option<[f64; 3]>,
     ) {
         self.set_rotation(entity.view_y_rot(partial), entity.view_x_rot(partial));
@@ -528,10 +579,14 @@ impl Camera {
                 mount_scale = s;
                 mount_distance = d as f32;
             }
-            let zoom = self.max_zoom(
-                java_max(scale * distance, mount_scale * mount_distance),
-                &mut clip,
-            );
+            let vanilla = java_max(scale * distance, mount_scale * mount_distance);
+            let adjusted = adjust_distance(vanilla);
+            let distance = if adjusted.is_finite() && (0.0..=1024.0).contains(&adjusted) {
+                adjusted
+            } else {
+                vanilla
+            };
+            let zoom = self.max_zoom(distance, &mut clip);
             self.move_by(-zoom, 0.0, 0.0);
         } else if let Some(LivingCamera {
             sleeping: Some(bed),
@@ -967,6 +1022,100 @@ mod tests {
             Some([0.0, 0.0, -1.0])
         });
         assert!(camera.position[2] > -1.1 && camera.position[2] < -0.9);
+    }
+    #[test]
+    fn detached_distance_override_keeps_collision_clipping() {
+        let entity = CameraEntity {
+            position: [0.0; 3],
+            previous: [0.0; 3],
+            x_rot: 0.0,
+            y_rot: 0.0,
+            x_rot_o: 0.0,
+            y_rot_o: 0.0,
+            eye_height: 1.62,
+            living: Some(LivingCamera {
+                scale: 2.0,
+                camera_distance: 3.0,
+                sleeping: None,
+                dead: None,
+            }),
+            mount: Some((3.0, 4.0)),
+        };
+        for kind in [CameraType::ThirdPersonBack, CameraType::ThirdPersonFront] {
+            let mut camera = Camera::default();
+            let mut calls = 0;
+            let mut rays = 0;
+            let z = if kind.is_mirrored() { 1.0 } else { -1.0 };
+            camera.align_with_entity_distance(
+                &entity,
+                1.0,
+                kind,
+                |distance| {
+                    assert_eq!(distance, 12.0);
+                    8.0
+                },
+                |_, _| None,
+            );
+            assert!((camera.position[2] - z * 8.0).abs() < 1e-5);
+            camera.align_with_entity_distance(
+                &entity,
+                1.0,
+                kind,
+                |distance| {
+                    calls += 1;
+                    assert_eq!(distance, 12.0);
+                    8.0
+                },
+                |_, _| {
+                    rays += 1;
+                    Some([0.0, 0.0, z])
+                },
+            );
+            assert_eq!((calls, rays), (1, 8));
+            assert!((camera.position[2] - z).abs() < 0.2);
+        }
+    }
+    #[test]
+    fn detached_distance_rejects_invalid_values_and_accepts_zero() {
+        let entity = CameraEntity {
+            position: [0.0; 3],
+            previous: [0.0; 3],
+            x_rot: 0.0,
+            y_rot: 0.0,
+            x_rot_o: 0.0,
+            y_rot_o: 0.0,
+            eye_height: 1.62,
+            living: None,
+            mount: None,
+        };
+        for distance in [f32::NAN, f32::INFINITY, -1.0, 1025.0] {
+            let mut camera = Camera::default();
+            camera.align_with_entity_distance(
+                &entity,
+                1.0,
+                CameraType::ThirdPersonBack,
+                |_| distance,
+                |_, _| None,
+            );
+            assert!((camera.position[2] + 4.0).abs() < 1e-6);
+        }
+        let mut camera = Camera::default();
+        camera.align_with_entity_distance(
+            &entity,
+            1.0,
+            CameraType::ThirdPersonBack,
+            |_| 0.0,
+            |_, _| None,
+        );
+        assert_eq!(camera.position, camera.eye);
+        camera.align_with_entity_distance(
+            &entity,
+            1.0,
+            CameraType::FirstPerson,
+            |_| panic!("first person has no detached distance"),
+            |_, _| None,
+        );
+        assert_eq!(camera.position, camera.eye);
     }
     #[test]
     fn fov_modifier_combines_speed_flight_and_bow() {

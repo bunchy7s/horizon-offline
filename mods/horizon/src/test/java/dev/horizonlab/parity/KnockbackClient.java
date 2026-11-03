@@ -4,6 +4,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
@@ -79,7 +80,8 @@ import net.minecraft.world.phys.Vec3;
  * knockback (tools/test_server_knockback_parity.py). Script on stdin:
  * {@code step LABEL}, {@code join NAME}, {@code cmd NAME COMMAND...} (waits
  * for its feedback), {@code pos NAME X Y Z YAW PITCH GROUND} (one client tick
- * at that place, on the ground or not), {@code sprint NAME on|off}, {@code
+ * at that place, on the ground or not), {@code use-pos NAME X Y Z YAW PITCH GROUND}
+ * (use the item, then move, in one network write), {@code sprint NAME on|off}, {@code
  * sync NAME} (a round trip through the server thread; "synced NAME" on stdout when
  * it is back), {@code attack NAME TARGET} (ServerboundAttackPacket then the swing; TARGET is a
  * player's name or an entity type's path, the last one added), {@code use
@@ -119,6 +121,12 @@ public final class KnockbackClient {
                         players.get(w[1]).at(new Vec3(Double.parseDouble(a[0]), Double.parseDouble(a[1]), Double.parseDouble(a[2])),
                             Float.parseFloat(a[3]), Float.parseFloat(a[4]), a[5].equals("1"));
                     }
+                    case "use-pos" -> {
+                        String[] a = w[2].split(" ");
+                        players.get(w[1]).useThenMove(new Vec3(Double.parseDouble(a[0]), Double.parseDouble(a[1]), Double.parseDouble(a[2])),
+                            Float.parseFloat(a[3]), Float.parseFloat(a[4]), a[5].equals("1"));
+                    }
+                    case "glide" -> players.get(w[1]).playerCommand(ServerboundPlayerCommandPacket.Action.START_FALL_FLYING);
                     case "sprint" -> players.get(w[1]).sprint(w[2].equals("on"));
                     case "attack" -> players.get(w[1]).attack(w[2]);
                     case "use" -> players.get(w[1]).send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, 0, 0));
@@ -250,11 +258,24 @@ public final class KnockbackClient {
             send(net.minecraft.network.protocol.game.ServerboundClientTickEndPacket.INSTANCE);
         }
 
+        /** One write: the item use belongs to the old position, before the next client's tick moves. */
+        void useThenMove(Vec3 to, float yaw, float pitch, boolean ground) throws Exception {
+            position = new PositionMoveRotation(to, Vec3.ZERO, yaw, pitch);
+            send(new ServerboundUseItemPacket(InteractionHand.MAIN_HAND, 0, yaw, pitch),
+                net.minecraft.network.protocol.game.ServerboundClientTickEndPacket.INSTANCE,
+                new ServerboundMovePlayerPacket.PosRot(to, yaw, pitch, ground, false),
+                net.minecraft.network.protocol.game.ServerboundClientTickEndPacket.INSTANCE);
+        }
+
         void sprint(boolean on) throws Exception {
+            playerCommand(on ? ServerboundPlayerCommandPacket.Action.START_SPRINTING : ServerboundPlayerCommandPacket.Action.STOP_SPRINTING);
+        }
+
+        void playerCommand(ServerboundPlayerCommandPacket.Action action) throws Exception {
             // ServerboundPlayerCommandPacket's only public constructors take an Entity: read it from its bytes.
             FriendlyByteBuf b = new FriendlyByteBuf(Unpooled.buffer());
             b.writeVarInt(id);
-            b.writeVarInt((on ? ServerboundPlayerCommandPacket.Action.START_SPRINTING : ServerboundPlayerCommandPacket.Action.STOP_SPRINTING).ordinal());
+            b.writeVarInt(action.ordinal());
             b.writeVarInt(0);
             send(ServerboundPlayerCommandPacket.STREAM_CODEC.decode(b));
         }
@@ -344,6 +365,11 @@ public final class KnockbackClient {
                         String who = a.getType() == net.minecraft.world.entity.EntityTypes.PLAYER
                             ? NAMES.getOrDefault(a.getUUID(), "uuid?")
                             : net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(a.getType()).getPath();
+                        if (who.equals("wind_charge")) {
+                            // Inaccuracy is random. These buckets distinguish the old source from
+                            // the later position eight blocks away (and its eight-block velocity).
+                            record("wind source x=" + (int) Math.floor(a.getX()) + " vx=" + Math.round(a.getMovement().x));
+                        }
                         seen.put(a.getId(), who);
                         last.put(who, a.getId());
                     } else if (p instanceof ClientboundSetEntityMotionPacket m) {
@@ -361,7 +387,10 @@ public final class KnockbackClient {
                             v.x, v.y, v.z)).orElse("explode push none"));
                     } else if (p instanceof net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket d && d.id() == id) {
                         for (var value : d.packedItems()) {
-                            if (value.id() == 0) record("sprinting " + ((((Byte) value.value()) & 8) != 0));
+                            if (value.id() == 0) {
+                                record("sprinting " + ((((Byte) value.value()) & 8) != 0));
+                                record("gliding " + ((((Byte) value.value()) & 128) != 0));
+                            }
                         }
                     } else if (p instanceof ClientboundSystemChatPacket c
                         && c.content().getContents() instanceof net.minecraft.network.chat.contents.TranslatableContents t
@@ -416,7 +445,14 @@ public final class KnockbackClient {
             return new Received(packet, payload);
         }
 
-        synchronized void send(Packet<?> packet) throws Exception {
+        synchronized void send(Packet<?>... packets) throws Exception {
+            ByteArrayOutputStream batch = new ByteArrayOutputStream();
+            for (Packet<?> packet : packets) batch.write(frame(packet));
+            out.write(batch.toByteArray());
+            out.flush();
+        }
+
+        private byte[] frame(Packet<?> packet) throws Exception {
             ByteBuf body = Unpooled.buffer();
             ((ProtocolInfo) outbound).codec().encode(body, packet);
             byte[] raw = new byte[body.readableBytes()];
@@ -444,8 +480,7 @@ public final class KnockbackClient {
             }
             byte[] bytes = new byte[frame.readableBytes()];
             frame.readBytes(bytes);
-            out.write(bytes);
-            out.flush();
+            return bytes;
         }
 
         private byte[] readFrame() throws Exception {

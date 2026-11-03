@@ -2,8 +2,8 @@ PlayerList.updateEntireScoreboard	port	crates/horizon-client/src/lan/scoreboard.
 PlayerList.loadPlayerData	port	crates/horizon-client/src/lan/playerdata.rs::load_owner	gap: minor: the owner gets the file level.dat names as Level::read_root read it, anyone else playerdata.rs::load; the files are datafixed when the world is upgraded (datafix/files.rs), not on load
 PlayerList.save	port	crates/horizon-client/src/game/lan.rs::Game::save_guest	player file, advancements and statistics of a guest
 PlayerList.disconnectAllPlayersWithProfile	port	crates/horizon-client/src/lan/hub.rs::Hub::poll	kicks every connection of the uuid on NetEvent::Duplicate; the refusal of a second login is Shared::try_admit (lan/mod.rs)
-PlayerList.broadcastSystemToTeam	missing		player: when a dead player's team hides death messages from other teams, its own members should read the death in chat; Horizon sends it to nobody (game/lan_actions.rs guest_die sends only when the team shows its own death)
-PlayerList.broadcastSystemToAllExceptTeam	missing		player: when a dead player's team hides death messages from its own team, players outside the team should read the death in chat; Horizon sends it to nobody
+PlayerList.broadcastSystemToTeam	port	crates/horizon-client/src/lan/hub.rs::Hub::system_message_to	
+PlayerList.broadcastSystemToAllExceptTeam	port	crates/horizon-client-core/src/scoreboard.rs::death_message_reaches	HideForOwnTeam sends the death message to everyone outside the dying player's team, checked before the LAN hub broadcasts it and before the local chat line
 PlayerList.getPlayerNamesArray	skip:server		the GS4 query reply's player list; RCON and query server code; Horizon has no RCON or GS4 query port
 PlayerList.op	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the op arm: list add, reply, and sync_ops (permission level push to the hub)
 PlayerList.deop	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the deop arm: list remove, reply, sync_ops and kick_unlisted_players
@@ -18,41 +18,41 @@ ProfileResolver.Cached.fetchByName	port	crates/horizon-client/src/game/dedicated
 ServerOpList.getUserList	skip:ui		tab-completion names only (DeOpCommands suggestions); the console has no completion
 ServerOpList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the Opped reply and the permission push are in console_command's op arm
 ServerOpList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the Deopped reply, sync_ops and the kick are in console_command's deop arm
-ServerOpList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+ServerOpList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 ServerOpList.canBypassPlayerLimit	port	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	the bypasses_limit closure: an op entry with bypassesPlayerLimit; read by Shared::try_admit
 ServerOpListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::OpEntry::serialize	level and bypassesPlayerLimit keys
 SleepStatus.areEnoughDeepSleeping	port	crates/horizon-client/src/game/lan_actions.rs::Game::enough_slept	counts players asleep for 100 ticks (sleep_counts) against sleepers_needed
-StoredUserList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+StoredUserList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 StoredUserList.removeExpired	port	crates/horizon-server-files/src/user_lists.rs::UserList::get	expired entries are dropped on each get, as vanilla
 UserBanList.getUserList	skip:ui		tab-completion names only (PardonCommand suggestions)
 UserBanList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the banned notice and the kick are in console_command's ban arm
 UserBanList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the unbanned notice is in console_command's pardon arm
-UserBanList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserBanList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserBanListEntry.serialize	port	crates/horizon-server-files/src/user_lists.rs::BanEntry::serialize	the player's name and the ban fields
 UserBanListEntry.getDisplayName	inline	crates/horizon-client/src/game/dedicated.rs::Game::console_command	the banlist arm prints the name; Horizon entries always carry one, so no Unknown-user fallback
 UserWhiteList.add	port	crates/horizon-server-files/src/user_lists.rs::UserList::add	gap: minor: the allowlist notice is in console_whitelist's add arm
 UserWhiteList.remove	port	crates/horizon-server-files/src/user_lists.rs::UserList::remove	gap: minor: the notice is in console_whitelist's remove arm
-UserWhiteList.clear	skip:server		only the JSON-RPC management API calls clear(); Horizon has no such API
+UserWhiteList.clear	port	crates/horizon-server-files/src/user_lists.rs::UserList::clear	empties the list, tells each removal and saves; vanilla's only callers are the JSON-RPC allow-list and ban-list services, which Horizon's management methods do not have, so nothing here calls it
 UserWhiteList.getUserList	skip:ui		tab-completion names only (WhitelistCommand suggestions)
-NetworkDataOutputStream.writeString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+NetworkDataOutputStream.writeString	inline	crates/horizon-server/src/query.rs::string	UTF-8 and a NUL; the rest of NetworkDataOutputStream is the GS4 query server (the short is little-endian: `u16::to_le_bytes`)
 PktUtils.stringFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the payload up to its first NUL; the rest of PktUtils is the GS4 query server
 PktUtils.intFromByteArray	inline	crates/horizon-server/src/rcon.rs::read_request	the little-endian length, request id and type; the rest of PktUtils is the GS4 query server
-PktUtils.intFromNetworkByteArray	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
+PktUtils.intFromNetworkByteArray	inline	crates/horizon-server/src/query.rs::Query::answer	the token of a stat request: four big-endian bytes at 7, zero when the packet is short
 PktUtils.toHexString	skip:server		RCON and query server code; Horizon has no RCON or GS4 query port
-RconConsoleSource.createCommandSourceStack	inline	crates/horizon-server/src/rcon.rs::run_on_game	gap: minor: a command runs as the console does, through the game's `console` request; the sender shows as Server, not Rcon, and broadcast-rcon-to-ops is not read
+RconConsoleSource.createCommandSourceStack	port	crates/horizon-client/src/game/dedicated.rs::Game::rcon_line	the console at level 4 from the world respawn position with the source named Rcon (its `say`, and its feedback to the operators as [Rcon: ...]); gap: minor: the dedicated-only console commands keep their own wording
 GenericThread.start	inline	crates/horizon-server/src/rcon.rs::serve	the listener and a thread per connection; GenericThread is also the GS4 query server's helper
 GenericThread.stop	skip:server		the RCON threads end with the supervisor; GenericThread is also the GS4 query server's helper
-QueryThreadGs4.create	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.sendTo	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.processPacket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.buildRuleResponse	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.validChallenge	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.sendChallenge	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.pruneChallenges	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.run	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.start	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.recoverSocketError	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
-QueryThreadGs4.initSocket	skip:server		GS4 query server; RCON and query server code; Horizon has no RCON or GS4 query port
+QueryThreadGs4.create	port	crates/horizon-server/src/query.rs::setup	query.port 1 to 65535 with vanilla's warning, server-ip (0.0.0.0 when empty)
+QueryThreadGs4.sendTo	inline	crates/horizon-server/src/query.rs::serve	the reply goes to the sender's address
+QueryThreadGs4.processPacket	port	crates/horizon-server/src/query.rs::Query::answer	the magic, the handshake (9) and a stat (0) with a valid token, full when the request is 15 bytes; no answer otherwise
+QueryThreadGs4.buildRuleResponse	port	crates/horizon-server/src/query.rs::full_stat	splitnum, the key/value pairs and the player_ section; kept 5 seconds with each asker's session id
+QueryThreadGs4.validChallenge	inline	crates/horizon-server/src/query.rs::Query::answer	the token of that address, compared with the one the request carries
+QueryThreadGs4.sendChallenge	inline	crates/horizon-server/src/query.rs::Query::answer	a token below 2^24 as text after the session id; gap: minor: a session id outside ASCII is echoed as lossy UTF-8
+QueryThreadGs4.pruneChallenges	port	crates/horizon-server/src/query.rs::Query::prune	every 30 seconds all the tokens made before the check go
+QueryThreadGs4.run	port	crates/horizon-server/src/query.rs::serve	a thread that reads a datagram (500 ms timeout) and answers it; gap: minor: nothing answers while the game isn't running
+QueryThreadGs4.start	port	crates/horizon-server/src/query.rs::start	started by the supervisor next to RCON; a port that can't be bound is a warning
+QueryThreadGs4.recoverSocketError	inline	crates/horizon-server/src/query.rs::serve	a failed read is ignored and the socket kept
+QueryThreadGs4.initSocket	port	crates/horizon-server/src/query.rs::start	the UDP socket on server-ip and query.port, with vanilla's warning when it can't be opened
 RconClient.run	port	crates/horizon-server/src/rcon.rs::client	login, command and unknown request, with vanilla's answers; gap: minor: the packets are read from the stream, not one read each
 RconClient.send	port	crates/horizon-server/src/rcon.rs::send	-
 RconClient.sendCmdResponse	port	crates/horizon-server/src/rcon.rs::send_output	packets of 4096 characters, one even when empty; gap: minor: cut at 4096 characters, vanilla at 4096 UTF-16 units
@@ -72,7 +72,7 @@ ServerWaypointManager.remakeConnections	inline	crates/horizon-client/src/lan/way
 ServerWaypointManager.createConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::create_connection	
 ServerWaypointManager.updateConnection	port	crates/horizon-client/src/lan/waypoints.rs::Waypoints::update_or_create	
 SoundEvent.create	skip:data		registry object construction; Horizon's sound_events.rs models sounds.json entries, not SoundEvent objects
-SoundEvent.getRange	missing		minor: no fixed-range sound events (fixed_range is not read anywhere); attenuation comes from the sounds.json value (Sound::attenuation_distance)
+SoundEvent.getRange	inline	crates/horizon-client/src/lan/containers.rs::Hub::broadcast_near	16*max(volume,1) is the whole formula: no 26.3 event sets a fixed range (SoundEvents never calls createFixedRangeEvent), and a player exactly on it is left out
 SoundEvents.register	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerForHolder	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer
 SoundEvents.registerGoatHornSoundVariants	skip:data		registry bootstrap of sound events and variant sets; Horizon has no registry layer

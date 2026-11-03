@@ -3,18 +3,19 @@ BellBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::u
 BellBlock.isProperHit	inline	crates/horizon-world/src/level/redstone.rs::Sim::bell_hit	Proper-hit test is folded into bell_hit.
 BellBlock.getVoxelShape	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
 BellBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::Bell arm picks attachment and facing.
-BellBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	gap: player: a wind charge burst that hits a bell should ring it; Horizon sends an Up-face use that bell_hit rejects, so it stays silent. TNT does not reach this (canTriggerBlocks is false).
+BellBlock.onExplosionHit	port	crates/horizon-client/src/game/wind.rs::Game::wind_trigger_block	the bell has its own arm: attemptToRing with no direction, so it rings toward its facing, powered or not; the other trigger blocks take the Up-face use. TNT does not reach this (canTriggerBlocks is false).
 BellBlock.getConnectedDirection	port	crates/horizon-world/src/level/survive.rs::Sim::bell_connected_direction	Same floor/ceiling/wall mapping.
 BellBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.
 BellBlock.rotate	skip:data		Rotation is a precomputed table from extracted data (worldgen/structure.rs rotate).
 BigDripleafBlock.makeShapes	skip:data		Shape precomputed from the extracted block shapes (level/data.rs).
+BigDripleafBlock.onProjectileHit	port	crates/horizon-world/src/level/hooks.rs::Sim::big_dripleaf_projectile_hit	Game::projectile_hit dispatches every block-hit projectile; FULL and 100-tick reset even when powered
 BigDripleafBlock.canReplace	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::dripleaf_can_grow_into	Only used by canGrowInto; folded into dripleaf_can_grow_into.
 BigDripleafBlock.place	port	crates/horizon-world/src/level/bonemeal.rs::Sim::dripleaf_place	Sets big dripleaf with waterlogged and facing.
 BigDripleafBlock.getFluidState	port	crates/horizon-world/src/level/mod.rs::Behaviours::fluid	Waterlogged fluid is read from per-state facts.
 BigDripleafBlock.performBonemeal	port	crates/horizon-world/src/level/bonemeal.rs::Sim::perform_bonemeal	Kind::BigDripleaf arm places the stem and the leaf above.
 BigDripleafBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Signal resets tilt; UNSTABLE to PARTIAL (10 ticks) to FULL (100 ticks) with sound.
 BigDripleafBlock.playTiltSound	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Random pitch sound is inside the tick.
-BigDripleafBlock.setTiltAndScheduleTick	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Tick path schedules the next tilt; the UNSTABLE entity path is big_dripleaf_entity_inside in hooks.rs.
+BigDripleafBlock.setTiltAndScheduleTick	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Tick path schedules the next tilt; hooks.rs has the UNSTABLE entity path and the FULL projectile path, big_dripleaf_projectile_hit.
 BigDripleafBlock.setTilt	inline	crates/horizon-world/src/level/tick.rs::Sim::big_dripleaf_tick	Tilt write plus block_change game event folded into the tick.
 BigDripleafBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Class::BigDripleaf arm takes facing from the part below.
 BigDripleafBlock.createBlockStateDefinition	skip:data		Block state properties come from extracted data.

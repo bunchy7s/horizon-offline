@@ -5,7 +5,10 @@
 #[cfg(test)]
 use super::Frustum;
 use super::{Cull, SectionKey};
-use crate::{fast_hash::FxHashMap, streaming::in_view_distance};
+use crate::{
+    fast_hash::{FxHashMap, FxHashSet},
+    streaming::in_view_distance,
+};
 use glam::{DVec3, Vec3};
 
 /// One chunk column's resident sections.
@@ -55,6 +58,22 @@ impl<T> Resident<T> {
     pub fn len(&self) -> usize {
         self.items.len()
     }
+    /// Heap bytes of its own lists and maps, not counting what a `T` points
+    /// to (`horizon-ctl memory`). A hash map entry costs its pair and a
+    /// control byte.
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.items.capacity() * size_of::<(SectionKey, T)>()
+            + self.bounds.capacity() * size_of::<Option<[Vec3; 2]>>()
+            + self.slots.capacity() * (size_of::<(SectionKey, u32)>() + 1)
+            + self.columns.capacity() * size_of::<Column>()
+            + self
+                .columns
+                .iter()
+                .map(|c| c.sections.capacity() * size_of::<(i32, u32)>())
+                .sum::<usize>()
+            + self.column_index.capacity() * (size_of::<((i32, i32), u32)>() + 1)
+    }
     pub fn contains(&self, key: SectionKey) -> bool {
         self.slots.contains_key(&key)
     }
@@ -63,6 +82,15 @@ impl<T> Resident<T> {
     }
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.items.iter_mut().map(|(_, v)| v)
+    }
+    /// Every section's key and value.
+    #[cfg(debug_assertions)]
+    pub fn iter(&self) -> impl Iterator<Item = (SectionKey, &T)> {
+        self.items.iter().map(|(key, value)| (*key, value))
+    }
+    /// Every section's key and value.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (SectionKey, &mut T)> {
+        self.items.iter_mut().map(|(key, value)| (*key, value))
     }
     /// `key`'s value, when it is resident.
     pub fn find(&self, key: SectionKey) -> Option<&T> {
@@ -82,6 +110,10 @@ impl<T> Resident<T> {
     /// Sections from now on count from `min_y` (a level of another column).
     pub fn set_min_y(&mut self, min_y: i32) {
         self.min_y = min_y;
+    }
+    /// The minimum Y of section index 0.
+    pub fn min_y(&self) -> i32 {
+        self.min_y
     }
     pub fn clear(&mut self) {
         self.items.clear();
@@ -124,6 +156,35 @@ impl<T> Resident<T> {
         column.sections.push((key.1, slot));
         column.low = column.low.min(key.1);
         column.high = column.high.max(key.1);
+    }
+    /// Removes every section of the `gone` columns, the others keeping their order: one
+    /// pass over the store, where `remove` moves a slot and looks its column up for each.
+    pub fn remove_columns(&mut self, gone: &FxHashSet<(i32, i32)>) -> Vec<T> {
+        // Every column (a far teleport): emptied, without a lookup per section.
+        if self.columns.iter().all(|c| gone.contains(&(c.x, c.z))) {
+            self.bounds.clear();
+            self.slots.clear();
+            self.columns.clear();
+            self.column_index.clear();
+            return std::mem::take(&mut self.items)
+                .into_iter()
+                .map(|(_, value)| value)
+                .collect();
+        }
+        let items = std::mem::take(&mut self.items);
+        let bounds = std::mem::take(&mut self.bounds);
+        self.slots.clear();
+        self.columns.clear();
+        self.column_index.clear();
+        let mut removed = Vec::new();
+        for ((key, value), bounds) in items.into_iter().zip(bounds) {
+            if gone.contains(&(key.0, key.2)) {
+                removed.push(value);
+            } else {
+                self.insert_with_bounds(key, value, bounds);
+            }
+        }
+        removed
     }
     pub fn remove(&mut self, key: SectionKey) -> Option<T> {
         let slot = self.slots.remove(&key)?;
@@ -175,7 +236,7 @@ pub struct Visible {
 }
 
 /// The camera-relative origin of the section at `key`.
-fn origin(key: SectionKey, min_y: i32, camera: DVec3) -> DVec3 {
+pub(super) fn origin(key: SectionKey, min_y: i32, camera: DVec3) -> DVec3 {
     DVec3::new(
         f64::from(key.0 * 16),
         f64::from(min_y + key.1 * 16),
@@ -184,7 +245,7 @@ fn origin(key: SectionKey, min_y: i32, camera: DVec3) -> DVec3 {
 }
 
 /// The camera's chunk column.
-fn camera_column(camera: DVec3) -> (i32, i32) {
+pub(super) fn camera_column(camera: DVec3) -> (i32, i32) {
     (
         (camera.x.floor() as i32) >> 4,
         (camera.z.floor() as i32) >> 4,
@@ -336,7 +397,7 @@ impl<T> Resident<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn column_walk_finds_exactly_the_sections_in_view() {
@@ -496,13 +557,49 @@ mod tests {
                 ((seed >> 4) % 6) as i32 - 1,
                 ((seed >> 8) % 5) as i32 - 2,
             );
-            if (seed >> 12).is_multiple_of(3) {
+            if (seed >> 12).is_multiple_of(389) {
+                // Every column at once (a far teleport), and one that holds nothing.
+                let gone: FxHashSet<(i32, i32)> = (-2..=3)
+                    .flat_map(|x| (-2..=2).map(move |z| (x, z)))
+                    .collect();
+                let mut removed = r.remove_columns(&gone);
+                let mut expected: Vec<u32> = model.drain().map(|(_, v)| v).collect();
+                removed.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(removed, expected);
+                assert!(r.columns.is_empty() && r.column_index.is_empty());
+            } else if (seed >> 12).is_multiple_of(97) {
+                // Whole columns at once: the column of `key` and the next one along x.
+                let gone: FxHashSet<(i32, i32)> =
+                    [(key.0, key.2), (key.0 + 1, key.2)].into_iter().collect();
+                let mut removed = r.remove_columns(&gone);
+                let mut expected: Vec<u32> = model
+                    .extract_if(|k: &SectionKey, _| gone.contains(&(k.0, k.2)))
+                    .map(|(_, v)| v)
+                    .collect();
+                removed.sort_unstable();
+                expected.sort_unstable();
+                assert_eq!(removed, expected);
+            } else if (seed >> 12).is_multiple_of(3) {
                 assert_eq!(r.remove(key), model.remove(&key));
             } else {
                 r.insert(key, step);
                 model.insert(key, step);
             }
             check(&r, &model);
+            // `iter_mut` yields every key once, with its value.
+            let mut seen = HashSet::new();
+            for (key, value) in r.iter_mut() {
+                assert_eq!(*value, model[&key], "{key:?}");
+                assert!(seen.insert(key), "{key:?} twice");
+            }
+            assert_eq!(seen.len(), model.len());
+        }
+        for (_, value) in r.iter_mut() {
+            *value += 1;
+        }
+        for (key, value) in &model {
+            assert_eq!(r.find(*key), Some(&(value + 1)));
         }
         r.clear();
         assert_eq!(r.len(), 0);

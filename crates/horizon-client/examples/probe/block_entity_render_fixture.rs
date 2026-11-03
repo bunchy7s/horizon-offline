@@ -21,7 +21,7 @@ use horizon_world::registry::{BlockRegistry, BlockStateId};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
@@ -363,6 +363,9 @@ pub fn main() -> Result<()> {
             max_y,
             world: &world,
             sprites: &sprites,
+            emissive: &Default::default(),
+            translucent_sprites: &HashSet::new(),
+            atlas_revision: 1,
             nether: false,
             lid: &|_| open,
             sign: &|_| sign.as_ref(),

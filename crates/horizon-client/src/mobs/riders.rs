@@ -18,13 +18,9 @@ const BOARDING_COOLDOWN: i32 = 60;
 const MAX_PASSENGERS_ON_ONE_HOGLIN: i32 = 3;
 
 /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on any
-/// living entity (`extra.model_scale`, 0 when none came), 1 when unset.
-fn scale(m: &Mob) -> f64 {
-    if m.extra.model_scale > 0.0 {
-        f64::from(m.extra.model_scale)
-    } else {
-        1.0
-    }
+/// living entity, 1 when unset (`Mob::model_scale`).
+pub(super) fn scale(m: &Mob) -> f64 {
+    f64::from(m.model_scale())
 }
 /// Players and mannequins (`Avatar`).
 fn avatar(m: &Mob) -> bool {
@@ -57,23 +53,35 @@ fn base_attachment(v: &Mob) -> [f64; 3] {
         Species::Nautilus | Species::ZombieNautilus => [0.0, 1.1375, 0.0],
         Species::Camel | Species::CamelHusk => super::camel::passenger_attachment(v),
         // The default attachments: the top of the bounding box, before
-        // `passenger_attachment`'s scale — a player's or mannequin's
-        // `height()` carries `minecraft:scale` since `getDimensions` grew it;
-        // any other mob's `height()` stays unscaled (`awake_dims_in`).
-        _ if avatar(v) => [0.0, f64::from(v.height()) / scale(v), 0.0],
-        _ => [0.0, f64::from(v.height()), 0.0],
+        // `passenger_attachment`'s scale — `height()` carries
+        // `minecraft:scale` since `getDimensions` grew every living entity's
+        // box, so the box's own height divides it out again.
+        _ => [0.0, f64::from(v.height()) / scale(v), 0.0],
     }
 }
 /// The rider's own `VEHICLE` attachment height (`ridingOffset`): how far
 /// below the vehicle's attachment point its feet hang, in its scale.
-pub fn vehicle_attachment(r: &Mob) -> f64 {
-    unscaled_vehicle_attachment(r) * scale(r)
+/// `vehicle_width` is the vehicle's `getBbWidth`, which a spider's own rule
+/// reads.
+pub fn vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
+    unscaled_vehicle_attachment(r, vehicle_width) * scale(r)
 }
-fn unscaled_vehicle_attachment(r: &Mob) -> f64 {
+fn unscaled_vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
     use Species as S;
     // Avatar.DEFAULT_VEHICLE_ATTACHMENT.
     if avatar(r) {
         return 0.6;
+    }
+    // `Spider.getVehicleAttachmentPoint` and `CaveSpider.getVehicleAttachmentPoint`:
+    // a vehicle no wider than the rider takes the spider's fixed seat, and a
+    // wider one the type's default. A cave spider's super call reaches the
+    // spider's rule, which then sees the same width and takes the default too.
+    if vehicle_width <= r.width() {
+        match r.species() {
+            S::CaveSpider => return 0.21875,
+            S::Spider => return 0.3125,
+            _ => {}
+        }
     }
     match r.species() {
         S::Zombie | S::Husk | S::Drowned if r.is_baby() => 0.1875,
@@ -368,21 +376,21 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
         assert!(close(passenger_attachment(&npc(0.0))[1], 1.8));
         assert!(close(passenger_attachment(&npc(1.5))[1], 2.7));
-        assert!(close(vehicle_attachment(&npc(0.0)), 0.6));
-        assert!(close(vehicle_attachment(&npc(1.5)), 0.9));
+        assert!(close(vehicle_attachment(&npc(0.0), 1.375), 0.6));
+        assert!(close(vehicle_attachment(&npc(1.5), 1.375), 0.9));
         // On a seat at y 55 (a text display, whose attachment is its feet):
         // a 1.5 NPC's feet at 54.1, where the server puts it.
         let seat = seat(
             [0.0; 3],
-            vehicle_attachment(&npc(1.5)),
+            vehicle_attachment(&npc(1.5), 1.375),
             Vec3::new(0.0, 55.0, 0.0),
             0.0,
         );
         assert!(close(seat.y, 54.1));
     }
     /// A scaled vehicle that is not an avatar: `remote_mob_attributes` puts
-    /// `minecraft:scale` on any living entity, but `awake_dims_in` grows only
-    /// avatars' boxes, so the seat still rides at the scaled box height.
+    /// `minecraft:scale` on any living entity, so the seat rides at the scaled
+    /// box height on a cow as on a fake player.
     #[test]
     fn a_scaled_vehicle_seat_stays_scaled() {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
@@ -395,5 +403,38 @@ mod tests {
     fn archers_keep_their_distance_and_brawlers_close_in() {
         assert!(ranged(Species::Skeleton) && ranged(Species::Pillager));
         assert!(!ranged(Species::Zombie) && !ranged(Species::Vindicator));
+    }
+    /// `Spider.getVehicleAttachmentPoint` and
+    /// `CaveSpider.getVehicleAttachmentPoint`: a vehicle no wider than the
+    /// spider takes the spider's fixed seat — 0.3125 of its scale, and a cave
+    /// spider's 0.21875 — and a wider one the type's default.
+    #[test]
+    fn a_spider_sits_by_its_own_rule_on_a_narrow_vehicle() {
+        // World-gated: without the extracted data the body never runs.
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
+            let new = |kind: &str| {
+                Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                )
+            };
+            let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+            let chicken = 0.4_f32;
+            // Wider than either spider (the boat's 1.375 is not).
+            let wide = 2.0_f32;
+            let spider = new("minecraft:spider");
+            let cave = new("minecraft:cave_spider");
+            assert!(spider.width() > chicken && cave.width() > chicken);
+            assert!(spider.width() < wide && cave.width() < wide);
+            assert!(close(vehicle_attachment(&spider, chicken), 0.3125));
+            assert!(close(vehicle_attachment(&cave, chicken), 0.21875));
+            assert!(close(vehicle_attachment(&spider, wide), 0.0));
+            assert!(close(vehicle_attachment(&cave, wide), 0.0));
+            let mut big = new("minecraft:cave_spider");
+            big.extra.model_scale = 2.0;
+            assert!(close(vehicle_attachment(&big, chicken), 0.4375));
+        });
     }
 }

@@ -21,7 +21,7 @@ use horizon_world::{
     server_player_damage::ServerDamageEnvironment,
     synced_floats::{FloatValue, Observer, SyncedFloats},
 };
-use std::{fs, io, path::Path, sync::OnceLock};
+use std::{cell::Cell, fs, io, path::Path, sync::OnceLock};
 pub(crate) type Attributes = LiveAttributes<Box<dyn horizon_world::attributes::live::Identities>>;
 pub(crate) type State = HurtState<DamageTypeId>;
 
@@ -35,7 +35,9 @@ pub struct HurtSource<'a> {
     pub causing: i32,
     pub direct: i32,
 }
-/// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`].
+/// What `LivingEntity.hurtServer` is about to hurt, for [`HURT_SERVER`], or
+/// `LivingEntity.knockback` to push, for [`KNOCKBACK`]: the entity and the
+/// hit's source.
 pub enum Hurting<'a> {
     /// A player, by its entity id.
     Player(i32, HurtSource<'a>),
@@ -43,6 +45,8 @@ pub enum Hurting<'a> {
     Mob(&'a crate::mobs::Mob, &'a crate::mobs::Damage),
     /// The ender dragon, by its entity id.
     Dragon(i32, HurtSource<'a>),
+    /// An armor stand, by its entity id, for sweep knockback.
+    ArmorStand(i32, HurtSource<'a>),
 }
 /// The game's native damage hook (`native_living_incoming_damage`), set once by the
 /// game: `LivingEntity.hurtServer` once its guards passed. It may change the
@@ -51,6 +55,77 @@ pub static HURT_SERVER: OnceLock<fn(Hurting<'_>, &mut f32) -> bool> = OnceLock::
 /// Whether [`HURT_SERVER`] canceled the hit (never while it is unset).
 pub fn hurt_server_canceled(hurting: Hurting<'_>, amount: &mut f32) -> bool {
     HURT_SERVER.get().is_some_and(|hook| hook(hurting, amount))
+}
+/// A knockback's strength and direction, as `LivingEntity.knockback` has them
+/// before knockback resistance is applied. The entity is pushed away from
+/// the direction (`x`, `z`), which vanilla points at the source of the hit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Knock {
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+/// The game's native knockback hook (`native_living_knockback`), set once by
+/// the game: `LivingEntity.knockback`, at its start (`LivingKnockBackEvent`), on the raw strength
+/// and before the knockback resistance and the motion change. It may change the [`Knock`]; true
+/// cancels it.
+pub static KNOCKBACK: OnceLock<fn(Hurting<'_>, &mut Knock) -> bool> = OnceLock::new();
+
+thread_local! {
+    static KNOCKBACK_ATTACKER: Cell<i32> = const { Cell::new(0) };
+    static KNOCKBACK_HELD: std::cell::RefCell<[Option<crate::items::ItemStack>; 2]> =
+        const { std::cell::RefCell::new([None, None]) };
+}
+
+/// The entity behind the synchronous attack, or 0 outside an attack scope.
+pub fn knockback_attacker() -> i32 {
+    KNOCKBACK_ATTACKER.get()
+}
+
+/// What the attacker holds in the main and off hand, or none when it is not known (or no
+/// native mod listens: the game only records it then).
+pub fn knockback_held() -> [Option<crate::items::ItemStack>; 2] {
+    KNOCKBACK_HELD.with(|held| held.borrow().clone())
+}
+
+/// Restore the previous attacker on return or unwind, including nested guest actions.
+pub fn knockback_from(entity: i32) -> impl Drop {
+    knockback_from_holding(entity, [None, None])
+}
+
+/// [`knockback_from`] that also records the attacker's held stacks (main hand, off hand).
+pub fn knockback_from_holding(
+    entity: i32,
+    held: [Option<crate::items::ItemStack>; 2],
+) -> impl Drop {
+    struct Restore(i32, [Option<crate::items::ItemStack>; 2]);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            KNOCKBACK_ATTACKER.set(self.0);
+            KNOCKBACK_HELD.with(|held| *held.borrow_mut() = std::mem::take(&mut self.1));
+        }
+    }
+    let held = KNOCKBACK_HELD.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), held));
+    Restore(KNOCKBACK_ATTACKER.replace(entity), held)
+}
+/// Whether [`KNOCKBACK`] canceled the knockback (never while it is unset). A
+/// value it leaves that is not a finite number is put back as it was.
+pub fn knockback_canceled(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    let Some(hook) = KNOCKBACK.get() else {
+        return false;
+    };
+    let before = *knock;
+    let canceled = hook(pushed, knock);
+    for (now, was) in [
+        (&mut knock.strength, before.strength),
+        (&mut knock.x, before.x),
+        (&mut knock.z, before.z),
+    ] {
+        if !now.is_finite() {
+            *now = was;
+        }
+    }
+    canceled
 }
 pub struct HealthResources {
     pub damage: Catalog,
@@ -914,6 +989,27 @@ impl ServerPlayerHurtWorld for Environment<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn knockback_attacker_scopes_restore_on_return_and_unwind() {
+        assert_eq!(super::knockback_attacker(), 0);
+        {
+            let _outer = super::knockback_from(7);
+            let panic = std::panic::catch_unwind(|| {
+                let _inner = super::knockback_from(9);
+                assert_eq!(super::knockback_attacker(), 9);
+                panic!("test unwind");
+            });
+            assert!(panic.is_err());
+            assert_eq!(super::knockback_attacker(), 7);
+            assert_eq!(
+                std::thread::spawn(super::knockback_attacker)
+                    .join()
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(super::knockback_attacker(), 0);
+    }
+    #[test]
     fn a_hit_in_the_hurt_cooldown_knocks_nobody_back() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -1029,7 +1125,7 @@ mod tests {
         use super::Hurting;
         fn hook(hurting: Hurting<'_>, amount: &mut f32) -> bool {
             let (entity, seen) = match hurting {
-                Hurting::Player(e, s) | Hurting::Dragon(e, s) => {
+                Hurting::Player(e, s) | Hurting::Dragon(e, s) | Hurting::ArmorStand(e, s) => {
                     (e, format!("{} {}", s.damage_type, s.causing))
                 }
                 Hurting::Mob(mob, source) => (mob.id as i32, format!("{:?}", source.kind)),
@@ -1125,6 +1221,149 @@ mod tests {
         assert!(hurt.unwrap().hurt);
         assert_eq!(seen(9011), [("minecraft:arrow 0".to_owned(), 5.0)]);
         assert_eq!(seen(9013), [("minecraft:arrow 44".to_owned(), 5.0)]);
+    }
+
+    /// What the knockback hook of these tests saw: the entity, the hit that
+    /// causes it (a mob's damage kind) and the push it was handed.
+    static PUSHES: std::sync::Mutex<Vec<(i32, String, super::Knock)>> =
+        std::sync::Mutex::new(Vec::new());
+    /// Sets the native knockback hook of these tests (global: it stays set for
+    /// the process), for mobs 9101 to 9106 only: it records the push, cancels
+    /// 9101's, doubles 9102's strength and turns its direction around, leaves
+    /// 9103 non-finite numbers, and gives 9105 (whose resistance leaves
+    /// nothing) a strength of 0.4.
+    fn set_knockback_hook() -> fn(i32) -> Vec<(String, super::Knock)> {
+        use super::{Hurting, Knock};
+        fn hook(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+            let Hurting::Mob(mob, source) = pushed else {
+                return false;
+            };
+            let entity = mob.id as i32;
+            if !(9101..=9106).contains(&entity) {
+                return false;
+            }
+            let hit = format!("{:?}", source.kind);
+            PUSHES.lock().unwrap().push((entity, hit, *knock));
+            match entity {
+                9101 => return true,
+                9102 => {
+                    knock.strength *= 2.0;
+                    knock.x = -knock.x;
+                }
+                9103 => {
+                    knock.strength = f64::NAN;
+                    knock.x = f64::INFINITY;
+                    knock.z = f64::NEG_INFINITY;
+                }
+                9105 => knock.strength = 0.4,
+                _ => {}
+            }
+            false
+        }
+        let installed = *super::KNOCKBACK.get_or_init(|| hook);
+        assert!(std::ptr::fn_addr_eq(
+            installed,
+            hook as fn(Hurting<'_>, &mut Knock) -> bool
+        ));
+        |entity| {
+            let seen = PUSHES.lock().unwrap();
+            let pushes = seen.iter().filter(|p| p.0 == entity);
+            pushes.map(|p| (p.1.clone(), p.2)).collect()
+        }
+    }
+
+    /// A zombie in full netherite (0.1 a piece) is pushed 60 % as far as one
+    /// with no armour: `knockback` scales by the attribute's value with the
+    /// gear's modifiers, which the game hands the mob as `gear_knockback_resistance`.
+    #[test]
+    fn a_mobs_gear_resists_knockback() {
+        use crate::mobs::{Damage, Mob};
+        let hit = Damage::player([3.0, 0.0, 0.0]);
+        let pushed = |gear: Option<f64>, own: f64| {
+            let mut m = Mob::new(
+                9200,
+                crate::mobs::sensor_scan_tests::kind(),
+                Default::default(),
+                0.0,
+            );
+            m.on_ground = true;
+            m.attrs.knockback_resistance = own;
+            m.gear_knockback_resistance = gear;
+            m.knockback(0.4, 3.0, 0.0, &hit);
+            m.velocity.x
+        };
+        assert_eq!(pushed(None, 0.0), -0.4);
+        assert!((pushed(Some(0.4), 0.0) - -0.4 * 0.6).abs() < 1e-12);
+        // The gear's value is the whole attribute: it replaces the mob's own.
+        assert!((pushed(Some(0.4), 0.5) - -0.4 * 0.6).abs() < 1e-12);
+    }
+    /// `LivingEntity.knockback`: the hook runs before knockback resistance
+    /// takes its share and before motion changes; a mod's strength or
+    /// direction is what pushes, a cancel pushes nothing, and with no mod in
+    /// the way the push is vanilla's. Expected values are worked out by hand
+    /// from vanilla's formula: the horizontal speed halves and the push is
+    /// subtracted along the normalized direction; on the ground the vertical
+    /// speed becomes `min(0.4, vy / 2 + strength)`.
+    #[test]
+    fn the_native_knockback_hook_changes_or_cancels_a_mobs_push() {
+        use super::Knock;
+        use crate::mobs::{Damage, Mob};
+        let seen = set_knockback_hook();
+        let mob = |id, resistance| {
+            let mut m = Mob::new(
+                id,
+                crate::mobs::sensor_scan_tests::kind(),
+                Default::default(),
+                0.0,
+            );
+            m.on_ground = true;
+            m.attrs.knockback_resistance = resistance;
+            m
+        };
+        let velocity = |m: &Mob| (m.velocity.x, m.velocity.y, m.velocity.z);
+        let hit = Damage::player([3.0, 0.0, 0.0]);
+        let push = |id, resistance| {
+            let mut m = mob(id, resistance);
+            m.knockback(0.4, 3.0, 0.0, &hit);
+            m
+        };
+        // No mod in the way (the hook leaves 9100 alone): vanilla's push, away from x = 3.
+        let plain = push(9100, 0.0);
+        assert_eq!(velocity(&plain), (-0.4, 0.4, 0.0));
+        assert!(plain.needs_sync);
+        // Canceled: no motion, no resync. The hook saw the push the game made.
+        let kept = push(9101, 0.0);
+        assert_eq!(velocity(&kept), (0.0, 0.0, 0.0));
+        assert!(!kept.needs_sync);
+        let made = Knock {
+            strength: 0.4,
+            x: 3.0,
+            z: 0.0,
+        };
+        assert_eq!(seen(9101), [("PlayerAttack".to_owned(), made)]);
+        // A stronger push the other way: twice the strength, x turned around.
+        let turned = push(9102, 0.0);
+        assert_eq!(velocity(&turned), (0.8, 0.4, 0.0));
+        assert_eq!(velocity(&push(9102, 0.5)), (0.4, 0.4, 0.0));
+        // Numbers that are not finite are put back as the game made them.
+        assert_eq!(velocity(&push(9103, 0.0)), (-0.4, 0.4, 0.0));
+        // Before the resistance (`LivingKnockBackEvent`): the hook is handed the raw 0.4, and
+        // the push that follows is halved.
+        let resisted = push(9104, 0.5);
+        assert_eq!(velocity(&resisted), (-0.2, 0.2, 0.0));
+        assert_eq!(seen(9104)[0].1.strength, 0.4);
+        // A full resistance takes all of what the hook leaves: no push.
+        let stopped = push(9105, 1.0);
+        assert_eq!(seen(9105)[0].1.strength, 0.4);
+        assert_eq!(velocity(&stopped), (0.0, 0.0, 0.0));
+        // The game's own hit on a mob reaches the hook with its damage.
+        let mut hurt = mob(9106, 0.0);
+        assert!(hurt.damage(2.0, hit));
+        // dealDefaultKnockback pushes with the float 0.4F.
+        let strength = f64::from(0.4_f32);
+        assert_eq!(velocity(&hurt), (-strength, 0.4, 0.0));
+        let made = Knock { strength, ..made };
+        assert_eq!(seen(9106), [("PlayerAttack".to_owned(), made)]);
     }
 
     /// #4301: `ServerPlayer.isInvulnerableTo`'s `!connection.hasClientLoaded`

@@ -10,6 +10,29 @@ use horizon_world::registry::{BlockRegistry, BlockStateId};
 use serde_json::{Value, json};
 use std::path::Path;
 
+/// The standalone models native mods asked for (`native_standalone_models`).
+static STANDALONE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Sets the models no blockstate names that every resource load bakes
+/// beside the block models ([`StateModels::standalone`]): once, at start,
+/// as vanilla's `ModelEvent.RegisterStandalone` is posted once per model
+/// discovery. Names are sorted and deduplicated; one without a namespace
+/// (`mymod:block/shaft_half`) is dropped. False when already set.
+pub fn register_standalone(mut names: Vec<String>) -> bool {
+    names.retain(|n| {
+        n.split_once(':')
+            .is_some_and(|(ns, path)| !ns.is_empty() && !path.is_empty())
+    });
+    names.sort();
+    names.dedup();
+    STANDALONE.set(names).is_ok()
+}
+
+/// What [`register_standalone`] set; none before.
+pub fn standalone() -> &'static [String] {
+    STANDALONE.get().map_or(&[], Vec::as_slice)
+}
+
 type Placement = (&'static str, &'static [(&'static str, &'static str)]);
 const GALLERY: [Placement; 16] = [
     (
@@ -76,8 +99,9 @@ pub(crate) fn prepare_with_models(
         .filter(|name| registry.default_state(name).is_some())
         .map(|name| name.strip_prefix("minecraft:").unwrap_or(name))
         .collect();
-    let catalog =
+    let mut catalog =
         StateModels::from_facts_with_models(root, registry, &blocks, sprites, &facts, models)?;
+    catalog.bake_standalone(root, sprites, models, standalone())?;
     let mut placements = Vec::new();
     let mut states = Vec::new();
     for (index, (name, properties)) in GALLERY.iter().enumerate() {
@@ -86,7 +110,16 @@ pub(crate) fn prepare_with_models(
             .state(state)
             .ok_or("missing gallery registry state")?;
         let position = BlockPos::new((index % 4) as i32 * 4 - 7, 4, (index / 4) as i32 * 4 + 14);
-        let selected = catalog.collect(state, position)?;
+        // A state no definition binds (a pack's partial blockstate file
+        // without vanilla's below it) is left out, as the mesher skips it,
+        // instead of failing the whole pack.
+        let selected = match catalog.collect(state, position) {
+            Ok(selected) => selected,
+            Err(e) => {
+                log::warn!("Horizon: gallery block {name} has no model: {e}");
+                continue;
+            }
+        };
         states.push(json!({"block":actual.name,"properties":actual.properties,"state_id":state.0,
             "position":[position.x,position.y,position.z],
             "models":selected.iter().map(|(v,_)| json!({"model":v.model,"rotations":v.rotations,"uv_lock":v.uv_lock})).collect::<Vec<_>>()}));
@@ -148,4 +181,24 @@ pub fn load_visibility(
         })
         .collect::<std::result::Result<_, &str>>()?;
     Ok(FaceVisibility::new(&occlusion, &definitions)?)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn standalone_names_are_namespaced_sorted_and_set_once() {
+        assert!(super::standalone().is_empty());
+        let names = [
+            "lanef:block/b",
+            "nonamespace",
+            ":x",
+            "lanef:",
+            "lanef:block/a",
+            "lanef:block/b",
+        ];
+        assert!(super::register_standalone(names.map(str::to_owned).into()));
+        assert_eq!(super::standalone(), ["lanef:block/a", "lanef:block/b"]);
+        assert!(!super::register_standalone(vec!["other:block/c".into()]));
+        assert_eq!(super::standalone(), ["lanef:block/a", "lanef:block/b"]);
+    }
 }

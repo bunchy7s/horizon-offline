@@ -24,6 +24,8 @@ pub const MAX_TEXTURES: usize = 8;
 pub const MAX_TEXTURE_SIZE: u32 = 2048;
 /// `[[lights]]` entries a manifest may declare.
 pub const MAX_LIGHTS: usize = 256;
+/// `[[particle_lights]]` entries a manifest may declare.
+pub const MAX_PARTICLE_LIGHTS: usize = 32;
 /// Sprite tags a pack may declare: the bits of `MaterialInput.tags`.
 pub const MAX_TAGS: usize = 32;
 
@@ -43,6 +45,8 @@ pub struct Manifest {
     pub shared: Vec<String>,
     pub sky: Option<Stage>,
     pub material: Option<Stage>,
+    /// Where corners of terrain are drawn: needs `material`, and shares its module.
+    pub vertex: Option<Stage>,
     /// The colour of rain and snow streaks (Minecraft's own when absent).
     pub weather: Option<Stage>,
     /// Full-screen passes, in the order they run.
@@ -60,6 +64,9 @@ pub struct Manifest {
     /// The colour of block light by the block giving it off: the first entry with a matching
     /// pattern wins (`Manifest::light_of`).
     pub lights: Vec<LightColor>,
+    /// Particles that join the frame's coloured lights (`MaterialInput.colored_light`): the first
+    /// entry naming a particle wins.
+    pub particle_lights: Vec<ParticleLight>,
     pub budget: Budget,
     /// When the material stage's water mirror (`reflection`) is drawn.
     pub reflection: Option<Reflection>,
@@ -121,6 +128,16 @@ pub struct PackTexture {
     pub repeat: bool,
 }
 
+/// `[[particle_lights]]`: `particles` (names, as `firefly` or `minecraft:firefly`) light what's
+/// within `reach` blocks in `color`, as strongly as they are opaque.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParticleLight {
+    pub particles: Vec<String>,
+    pub color: [f32; 3],
+    pub reach: f32,
+}
+
 /// `[[lights]]`: the colour of the block light from some blocks, as the material stage reads
 /// it through `block_light_color`.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -161,7 +178,16 @@ pub struct Material {
     pub id: u32,
     /// Sprite names such as `minecraft:block/oak_leaves` (the namespace defaults to
     /// `minecraft`), each with any number of `*` matching any run of characters.
+    #[serde(default)]
     pub sprites: Vec<String>,
+    /// Blocks (`oak_log`, `minecraft:stone`, `grass_block:snowy=true`): the sprites their models
+    /// draw with take the id where no entry's `sprites` names them.
+    #[serde(default)]
+    pub blocks: Vec<String>,
+    /// This id's sprites draw in the translucent pass (sorted, blended, `input.translucent`),
+    /// clear texels and all, rather than cut out with the solid terrain.
+    #[serde(default)]
+    pub translucent: bool,
 }
 
 impl Material {
@@ -173,6 +199,15 @@ impl Material {
 
 /// Whether the sprite or block `name` (`namespace:path`) fits `pattern`: the namespace
 /// defaults to `minecraft`, and each `*` matches any run of characters.
+/// The colour of the first of `lights` whose patterns match the block `name`
+/// (`Manifest::light_of`, for a copy of the entries).
+pub fn light_color(lights: &[LightColor], name: &str) -> Option<[f32; 3]> {
+    lights
+        .iter()
+        .find(|l| l.blocks.iter().any(|pattern| sprite_matches(pattern, name)))
+        .map(|l| l.color)
+}
+
 fn sprite_matches(pattern: &str, name: &str) -> bool {
     let pattern = match pattern.contains(':') {
         true => std::borrow::Cow::Borrowed(pattern),
@@ -315,6 +350,8 @@ struct Raw {
     sky: Option<Stage>,
     material: Option<Stage>,
     #[serde(default)]
+    vertex: Option<Stage>,
+    #[serde(default)]
     weather: Option<Stage>,
     #[serde(default)]
     post: Vec<Stage>,
@@ -330,6 +367,8 @@ struct Raw {
     textures: Vec<RawTexture>,
     #[serde(default)]
     lights: Vec<LightColor>,
+    #[serde(default)]
+    particle_lights: Vec<ParticleLight>,
     #[serde(default)]
     budget: RawBudget,
     reflection: Option<Reflection>,
@@ -465,13 +504,25 @@ impl Manifest {
                 "no stage: give it a [sky], a [material], a [weather] or a [[post]]".into(),
             ));
         }
-        if raw.sky.iter().chain(&raw.post).any(|s| s.fog.is_some()) {
+        if raw.vertex.is_some() && raw.material.is_none() {
+            return Err(err(
+                "[vertex] needs a [material]: they draw terrain together".into(),
+            ));
+        }
+        if raw
+            .sky
+            .iter()
+            .chain(&raw.vertex)
+            .chain(&raw.post)
+            .any(|s| s.fog.is_some())
+        {
             return Err(err("`fog` is a key of [material] only".into()));
         }
         if raw
             .sky
             .iter()
             .chain(&raw.material)
+            .chain(&raw.vertex)
             .any(|s| s.scale.is_some() || s.output.is_some())
         {
             return Err(err("`scale` and `output` are keys of [[post]] only".into()));
@@ -487,6 +538,7 @@ impl Manifest {
             .sky
             .iter()
             .chain(&raw.material)
+            .chain(&raw.vertex)
             .chain(&raw.weather)
             .chain(&raw.post);
         for file in raw
@@ -563,8 +615,15 @@ impl Manifest {
             if !(1..=65535).contains(&m.id) {
                 return Err(err(format!("material id {} is not in 1..=65535", m.id)));
             }
-            if m.sprites.is_empty() || m.sprites.iter().any(String::is_empty) {
-                return Err(err(format!("material {}: needs sprites", m.id)));
+            let listed = m.sprites.iter().chain(&m.blocks);
+            if m.sprites.is_empty() && m.blocks.is_empty() || listed.clone().any(String::is_empty) {
+                return Err(err(format!("material {}: needs sprites or blocks", m.id)));
+            }
+            if let Some(block) = m.blocks.iter().find(|b| b.contains(char::is_whitespace)) {
+                return Err(err(format!(
+                    "material {}: the block {block:?} has a space in it",
+                    m.id
+                )));
             }
         }
         for id in raw.shadow.iter().flat_map(|s| &s.solid_materials) {
@@ -616,6 +675,34 @@ impl Manifest {
             return Err(err(
                 "lights are read by the material stage: give it a [material]".into(),
             ));
+        }
+        if !raw.particle_lights.is_empty() && raw.material.is_none() {
+            return Err(err(
+                "particle lights are read by the material stage: give it a [material]".into(),
+            ));
+        }
+        if raw.particle_lights.len() > MAX_PARTICLE_LIGHTS {
+            return Err(err(format!(
+                "{} [[particle_lights]]; a pack may declare {MAX_PARTICLE_LIGHTS}",
+                raw.particle_lights.len()
+            )));
+        }
+        for l in &raw.particle_lights {
+            if l.particles.is_empty() {
+                return Err(err("a [[particle_lights]] entry needs particles".into()));
+            }
+            if l.color.iter().any(|c| !(0.0..=1.0).contains(c)) {
+                return Err(err(format!(
+                    "particle light color {:?} is not in 0..=1 per channel",
+                    l.color
+                )));
+            }
+            if !(0.25..=16.0).contains(&l.reach) {
+                return Err(err(format!(
+                    "particle light reach {} is not in 0.25..=16",
+                    l.reach
+                )));
+            }
         }
         if raw.lights.len() > MAX_LIGHTS {
             return Err(err(format!(
@@ -686,6 +773,7 @@ impl Manifest {
             shared: raw.shared,
             sky: raw.sky,
             material: raw.material,
+            vertex: raw.vertex,
             weather: raw.weather,
             post: raw.post,
             options,
@@ -694,6 +782,7 @@ impl Manifest {
             materials: raw.materials,
             textures,
             lights: raw.lights,
+            particle_lights: raw.particle_lights,
             budget: Budget { gpu_ms },
             reflection: raw.reflection,
             shadow: raw.shadow,
@@ -744,13 +833,34 @@ impl Manifest {
             .collect()
     }
 
+    /// The `blocks` lists in `block.properties`' form, for matching them against block states.
+    /// Empty without any.
+    pub fn material_blocks(&self) -> String {
+        self.materials
+            .iter()
+            .filter(|m| !m.blocks.is_empty())
+            .map(|m| format!("block.{}={}\n", m.id, m.blocks.join(" ")))
+            .collect()
+    }
+
+    /// Which of `layers` sprite layers draw in the translucent pass, by `materials` as
+    /// `sprite_materials` gives them: empty when none does.
+    pub fn translucent_layers(&self, materials: &[(u32, u32)], layers: usize) -> Vec<bool> {
+        let mut out = vec![false; layers];
+        for (layer, id) in materials {
+            if self.materials.iter().any(|m| m.translucent && m.id == *id)
+                && let Some(l) = out.get_mut(*layer as usize)
+            {
+                *l = true;
+            }
+        }
+        if out.contains(&true) { out } else { Vec::new() }
+    }
+
     /// The `[[lights]]` colour of the block `name` (`namespace:path`): the first entry with a
     /// matching pattern.
     pub fn light_of(&self, name: &str) -> Option<[f32; 3]> {
-        self.lights
-            .iter()
-            .find(|l| l.blocks.iter().any(|pattern| sprite_matches(pattern, name)))
-            .map(|l| l.color)
+        light_color(&self.lights, name)
     }
 
     /// The pack targets its post passes write (`[[post]] output`), in the order first
@@ -774,6 +884,7 @@ impl Manifest {
             .sky
             .iter()
             .chain(&self.material)
+            .chain(&self.vertex)
             .chain(&self.weather)
             .chain(&self.post);
         for file in self

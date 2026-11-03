@@ -14,7 +14,25 @@ pub struct Properties {
 
 impl Properties {
     pub fn parse(text: &str) -> Self {
+        Self::read(text, split)
+    }
+
+    /// As CIT Resewn reads its files: a line with an unescaped `=` splits there, so a key may
+    /// hold an unescaped `:` (`components.minecraft:custom_name=Bob`); other lines as `parse`.
+    pub fn parse_equals_first(text: &str) -> Self {
+        Self::read(text, |line| match unescaped_equals(line) {
+            Some(i) => (
+                line[..i].trim_end_matches([' ', '\t', '\x0c']),
+                &line[i + 1..],
+            ),
+            None => split(line),
+        })
+    }
+
+    fn read(text: &str, split: impl Fn(&str) -> (&str, &str)) -> Self {
         let mut out = Self::default();
+        // Each key's place in `entries`, so a file of many keys reads in linear time.
+        let mut index = std::collections::HashMap::<String, usize>::new();
         let mut lines = text.lines();
         while let Some(first) = lines.next() {
             let first = first.trim_start();
@@ -30,16 +48,16 @@ impl Properties {
                 }
             }
             let (key, value) = split(&line);
-            out.insert(unescape(key), unescape(value).trim().to_owned());
+            let (key, value) = (unescape(key), unescape(value).trim().to_owned());
+            match index.get(&key) {
+                Some(&i) => out.entries[i].1 = value,
+                None => {
+                    index.insert(key.clone(), out.entries.len());
+                    out.entries.push((key, value));
+                }
+            }
         }
         out
-    }
-
-    fn insert(&mut self, key: String, value: String) {
-        match self.entries.iter_mut().find(|(k, _)| *k == key) {
-            Some(entry) => entry.1 = value,
-            None => self.entries.push((key, value)),
-        }
     }
 
     pub fn get(&self, key: &str) -> Option<&str> {
@@ -60,6 +78,19 @@ impl Properties {
 /// An odd number of trailing backslashes.
 fn ends_in_continuation(line: &str) -> bool {
     line.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 1
+}
+
+fn unescaped_equals(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 2,
+            b'=' => return Some(i),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// The key ends at the first unescaped `=`, `:` or whitespace; then whitespace and at most one
@@ -96,8 +127,24 @@ fn unescape(s: &str) -> String {
             Some('r') => out.push('\r'),
             Some('f') => out.push('\x0c'),
             Some('u') => {
-                let hex: String = chars.by_ref().take(4).collect();
-                if let Some(c) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                let mut unit = || {
+                    let hex: String = chars.by_ref().take(4).collect();
+                    u32::from_str_radix(&hex, 16).ok()
+                };
+                let Some(mut code) = unit() else { continue };
+                // A character past U+FFFF is two escapes, as Java writes it: `\uD83D\uDE00`.
+                if (0xD800..0xDC00).contains(&code) {
+                    let rest = chars.as_str();
+                    if let Some(low) = rest
+                        .strip_prefix("\\u")
+                        .and_then(|r| u32::from_str_radix(r.get(..4)?, 16).ok())
+                        .filter(|low| (0xDC00..0xE000).contains(low))
+                    {
+                        chars.nth(5);
+                        code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+                    }
+                }
+                if let Some(c) = char::from_u32(code) {
                     out.push(c);
                 }
             }
@@ -136,6 +183,21 @@ mod tests {
         assert_eq!(p.get("key=with:colon"), Some("a\tb"));
         // An even number of backslashes is an escaped backslash, not a continuation.
         assert_eq!(p.get("last\\"), Some("x"));
+        let emoji = Properties::parse("nbt.display.Name=\\uD83D\\uDE00 Sword\n");
+        assert_eq!(emoji.get("nbt.display.Name"), Some("\u{1F600} Sword"));
+    }
+
+    #[test]
+    fn equals_first_keeps_colons_in_keys() {
+        let text = "components.minecraft:custom_name = Bob\nnbt.a\\=b=c\ntype:item\n";
+        let p = Properties::parse_equals_first(text);
+        assert_eq!(p.get("components.minecraft:custom_name"), Some("Bob"));
+        assert_eq!(p.get("nbt.a=b"), Some("c"), "an escaped = is the key's");
+        assert_eq!(p.get("type"), Some("item"), "no = at all: Java's rules");
+        assert_eq!(
+            Properties::parse(text).get("components.minecraft"),
+            Some("custom_name = Bob")
+        );
     }
 
     #[test]

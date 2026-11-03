@@ -62,11 +62,21 @@ impl Launcher {
             export::export(&i.home, &i.name, format, &worlds, &linked, &out).map(|done| {
                 let linked = match done.linked {
                     0 => String::new(),
-                    n => format!(", {n} listed by their Modrinth download"),
+                    n => trf(
+                        ", {count} listed by their Modrinth download",
+                        &[("count", &n.to_string())],
+                    ),
                 };
                 let file = done.path.file_name().unwrap_or_default().to_string_lossy();
                 (
-                    format!("Exported {file}: {} files{linked}.", done.copied),
+                    trf(
+                        "Exported {file}: {count} files{linked}.",
+                        &[
+                            ("file", &file),
+                            ("count", &done.copied.to_string()),
+                            ("linked", &linked),
+                        ],
+                    ),
                     done.path,
                 )
             })
@@ -114,18 +124,18 @@ impl Launcher {
             );
         }
         let about = match panel.format {
-            Format::Mrpack => {
+            Format::Mrpack => tr(
                 "Modrinth's modpack format: resource packs from Modrinth are listed by their \
-                 download, the rest is carried in it."
-            }
-            Format::Zip => "The game folder's own layout, zipped.",
+                 download, the rest is carried in it.",
+            ),
+            Format::Zip => tr("The game folder's own layout, zipped."),
         };
         let mut worlds = div().flex().flex_col().gap(px(6.));
         if panel.worlds.is_empty() {
             worlds = worlds.child(
                 text(theme::CAPTION)
                     .text_color(t.muted)
-                    .child("No worlds to put in."),
+                    .child(tr("No worlds to put in.")),
             );
         }
         for (n, (_, name, on)) in panel.worlds.iter().enumerate() {
@@ -188,15 +198,15 @@ impl Launcher {
                 .px(px(14.))
                 .py(px(12.))
                 .ml(px(40.))
-                .child(caps("Export to share").text_color(t.muted))
+                .child(caps(tr("Export to share")).text_color(t.muted))
                 .child(pick)
                 .child(text(theme::CAPTION).text_color(t.muted).child(about))
-                .child(caps("Worlds").text_color(t.muted))
+                .child(caps(tr("Worlds")).text_color(t.muted))
                 .child(worlds)
-                .child(text(theme::CAPTION).text_color(t.muted).child(
+                .child(text(theme::CAPTION).text_color(t.muted).child(tr(
                     "Settings, packs and Horizon mods go in; logs, screenshots, backups and \
                          your account never do. Worlds go without their per-player files.",
-                ))
+                )))
                 .child(
                     div()
                         .flex()
@@ -204,7 +214,11 @@ impl Launcher {
                         .gap(px(10.))
                         .child(go)
                         .when(panel.busy, |d| {
-                            d.child(text(theme::CAPTION).text_color(t.muted).child("Exporting…"))
+                            d.child(
+                                text(theme::CAPTION)
+                                    .text_color(t.muted)
+                                    .child(tr("Exporting…")),
+                            )
                         }),
                 )
                 .children(result),

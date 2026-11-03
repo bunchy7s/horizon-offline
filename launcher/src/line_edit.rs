@@ -508,7 +508,7 @@ pub(super) fn content(
     placeholder: &'static str,
 ) -> Div {
     if edit.text.is_empty() && !focused {
-        return div().text_color(t.muted).child(placeholder);
+        return div().text_color(t.muted).child(tr(placeholder));
     }
     let (before, selected, after, caret_first) = edit.view(whole);
     let text = |s: String| {

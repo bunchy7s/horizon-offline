@@ -1,4 +1,5 @@
 //! Native component registration, value limits and content identity.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     content_identity,
     mod_content::{ContentMod, accept_mod, build, known_components},

@@ -153,7 +153,14 @@ fn material_ids_go_by_the_first_entry_and_may_cut_shadows_whole() {
         "[[materials]]\nid = 65536\nsprites = [\"a\"]\n",
         "1..=65535",
     );
-    refused("[[materials]]\nid = 1\nsprites = []\n", "needs sprites");
+    refused(
+        "[[materials]]\nid = 1\nsprites = []\n",
+        "needs sprites or blocks",
+    );
+    refused(
+        "[[materials]]\nid = 1\nblocks = [\"oak log\"]\n",
+        "has a space",
+    );
     refused(
         "[shadow]\nsolid_materials = [3]\n",
         "no [[materials]] entry",
@@ -603,4 +610,55 @@ fn post_outputs_are_named_scaled_and_never_the_last_pass() {
         let e = pack(passes).unwrap_err();
         assert!(e.contains(why), "{passes}: {e}");
     }
+}
+
+#[test]
+fn a_vertex_stage_needs_a_material() {
+    let head = "schema = 1\nid = \"a\"\nname = \"A\"\nversion = \"1\"\napi = \"0.1\"\n";
+    let e = Manifest::parse(&format!(
+        "{head}[vertex]\nfile = \"v.wgsl\"\n[[post]]\nfile = \"p.wgsl\"\n"
+    ))
+    .unwrap_err();
+    assert!(e.to_string().contains("needs a [material]"), "{e}");
+    let m = Manifest::parse(&format!(
+        "{head}[material]\nfile = \"m.wgsl\"\n[vertex]\nfile = \"v.wgsl\"\n"
+    ))
+    .unwrap();
+    assert_eq!(m.vertex.unwrap().file, "v.wgsl");
+}
+
+#[test]
+fn materials_name_blocks_and_move_sprites_to_the_translucent_pass() {
+    let m = Manifest::parse(concat!(
+        "schema = 1\nid = \"a\"\nname = \"A\"\nversion = \"1\"\napi = \"0.1\"\n",
+        "[material]\nfile = \"m.wgsl\"\n",
+        "[[materials]]\nid = 7\nblocks = [\"oak_log\", \"grass_block:snowy=true\"]\n\
+         [[materials]]\nid = 8\nsprites = [\"block/glass\"]\ntranslucent = true\n\
+         [[materials]]\nid = 9\nsprites = [\"block/stone\"]\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        m.material_blocks(),
+        "block.7=oak_log grass_block:snowy=true\n"
+    );
+    assert_eq!(
+        m.translucent_layers(&[(0, 9), (2, 8)], 4),
+        [false, false, true, false]
+    );
+    assert!(m.translucent_layers(&[(0, 9)], 4).is_empty());
+}
+
+#[test]
+fn reads_particle_lights_and_refuses_bad_ones() {
+    let entry = |rest: &str| {
+        format!(
+            "{}[[particle_lights]]\nparticles = [\"firefly\"]\n{rest}\n",
+            sample_text()
+        )
+    };
+    let m = Manifest::parse(&entry("color = [0.3, 0.35, 0.2]\nreach = 4.0")).unwrap();
+    assert_eq!(m.particle_lights[0].particles, ["firefly"]);
+    assert_eq!(m.particle_lights[0].reach, 4.0);
+    assert!(refused(&entry("color = [2.0, 0.0, 0.0]\nreach = 4.0")).contains("0..=1"));
+    assert!(refused(&entry("color = [1.0, 1.0, 1.0]\nreach = 40.0")).contains("reach"));
 }

@@ -12,6 +12,8 @@ FRAGMENTS = Path("tools/native-hook-fragments")
 SOURCE = Path("crates/horizon-client/src/game/native_hooks.rs")
 DOCS = Path("docs/native-mods.md")
 CATALOG = Path("native-hooks.json")
+# Hand-written API types can carry markers too; generated copies are built from stamped sources.
+MOD_API = Path("crates/horizon-client/src/mod_api.rs")
 
 
 def stamp(check):
@@ -41,19 +43,28 @@ def stamp(check):
         raise ValueError("missing numeric NATIVE_HOOKS_API")
     version = int(match.group(1))
     names = {hook["name"] for hook in catalog["hooks"]}
+    helper_names = {helper["name"] for helper in catalog.get("helpers", [])}
     extra = {}
-    for path in ordered:
+    # Match the build-time generator's fragment order so stamping preserves the generated API.
+    for path in sorted(ordered):
         fragment = json.loads(path.read_text())
-        version += 1
-        marker = f"@API:{path.stem}@"
         for hook in fragment["hooks"]:
             if hook["name"] in names:
                 raise ValueError(f"duplicate hook: {hook['name']}")
             names.add(hook["name"])
             entry = {"name": hook["name"], "version": 1, "target": hook["target"]}
             # The catalog's optional facts about a hook travel with it.
-            entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable") if k in hook})
+            entry.update({k: hook[k] for k in ("neoforge", "side", "cancellable", "mod_api") if k in hook})
             catalog["hooks"].append(entry)
+        for helper in fragment.get("helpers", []):
+            if helper["name"] in helper_names:
+                raise ValueError(f"duplicate helper: {helper['name']}")
+            helper_names.add(helper["name"])
+            catalog.setdefault("helpers", []).append(helper)
+    for path in ordered:
+        fragment = json.loads(path.read_text())
+        version += 1
+        marker = f"@API:{path.stem}@"
         rust_summary = fragment["rust_summary"].replace(marker, str(version))
         doc_summary = fragment["doc_summary"].replace(marker, str(version))
         if not rust_summary or not doc_summary:
@@ -68,14 +79,18 @@ def stamp(check):
         docs = docs.replace(docs_marker, f"\nAPI {version} adds {doc_summary}\n" + docs_marker, 1)
         for filename in fragment.get("comments", []):
             file = Path(filename)
-            if file.is_absolute() or ".." in file.parts or file in (SOURCE, DOCS, CATALOG):
+            if file.is_absolute() or ".." in file.parts or file in (SOURCE, DOCS, CATALOG, MOD_API):
                 raise ValueError(f"invalid comment path: {filename}")
             text = extra.get(file, (ROOT / file).read_text())
             if marker not in text:
                 raise ValueError(f"missing {marker} in {filename}")
             extra[file] = text.replace(marker, str(version))
-        # Most hook comments live in the source itself.
+        # Most hook comments live in the source itself, and some hook lists in the docs.
         source = source.replace(marker, str(version))
+        docs = docs.replace(marker, str(version))
+        if (ROOT / MOD_API).exists():
+            text = extra.get(MOD_API, (ROOT / MOD_API).read_text())
+            extra[MOD_API] = text.replace(marker, str(version))
 
     source = re.sub(
         r"^(pub\(crate\) const NATIVE_HOOKS_API: u32 = )\d+;$",

@@ -101,7 +101,7 @@ impl Launcher {
         std::thread::spawn(move || {
             let _ = tx.send(Event::State(tailscale::status()));
             if want_token {
-                let token = account::store().get(tailscale::TOKEN_KEY).ok().flatten();
+                let token = account::keychain().get(tailscale::TOKEN_KEY).ok().flatten();
                 let _ = tx.send(Event::Token(token));
             }
         });
@@ -171,8 +171,8 @@ impl Launcher {
         }
         self.servers.text(Field::Token).set(String::new());
         self.internet.asking_token = false;
-        self.internet.message = match account::store().set(tailscale::TOKEN_KEY, &token) {
-            Ok(()) if account::store().persistent() => None,
+        self.internet.message = match account::keychain().set(tailscale::TOKEN_KEY, &token) {
+            Ok(()) if account::keychain().persistent() => None,
             Ok(()) => Some(Ok(
                 "No keychain here: the token is kept until the launcher closes.".into(),
             )),
@@ -183,7 +183,7 @@ impl Launcher {
     }
 
     fn forget_token(&mut self) {
-        let _ = account::store().delete(tailscale::TOKEN_KEY);
+        let _ = account::keychain().delete(tailscale::TOKEN_KEY);
         let i = &mut self.internet;
         i.token = Some(None);
         i.invites = None;
@@ -280,7 +280,7 @@ impl Launcher {
             .flex_col()
             .gap(px(12.))
             .p(px(20.))
-            .child(caps("Friends over the internet · Tailscale").text_color(t.muted));
+            .child(caps(tr("Friends over the internet · Tailscale")).text_color(t.muted));
         let line = |s: String| text(theme::CAPTION).text_color(t.muted).child(s);
         let check = button("ts-check", "Check again", Kind::Ghost, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
@@ -289,13 +289,12 @@ impl Launcher {
             },
         ));
         match self.internet.state.clone() {
-            None => return panel.child(line("Looking for Tailscale…".into())),
+            None => return panel.child(line(tr("Looking for Tailscale…").into())),
             Some(State::Missing) => {
                 return panel
-                    .child(text(theme::UI).text_color(t.ink).child(
-                        "Tailscale lets friends anywhere join without opening your router to the \
-                         internet. It's free: install it, sign in, then invite them here.",
-                    ))
+                    .child(text(theme::UI).text_color(t.ink).child(tr(
+                        "Tailscale lets friends anywhere join without opening your router to the internet. It's free: install it, sign in, then invite them here.",
+                    )))
                     .child(
                         div()
                             .flex()
@@ -318,13 +317,12 @@ impl Launcher {
                         this.internet.read = None;
                         cx.notify();
                     }));
-                panel =
-                    panel
-                        .child(text(theme::UI).text_color(t.ink).child(
-                            "Tailscale is installed but not running. Open it and switch it on.",
-                        ))
-                        .when(!why.is_empty(), |d| d.child(line(why)))
-                        .child(div().flex().gap(px(8.)).child(open).child(check));
+                panel = panel
+                    .child(text(theme::UI).text_color(t.ink).child(tr(
+                        "Tailscale is installed but not running. Open it and switch it on.",
+                    )))
+                    .when(!why.is_empty(), |d| d.child(line(why)))
+                    .child(div().flex().gap(px(8.)).child(open).child(check));
                 return self.internet_message(panel);
             }
             Some(State::SignedOut { auth_url }) => {
@@ -343,14 +341,13 @@ impl Launcher {
                         cx.notify();
                     }));
                 panel = panel
-                    .child(text(theme::UI).text_color(t.ink).child(
-                        "Tailscale is installed. Sign in with your own account in Tailscale \
-                         (Horizon never sees it), then come back here.",
-                    ))
+                    .child(text(theme::UI).text_color(t.ink).child(tr(
+                        "Tailscale is installed. Sign in with your own account in Tailscale (Horizon never sees it), then come back here.",
+                    )))
                     .when(cfg!(target_os = "linux"), |d| {
-                        d.child(line(format!(
-                            "On Linux, run `{}` in a terminal and open the link it prints.",
-                            tailscale::LINUX_LOGIN
+                        d.child(line(trf(
+                            "On Linux, run `{cmd}` in a terminal and open the link it prints.",
+                            &[("cmd", tailscale::LINUX_LOGIN)],
                         )))
                     })
                     .child(div().flex().gap(px(8.)).child(sign_in).child(check));
@@ -380,14 +377,13 @@ impl Launcher {
             } else {
                 format!("{ip}:{port}")
             };
-            where_ = where_.child(line(format!(
-                "Or {ip_port}. Friends type it in Multiplayer, Add Server, once this computer is \
-                 shared with them and Tailscale runs on theirs."
+            where_ = where_.child(line(trf(
+                "Or {address}. Friends type it in Multiplayer, Add Server, once this computer is shared with them and Tailscale runs on theirs.",
+                &[("address", &ip_port)],
             )));
         } else {
             where_ = where_.child(line(
-                "Friends type it in Multiplayer, Add Server, once this computer is shared with \
-                 them and Tailscale runs on theirs."
+                tr("Friends type it in Multiplayer, Add Server, once this computer is shared with them and Tailscale runs on theirs.")
                     .into(),
             ));
         }
@@ -400,12 +396,15 @@ impl Launcher {
                 .flex()
                 .flex_col()
                 .gap(px(10.))
-                .child(text(theme::UI).text_color(t.ink).child("Invite a friend"))
+                .child(
+                    text(theme::UI)
+                        .text_color(t.ink)
+                        .child(tr("Invite a friend")),
+                )
                 .child(self.invite_section(&ip, port, cx)),
         );
         panel = panel.child(line(
-            "Horizon never turns on Funnel: the server isn't put on the public internet, only \
-             shared with the people you invite."
+            tr("Horizon never turns on Funnel: the server isn't put on the public internet, only shared with the people you invite.")
                 .into(),
         ));
         self.internet_message(panel)
@@ -431,9 +430,7 @@ impl Launcher {
         let token = self.internet.token();
         if token.is_none() {
             let mut d = div().flex().flex_col().gap(px(10.)).child(line(
-                "Share this computer with a friend: they get it in their own Tailscale, and \
-                 nothing else of yours. Do it in Tailscale's admin console (Machines, this \
-                 computer, Share), or here with an access token you make there."
+                tr("Share this computer with a friend: they get it in their own Tailscale, and nothing else of yours. Do it in Tailscale's admin console (Machines, this computer, Share), or here with an access token you make there.")
                     .into(),
             ));
             let machines = link(
@@ -459,8 +456,7 @@ impl Launcher {
                             .child(link("ts-keys", "Make a token", tailscale::KEYS)),
                     )
                     .child(line(
-                        "Settings, Keys, Generate access token. It's kept in this computer's \
-                         keychain and only sent to Tailscale."
+                        tr("Settings, Keys, Generate access token. It's kept in this computer's keychain and only sent to Tailscale.")
                             .into(),
                     ));
             } else {
@@ -501,8 +497,7 @@ impl Launcher {
                     .child(invite),
             )
             .child(line(
-                "One invitation per friend. With an email Tailscale sends it; without, send them \
-                 the link. They accept it in their own Tailscale account."
+                tr("One invitation per friend. With an email Tailscale sends it; without, send them the link. They accept it in their own Tailscale account.")
                     .into(),
             ));
         if let Some(fresh) = self.internet.fresh.clone() {
@@ -703,12 +698,12 @@ impl Launcher {
             d = d.child(safety);
         }
         d.child(div().flex().child(
-            button("ts-forget", "Forget the access token", Kind::Ghost, &t).on_click(cx.listener(
-                |this, _: &ClickEvent, _, cx| {
+            button("ts-forget", tr("Forget the access token"), Kind::Ghost, &t).on_click(
+                cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.forget_token();
                     cx.notify();
-                },
-            )),
+                }),
+            ),
         ))
     }
 }

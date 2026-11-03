@@ -2,6 +2,7 @@
 //! Run each mode in a separate process to capture CPU usage and peak RSS.
 //! The deferred mode evaluates both phases contiguously for fair loader comparison;
 //! actual client startup performs other initialization between these phases.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{assets::Assets, blocks::BlockFacts};
 use horizon_world::level::Behaviours;
 use std::{path::Path, time::Instant};

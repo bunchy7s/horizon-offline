@@ -46,7 +46,7 @@ The report is the [benchmark report format](benchmark-report.md): startup to the
 
 ## Reproduce it
 
-You need Horizon built (`cargo build --release -p horizon-client --bins`) and its resources prepared from your own copy of 26.3 (which also provides `.local/minecraft/26.3`, the vanilla client the driver starts), Java 25 with `javac`, and Python 3.10 or newer.
+You need Horizon built (`cargo build --release -p horizon-client -p horizon-client-lib --bins`) and its resources prepared from your own copy of 26.3 (which also provides `.local/minecraft/26.3`, the vanilla client the driver starts), Java 25 with `javac`, and Python 3.10 or newer.
 
 ```sh
 python3 tools/perf_bench.py --game horizon --label horizon-mine
@@ -55,9 +55,39 @@ python3 tools/perf_bench.py --game vanilla-mods --label mods-mine
 python3 tools/perf_bench.py --table horizon-mine vanilla-mine mods-mine
 ```
 
-Options: `--distances 8,16`, `--sizes 1920x1080`, `--scenes village,ocean`, `--seconds 20`, `--repeats 5`, `--heap 4G` (vanilla), `--offscreen` (Horizon, for locked or headless sessions). Results go to `benchmarks/perf/<label>-rd<N>.json` at 1280x720 and `<label>-1080p-rd<N>.json` at 1920x1080 (other sizes `<label>-<W>x<H>-rd<N>.json`; `--table` takes those labels), one [benchmark report](benchmark-report.md) per window size and render distance (the same format the game's `--benchmark` and the launcher write), with the load average before each game; each game's log, and the vanilla driver's event log, stay in `.local/perf-bench/`. Keep the machine otherwise idle, plugged in, and the window on a screen.
+Options: `--distances 8,16`, `--sizes 1920x1080`, `--scenes village,ocean`, `--seconds 20`, `--repeats 5`, `--heap 4G` (vanilla), `--offscreen` (Horizon, for locked or headless sessions). Results go to `benchmarks/perf/<label>-rd<N>.json` at 1280x720 and `<label>-1080p-rd<N>.json` at 1920x1080 (other sizes `<label>-<W>x<H>-rd<N>.json`; `--table` takes those labels), one [benchmark report](benchmark-report.md) per window size and render distance (the same format the game's `--benchmark` and the launcher write), with the load average before each game; each game's log, and the vanilla driver's event log, stay in `.local/perf-bench/`. Keep the machine otherwise idle, plugged in, and the window on a screen. `PERF_BENCH_TRACE=<file>` appends each load's timeline to that file, one JSON line per sample: Horizon's status every 50 ms after a line for each teleport (resident and generated chunks, chunks still pending, stage counts), and the vanilla driver's loaded chunk count and the chunks it holds within the render distance minus one; compare when the columns arrive with when the load ends.
+
+### Many-entity stress scenes
+
+`--scenes stress` (or some of `stress_empty`, `stress_mobs`, `stress_items`, `stress_frames`, `stress_armor_stands`, `stress_chests`, `stress_signs`, `stress_banners`, `stress_particles`) runs the scenes of `tools/stress_scenes.py` instead of flying: 1000 still mobs of 8 kinds, 2000 dropped items, 512 item frames, 500 armoured armor stands, 800 chests and shulker boxes, a wall of 687 written signs, 300 banners, and steady particles from repeating command blocks (flames, smoke, end rods, firework bursts, TNT in the air). Each is built high above the terrain by the same vanilla commands in every game (Horizon through `horizon-ctl command`, vanilla and vanilla-mods through the driver mod), settles 6 seconds and is held still for `--seconds`; `stress_empty` is the same camera and floor without them. Entities are drawn only within a distance that grows with the render distance up to 20 (`Entity.shouldRenderAtSqrDistance`), so run them at 16 or more:
+
+```sh
+python3 tools/perf_bench.py --game horizon --scenes stress --distances 16 --label stress-horizon
+python3 tools/perf_bench.py --game vanilla --scenes stress --distances 16 --label stress-vanilla
+python3 tools/perf_bench.py --table stress-horizon stress-vanilla
+```
+
+Besides the FPS table, `--table` then gives each scene's median frame CPU time (Horizon), client tick time and resident memory. Chests stay closed: opening them needs a player, which neither driver has. The stress scenes use 26.3's command syntax, so they are not for `--game neoforge`.
 
 On Windows, run `python tools\perf_bench.py ...` the same way. Horizon's control endpoint there is a localhost TCP port, which the game writes to a `.json` file in the temporary folder. `--build` can point at an installed release (`%APPDATA%\horizon-launcher\versions\vX.Y.Z`, with `--resources` its `.local\horizon-client\26.3`), and the report then gives that release's version.
+
+## Frame pacing
+
+`tools/pacing_bench.py` measures smoothness rather than throughput: every frame of the sessions where players see
+hitches, a fast flight (64 blocks a second over new terrain), eight long teleports, trips to the Nether and back, and
+the inventory and pause menu opened and closed twenty times. For each it reports the median, p99 and p99.9 frame
+times, the slowest frame, the 1% and 0.1% lows and the frames over 33 ms. The game runs with `HORIZON_SPIKES`, so
+every slow frame also logs its timed spans (wall and thread CPU time): the report keeps the slowest ones next to the
+figures, which says whether a hitch was work (a span's CPU time) or waiting (the GPU, a lock, a file).
+`Renderer`'s frame and `entity_geometry` time their steps as spans too (`spans::laps`).
+
+```sh
+python3 tools/pacing_bench.py --build target/fast --label main --distances 32
+python3 tools/pacing_bench.py --compare main mybranch
+```
+
+`--size 320x180` keeps a software renderer (Mesa's lavapipe on a machine with no GPU) from hiding the CPU side; there
+only the spans' CPU times mean anything.
 
 ## Results
 

@@ -15,19 +15,26 @@ impl Game<'_> {
             return self.dialog_has_text_field();
         }
         if let Some(title) = self.title.as_mut() {
-            return title.focused_field().is_some();
+            // A caret field, an append-only one (`focused_field`), or a game
+            // rule's box (`has_caret_field` asks the rules screen itself, and
+            // `title_edit` types into it).
+            return title.has_caret_field() || title.focused_field().is_some();
         }
         if self.sign_edit.is_some() || matches!(self.book, Some(BookScreen::Edit { .. })) {
             return true;
         }
         match self.screen {
-            Screen::Chat | Screen::CommandBlock => true,
+            Screen::Chat | Screen::CommandBlock | Screen::Social => true,
             Screen::DebugOptions => self
                 .debug_options
                 .as_ref()
                 .is_some_and(|s| s.search_focused()),
+            // The language list's search, the settings search and the pack
+            // screen's search (OptionsUi::typing).
+            Screen::Options => self.ui.options.typing(),
             Screen::WorldOptions => self.world_options_typing(),
             Screen::Creative => self.creative_screen.tab().search,
+            Screen::BlockEditor => self.block_editor.as_ref().is_some_and(|s| s.text_focused()),
             Screen::Inventory => {
                 self.mod_browser_typing() || self.recipe_search_focused() || self.station_typing()
             }
@@ -117,9 +124,12 @@ impl Game<'_> {
             match self.screen {
                 Screen::Chat => self.chat_type(&text),
                 Screen::CommandBlock => self.command_block_type(&text),
+                Screen::Social => self.social_type(&text),
                 Screen::DebugOptions => self.debug_options_type(&text),
+                Screen::Options => self.ui.options.type_text(&self.gui.atlas, &text),
                 Screen::WorldOptions => self.world_options_text(Some(&text)),
                 Screen::Creative => self.creative_search_edit(Some(&text)),
+                Screen::BlockEditor => self.block_editor_type(&text),
                 Screen::Inventory if self.mod_browser_typing() => {
                     self.mod_browser_text(Some(&text), false)
                 }

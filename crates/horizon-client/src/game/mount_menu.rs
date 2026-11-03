@@ -252,7 +252,7 @@ impl Game<'_> {
         let m = &self.mobs[index];
         let species = m.species();
         let body =
-            shows_body(species).then(|| m.extra.head.as_deref().map(|i| ItemStack::new(i, 1)));
+            shows_body(species).then(|| m.extra.body.as_deref().map(|i| ItemStack::new(i, 1)));
         let mut items = m.extra.items.clone();
         items.resize(mount_columns(m) * 3, None);
         (m.saddle_item(), body, items)
@@ -274,7 +274,7 @@ impl Game<'_> {
         } else {
             body.as_ref()
                 .and_then(Option::as_ref)
-                .filter(|_| m.extra.head.is_none())
+                .filter(|_| m.extra.body.is_none())
         };
         let sound = if saddle_put_on && nautilus::is_nautilus(m.species()) {
             // AbstractNautilus.getEquipSound: its own saddle sounds.
@@ -291,7 +291,7 @@ impl Game<'_> {
         let m = &mut self.mobs[index];
         m.set_saddle(saddle);
         if let Some(body) = body {
-            m.extra.head = body.map(|a| a.item);
+            m.extra.body = body.map(|a| a.item);
         }
         let mut items = items;
         let keep = m.extra.items.len().max(CHEST_SIZE);
@@ -541,16 +541,19 @@ impl Game<'_> {
         let atlas = &self.gui.atlas;
         let lookup = |name: &str| atlas.sprites.get(name).map(|r| [r.u0, r.v0, r.u1, r.v1]);
         let mut verts = Vec::new();
-        horizon_client::mobs::render::render_with(
-            &m,
-            1.0,
-            camera,
-            &lookup,
-            240 | 240 << 8,
-            self.res.mob_data(),
-            &[],
-            &mut verts,
-        );
+        // A screen preview: custom entity model animations see is_in_gui = 1.
+        horizon_client::mobs::cem_anim::in_gui(|| {
+            horizon_client::mobs::render::render_with(
+                &m,
+                1.0,
+                camera,
+                &lookup,
+                240 | 240 << 8,
+                self.res.mob_data(),
+                &[],
+                &mut verts,
+            );
+        });
         let height = m.kind.height as f32;
         let gui = glam::Mat4::from_translation(glam::Vec3::new(cx, cy, 0.0))
             * glam::Mat4::from_scale(glam::Vec3::new(size, size, -size))

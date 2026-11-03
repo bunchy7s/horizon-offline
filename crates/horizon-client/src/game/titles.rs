@@ -11,16 +11,24 @@ use horizon_client::{
 };
 
 impl Game<'_> {
-    /// `Hud.extractOverlayMessage` and `extractTitle`.
-    pub(super) fn draw_titles(&self, batch: &mut HudBatch, bar_height: i32) {
+    /// `Hud.extractOverlayMessage`: the action bar.
+    pub(super) fn draw_overlay_message(&self, batch: &mut HudBatch, bar_height: i32) {
         let (w, h) = (batch.width as i32, batch.height as i32);
         let partial = self.clock.fraction() as f32;
         let background = self.settings.text_background(0.0);
         let font = &self.gui.atlas.font;
-        let mut draws = self
+        let draws = self
             .titles
             .overlay_message(w, h, bar_height, partial, font, background);
-        draws.extend(self.titles.title(w, h, partial, font, background));
+        hud_layout::paint(batch, &self.gui.atlas, &draws);
+    }
+    /// `Hud.extractTitle`.
+    pub(super) fn draw_title(&self, batch: &mut HudBatch) {
+        let (w, h) = (batch.width as i32, batch.height as i32);
+        let partial = self.clock.fraction() as f32;
+        let background = self.settings.text_background(0.0);
+        let font = &self.gui.atlas.font;
+        let draws = self.titles.title(w, h, partial, font, background);
         hud_layout::paint(batch, &self.gui.atlas, &draws);
     }
     /// `Hud.extractSavingIndicator`, under the screens: the option, then the

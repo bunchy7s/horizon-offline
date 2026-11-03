@@ -288,7 +288,13 @@ pub fn kind_of(file: &Path) -> Result<Kind, String> {
         .ok_or_else(|| format!("{name} is not a zip file that can be read."))?;
     if zip.index_for_name("pack.mcmeta").is_some() {
         Ok(Kind::Resource)
-    } else if zip.file_names().any(|n| n.starts_with("shaders/")) {
+    } else if zip
+        .file_names()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("{name} has an entry whose name can't be read: {e}"))?
+        .iter()
+        .any(|n| n.starts_with("shaders/"))
+    {
         Ok(Kind::Shader)
     } else {
         Err(format!(

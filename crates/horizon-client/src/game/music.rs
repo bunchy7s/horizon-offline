@@ -4,6 +4,7 @@ use super::Game;
 use horizon_client::{
     blocks::Fluid,
     music::{BackgroundMusic, Music, MusicFrequency, Situation},
+    options_ui::MusicGroup,
     sound_engine::{SoundEngine, SoundInstance, Sounds, TickContext},
 };
 
@@ -14,12 +15,25 @@ impl Game<'_> {
         if self.options.split_guest {
             return;
         }
-        let (music, volume) = self.situational_music();
+        let (mut music, mut volume) = self.situational_music();
+        // A native mod's own choice of track and volume, then its layers.
+        self.native_music(&mut music, &mut volume);
+        let mut layers = Vec::new();
+        self.native_music_layers(&mut layers);
+        self.music_layers.tick(&layers, &mut self.audio);
         // Options.musicFrequency's listener: MusicManager.setMinutesBetweenSongs.
         let frequency = MusicFrequency::parse(&self.settings.file.name("musicFrequency"));
         if frequency != self.music.frequency {
             self.music.set_frequency(frequency, music.as_ref());
         }
+        // The Music page's off tracks leave every pool they play in (the
+        // extra off: nothing is filtered, vanilla's pools play as they are).
+        let off = if self.settings.extras.music_page {
+            &self.settings.extras.music_off[..]
+        } else {
+            &[][..]
+        };
+        self.music.set_off(off);
         // LevelLoadingScreen: no new track before the player is in the world.
         let loading = self.title.is_none() && self.player.is_none() && self.win.is_none();
         self.music
@@ -41,6 +55,15 @@ impl Game<'_> {
                 }
             }
         }
+    }
+    /// The Music page's groups: every track the loaded `sounds.json` can play,
+    /// by situation (see `music::track_groups`).
+    pub(super) fn music_groups(&self) -> Vec<MusicGroup> {
+        horizon_client::music::track_groups(&self.audio.engine.registry)
+    }
+    /// A Music page row: play this track of `event` now.
+    pub(super) fn play_music_track(&mut self, event: &str, track: &str) {
+        self.music.play_track(event, track, &mut self.audio);
     }
     /// `Options.getFinalSoundSourceVolume(SoundSource.MUSIC)`.
     fn final_music_volume(&self) -> f32 {
@@ -164,6 +187,8 @@ impl Game<'_> {
             player_fall_flying,
             ridden,
         };
+        self.audio
+            .set_listener_reserve(self.settings.extras.ui_sound_reserve);
         self.audio.tick(self.pause, &ctx);
     }
     /// `Minecraft.setLevel` -> `updateLevelInEngines`: `SoundManager.stop()`.

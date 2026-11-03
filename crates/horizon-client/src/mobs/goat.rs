@@ -430,11 +430,13 @@ fn ram_tick(m: &mut Mob, cx: &mut Cx) {
         let factor = (m.ai.speed * 1.65).clamp(0.2, 3.0) + boost;
         let force = if m.is_baby() { 1.0 } else { 2.5 };
         let d = m.extra.goat.ram_direction;
+        // The knockback's source is `mobAttack`, not the hurt's `noAggroMobAttack`.
         cx.events.push(MobEvent::Knockback {
             target,
             power: f64::from(factor * force),
             x: d.x,
             z: d.z,
+            source: Damage::mob(m.id, from),
         });
         finish_ram(m, cx.events);
         play(m, cx.events, impact, 1.0);

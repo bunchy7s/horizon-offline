@@ -4,11 +4,13 @@
 //! came closer, so they stayed invisible until a block in them changed.
 //! Relit columns remesh only where their light changed (#270), and every
 //! mesh still matches the world.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     assets::Assets,
     biome::Biomes,
     blocks::BlockFacts,
     chunk::{Chunk, HEIGHT},
+    graphics::LeafCullingMode,
     light::LightTables,
     mesher::{MeshTables, Mesher, Region, SectionMesh, borrow},
     models,
@@ -84,7 +86,7 @@ fn columns_loaded_past_the_render_distance_mesh_when_they_come_in_range() {
             // and nothing comes back (`pending` empties).
             streaming.free(uploads);
             thread::sleep(Duration::from_millis(5));
-            let idle = streaming.pending() == 0 && before == (world.chunks.len(), meshed.len());
+            let idle = !streaming.busy() && before == (world.chunks.len(), meshed.len());
             quiet = if idle { quiet + 1 } else { 0 };
         }
     };
@@ -179,7 +181,7 @@ fn relit_columns_keep_every_mesh_current() {
         while quiet < 40 {
             assert!(Instant::now() < deadline, "streaming never settled");
             let (uploads, _) = streaming.update(world);
-            let idle = uploads.is_empty() && streaming.pending() == 0;
+            let idle = uploads.is_empty() && !streaming.busy();
             meshes.extend(uploads);
             thread::sleep(Duration::from_millis(5));
             quiet = if idle { quiet + 1 } else { 0 };
@@ -215,10 +217,13 @@ fn relit_columns_keep_every_mesh_current() {
         let mut mesher = Mesher {
             nether_shading: false,
             shader_pack_lighting: false,
+            separate_ao: false,
             zoom: BiomeZoom::new(0),
             blend_radius: 2,
             smooth_lighting: true,
             cutout_leaves: true,
+            translucent_layers: &[],
+            leaf_culling: LeafCullingMode::Off,
             assets: &context.assets,
             render: &context.render,
             tables: &context.tables,

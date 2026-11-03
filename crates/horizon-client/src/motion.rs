@@ -43,11 +43,17 @@ use std::{
     sync::Arc,
 };
 
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`). 359.
+#[inline(never)]
+pub fn native_living_jump(entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(entity, kind);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
     BubbleColumn, FluidResources, FluidTags, LAVA, PlayerFluids, RiddenBoat, WATER,
-    bubble_column_at, bubble_column_push,
+    bubble_column_at, bubble_column_push, bubble_column_push_over, bubble_column_surfaces,
 };
 
 pub struct MotionResources {
@@ -326,6 +332,12 @@ pub struct PlayerMotion {
     /// The server saw the glide end last tick (`updateFallFlying`'s `canGlide`
     /// failed): the cleared flag reaches the client at its next tick.
     pub glide_ending: bool,
+    /// The server owns the glide flag (`Player.setSharedFlag(7, ...)` comes
+    /// only from its `DATA_SHARED_FLAGS_ID`): the client of a server never
+    /// ends a glide itself, as `LocalPlayer` does not —
+    /// `LivingEntity.updateFallFlying` clears the flag on the server only, and
+    /// the client applies the synced data when `SetEntityData` is handled.
+    pub server_owns_glide: bool,
     /// Glider durability to take this tick (updateFallFlying).
     pub glider_wear: u32,
     /// Soul Speed's `location_changed` bookkeeping.
@@ -344,6 +356,10 @@ pub struct PlayerMotion {
     pub local_crouching: bool,
     pub pose: crate::pose::Pose,
     pub dimensions: crate::pose::Dimensions,
+    /// The `minecraft:scale` the dimensions were last built with
+    /// (`Entity.refreshDimensions`), for the poses the body takes before it
+    /// next refreshes.
+    pub scale: f32,
     pub speed: f32,
     /// `LocalPlayer.itemUseSpeedMultiplier` while using an item (not riding).
     pub item_use_speed: Option<f32>,
@@ -396,6 +412,8 @@ pub struct PlayerMotion {
     /// it travels on the server: `isLocalInstanceAuthoritative` is false, so
     /// its moves check no fall damage.
     pub server_copy: bool,
+    /// A speculative anticheat replay, whose native callbacks must not escape.
+    pub(crate) replaying: bool,
     /// The span of `events` a wall hit on the server's copy pushed (sound and
     /// damage): `server_travel` keeps them while it drops the simulated moves.
     pub wall_hit_events: Option<std::ops::Range<usize>>,
@@ -428,6 +446,16 @@ fn attribute_error(error: impl std::fmt::Debug) -> io::Error {
     io::Error::other(format!("movement attribute: {error:?}"))
 }
 impl PlayerMotion {
+    /// `ServerGamePacketListenerImpl.handleMovePlayer`: the movement the client
+    /// sent is the server copy's own delta movement. A glide's wall hit reads it
+    /// as the speed the glide had (`LivingEntity.handleFallFlyingCollisions`'s
+    /// moveHorLength); a copy whose travels start from its own last velocity
+    /// otherwise keeps a few hundredths there, and no hit reaches the damage.
+    pub fn carry_client_movement(&mut self, movement: Vec3) {
+        if self.fall_flying {
+            self.velocity = movement;
+        }
+    }
     /// `Player.isSweepAttack`, using the resident player's known horizontal velocity.
     pub fn is_sweep_attack(&self, strength: f32, critical: bool, sword: bool) -> bool {
         let movement = self.velocity;
@@ -547,6 +575,7 @@ impl PlayerMotion {
             sleeping: false,
             fall_fly_ticks: 0,
             glide_ending: false,
+            server_owns_glide: false,
             glider_wear: 0,
             location_effects: LocationEffects::default(),
             auto_spin_attack_ticks: 0,
@@ -559,6 +588,7 @@ impl PlayerMotion {
             local_crouching: false,
             pose: crate::pose::Pose::Standing,
             dimensions: crate::pose::Pose::Standing.dimensions(1.0),
+            scale: 1.0,
             swimming: false,
             is_passenger: false,
             fire_ticks: -20,
@@ -589,6 +619,7 @@ impl PlayerMotion {
             burn_from_stepping_immune: false,
             old_position: position,
             server_copy: false,
+            replaying: false,
             wall_hit_events: None,
             client_side: false,
             entity_id: 0,
@@ -717,6 +748,18 @@ impl PlayerMotion {
     /// player's `attributes` list (LivingEntity.addAdditionalSaveData), each
     /// instance's id, base and permanent modifiers.
     pub fn saved_attributes(&self) -> horizon_world::nbt::Tag {
+        self.packed_attributes(true)
+    }
+    /// `ServerPlayer.restoreFrom`: the attributes a player's new body takes
+    /// over from the old one. A body that comes back from a death takes the
+    /// base values only (`assignBaseValues`); the same player in another
+    /// level (`ServerPlayer.teleport`) is the same entity, with its permanent
+    /// modifiers too (`restoreAll`, `assignPermanentModifiers`). A scale of
+    /// 0.1 is still 0.1 after a respawn or a trip through a portal (#3684).
+    pub fn carried_attributes(&self, restore_all: bool) -> horizon_world::nbt::Tag {
+        self.packed_attributes(restore_all)
+    }
+    fn packed_attributes(&self, modifiers: bool) -> horizon_world::nbt::Tag {
         use horizon_client_core::nbt_value::string;
         use horizon_world::nbt::Tag;
         let list = self
@@ -729,7 +772,7 @@ impl PlayerMotion {
                     ("base", Tag::Double(packed.base.to_bits())),
                 ];
                 // `modifiers` is an optional field whose default is the empty list.
-                if !packed.modifiers.is_empty() {
+                if modifiers && !packed.modifiers.is_empty() {
                     let modifiers = packed
                         .modifiers
                         .iter()
@@ -1035,9 +1078,9 @@ impl MotionWorld<'_, '_, '_> {
         if self.player.spectator {
             self.player.flying = true;
             self.player.ground.on_ground = false;
-        } else if !self.player.may_fly {
-            self.player.flying = false;
-        } else if !was_jumping && jumping && !self.player.was_auto_jump {
+        } else if self.player.may_fly && !was_jumping && jumping && !self.player.was_auto_jump {
+            // `LocalPlayer.aiStep`: mayfly gates the flight toggle, not the
+            // flying state independently supplied by the server's abilities.
             if self.player.jump_trigger_time == 0 {
                 self.player.jump_trigger_time = 7;
             } else if !self.player.swimming {
@@ -1053,7 +1096,12 @@ impl MotionWorld<'_, '_, '_> {
         // last tick, and the client applies it a tick later, before aiStep: a
         // landing glide lasts one more tick on the ground, with no ground
         // friction, so a jump then keeps the speed (the elytra hop).
-        if std::mem::take(&mut self.player.glide_ending) {
+        // A client of a server takes the flag from the server itself: vanilla's
+        // LocalPlayer never ends a glide of its own, and keeping the local
+        // prediction there would clear the flag before the server's
+        // SetEntityData does (#7616).
+        let ending = std::mem::take(&mut self.player.glide_ending);
+        if ending && !self.player.server_owns_glide {
             self.player.fall_flying = false;
         }
         // Player.tryToStartFallFlying (canGlide: airborne, not flying, a glider;
@@ -1089,7 +1137,11 @@ impl MotionWorld<'_, '_, '_> {
                 && !self.player.flying
                 && self.player.status.levitation.is_none();
             if !still {
-                self.player.glide_ending = true;
+                // The server clears the flag; a client of one waits for its
+                // synced data (the SetEntityData handler sets fall_flying).
+                if !self.player.server_owns_glide {
+                    self.player.glide_ending = true;
+                }
             } else if (self.player.fall_fly_ticks + 1) % 10 == 0
                 && ((self.player.fall_fly_ticks + 1) / 10) % 2 == 0
             {
@@ -1175,13 +1227,16 @@ impl MotionWorld<'_, '_, '_> {
     /// client's own keys, and the sprinting it said it had (its
     /// ServerboundPlayerCommandPacket comes before the tick's move).
     pub fn replayed_tick(&mut self, keys: crate::sprint::Keys, sprinting: bool) -> Result<()> {
-        self.local_tick(keys, |player, _| {
+        self.player.replaying = true;
+        let result = self.local_tick(keys, |player, _| {
             if player.sprinting == sprinting {
                 Ok(())
             } else {
                 player.set_sprinting(sprinting)
             }
-        })
+        });
+        self.player.replaying = false;
+        result
     }
     /// `LocalPlayer.aiStep` and the travel it ends with; `sprint` is the
     /// sprint phase.
@@ -1716,8 +1771,13 @@ impl MotionWorld<'_, '_, '_> {
                     // HoneyBlock.entityInside: a server's player slides too, so
                     // its fall distance resets (its client moves it).
                     "minecraft:honey_block" => self.honey_block_inside(p)?,
-                    // PowderSnowBlock.entityInside's FREEZE.
-                    "minecraft:powder_snow" if damage_only => entered.push((step, p)),
+                    // PowderSnowBlock.entityInside's FREEZE and its server
+                    // snowflake (`ServerLevel.sendParticles`). The slowing is
+                    // the client's (`makeStuckInBlock`).
+                    "minecraft:powder_snow" if damage_only => {
+                        self.powder_snow_snowflake(p);
+                        entered.push((step, p));
+                    }
                     _ => {}
                 }
                 if damage_only {
@@ -1884,6 +1944,24 @@ impl MotionWorld<'_, '_, '_> {
             return Ok(());
         }
         self.make_stuck_in_block(Vec3::new(f64::from(0.9_f32), 1.5, f64::from(0.9_f32)));
+        // `ServerLevel.sendParticles` is server-only (`!level.isClientSide()`).
+        if !self.player.client_side {
+            self.powder_snow_snowflake(p);
+        }
+        Ok(())
+    }
+    /// `PowderSnowBlock.entityInside`'s server particle: one snowflake at
+    /// the top of `p` when the player moved horizontally this tick.
+    fn powder_snow_snowflake(&mut self, p: BlockPos) {
+        let feet = BlockPos::containing(self.player.position);
+        if !self
+            .assets
+            .registry
+            .state(self.block(feet))
+            .is_some_and(|s| s.name == "minecraft:powder_snow")
+        {
+            return;
+        }
         // ServerPlayer.getKnownMovement: this tick's movement.
         let known = self.player.position.subtract(self.player.old_position);
         let random = &mut self.scene.random;
@@ -1900,10 +1978,12 @@ impl MotionWorld<'_, '_, '_> {
                 velocity: Vec3::new(f64::from(xa), f64::from(0.05_f32), f64::from(za)),
             });
         }
-        Ok(())
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
+        if !self.player.replaying {
+            native_living_jump(self.player.entity_id as u32, "minecraft:player");
+        }
         self.player
             .events
             .push(MotionEvent::Health(crate::health::HealthEvent::Statistic {
@@ -1956,14 +2036,16 @@ impl MotionWorld<'_, '_, '_> {
             m.z * f64::from(0.99_f32),
         );
         let movement = self.player.velocity;
+        let before = self.player.position;
         self.move_self(movement)?;
-        // LivingEntity.handleFallFlyingCollisions: only the server hurts.
+        // LivingEntity.handleFallFlyingCollisions: only the server hurts, and
+        // it compares the delta before the move with the one after it, which
+        // `Entity.move` leaves as the movement it resolved. `move_entity` does
+        // not write that back, so the distance actually travelled stands in.
         if !self.player.client_side && self.player.collision.horizontal {
-            let new_h = {
-                let v = self.player.velocity;
-                (v.x * v.x + v.z * v.z).sqrt()
-            };
-            let dmg = ((move_h - new_h) * 10.0 - 3.0) as f32;
+            let travelled = self.player.position.subtract(before);
+            let new_h = (travelled.x * travelled.x + travelled.z * travelled.z).sqrt();
+            let dmg = fly_into_wall_damage(move_h, new_h);
             if dmg > 0.0 {
                 let first = self.player.events.len();
                 // getFallDamageSound((int) dmg)
@@ -1994,6 +2076,15 @@ impl MotionWorld<'_, '_, '_> {
             }
         }
         Ok(())
+    }
+    /// `Entity.move(MoverType.SHULKER_BOX, movement)`: a shulker box lid pushed
+    /// the player. An ordinary move — the collision scan steps and reads the
+    /// ground flag — whose end writes the ground state
+    /// (`Entity.setOnGroundWithMovement`): a lid lifting the body off the
+    /// ground leaves it airborne, and the next tick's gravity lands it on the
+    /// lid again instead of the client holding it on a stale ground.
+    pub fn shulker_box_push(&mut self, movement: Vec3) -> Result<()> {
+        entity_move::move_entity(self, MoverType::ShulkerBox, movement)
     }
     /// `LocalPlayer.move`: the move, then `updateAutoJump` with the float
     /// horizontal displacement.
@@ -2815,8 +2906,25 @@ fn horizontal_collision_minor(yaw: f32, input: [f32; 2], movement: Vec3) -> bool
     horizon_core::jmath::acos(dot / (a_len * m_len).sqrt()) < f64::from(0.13962634_f32)
 }
 
+/// `LivingEntity.handleFallFlyingCollisions`: a glide a block stopped takes
+/// `(before - after) * 10 - 3`, and nothing when that is not positive.
+fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
+    ((before - after) * 10.0 - 3.0) as f32
+}
+
 #[cfg(test)]
 mod tests {
+    /// The glide's collision damage: a third of a block a tick lost is 0.0 and
+    /// does nothing, more than that hurts, and a move a block stopped loses
+    /// everything it had.
+    #[test]
+    fn a_glide_hurts_by_what_a_collision_took_off_its_speed() {
+        assert_eq!(fly_into_wall_damage(0.5, 0.5), -3.0);
+        assert_eq!(fly_into_wall_damage(0.3, 0.0), 0.0);
+        assert!((fly_into_wall_damage(0.5, 0.1) - 1.0).abs() < 1e-5);
+        assert!((fly_into_wall_damage(1.2, 0.0) - 9.0).abs() < 1e-5);
+    }
+
     use super::*;
 
     /// `LocalPlayer.isHorizontalCollisionMinor`: sliding along a wall at a
@@ -3259,6 +3367,98 @@ mod tests {
     }
 
     #[test]
+    fn walking_through_powder_snow_asks_for_a_snowflake() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        let snow = assets
+            .registry
+            .default_state("minecraft:powder_snow")
+            .unwrap();
+        scene.set(20, 4, 20, snow).unwrap();
+        let at = Vec3::new(20.5, 4.0, 20.5);
+        let from = at.subtract(Vec3::new(0.2, 0.0, 0.0));
+        let snowflakes = |player: &PlayerMotion| {
+            player
+                .events
+                .iter()
+                .filter(|e| matches!(e, MotionEvent::Snowflake { .. }))
+                .count()
+        };
+        let mut player = PlayerMotion::new(&resources, at).unwrap();
+        let mut found = 0;
+        for seed in 0..64 {
+            scene.random = horizon_core::random::LegacyRandom::new(seed);
+            player.events.clear();
+            MotionWorld {
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            }
+            .server_block_damage(from)
+            .unwrap();
+            found = snowflakes(&player);
+            if found > 0 {
+                break;
+            }
+        }
+        assert!(
+            found > 0,
+            "a server's player walking through powder snow must send a snowflake"
+        );
+        if let MotionEvent::Snowflake { position, velocity } = &player
+            .events
+            .iter()
+            .find(|e| matches!(e, MotionEvent::Snowflake { .. }))
+            .unwrap()
+        {
+            assert_eq!(position.y, 5.0);
+            assert_eq!(velocity.y, f64::from(0.05_f32));
+        }
+        player.events.clear();
+        scene.random = horizon_core::random::LegacyRandom::new(1);
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .server_block_damage(at)
+        .unwrap();
+        assert_eq!(snowflakes(&player), 0);
+        player.client_side = true;
+        player.events.clear();
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .controlled_simulation_tick(Default::default())
+        .unwrap();
+        assert_eq!(snowflakes(&player), 0);
+    }
+
+    #[test]
     fn server_travel_moves_only_the_velocity() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client")
@@ -3314,6 +3514,60 @@ mod tests {
         assert_eq!(player.health.health(), health);
         assert_eq!(player.fall_distance, 10.0);
         assert!(player.events.is_empty());
+    }
+
+    /// `LivingEntity.handleFallFlyingCollisions`: a glide that meets a wall loses
+    /// the horizontal speed it had, and the server's copy hurts by that loss,
+    /// `(moveHorLength - newMoveHorLength) * 10 - 3`, as `minecraft:fly_into_wall`.
+    /// The speed it starts the tick with is the client's own movement
+    /// (`handleMovePlayer` gives the server copy its delta movement), so the
+    /// loss is the speed the glide actually flew at.
+    #[test]
+    fn a_glide_into_a_wall_hurts_by_the_speed_it_lost() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 1).unwrap();
+        // A wall in the way of a glide along +x, at feet height.
+        let stone = assets.registry.default_state("minecraft:stone").unwrap();
+        for y in 4..=5 {
+            for z in 19..=21 {
+                scene.set(23, y, z, stone).unwrap();
+            }
+        }
+        let mut player = PlayerMotion::new(&resources, Vec3::new(22.0, 4.0, 20.5)).unwrap();
+        player.fall_flying = true;
+        // Looking along +x (the `getLookAngle` of a flat -90 yaw) keeps the
+        // glide on its course through `updateFallFlyingMovement`'s pull.
+        player.yaw = -90.0;
+        player.pitch = 0.0;
+        player.carry_client_movement(Vec3::new(1.2, 0.0, 0.0));
+        MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        }
+        .server_travel()
+        .unwrap();
+        assert!(
+            player
+                .hurt_log
+                .last()
+                .is_some_and(|hurt| hurt.source == "minecraft:fly_into_wall"),
+            "{:?}",
+            player.hurt_log
+        );
+        assert!(player.health.health() < 20.0, "{}", player.health.health());
     }
 
     #[test]
@@ -3834,6 +4088,36 @@ mod tests {
             }
         }
     }
+    /// `Player.doWaterSplashEffect`: a spectator entering water makes no splash
+    /// sound, particles or game event; everyone else does.
+    #[test]
+    fn a_spectator_entering_water_makes_no_splash() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        for spectator in [false, true] {
+            let mut scene = World::test_scene(&assets, &render, 2).unwrap();
+            let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 20.0, 20.5)).unwrap();
+            player.spectator = spectator;
+            let mut w = MotionWorld {
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            };
+            horizon_world::entity_fluid_tick::EntityFluidTickWorld::water_splash(&mut w).unwrap();
+            assert_eq!(w.player.events.is_empty(), spectator);
+        }
+    }
     /// A client's own fall (multiplayer, a LAN guest, single player on its
     /// server thread) plays its landing but never hurts it: only the server
     /// does (`Entity.hurt` on a client), so a server that cancels fall damage
@@ -4257,9 +4541,74 @@ mod tests {
             "kept its speed: {:?}",
             w.player.velocity
         );
-        // Then the server's cleared flag arrives.
+        // Then the predicted clear (an integrated server has no SetEntityData
+        // round trip: the client plays it a tick later).
         w.player_movement_tick([0.0, 1.0], true).unwrap();
         assert!(!w.player.fall_flying);
+    }
+
+    /// #7616: on someone else's server the glide flag is `DATA_SHARED_FLAGS_ID`'s.
+    /// `LivingEntity.updateFallFlying` clears it on the server only and
+    /// `LocalPlayer` never ends a glide itself, so a client that predicts the
+    /// clear clears it before the server's `SetEntityData` and the movement of
+    /// the tick after the landing is air travel where vanilla still glides.
+    #[test]
+    fn a_server_client_glides_until_the_servers_flag_clears() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 2).unwrap();
+        let mut player = PlayerMotion::new(&resources, Vec3::new(20.5, 4.2, 20.5)).unwrap();
+        let mut w = MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        };
+        w.move_self(Vec3::new(0.0, -1.0, 0.0)).unwrap();
+        assert!(w.player.ground.on_ground);
+        w.player.set_sprinting(true).unwrap();
+        w.player.glider = true;
+        w.player.fall_flying = true;
+        w.player.server_owns_glide = true;
+        w.player.velocity = Vec3::new(0.0, 0.0, 1.5);
+        // The landing tick's jump, gliding: vy = (0.42 - 0.08 * 0.25) * 0.98.
+        w.player_movement_tick([0.0, 1.0], true).unwrap();
+        assert!(w.player.fall_flying);
+        assert!(
+            (w.player.velocity.y - 0.392).abs() < 1e-6,
+            "jump: {:?}",
+            w.player.velocity
+        );
+        // The tick after it: the local `canGlide` failed on the landing tick,
+        // but no `SetEntityData` has arrived, so the glide goes on — vanilla's
+        // `LocalPlayer` glides here too. Its travel is the glide's
+        // (0.392 - 0.02) * 0.98, not the air's (0.392 - 0.08) * 0.98.
+        w.player_movement_tick([0.0, 1.0], true).unwrap();
+        assert!(w.player.fall_flying, "only the server's flag ends a glide");
+        assert!(
+            (w.player.velocity.y - 0.36456).abs() < 1e-5,
+            "glide travel: {:?}",
+            w.player.velocity
+        );
+        // The server's cleared flag (0x80 gone), handled between ticks.
+        w.player.fall_flying = false;
+        w.player_movement_tick([0.0, 1.0], true).unwrap();
+        assert!(!w.player.fall_flying);
+        assert!(
+            (w.player.velocity.y - 0.2788688).abs() < 1e-5,
+            "air travel: {:?}",
+            w.player.velocity
+        );
     }
 
     #[test]
@@ -5050,6 +5399,60 @@ mod tests {
         w.player.mobility_restricted = false;
         w.controlled_simulation_tick(sprint_key).unwrap();
         assert!(w.player.sprinting);
+    }
+
+    #[test]
+    fn server_forced_flight_survives_without_permission_to_toggle_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            eprintln!("skipped forced flight: prepared resources unavailable");
+            return;
+        }
+        let assets = Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let binding = crate::collisions::load(&root, assets.registry).unwrap();
+        let resources = MotionResources::load(&root, &assets).unwrap();
+        let mut scene = World::test_scene(&assets, &render, 3).unwrap();
+        let start = Vec3::new(20.5, 20.0, 20.5);
+        let mut player = PlayerMotion::new(&resources, start).unwrap();
+        player.may_fly = false;
+        player.flying = true;
+        player.flying_speed = 0.0;
+        let mut w = MotionWorld {
+            entities: &[],
+            player: &mut player,
+            scene: &mut scene,
+            assets: &assets,
+            collision_binding: &binding,
+            resources: &resources,
+        };
+        // Idle, movement in all directions, and repeated jump presses must
+        // neither cancel server-forced flight nor move a zero-speed flyer.
+        for tick in 0..60 {
+            w.controlled_simulation_tick(crate::sprint::Keys {
+                forward: tick % 4 == 0,
+                backward: tick % 4 == 1,
+                left: tick % 4 == 2,
+                right: tick % 4 == 3,
+                jump: tick % 2 == 0,
+                shift: tick % 3 == 0,
+                ..Default::default()
+            })
+            .unwrap();
+            assert!(w.player.flying, "server-forced flight ended on tick {tick}");
+            assert_eq!(w.player.position, start);
+            assert_eq!(w.player.velocity, Vec3::ZERO);
+        }
+        // A later abilities update from the server can still end flight.
+        w.player.flying = false;
+        for _ in 0..3 {
+            w.controlled_simulation_tick(crate::sprint::Keys::default())
+                .unwrap();
+        }
+        assert!(!w.player.flying);
+        assert!(w.player.position.y < start.y);
     }
 
     /// Vanilla `Player.getFlyingSpeed`: a flying player moves at the ability

@@ -2,6 +2,7 @@
 //! progress (`PlayerAdvancements`) and the predicates criteria test
 //! (`EntityPredicate`, `ItemPredicate`, `LocationPredicate`, the loot
 //! conditions advancements use).
+use horizon_world::lazy_json::LazyJson;
 use serde_json::Value;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -30,7 +31,9 @@ pub struct Display {
 pub struct Criterion {
     pub name: String,
     pub trigger: String,
-    pub conditions: Value,
+    /// Read on first test: ~1,300 recipe advancements' criteria, most never
+    /// tested in a game, took ~4 MB as `Value`s.
+    pub conditions: LazyJson,
 }
 #[derive(Clone, Debug, Default)]
 pub struct Rewards {
@@ -101,22 +104,20 @@ impl Tree {
         let Ok(namespaces) = std::fs::read_dir(data) else {
             return tree;
         };
-        let mut files = Vec::new();
-        for ns in namespaces.flatten() {
-            let root = ns.path().join("advancement");
-            collect(&root, &root, &ns.file_name().to_string_lossy(), &mut files);
-        }
-        // One JSON per id, the packs' over the game's own.
+        // One JSON per id, the packs' over the game's own. Through `json_folder`: from
+        // the prepared data file, and read once while a load holds the folder.
         let mut json: BTreeMap<String, Value> = BTreeMap::new();
-        files.sort();
-        for (id, path) in files {
-            let Ok(text) = std::fs::read_to_string(&path) else {
+        for ns in namespaces.flatten() {
+            let Ok(folder) = horizon_world::json_folder::read(&ns.path().join("advancement"))
+            else {
                 continue;
             };
-            let Ok(v) = serde_json::from_str::<Value>(&text) else {
-                continue;
-            };
-            json.insert(id, v);
+            let ns = ns.file_name().to_string_lossy().into_owned();
+            for file in &folder.files {
+                if let Ok(v) = serde_json::from_slice::<Value>(file.bytes().unwrap_or_default()) {
+                    json.insert(format!("{ns}:{}", file.name), v);
+                }
+            }
         }
         for (id, files) in overlay.kind("advancement") {
             match serde_json::from_slice::<Value>(horizon_world::loot::PackOverlay::top(files)) {
@@ -154,7 +155,8 @@ impl Tree {
             .into_iter()
             .flatten()
         {
-            match self.list[ai].criteria[ci].conditions["recipes"].as_str() {
+            // `read`: the index alone keeps none of the criteria read.
+            match self.list[ai].criteria[ci].conditions.read()["recipes"].as_str() {
                 Some(r) => self
                     .by_recipe
                     .entry(r.to_owned())
@@ -208,7 +210,8 @@ impl InventoryIndex {
             return index;
         };
         for &(ai, ci) in list {
-            let items = &tree.list[ai].criteria[ci].conditions["items"];
+            let conditions = tree.list[ai].criteria[ci].conditions.read();
+            let items = &conditions["items"];
             // `id_matches`: only a string or a list limits the items.
             let limited = items.as_array().and_then(|a| {
                 a.iter()
@@ -244,21 +247,6 @@ impl InventoryIndex {
         out
     }
 }
-fn collect(root: &Path, dir: &Path, ns: &str, out: &mut Vec<(String, std::path::PathBuf)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in entries.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            collect(root, &p, ns, out);
-        } else if p.extension().is_some_and(|x| x == "json") {
-            let rel = p.strip_prefix(root).unwrap_or(&p).with_extension("");
-            let rel = rel.to_string_lossy().replace('\\', "/");
-            out.push((format!("{ns}:{rel}"), p));
-        }
-    }
-}
 fn parse(id: &str, v: &Value) -> Option<Advancement> {
     let criteria: Vec<Criterion> = v["criteria"]
         .as_object()?
@@ -266,7 +254,7 @@ fn parse(id: &str, v: &Value) -> Option<Advancement> {
         .map(|(name, c)| Criterion {
             name: name.clone(),
             trigger: c["trigger"].as_str().unwrap_or("").to_owned(),
-            conditions: c["conditions"].clone(),
+            conditions: LazyJson::new(&c["conditions"]),
         })
         .collect();
     let requirements = match v["requirements"].as_array() {
@@ -1437,6 +1425,29 @@ mod tests {
                     && matches!(id, "minecraft:fireball" | "minecraft:arrow"))
         }
     }
+    /// A `recipe_crafted` criterion names `minecraft:x`; the craft hands
+    /// the recipe book and the trigger the same whole id (`award_crafted`
+    /// qualifies). The bare name the crafting copy uses never matched —
+    /// the second half of #7186.
+    #[test]
+    fn a_recipe_crafted_criterion_matches_the_whole_id_only() {
+        let w = Flat;
+        let criterion = serde_json::json!({"recipes": "minecraft:folder_recipe"});
+        assert!(
+            !id_matches(&criterion["recipes"], "recipe", "folder_recipe", &w),
+            "the crafting copy's bare name never matched the criterion"
+        );
+        assert!(
+            id_matches(
+                &criterion["recipes"],
+                "recipe",
+                &crate::crafting::qualified("folder_recipe"),
+                &w
+            ),
+            "the whole id award_crafted passes matches"
+        );
+    }
+
     /// `LockCode.canUnlock` for a chest with
     /// `lock:{items:"minecraft:gold_ingot"}`: a gold ingot opens it, an empty
     /// hand or another item does not, and a spectator always does.
@@ -1606,7 +1617,7 @@ mod tests {
                 criteria: vec![Criterion {
                     name: "c".into(),
                     trigger: "minecraft:inventory_changed".into(),
-                    conditions,
+                    conditions: LazyJson::new(&conditions),
                 }],
                 requirements: vec![vec!["c".into()]],
                 rewards: Rewards::default(),
@@ -1655,7 +1666,7 @@ mod tests {
                 criteria: vec![Criterion {
                     name: "c".into(),
                     trigger: "minecraft:recipe_unlocked".into(),
-                    conditions,
+                    conditions: LazyJson::new(&conditions),
                 }],
                 requirements: vec![vec!["c".into()]],
                 rewards: Rewards::default(),

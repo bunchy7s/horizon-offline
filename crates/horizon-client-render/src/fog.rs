@@ -5,6 +5,7 @@
 use crate::{
     biome::Biomes,
     blocks::{BlockFacts, Fluid},
+    camera::NearPlane,
     environment::Sky,
     world::World,
 };
@@ -135,9 +136,24 @@ fn camera_fluid_height(world: &World, facts: &BlockFacts, b: [i32; 3]) -> Option
     };
     Some((s.fluid, height))
 }
-/// `Camera.getFluidInCamera` (near-plane points reduced to the camera and
-/// the point just in front of it).
-pub fn fog_type(world: &World, facts: &BlockFacts, camera: [f64; 3], forward: [f64; 3]) -> FogType {
+/// `Camera.getFluidInCamera`: water at the camera, then lava or powder snow
+/// at the near plane's centre and corners.
+pub fn fog_type(world: &World, facts: &BlockFacts, camera: [f64; 3], near: &NearPlane) -> FogType {
+    camera_fog_type(
+        camera,
+        near,
+        |b| camera_fluid_height(world, facts, b),
+        |b| &*facts.get(world.block(b[0], b[1], b[2])).name == "minecraft:powder_snow",
+    )
+}
+/// `fog_type` over a block lookup: the fluid and its camera height, and
+/// whether the block is powder snow.
+fn camera_fog_type(
+    camera: [f64; 3],
+    near: &NearPlane,
+    fluid: impl Fn([i32; 3]) -> Option<(Fluid, f64)>,
+    powder_snow: impl Fn([i32; 3]) -> bool,
+) -> FogType {
     let block = |p: [f64; 3]| {
         [
             p[0].floor() as i32,
@@ -146,28 +162,19 @@ pub fn fog_type(world: &World, facts: &BlockFacts, camera: [f64; 3], forward: [f
         ]
     };
     let b = block(camera);
-    if let Some((Fluid::Water, h)) = camera_fluid_height(world, facts, b)
+    if let Some((Fluid::Water, h)) = fluid(b)
         && camera[1] < f64::from(b[1]) + h
     {
         return FogType::Water;
     }
-    for p in [
-        [
-            camera[0] + forward[0] * 0.05,
-            camera[1] + forward[1] * 0.05,
-            camera[2] + forward[2] * 0.05,
-        ],
-        camera,
-    ] {
+    for point in near.points() {
+        let p: [f64; 3] = std::array::from_fn(|i| camera[i] + point[i]);
         let b = block(p);
-        match camera_fluid_height(world, facts, b) {
+        match fluid(b) {
             Some((Fluid::Lava, h)) if p[1] <= f64::from(b[1]) + h => return FogType::Lava,
             Some((Fluid::Lava, _)) => {}
-            _ => {
-                if &*facts.get(world.block(b[0], b[1], b[2])).name == "minecraft:powder_snow" {
-                    return FogType::PowderSnow;
-                }
-            }
+            _ if powder_snow(b) => return FogType::PowderSnow,
+            _ => {}
         }
     }
     FogType::Atmospheric
@@ -446,6 +453,23 @@ mod tests {
             fire_resistance: false,
             night_vision: 0.0,
         }
+    }
+    #[test]
+    fn lava_fog_starts_when_a_near_plane_corner_dips_under_the_surface() {
+        // Flowing lava (amount 4) on y 64: the camera sees its surface at 64 + 4/9.
+        let surface = 64.0 + 4.0 / 9.0;
+        let fluid = |b: [i32; 3]| (b[1] == 64).then_some((Fluid::Lava, 4.0 / 9.0));
+        let fog = |y: f64, pitch: f32| {
+            let mut camera = crate::camera::Camera::default();
+            camera.set_rotation(0.0, pitch);
+            let near = camera.near_plane(70.0, 1600.0, 900.0);
+            camera_fog_type([0.5, y, 0.5], &near, fluid, |_| false)
+        };
+        // Looking level, the near plane reaches tan(35 degrees) * 0.05 = 0.035 below the eye.
+        assert_eq!(fog(surface + 0.02, 0.0), FogType::Lava);
+        assert_eq!(fog(surface + 0.05, 0.0), FogType::Atmospheric);
+        // The eye itself is not tested: looking up, the whole plane is above it.
+        assert_eq!(fog(surface - 0.01, -90.0), FogType::Atmospheric);
     }
     #[test]
     fn boss_world_fog_closes_in() {

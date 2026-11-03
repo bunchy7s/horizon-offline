@@ -449,7 +449,7 @@ impl Game<'_> {
     pub(super) fn sort_mouse_press(&mut self, button: MouseButton) -> bool {
         self.sort_input(&keybinds::mouse_name(button))
     }
-    /// The HDR settings key (`Graphics::hdr_key`): opens Graphics: HDR from the game, where
+    /// The HDR settings key (`Graphics::hdr_key`): opens the graphics screen's HDR page from the game, where
     /// the display offers HDR; Done goes back to the game.
     pub(super) fn hdr_key_press(&mut self, key: KeyCode) -> bool {
         keybinds::key_name(key).is_some_and(|name| self.hdr_input(name))
@@ -459,19 +459,15 @@ impl Game<'_> {
     }
     fn hdr_input(&mut self, name: &str) -> bool {
         if self.screen != Screen::Playing
+            || self.title.is_some()
             || self.settings.horizon.hdr_key != name
             || !horizon_client::graphics::hdr_offered()
         {
             return false;
         }
-        if self.title.is_none() {
-            self.capture(false);
-        }
-        self.open_options_at(
-            self.title.is_some(),
-            horizon_client::options_ui::Page::GraphicsHdr,
-        );
-        self.options_to_game = self.title.is_none();
+        self.capture(false);
+        self.open_options_at(false, horizon_client::options_ui::Page::GraphicsHdr);
+        self.options_to_game = true;
         true
     }
     fn sort_input(&mut self, name: &str) -> bool {

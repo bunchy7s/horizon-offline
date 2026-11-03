@@ -35,6 +35,25 @@ impl Game<'_> {
             )
             .collect()
     }
+    /// `EntityGetter.getEntityCollisions` for a dropped item: the entities whose
+    /// `canBeCollidedWith(item)` is true. A boat and a minecart always, a living shulker,
+    /// and a happy ghast only while it is held still (`isOnStillTimeout`): a player on its
+    /// back keeps it still, so an item dropped there stays on top.
+    pub(super) fn item_entity_collisions(&self) -> Vec<Aabb> {
+        self.mobs
+            .iter()
+            .filter(|m| {
+                (m.species() == horizon_client::mobs::Species::HappyGhast
+                    && m.alive()
+                    && !m.is_baby()
+                    && happy_ghast::on_still_timeout(m))
+                    || (m.species() == horizon_client::mobs::Species::Shulker && m.alive())
+            })
+            .map(|m| m.bounds())
+            .chain(self.boats.iter().map(super::boats::Boat::bounds))
+            .chain(self.carts.iter().map(|c| c.bounds()))
+            .collect()
+    }
     /// `HappyGhast.mobInteract`. Returns whether the click was used.
     pub(super) fn interact_happy_ghast(&mut self, index: usize, item: &str) -> bool {
         let m = &self.mobs[index];
@@ -47,10 +66,10 @@ impl Game<'_> {
         }
         let at = m.center();
         let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft);
-        let harnessed = m.extra.head.is_some();
+        let harnessed = m.extra.body.is_some();
         // Equippable.equipOnInteract: a harness goes on a bare adult.
         if item.ends_with("_harness") && item.starts_with("minecraft:") && !harnessed {
-            self.mobs[index].extra.head = Some(item.into());
+            self.mobs[index].extra.body = Some(item.into());
             self.audio
                 .play("minecraft:entity.happy_ghast.equip", Some(at), 1.0, 1.0);
             self.consume_held();
@@ -60,7 +79,7 @@ impl Game<'_> {
         if item == "minecraft:shears"
             && harnessed
             && !sneaking
-            && let Some(harness) = self.mobs[index].extra.head.take()
+            && let Some(harness) = self.mobs[index].extra.body.take()
         {
             self.audio
                 .play("minecraft:entity.happy_ghast.unequip", Some(at), 1.0, 1.0);
@@ -71,6 +90,9 @@ impl Game<'_> {
         if harnessed && !sneaking {
             // doPlayerRide.
             let id = self.mobs[index].id;
+            if !self.native_may_board(id) {
+                return true;
+            }
             self.break_leash(id, true, false);
             let was_empty = self.mobs[index].rider.is_none();
             // addPassenger: the rider is not standing on top, so no still
@@ -133,7 +155,12 @@ impl Game<'_> {
         if let Some(id) = self.spawn_mob("minecraft:happy_ghast", at, true)
             && let Some(m) = self.mobs.iter_mut().find(|m| m.id == id)
         {
-            m.extra.age = -24000;
+            // DriedGhastBlock.spawnGhastling sets the baby age before
+            // addFreshEntity, so ageBoundaryReached runs the ghastling setup
+            // (`babyGhastSetup`) while the mob is still being hatched: its
+            // goals, navigation and brain are a ghastling's before its first
+            // tick, not an adult's until the next aiStep.
+            horizon_client::mobs::finalize::set_age(m, -24000);
             m.yaw = yaw;
             m.body_yaw = yaw;
             m.head_yaw = yaw;

@@ -383,9 +383,29 @@ fn carry(shared: &Arc<Shared>, session: u64, (r, w): session::Secure, direct: bo
 // ----- The relay (optional) ---------------------------------------------------------------------
 
 fn connect_relay(relay: &str, port: Option<u16>) -> io::Result<(TcpStream, SocketAddr)> {
+    let wait = Duration::from_secs(5);
     let mut last = io::Error::other("no address");
+    let mut timed_out = Vec::new();
     for address in resolve_relay(relay)? {
-        match direct::connect_from(port, address, Duration::from_secs(5)) {
+        match direct::connect_from(port, address, wait) {
+            Ok(s) => {
+                let _ = s.set_nodelay(true);
+                return Ok((s, address));
+            }
+            Err(e) => {
+                if port.is_some() && e.kind() == io::ErrorKind::TimedOut {
+                    timed_out.push(address);
+                }
+                last = e;
+            }
+        }
+    }
+    // A relay on Windows ignores a new connection from the address of one it
+    // closed less than its TIME_WAIT ago (the last guest's attach from the
+    // direct port), where Linux takes it: those get one more try from any
+    // port, once every address had its try from the direct port.
+    for address in timed_out {
+        match direct::connect_from(None, address, wait) {
             Ok(s) => {
                 let _ = s.set_nodelay(true);
                 return Ok((s, address));
@@ -513,6 +533,9 @@ fn serve_relayed(
     let Ok((mut stream, _)) = connect_relay(relay_url, port) else {
         return;
     };
+    // What the relay sees of an attach from another port is no address of
+    // this host's: nothing listens there.
+    let from_port = stream.local_addr().ok().map(|a| a.port()) == port;
     let _ = stream.set_read_timeout(Some(Duration::from_secs(15)));
     let attach = ToRelay::Attach {
         v: wire::VERSION,
@@ -523,9 +546,9 @@ fn serve_relayed(
         return;
     }
     let observed = match wire::recv::<_, FromRelay>(&mut stream) {
-        Ok(FromRelay::Bridged { observed, .. }) => {
-            observed.and_then(|o| o.parse::<SocketAddr>().ok())
-        }
+        Ok(FromRelay::Bridged { observed, .. }) => observed
+            .filter(|_| from_port)
+            .and_then(|o| o.parse::<SocketAddr>().ok()),
         _ => return,
     };
     let Ok(key) = crypto::exchange(&mut stream, &code.secret, &code.nameplate, session) else {

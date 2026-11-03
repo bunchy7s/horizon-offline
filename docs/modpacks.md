@@ -212,7 +212,7 @@ properties and shapes the new block takes, and overrides what differs:
 ```json
 {
   "template": "minecraft:iron_block",
-  "properties": { "hardness": 5.0, "explosion_resistance": 6.0, "sound": "minecraft:metal",
+  "properties": { "hardness": 5.0, "explosion_resistance": 6.0, "sounds": "minecraft:iron_block",
                   "map_color": 33, "light": 0, "requires_tool": true },
   "item": true
 }
@@ -291,9 +291,10 @@ How the game loads them, without touching vanilla's path:
   and a recipe that does not parse are logged and skipped: the block gets no model or the
   missing model, the recipe is absent, everything else loads. Vanilla's own files never hit
   these paths.
-- Not in 0.2: multiplayer registry sync (single player and the integrated server first), worlds
-  opened without a mod they used (vanilla turns unknown blocks into air; we will ask first),
-  vanilla ids redefined by a mod (refused).
+- Multiplayer works when the server and its players run the same content mods: a client whose
+  mods add different blocks, items, effects, entity types or menus is refused when it joins.
+- Not in 0.2: worlds opened without a mod they used (vanilla turns unknown blocks into air; we
+  will ask first), vanilla ids redefined by a mod (refused).
 
 ## The pipeline: `horizon-port-pack`
 
@@ -388,8 +389,8 @@ classes come from the reviewed table, Modrinth categories and sides; with jars, 
 only): content 54, library 33, client-ui 26, performance 25, other 14, unknown 2, server-only 1;
 40 rows matched the reviewed ATM10 table; three dependency layers (93 / 57 / 5).
 
-`carry` copies a jar's `assets/<id>/`, `data/<id>/`, `data/minecraft/tags/` and `data/c/tags/`
-into `mods/<id>/carry/`, a folder content mod (API 0.2) the game loads with `--dev-mod`, and
+`carry` copies a jar's `assets/<id>/`, `data/<id>/`, `data/minecraft/tags/`, `data/c/tags/` and the
+sources it adds to vanilla's atlases (`assets/minecraft/atlases/`) into `mods/<id>/carry/`, a folder content mod (API 0.2) the game loads with `--dev-mod`, and
 keeps what a content mod may not hold (other namespaces, vanilla data) in `outside/`. Files of
 the mod's own content that the game's content loader would refuse whole also go to `outside/`,
 listed with the reason in the report's `unreadable`: paths vanilla does not read (upper case),

@@ -4,6 +4,7 @@
 use crate::{
     font::Font,
     hud_layout::{GuiDraw, PoseOp, fill},
+    java_text,
     text::Text,
 };
 
@@ -86,15 +87,17 @@ impl Displayer {
 /// Horizon's own lines: the shader pack's GPU time, then its costliest passes (`passes`: each
 /// pass's median milliseconds, in the order they run).
 pub fn shader_pass_lines(passes: &[(String, f32)]) -> Vec<String> {
+    labelled_pass_lines("Shader pack GPU", passes)
+}
+
+/// `label` and the passes' total, then the costliest passes by GPU time.
+pub fn labelled_pass_lines(label: &str, passes: &[(String, f32)]) -> Vec<String> {
     const SHOWN: usize = 8;
     if passes.is_empty() {
         return Vec::new();
     }
     let total: f32 = passes.iter().map(|p| p.1).sum();
-    let mut lines = vec![format!(
-        "Shader pack GPU: {total:.2} ms in {} passes",
-        passes.len()
-    )];
+    let mut lines = vec![format!("{label}: {total:.2} ms in {} passes", passes.len())];
     let mut costliest: Vec<&(String, f32)> = passes.iter().collect();
     costliest.sort_by(|a, b| b.1.total_cmp(&a.1));
     lines.extend(
@@ -141,7 +144,12 @@ pub fn position(
         _ => ("east", "Towards positive X"),
     };
     vec![
-        format!("XYZ: {:.3} / {:.5} / {:.3}", pos[0], pos[1], pos[2]),
+        format!(
+            "XYZ: {} / {} / {}",
+            java_text::format_fixed(pos[0], 3),
+            java_text::format_fixed(pos[1], 5),
+            java_text::format_fixed(pos[2], 3),
+        ),
         format!("Block: {} {} {}", block[0], block[1], block[2]),
         format!(
             "Chunk: {cx} {sy} {cz} [{} {} in r.{}.{}.mca]",
@@ -151,9 +159,9 @@ pub fn position(
             cz >> 5
         ),
         format!(
-            "Facing: {direction} ({towards}) ({:.1} / {:.1})",
-            wrap_degrees(yaw),
-            wrap_degrees(pitch)
+            "Facing: {direction} ({towards}) ({} / {})",
+            java_text::format_fixed(wrap_degrees(yaw) as f64, 1),
+            java_text::format_fixed(wrap_degrees(pitch) as f64, 1),
         ),
         format!("{dimension} FC: {forced}"),
         format!(
@@ -202,7 +210,11 @@ pub fn scale(
 ) -> (f32, [i32; 2]) {
     let scale = match option {
         -1 => gui_scale,
-        0 => crate::window::calculate_scale(framebuffer, 0, unicode) / 2,
+        // Half the automatic scale, rounded up: an odd scale has no exact
+        // half, and truncating it put the overlay at a third of the GUI
+        // scale instead of a half on a window whose automatic scale is odd
+        // (1280x720 is 3). Even scales are unchanged.
+        0 => (crate::window::calculate_scale(framebuffer, 0, unicode) + 1) / 2,
         n => crate::window::calculate_scale(framebuffer, n, unicode),
     };
     if scale < gui_scale && scale > 0 {
@@ -364,7 +376,11 @@ pub fn local_difficulty_line(effective: f32) -> String {
     } else {
         (effective - 2.0) / 2.0
     };
-    format!("Local Difficulty: {effective:.2} // {special:.2}")
+    format!(
+        "Local Difficulty: {} // {}",
+        java_text::format_fixed(effective as f64, 2),
+        java_text::format_fixed(special as f64, 2),
+    )
 }
 
 /// `DebugEntryGpuUtilization`: past 100% in red.
@@ -550,6 +566,10 @@ mod tests {
             "SC: 289, MO: 3, C: 10, AM: 1, AX: 0, UWC: 0, WC: 2, WA: 4, MI: 0"
         );
         assert_eq!(local_difficulty_line(1.5), "Local Difficulty: 1.50 // 0.00");
+        assert_eq!(
+            local_difficulty_line(2.25),
+            "Local Difficulty: 2.25 // 0.13"
+        );
         assert_eq!(local_difficulty_line(3.0), "Local Difficulty: 3.00 // 0.50");
         assert_eq!(light_line(12, 14), "Client Light: 14 (12 sky, 14 block)");
     }
@@ -663,6 +683,10 @@ mod tests {
             ])
         );
         assert_eq!(
+            position([1.0005, 64.0, 0.0], 0.0, 0.0, "minecraft:overworld", 0)[0],
+            "XYZ: 1.001 / 64.00000 / 0.000"
+        );
+        assert_eq!(
             position([0.0, 64.0, 0.0], 450.0, 0.0, "minecraft:the_nether", 2)[3],
             "Facing: west (Towards negative X) (90.0 / 0.0)"
         );
@@ -681,6 +705,14 @@ mod tests {
         assert_eq!(
             scale([1920, 1080], 4, 0, false, [480, 270]),
             (0.5, [960, 540])
+        );
+        // A window whose automatic scale is odd: 1280x720 is 3, whose half
+        // rounds to 2. Truncating gave 1, a third of the GUI scale, which is
+        // why a restored-down window drew the overlay smaller than a
+        // maximised one.
+        assert_eq!(
+            scale([1280, 720], 3, 0, false, [427, 240]),
+            (2.0 / 3.0, [640, 360])
         );
         // A GUI scale already at or under the debug scale is kept.
         assert_eq!(

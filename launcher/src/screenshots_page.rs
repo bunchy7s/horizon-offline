@@ -7,21 +7,21 @@ use horizon_launcher::screenshots::{self, Shot};
 use std::path::PathBuf;
 
 /// Thumbnails shown before "Show all".
-const FIRST: usize = 8;
+pub(super) const FIRST: usize = 8;
 const THUMB_W: f32 = 196.;
 const THUMB_H: f32 = THUMB_W * 9. / 16.;
 
 #[derive(Default)]
 pub(super) struct Screenshots {
     home: Option<PathBuf>,
-    list: Vec<Shot>,
+    pub(super) list: Vec<Shot>,
     fresh: bool,
-    all: bool,
+    pub(super) all: bool,
     /// The picture open in the viewer, by its place in `list`.
-    viewing: Option<usize>,
-    confirm_delete: bool,
+    pub(super) viewing: Option<usize>,
+    pub(super) confirm_delete: bool,
     /// What the last action did, or why it failed.
-    note: Option<Result<String, String>>,
+    pub(super) note: Option<Result<String, String>>,
 }
 
 impl Screenshots {
@@ -32,7 +32,7 @@ impl Screenshots {
 }
 
 impl Launcher {
-    fn load_screenshots(&mut self, home: PathBuf) {
+    pub(super) fn load_screenshots(&mut self, home: PathBuf) {
         if self.screenshots.home.as_ref() != Some(&home) {
             self.screenshots = Screenshots {
                 home: Some(home.clone()),
@@ -86,21 +86,36 @@ impl Launcher {
                     cx,
                     ClipboardItem::new_image(&Image::from_bytes(format, bytes)),
                 );
-                Ok("Copied to the clipboard.".into())
+                Ok(tr("Copied to the clipboard.").into())
             }
-            Err(e) => Err(format!("Could not read {}: {e}", shot.name)),
+            Err(e) => Err(trf(
+                "Could not read {name}: {error}",
+                &[("name", &shot.name), ("error", &e.to_string())],
+            )),
         });
     }
 
     fn delete_screenshot(&mut self, shot: &Shot) {
         self.screenshots.confirm_delete = false;
-        self.screenshots.note =
-            Some(screenshots::delete(shot).map(|()| format!("{} moved to the trash.", shot.name)));
+        self.screenshots.note = Some(
+            screenshots::delete(shot)
+                .map(|()| trf("{name} moved to the trash.", &[("name", &shot.name)])),
+        );
         self.screenshots.stale();
     }
 
-    /// Home's Screenshots section, for the selected instance; None while it has none.
-    pub(super) fn screenshots_section(&mut self, cx: &mut Context<Self>) -> Option<Div> {
+    /// How many screenshots the selected instance has.
+    pub(super) fn screenshots_count(&mut self) -> usize {
+        let Some(home) = self.selected_instance().map(|i| i.home.clone()) else {
+            return 0;
+        };
+        self.load_screenshots(home);
+        self.screenshots.list.len()
+    }
+
+    /// Home's Screenshots tab, for the selected instance: its buttons (beside the tabs) and its
+    /// pictures; None while it has none.
+    pub(super) fn screenshots_section(&mut self, cx: &mut Context<Self>) -> Option<(Div, Div)> {
         let t = self.theme;
         let home = self.selected_instance()?.home.clone();
         self.load_screenshots(home.clone());
@@ -114,13 +129,13 @@ impl Launcher {
             FIRST
         };
         let folder = screenshots::folder(&home);
-        let mut buttons = div().flex().items_center().gap(px(6.));
+        let mut buttons = div().flex().items_center().gap(px(8.));
         if list.len() > FIRST {
             let label = match self.screenshots.all {
-                true => "Show fewer".to_string(),
-                false => format!("Show all {}", list.len()),
+                true => tr("Show fewer").to_string(),
+                false => trf("Show all {count}", &[("count", &list.len().to_string())]),
             };
-            buttons = buttons.child(button("screenshots-all", label, Kind::Ghost, &t).on_click(
+            buttons = buttons.child(tab_action("screenshots-all", label, &t).on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| {
                     this.screenshots.all = !this.screenshots.all;
                     cx.notify();
@@ -128,16 +143,9 @@ impl Launcher {
             ));
         }
         buttons = buttons.child(
-            button("screenshots-folder", "Open folder", Kind::Ghost, &t)
+            tab_action("screenshots-folder", "Open folder", &t)
                 .on_click(move |_, _, cx| cx.open_with_system(&folder)),
         );
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .mb(px(4.))
-            .child(section_title("Screenshots", "image", &t))
-            .child(buttons);
         let grid = div().flex().flex_wrap().gap(px(10.)).children(
             list.into_iter().take(shown).enumerate().map(|(i, shot)| {
                 div()
@@ -163,13 +171,13 @@ impl Launcher {
                     }))
             }),
         );
-        let mut section = div().flex().flex_col().gap(px(8.)).child(header);
+        let mut section = div().flex().flex_col().gap(px(8.));
         if self.screenshots.viewing.is_none() {
             if let Some(Err(e)) = &self.screenshots.note {
                 section = section.child(notice(e.clone(), &t));
             }
         }
-        Some(section.child(grid))
+        Some((buttons, section.child(grid)))
     }
 
     /// The viewer over the whole window, while a picture is open.
@@ -198,7 +206,7 @@ impl Launcher {
                     .child(
                         text(theme::CAPTION)
                             .text_color(t.danger)
-                            .child("Move it to the trash?"),
+                            .child(tr("Move it to the trash?")),
                     )
                     .child(button("screenshot-keep", "Keep", Kind::Ghost, &t).on_click(
                         cx.listener(|this, _: &ClickEvent, _, cx| {
@@ -265,7 +273,14 @@ impl Launcher {
                         text(theme::CAPTION)
                             .text_color(t.muted)
                             .truncate()
-                            .child(format!("{} · {} of {count}", shot.name, i + 1)),
+                            .child(trf(
+                                "{name} · {index} of {count}",
+                                &[
+                                    ("name", &shot.name),
+                                    ("index", &(i + 1).to_string()),
+                                    ("count", &count.to_string()),
+                                ],
+                            )),
                     ),
             )
             .child(step("screenshot-newer", "← Newer", false, i > 0))
@@ -298,7 +313,7 @@ impl Launcher {
                 .px(px(32.))
                 .py(px(24.))
                 .bg(t.page.opacity(0.96))
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 .occlude()
                 .child(top)
                 .child(

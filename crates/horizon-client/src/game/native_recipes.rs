@@ -1,10 +1,10 @@
 //! Every item and recipe the game knows, made once for the mods that read
 //! them (native mods' `native_recipes`, capability `recipes` of WebAssembly
 //! mods, docs/mods.md), and the recipe book's known displays; placing a
-//! recipe and creative gifts. The recipes are the window's own data: the
-//! world's in single player, vanilla's on a server (a client is sent no
-//! others), while the known displays follow the server's book as the recipe
-//! book does.
+//! recipe and creative gifts. The recipes are the window's own data — the
+//! content root's — with the server's recipes of the types its native mods
+//! had it send (`horizon:recipe_content`) in their place, while the known
+//! displays follow the server's book as the recipe book does.
 use super::{
     Game,
     native_hooks::{
@@ -13,7 +13,7 @@ use super::{
     },
 };
 use horizon_client::{
-    crafting::Ingredient,
+    crafting::{Ingredient, recipe_id},
     items::ItemStack,
     recipe_book::{Category, Display},
     stations::Smithing,
@@ -22,10 +22,23 @@ use std::{collections::HashMap, sync::Arc};
 
 /// The tables, made once, and the recipe book's known displays with the
 /// book's version they are of.
+/// The most recipes a server's recipe content may carry.
+const MAX_SYNCED_RECIPES: usize = 1_000_000;
+
 #[derive(Default)]
 pub(super) struct RecipeTables {
     tables: Option<Arc<Recipes>>,
+    pub(super) categories: Option<HashMap<String, horizon_client::recipe_book::RecipeBookCategory>>,
     known: (Option<u64>, Arc<[i32]>),
+    /// The server's recipes of the types its native mods sent (`horizon:
+    /// recipe_content`) over the window's own: what `Game::recipes` reads on
+    /// a client once they came.
+    synced: Option<horizon_client::crafting::Recipes>,
+    /// The recipe content's parts so far, until its last.
+    incoming: Vec<(String, serde_json::Value)>,
+    /// The types that came before the player did: the mods hear of them
+    /// once the helpers can answer (`recipes_received_now`).
+    received: Option<Vec<String>>,
 }
 
 /// Item id -> its index in [`Recipes::items`].
@@ -42,7 +55,8 @@ impl Index {
         self.stack(&s.item, s.count, components(s))
     }
     fn any(&self, i: &Ingredient) -> Vec<RecipeStack> {
-        i.1.iter()
+        i.order
+            .iter()
             .filter_map(|id| self.stack(id, 1, String::new()))
             .collect()
     }
@@ -85,6 +99,21 @@ fn recipe(id: String, kind: RecipeKind) -> Recipe {
 }
 
 impl Game<'_> {
+    pub(super) fn registered_recipe_book_category(
+        &mut self,
+        kind: &str,
+    ) -> Option<horizon_client::recipe_book::RecipeBookCategory> {
+        if self.recipe_tables.categories.is_none() {
+            let mut declarations = Vec::new();
+            self.native_recipe_book_categories(&mut declarations);
+            self.recipe_tables.categories = Some(horizon_client::recipe_book::mod_categories(
+                declarations,
+                self.recipes(),
+                self.items(),
+            ));
+        }
+        self.recipe_tables.categories.as_ref()?.get(kind).cloned()
+    }
     /// `native_give`: `count` of `item`, refused outside a world, unless
     /// creative and for an item the game doesn't have.
     pub(super) fn recipe_give(&mut self, item: &str, count: u32) -> Result<(), String> {
@@ -187,11 +216,10 @@ impl Game<'_> {
         );
         let mut out = Vec::new();
         let cooking: HashMap<String, (u32, f32)> = self
-            .res
             .recipes()
             .cooking
             .iter()
-            .map(|c| (format!("minecraft:{}", c.id), (c.time, c.experience)))
+            .map(|c| (recipe_id(&c.id), (c.time, c.experience)))
             .collect();
         for e in self.recipe_book_entries() {
             let furnace = |c: Category| match c.name().split('_').next() {
@@ -243,7 +271,7 @@ impl Game<'_> {
         }
         for c in &self.recipes().cooking {
             if c.kind == "minecraft:campfire_cooking" {
-                let mut r = recipe(format!("minecraft:{}", c.id), RecipeKind::Campfire);
+                let mut r = recipe(recipe_id(&c.id), RecipeKind::Campfire);
                 r.group = c.group.clone();
                 r.slots = vec![index.any(&c.ingredient)];
                 r.results = index.of(&c.result).into_iter().collect();
@@ -317,6 +345,110 @@ impl Game<'_> {
         Recipes {
             items: table,
             recipes: out,
+        }
+    }
+}
+
+impl Game<'_> {
+    /// The server's recipes a client was sent, over its own; None on a
+    /// server and until a server sends any.
+    pub(super) fn synced_recipes(&self) -> Option<&horizon_client::crafting::Recipes> {
+        self.recipe_tables.synced.as_ref()
+    }
+    /// A new play session (`Login`): what the last server sent is gone.
+    pub(super) fn forget_synced_recipes(&mut self) {
+        self.recipe_tables.synced = None;
+        self.recipe_tables.incoming.clear();
+        self.recipe_tables.received = None;
+        self.recipe_tables.tables = None;
+        self.forget_book();
+    }
+    /// `native_recipes_received` for the types that came, once the window
+    /// has its player: the recipes of a join come before it, and the helpers
+    /// answer nothing until then. Once a frame.
+    pub(super) fn recipes_received_now(&mut self) {
+        if self.player.is_some()
+            && let Some(types) = self.recipe_tables.received.take()
+        {
+            self.native_recipes_received(&types);
+        }
+    }
+    /// `OnDatapackSyncEvent.sendRecipes`: the recipe types the native mods
+    /// want their clients to have, from this load's tables, become what the
+    /// server sends its Horizon clients at a join and after `/reload`. Called
+    /// once a load's tables are built, before any player hears of them.
+    pub(super) fn sync_recipe_content(&mut self) {
+        use horizon_client::lan::recipes;
+        let mut types = Vec::new();
+        self.native_datapack_sync(&mut types);
+        types.sort();
+        types.dedup();
+        let sources = if types.is_empty() {
+            Vec::new()
+        } else {
+            horizon_client::crafting::Recipes::sources(&self.options.resources, &self.pack_files())
+                .unwrap_or_else(|e| {
+                    log::warn!("Horizon: the recipes for the clients were not read: {e}");
+                    Vec::new()
+                })
+        };
+        recipes::set_content(recipes::encode_content(
+            &types,
+            &sources,
+            recipes::sent_before(),
+        ));
+    }
+    /// A `horizon:recipe_content` part the server sent the window. On the
+    /// last, the window's tables take the server's recipes of those types in
+    /// place of its own, and the mods hear of it (`RecipesReceivedEvent`).
+    pub(super) fn remote_recipe_content(&mut self, data: &[u8]) {
+        let part: horizon_client::lan::recipes::ContentPart = match serde_json::from_slice(data) {
+            Ok(part) => part,
+            Err(e) => {
+                log::warn!("Horizon: bad recipe content from the server: {e}");
+                return;
+            }
+        };
+        self.recipe_tables.incoming.extend(part.recipes);
+        // The server is trusted to end its parts; one that never does is
+        // dropped, not kept growing.
+        if self.recipe_tables.incoming.len() > MAX_SYNCED_RECIPES {
+            log::warn!("Horizon: the server sent more than {MAX_SYNCED_RECIPES} recipes; dropped");
+            self.recipe_tables.incoming = Vec::new();
+            return;
+        }
+        let Some(types) = part.last else {
+            return;
+        };
+        let received = std::mem::take(&mut self.recipe_tables.incoming);
+        // No type any more: back on the window's own recipes.
+        if types.is_empty() {
+            if self.recipe_tables.synced.take().is_some() {
+                self.recipe_tables.tables = None;
+                self.forget_book();
+                self.recipe_tables.received = Some(types);
+                self.recipes_received_now();
+            }
+            return;
+        }
+        let root = &self.options.resources;
+        let overlay = horizon_world::loot::PackOverlay::NONE;
+        let built = horizon_client::crafting::Recipes::sources(root, &overlay).and_then(|own| {
+            let of = |v: &serde_json::Value| types.iter().any(|t| v["type"].as_str() == Some(t));
+            let mut all: Vec<_> = own.into_iter().filter(|(_, v)| !of(v)).collect();
+            all.extend(received);
+            horizon_client::crafting::Recipes::from_sources(root, self.items(), &overlay, all)
+        });
+        match built {
+            Ok(recipes) => {
+                self.recipe_tables.synced = Some(recipes);
+                // What was made of the window's own recipes is made again.
+                self.recipe_tables.tables = None;
+                self.forget_book();
+                self.recipe_tables.received = Some(types);
+                self.recipes_received_now();
+            }
+            Err(e) => log::warn!("Horizon: the server's recipes were not taken: {e}"),
         }
     }
 }

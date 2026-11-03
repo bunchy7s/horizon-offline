@@ -16,7 +16,7 @@ ops.json); at level 2 the admins' commands must do nothing.
 
 The game and the server run with fresh HORIZON_HOME, launcher and XDG folders and without audio. Logs go to --out.
 Build first:
-    cargo build --profile fast -p horizon-client --bins
+    cargo build --profile fast -p horizon-client -p horizon-client-lib --bins
     cargo build --profile fast -p horizon-bots
 """
 import argparse

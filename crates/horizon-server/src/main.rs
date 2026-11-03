@@ -20,6 +20,7 @@ mod management_tls;
 mod mcp;
 mod panel;
 mod process;
+mod query;
 mod rcon;
 #[cfg(test)]
 mod reference;

@@ -40,7 +40,10 @@ cargo horizon-mod build             # only build: target/horizon-mod/my_mod.hmod
 cargo horizon-mod check target/horizon-mod/my_mod.hmod   # the registry's checks; --json for JSON
 ```
 
-- `new <path> [--name "Name"]` writes the template. It makes content mods only: any other `--template` is refused.
+- `new <path> [--name "Name"]` writes the template. `--template native [--horizon <commit>]` writes a native trait
+  mod's bundle instead: `horizon-mixin.toml` (pinned to that Horizon commit, else unpinned) and an `[api]` crate with
+  one hook, built with `horizon-launcher native-build <path> --trust-native-code`
+  ([native-mods.md](native-mods.md#trait-mods-draft)). Any other `--template` is refused.
 - `build` packs `horizon-mod.toml`, `assets/` and `data/` into `target/horizon-mod/<id>.hmod`, with the same checks
   the game makes when it reads the content. It refuses a folder with a `Cargo.toml` (code is native now) and a
   manifest without capability `registries`.
@@ -72,7 +75,21 @@ Unknown keys are refused, so a typo is an error, not a silently ignored permissi
 
 A content mod has capability `registries` and carries `assets/` and `data/` in the `.hmod`. It adds blocks and items
 by declaring them in `data/<id>/horizon/block/*.json` and `data/<id>/horizon/item/*.json`, each copying a vanilla
-template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and mob effects (below):
+template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-mob-effects)), and creative tabs, mob
+effects, entity types and menu types (each below) in `creative_tab/`, `mob_effect/`, `entity_type/` and `menu/` beside
+them. LAN and dedicated server players play with them when they run the same mods: a client whose mods add different
+content is refused when it joins, with the reason.
+
+A server that has content mods on also checks them one by one (`horizon_protocol::mod_list`, channel
+`horizon:mod_list`): in the configuration phase it sends the id, version and SHA-256 of each `.hmod` with
+`side = "both"`, the client answers with its own, and a client that differs is refused with the mods named: missing,
+not on this server, or another version or file. Only `side = "both"` mods are compared and sent: a `client` mod (a
+HUD, a minimap) never blocks a join and is never told to a server, and a `server` mod stays private to it. A manifest
+with no `side` line is `client`, so a content mod meant for both halves must say `side = "both"`, or this check
+ignores it. A mod run from a folder (`--dev-mod`) has no file hash and matches by version. Native mods are not in the
+list yet: their manifest has no side.
+
+A block names its template and what differs from it:
 
 ```json
 { "template": "minecraft:iron_block",
@@ -80,11 +97,28 @@ template ([modpacks.md](modpacks.md#registries-02-data-driven-blocks-items-and-m
   "item": true }
 ```
 
+`random_ticks` makes a block tick randomly whatever its template does, as vanilla's
+`isRandomlyTicking(state)` does for its own blocks, so a crop, sapling or soil on a template that never
+ticks still grows: `"random_ticks": true` for every state (or `false`, to stop a template that ticks), or
+`{ "property": "grown", "values": ["false"] }` for the states whose own state property (declared in
+`state_properties`) is one of the values. The block's native `native_random_tick` hook then fires as it does
+for a vanilla block that ticks, and its sections count it.
+
+`render_shape` says how a block is drawn whatever its template does, as vanilla's `getRenderShape`:
+`"MODEL"` puts its block model in the chunk mesh, `"ENTITYBLOCK_ANIMATED"` leaves the model out for a block whose
+moving parts its block entity draws every frame (a turning shaft, a machine's arm), and `"INVISIBLE"` draws nothing.
+Its outline, collision, light and occlusion stay as declared: on a template that occludes (stone), the faces it
+covers stay hidden, so a block drawn by its block entity usually takes a template that doesn't (glass).
+
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its
-template's states times the combinations of the ones it declares, in a fixed
-order with every declared default first, so ids do not move between loads:
+template's states times the combinations of the ones it declares, laid out as
+vanilla lays out a block's states (`StateDefinition`): every property, the
+template's and the declared ones, sorted by name with the first name varying
+slowest, and each declared property's default value first. The order is fixed,
+so ids do not move between loads, and a declared name may sort before one of
+the template's (`bites` on a carved pumpkin, whose `facing` comes after it):
 
 ```json
 { "template": "minecraft:stone",
@@ -100,6 +134,64 @@ A declared name may not be one the template already has, and `default_state`
 takes one value per declared property too, so a block's default is exactly one
 state of its own. Every combination has to fit in the states a world holds
 (2^20), so a declaration that would not is refused when the mods load.
+
+A block whose template is one of vanilla's signs is a sign, whatever its name: it has vanilla's sign block
+entity, so the text, the editor, dye, glow ink, wax and saving all work as they do on an oak sign, and the
+client draws its text. A wooden sign is two blocks and a hanging sign two more, one form per template, and the
+one with the item names its wall form:
+
+```json
+{ "template": "minecraft:oak_sign", "wood_type": "ruby:elm", "wall_block": "ruby:elm_wall_sign" }
+```
+
+```json
+{ "template": "minecraft:oak_wall_sign", "wood_type": "ruby:elm", "item": false }
+```
+
+The same goes for `minecraft:oak_hanging_sign` and `minecraft:oak_wall_hanging_sign`. `wall_block` is what the
+sign's item places on a wall, a block of the same mod, declared in its files when the sign is; without it the
+item places the template's wall sign. The wall form has no item of its own, and its sign's item is what picking
+it gives. `wood_type` names the editor's background:
+`ruby:elm` is `assets/ruby/textures/gui/signs/elm.png` (24x26) and `assets/ruby/textures/gui/hanging_signs/elm.png`
+(16x16), and a bare name is vanilla's, such as `cherry`; without it the template's wood is used. The board is
+the block's model: `minecraft:block/template_sign_rot_0` to `_rot_3` and `template_wall_sign`, and for hanging
+signs `template_hanging_sign_rot_0` to `_rot_3`, `template_attached_hanging_sign_rot_0` to `_rot_3` and
+`template_wall_hanging_sign`, with `all` and `particle` textures. List your blocks in vanilla's tags as well:
+`minecraft:standing_signs`, `minecraft:wall_signs`, `minecraft:ceiling_hanging_signs` and
+`minecraft:wall_hanging_signs`, which vanilla's other sign tags and `minecraft:mineable/axe` include. Give the
+wall form a loot table of its own, or name it `<x>_wall_sign` so that it drops what `<x>_sign`'s table does.
+
+A block can override its targeting outline with `shapes` and independently override movement
+collision with `collision_shapes`. Both take the same table format. Boxes are
+`[minX,minY,minZ,maxX,maxY,maxZ]` in block units (one block is 1), at most 16 per shape.
+Coordinates must be finite and each minimum must not exceed its maximum. `[]` is an empty shape.
+
+```json
+{
+  "template": "minecraft:stone",
+  "state_properties": {
+    "facing": { "type": "enum", "values": ["north", "south"] },
+    "count": { "type": "enum", "values": ["1", "2"] }
+  },
+  "shapes": {
+    "properties": ["facing", "count"],
+    "values": { "north,2": [[0,0,0,1,0.5,1]] },
+    "default": [[0,0,0,1,1,1]]
+  },
+  "collision_shapes": { "default": [] }
+}
+```
+
+`properties` names an ordered tuple of template and/or declared state properties; each `values` key
+lists their values in that order, separated by commas without spaces. A nonmatching tuple uses
+`default`. Without `default`, every tuple must be covered. A default-only table gives every state the
+same shape. The existing `{"property":"axis","values":{"x":[...],"y":[...],"z":[...]}}`
+format still works; use either `property` or `properties`, not both. Unknown properties, unreachable
+value tuples, malformed boxes and duplicate property names reject the mod with a load error rather
+than silently ignoring a typo. Omitted `shapes` preserves the template outline (or the connecting
+block's `thickness` outline). Omitted `collision_shapes` preserves the existing behavior: a declared
+outline also becomes collision, otherwise the template collision is retained. An explicit collision
+table can be used without an outline override, and overrides `thickness` collision too.
 
 An item copies its template's data components, with `max_stack_size` and
 `rarity` changed, and any other 26.3 component set or removed in
@@ -123,6 +215,18 @@ JSON values become NBT values. Values must fit the network NBT limits and
 round-trip through saved NBT; negative zero is not supported. A key such as
 `"!sample:charge": {}` removes the template's default. Unknown types fail when Horizon builds the content root;
 `cargo horizon-mod check` cannot check native registrations.
+
+`crafting_remainder` names what the item leaves in the crafting grid when a
+recipe uses it, as a milk bucket leaves a bucket (vanilla's
+`Item.Properties.craftRemainder`, not a data component): a vanilla item or
+one of the mod's own, refused at load otherwise. It holds on the crafting
+table, the inventory grid, the crafter and as furnace fuel (the last of the stack leaves it in
+the fuel slot, a stack with more left drops it), not yet in a brewing stand. What the item leaves once eaten
+or drunk is the `minecraft:use_remainder` component instead:
+
+```json
+{ "template": "minecraft:mushroom_stew", "crafting_remainder": "minecraft:bowl" }
+```
 
 A block's item takes the same `components`, over the components of its
 template block's item; a block with `"item": false` can't have them. Block files
@@ -220,26 +324,19 @@ slot, and one on the container goes to the inventory, as a chest's does. `result
 container's faces and `inputs`, so leave result slots out of `inputs`. The data slots are the block entity's `data`
 (16-bit on the network, as vanilla's), all sent when it opens, then each change. A Horizon client shows it through the
 mod's own screen (`native_screen`); without one it closes again. Clients join a server only with the same mods' menu
-types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Not
-yet: per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra data, and
-client prediction of its clicks.
+types, as with its blocks, and a client that isn't Horizon's is never sent one: the block opens nothing for it. Its
+clicks run on the server's vanilla menu engine (`menu::Kind::Mod`), shift-clicks routed as `ChestMenu`'s, and a native
+mod can decide what a slot takes in code with `native_menu_slot_rules` ([native-mods.md](native-mods.md#menu-slot-rules)).
+Not yet: declared per-slot rules beyond `results`, hooks for shift-click routing and `stillValid`, opening with extra
+data, and client prediction of its clicks.
 
-`crafting_remainder` names what the item leaves in the crafting grid when a
-recipe uses it, as a milk bucket leaves a bucket (vanilla's
-`Item.Properties.craftRemainder`, not a data component): a vanilla item or
-one of the mod's own, refused at load otherwise. It holds on the crafting
-table, the inventory grid and the crafter, not yet as furnace fuel or in a
-brewing stand. What the item leaves once eaten
-or drunk is the `minecraft:use_remainder` component instead:
-
-```json
-{ "template": "minecraft:mushroom_stew", "crafting_remainder": "minecraft:bowl" }
-```
+#### Namespaces and limits
 
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
 `data/<id>/`, and those its manifest lists), plus additions to vanilla tags
-(`data/minecraft/tags/`) and to the convention tags NeoForge and Fabric mods
-share (`data/c/tags/`).
+(`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
+share (`data/c/tags/`), and sources added to vanilla's atlases
+(`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under
@@ -253,7 +350,8 @@ namespaces = ["kaisyn", "towns_and_towers"]
 ```
 
 A listed namespace is the mod's as its id is: its `assets/` and `data/` files load, and the game reads its tags,
-recipes, names and loot. Blocks, items and mob effects are declared in `data/<id>/horizon/` only. `minecraft`, `c` and
+recipes, names and loot. Blocks, items, creative tabs, mob effects, entity types and menu types are declared in
+`data/<id>/horizon/` only. `minecraft`, `c` and
 `horizon` cannot be listed. Two mods that are on may not own the same namespace (one's id or listed namespace being
 the other's): the game keeps the first in load order and leaves the other's content out, with "mods A and B both use
 the namespace N; turn one of them off" in the log. Paths use vanilla's resource characters, at most 65,536 files, 16
@@ -285,13 +383,17 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
-biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
-(older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
-generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
-none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
-NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
-feature already in the step is not added twice.
+A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) and mob spawn
+changes reach biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in
+`data/<ns>/neoforge/biome_modifier/` (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types).
+`add_features` appends its `features` to one generation `step` of every biome in `biomes`; `remove_features` takes them
+out of its `steps` (every step when it lists none); `add_spawns` appends its `spawners` (one `{ "type", "weight",
+"minCount", "maxCount" }` object or a list of them) to each entity type's category in
+`minecraft:gameplay/natural_mob_spawns`, turning `minCount` and `maxCount` into 26.3's `count`; `remove_spawns` takes its
+`entity_types` out of every category; `add_spawn_costs` sets `spawn_costs` (`{ "energy_budget", "charge" }`) for its
+`entity_types`, and `remove_spawn_costs` removes them; `none` does nothing. `biomes`, `features` and `entity_types` are
+an id, a `#tag`, a list of ids, or NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal,
+each in mod and file order, and a feature already in the step is not added twice.
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
@@ -301,12 +403,13 @@ feature already in the step is not added twice.
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
-naming a biome, biome tag, feature or feature tag the game doesn't have (another mod's, a `#c:` convention tag), or of a
-type not read yet (spawns and climate: `add_spawns`, `add_carvers`, a mod's own serializer), is skipped with a warning
-naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a type
-that is read (an unknown step, a missing field) stops the build, and the game starts without content mods ("content
-mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features` doesn't read a mod's
-`placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to it too.
+naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
+`#c:` convention tag), or of a type not read yet (`add_carvers`, climate, a mod's own serializer), is skipped with a
+warning naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a
+type that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
+content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
+doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
+it too.
 
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,

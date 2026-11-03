@@ -2,6 +2,7 @@
 //! to the ones decoded from the PNGs. Deletes the cache file in ROOT, loads (decodes
 //! and writes it), loads again (reads it) and compares the sprite arrays.
 //! cargo run --profile fast -p horizon-client --example sprite_cache_parity -- ROOT
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::assets::{Assets, RenderAssets};
 use std::{
     hash::{DefaultHasher, Hash, Hasher},

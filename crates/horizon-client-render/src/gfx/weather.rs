@@ -361,7 +361,7 @@ mod tests {
     #[test]
     #[ignore = "requires a Vulkan/Metal/DX12 adapter"]
     fn weather_shader_uvs_match_legacy_bits() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .unwrap();

@@ -129,6 +129,16 @@ fn edge((w, h): (f32, f32), button: Button) -> Rect {
     }
 }
 
+/// Whether the screen still gets the key after `act`. `Screen.keyPressed`
+/// moves the focus on Tab or an arrow and returns false, so a container
+/// screen goes on to `checkHotbarKeyPressed` (`AbstractContainerScreen
+/// .keyPressed`): Tab bound to the off hand both moves the focus and swaps.
+/// Horizon's other screens handle these keys themselves, so only containers
+/// pass them on.
+pub(super) fn passes_on(act: Act, container: bool) -> bool {
+    container && matches!(act, Act::Focus(_) | Act::Step(_))
+}
+
 /// `AbstractSliderButton.setFocused`: the arrows change a slider's value
 /// when the focus came from the mouse or Tab, not from an arrow.
 pub(super) fn slider_edit_on_focus(nav: Nav) -> bool {
@@ -329,6 +339,19 @@ mod tests {
         }
         assert_eq!(nav_of(KeyCode::KeyA, false), None);
         assert_eq!(nav_of(KeyCode::Escape, false), None);
+    }
+
+    /// Tab bound to key.swapOffhand in an inventory: the focus moves and the
+    /// screen still checks its hotbar keys; a press stays the widget's.
+    #[test]
+    fn containers_still_get_tab_and_arrows_after_the_focus_moves() {
+        assert!(passes_on(Act::Focus(0), true));
+        assert!(passes_on(Act::Step(Button::DPadDown), true));
+        assert!(!passes_on(Act::Press, true));
+        assert!(!passes_on(Act::ToggleSlider, true));
+        assert!(!passes_on(Act::Nudge(1.0), true));
+        assert!(!passes_on(Act::Focus(0), false));
+        assert!(!passes_on(Act::Step(Button::DPadDown), false));
     }
 
     /// The title screen's rows (TitleScreen.init's add order).

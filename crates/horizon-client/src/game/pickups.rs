@@ -1,4 +1,4 @@
-//! `ItemPickupParticle`: a taken item entity, experience orb or arrow flies
+//! `ItemPickupParticle`: a taken item entity, experience orb, arrow or trident flies
 //! into whoever took it over three ticks (`ClientPacketListener.handleTakeItemEntity`
 //! adds one for every `ClientboundTakeItemEntityPacket`), drawn with the render
 //! state it had when it was taken (`extractEntity(from, 1.0F)`).
@@ -16,6 +16,7 @@ pub(super) enum Taken {
     Item(Box<ItemEntity>),
     Orb(Box<ExperienceOrb>),
     Arrow(Box<Projectile>),
+    Trident(Box<super::trident::ThrownTrident>),
 }
 impl Taken {
     /// The render state's position: the entity's at partial tick 1.
@@ -24,6 +25,7 @@ impl Taken {
             Taken::Item(i) => i.position,
             Taken::Orb(o) => o.position,
             Taken::Arrow(a) => a.position,
+            Taken::Trident(t) => t.position,
         };
         [p.x, p.y, p.z]
     }
@@ -35,8 +37,6 @@ pub(super) enum Collector {
     Player,
     /// A mob, or another player on a server (both kept as mobs here).
     Mob(u32),
-    /// A LAN guest, by entity id (the host draws it as a model).
-    Guest(u32),
 }
 
 pub(super) struct Pickup {
@@ -78,13 +78,6 @@ pub(super) fn position(p: &Pickup, partial: f64) -> [f64; 3] {
     })
 }
 
-/// A LAN guest's target, from the model the host draws for it.
-pub(super) fn guest_target(host: &super::lan::LanHost, id: u32) -> Option<[f64; 3]> {
-    let m = host.models.values().find(|m| m.id == id)?;
-    let (p, eye) = (m.position, m.eye_height());
-    Some([p.x, (p.y + (p.y + eye)) / 2.0, p.z])
-}
-
 impl Game<'_> {
     /// `ItemPickupParticle.updatePosition`: the collector's x and z, halfway up to its eyes.
     fn collector_target(&self, collector: Collector) -> Option<[f64; 3]> {
@@ -96,9 +89,6 @@ impl Game<'_> {
             Collector::Mob(id) => {
                 let m = self.mobs.iter().find(|m| m.id == id)?;
                 (m.position, m.eye_height())
-            }
-            Collector::Guest(id) => {
-                return guest_target(self.lan.as_ref()?, id);
             }
         };
         Some([p.x, (p.y + (p.y + eye)) / 2.0, p.z])
@@ -122,6 +112,7 @@ impl Game<'_> {
             Taken::Item(_) => "item",
             Taken::Orb(_) => "orb",
             Taken::Arrow(_) => "arrow",
+            Taken::Trident(_) => "trident",
         };
         *self.pickups.made.entry(kind).or_default() += 1;
         self.pickups.added.push(Pickup {
@@ -159,6 +150,8 @@ mod tests {
     fn orb_at(x: f64, y: f64, z: f64) -> Taken {
         let at = horizon_core::geometry::Vec3::new(x, y, z);
         Taken::Orb(Box::new(ExperienceOrb {
+            join: Default::default(),
+            no_gravity: false,
             id: 0,
             position: at,
             previous: at,

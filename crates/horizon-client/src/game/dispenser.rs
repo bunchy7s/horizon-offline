@@ -13,6 +13,8 @@ use horizon_client::{
     particles::{ParticleOptions, ParticleType},
     projectiles::{Projectile, ProjectileKind},
 };
+// Its old home, for mixin code that names it here.
+pub(super) use horizon_client::mod_api::NativeDispensed;
 use horizon_core::{
     geometry::{Aabb, Direction, Vec3},
     position::BlockPos,
@@ -98,10 +100,6 @@ fn shrink(mut stack: ItemStack) -> Option<ItemStack> {
 }
 /// A dispenser's answer: the slot's new content and the level event played.
 type Dispensed = (Option<ItemStack>, i32);
-
-/// A dispenser hook's answer: the slot's remainder (None empties it) and the
-/// level event to play, `CLICK` (1000), `FAIL` (1001) or 0 for none.
-pub(super) type NativeDispensed = (Option<ItemStack>, i32);
 
 /// None keeps vanilla's behaviour; an explicit empty remainder consumes the stack.
 fn mod_dispensed(answer: Option<NativeDispensed>) -> Option<Dispensed> {
@@ -230,24 +228,17 @@ fn equine(s: Species) -> bool {
             | Species::TraderLlama
     )
 }
-/// Mobs whose body slot Horizon keeps in `extra.head` (no helmet slot is drawn).
-pub(super) fn body_in_head(s: Species) -> bool {
-    equine(s)
-        || matches!(s, Species::Wolf | Species::HappyGhast | Species::SulfurCube)
-        || horizon_client::mobs::nautilus::is_nautilus(s)
-}
 /// What a mob holds in a slot.
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
-    let body = body_in_head(m.species());
     match slot {
         Slot::MainHand => x.main_hand.clone(),
         Slot::OffHand => x.off_hand.clone(),
         Slot::Feet => x.feet.clone(),
         Slot::Legs => x.legs.clone(),
         Slot::Chest => x.chest.clone(),
-        Slot::Head => x.head.clone().filter(|_| !body),
-        Slot::Body => x.head.clone().filter(|_| body),
+        Slot::Head => x.head.clone(),
+        Slot::Body => x.body.clone(),
         Slot::Saddle => m.saddle_item().map(|s| s.item),
     }
 }
@@ -319,7 +310,8 @@ pub(super) fn mob_set_slot(m: &mut Mob, slot: Slot, stack: ItemStack) {
         Slot::Feet => x.feet = Some(item),
         Slot::Legs => x.legs = Some(item),
         Slot::Chest => x.chest = Some(item),
-        Slot::Head | Slot::Body => x.head = Some(item),
+        Slot::Head => x.head = Some(item),
+        Slot::Body => x.body = Some(item),
         Slot::Saddle => m.set_saddle(Some(stack)),
     }
 }
@@ -636,6 +628,13 @@ impl Game<'_> {
             );
         }
         if let Some((left, event)) = mod_dispensed(answer) {
+            if event == FAIL {
+                self.native_block_failed_dispense(
+                    self.dim.id(),
+                    [pos.0, pos.1, pos.2],
+                    &stack.item,
+                );
+            }
             // DefaultDispenseItemBehavior.dispense: playSound, then playAnimation;
             // a NOOP behaviour (event 0) plays neither.
             if event != 0 {
@@ -692,6 +691,9 @@ impl Game<'_> {
             }
             _ => self.dispense_default_method(pos, facing, stack)?,
         };
+        if event == FAIL {
+            self.native_block_failed_dispense(self.dim.id(), [pos.0, pos.1, pos.2], &item);
+        }
         self.dispenser_event(event, pos, 0);
         self.dispenser_event(2000, pos, data_value(facing));
         Ok(left)
@@ -901,6 +903,12 @@ impl Game<'_> {
                 };
                 self.player_equipped(name, Some(&one));
                 self.apply_equipment();
+                self.native_block_dispense_armor(
+                    self.dim.id(),
+                    [pos.0, pos.1, pos.2],
+                    &stack.item,
+                    "player",
+                );
                 return true;
             }
             Target::Stand(i) => {
@@ -934,6 +942,16 @@ impl Game<'_> {
             let ctx = self.who_context(who, None);
             self.post_game_event("minecraft:equip", [at.x, at.y, at.z], ctx);
         }
+        self.native_block_dispense_armor(
+            self.dim.id(),
+            [pos.0, pos.1, pos.2],
+            &stack.item,
+            match target {
+                Target::Stand(_) => "armor_stand",
+                Target::Mob(_) => "mob",
+                Target::Player => "player",
+            },
+        );
         true
     }
     /// After `EntityType.spawn` / `MobBucketItem.spawn`: `mob.playAmbientSound()`.
@@ -951,9 +969,22 @@ impl Game<'_> {
         self.handle_mob_events(events)
     }
     /// A mob a bucket emptied: `setFromBucket` keeps it, then it calls out.
+    /// Fish and axolotls carry the flag itself (saved as `FromBucket`, read by
+    /// `requiresCustomPersistence`); the others stay persistent instead.
     pub(super) fn mob_placed(&mut self, id: u32) -> Result<()> {
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = true;
+            if matches!(
+                m.species(),
+                Species::Cod
+                    | Species::Salmon
+                    | Species::Pufferfish
+                    | Species::TropicalFish
+                    | Species::Axolotl
+            ) {
+                m.extra.from_bucket = true;
+            } else {
+                m.persistent = true;
+            }
         }
         self.mob_ambient(id)
     }
@@ -1192,6 +1223,13 @@ impl Game<'_> {
         }
         self.world.modified.insert((front.0 >> 4, front.2 >> 4));
         self.boats.push(boat);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let boat = self.boats.last().unwrap();
+            self.native_vehicle_create(
+                boat.entity_type().as_str(),
+                [boat.position.x, boat.position.y, boat.position.z],
+            );
+        }
         (shrink(stack), CLICK)
     }
     /// `MinecartDispenseItemBehavior`.
@@ -1231,6 +1269,13 @@ impl Game<'_> {
         );
         self.world.modified.insert((front.0 >> 4, front.2 >> 4));
         self.carts.push(cart);
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            let cart = self.carts.last().unwrap();
+            self.native_vehicle_create(
+                cart.kind.id(),
+                [cart.position.x, cart.position.y, cart.position.z],
+            );
+        }
         (shrink(stack), CLICK)
     }
 
@@ -1249,10 +1294,10 @@ impl Game<'_> {
             horizon_client::items::bucket_contents(&item).expect("filled bucket dispatcher");
         let target_pos = Self::pos_of(target);
         let emptied = self.with_level(|b, level, ticks| {
-            b.bucket_empty(level, ticks, target_pos, content, sound, false, false)
+            b.bucket_empty(level, ticks, target_pos, None, content, sound, false, false)
         });
         self.process_level_events()?;
-        if !emptied {
+        if emptied.is_none() {
             return Ok((self.dispense_default(pos, facing, stack), CLICK));
         }
         if self.dim == super::Dim::Nether
@@ -1356,6 +1401,9 @@ impl Game<'_> {
         if self
             .with_level(|b, level, ticks| b.fire_can_be_placed_at(level, ticks, target_pos, facing))
         {
+            if !self.native_block_ignite_allowed(target_pos, "flint_and_steel") {
+                return Ok((Some(stack), CLICK));
+            }
             let fire =
                 self.with_level(|b, level, ticks| b.fire_state_for(level, ticks, target_pos));
             self.level_set([target.0, target.1, target.2], fire)?;
@@ -1376,8 +1424,8 @@ impl Game<'_> {
                 None,
             );
         } else if &*name == "minecraft:tnt" {
-            if self.ui.rules.bool("tnt_explodes") {
-                self.spawn_primed_tnt(target_pos, false);
+            if self.ui.rules.bool("tnt_explodes") && self.tnt_prime_allowed(target_pos) {
+                self.spawn_primed_tnt(target_pos, false, None, None);
                 self.with_level(|b, level, ticks| b.remove_block(level, ticks, target_pos, false));
                 self.process_level_events()?;
             } else {
@@ -1437,11 +1485,15 @@ impl Game<'_> {
         if self.sulfur_cube_swallow(front, &stack) {
             return (shrink(stack), optional_event("tnt"));
         }
+        let target = Self::pos_of(front);
+        if !self.tnt_prime_allowed(target) {
+            set_success("tnt", false);
+            return (Some(stack), FAIL);
+        }
         set_success("tnt", true);
         // new PrimedTnt(level, x + 0.5, y, z + 0.5, null), its sound and ENTITY_PLACE.
-        let target = Self::pos_of(front);
         let rot = self.world.random.next_double() * f64::from(std::f32::consts::TAU);
-        self.add_primed_tnt(target, rot, 80);
+        self.add_primed_tnt(target, rot, 80, None, None);
         self.audio.play(
             "minecraft:entity.tnt.primed",
             Some([
@@ -1748,10 +1800,7 @@ impl Game<'_> {
                 let random = self.rand_sequences.get(&sequence, self.level.seed);
                 world_items!(self).loot_table_from(table, false, held, random)
             }
-            None => self
-                .res
-                .items()
-                .loot_table(table, false, held, &mut self.world.random),
+            None => world_items!(self).loot_table(table, false, held, &mut self.world.random),
         }
     }
     /// `Entity.spawnAtLocation(level, stack, offset)`: an item at the entity's
@@ -1772,6 +1821,16 @@ impl Game<'_> {
     /// is discarded.
     pub(super) fn convert_mob(&mut self, index: usize, kind: &str) -> Option<u32> {
         let t = self.res.mob_types().get(kind).cloned()?;
+        let (old_id, old_kind) = (
+            self.mobs[index].id,
+            super::native_hooks::mob_kind(&self.mobs[index]),
+        );
+        // LivingConversionEvent.Pre: a canceled conversion leaves the mob.
+        let mut cancel = false;
+        self.native_living_conversion_pre(old_id, &old_kind, kind, &mut cancel);
+        if cancel {
+            return None;
+        }
         let old = &self.mobs[index];
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, old.position, old.yaw);
@@ -1793,6 +1852,7 @@ impl Game<'_> {
             &mut mob.extra.main_hand,
             &mut mob.extra.off_hand,
             &mut mob.extra.head,
+            &mut mob.extra.body,
             &mut mob.extra.chest,
             &mut mob.extra.legs,
             &mut mob.extra.feet,
@@ -1803,6 +1863,8 @@ impl Game<'_> {
         self.mobs[index].removed = true;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        self.native_entity_transform(old_id, &old_kind, id, kind);
+        self.native_living_conversion_post(old_id, &old_kind, id, kind);
         Some(id)
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
@@ -1820,6 +1882,8 @@ impl Game<'_> {
                 continue;
             }
             let at = m.position;
+            let entity_id = m.id;
+            let kind = m.kind.id.clone();
             let sound_at = Some([at.x, at.y, at.z]);
             match m.species() {
                 Species::SulfurCube if sulfur_cube::has_body(m) => {
@@ -1827,7 +1891,7 @@ impl Game<'_> {
                     // passenger attachment, and nothing is swallowed for 5 s.
                     let height = f64::from(m.height());
                     let id = m.id;
-                    if let Some(body) = self.mobs[i].extra.head.take() {
+                    if let Some(body) = self.mobs[i].extra.body.take() {
                         self.spawn_at_location(at, height, ItemStack::new(&body, 1));
                     }
                     // setItemSlot(BODY, EMPTY): an unequip.
@@ -1920,24 +1984,33 @@ impl Game<'_> {
                     self.audio
                         .play("minecraft:entity.mooshroom.shear", sound_at, 1.0, 1.0);
                     // convertTo(COW): the cow takes its place, then the mushrooms drop.
-                    self.convert_mob(i, "minecraft:cow");
-                    let drops = self.sequence_loot(
-                        "minecraft:shearing/mooshroom",
-                        &format!("minecraft:shearing/mooshroom/{variant}"),
-                        Some(&shears),
-                    );
-                    for stack in drops {
-                        for _ in 0..stack.count {
-                            let one = ItemStack {
-                                count: 1,
-                                ..stack.clone()
-                            };
-                            self.spawn_at_location(at, height, one);
+                    // A canceled conversion (LivingConversionEvent.Pre) drops nothing.
+                    if self.convert_mob(i, "minecraft:cow").is_some() {
+                        self.mooshroom_shear_puff([at.x, at.y, at.z], height);
+                        let drops = self.sequence_loot(
+                            "minecraft:shearing/mooshroom",
+                            &format!("minecraft:shearing/mooshroom/{variant}"),
+                            Some(&shears),
+                        );
+                        for stack in drops {
+                            for _ in 0..stack.count {
+                                let one = ItemStack {
+                                    count: 1,
+                                    ..stack.clone()
+                                };
+                                self.spawn_at_location(at, height, one);
+                            }
                         }
                     }
                 }
                 _ => continue,
             }
+            self.native_block_shear_entity(
+                self.dim.id(),
+                [target.0, target.1, target.2],
+                entity_id,
+                &kind,
+            );
             self.post_block_game_event(
                 "minecraft:shear",
                 [target.0, target.1, target.2],
@@ -2063,16 +2136,16 @@ impl Game<'_> {
             .collect();
         for i in cubes {
             let m = &self.mobs[i];
-            if m.is_baby() || m.extra.head.as_deref() == Some(&*stack.item) {
+            if m.is_baby() || m.extra.body.as_deref() == Some(&*stack.item) {
                 continue;
             }
             let (at, height) = (m.position, f64::from(m.height()));
             // The swallowed block comes out on top (the passenger attachment).
-            if let Some(old) = self.mobs[i].extra.head.take() {
+            if let Some(old) = self.mobs[i].extra.body.take() {
                 self.spawn_at_location(at, height, ItemStack::new(&old, 1));
             }
             let m = &mut self.mobs[i];
-            m.extra.head = Some(stack.item.clone());
+            m.extra.body = Some(stack.item.clone());
             m.persistent = true;
             let (at, id) = (m.position, m.id);
             // setItemSlot: a body item without `equippable` posts UNEQUIP.

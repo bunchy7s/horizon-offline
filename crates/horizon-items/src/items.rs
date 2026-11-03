@@ -7,7 +7,7 @@ use horizon_world::loot::PackOverlay;
 use horizon_world::registry::{BlockRegistry, BlockStateId};
 use serde_json::Value;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs,
     path::Path,
     sync::Arc,
@@ -193,6 +193,8 @@ pub struct ItemInfo {
     pub disable_blocking_seconds: f32,
     /// `weapon.item_damage_per_attack`, when the item is a weapon.
     pub weapon_damage: Option<u32>,
+    /// `villager_food.nutrition`: what a villager gets from eating it.
+    pub villager_food: Option<i32>,
     /// `use_effects.speed_multiplier` (UseEffects.DEFAULT: 0.2).
     pub use_speed: f32,
     /// `use_effects.can_sprint` (default false): sprinting may start while the
@@ -362,6 +364,14 @@ fn registry_order(root: &Path, order: &[Arc<str>]) -> Vec<Arc<str>> {
 }
 /// Item ids standing for a loot table's `minecraft:dynamic` entries.
 const DYNAMIC: &str = "#dynamic:";
+/// The item id standing for a chosen `minecraft:loot_table` entry, whose
+/// table then rolls in full (`NestedLootTable`).
+const NESTED: &str = "#loot_table";
+thread_local! {
+    /// The nested tables rolling now, outermost first: a table never rolls
+    /// inside itself (`LootContext.pushVisitedElement`).
+    static NESTED_ROLLS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 pub struct Items {
     pub items: HashMap<Arc<str>, ItemInfo>,
     pub order: Vec<Arc<str>>,
@@ -374,7 +384,7 @@ pub struct Items {
     /// Item tags in vanilla's order (`TagLoader`: file order, nested tags in
     /// place, first occurrence kept), the order `TagSlotDisplay` resolves.
     pub item_tag_order: HashMap<String, Vec<String>>,
-    loot: Arc<HashMap<String, Value>>,
+    loot: Arc<horizon_world::loot::LootTables>,
     /// The `jukebox_song` registry.
     pub songs: HashMap<String, Song>,
     /// The `instrument` registry (goat horns).
@@ -517,33 +527,18 @@ pub(crate) fn load_tag_lists(
     overlay: &PackOverlay,
 ) -> Result<HashMap<String, Vec<String>>> {
     let mut raw: HashMap<String, Vec<String>> = HashMap::new();
-    fn walk(
-        dir: &Path,
-        base: &Path,
-        namespace: &str,
-        raw: &mut HashMap<String, Vec<String>>,
-    ) -> Result<()> {
-        for entry in fs::read_dir(dir)?.flatten() {
-            let p = entry.path();
-            if p.is_dir() {
-                walk(&p, base, namespace, raw)?;
-            } else if p.extension().is_some_and(|e| e == "json") {
-                let name = format!(
-                    "{namespace}:{}",
-                    p.strip_prefix(base)?
-                        .with_extension("")
-                        .to_string_lossy()
-                        .replace('\\', "/")
-                );
-                let v: Value = serde_json::from_slice(&fs::read(&p)?)?;
-                let values = v["values"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
-                    .collect();
-                raw.insert(name, values);
-            }
+    /// Through `json_folder`: from the prepared data file, and read once for
+    /// the tables a load builds from the same tags.
+    fn walk(dir: &Path, namespace: &str, raw: &mut HashMap<String, Vec<String>>) -> Result<()> {
+        for file in &horizon_world::json_folder::read(dir)?.files {
+            let v: Value = serde_json::from_slice(file.bytes()?)?;
+            let values = v["values"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|e| e.as_str().or_else(|| e["id"].as_str()).map(str::to_owned))
+                .collect();
+            raw.insert(format!("{namespace}:{}", file.name), values);
         }
         Ok(())
     }
@@ -551,7 +546,7 @@ pub(crate) fn load_tag_lists(
     for namespace in crate::content_namespaces::tag_namespaces(root) {
         let dir = root.join(format!("data/{namespace}/tags/{kind}"));
         if dir.exists() {
-            walk(&dir, &dir, &namespace, &mut raw)?;
+            walk(&dir, &namespace, &mut raw)?;
         }
     }
     // The packs' entries join the game's own, in pack order; a `replace`
@@ -605,6 +600,31 @@ fn entity_spec(tags: &HashMap<String, HashSet<String>>, spec: &str) -> HashSet<S
         None => HashSet::from([spec.to_owned()]),
     }
 }
+/// Every item of the last item registry loaded with its `villager_food`
+/// nutrition (0 without the component): what the mobs' villagers read, since
+/// a mob does not hold the registry (`None` until one is loaded).
+static VILLAGER_FOOD: std::sync::RwLock<Option<HashMap<Arc<str>, i32>>> =
+    std::sync::RwLock::new(None);
+fn set_villager_food(items: &HashMap<Arc<str>, ItemInfo>) {
+    let food = items
+        .values()
+        .map(|i| (i.id.clone(), i.villager_food.unwrap_or(0)))
+        .collect();
+    *VILLAGER_FOOD
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(food);
+}
+/// `item`'s `villager_food` nutrition (`DataComponents.VILLAGER_FOOD`): its
+/// value in the loaded registry (0 for an item without the component), or
+/// `None` while no registry is loaded or the loaded one lacks the item (a
+/// test's content root without the vanilla items).
+pub fn villager_food(item: &str) -> Option<i32> {
+    let food = VILLAGER_FOOD
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    food.as_ref().and_then(|f| f.get(item).copied())
+}
+
 impl Items {
     pub fn resists_fire(&self, stack: &ItemStack, source: &str) -> bool {
         if let Some(data) = stack.data()
@@ -843,6 +863,9 @@ impl Items {
                         .find(|(item, _)| *item == name)
                         .map(|(_, rest)| (*rest).to_owned())
                         .or_else(|| mod_remainders.get(name).cloned()),
+                    villager_food: c["minecraft:villager_food"]["nutrition"]
+                        .as_i64()
+                        .map(|n| n as i32),
                     use_speed: c["minecraft:use_effects"]["speed_multiplier"]
                         .as_f64()
                         .unwrap_or(0.2) as f32,
@@ -905,6 +928,7 @@ impl Items {
         // game's own: one map with the loot data of the same root and packs.
         let loot = horizon_world::loot::shared_tables(root, overlay)?;
         let registry_order = registry_order(root, &order);
+        set_villager_food(&items);
         Ok(Self {
             items,
             order,
@@ -1043,7 +1067,7 @@ impl Items {
         table: &Value,
         random: &mut R,
     ) -> Vec<ItemStack> {
-        let empty = BTreeMap::new();
+        let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
             block: "",
@@ -1236,7 +1260,7 @@ impl Items {
         let Some(table) = self.loot.get(id) else {
             return vec![];
         };
-        let empty = BTreeMap::new();
+        let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
             block: "",
@@ -1246,7 +1270,11 @@ impl Items {
             explosion_radius: None,
             this_entity: false,
         };
-        ctx.evaluate(table, random)
+        // LootTable.getRandomItemsRaw visits the table itself first.
+        NESTED_ROLLS.with(|v| v.borrow_mut().push(id.to_owned()));
+        let out = ctx.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        out
     }
     /// The server random sequence a loot table draws from (`random_sequence`):
     /// vanilla's `LootContext.Builder.create` uses it instead of the level random.
@@ -1295,7 +1323,7 @@ impl Items {
         let Some(table) = self.loot.get(id) else {
             return vec![];
         };
-        let empty = BTreeMap::new();
+        let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
             block: "",
@@ -1318,7 +1346,7 @@ impl Items {
         let Some(table) = self.loot.get(&format!("minecraft:entities/{name}")) else {
             return vec![];
         };
-        let empty = BTreeMap::new();
+        let empty = horizon_world::chunk::BlockProperties::new();
         let ctx = LootContext {
             items: self,
             block: "",
@@ -1365,7 +1393,7 @@ impl LootContext<'_> {
 struct LootContext<'a> {
     items: &'a Items,
     block: &'a str,
-    properties: &'a BTreeMap<String, String>,
+    properties: &'a horizon_world::chunk::BlockProperties,
     held: Option<&'a ItemStack>,
     killed_by_player: bool,
     /// `LootContextParams.EXPLOSION_RADIUS`: an explosion that decays drops.
@@ -1377,6 +1405,33 @@ impl LootContext<'_> {
     /// Level of an enchantment on the tool / killer's weapon.
     fn enchantment_level(&self, id: &str) -> u32 {
         self.held.map_or(0, |h| h.enchantment_level(id))
+    }
+    /// The context a mod's own loot kind sees in this engine: the block and
+    /// the tool it has, and a seed from the roll's random. The entity, the
+    /// damage, the player and the biome belong to the main loot engine's
+    /// rolls; they are None here (docs/native-mods.md, API 133).
+    fn native_loot_context<R: RandomSource>(
+        &self,
+        random: &mut R,
+    ) -> horizon_world::loot::NativeLootContext<'_> {
+        horizon_world::loot::NativeLootContext {
+            entity: None,
+            damage: None,
+            player: None,
+            block: (!self.block.is_empty()).then_some(self.block),
+            tool: self.held.map(|h| horizon_world::loot::NativeLootTool {
+                item: h.item.to_string(),
+                enchantments: h
+                    .enchantments()
+                    .iter()
+                    .map(|(id, lvl)| (id.to_string(), *lvl as i32))
+                    .collect(),
+            }),
+            luck: 0.0,
+            biome: None,
+            seed: random.next_long(),
+            place: horizon_world::loot::current_native_loot_place(),
+        }
     }
     fn number<R: RandomSource>(v: &Value, random: &mut R) -> f32 {
         match v {
@@ -1551,6 +1606,13 @@ impl LootContext<'_> {
             // does not have: held true (a double plant's other half is taken
             // as there). Unknown types fail, as in loot.rs.
             "minecraft:location_check" => true,
+            // A mod's own kind: the condition hook answers.
+            k if !c.is_null() && k.contains(':') && !k.starts_with("minecraft:") => {
+                let ctx = self.native_loot_context(random);
+                let mut holds = false;
+                horizon_world::loot::native_loot_condition(k, c, &ctx, &mut holds);
+                holds
+            }
             _ => false,
         }
     }
@@ -1627,6 +1689,21 @@ impl LootContext<'_> {
                 ));
                 true
             }
+            // NestedLootTable: chosen by its weight like an item; `choose`
+            // then rolls its table (an id or inline) and applies its functions.
+            "minecraft:loot_table" => {
+                out.push((
+                    e["weight"].as_i64().unwrap_or(1) as i32,
+                    ItemStack {
+                        item: Arc::from(NESTED),
+                        count: 1,
+                        damage: 0,
+                        extra: None,
+                    },
+                    e.clone(),
+                ));
+                true
+            }
             "minecraft:empty" => {
                 out.push((
                     e["weight"].as_i64().unwrap_or(1) as i32,
@@ -1672,8 +1749,45 @@ impl LootContext<'_> {
             chosen
         };
         let (_, mut stack, modifiers) = candidates.swap_remove(pick);
+        if &*stack.item == NESTED {
+            self.nested(&modifiers, random, produced);
+            return;
+        }
         self.modifiers(&modifiers, &mut stack, random);
         produced.push(stack);
+    }
+    /// `NestedLootTable.createItemStack`: the entry's table rolls in full
+    /// (its pools and its own functions), then the entry's functions apply to
+    /// each stack. A table already rolling further out adds nothing.
+    fn nested<R: RandomSource>(
+        &self,
+        entry: &Value,
+        random: &mut R,
+        produced: &mut Vec<ItemStack>,
+    ) {
+        let (name, table) = match &entry["value"] {
+            Value::String(name) => (name.as_str(), self.items.loot.get(name.as_str())),
+            inline @ Value::Object(_) => ("<inline>", Some(inline)),
+            _ => return,
+        };
+        let Some(table) = table else { return };
+        let entered = NESTED_ROLLS.with(|v| {
+            let mut v = v.borrow_mut();
+            let fresh = !v.iter().any(|n| n == name);
+            if fresh {
+                v.push(name.to_owned());
+            }
+            fresh
+        });
+        if !entered {
+            return;
+        }
+        let stacks = self.evaluate(table, random);
+        NESTED_ROLLS.with(|v| v.borrow_mut().pop());
+        for mut stack in stacks {
+            self.modifiers(&entry["modifier"], &mut stack, random);
+            produced.push(stack);
+        }
     }
     /// An enchantment function's `options` (`HolderSet`): a tag, a list or
     /// one id; every enchantment when absent (`registryAccess().listElements`).
@@ -1704,6 +1818,37 @@ impl LootContext<'_> {
                         0
                     };
                     stack.count = (base + n).max(0) as u32;
+                }
+                // SetItemDamageFunction.run: check damageability before the
+                // float provider, so ineligible stacks do not draw randomness.
+                "minecraft:set_damage" => {
+                    let component = |id| stack.data().and_then(|data| data.other(id));
+                    if stack.count == 0
+                        || component("minecraft:unbreakable").is_some()
+                        || component("!minecraft:max_damage").is_some()
+                        || component("!minecraft:damage").is_some()
+                    {
+                        continue;
+                    }
+                    let max = match component("minecraft:max_damage") {
+                        Some(horizon_world::nbt::Tag::Int(value)) => {
+                            u32::try_from(*value).unwrap_or(0)
+                        }
+                        _ => self
+                            .items
+                            .get(&stack.item)
+                            .map_or(0, |info| info.max_damage),
+                    };
+                    if max == 0 {
+                        continue;
+                    }
+                    let base = if f["add"].as_bool() == Some(true) {
+                        1.0 - stack.damage as f32 / max as f32
+                    } else {
+                        0.0
+                    };
+                    let remaining = (Self::number(&f["damage"], random) + base).clamp(0.0, 1.0);
+                    stack.damage = ((1.0 - remaining) * max as f32).floor() as u32;
                 }
                 "minecraft:apply_bonus" => {
                     let level =
@@ -1844,10 +1989,153 @@ impl LootContext<'_> {
                         stack.count = stack.count.min(max as u32);
                     }
                 }
+                // A mod's own kind: the function hook changes the stack, as it
+                // does in the main loot engine.
+                k if k.contains(':') && !k.starts_with("minecraft:") => {
+                    let ctx = self.native_loot_context(random);
+                    mod_function(k, f, &ctx, stack, horizon_world::loot::native_loot_function);
+                }
                 _ => {}
             }
         }
     }
+}
+
+/// The items engine's stack as the loot engine's (`LootStack`), for a mod's
+/// function hook: the parts of it the hook can change and the engine takes
+/// back. The components the engine keeps as saved travel as their JSON, as
+/// `set_components` writes them.
+fn loot_of(stack: &ItemStack) -> horizon_world::loot::LootStack {
+    let mut components: Vec<(String, Value)> = Vec::new();
+    if let Some(data) = stack.data() {
+        for (id, value) in &data.other {
+            components.push((
+                id.clone(),
+                horizon_client_core::scoreboard::tag_to_json(value),
+            ));
+        }
+        if let Some(name) = &data.custom_name {
+            components.push((
+                "minecraft:custom_name".to_owned(),
+                horizon_client_core::scoreboard::tag_to_json(name),
+            ));
+        }
+        if let Some((material, pattern)) = &data.trim {
+            components.push((
+                "minecraft:trim".to_owned(),
+                serde_json::json!({"material": &**material, "pattern": &**pattern}),
+            ));
+        }
+    }
+    horizon_world::loot::LootStack {
+        item: stack.item.to_string(),
+        count: stack.count as i32,
+        damage: stack.damage as i32,
+        enchantments: stack
+            .crafting_enchantments()
+            .iter()
+            .map(|(id, level)| (id.to_string(), *level as i32))
+            .collect(),
+        potion: stack.potion().map(str::to_owned),
+        map: false,
+        exploration: None,
+        ominous_amplifier: stack
+            .data()
+            .and_then(|d| d.ominous_amplifier)
+            .map(i32::from),
+        stew_effects: stack
+            .data()
+            .map(|d| {
+                d.stew_effects
+                    .iter()
+                    .map(|(effect, ticks)| (effect.to_string(), *ticks))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        names: Vec::new(),
+        components,
+    }
+}
+
+/// What a mod's loot function left in its stack, applied to the engine's.
+/// Only what changed is written, so a field the hook did not touch keeps the
+/// engine's own form of it.
+fn apply_loot(
+    before: &horizon_world::loot::LootStack,
+    after: &horizon_world::loot::LootStack,
+    stack: &mut ItemStack,
+) {
+    if after.item != before.item {
+        stack.item = Arc::from(after.item.as_str());
+    }
+    if after.count != before.count {
+        stack.count = after.count.max(0) as u32;
+    }
+    if after.damage != before.damage {
+        stack.damage = after.damage.max(0) as u32;
+    }
+    if after.enchantments != before.enchantments {
+        let levels = after
+            .enchantments
+            .iter()
+            .filter(|(_, level)| *level > 0)
+            .map(|(id, level)| (Arc::from(id.as_str()), *level as u32))
+            .collect();
+        stack.set_crafting_enchantments(levels);
+    }
+    if after.potion != before.potion {
+        stack.data_mut().potion = after.potion.as_deref().map(Arc::from);
+    }
+    if after.ominous_amplifier != before.ominous_amplifier {
+        stack.data_mut().ominous_amplifier = after.ominous_amplifier.map(|a| a.clamp(0, 255) as u8);
+    }
+    if after.stew_effects != before.stew_effects {
+        stack.data_mut().stew_effects = after
+            .stew_effects
+            .iter()
+            .map(|(effect, ticks)| (Arc::from(effect.as_str()), *ticks))
+            .collect();
+    }
+    // `SetNameFunction`'s components: the names the hook set.
+    for (id, text) in &after.names {
+        if !before.names.iter().any(|(i, t)| i == id && t == text) {
+            stack.data_mut().set_loot_name(id, text);
+        }
+    }
+    // `SetComponentsFunction`'s patch: the components the hook changed or
+    // added are set, and the ones it dropped (gone from the stack) removed.
+    for (id, value) in &after.components {
+        if !before.components.iter().any(|(i, v)| i == id && v == value) {
+            stack.data_mut().set_loot_component(id, value);
+        }
+    }
+    for (id, _) in &before.components {
+        if !after.components.iter().any(|(i, _)| i == id) {
+            stack.data_mut().set_loot_component(id, &Value::Null);
+        }
+    }
+    stack.tidy();
+}
+
+/// `native_loot_function` with the items engine's stack: the stack as the
+/// loot engine's, the hook, and back what it changed. `hook` is the hook
+/// point (`horizon_world::loot::native_loot_function`); a test passes its own.
+fn mod_function(
+    kind: &str,
+    data: &Value,
+    ctx: &horizon_world::loot::NativeLootContext<'_>,
+    stack: &mut ItemStack,
+    hook: impl FnOnce(
+        &str,
+        &Value,
+        &horizon_world::loot::NativeLootContext<'_>,
+        &mut horizon_world::loot::LootStack,
+    ),
+) {
+    let before = loot_of(stack);
+    let mut after = before.clone();
+    hook(kind, data, ctx, &mut after);
+    apply_loot(&before, &after, stack);
 }
 
 /// `DispensibleContainerItem`: shared contents for hand use and dispensers.
@@ -2044,6 +2332,40 @@ mod tests {
         assert!(!items.item_in_tag("test:missing", "test:apple"));
     }
 
+    /// `NestedLootTable`: a `loot_table` entry, by id or inline, rolls that
+    /// table in full and applies its own functions to each stack; a table
+    /// never rolls inside itself.
+    #[test]
+    fn loot_table_entries_roll_their_table() {
+        let mut items = Items::for_tests(HashMap::new());
+        let diamond = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:diamond"}]}]});
+        items.loot = Arc::new(
+            [
+                ("test:inner", diamond.clone()),
+                ("test:outer", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:inner","modifier":[{"type":"minecraft:set_count","count":3}]}]}]})),
+                ("test:inline", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":diamond}]}]})),
+                ("test:loop", json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:loot_table",
+                    "value":"test:loop"}]},{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stick"}]}]})),
+            ]
+            .map(|(id, t)| (id.to_owned(), t))
+            .into_iter()
+            .collect(),
+        );
+        let roll = |id: &str| {
+            items
+                .loot_table(id, false, None, &mut LegacyRandom::new(1))
+                .into_iter()
+                .map(|s| format!("{} {}", s.item, s.count))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(roll("test:outer"), ["minecraft:diamond 3"]);
+        assert_eq!(roll("test:inline"), ["minecraft:diamond 1"]);
+        // `test:loop` is already rolling: its own entry adds nothing.
+        assert_eq!(roll("test:loop"), ["minecraft:stick 1"]);
+    }
+
     /// `Blocks.wallVariant`: a wall block without a table of its own drops
     /// from its standing block's (vanilla's tables: `blocks/torch` for
     /// `wall_torch`, `blocks/oak_sign` for `oak_wall_sign`...).
@@ -2094,10 +2416,36 @@ mod tests {
         assert_eq!(table(0), None);
     }
 
+    #[test]
+    fn content_mod_blocks_keep_their_namespace_in_loot_table_ids() {
+        let facts = br#"{"defaults":{"minecraft:air":0,"loot_repro:glowing_amethyst":1},
+            "states":[
+            ["air",true,false,"","minecraft:air"],
+            ["amethyst",false,false,"","loot_repro:glowing_amethyst"]
+        ]}"#;
+        let registry = BlockRegistry::from_facts_json(&facts[..]).unwrap();
+        let mut items = Items::for_tests(HashMap::new());
+        items.loot = Arc::new(
+            [(
+                "loot_repro:blocks/glowing_amethyst".to_owned(),
+                json!({"pools": []}),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        assert_eq!(
+            items
+                .block_loot_table(&registry, BlockStateId(1))
+                .as_deref(),
+            Some("loot_repro:blocks/glowing_amethyst")
+        );
+    }
+
     fn ctx<'a>(
         items: &'a Items,
         held: Option<&'a ItemStack>,
-        props: &'a BTreeMap<String, String>,
+        props: &'a horizon_world::chunk::BlockProperties,
         block: &'a str,
     ) -> LootContext<'a> {
         LootContext {
@@ -2111,10 +2459,122 @@ mod tests {
         }
     }
 
+    /// A mod's kind nobody claims fails; a reference by name isn't a kind,
+    /// and fails too.
+    #[test]
+    fn an_unclaimed_condition_of_a_mods_kind_fails() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let table = |condition: Value| {
+            json!({"pools":[{"rolls":1,"entries":[
+                {"type":"minecraft:item","name":"minecraft:stone","condition":condition}]}]})
+        };
+        let mut random = LegacyRandom::new(7);
+        let mut drops = |condition: Value, block: &str| {
+            ctx(&items, None, &props, block)
+                .evaluate(&table(condition), &mut random)
+                .len()
+        };
+        assert_eq!(drops(json!({"type":"mymod:always"}), "minecraft:stone"), 0);
+        assert_eq!(drops(json!({"type":"mymod:always"}), ""), 0);
+        assert_eq!(drops(json!("mymod:always"), "minecraft:stone"), 0);
+        assert_eq!(drops(Value::Null, "minecraft:stone"), 1);
+    }
+
+    /// A mod's function kind changes the stack the items engine drops: what
+    /// the hook leaves in the stack comes back (item, count, a component),
+    /// through the conversion the block-drop path uses.
+    #[test]
+    fn a_mod_function_changes_the_stack_the_items_engine_drops() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let mut random = LegacyRandom::new(7);
+        let block = ctx(&items, None, &props, "minecraft:stone");
+        let native = block.native_loot_context(&mut random);
+        let mut stack = ItemStack::new("minecraft:stone", 1);
+        mod_function(
+            "mymod:seven",
+            &json!({"type": "mymod:seven"}),
+            &native,
+            &mut stack,
+            |_, _, _, loot| {
+                loot.item = "minecraft:diamond".to_owned();
+                loot.count = 7;
+                loot.components.push((
+                    "minecraft:custom_data".to_owned(),
+                    json!({"machine": "furnace"}),
+                ));
+            },
+        );
+        assert_eq!(&*stack.item, "minecraft:diamond");
+        assert_eq!(stack.count, 7);
+        assert_eq!(
+            stack.data().and_then(|d| d.other("minecraft:custom_data")),
+            Some(&horizon_client_core::scoreboard::json_to_tag(
+                &json!({"machine": "furnace"})
+            ))
+        );
+    }
+
+    /// A function that leaves the stack alone keeps its own form: the round
+    /// trip through the loot engine's stack changes nothing.
+    #[test]
+    fn a_mod_function_that_changes_nothing_keeps_the_stacks_form() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let mut random = LegacyRandom::new(7);
+        let block = ctx(&items, None, &props, "minecraft:stone");
+        let native = block.native_loot_context(&mut random);
+        let mut stack = ItemStack::new("minecraft:diamond_sword", 1);
+        stack.enchant("minecraft:sharpness", 3);
+        stack
+            .data_mut()
+            .set_loot_name("minecraft:custom_name", &json!("Excalibur"));
+        let before = stack.clone();
+        mod_function(
+            "mymod:nothing",
+            &json!({"type": "mymod:nothing"}),
+            &native,
+            &mut stack,
+            |_, _, _, _| {},
+        );
+        assert_eq!(stack, before);
+    }
+
+    /// The items engine reaches the function hook: a pool whose function kind
+    /// is a mod's draws the hook's one `next_long` where a vanilla pool draws
+    /// none. The hook is unclaimed here, so the drop keeps its count.
+    #[test]
+    fn a_mod_function_kind_reaches_the_items_engines_roll() {
+        let items = Items::for_tests(HashMap::new());
+        let props = horizon_world::chunk::BlockProperties::new();
+        let vanilla = json!({"pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item","name":"minecraft:stone"}]}]});
+        let modded = json!({"pools":[{"rolls":1,"entries":[
+            {"type":"minecraft:item","name":"minecraft:stone"}],
+            "modifier":[{"type":"mymod:duplicate","factor":2}]}]});
+        let mut a = LegacyRandom::new(100);
+        let mut b = LegacyRandom::new(100);
+        let _ = ctx(&items, None, &props, "minecraft:stone").evaluate(&vanilla, &mut a);
+        let expected: Vec<i64> = (0..5).map(|_| b.next_long()).collect();
+        let got: Vec<i64> = (0..5).map(|_| a.next_long()).collect();
+        assert_eq!(got, expected, "a vanilla table shifted the random");
+
+        let mut c = LegacyRandom::new(100);
+        let mut d = LegacyRandom::new(100);
+        let drops = ctx(&items, None, &props, "minecraft:stone").evaluate(&modded, &mut c);
+        let _ = d.next_long(); // the hook's seed
+        let expected: Vec<i64> = (0..5).map(|_| d.next_long()).collect();
+        let got: Vec<i64> = (0..5).map(|_| c.next_long()).collect();
+        assert_eq!(got, expected, "the mod function did not draw its seed");
+        assert_eq!(drops.len(), 1);
+        assert_eq!(drops[0].count, 1);
+    }
+
     #[test]
     fn fortune_silk_touch_and_looting() {
         let items = Items::for_tests(HashMap::new());
-        let props = BTreeMap::new();
+        let props = horizon_world::chunk::BlockProperties::new();
         let mut pick = ItemStack::new("minecraft:diamond_pickaxe", 1);
         pick.enchant("minecraft:fortune", 3);
         let ore = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:alternatives","children":[
@@ -2186,7 +2646,7 @@ mod tests {
     #[test]
     fn set_potion_gives_the_potion_its_contents() {
         let items = Items::for_tests(HashMap::new());
-        let props = BTreeMap::new();
+        let props = horizon_world::chunk::BlockProperties::new();
         let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:splash_potion",
             "modifier":{"type":"minecraft:set_potion","id":"minecraft:fire_resistance"}}]}]});
         let drops = ctx(&items, None, &props, "").evaluate(&table, &mut LegacyRandom::new(1));
@@ -2203,7 +2663,7 @@ mod tests {
         let Some(items) = super::prepared_items() else {
             return;
         };
-        let props = BTreeMap::new();
+        let props = horizon_world::chunk::BlockProperties::new();
         let mut random = LegacyRandom::new(11);
         // A sword at levels 20..39 comes out enchanted, as in an End city.
         let levels = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item",
@@ -2264,7 +2724,7 @@ mod tests {
         let Some(items) = super::prepared_items() else {
             return;
         };
-        let props = BTreeMap::new();
+        let props = horizon_world::chunk::BlockProperties::new();
         let table = json!({"pools":[{"rolls":1,"entries":[{"type":"minecraft:item",
             "name":"minecraft:book","modifier":[
             {"type":"minecraft:enchant_randomly","options":"minecraft:mending"},
@@ -2361,5 +2821,41 @@ mod held_drop_tests {
                 if all { 4 } else { 1 }
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod villager_food_tests {
+    use super::*;
+
+    /// A villager's food is the item's `villager_food` component, read from the registry:
+    /// vanilla's four (bread 4, the rest 1) and nothing else.
+    #[test]
+    fn the_registry_tells_a_villagers_food() {
+        let Some(items) = prepared_items() else {
+            return;
+        };
+        let food: Vec<(&str, Option<i32>)> = [
+            "minecraft:bread",
+            "minecraft:carrot",
+            "minecraft:potato",
+            "minecraft:beetroot",
+            "minecraft:apple",
+        ]
+        .map(|i| (i, items.get(i).and_then(|i| i.villager_food)))
+        .into();
+        assert_eq!(
+            food,
+            [
+                ("minecraft:bread", Some(4)),
+                ("minecraft:carrot", Some(1)),
+                ("minecraft:potato", Some(1)),
+                ("minecraft:beetroot", Some(1)),
+                ("minecraft:apple", None),
+            ]
+        );
+        // Loading the registry hands the mobs the same table.
+        assert_eq!(villager_food("minecraft:bread"), Some(4));
+        assert_eq!(villager_food("minecraft:apple"), Some(0));
     }
 }

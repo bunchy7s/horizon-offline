@@ -4,9 +4,15 @@
 //! shared table, run through the same `Session` as the CLI.
 use crate::{Session, commands};
 use serde_json::{Value, json};
-use std::io::{BufRead, Write};
 
-const PROTOCOL: &str = "2025-06-18";
+/// What an agent reads before its first call.
+const INSTRUCTIONS: &str = "Play Horizon, a Rust reimplementation of Minecraft Java Edition. Start with launch (it finds the game installed by the Horizon launcher and opens or creates a world), then read the world with state, inventory, screen, entities and find_block, and act with goto, look_at_block, break, place, interact, click_slot and click_button. Actions block until they finish and report what happened. Coordinates are block coordinates; yaw 0 faces south (+Z).";
+
+/// The revisions this server advertises: `horizon_mcp` serves them (`2026-07-28` stateless,
+/// `2025-06-18` for the clients that still open with `initialize`).
+fn server() -> horizon_mcp::Server<'static> {
+    horizon_mcp::Server::new("horizon-ctl", horizon_core::release::VERSION, INSTRUCTIONS)
+}
 
 fn tools() -> Vec<Value> {
     commands::COMMANDS
@@ -131,15 +137,10 @@ impl Session {
         }
     }
 
+    /// The two tool methods; `horizon_mcp` answers the protocol's own (`initialize`,
+    /// `server/discover`) and frames these results for the revision the request speaks.
     fn handle(&mut self, method: &str, params: &Value) -> Result<Value, (i64, String)> {
         match method {
-            "initialize" => Ok(json!({
-                "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL),
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "horizon-ctl", "version": horizon_core::release::VERSION },
-                "instructions": "Play Horizon, a Rust reimplementation of Minecraft Java Edition. Start with launch (it finds the game installed by the Horizon launcher and opens or creates a world), then read the world with state, inventory, screen, entities and find_block, and act with goto, look_at_block, break, place, interact, click_slot and click_button. Actions block until they finish and report what happened. Coordinates are block coordinates; yaw 0 faces south (+Z).",
-            })),
-            "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": tools() })),
             "tools/call" => {
                 let name = params
@@ -159,41 +160,12 @@ impl Session {
 }
 
 pub fn serve(session: &mut Session) -> Result<(), String> {
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Err(e) => Some(
-                json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": e.to_string() } }),
-            ),
-            Ok(msg) => {
-                let method = msg
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                // Notifications (no id) get no reply.
-                msg.get("id").cloned().map(|id| match session.handle(method, &params) {
-                    Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-                    Err((code, message)) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }),
-                })
-            }
-        };
-        if let Some(reply) = reply {
-            writeln!(stdout, "{reply}")
-                .and_then(|_| stdout.flush())
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
+    server().serve(|method, params| session.handle(method, params))
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -233,28 +205,66 @@ mod tests {
     #[test]
     fn protocol_basics() {
         let mut s = Session::new(std::env::temp_dir().join("horizon-ctl-mcp-test.sock"), None);
-        let init = s
-            .handle("initialize", &json!({ "protocolVersion": "2025-03-26" }))
-            .unwrap();
-        assert_eq!(init["protocolVersion"], "2025-03-26");
-        assert!(s.handle("nope", &json!({})).is_err());
-        let r = s
-            .handle(
-                "tools/call",
-                &json!({ "name": "goto", "arguments": { "x": 1 } }),
+        let mut app = |method: &str, params: &Value| s.handle(method, params);
+        let server = server();
+        let line = |method: &str, params: Value| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string()
+        };
+
+        // A client that opens with the handshake revision.
+        let init = server
+            .handle_line(
+                &line("initialize", json!({ "protocolVersion": "2025-06-18" })),
+                &mut app,
             )
             .unwrap();
-        assert_eq!(r["isError"], true);
+        assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(init["result"]["serverInfo"]["name"], "horizon-ctl");
+
+        // A modern client: stateless, and the same tools.
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            horizon_mcp::VERSION_KEY.to_owned(),
+            json!(horizon_mcp::MODERN),
+        );
+        meta.insert(horizon_mcp::CLIENT_CAPABILITIES_KEY.to_owned(), json!({}));
+        let params = json!({ "_meta": Value::Object(meta) });
+        let list = server
+            .handle_line(&line("tools/list", params), &mut app)
+            .unwrap();
+        assert_eq!(list["result"]["resultType"], "complete");
+        assert!(list["result"]["tools"].as_array().unwrap().len() > 3);
+
+        let r = server
+            .handle_line(
+                &line(
+                    "tools/call",
+                    json!({ "name": "goto", "arguments": { "x": 1 } }),
+                ),
+                &mut app,
+            )
+            .unwrap();
+        assert_eq!(r["result"]["isError"], true);
         assert!(
-            r["content"][0]["text"]
+            r["result"]["content"][0]["text"]
                 .as_str()
                 .unwrap()
                 .contains("y is required")
         );
         // No game: a connection error, reported as a tool error.
-        let r = s
-            .handle("tools/call", &json!({ "name": "state", "arguments": {} }))
+        let r = server
+            .handle_line(
+                &line("tools/call", json!({ "name": "state", "arguments": {} })),
+                &mut app,
+            )
             .unwrap();
-        assert_eq!(r["isError"], true);
+        assert_eq!(r["result"]["isError"], true);
+        // Methods this server does not have are the protocol's to refuse.
+        assert_eq!(
+            server
+                .handle_line(&line("nope/nope", json!({})), &mut app)
+                .unwrap()["error"]["code"],
+            json!(-32601)
+        );
     }
 }

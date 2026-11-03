@@ -5,12 +5,16 @@
 
 use crate::api::Client;
 use serde_json::{Map, Value, json};
-use std::{
-    io::{BufRead, Write},
-    path::Path,
-};
+use std::path::Path;
 
-const PROTOCOL: &str = "2025-06-18";
+/// What an agent reads before its first call.
+const INSTRUCTIONS: &str = "Run and moderate a Horizon (Minecraft Java Edition 26.3) server. Start with status and players. Moderation tools (kick, ban, pardon, ban_ip, op, whitelist...) run vanilla's console commands and answer `changed` and the console's lines; events and logs read what happened since a number they return. Destructive tools that can't be undone need confirm: true.";
+
+/// The revisions this server advertises: `horizon_mcp` serves them (`2026-07-28` stateless,
+/// `2025-06-18` for the clients that still open with `initialize`).
+fn server() -> horizon_mcp::Server<'static> {
+    horizon_mcp::Server::new("horizon-server", crate::VERSION, INSTRUCTIONS)
+}
 
 /// One tool: its name, what it does, its arguments (name, JSON type, what it is, required), and whether it
 /// destroys or sends someone away.
@@ -385,15 +389,10 @@ fn call(dir: &Path, name: &str, args: &Value) -> (Value, bool) {
     }
 }
 
+/// The two tool methods; `horizon_mcp` answers the protocol's own (`initialize`,
+/// `server/discover`) and frames these results for the revision the request speaks.
 fn handle(dir: &Path, method: &str, params: &Value) -> Result<Value, (i64, String)> {
     match method {
-        "initialize" => Ok(json!({
-            "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL),
-            "capabilities": { "tools": {} },
-            "serverInfo": { "name": "horizon-server", "version": crate::VERSION },
-            "instructions": "Run and moderate a Horizon (Minecraft Java Edition 26.3) server. Start with status and players. Moderation tools (kick, ban, pardon, ban_ip, op, whitelist...) run vanilla's console commands and answer `changed` and the console's lines; events and logs read what happened since a number they return. Destructive tools that can't be undone need confirm: true.",
-        })),
-        "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tools() })),
         "tools/call" => {
             let name = params
@@ -413,40 +412,12 @@ fn handle(dir: &Path, method: &str, params: &Value) -> Result<Value, (i64, Strin
 }
 
 pub fn serve(dir: &Path) -> Result<(), String> {
-    let mut stdout = std::io::stdout();
-    for line in std::io::stdin().lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Err(e) => Some(
-                json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": e.to_string() } }),
-            ),
-            Ok(message) => {
-                let method = message
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let params = message.get("params").cloned().unwrap_or(json!({}));
-                // Notifications (no id) get no reply.
-                message.get("id").cloned().map(|id| match handle(dir, method, &params) {
-                    Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-                    Err((code, message)) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }),
-                })
-            }
-        };
-        if let Some(reply) = reply {
-            writeln!(stdout, "{reply}")
-                .and_then(|()| stdout.flush())
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(())
+    server().serve(|method, params| handle(dir, method, params))
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -501,20 +472,34 @@ mod tests {
     fn the_protocol_answers_without_a_server() {
         let dir = std::env::temp_dir().join(format!("horizon-server-mcp-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let init = handle(
-            &dir,
-            "initialize",
-            &json!({ "protocolVersion": "2025-03-26" }),
-        )
-        .unwrap();
-        assert_eq!(init["protocolVersion"], "2025-03-26");
-        assert!(
-            handle(&dir, "tools/list", &json!({})).unwrap()["tools"]
-                .as_array()
-                .unwrap()
-                .len()
-                > 20
+        // A client that opens with the handshake revision, as the launcher's game_* tools do.
+        let mut app = |method: &str, params: &Value| handle(&dir, method, params);
+        let line = |method: &str, params: Value| {
+            json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }).to_string()
+        };
+        let init = server()
+            .handle_line(
+                &line("initialize", json!({ "protocolVersion": "2025-06-18" })),
+                &mut app,
+            )
+            .unwrap();
+        assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+        assert_eq!(init["result"]["serverInfo"]["name"], "horizon-server");
+        // A modern client gets the same tools with the framing that revision requires.
+        let mut meta = serde_json::Map::new();
+        meta.insert(
+            horizon_mcp::VERSION_KEY.to_owned(),
+            json!(horizon_mcp::MODERN),
         );
+        meta.insert(horizon_mcp::CLIENT_CAPABILITIES_KEY.to_owned(), json!({}));
+        let list = server()
+            .handle_line(
+                &line("tools/list", json!({ "_meta": Value::Object(meta) })),
+                &mut app,
+            )
+            .unwrap();
+        assert_eq!(list["result"]["resultType"], "complete");
+        assert!(list["result"]["tools"].as_array().unwrap().len() > 20);
         let reply = handle(
             &dir,
             "tools/call",

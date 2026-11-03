@@ -4,6 +4,7 @@
 //! when the block goes, and despawning. The tick stops at an entity it hits:
 //! the game hurts the entity (`projectile_hit`), then `finish_entity_hit`
 //! spends the arrow or turns it back and ends the tick.
+use crate::entity_rules::EntityRules;
 use crate::{
     blocks::BlockFacts,
     collisions::SceneCollisions,
@@ -32,8 +33,8 @@ use horizon_world::{
 use std::{collections::HashSet, fmt};
 
 /// `EntityType.ARROW` (and tipped/spectral arrows): 0.5 x 0.5, eyes at 0.13.
-const WIDTH: f32 = 0.5;
-const HEIGHT: f32 = 0.5;
+pub const WIDTH: f32 = 0.5;
+pub const HEIGHT: f32 = 0.5;
 const EYE_HEIGHT: f32 = 0.13;
 
 /// `AbstractArrow.Pickup`.
@@ -117,6 +118,8 @@ pub enum ArrowEvent {
     Block {
         pos: BlockPos,
         reaction: BlockReaction,
+        /// The arrow's owner (`Projectile.getOwner`), who owns a TNT it primes.
+        owner: Option<Who>,
     },
     /// The SPLASH and PROJECTILE_SHOOT game events.
     SplashEvent,
@@ -159,6 +162,7 @@ pub enum BlockReaction {
 #[derive(Clone)]
 pub struct ArrowState {
     pub in_ground: bool,
+    pub canceled_impact_inside: bool,
     pub in_ground_time: i32,
     /// Ticks stuck (`life`): gone at 1200.
     pub life: i32,
@@ -166,6 +170,8 @@ pub struct ArrowState {
     /// The block it stuck in (`lastState`).
     pub last_state: Option<BlockStateId>,
     pub pickup: Pickup,
+    /// Its entity type is `SpectralArrow` (the type is its own, not the pickup item's).
+    pub spectral: bool,
     /// `pickupItemStack`: what picking the arrow up gives.
     pub pickup_item: crate::items::ItemStack,
     /// `AbstractArrow.firedFromWeapon`: the crossbow or bow it was shot from.
@@ -217,11 +223,13 @@ impl ArrowState {
     pub fn new(random: LegacyRandom) -> Self {
         Self {
             in_ground: false,
+            canceled_impact_inside: false,
             in_ground_time: 0,
             life: 0,
             shake: 0,
             last_state: None,
             pickup: Pickup::Disallowed,
+            spectral: false,
             pickup_item: crate::items::ItemStack::new("minecraft:arrow", 1),
             fired_from_weapon: None,
             no_physics: false,
@@ -346,13 +354,21 @@ impl ArrowScene<'_, '_> {
             .map(String::as_str)
     }
     /// `ClipContext.Block.COLLIDER` with `Fluid.NONE`: the first block hit.
-    fn clip(&self, from: Vec3, to: Vec3) -> Option<(Vec3, BlockPos, [i32; 3])> {
+    fn clip(
+        &self,
+        from: Vec3,
+        to: Vec3,
+        ignored: Option<BlockPos>,
+    ) -> Option<(Vec3, BlockPos, [i32; 3])> {
         let mut scene = SceneCollisions {
             world: self.world,
             binding: self.collision,
             subject: None,
         };
         let hit = horizon_core::geometry::traverse_blocks(from, to, 1024, |p: BlockPos| {
+            if Some(p) == ignored {
+                return None;
+            }
             let state = self.block(p);
             if self.is_air(state) {
                 return None;
@@ -395,14 +411,27 @@ impl ArrowScene<'_, '_> {
 /// `level().clip(new ClipContext(position(), position().add(movement),
 /// ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this))`, then
 /// `AbstractArrow.onHitBlock`'s `position().subtract(signum * 0.05)`. Returns
-/// the position to stop at (pull-back included) and the block that was hit.
+/// the position to stop at (pull-back included), the block that was hit and
+/// the normal of the face it was hit on.
 pub fn clip_block_stop(
     world: &World,
     facts: &BlockFacts,
     collision: &BlockCollisionRegistry<'_>,
     from: Vec3,
     movement: Vec3,
-) -> Option<(Vec3, BlockPos)> {
+) -> Option<(Vec3, BlockPos, [i32; 3])> {
+    let (location, block, normal) = clip_block_hit(world, facts, collision, from, movement)?;
+    Some((back_off(location, movement), block, normal))
+}
+/// The clip of `clip_block_stop` before the back-off: the hit location (what a
+/// `BlockHitResult` carries), the block and the normal of the face.
+pub fn clip_block_hit(
+    world: &World,
+    facts: &BlockFacts,
+    collision: &BlockCollisionRegistry<'_>,
+    from: Vec3,
+    movement: Vec3,
+) -> Option<(Vec3, BlockPos, [i32; 3])> {
     let to = Vec3::new(
         from.x + movement.x,
         from.y + movement.y,
@@ -425,7 +454,7 @@ pub fn clip_block_stop(
     })
     .ok()
     .flatten()?;
-    Some((back_off(hit.location, movement), hit.block))
+    Some((hit.location, hit.block, hit.direction.normal()))
 }
 /// `AbstractArrow.onHitBlock`'s back-off: vanilla scales `(double) 0.05f` by
 /// `Math.signum` per axis, whose value at zero is zero (not Rust's -1.0).
@@ -478,7 +507,7 @@ pub fn blocks_inside(from: Vec3, to: Vec3) -> Vec<BlockPos> {
     inside
 }
 /// `Projectile.lerpRotation`.
-fn lerp_rotation(mut old: f32, new: f32) -> f32 {
+pub fn lerp_rotation(mut old: f32, new: f32) -> f32 {
     while new - old < -180.0 {
         old -= 360.0;
     }
@@ -505,19 +534,36 @@ fn signum(v: f64) -> f64 {
 /// entity stops there and is not kept: the game hands it to
 /// `finish_entity_hit` once it has hurt the entity.
 pub fn tick(p: &mut Projectile, scene: &ArrowScene, targets: &[(Who, Aabb)]) -> (bool, Hit) {
+    tick_with(p, scene, targets, true)
+}
+/// One arrow tick whose hit is canceled (`ProjectileImpactEvent`): the arrow
+/// flies through its full movement: not stuck, nothing hurt, no hit.
+pub fn tick_through(
+    p: &mut Projectile,
+    scene: &ArrowScene,
+    targets: &[(Who, Aabb)],
+) -> (bool, Hit) {
+    tick_with(p, scene, targets, false)
+}
+fn tick_with(
+    p: &mut Projectile,
+    scene: &ArrowScene,
+    targets: &[(Who, Aabb)],
+    impact: bool,
+) -> (bool, Hit) {
     let Some(mut st) = p.arrow.take() else {
         return (false, Hit::None);
     };
     // Entity.setOldPosAndRot: the renderer interpolates from here, in flight
     // and stuck alike; ServerLevel.tickNonPassenger counts the tick.
-    p.previous = p.position;
+    p.set_old_pos_and_rot();
     p.age += 1;
     let hit = Ticker {
         p,
         st: &mut st,
         scene,
     }
-    .tick(targets);
+    .tick(targets, impact);
     p.stuck = st.in_ground;
     let keep = !st.removed && !matches!(hit, Hit::Entity { .. });
     p.arrow = Some(st);
@@ -600,7 +646,7 @@ impl Ticker<'_, '_, '_, '_> {
     fn trident(&self) -> bool {
         matches!(self.p.kind, ProjectileKind::Trident)
     }
-    fn tick(&mut self, targets: &[(Who, Aabb)]) -> Hit {
+    fn tick(&mut self, targets: &[(Who, Aabb)], impact: bool) -> Hit {
         // ThrownTrident.tick.
         if self.trident() && self.st.in_ground_time > 4 {
             self.st.dealt_damage = true;
@@ -616,15 +662,18 @@ impl Ticker<'_, '_, '_, '_> {
                 f64::from(block_pos.z),
             );
             let at = self.position();
-            if self
+            let inside = self
                 .scene
                 .collision_boxes(state, block_pos)
                 .iter()
-                .any(|b| b.move_by(origin).contains(at))
-            {
+                .any(|b| b.move_by(origin).contains(at));
+            if inside && !self.st.canceled_impact_inside {
                 self.p.velocity = Vec3::ZERO;
                 self.st.in_ground = true;
             }
+            self.st.canceled_impact_inside &= inside;
+        } else {
+            self.st.canceled_impact_inside = false;
         }
         if self.st.shake > 0 {
             self.st.shake -= 1;
@@ -710,14 +759,17 @@ impl Ticker<'_, '_, '_, '_> {
             original.y + movement.y,
             original.z + movement.z,
         );
-        if physics {
-            hit = self.step_move_and_hit(original, end, targets);
+        if physics && impact {
+            hit = self.step_move_and_hit(original, end, targets, impact);
             if matches!(hit, Hit::Entity { .. }) {
                 return hit;
             }
         } else {
             self.p.position = end;
             self.apply_effects_from_blocks(original, end);
+            if physics {
+                self.st.canceled_impact_inside = true;
+            }
         }
         self.finish();
         hit
@@ -730,8 +782,8 @@ impl Ticker<'_, '_, '_, '_> {
             self.p.velocity = self.p.velocity.scale(f64::from(0.99f32));
         }
         if physics && !self.st.in_ground {
-            // Entity.applyGravity: AbstractArrow.getDefaultGravity.
-            self.add_velocity(-0.05);
+            // Entity.applyGravity: AbstractArrow.getDefaultGravity, none with NoGravity.
+            self.add_velocity(-self.p.get_gravity());
         }
         // Projectile.tick, then Entity.baseTick's fluid and fire phases.
         if !self.st.has_been_shot {
@@ -795,8 +847,18 @@ impl Ticker<'_, '_, '_, '_> {
     /// `AbstractArrow.stepMoveAndHit`: the nearest entity on the way, else the
     /// block. A piercing arrow that hits an entity here goes on from it next
     /// tick (`finish_entity_hit`); vanilla's loop goes on within the same tick.
-    fn step_move_and_hit(&mut self, from: Vec3, to: Vec3, targets: &[(Who, Aabb)]) -> Hit {
-        let block = self.scene.clip(from, to);
+    fn step_move_and_hit(
+        &mut self,
+        from: Vec3,
+        to: Vec3,
+        targets: &[(Who, Aabb)],
+        impact: bool,
+    ) -> Hit {
+        let ignored = self
+            .st
+            .canceled_impact_inside
+            .then(|| self.block_position());
+        let block = self.scene.clip(from, to, ignored);
         let end = block.map_or(to, |b| b.0);
         // findHitEntities: ProjectileUtil.computeMargin and the search box.
         let margin = f64::from(((self.p.age as i32 - 2) as f32 / 20.0).clamp(0.0, 0.3));
@@ -828,6 +890,10 @@ impl Ticker<'_, '_, '_, '_> {
         self.p.position = next;
         self.apply_effects_from_blocks(from, next);
         if let Some((who, at, _)) = best {
+            // A canceled impact ends the search, the arrow where it would have hit.
+            if !impact {
+                return Hit::None;
+            }
             // AbstractArrow.onHitEntity: past pierce level + 1 entities the
             // arrow is discarded before it hurts the next one.
             if self.st.pierce > 0 {
@@ -847,6 +913,9 @@ impl Ticker<'_, '_, '_, '_> {
         }
         let state = self.scene.block(pos);
         if self.scene.is_air(state) {
+            return Hit::None;
+        }
+        if !impact {
             return Hit::None;
         }
         self.on_hit_block(pos, state);
@@ -870,7 +939,10 @@ impl Ticker<'_, '_, '_, '_> {
             .inflate(Vec3::new(margin, margin, margin))
             .clip(from, to)?;
         let centre = b.center();
-        let towards = self.scene.clip(outside, centre).map_or(centre, |h| h.0);
+        let towards = self
+            .scene
+            .clip(outside, centre, None)
+            .map_or(centre, |h| h.0);
         b.clip(outside, towards).map(|_| outside)
     }
     /// `playSound(soundEvent, 1, 1.2 / (random * 0.2 + 0.9))`.
@@ -938,7 +1010,11 @@ impl Ticker<'_, '_, '_, '_> {
         if self.st.on_fire()
             && let Some(reaction) = self.block_reaction(state)
         {
-            self.st.events.push(ArrowEvent::Block { pos, reaction });
+            self.st.events.push(ArrowEvent::Block {
+                pos,
+                reaction,
+                owner: self.p.owner,
+            });
         }
         let v = self.p.velocity;
         let offset = f64::from(0.05f32);

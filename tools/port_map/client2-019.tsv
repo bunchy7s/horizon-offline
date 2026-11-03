@@ -42,51 +42,51 @@ AbstractGameRulesScreen.IntegerRuleEntry.extractContent	port	crates/horizon-clie
 AbstractGameRulesScreen.RuleList.matchesFilter	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::rows	matches id, name, category and description, as rows() does
 AbstractGameRulesScreen.RuleList.extractWidgetRenderState	port	crates/horizon-client/src/game_rules_screen.rs::RulesScreen::draw	hovered rule's tooltip: id, description, default
 ConfirmExperimentalFeaturesScreen.getNarrationMessage	skip:ui		narration text only
-ConfirmExperimentalFeaturesScreen.init	missing		minor: confirmation for experimental packs; Horizon has no experimental packs, so it never opens
+ConfirmExperimentalFeaturesScreen.init	port	crates/horizon-client/src/title/confirm_experiments.rs::ConfirmExperimentsScreen::new	the picked selection's feature packs, each with the flags it asks for
 ConfirmExperimentalFeaturesScreen.repositionElements	skip:ui		layout only
-ConfirmExperimentalFeaturesScreen.DetailsScreen.init	missing		minor: details of the experimental packs; no such screen in Horizon
+ConfirmExperimentalFeaturesScreen.DetailsScreen.init	port	crates/horizon-client/src/title/confirm_experiments.rs::ConfirmExperimentsScreen::new	the details view's entries (pack id and its flags) are built with the screen; draw lists them when details is set
 ConfirmExperimentalFeaturesScreen.DetailsScreen.repositionElements	skip:ui		layout only
-ConfirmExperimentalFeaturesScreen.DetailsScreen.PackListEntry.extractContent	missing		minor: draws an experimental pack id and its message; no such list in Horizon
+ConfirmExperimentalFeaturesScreen.DetailsScreen.PackListEntry.extractContent	port	crates/horizon-client/src/title/confirm_experiments.rs::ConfirmExperimentsScreen::draw	each entry's bold title and the flags under it
 ConfirmExperimentalFeaturesScreen.DetailsScreen.PackListEntry.getNarration	skip:ui		narration text only
-CreateWorldScreen.openFresh	port	crates/horizon-client/src/title.rs::Title::new_world	gap: minor: no resource load for datapack registries before the screen
+CreateWorldScreen.openFresh	port	crates/horizon-client/src/title.rs::Title::new_world	the screen shows createWorld.preparing while the world creation data is read, then opens
 CreateWorldScreen.testWorld	skip:debug		TW button, shown only when running in the IDE
 CreateWorldScreen.openCreateWorldScreen	skip:data		loads datapack registries and world presets before the screen; Horizon reads data from tables
-CreateWorldScreen.createFromExisting	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::of_world	gap: minor: no datapacks copied; name, seed and mode come from title.rs click_action arm 15
+CreateWorldScreen.createFromExisting	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::of_world	name, seed and mode come from title.rs click_action arm 15; the old world's datapacks come from datapack::for_recreate
 CreateWorldScreen.init	port	crates/horizon-client/src/title/create_world.rs::buttons	tab bar and footer buttons; tabs are drawn by draw_create
 CreateWorldScreen.repositionElements	skip:ui		layout only
 CreateWorldScreen.onCreate	port	crates/horizon-client/src/title.rs::Title::create_action	gap: minor: no experimental or deprecated-data warning before creating
-CreateWorldScreen.createWorldAndCleanup	inline	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	gap: minor: temp datapack folder cleanup not modelled (no datapack copy)
-CreateWorldScreen.createNewWorld	port	crates/horizon-client/src/game.rs::Game::open_world	gap: minor: the folder is made in WorldRequest::prepare and no datapacks are copied in
+CreateWorldScreen.createWorldAndCleanup	inline	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	the temp pack folder is removed once its packs are installed (game.rs) and when Create is cancelled (Title::cancel_create)
+CreateWorldScreen.createNewWorld	port	crates/horizon-client/src/game.rs::Game::open_world	the folder is made in WorldRequest::prepare; the picked data packs are installed into it before the world opens (datapack::install)
 CreateWorldScreen.createLevelSettings	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	name, mode, difficulty, hardcore and commands written with the new level; gap: minor: debug world (spectator, peaceful) not modelled
-CreateWorldScreen.keyPressed	missing		player: Enter does not create the world; startup_menu title_key only confirms a focused rename box, so Enter on Create New World does nothing
+CreateWorldScreen.keyPressed	port	crates/horizon-client/src/title.rs::confirm_key_size	player: Enter with no button focused creates the world (Screenless Create mode falls through to create_action), as the screen does after its widgets decline the key
 CreateWorldScreen.extractRenderState	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the footer separator
 CreateWorldScreen.extractMenuBackground	port	crates/horizon-client/src/title/create_world.rs::Title::draw_create	draws the tab header strip and menu background
-CreateWorldScreen.getOrCreateTempDataPackDir	missing		minor: temp folder for datapacks chosen at creation; Horizon has no create-time datapack picker
-CreateWorldScreen.openExperimentsScreen	missing		minor: Experiments screen, only in non-stable builds; Horizon's button is disabled and has no screen
-CreateWorldScreen.openDataPackSelectionScreen	missing		player: the Data Packs button is disabled on the More tab, so the datapack picker never opens
-CreateWorldScreen.tryApplyNewDataPacks	missing		player: part of the greyed-out Data Packs picker; picked packs never reach the new world
-CreateWorldScreen.applyNewPackConfig	missing		player: part of the greyed-out Data Packs picker; validates and applies the picked packs
+CreateWorldScreen.getOrCreateTempDataPackDir	port	crates/horizon-client-render/src/datapack.rs::temp_folder	the Create screen's chosen packs live in a temp folder kept in options.pack_dir, made on the first drop or Data Packs click
+CreateWorldScreen.openExperimentsScreen	port	crates/horizon-client/src/title.rs::Title::click_action	the Experiments button opens experiments::ExperimentsScreen with the selected packs' flags
+CreateWorldScreen.openDataPackSelectionScreen	port	crates/horizon-client/src/title.rs::Title::click_action	the More tab's Data Packs button (arm 31) opens the pack selection screen on the temp folder; Back reopens it (reopen_data_packs)
+CreateWorldScreen.tryApplyNewDataPacks	port	crates/horizon-client/src/title.rs::Title::offer_data_packs	the chosen ids apply at once and the data is read again, or the experimental confirm comes first
+CreateWorldScreen.applyNewPackConfig	inline	crates/horizon-client/src/title.rs::creation_packs	the selected ids are applied at creation rather than validated into a separate config object
 CreateWorldScreen.createDefaultLoadConfig	skip:data		builds the datapack load config; Horizon loads no datapack set at creation
-CreateWorldScreen.removeTempDataPackDir	missing		minor: cleanup of the temp datapack folder; no such folder in Horizon
-CreateWorldScreen.copyBetweenDirs	missing		minor: copies datapack files into the temp folder; not in Horizon
+CreateWorldScreen.removeTempDataPackDir	inline	crates/horizon-client/src/title.rs::Title::cancel_create	the temp folder goes when Create is cancelled; it is also removed once its packs are installed
+CreateWorldScreen.copyBetweenDirs	port	crates/horizon-client-render/src/datapack.rs::copy_pack	a dropped pack is copied into the temp folder
 CreateWorldScreen.createNewWorldDirectory	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	makes the world folder and writes level.dat; gap: minor: datapack files not copied in
-CreateWorldScreen.createTempDataPackDirFromExistingWorld	missing		minor: Re-Create copies the old world's datapacks to a temp folder; Horizon's Re-Create does not
-CreateWorldScreen.getDataPackSelectionSettings	missing		minor: temp datapack repository for the picker; no picker in Horizon
+CreateWorldScreen.createTempDataPackDirFromExistingWorld	port	crates/horizon-client-render/src/datapack.rs::for_recreate	Re-Create copies the old world's packs into a temp folder and keeps its selection
+CreateWorldScreen.getDataPackSelectionSettings	inline	crates/horizon-client/src/title.rs::Title::creation_packs	options.pack_dir and options.data_packs are the selection settings the picker and the worldgen read open on
 CreateWorldScreen.GameTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	Game tab: name box, game mode, difficulty, allow cheats; gap: minor: vanilla's Experiments button sits on this tab in non-stable builds
 CreateWorldScreen.MoreTab.openGameRulesScreen	port	crates/horizon-client/src/title.rs::Title::click_action	Game Rules button (arm 29) over a copy of the rules, via RulesScreen::for_creation
 CreateWorldScreen.WorldTab.<init>	port	crates/horizon-client/src/title/create_world.rs::buttons	World tab: world type, customize, seed box (field 1), structures and bonus chest; gap: player: only Default and Superflat are offered, vanilla also offers Amplified and other presets
-CreateWorldScreen.WorldTab.openPresetEditor	port	crates/horizon-client/src/title.rs::Title::click_action	Customize button (arm 26) opens the Superflat editor (Mode::CreateFlat)
+CreateWorldScreen.WorldTab.openPresetEditor	port	crates/horizon-client/src/title.rs::Title::click_action	Customize button (arm 26) opens CreateFlatWorldScreen (Mode::CreateFlat) for the flat preset and CreateBuffetWorldScreen (Mode::CreateBuffet) for single biome, as PresetEditor.EDITORS has them
 EditWorldScreen.create	port	crates/horizon-client/src/title.rs::Title::click_action	Edit button (arm 13) builds the Edit mode from the list entry; gap: minor: no fixAndGetSummary (file fixing) on open
 EditWorldScreen.<init>	port	crates/horizon-client/src/title.rs::Title::buttons	Edit buttons: reset icon, open folder, backup, backups folder, Optimize, Save, Cancel; gap: player: Optimize World is drawn inactive and does nothing
 EditWorldScreen.keyPressed	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::title_key	Enter confirms a focused name box through confirm_edit; Escape goes back through Title::escape
 EditWorldScreen.onRename	port	crates/horizon-client/src/title/world_management.rs::rename	saves the trimmed name to level.dat; Save (arm 35) and Enter reach it, then return to the list
 EditWorldScreen.makeBackupAndShowToast	port	crates/horizon-client/src/title.rs::Title::start_backup	gap: minor: the success or failure toast and the return to the list are in Title::poll_backup
 EditWorldScreen.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw	draws the centred Edit World title
-ExperimentsScreen.init	missing		minor: Experiments screen, only in non-stable builds; Horizon has none
-ExperimentsScreen.getHumanReadableTitle	missing		minor: translated title of an experiment pack; Horizon has no experiments
+ExperimentsScreen.init	port	crates/horizon-client/src/title/experiments.rs::ExperimentsScreen::new	one switch per flag of the selected packs, with vanilla's warning over them
+ExperimentsScreen.getHumanReadableTitle	port	crates/horizon-client/src/title/experiments.rs::ExperimentsScreen::new	each pack's own title, translated when the language has it
 ExperimentsScreen.repositionElements	skip:ui		layout only
 ExperimentsScreen.getNarrationMessage	skip:ui		narration text only
-ExperimentsScreen.onDone	missing		minor: applies the chosen experiments to the pack repository; none in Horizon
+ExperimentsScreen.onDone	port	crates/horizon-client/src/title/experiments.rs::ExperimentsScreen::click	Outcome::Done hands the chosen flags back to the create screen, which keeps them (Title::click_action)
 FileFixerProgressScreen.init	port	crates/horizon-client/src/game.rs::Game::window_event	Cancel at ((width - 200) / 2, height / 2 + 100) (file_fixer_cancel) sets the upgrade's cancel and goes inactive; Escape does nothing. gap: a cancel is honoured before the file fixes move anything and between files of the data stage, not in the middle of the file fixes (they are not undoable)
 FileFixerProgressScreen.extractRenderState	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	title, then progress or the scanning line
 FileFixerProgressScreen.extractProgress	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	bar, totals, stage, type label, type bar, percentage
@@ -96,9 +96,9 @@ FileFixerProgressScreen.extractTypeProgress	port	crates/horizon-client-render/sr
 FileFixerProgressScreen.extractFileStats	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.converted and upgradeWorld.info.total
 FileFixerProgressScreen.extractScanning	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.scanning while no operation is counted
 FileFixerProgressScreen.extractFileFixerCount	port	crates/horizon-client-render/src/level_loading.rs::draw_file_fixer	upgradeWorld.info.file_fix_stage
-OptimizeWorldScreen.create	missing		player: opens from Optimize World, which Horizon draws inactive on purpose; no optimizer exists
-OptimizeWorldScreen.init	missing		player: Cancel of the optimize run; no optimize run exists
-OptimizeWorldScreen.extractRenderState	missing		player: optimize progress (converted, skipped, per-dimension bars); not shown
+OptimizeWorldScreen.create	port	crates/horizon-client/src/title.rs::Title::begin_optimize	a world whose files still need fixing is refused; otherwise WorldUpgrader runs over its dimensions
+OptimizeWorldScreen.init	port	crates/horizon-client/src/title.rs::Title::end_optimize	Cancel closes the screen and the upgrader; progress and the Done at the end come from poll_optimize
+OptimizeWorldScreen.extractRenderState	port	crates/horizon-client/src/title.rs::Title::draw_optimize	the converted, skipped and per-dimension progress, from the upgrader's snapshot
 SelectWorldScreen.init	port	crates/horizon-client/src/title.rs::Title::buttons	Play, Create, Edit, Delete, Re-Create and Back; the list comes from list_worlds in return_to_list
 SelectWorldScreen.createFooterButtons	port	crates/horizon-client/src/title.rs::Title::buttons	footer buttons for the selected world: Play, Create, Edit, Delete, Re-Create, Back
 SelectWorldScreen.createDebugWorldRecreateButton	skip:debug		DEBUG recreate button, only with SharedConstants.DEBUG_WORLD_RECREATE
@@ -122,29 +122,29 @@ WorldCreationUiState.setSeed	port	crates/horizon-client/src/title.rs::parse_seed
 WorldCreationUiState.isBonusChest	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::bonus_chest	never in Hardcore
 WorldCreationUiState.tryUpdateDataConfiguration	skip:data		datapack and feature-flag config; Horizon has neither at creation
 WorldCreationUiState.setWorldType	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::press	Superflat toggle (id 25); gap: player: only Default and Superflat exist, vanilla's other presets such as Amplified are missing
-WorldCreationUiState.getPresetEditor	port	crates/horizon-client/src/title/create_world.rs::buttons	customize button enabled only for Superflat; the editor opens in title.rs click_action arm 26
+WorldCreationUiState.getPresetEditor	port	crates/horizon-client/src/title/create_world.rs::buttons	customize button enabled for the flat and single-biome presets, the two PresetEditor.EDITORS has; the editor opens in title.rs click_action arm 26
 WorldCreationUiState.updatePresetLists	skip:data		preset lists from the registry; Horizon has two built-in types
 WorldCreationUiState.findPreset	skip:data		registry lookup
 WorldCreationUiState.getNonEmptyList	skip:data		registry tag lookup
 WorldCreationUiState.WorldTypeEntry.describePreset	port	crates/horizon-client/src/title/create_world.rs::buttons	world type label: Default or Superflat
-WorldCreationUiState.WorldTypeEntry.isAmplified	missing		player: there is no Amplified world type in Horizon, so its help tooltip never shows
+WorldCreationUiState.WorldTypeEntry.isAmplified	inline	crates/horizon-client/src/title/create_world.rs::buttons	the amplified preset's help tooltip on the world type cycle button
 WorldOpenFlows.createFreshLevel	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	writes a fresh level.dat; gap: minor: vanilla uses it for the debug recreate and the demo world; no datapack dimensions
 WorldOpenFlows.createWorldAccess	port	crates/horizon-client/src/save.rs::SessionLock::acquire	takes the world's session lock as the access; gap: minor: no symlink warning
-WorldOpenFlows.createLevelFromExistingSettings	port	crates/horizon-client/src/game.rs::Game::open_world	starts the world with the given settings; gap: minor: no datapack repository is built
-WorldOpenFlows.loadWorldStem	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	reads level data and generator settings; gap: minor: no datapack load or safe-mode retry
+WorldOpenFlows.createLevelFromExistingSettings	port	crates/horizon-client/src/game.rs::Game::open_world	starts the world with the given settings; the packs come from datapack::for_recreate and are installed before the world opens
+WorldOpenFlows.loadWorldStem	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	reads level data and generator settings and discovers the world's packs (datapack::discover_with_features); gap: minor: no safe-mode retry when a pack fails to load
 WorldOpenFlows.recreateWorldData	port	crates/horizon-client/src/title/create_world.rs::WorldOptions::of_world	reads the old world's settings for Re-Create; title.rs click_action arm 15 fills name, seed and mode
 WorldOpenFlows.loadWorldDataBlocking	port	crates/horizon-client/src/game/world_loading.rs::WorldLoader::finish	waits for the load worker and returns its result
-WorldOpenFlows.askForBackup	missing		player: backup question before opening an old customized or experimental world; Horizon never asks
+WorldOpenFlows.askForBackup	port	crates/horizon-client/src/title.rs::Title::play	a world that needs its files fixed or comes from a newer version asks for a backup first (Mode::BackupBeforeUpgrade)
 WorldOpenFlows.confirmWorldCreation	skip:data		lifecycle warning for experimental or deprecated data; Horizon has no such data
 WorldOpenFlows.openWorld	port	crates/horizon-client/src/game/startup_menu.rs::StartupMenu::queue_entry	Play (title.rs arm 10) queues the existing world for loading
-WorldOpenFlows.openWorldLoadLevelData	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	gap: player: a level.dat that will not read (Level::read gives None) opens with a random seed and the folder name, not the Recover World Data screen
-WorldOpenFlows.openWorldCheckVersionCompatibility	missing		player: no incompatible-version alert and no backup question; Horizon upgrades older worlds and opens newer ones without a check
-WorldOpenFlows.createBackupAndOpenWorld	missing		player: no backup step before opening an old world; the backup button exists only in Edit World
-WorldOpenFlows.upgradeAndOpenWorld	port	crates/horizon-client/src/save.rs::upgrade_older_world	runs the file fixes and upgrades on open; gap: player: no file-fix progress screen and no upgrade done, join now confirm
+WorldOpenFlows.openWorldLoadLevelData	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	the level data is read by WorldRequest::prepare; a level.dat that does not read opens RecoverWorldDataScreen instead of the world (Title::play, Mode::Recover)
+WorldOpenFlows.openWorldCheckVersionCompatibility	port	crates/horizon-client/src/title.rs::Title::play	a world from another series opens the incompatible AlertScreen instead
+WorldOpenFlows.createBackupAndOpenWorld	port	crates/horizon-client/src/title.rs::Title::start_backup	the backup runs on its own thread; the world opens once it finishes (backup_then_open)
+WorldOpenFlows.upgradeAndOpenWorld	port	crates/horizon-client/src/save.rs::upgrade_older_world	runs the file fixes and upgrades on open under FileFixerProgressScreen (level_loading::draw_file_fixer, Cancel wired in game.rs); gap: player: no upgrade-done join-now confirm
 WorldOpenFlows.tryFileFixAndReportErrors	port	crates/horizon-world/src/datafix/files.rs::fix_world_files	runs the file fixer; gap: player: cancel, symlink and failed-cleanup alerts are not shown
 WorldOpenFlows.openWorldLoadLevelStem	port	crates/horizon-client/src/game/world_loading.rs::WorldRequest::prepare	loads the level stem and generator; gap: minor: no safe-mode retry
-WorldOpenFlows.openWorldCheckWorldStemCompatibility	missing		player: old-customized and experimental warning before the load; Horizon has none
-WorldOpenFlows.openWorldLoadBundledResourcePack	missing		player: the world's own resources.zip is not applied on open; only an old-world file fix moves it into resourcepacks (datafix fix 4772)
-WorldOpenFlows.openWorldCheckDiskSpace	missing		player: no low-disk-space warning before loading a world
-WorldOpenFlows.loadBundledResourcePack	missing		player: pushes the world's resources.zip as a local pack; Horizon has no such path
+WorldOpenFlows.openWorldCheckWorldStemCompatibility	port	crates/horizon-client/src/title.rs::Title::after_prompt	an old customized or experimental world asks its own question before the load, the stem issue of Mode::BackupBeforeUpgrade
+WorldOpenFlows.openWorldLoadBundledResourcePack	inline	crates/horizon-client/src/game/server_packs.rs::Game::server_packs_world_pack	the world's pack goes in as a local pack and the world connects (game/integrated.rs); a pack that fails to load has no prompt
+WorldOpenFlows.openWorldCheckDiskSpace	port	crates/horizon-client/src/title.rs::Title::after_prompt	little space left opens the LowDiskSpace ConfirmScreen instead of the world
+WorldOpenFlows.loadBundledResourcePack	port	crates/horizon-client/src/game/server_packs.rs::Game::server_packs_world_pack	saves/<world>/resourcepacks/resources.zip is pushed as the world pack before the connect
 WorldOpenFlows.promptBundledPackLoadFailure	missing		minor: prompt when the world's own pack fails to load; no such pack in Horizon

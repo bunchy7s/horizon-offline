@@ -52,9 +52,9 @@ impl Launcher {
         self.world_packs = WorldPacks {
             list: datapacks::list(&world),
             note: Some(added.map(|names| {
-                format!(
-                    "Added {}: the game turns it on when the world opens.",
-                    names.join(", ")
+                trf(
+                    "Added {names}: the game turns it on when the world opens.",
+                    &[("names", &names.join(", "))],
                 )
             })),
             open: Some(world),
@@ -67,7 +67,7 @@ impl Launcher {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some("Add".into()),
+            prompt: Some(tr("Add").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = paths.await {
@@ -117,18 +117,19 @@ impl Launcher {
         }
         let t = self.theme;
         let path = world.path.clone();
-        let mut panel = div()
+        let mut panel = div().flex().flex_col().gap(px(6.)).ml(px(62.)).mb(px(6.));
+        let mut head = plate(&t)
             .flex()
             .flex_col()
             .gap(px(6.))
-            .ml(px(62.))
-            .mb(px(6.))
+            .px(px(12.))
+            .py(px(8.))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(caps("Data packs").text_color(t.muted))
+                    .child(caps(tr("Data packs")).text_color(t.muted))
                     .child(
                         div()
                             .flex()
@@ -150,20 +151,20 @@ impl Launcher {
                             }),
                     ),
             );
+        let mut failed = None;
         match &self.world_packs.note {
             Some(Ok(m)) => {
-                panel = panel.child(text(theme::CAPTION).text_color(t.muted).child(m.clone()))
+                head = head.child(text(theme::CAPTION).text_color(t.muted).child(m.clone()))
             }
-            Some(Err(e)) => panel = panel.child(notice(e.clone(), &t)),
+            Some(Err(e)) => failed = Some(notice(e.clone(), &t)),
             None => {}
         }
         if self.world_packs.list.is_empty() {
-            panel = panel.child(
-                text(theme::CAPTION)
-                    .text_color(t.muted)
-                    .child("None yet: drop a data pack .zip on the world, or use Add data pack…"),
-            );
+            head = head.child(text(theme::CAPTION).text_color(t.muted).child(tr(
+                "None yet: drop a data pack .zip on the world, or use Add data pack…",
+            )));
         }
+        panel = panel.child(head).children(failed);
         for (i, pack) in self.world_packs.list.clone().into_iter().enumerate() {
             let confirming = self.world_packs.confirm_remove.as_ref() == Some(&pack.file);
             let mut actions = div().flex().items_center().gap(px(6.));
@@ -173,7 +174,7 @@ impl Launcher {
                     .child(
                         text(theme::CAPTION)
                             .text_color(t.danger)
-                            .child("Move it to the trash?"),
+                            .child(tr("Move it to the trash?")),
                     )
                     .child(
                         button(
@@ -198,8 +199,9 @@ impl Launcher {
                         )
                         .on_click(cx.listener(
                             move |this, _: &ClickEvent, _, cx| {
-                                let note = datapacks::remove(&world, &gone)
-                                    .map(|()| format!("{} moved to the trash.", gone.file));
+                                let note = datapacks::remove(&world, &gone).map(|()| {
+                                    trf("{name} moved to the trash.", &[("name", &gone.file)])
+                                });
                                 this.world_packs.list = datapacks::list(&world);
                                 this.world_packs.note = Some(note);
                                 this.world_packs.confirm_remove = None;
@@ -213,7 +215,7 @@ impl Launcher {
                     actions = actions.child(
                         text(theme::CAPTION)
                             .text_color(t.muted)
-                            .child("Off in the game"),
+                            .child(tr("Off in the game")),
                     );
                 }
                 actions = actions.child(

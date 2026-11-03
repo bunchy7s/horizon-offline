@@ -27,11 +27,11 @@ fn real_packs_read() {
     for f in found.iter().filter(|f| f.problem.is_none()) {
         let start = Instant::now();
         let pack = Pack::open(&f.path).unwrap();
-        let macros = Macros::standard();
-        let shaders = Properties::parse(
-            &pack.read_text("shaders.properties").unwrap_or_default(),
-            &horizon_shaders::with_options(&pack, &macros),
-        );
+        // The macros the game reads the pack's programs with: the standard set, the renderer's
+        // (at Mipmap Levels 4), then the features the pack turns on.
+        let mut macros = Macros::standard();
+        macros.define_renderer(4);
+        let (shaders, feature_notes) = horizon_shaders::read_properties(&pack, &mut macros);
         let ids: Vec<Properties> = ["block", "item", "entity", "dimension"]
             .iter()
             .filter_map(|n| pack.read_text(&format!("{n}.properties")))
@@ -176,6 +176,7 @@ fn real_packs_read() {
                 entities: Some(terrain.clone()),
                 clouds: Some(terrain.clone()),
                 weather: Some(terrain.clone()),
+                lines: Some(terrain.clone()),
                 hand: Some(terrain.clone()),
                 terrain_geometry: Some(horizon_shaders::GeometryInputs {
                     inputs: horizon_shaders::GbuffersInputs {
@@ -183,19 +184,32 @@ fn real_packs_read() {
                             "layout(set = 3, binding = 1) readonly buffer HzVertices {{ uint hz_vertices[]; }};\n{}",
                             terrain.declarations
                         ),
-                        ..terrain
+                        ..terrain.clone()
                     },
                     pull: "        hz_v_pos = uintBitsToFloat(uvec3(hz_vertices[hz_vertex_index * 6u], \
                            hz_vertices[hz_vertex_index * 6u + 1u], hz_vertices[hz_vertex_index * 6u + 2u]));\n"
                         .into(),
                     index: "uint(@)".into(),
                 }),
+                entity_geometry: Some(horizon_shaders::GeometryInputs {
+                    inputs: horizon_shaders::GbuffersInputs {
+                        declarations: format!(
+                            "layout(set = 1, binding = 0) readonly buffer HzEntityVertices {{ uint hz_entity_vertices[]; }};\n{}",
+                            terrain.declarations
+                        ),
+                        ..terrain.clone()
+                    },
+                    pull: "        hz_v_pos = uintBitsToFloat(uvec3(hz_entity_vertices[hz_vertex_index * 11u], \
+                           hz_entity_vertices[hz_vertex_index * 11u + 1u], hz_entity_vertices[hz_vertex_index * 11u + 2u]));\n"
+                        .into(),
+                    index: "uint(@)".into(),
+                }),
             };
-            let mut macros = Macros::standard();
+            let mut macros = macros.clone();
             if std::env::var_os("SUBGROUPS").is_some() {
                 macros.define("MC_GL_KHR_shader_subgroup_arithmetic", "");
             }
-            for note in macros.define_features(&shaders) {
+            for note in &feature_notes {
                 println!("    {note}");
             }
             let post = load_post(&pack, &folder, &shaders, &macros, &inputs);

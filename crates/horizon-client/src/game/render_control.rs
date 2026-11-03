@@ -14,6 +14,7 @@ pub const HELP: &[&str] = &[
     "section-draws [flat|indirect]  how terrain sections are drawn (A/B checks); replies the mode",
     "section-cull [on|off]          occlusion culling of solid sections (A/B checks); replies the mode",
     "section-sides [on|off]         leave out solid quads facing away from the eye (A/B checks); replies the mode",
+    "gpu-culling [on|off]           list and draw the near solid sections on the GPU where the device can (A/B checks); replies the mode",
 ];
 
 impl Game<'_> {
@@ -100,7 +101,8 @@ impl Game<'_> {
                     .get(self.world.block(key.0, key.1, key.2))
                     .name
                     .clone();
-                let entity = horizon_client::containers::BlockEntity::for_block(&name)
+                let entity = self
+                    .new_block_entity(&name)
                     .filter(|e| matches!(e, horizon_client::containers::BlockEntity::Sign(_)))
                     .ok_or("no sign there")?;
                 self.world.block_entities.get_or_insert_with(key, || entity);

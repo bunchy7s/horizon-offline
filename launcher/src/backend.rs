@@ -15,8 +15,7 @@ pub const REPO: &str = "bunchy7s/horizon-offline";
 /// Upstream's repository: the game's builds (the official client) are published and signed there,
 /// so this fork's launcher installs them as they are, checksums and all.
 pub const GAME_REPO: &str = "horizon-rust/horizon";
-pub const README_URL: &str =
-    "https://github.com/bunchy7s/horizon-offline/blob/main/launcher/README.md";
+pub const README_URL: &str = "https://github.com/bunchy7s/horizon-offline/blob/main/launcher/README.md";
 /// The players' page on connecting an AI agent (the website's docs/agents.md).
 pub const AGENT_DOCS_URL: &str = "https://playhorizon.dev/docs/agents";
 /// This launcher's version: the release workflow sets `HORIZON_LAUNCHER_VERSION` from the
@@ -42,9 +41,6 @@ pub struct Release {
     pub name: String,
     pub body: String,
     pub date: String,
-    /// The full publish timestamp (`2026-10-28T09:58:01Z`), for ordering releases by when they
-    /// actually came out.
-    pub published: String,
     pub asset: Option<(String, u64)>,
     /// Listed and installed by hand, never as an update: a GitHub pre-release of the old Alpha
     /// channel (v0.2.1 on), or a Nightly older than the current one.
@@ -55,31 +51,86 @@ pub struct Release {
     pub nightly: Option<String>,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const ASSET: Option<&str> = Some("horizon-linux-x86_64.tar.gz");
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const ASSET: Option<&str> = Some("horizon-macos-arm64.zip");
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-pub const ASSET: Option<&str> = Some("horizon-windows-x64.zip");
-#[cfg(not(any(
-    all(target_os = "linux", target_arch = "x86_64"),
-    all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "windows", target_arch = "x86_64")
-)))]
-pub const ASSET: Option<&str> = None;
+/// The release assets of each system Horizon ships for: (`std::env::consts::OS`, `ARCH`, the game,
+/// the launcher). game-build.yml builds the game's, nightly-build.yml signs and publishes them, and
+/// launcher.yml builds the launcher's (`platform_assets_are_published`).
+pub const PLATFORMS: [(&str, &str, &str, &str); 4] = [
+    (
+        "linux",
+        "x86_64",
+        "horizon-linux-x86_64.tar.gz",
+        "horizon-launcher-linux-x86_64.tar.gz",
+    ),
+    (
+        "macos",
+        "aarch64",
+        "horizon-macos-arm64.zip",
+        "horizon-launcher-macos-arm64.zip",
+    ),
+    // Intel Macs (#1161).
+    (
+        "macos",
+        "x86_64",
+        "horizon-macos-x64.zip",
+        "horizon-launcher-macos-x64.zip",
+    ),
+    (
+        "windows",
+        "x86_64",
+        "horizon-windows-x64.zip",
+        "horizon-launcher-windows-x64.zip",
+    ),
+];
 
+/// `a == b`, in a const context.
+const fn same(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// This system's entry of `PLATFORMS`: the game's asset and the launcher's.
+const fn platform_assets(os: &str, arch: &str) -> Option<(&'static str, &'static str)> {
+    let mut i = 0;
+    while i < PLATFORMS.len() {
+        let (o, a, game, launcher) = PLATFORMS[i];
+        if same(o, os) && same(a, arch) {
+            return Some((game, launcher));
+        }
+        i += 1;
+    }
+    None
+}
+
+const OWN_ASSETS: Option<(&str, &str)> =
+    platform_assets(std::env::consts::OS, std::env::consts::ARCH);
+/// The game build this launcher installs, None where Horizon has none.
+pub const ASSET: Option<&str> = match OWN_ASSETS {
+    Some((game, _)) => Some(game),
+    None => None,
+};
+/// The launcher build this launcher updates itself from.
+pub const LAUNCHER_ASSET: Option<&str> = match OWN_ASSETS {
+    Some((_, launcher)) => Some(launcher),
+    None => None,
+};
+
+/// The launcher as an AppImage (`packaging/linux/appimage.sh`): the program and its libraries in
+/// one file. A launcher running from one updates by replacing that file ([`appimage_path`]), so it
+/// needs this archive rather than the platform's `.tar.gz`.
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64");
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-macos-arm64.zip");
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-pub const LAUNCHER_ASSET: Option<&str> = Some("horizon-launcher-windows-x64.exe");
-#[cfg(not(any(
-    all(target_os = "linux", target_arch = "x86_64"),
-    all(target_os = "macos", target_arch = "aarch64"),
-    all(target_os = "windows", target_arch = "x86_64")
-)))]
-pub const LAUNCHER_ASSET: Option<&str> = None;
+pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = Some("horizon-launcher-linux-x86_64.AppImage");
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+pub const LAUNCHER_APPIMAGE_ASSET: Option<&str> = None;
 
 const LAUNCHER_BINARY: &str = if cfg!(windows) {
     "horizon-launcher.exe"
@@ -95,7 +146,7 @@ pub(crate) const CLIENT: &str = if cfg!(windows) {
 
 /// The agent `url` is fetched with: the launcher's own user agent, through the player's proxy when
 /// one is set (`proxy`).
-fn agent(url: &str) -> ureq::Agent {
+pub(crate) fn agent(url: &str) -> ureq::Agent {
     crate::proxy::agent(
         ureq::AgentBuilder::new()
             .user_agent(&format!("horizon-launcher/{VERSION}"))
@@ -129,7 +180,10 @@ pub(crate) fn get(url: &str) -> Result<ureq::Response, String> {
         }
     }
     request.call().map_err(|e| match e {
-        ureq::Error::Status(403, _) => {
+        ureq::Error::Status(code, r)
+            if url.starts_with("https://api.github.com/")
+                && crate::github::rate_limited(code, |h| r.header(h).map(str::to_owned)) =>
+        {
             "GitHub's rate limit was reached. Try again in a few minutes.".into()
         }
         ureq::Error::Status(code, _) => format!("{url} answered {code}"),
@@ -265,18 +319,21 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     release_order(a).cmp(&release_order(b))
 }
 
-/// Every published release of upstream's repository (the game's builds), both kinds, as GitHub's
-/// JSON.
-fn release_list() -> Result<serde_json::Value, String> {
-    let url = format!("https://api.github.com/repos/{GAME_REPO}/releases?per_page=100");
-    get(&url)?.into_json().map_err(|e| e.to_string())
+/// Every published release of this fork's upstream repository (the game's builds: the official
+/// client), both kinds, as GitHub's JSON (kept on disk with its ETag, and read through Kira's
+/// mirror past GitHub's rate limit: [`crate::github`]).
+fn game_release_list() -> Result<serde_json::Value, String> {
+    crate::github::json(&format!(
+        "https://api.github.com/repos/{GAME_REPO}/releases?per_page=100"
+    ))
 }
 
 /// Every published release of this fork's repository (the launcher's own releases), as GitHub's
-/// JSON.
+/// JSON. Game releases come from upstream's repository; launcher releases come from the fork's.
 fn launcher_release_list() -> Result<serde_json::Value, String> {
-    let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=100");
-    get(&url)?.into_json().map_err(|e| e.to_string())
+    crate::github::json(&format!(
+        "https://api.github.com/repos/{REPO}/releases?per_page=100"
+    ))
 }
 
 /// The releases in `list` whose tag passes `keep`, newest first, with the asset named `asset`.
@@ -292,10 +349,7 @@ pub(crate) fn parse_releases(
             continue;
         }
         let found = r["assets"].as_array().into_iter().flatten().find_map(|a| {
-            let name = a["name"].as_str()?;
-            // Game assets match exactly; a launcher's raw binary carries its version in the name
-            // (`horizon-launcher-linux-x86_64-0.2.3`), so a prefix matches both forms.
-            (Some(name) == asset || asset.is_some_and(|prefix| name.starts_with(prefix))).then(|| {
+            (Some(a["name"].as_str()?) == asset).then(|| {
                 Some((
                     a["browser_download_url"].as_str()?.to_string(),
                     a["size"].as_u64()?,
@@ -312,7 +366,6 @@ pub(crate) fn parse_releases(
                 .chars()
                 .take(10)
                 .collect(),
-            published: r["published_at"].as_str().unwrap_or_default().into(),
             asset: found,
             prerelease: r["prerelease"].as_bool().unwrap_or(false),
             nightly: None,
@@ -330,29 +383,26 @@ fn is_launcher_tag(tag: &str) -> bool {
 /// 2026-10-28, docs/release-flow.md), the last week's Nightlies, then the releases from before.
 /// Drafts never reach the anonymous API, and launcher releases are left out.
 pub fn releases() -> Result<Vec<Release>, String> {
-    Ok(game_releases(&release_list()?))
+    Ok(game_releases(&game_release_list()?))
 }
 
 /// The game's builds in `list`, newest first. A Nightly is listed under the version it installs as
 /// ([`crate::nightly::version_of`]); only the current one (`nightly`) is an update.
-/// This fork's game builds: upstream's numbered releases only, newest first by when they were
-/// actually published. Nightlies are left out: a fork player updates to releases, and the Nightly
-/// channel (which upstream's launcher prefers) would always outrank them.
 pub(crate) fn game_releases(list: &serde_json::Value) -> Vec<Release> {
-    let mut out: Vec<Release> = parse_releases(list, ASSET, is_game_tag)
-        .into_iter()
-        .filter(|r| r.nightly.is_none())
-        .collect();
-    out.sort_by(|a, b| b.published.cmp(&a.published).then(compare_versions(&b.tag, &a.tag)));
+    let mut out = parse_releases(list, ASSET, |tag| {
+        is_game_tag(tag) || horizon_release_sign::is_nightly(tag)
+    });
+    for r in &mut out {
+        if horizon_release_sign::is_nightly(&r.tag) {
+            let version = crate::nightly::version_of(r);
+            let tag = std::mem::replace(&mut r.tag, version);
+            r.prerelease = tag != horizon_release_sign::NIGHTLY;
+            r.nightly = Some(tag);
+        }
+    }
+    // Two Nightlies of one day: the current one first (the dated one is the day's earlier build).
+    out.sort_by(|a, b| compare_versions(&b.tag, &a.tag).then(a.prerelease.cmp(&b.prerelease)));
     out
-}
-
-/// The launcher's own releases, from this fork's repository (the game's builds come from
-/// upstream's). A failed fetch gives none: the launcher then offers no update of itself.
-pub fn launcher_releases() -> Vec<Release> {
-    launcher_release_list()
-        .map(|list| launcher_releases_in(&list))
-        .unwrap_or_default()
 }
 
 /// The launcher releases in `list` (the newest 100 releases). Game releases come out several times
@@ -360,16 +410,14 @@ pub fn launcher_releases() -> Vec<Release> {
 /// `launcher@` and `launcher-v` tags are looked up one by one (a draft's tag is skipped: it has no
 /// public release).
 fn launcher_releases_in(list: &serde_json::Value) -> Vec<Release> {
-    launcher_releases_in_with(list, |url| {
-        get(&url)?.into_json().map_err(|e| e.to_string())
-    })
+    launcher_releases_in_with(list, |url| crate::github::json(&url))
 }
 
 fn launcher_releases_in_with(
     list: &serde_json::Value,
     json: impl Fn(String) -> Result<serde_json::Value, String>,
 ) -> Vec<Release> {
-    let found = parse_releases(list, LAUNCHER_ASSET, is_launcher_tag);
+    let found = parse_releases(list, launcher_asset(), is_launcher_tag);
     if found.iter().any(|r| r.asset.is_some()) {
         return found;
     }
@@ -387,7 +435,7 @@ fn launcher_releases_in_with(
         if let Ok(release) = json(format!("{api}/releases/tags/{tag}")) {
             let one = parse_releases(
                 &serde_json::json!([release]),
-                LAUNCHER_ASSET,
+                launcher_asset(),
                 is_launcher_tag,
             );
             if one.iter().any(|r| r.asset.is_some()) {
@@ -426,22 +474,33 @@ pub fn installable_updates(releases: &[Release]) -> Vec<Release> {
 /// How often a launcher left open looks for new releases: they come out several times a day.
 pub const CHECK_EVERY: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
-/// The community, sponsor and website links, from `launcher/links.json` on main, so they can change
-/// without a launcher release. An empty address hides its button.
+/// The community, sponsor and website links and the official server's address, from
+/// `launcher/links.json` on main, so they can change without a launcher release. An empty address
+/// hides its button (an empty `official_server`: no official server offered).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Links {
     pub discord: String,
     pub sponsor: String,
     pub website: String,
+    /// The official server's address, as servers.dat lists it (`server_list::add_official`).
+    pub official_server: String,
+    /// The addresses it had before: a list holding one moves to `official_server`. A move appends
+    /// the old address here.
+    pub official_server_previous: Vec<String>,
 }
 
 impl Default for Links {
     /// What the launcher uses until (or unless) it can read links.json.
     fn default() -> Self {
         Self {
-            discord: "https://discord.gg/HcTeMZxe5E".into(),
+            discord: "https://discord.gg/playhorizon".into(),
             sponsor: "https://github.com/sponsors/ludovic111".into(),
             website: "https://playhorizon.dev".into(),
+            official_server: crate::server_list::OFFICIAL_ADDRESS.into(),
+            official_server_previous: crate::server_list::OFFICIAL_PREVIOUS
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
         }
     }
 }
@@ -456,9 +515,21 @@ impl Links {
                 ("discord", &mut links.discord),
                 ("sponsor", &mut links.sponsor),
                 ("website", &mut links.website),
+                ("official_server", &mut links.official_server),
             ] {
                 if let Some(url) = map.get(key).and_then(|v| v.as_str()) {
                     *slot = url.trim().to_string();
+                }
+            }
+            // A list of addresses; anything else keeps the built-in one.
+            if let Some(serde_json::Value::Array(previous)) = map.get("official_server_previous") {
+                if previous.iter().all(serde_json::Value::is_string) {
+                    links.official_server_previous = previous
+                        .iter()
+                        .filter_map(|a| a.as_str())
+                        .map(|a| a.trim().to_string())
+                        .filter(|a| !a.is_empty())
+                        .collect();
                 }
             }
         }
@@ -483,6 +554,96 @@ pub fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("horizon-launcher")
+}
+
+/// A canonical path without Windows' verbatim prefix: `canonicalize` gives `\\?\C:\...` there,
+/// and some tools stat `\\?\C:` — the volume itself — and fail. A drive path loses its `\\?\`;
+/// any other path is left as it is.
+pub(crate) fn plain(path: PathBuf) -> PathBuf {
+    match path.to_str().and_then(|p| p.strip_prefix(r"\\?\")) {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => PathBuf::from(rest),
+        _ => path,
+    }
+}
+
+/// `path` spelled only in ASCII: what Windows' MinGW-w64 tools can open (they read paths
+/// through ANSI APIs, so a Cyrillic user name in %APPDATA% breaks them, #5189).
+fn ascii(path: &Path) -> bool {
+    path.as_os_str().to_str().is_some_and(str::is_ascii)
+}
+
+/// `path` as Windows' MinGW-w64 tools can take it: [`ascii`], and on Windows without a space.
+/// `windres` hands its include folders to the preprocessor unquoted, so a user name with a space
+/// in %APPDATA% splits there ("cc1.exe: fatal error: v\: No such file or directory").
+fn tool_safe(path: &Path) -> bool {
+    ascii(path) && !(cfg!(windows) && path.as_os_str().to_str().is_some_and(|p| p.contains(' ')))
+}
+
+/// Where builds happen — the Rust toolchain, its Cargo home and `native_mods::root` — as a
+/// path every build tool can read: `data_dir()` resolved, so the tools are never handed a
+/// link (horizon-mixins refuses one, and macOS's /tmp is one). On Windows, when the resolved
+/// path isn't [`tool_safe`], [`windows_build_dir`] names the same folder a way MinGW-w64 can open.
+pub fn build_dir() -> PathBuf {
+    let data = data_dir();
+    let _ = fs::create_dir_all(&data);
+    let real = data.canonicalize().map(plain).unwrap_or(data);
+    if tool_safe(&real) {
+        return real;
+    }
+    #[cfg(windows)]
+    return windows_build_dir(&real);
+    #[cfg(not(windows))]
+    real
+}
+
+/// [`build_dir`] when `real` isn't [`tool_safe`]: [`ascii_build_dir`], a real folder of
+/// ProgramData's. Only when it can't be created, the data folder's short (8.3) name.
+///
+/// The short name came first until #6009, and wasn't enough: it is only another spelling of the
+/// same folder, and rustc canonicalizes its own path to find its sysroot, which spells the long,
+/// Cyrillic name again and hands it to the linker (`x86_64-w64-mingw32-gcc`: "No such file or
+/// directory" on `C:/Users/\xca\xe8…`). A folder whose real name is ASCII stays ASCII however a
+/// tool resolves it.
+#[cfg(windows)]
+fn windows_build_dir(real: &Path) -> PathBuf {
+    let dir = ascii_build_dir(real, std::env::var_os("ProgramData").map(PathBuf::from));
+    if fs::create_dir_all(&dir).is_ok() {
+        return dir;
+    }
+    short_path(real).filter(|p| tool_safe(p)).unwrap_or(dir)
+}
+
+/// The build folder for a data folder `real` whose path isn't [`ascii`]: in `program_data`
+/// (`%ProgramData%`, `C:\ProgramData` when unset, relative or not ASCII), which every user may
+/// create folders in, named for `real` so each user's is their own.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn ascii_build_dir(real: &Path, program_data: Option<PathBuf>) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let public = program_data
+        .filter(|p| p.is_absolute() && tool_safe(p))
+        .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+    let key = Sha256::digest(real.as_os_str().as_encoded_bytes());
+    let key: String = key[..4].iter().map(|b| format!("{b:02x}")).collect();
+    public.join(format!("horizon-launcher-{key}"))
+}
+
+/// `GetShortPathNameW`: `path`'s short (8.3) name, or None on error. A folder with no short
+/// name (the volume may keep none) answers with its long name again, which [`ascii`] refuses.
+#[cfg(windows)]
+fn short_path(path: &Path) -> Option<PathBuf> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+    }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+    let need = unsafe { GetShortPathNameW(wide.as_ptr(), std::ptr::null_mut(), 0) } as usize;
+    if need == 0 {
+        return None;
+    }
+    let mut buf = vec![0u16; need];
+    let got = unsafe { GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), need as u32) } as usize;
+    (got != 0 && got < need).then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..got])))
 }
 
 fn versions_dir() -> PathBuf {
@@ -682,22 +843,37 @@ pub(crate) fn install_as(
     fs::rename(&top, &target).map_err(|e| e.to_string())?;
     fs::write(target.join(COMPLETE), "").map_err(|e| e.to_string())?;
     let _ = fs::remove_dir_all(&partial);
-    reuse_prepared(&root, tag);
-    complete_assets(tag);
+    reuse_prepared_for(tag);
     progress(1.0);
     Ok(())
 }
 
 pub fn remove(tag: &str) -> Result<(), String> {
     let dir = version_dir(tag);
+    remove_in(&dir)
+}
+
+fn remove_in(dir: &Path) -> Result<(), String> {
+    let installed = dir.join(COMPLETE).is_file();
+    // The marker goes first: a version counted as installed until its folder is gone comes back
+    // into `installed` when an overlapping removal re-reads the list mid-delete.
+    let _ = fs::remove_file(dir.join(COMPLETE));
     // Windows holds a file for a moment after the game, a scan or the launcher's own reader lets
     // go of it, and remove_dir_all stops at the first one. Retry for a second; a folder that is
     // already gone is removed.
     for attempt in 1.. {
-        match fs::remove_dir_all(&dir) {
+        match fs::remove_dir_all(dir) {
             Ok(()) => break,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
-            Err(e) if attempt == 5 => return Err(e.to_string()),
+            Err(e) if attempt == 5 => {
+                // A failed removal must remain discoverable and retryable. Files may
+                // already have gone, so this is recovery metadata, not a rollback.
+                if installed && dir.is_dir() {
+                    fs::write(dir.join(COMPLETE), "")
+                        .map_err(|restore| format!("{e}; {restore}"))?;
+                }
+                return Err(e.to_string());
+            }
             Err(_) => std::thread::sleep(std::time::Duration::from_millis(250)),
         }
     }
@@ -961,12 +1137,19 @@ fn files_under(dir: &Path, relative: &Path) -> Vec<PathBuf> {
 }
 
 pub(crate) fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    copy_dir_except(from, to, None)
+}
+
+/// Copy a folder, leaving out one directory when given.
+pub(crate) fn copy_dir_except(from: &Path, to: &Path, skip: Option<&Path>) -> std::io::Result<()> {
     fs::create_dir_all(to)?;
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let target = to.join(entry.file_name());
         if entry.file_type()?.is_dir() {
-            copy_dir(&entry.path(), &target)?;
+            if Some(entry.path().as_path()) != skip {
+                copy_dir_except(&entry.path(), &target, skip)?;
+            }
         } else {
             horizon_prepare::clone_or_copy(&entry.path(), &target)?;
         }
@@ -1018,6 +1201,13 @@ fn reuse_prepared(versions: &Path, tag: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// What an install does once its folder is in place (an imported build's too, `build_import`):
+/// another installed version's resources if it has none, and whatever its resources lack.
+pub(crate) fn reuse_prepared_for(tag: &str) {
+    reuse_prepared(&versions_dir(), tag);
+    complete_assets(tag);
 }
 
 /// `reuse_prepared` for every installed version that is not prepared, oldest first, so a
@@ -1110,10 +1300,11 @@ fn complete_reports(versions: &Path, tag: &str) -> bool {
 
 /// What a prepared version may lack that the launcher adds without preparing again, each copied
 /// from the player's own Minecraft asset store as `horizon-prepare <kind>` does: what the
-/// player misses without it, whether the resources lack it, and the copy.
+/// player misses without it, its kind (`horizon_prepare::missing_extras`, the same check as
+/// `horizon-prepare --check`), and the copy.
 type Completion = (
     &'static str,
-    fn(&Path) -> bool,
+    &'static str,
     fn(&Path, Option<&Path>, horizon_prepare::Log) -> Result<PathBuf, String>,
 );
 
@@ -1121,53 +1312,17 @@ const COMPLETIONS: [Completion; 5] = [
     // Preparers before #1538 left the built-in packs out.
     (
         "Programmer Art and High Contrast",
-        lacks_packs,
+        "packs",
         horizon_prepare::packs,
     ),
     // A preparation that could not read the asset store keeps the client jar's 1x1 grey
     // placeholders, its English alone, and no sounds (#1867: Prism Launcher installs prepared
     // since 0.2.48).
-    (
-        "The title panorama",
-        lacks_panorama,
-        horizon_prepare::panorama,
-    ),
-    ("The Unifont glyphs", lacks_unifont, horizon_prepare::fonts),
-    ("The languages", lacks_languages, horizon_prepare::languages),
-    (
-        "The sounds",
-        |resources| !sounds_in(resources),
-        horizon_prepare::sounds,
-    ),
+    ("The title panorama", "panorama", horizon_prepare::panorama),
+    ("The Unifont glyphs", "fonts", horizon_prepare::fonts),
+    ("The languages", "languages", horizon_prepare::languages),
+    ("The sounds", "sounds", horizon_prepare::sounds),
 ];
-
-fn lacks_unifont(resources: &Path) -> bool {
-    !resources
-        .join("assets/minecraft/font/unifont.zip")
-        .is_file()
-}
-
-/// Whether the language list is missing: `pack.mcmeta` only the asset index holds, while the
-/// client jar's `lang` folder holds `en_us.json` and `deprecated.json`, so counting its files
-/// never tells.
-fn lacks_languages(resources: &Path) -> bool {
-    !resources.join("assets/pack.mcmeta").is_file()
-}
-
-fn lacks_packs(resources: &Path) -> bool {
-    horizon_prepare::BUILT_IN_PACKS
-        .iter()
-        .any(|pack| !resources.join("assets").join(pack).is_file())
-}
-
-/// Whether the first panorama face is missing or the client jar's 1x1 placeholder (a PNG's
-/// width is the big-endian word at byte 16, in the IHDR chunk).
-fn lacks_panorama(resources: &Path) -> bool {
-    let face = resources.join("assets/minecraft/textures/gui/title/background/panorama_0.png");
-    fs::read(face).map_or(true, |png| {
-        png.get(16..20).is_none_or(|width| width == [0, 0, 0, 1])
-    })
-}
 
 /// Adds what a prepared version lacks of `COMPLETIONS`: a new version reuses the resources of the
 /// one before (`reuse_prepared`), which may come from a preparer that left them out. Without them
@@ -1188,7 +1343,9 @@ fn refill_own_store(tag: &str) {
     let own = data_dir().join("minecraft");
     let resources = resources_at(&versions_dir().join(tag));
     if !own.join("assets/indexes").is_dir()
-        || !(lacks_languages(&resources) || !sounds_in(&resources))
+        || !horizon_prepare::missing_extras(&resources)
+            .iter()
+            .any(|(kind, _)| matches!(*kind, "languages" | "sounds"))
         || ASKED.swap(true, std::sync::atomic::Ordering::Relaxed)
     {
         return;
@@ -1227,9 +1384,10 @@ fn complete_assets_in(
         if !resources.join(RESOURCES_MANIFEST).exists() {
             return Vec::new();
         }
+        let missing = horizon_prepare::missing_extras(&resources);
         COMPLETIONS
             .iter()
-            .filter(|(_, lacks, _)| lacks(&resources))
+            .filter(|(_, kind, _)| missing.iter().any(|(m, _)| m == kind))
             .collect()
     };
     if lacking().is_empty() {
@@ -1334,9 +1492,9 @@ fn preparer_binary(dir: &Path) -> Option<PathBuf> {
     binary.is_file().then_some(binary)
 }
 
-/// Downloads the pinned version from Mojang into `dir`. This fork needs no Microsoft account
-/// for it: Mojang's version manifest and file downloads are public, so the game files are
-/// fetched whatever accounts are signed in (a signed-in owner is only named in the log).
+/// Downloads the pinned version from Mojang into `dir` when an account in the launcher owns
+/// Minecraft (asked again now), else says what signing in would do, as the last line of the
+/// not-found error.
 fn download_for_owner(
     pins: &sources::Pins,
     dir: &Path,
@@ -1344,19 +1502,23 @@ fn download_for_owner(
     log: &dyn Fn(String),
 ) -> Result<(), String> {
     let mut accounts = account::Accounts::load();
+    // The strict gate, never `launch_for_game`: the developer option that lets offline names
+    // play without an owner must not download the game for them.
     let pass = account::launch(
         &account::Endpoints::live(),
         account::client_id().as_deref(),
         account::store(),
         &mut accounts,
     );
-    let _ = accounts.save();
+    if let Err(e) = accounts.save() {
+        log(format!("Horizon: the accounts are not saved: {e}"));
+    }
     download_for(pins, dir, pass, !accounts.accounts.is_empty(), fetch, log)
 }
 
 /// Downloads Minecraft `id` (any version on Mojang's list, its version file's sha1 from it) into
-/// Horizon's own game folder, in the official launcher's layout. This fork needs no Microsoft
-/// account for it: Mojang's files are public. Returns that folder.
+/// Horizon's own game folder, in the official launcher's layout, for an account that owns the
+/// game (asked again now). Returns that folder.
 pub fn download_version_for_owner(
     id: &str,
     manifest_sha1: &str,
@@ -1377,11 +1539,11 @@ pub fn download_version_for_owner(
     Ok(dir)
 }
 
-/// The command that starts a Java instance's Minecraft: its version downloaded from Mojang the
-/// first time (then it starts offline too), the Java it needs (the instance's own, else one found
-/// here, else Mojang's, downloaded), and the game in the instance's folder. The caller wraps it
-/// (`launch::wrap`) and never logs it: it holds the token. A Java instance's game, ready to start;
-/// `server` (`host[:port]`) is joined once it has.
+/// The command that starts a Java instance's Minecraft, for an account that owns the game: its
+/// version downloaded from Mojang the first time (then it starts offline too), the Java it needs
+/// (the instance's own, else one found here, else Mojang's, downloaded), and the game in the
+/// instance's folder. The caller wraps it (`launch::wrap`) and never logs it: it holds the token.
+/// A Java instance's game, ready to start; `server` (`host[:port]`) is joined once it has.
 pub fn java_game(
     instance: &crate::instances::Instance,
     server: Option<&str>,
@@ -1460,35 +1622,50 @@ pub fn java_game(
     )
 }
 
-/// Downloads the pinned version's files from Mojang. This fork's owner gate is only for naming a
-/// signed-in owner in the log: an account is never required, since the files are public.
+/// What [`download_for_owner`] does with the owner gate's answer: Mojang's files only for its
+/// `owner`, an account the services said owns the game just now.
 fn download_for(
     pins: &sources::Pins,
     dir: &Path,
     pass: Result<account::Launch, account::NoOwner>,
-    _signed_in: bool,
+    signed_in: bool,
     fetch: sources::Fetch,
     log: &dyn Fn(String),
 ) -> Result<(), String> {
     let v = &pins.version;
-    let name = pass.ok().and_then(|p| p.owner).map(|(owner, _)| owner.name);
-    match &name {
-        Some(name) => log(format!(
-            "{name} owns Minecraft: downloading {v} from Mojang"
-        )),
-        None => log(format!("Downloading {v} from Mojang")),
-    }
-    let os = match sources::Os::current() {
-        sources::Os::Linux => "linux",
-        sources::Os::MacOs => "osx",
-        sources::Os::Windows => "windows",
-    };
-    mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| match name {
-        Some(name) => {
-            format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
+    match pass {
+        Ok(account::Launch {
+            owner: Some((owner, _)),
+            ..
+        }) => {
+            let name = owner.name;
+            log(format!(
+                "{name} owns Minecraft: downloading {v} from Mojang"
+            ));
+            let os = match sources::Os::current() {
+                sources::Os::Linux => "linux",
+                sources::Os::MacOs => "osx",
+                sources::Os::Windows => "windows",
+            };
+            mojang::download(pins, dir, os, 8, fetch, &mojang::CANCEL, log).map_err(|e| {
+                format!("\n  • Horizon tried to download {v} from Mojang for {name}, but: {e}")
+            })
         }
-        None => format!("\n  • Horizon tried to download {v} from Mojang, but: {e}"),
-    })
+        // An owner by its last answer, who can't be asked now.
+        Ok(pass) => Err(format!(
+            "\n  • Downloading {v} from Mojang needs your Microsoft account, which could not be \
+             checked: {}",
+            pass.offline.unwrap_or_default()
+        )),
+        Err(_) if signed_in => Err(
+            "\n  • No signed-in account owns Minecraft: Java Edition, so Horizon can't download it."
+                .into(),
+        ),
+        Err(_) => Err(format!(
+            "\n  • Or sign in with the Microsoft account that owns Minecraft: Horizon then \
+             downloads {v} from Mojang itself."
+        )),
+    }
 }
 
 /// The Java home for this version: a runtime for precompiled exporters, a JDK for older
@@ -1598,11 +1775,46 @@ fn assets_folder(
 /// Where the preparation takes Minecraft's files from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MinecraftFrom {
-    /// The player's own install (any launcher's); Mojang when none has the version.
+    /// The player's own install (any launcher's); Mojang only when none has the version and an
+    /// account that owns the game is signed in.
     Install,
-    /// Mojang, straight from its public downloads ("Download and prepare"; no account needed
-    /// in this fork).
+    /// Mojang, for the signed-in account that owns the game ("Download and prepare").
     Mojang,
+}
+
+/// A preparation's steps, in the order they run, as Home names them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PrepareStep {
+    /// Minecraft's files: found in an install, or downloaded from Mojang.
+    Files,
+    Java,
+    Sounds,
+    /// horizon-prepare's own work on those files.
+    Prepare,
+}
+
+impl PrepareStep {
+    pub const ALL: [PrepareStep; 4] = [Self::Files, Self::Java, Self::Sounds, Self::Prepare];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Files => "Game files",
+            Self::Java => "Java",
+            Self::Sounds => "Sounds",
+            Self::Prepare => "Prepare",
+        }
+    }
+}
+
+/// The step the preparation under way is at (`PrepareStep::ALL`'s index).
+static PREPARE_STEP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn prepare_step() -> PrepareStep {
+    PrepareStep::ALL[PREPARE_STEP.load(std::sync::atomic::Ordering::Relaxed)]
+}
+
+pub fn set_prepare_step(step: PrepareStep) {
+    PREPARE_STEP.store(step as usize, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Checks what the preparation needs and picks how to run it. PLAY.txt describes the same
@@ -1616,6 +1828,7 @@ pub fn preparer(
     from: MinecraftFrom,
     log: &dyn Fn(String),
 ) -> Result<(Preparer, PathBuf), String> {
+    set_prepare_step(PrepareStep::Files);
     let version = game_version(tag);
     let dir = version_dir(tag);
     let reused = horizon_prepare::artifacts::reuse_imported(&dir, &|line| log(line.to_string()))?;
@@ -1687,6 +1900,7 @@ pub fn preparer(
             .into_iter()
             .map(|(_, dir)| dir),
     );
+    set_prepare_step(PrepareStep::Java);
     let java_home = java(
         major,
         !horizon_prepare::exporters::available(&dir),
@@ -1766,6 +1980,7 @@ pub fn sounds(tag: &str, minecraft: &Path, log: &dyn Fn(String)) {
             .output()
             .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("horizon-prepare sounds"))
     });
+    set_prepare_step(PrepareStep::Sounds);
     log("Copying the sounds from your Minecraft install".into());
     let result = match binary {
         Some(binary) => crate::process::command(binary)
@@ -2049,6 +2264,10 @@ pub fn client_command(tag: &str) -> Command {
     let _ = fs::create_dir_all(&home);
     let mut cmd = Command::new(client_program(tag));
     cmd.current_dir(home).arg("--resources").arg(resources(tag));
+    // How the game asks for a renewed session (`account session`) while it runs.
+    if let Ok(exe) = std::env::current_exe() {
+        cmd.env("HORIZON_LAUNCHER_EXE", exe);
+    }
     // PipeWire remembers volume and mute per application name. The game's own name is
     // "PipeWire ALSA [horizon-client]", shared with development and test runs, where
     // muting it once left every later game silent: played from here it is "Horizon".
@@ -2112,16 +2331,20 @@ pub fn resolve_version(requested: Option<&str>) -> Result<String, String> {
         .ok_or_else(|| "No version is installed yet.".into())
 }
 
-/// Removes an installed version and moves the selection to the newest one left if needed.
+/// Removes an installed version, unless a program runs from it, and moves the selection to the
+/// newest one left if needed.
 pub fn remove_version(tag: &str) -> Result<(), String> {
     if !installed().iter().any(|t| t == tag) {
         return Err(format!("{tag} is not installed."));
+    }
+    if in_use(tag) {
+        return Err(format!("{tag} is running. Quit it first."));
     }
     remove(tag)?;
     let mut settings = Settings::load();
     if settings.selected.as_deref() == Some(tag) {
         settings.selected = installed().first().cloned();
-        settings.save();
+        settings.save()?;
     }
     Ok(())
 }
@@ -2227,8 +2450,16 @@ pub fn need_prepared(tag: &str) -> Result<(), String> {
 /// the gate, a sign-in that can't be renewed (no network, expired) still lets the game start,
 /// offline.
 pub fn client(tag: &str) -> Result<Command, String> {
-    let (session, offline) = account::session_for_game(&game_home(), false)
-        .map_err(|refused| format!("{refused} Sign in with `horizon-launcher account sign-in`."))?;
+    client_as(tag, None)
+}
+
+/// [`client`], playing as `who` for this launch only (`play --account`).
+pub fn client_as(tag: &str, who: Option<&account::Player>) -> Result<Command, String> {
+    let (session, offline) = match who {
+        None => account::session_for_game(&game_home(), false).map_err(|e| e.to_string()),
+        Some(who) => account::session_for_game_as(&game_home(), who),
+    }
+    .map_err(|refused| format!("{refused} Sign in with `horizon-launcher account sign-in`."))?;
     need_prepared(tag)?;
     complete_assets(tag);
     crate::browser::horizon::before_play(&game_home());
@@ -2365,12 +2596,10 @@ pub struct Updates {
 /// the update.
 pub fn horizon_update(releases: &[Release], installed: &[String]) -> Option<Release> {
     let newest = latest(releases)?;
-    // Nightly installs don't block a release update: this fork ranks releases by publish time,
-    // and a Nightly tag would always outrank them.
     let newer = !installed.contains(&newest.tag)
         && installed
             .iter()
-            .all(|t| crate::nightly::date_of(t).is_some() || compare_versions(&newest.tag, t).is_ge());
+            .all(|t| compare_versions(&newest.tag, t).is_ge());
     newer.then(|| newest.clone())
 }
 
@@ -2388,18 +2617,26 @@ fn launcher_update_from(releases: &[Release], own: &str) -> Option<Release> {
         .cloned()
 }
 
-/// Load the game's release list and both update kinds from the same GitHub response.
+/// The launcher's own releases, from this fork's repository (the game's builds come from
+/// upstream's). A failed fetch gives none: the launcher then offers no update of itself.
+pub fn launcher_releases() -> Vec<Release> {
+    launcher_release_list()
+        .map(|list| launcher_releases_in(&list))
+        .unwrap_or_default()
+}
+
+/// Load the game's release list and both update kinds from their own repositories.
 /// Publish the game releases before any fallback lookups for older launcher tags, so those
 /// lookups cannot hold up the release pages or opening animation. A list error reaches both.
 pub fn releases_and_updates(
     on_releases: impl FnOnce(Result<Vec<Release>, String>),
 ) -> Result<Updates, String> {
+    // The game's builds come from upstream's repository; the launcher's own releases from this
+    // fork's, fetched separately. A failed fork fetch gives none: the launcher then offers no
+    // update of itself, but game releases still show.
     releases_and_updates_with(
-        release_list,
+        game_release_list,
         installed,
-        // The game's builds come from upstream's repository (the list above); the launcher's own
-        // releases from this fork's, fetched separately. A failed fork fetch gives none: then the
-        // launcher offers no update of itself, but game releases still show.
         |_| launcher_releases(),
         on_releases,
     )
@@ -2435,11 +2672,13 @@ pub fn check_updates() -> Result<Updates, String> {
 /// Whether a version installed as an update becomes the selected one: when the player had none,
 /// was on a Nightly, or on the newest installed release (so a player of the release channel moves
 /// to the Nightly at the first check, docs/release-flow.md). An older release picked by hand
-/// stays; an instance pinned to a version keeps it either way.
+/// stays, and so does an imported build (`build_import`); an instance pinned to a version keeps it
+/// either way.
 pub fn select_after_update(selected: Option<&str>, installed_before: &[String]) -> bool {
     match selected {
         None => true,
         Some(s) if crate::nightly::date_of(s).is_some() => true,
+        Some(s) if crate::build_import::is_imported(s) => false,
         Some(s) => installed_before
             .iter()
             .find(|t| is_game_tag(t))
@@ -2470,7 +2709,7 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
     let mut settings = Settings::load();
     if !as_update || select_after_update(settings.selected.as_deref(), &before) {
         settings.selected = Some(release.tag.clone());
-        settings.save();
+        settings.save()?;
     }
     if as_update && release.nightly.is_some() {
         crate::nightly::after_update(&release.tag);
@@ -2483,6 +2722,55 @@ pub fn install_tag(tag: &str, as_update: bool, progress: impl Fn(f32)) -> Result
 pub fn exe_path() -> &'static Path {
     static EXE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     EXE.get_or_init(|| std::env::current_exe().unwrap_or_else(|_| PathBuf::from(LAUNCHER_BINARY)))
+}
+
+/// The AppImage this launcher runs from, when it does: the runtime sets `$APPIMAGE` to the file it
+/// mounted and `$APPDIR` to the mount, while [`exe_path`] then names a copy inside that read-only
+/// mount, gone with it. Updating and restarting work on this file, and the menu entry, shortcuts and
+/// agent configurations start it.
+pub fn appimage_path() -> Option<PathBuf> {
+    appimage_path_in(
+        std::env::var_os("APPIMAGE").as_deref(),
+        std::env::var_os("APPDIR").as_deref(),
+        exe_path(),
+    )
+}
+
+/// `$APPIMAGE`, if it names a file still there and this binary runs from inside `$APPDIR`. Both
+/// variables reach every child of an AppImage: a launcher a different AppImage's program started
+/// must never take that program's file for its own (an update would overwrite it).
+fn appimage_path_in(
+    appimage: Option<&std::ffi::OsStr>,
+    appdir: Option<&std::ffi::OsStr>,
+    exe: &Path,
+) -> Option<PathBuf> {
+    let appdir = Path::new(appdir?);
+    if !appdir.is_absolute() || !exe.starts_with(appdir) {
+        return None;
+    }
+    appimage
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
+}
+
+/// The file a self-update replaces and a restart starts: the AppImage when the launcher runs from
+/// one, the binary this process started from otherwise.
+pub fn update_target() -> PathBuf {
+    appimage_path().unwrap_or_else(|| exe_path().to_path_buf())
+}
+
+/// The launcher archive this build installs from: the AppImage's when it runs from one (a `.tar.gz`
+/// binary would be written inside the read-only mount), this platform's otherwise.
+pub fn launcher_asset() -> Option<&'static str> {
+    launcher_asset_running_from(appimage_path().is_some())
+}
+
+fn launcher_asset_running_from(appimage: bool) -> Option<&'static str> {
+    if appimage {
+        LAUNCHER_APPIMAGE_ASSET
+    } else {
+        LAUNCHER_ASSET
+    }
 }
 
 /// Development builds and `HORIZON_LAUNCHER_NO_SELF_UPDATE` never replace themselves.
@@ -2512,8 +2800,7 @@ fn installed_launcher_version(path: &Path) -> Option<String> {
 /// Puts `new` at `exe`, the path this launcher started from. The running process keeps its
 /// file (unlinked) and works on. Unix only: `self_replace` asks the system where the running
 /// binary is, and Linux answers "<path> (deleted)" once the file has been replaced, so a second
-/// update in the same run failed with "No such file or directory". Windows keeps a running
-/// binary locked, so there `self_replace` moves it aside first.
+/// update in the same run failed with "No such file or directory".
 #[cfg(unix)]
 fn replace_binary(new: &Path, exe: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
@@ -2532,9 +2819,80 @@ fn replace_binary(new: &Path, exe: &Path) -> std::io::Result<()> {
     result
 }
 
+/// Windows keeps a running binary from being written or deleted but lets it be renamed: the
+/// running one steps aside to `<name>.old-<pid>-<n>` in its folder, the new one takes its path,
+/// and a later start removes the old file (`remove_replaced_binaries`). The `self_replace` crate
+/// did this by copying the launcher under a random hidden name and starting that copy to delete
+/// the original through a hidden `cmd.exe`, which Microsoft Defender quarantines as
+/// Trojan:Script/Wacatac (#3175).
 #[cfg(not(unix))]
-fn replace_binary(new: &Path, _exe: &Path) -> std::io::Result<()> {
-    self_replace::self_replace(new)
+fn replace_binary(new: &Path, exe: &Path) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    // A second update in the same run moves the first one's binary aside too.
+    static MOVED: AtomicU32 = AtomicU32::new(0);
+    let dir = exe.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "the launcher has no folder")
+    })?;
+    let name = exe.file_name().unwrap_or_default().to_string_lossy();
+    let pid = std::process::id();
+    let temp = dir.join(format!("{name}.update-{pid}"));
+    let old = dir.join(format!(
+        "{name}.old-{pid}-{}",
+        MOVED.fetch_add(1, Ordering::Relaxed)
+    ));
+    if let Err(e) = fs::copy(new, &temp) {
+        let _ = fs::remove_file(&temp);
+        return Err(e);
+    }
+    match fs::rename(exe, &old) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            let _ = fs::remove_file(&temp);
+            return Err(e);
+        }
+        _ => {}
+    }
+    if let Err(e) = fs::rename(&temp, exe) {
+        let _ = fs::rename(&old, exe);
+        let _ = fs::remove_file(&temp);
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Deletes the binaries earlier self-updates moved aside (`replace_binary`), and the copies of an
+/// update that stopped before its new binary took its place (`<name>.update-<pid>`). The one the
+/// launcher just restarted from is still exiting, so this keeps trying for a few seconds in the
+/// background; one that stays in use (another launcher window) goes on a later start.
+#[cfg(windows)]
+pub fn remove_replaced_binaries() {
+    let exe = exe_path();
+    let (Some(dir), Some(name)) = (exe.parent(), exe.file_name()) else {
+        return;
+    };
+    let dir = dir.to_path_buf();
+    let name = name.to_string_lossy();
+    let old = format!("{name}.old-");
+    let update = format!("{name}.update-");
+    let own = format!("{update}{}", std::process::id());
+    std::thread::spawn(move || {
+        for _ in 0..10 {
+            let Ok(entries) = fs::read_dir(&dir) else {
+                return;
+            };
+            let mut left = false;
+            for entry in entries.flatten() {
+                let file = entry.file_name();
+                let file = file.to_string_lossy();
+                if file.starts_with(&old) || (file.starts_with(&update) && file != own) {
+                    left |= fs::remove_file(entry.path()).is_err();
+                }
+            }
+            if !left {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    });
 }
 
 /// The app bundle the launcher runs from (`…/Horizon.app` for `…/Horizon.app/Contents/MacOS/
@@ -2565,71 +2923,19 @@ fn find_app(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Whether the bundle's signature (Developer ID or ad hoc) is whole: every file it seals is there
-/// and unchanged.
-#[cfg(target_os = "macos")]
-fn signature_holds(app: &Path) -> bool {
-    Command::new("codesign")
-        .args(["--verify", "--deep", "--strict"])
-        .arg(app)
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-
-/// Puts the bundle `new` in place of `app`: copied beside it first (`ditto` keeps its links,
-/// modes and signature) and checked, then the old one is moved aside and the new one renamed in,
-/// so `app` is never half written, and checked again where it lands (the old one comes back if it
-/// doesn't hold). The running launcher keeps its open files and works on.
+/// Puts a verified app bundle in place, retaining old bundles until no process uses them.
 #[cfg(target_os = "macos")]
 fn replace_bundle(new: &Path, app: &Path) -> Result<(), String> {
-    let dir = app.parent().ok_or("The app has no folder.")?;
-    let name = app.file_name().unwrap_or_default().to_string_lossy();
-    let staged = dir.join(format!(".{name}.update-{}", std::process::id()));
-    let old = dir.join(format!(".{name}.old-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&staged);
-    let copied = Command::new("ditto")
-        .arg(new)
-        .arg(&staged)
-        .status()
-        .map_err(|e| format!("ditto: {e}"))?;
-    if !copied.success() {
-        let _ = fs::remove_dir_all(&staged);
-        return Err(format!(
-            "Could not copy the new app next to {}.",
-            app.display()
-        ));
+    crate::mac_update::replace_bundle(new, app)
+}
+
+/// Retired macOS launchers are removed only once their executable is no longer in use.
+/// Run for every entry point (GUI, CLI and MCP), before a command can return or exec.
+pub fn cleanup_launcher_updates() {
+    #[cfg(target_os = "macos")]
+    if let Some(app) = app_bundle(exe_path()) {
+        crate::mac_update::cleanup(app);
     }
-    if !signature_holds(&staged) {
-        let _ = fs::remove_dir_all(&staged);
-        return Err(
-            "The downloaded app's signature doesn't hold; the launcher stays as it is.".into(),
-        );
-    }
-    fs::rename(app, &old).map_err(|e| {
-        let _ = fs::remove_dir_all(&staged);
-        format!("Could not move {} aside: {e}", app.display())
-    })?;
-    if let Err(e) = fs::rename(&staged, app) {
-        let _ = fs::rename(&old, app);
-        let _ = fs::remove_dir_all(&staged);
-        return Err(format!(
-            "Could not put the new app at {}: {e}",
-            app.display()
-        ));
-    }
-    if !signature_holds(app) {
-        let failed = dir.join(format!(".{name}.failed-{}", std::process::id()));
-        if fs::rename(app, &failed).is_ok() && fs::rename(&old, app).is_ok() {
-            let _ = fs::remove_dir_all(&failed);
-        }
-        return Err(format!(
-            "The new app's signature doesn't hold at {}; the launcher stays as it was.",
-            app.display()
-        ));
-    }
-    let _ = fs::remove_dir_all(&old);
-    Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -2637,8 +2943,8 @@ fn replace_bundle(_new: &Path, _app: &Path) -> Result<(), String> {
     Err("App bundles are a macOS thing.".into())
 }
 
-/// Downloads a launcher release and puts its binary in place of this one. The running process
-/// keeps working; `restart` starts the new one. When the file there already is that release or
+/// Downloads a launcher release and puts it in place of this one. The running process keeps
+/// working; `restart` starts the new one. When the file there already is that release or
 /// a newer one (updated from the command line or another window), there is nothing to do.
 pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), String> {
     let (url, size) = release
@@ -2646,51 +2952,62 @@ pub fn self_update(release: &Release, progress: impl Fn(f32)) -> Result<(), Stri
         .clone()
         .ok_or("This launcher release has no build for this platform.")?;
     let target = launcher_version(&release.tag).unwrap_or("0");
-    if installed_launcher_version(exe_path())
+    if installed_launcher_version(&update_target())
         .is_some_and(|v| v != VERSION && compare_versions(&v, target).is_ge())
     {
         progress(1.0);
         return Ok(());
     }
-    let asset_name = url.rsplit('/').next().unwrap_or(LAUNCHER_ASSET.unwrap_or_default());
-    let sha256 = signed_digest(&release.tag, asset_name)?;
+    let sha256 = signed_digest(&release.tag, launcher_asset().unwrap_or_default())?;
     let work = data_dir().join(".launcher-update");
     let _ = fs::remove_dir_all(&work);
     fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let archive = work.join("download");
     download(&url, size, &sha256, &archive, &progress)?;
-    // An archive (older launcher releases) is unpacked; a raw binary (this fork's launcher
-    // releases) is already the file to put in place.
-    if url.ends_with(".tar.gz") || url.ends_with(".zip") {
-        let unpacked = work.join("unpacked");
-        unpack(&archive, &url, &unpacked)?;
-        // A launcher inside Horizon.app replaces the whole bundle (its Info.plist, icon and
-        // signature belong with the binary); a bare binary, as older launchers are, only the binary,
-        // which the macOS archive also holds (Horizon.app/Contents/MacOS/horizon-launcher).
-        if let Some(app) = app_bundle(exe_path()) {
-            if let Some(new) = find_app(&unpacked) {
-                replace_bundle(&new, app)?;
-                let _ = fs::remove_dir_all(&work);
-                progress(1.0);
-                return Ok(());
-            }
+    // An AppImage is the whole program: the new one takes the place of the file `$APPIMAGE` names
+    // (the running mount keeps its copy until `restart` starts it). Its archive is not a `.tar.gz`
+    // to unpack, so this comes before the unpacking below.
+    if let Some(appimage) = appimage_path() {
+        if !url.ends_with(".AppImage") {
+            return Err(format!(
+                "{} is not an AppImage, and this launcher runs from one. Install it from its release page instead.",
+                release.tag
+            ));
         }
-        let binary =
-            find_file(&unpacked, LAUNCHER_BINARY).ok_or("The download has no launcher binary.")?;
-        replace_binary(&binary, exe_path()).map_err(|e| {
+        replace_binary(&archive, &appimage).map_err(|e| {
             format!(
-                "Could not replace the launcher at {}: {e}",
-                exe_path().display()
+                "Could not replace the AppImage at {}: {e}",
+                appimage.display()
             )
         })?;
-    } else {
-        replace_binary(&archive, exe_path()).map_err(|e| {
-            format!(
-                "Could not replace the launcher at {}: {e}",
-                exe_path().display()
-            )
-        })?;
+        let _ = fs::remove_dir_all(&work);
+        progress(1.0);
+        return Ok(());
     }
+    let unpacked = work.join("unpacked");
+    unpack(&archive, &url, &unpacked)?;
+    // A launcher inside Horizon.app replaces the whole bundle (its Info.plist, icon and
+    // signature belong with the binary); a bare binary, as older launchers are, only the binary,
+    // which the macOS archive also holds (Horizon.app/Contents/MacOS/horizon-launcher).
+    if let Some(app) = app_bundle(exe_path()) {
+        if let Some(new) = find_app(&unpacked) {
+            replace_bundle(&new, app)?;
+            let _ = fs::remove_dir_all(&work);
+            progress(1.0);
+            return Ok(());
+        }
+    }
+    let binary =
+        find_file(&unpacked, LAUNCHER_BINARY).ok_or("The download has no launcher binary.")?;
+    replace_binary(&binary, exe_path()).map_err(|e| {
+        format!(
+            "Could not replace the launcher at {}: {e}",
+            exe_path().display()
+        )
+    })?;
+    // An installed launcher's Uninstall entry names the new version (installer.rs).
+    #[cfg(windows)]
+    crate::installer::after_update(launcher_version(&release.tag).unwrap_or(VERSION));
     let _ = fs::remove_dir_all(&work);
     progress(1.0);
     Ok(())
@@ -2710,11 +3027,12 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Starts the launcher again (the updated binary) with the same arguments in place of this one:
-/// on Unix the process becomes the new binary (exec), on Windows the new one starts and this one
-/// exits. Returns only when the new binary could not start.
+/// Starts the launcher again (the updated binary, or the replaced AppImage) with the same
+/// arguments in place of this one: on Unix the process becomes the new binary (exec), on Windows
+/// the new one starts and this one exits. Returns only when the new one could not start.
 pub fn restart() -> String {
-    let mut cmd = Command::new(exe_path());
+    let target = update_target();
+    let mut cmd = Command::new(&target);
     cmd.args(std::env::args_os().skip(1));
     #[cfg(unix)]
     let error = {
@@ -2728,7 +3046,7 @@ pub fn restart() -> String {
     };
     format!(
         "Could not start {}: {error}. Close the launcher and open it again.",
-        exe_path().display()
+        target.display()
     )
 }
 
@@ -2830,6 +3148,11 @@ pub enum Msg {
     Keychain(Option<String>),
     /// Whether an account in the launcher owned the game at its last check (the owner gate).
     Owner(bool),
+    /// Credential-free result from a background account operation.
+    AccountStatus(String, u64, crate::account::session::Status),
+    AccountProgress(String, u64, crate::account::session::Phase),
+    AccountHead(String, Option<String>, Option<Vec<[u8; 4]>>, bool),
+    AccountRemoved(String, u64, Result<bool, String>),
     /// The owner gate's answer for the game about to start: the selected account's session
     /// file (none = offline) and why it plays offline, if it does.
     Session(Result<(Option<PathBuf>, Option<String>), crate::account::NoOwner>),
@@ -2839,10 +3162,15 @@ pub enum Msg {
     PackDone(Result<Box<crate::modpacks::Imported>, String>),
     /// How many play Horizon now, or none when the server can't be reached (`telemetry`).
     Playing(Option<u64>),
+    /// How many play on the official server now, or none when it doesn't answer its status ping
+    /// (`telemetry::watch_official`).
+    OfficialPlayers(Option<u64>),
     /// Where the native-mods build is (`native_mods::Step::label`).
     NativeProgress(String),
     /// The native-mods build ended: the version built, or why not.
     Native(Result<String, String>),
+    /// An imported game build is installed (`build_import::import`): its version, or why not.
+    Imported(Result<String, String>),
     /// A Java instance's game is ready to start (`java_game`, wrapped): the instance's id and
     /// game folder, and the command or why not.
     /// A Java instance's game ready to start, and its variables for the post-exit command.
@@ -3020,6 +3348,13 @@ pub struct Settings {
     /// one now (the owner gate's screen).
     #[serde(default)]
     pub owner_notice_seen: bool,
+    /// Seconds a partner banner (the sidebar's card or the Servers page's banner) has been on
+    /// screen, over every start, up to `partner::SEEN_BEFORE_HIDE`: only then can the player hide it.
+    #[serde(default)]
+    pub partner_seen_secs: u64,
+    /// The player hid a partner banner: the sidebar's card and the Servers page's banner are both gone for good.
+    #[serde(default)]
+    pub partner_hidden: bool,
     /// What the window does while the game runs. Stays by default.
     #[serde(default)]
     pub while_playing: WhilePlaying,
@@ -3033,14 +3368,17 @@ pub struct Settings {
     /// The window's language. Unset follows the system's (`i18n::Language::system`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<crate::i18n::Language>,
-    /// Native mods (experimental) are on (`native_mods`): mixin mods compiled into a game of
-    /// their own. Off until the player installs a native mod (`native_mods::turns_on`), or turns
-    /// them on in Settings.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub native_mods: bool,
-    /// The player has read what installing a native mod starts (`native_mods::needs_notice`).
+    /// The player has read the notice before the first native mod (`native_status::NOTICE`).
+    /// Native mods are always on: an older file's `native_mods` switch is ignored.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native_mods_noticed: bool,
+    /// The profile native builds compile with (`native_mods::Profile::chosen`); none is the
+    /// default, or the release's own while `native_release` is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_profile: Option<crate::native_mods::Profile>,
+    /// An older file's switch for the release profile, read when `native_profile` is unset.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native_release: bool,
     /// Developer options (hidden: seven clicks on the sidebar's launcher version reveal them):
     /// offline names play without an account that owns the game, in the window only
     /// (`account::Accounts::play_as_with`, `account::launch_for_game`). Never a download: the game still
@@ -3105,12 +3443,25 @@ impl Settings {
     pub fn keep_newest(&self) -> usize {
         self.keep_versions.unwrap_or(KEEP_NEWEST).max(1)
     }
-    pub fn save(&self) {
-        let _ = fs::create_dir_all(data_dir());
-        let _ = fs::write(
-            data_dir().join("settings.json"),
-            serde_json::to_string_pretty(self).unwrap(),
-        );
+    pub fn save(&self) -> Result<(), String> {
+        // The window and background jobs share the process's temporary file.
+        static SAVE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // A write that stops halfway leaves settings.json unreadable, and `load` answers
+        // defaults for it: the file is replaced only once it is whole.
+        let dir = data_dir();
+        let path = dir.join("settings.json");
+        let tmp = dir.join(format!("settings.{}.tmp", std::process::id()));
+        let json =
+            serde_json::to_vec_pretty(self).map_err(|e| format!("{}: {e}", path.display()))?;
+        let written = fs::create_dir_all(&dir)
+            .and_then(|()| fs::write(&tmp, json))
+            .and_then(|()| fs::rename(&tmp, &path));
+        if let Err(e) = written {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!("{}: {e}", path.display()));
+        }
+        Ok(())
     }
 }
 
@@ -3126,6 +3477,110 @@ mod java_tests;
 mod tests {
     use super::*;
     use std::cmp::Ordering::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn failed_removal_stays_listed_and_can_be_retried() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let versions =
+            std::env::temp_dir().join(format!("horizon-remove-locked-{}", std::process::id()));
+        let dir = versions.join("v0.2.0");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(COMPLETE), "").unwrap();
+        fs::write(dir.join(CLIENT), "locked executable").unwrap();
+        // Refuse delete sharing, as a running Windows executable does.
+        let running = fs::File::options()
+            .read(true)
+            .share_mode(1)
+            .open(dir.join(CLIENT))
+            .unwrap();
+        assert!(remove_in(&dir).is_err());
+        assert_eq!(installed_in(&versions), ["v0.2.0"]);
+        drop(running);
+        remove_in(&dir).unwrap();
+        assert!(installed_in(&versions).is_empty());
+        assert!(!dir.exists());
+        fs::remove_dir_all(versions).unwrap();
+    }
+
+    /// A canonical path loses Windows' verbatim prefix on a drive (horizon-mixins' output
+    /// check stats `\\?\C:`, the volume itself, which Windows refuses, os error 1), and keeps
+    /// it where there is no drive form.
+    #[test]
+    fn a_canonical_windows_path_loses_only_a_drives_verbatim_prefix() {
+        let plain = |p: &str| plain(PathBuf::from(p));
+        assert_eq!(
+            plain(r"\\?\C:\Users\me\AppData\Roaming\horizon-launcher\native"),
+            PathBuf::from(r"C:\Users\me\AppData\Roaming\horizon-launcher\native")
+        );
+        // A share has no drive form to fall back to; other paths have no prefix.
+        assert_eq!(
+            plain(r"\\?\UNC\server\share\native"),
+            PathBuf::from(r"\\?\UNC\server\share\native")
+        );
+        assert_eq!(
+            plain("/home/me/.local/share/horizon-launcher/native"),
+            PathBuf::from("/home/me/.local/share/horizon-launcher/native")
+        );
+    }
+
+    /// [#5189](https://github.com/horizon-rust/horizon/issues/5189): MinGW-w64's tools can't
+    /// read a non-ASCII path, so the build root is the data folder's resolved ASCII spelling —
+    /// which a link's target or a short (8.3) name already is.
+    #[test]
+    fn the_build_dir_is_a_path_the_tools_can_read() {
+        assert!(ascii(Path::new(
+            r"C:\Users\me\AppData\Roaming\horizon-launcher"
+        )));
+        assert!(!ascii(Path::new(
+            r"C:\Users\Кириченко Павло\AppData\Roaming\horizon-launcher"
+        )));
+        assert!(!ascii(Path::new("/høme/me/horizon-launcher")));
+        // A space splits windres' include folders, which matters on Windows only.
+        let spaced = Path::new(r"C:\Users\Jane Doe\AppData\Roaming\horizon-launcher");
+        assert!(ascii(spaced));
+        assert_eq!(tool_safe(spaced), !cfg!(windows));
+        let built = build_dir();
+        assert!(ascii(&built) || cfg!(windows), "{}", built.display());
+        // Resolved: the build never sees a link in the path (where the answer is the data
+        // folder itself, so already resolved — Windows' other spellings aren't its own).
+        if ascii(&built) {
+            assert_eq!(
+                built,
+                built
+                    .canonicalize()
+                    .map(plain)
+                    .unwrap_or_else(|_| built.clone())
+            );
+        }
+    }
+
+    /// [#6009](https://github.com/horizon-rust/horizon/issues/6009): with a Cyrillic user name the
+    /// build folder is a real ASCII folder of ProgramData's (not a short name of the data folder,
+    /// which rustc resolves back to the Cyrillic one), its own for each data folder.
+    #[test]
+    fn a_cyrillic_data_folder_builds_in_an_ascii_folder_of_its_own() {
+        let pavlo = Path::new(r"C:\Users\Кириченко Павло\AppData\Roaming\horizon-launcher");
+        let other = Path::new(r"C:\Users\Олена\AppData\Roaming\horizon-launcher");
+        let public = PathBuf::from(if cfg!(windows) { r"D:\Data" } else { "/data" });
+        let dir = ascii_build_dir(pavlo, Some(public.clone()));
+        assert!(ascii(&dir), "{}", dir.display());
+        assert_eq!(dir.parent(), Some(public.as_path()));
+        let name = dir.file_name().unwrap().to_str().unwrap();
+        assert!(
+            name.starts_with("horizon-launcher-") && name.len() == 25,
+            "{name}"
+        );
+        assert_eq!(dir, ascii_build_dir(pavlo, Some(public.clone())), "stable");
+        assert_ne!(dir, ascii_build_dir(other, Some(public)), "one per user");
+        // %ProgramData% unset, relative or itself not ASCII: C:\ProgramData.
+        let default = PathBuf::from(r"C:\ProgramData");
+        for pd in [None, Some("ProgramData".into()), Some(r"C:\Дані".into())] {
+            let dir = ascii_build_dir(pavlo, pd);
+            assert_eq!(dir.parent(), Some(default.as_path()));
+            assert!(ascii(&dir));
+        }
+    }
 
     /// The game program's mod API level is its mark's; a program from before the mark (0.2.68
     /// and older) or none at all serves level 0.
@@ -3145,13 +3600,12 @@ mod tests {
         fs::remove_dir_all(&dir).unwrap();
     }
 
-    /// The launcher downloads Mojang's game files (client jar, libraries, assets) whatever
-    /// accounts are signed in: this fork needs no Microsoft account for it. A signed-in owner
-    /// is only named in the log.
+    /// The launcher downloads Mojang's game files (client jar, libraries, assets) only for an
+    /// account the services said owns the game: never without one, and never past the gate by
+    /// the developer option (`Settings::dev_offline`), whose pass has no owner.
     #[test]
-    fn mojang_downloads_whatever_is_signed_in() {
-        let dir =
-            std::env::temp_dir().join(format!("horizon-owner-free-{}", std::process::id()));
+    fn mojang_downloads_only_for_an_owner() {
+        let dir = std::env::temp_dir().join(format!("horizon-owner-only-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let pins = sources::Pins::read(&serde_json::json!({ "minecraft": {
             "version": "26.3",
@@ -3164,21 +3618,53 @@ mod tests {
             asked.lock().unwrap().push(url.to_string());
             Err("no network in tests".into())
         };
-        let said = std::sync::Mutex::new(Vec::<String>::new());
-        let log = |s: String| said.lock().unwrap().push(s);
-        // No signed-in accounts: `account::launch` asks nothing, and the download still goes
-        // ahead (and fails here, without network). The log says so without any account.
-        assert!(download_for_owner(&pins, &dir, &fetch, &log).is_err());
+        let log = |_: String| {};
+        let no_owner = || Ok(account::Launch::default());
+        for (pass, signed_in) in [
+            (Err(account::NoOwner), false),
+            (Err(account::NoOwner), true),
+            (no_owner(), false),
+            (no_owner(), true),
+        ] {
+            assert!(download_for(&pins, &dir, pass, signed_in, &fetch, &log).is_err());
+        }
+        assert!(asked.lock().unwrap().is_empty());
+        assert!(!dir.exists());
+        // An owner: Mojang is asked (and the download fails here, without network).
+        let owner = account::Account {
+            uuid: "069a79f444e94726a5befca90e38aaf5".into(),
+            name: "Notch".into(),
+            skin: None,
+            cape: None,
+        };
+        let secrets = serde_json::from_str(
+            r#"{"refresh_token":"r","minecraft_token":"t","minecraft_expires_at":1,"owns":true}"#,
+        )
+        .unwrap();
+        let pass = Ok(account::Launch {
+            owner: Some((owner, secrets)),
+            ..Default::default()
+        });
+        assert!(download_for(&pins, &dir, pass, true, &fetch, &log).is_err());
         assert!(!asked.lock().unwrap().is_empty());
-        assert!(said
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|s| s == "Downloading 26.3 from Mojang"));
         let _ = fs::remove_dir_all(&dir);
 
-        // In the sources: one function downloads the game, `download_for`, which never refuses
-        // for want of an owner. Game-file hosts appear nowhere else.
+        // A store that lacks assets is not filled for a non-owner either: nothing is asked.
+        fs::create_dir_all(dir.join("assets/indexes")).unwrap();
+        fs::write(
+            dir.join("assets/indexes/34.json"),
+            r#"{"objects":{"a":{"hash":"00","size":1}}}"#,
+        )
+        .unwrap();
+        asked.lock().unwrap().clear();
+        for (pass, signed_in) in [(Err(account::NoOwner), true), (no_owner(), true)] {
+            assert!(download_for(&pins, &dir, pass, signed_in, &fetch, &log).is_err());
+        }
+        assert!(asked.lock().unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+
+        // In the sources: one call downloads the game, in `download_for`, and the only caller
+        // of that asks the strict gate. Game-file hosts appear nowhere else.
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = vec![src.clone()];
         let mut sources = Vec::new();
@@ -3188,8 +3674,8 @@ mod tests {
             } else if path.extension().is_some_and(|e| e == "rs") {
                 let name = path.file_name().unwrap().to_string_lossy().to_string();
                 let in_tests = name.contains("tests") || path.parent().unwrap() != src;
-                // The code alone: test modules (this one included) come after it. Windows
-                // checkouts keep CRLF line endings, which the searches below don't read.
+                // The code alone: test modules (this one included) come after it.
+                // A Windows checkout has CRLF line ends: the searches below look for "\n".
                 let mut text = fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
                 text.truncate(text.find("#[cfg(test)]").unwrap_or(text.len()));
                 sources.push((name, in_tests, text));
@@ -3321,6 +3807,57 @@ pub fn {f}("
             resources_summary(false, false, "26.3"),
             resources_summary(false, true, "26.3")
         );
+    }
+
+    #[test]
+    fn each_mac_picks_the_build_for_its_processor() {
+        assert_eq!(
+            platform_assets("macos", "aarch64"),
+            Some((
+                "horizon-macos-arm64.zip",
+                "horizon-launcher-macos-arm64.zip"
+            ))
+        );
+        assert_eq!(
+            platform_assets("macos", "x86_64"),
+            Some(("horizon-macos-x64.zip", "horizon-launcher-macos-x64.zip"))
+        );
+        assert_eq!(
+            platform_assets("windows", "x86_64").map(|(game, _)| game),
+            Some("horizon-windows-x64.zip")
+        );
+        assert_eq!(platform_assets("linux", "aarch64"), None);
+        assert_eq!(platform_assets("macos", "x86"), None);
+        assert_eq!(
+            ASSET,
+            platform_assets(std::env::consts::OS, std::env::consts::ARCH).map(|(game, _)| game)
+        );
+    }
+
+    /// Every asset a launcher looks for is one the release workflows build, sign and publish.
+    #[test]
+    fn platform_assets_are_published() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let read = |path: &str| fs::read_to_string(repo.join(path)).unwrap();
+        let build = read(".github/workflows/game-build.yml");
+        let nightly = read(".github/workflows/nightly-build.yml");
+        let launcher = read(".github/workflows/launcher.yml");
+        for (os, arch, game, launcher_asset) in PLATFORMS {
+            assert!(
+                build.contains(&format!("asset: {game}")),
+                "game-build.yml builds no {game}"
+            );
+            // Signed (SHA256SUMS), then published.
+            assert_eq!(
+                nightly.matches(&format!("dist/{game}")).count(),
+                2,
+                "nightly-build.yml must sign and publish {game} ({os} {arch})"
+            );
+            assert!(
+                launcher.contains(&format!("asset: {launcher_asset}")),
+                "launcher.yml builds no {launcher_asset}"
+            );
+        }
     }
 
     #[test]
@@ -3553,17 +4090,17 @@ pub fn {f}("
     #[test]
     fn the_accent_is_violet_unless_picked_and_an_unknown_one_keeps_the_rest() {
         use crate::themes::Accent;
-        assert_eq!(Settings::parse("{}").accent, Accent::Violet);
+        assert_eq!(Settings::parse("{}").accent, Accent::VIOLET);
         let teal =
             Settings::parse(r#"{"accent": "teal", "background": "background-0123456789ab.png"}"#);
         assert_eq!(
             (teal.accent, teal.background.as_deref()),
-            (Accent::Teal, Some("background-0123456789ab.png"))
+            (Accent::TEAL, Some("background-0123456789ab.png"))
         );
         let future = Settings::parse(r#"{"accent": "plaid", "game_args": "--x"}"#);
         assert_eq!(
             (future.accent, future.game_args.as_str()),
-            (Accent::Violet, "--x")
+            (Accent::VIOLET, "--x")
         );
     }
 
@@ -3619,7 +4156,6 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
-            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3661,7 +4197,6 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
-            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3699,6 +4234,59 @@ pub fn {f}("
             launcher_update_from(&old_scheme, "launcher-v0.16.0").map(|r| r.tag),
             Some("launcher-v0.17.0".into())
         );
+    }
+
+    /// A launcher in an AppImage updates with the AppImage's own file: the `.tar.gz` binary would
+    /// be written inside the AppImage's read-only mount.
+    #[test]
+    fn an_appimage_updates_with_the_appimage() {
+        assert_eq!(launcher_asset_running_from(false), LAUNCHER_ASSET);
+        assert_eq!(launcher_asset_running_from(true), LAUNCHER_APPIMAGE_ASSET);
+        #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+        assert_eq!(
+            launcher_asset_running_from(true),
+            Some("horizon-launcher-linux-x86_64.AppImage")
+        );
+    }
+
+    /// `$APPIMAGE` names the file the runtime mounted; a path that is not there (moved or deleted
+    /// since the launcher started) is no AppImage, and the launcher updates its own binary again.
+    /// Nor is one inherited from another AppImage's program: the binary has to run from `$APPDIR`.
+    // AppImages are Linux's, and the paths below are absolute only on Unix.
+    #[cfg(unix)]
+    #[test]
+    fn only_an_appimage_file_counts() {
+        use std::ffi::OsStr;
+        let mount = OsStr::new("/tmp/.mount_Horizon123");
+        let exe = Path::new("/tmp/.mount_Horizon123/usr/bin/horizon-launcher");
+        assert_eq!(appimage_path_in(None, Some(mount), exe), None);
+        assert_eq!(
+            appimage_path_in(Some(OsStr::new("Horizon.AppImage")), Some(mount), exe),
+            None,
+            "a relative path is no $APPIMAGE"
+        );
+        assert_eq!(
+            appimage_path_in(
+                Some(OsStr::new("/nonexistent/Horizon.AppImage")),
+                Some(mount),
+                exe
+            ),
+            None
+        );
+        let file = std::env::temp_dir().join(format!("horizon-appimage-{}", std::process::id()));
+        std::fs::write(&file, b"#!AppImage").unwrap();
+        assert_eq!(
+            appimage_path_in(Some(file.as_os_str()), Some(mount), exe),
+            Some(file.clone())
+        );
+        // Inherited from another AppImage: this launcher is installed elsewhere.
+        let elsewhere = Path::new("/home/a/.local/bin/horizon-launcher");
+        assert_eq!(
+            appimage_path_in(Some(file.as_os_str()), Some(mount), elsewhere),
+            None
+        );
+        assert_eq!(appimage_path_in(Some(file.as_os_str()), None, exe), None);
+        let _ = std::fs::remove_file(&file);
     }
 
     #[test]
@@ -3756,7 +4344,9 @@ pub fn {f}("
 
     #[test]
     fn the_fallback_looks_for_0_2_launchers_first() {
-        let asset = LAUNCHER_ASSET.unwrap_or("unsupported");
+        // The asset the launcher reading this list installs with (the AppImage's own when it runs
+        // from one), as launcher_releases_in_with looks for it.
+        let asset = launcher_asset().unwrap_or("unsupported");
         let release = |tag: &str| serde_json::json!({"tag_name": tag, "assets": [{"name": asset, "browser_download_url": "u", "size": 1}]});
         let asked = std::cell::RefCell::new(Vec::new());
         let lookup = |with_new: bool| {
@@ -3829,7 +4419,6 @@ pub fn {f}("
             name: String::new(),
             body: String::new(),
             date: String::new(),
-            published: String::new(),
             asset: Some(("u".into(), 1)),
             prerelease: false,
             nightly: None,
@@ -3847,40 +4436,65 @@ pub fn {f}("
         assert!(select_after_update(Some("v2026.10.12"), &installed));
         assert!(!select_after_update(Some("v2026.10.1"), &installed));
         assert!(select_after_update(None, &installed));
+        assert!(!select_after_update(
+            Some("imported-2026-11-01-abcdef0"),
+            &["imported-2026-11-01-abcdef0".to_string()]
+        ));
     }
 
-    /// This fork ignores the Nightly: its launcher offers the newest numbered release, by publish
-    /// time, and lists no Nightly at all.
+    /// The Nightly is the only build Horizon ships (docs/release-flow.md): every launcher takes the
+    /// current one as its update, over every release; the last week's are listed, never offered.
     #[test]
-    fn the_launcher_offers_the_newest_release_and_ignores_nightlies() {
+    fn every_launcher_updates_to_the_current_nightly() {
         let asset = ASSET.unwrap_or("horizon-linux-x86_64.tar.gz");
         let build = |url: &str| serde_json::json!([{"name": asset, "browser_download_url": url, "size": 1}]);
         let list = serde_json::json!([
             {"tag_name": "nightly", "name": "Nightly 2026-10-28 · 9b772b2", "prerelease": true,
              "published_at": "2026-10-28T09:58:01Z", "assets": build("n")},
             {"tag_name": "launcher@0.2.21", "assets": []},
-            {"tag_name": "v0.2.95", "published_at": "2026-10-28T10:00:00Z", "assets": build("r")},
+            {"tag_name": "v0.2.95", "assets": build("r")},
             {"tag_name": "nightly-2026-10-28", "name": "Nightly 2026-10-28 · 83f15fa", "prerelease": true,
              "published_at": "2026-10-28T07:54:57Z", "assets": build("d")},
             {"tag_name": "nightly-2026-10-27", "name": "Nightly 2026-10-27 · 7954902", "prerelease": true,
              "published_at": "2026-10-28T00:15:40Z", "assets": build("e")},
-            {"tag_name": "v2026.10.21", "published_at": "2026-10-21T12:00:00Z", "assets": build("o")},
         ]);
         let releases = game_releases(&list);
-        let listed: Vec<_> = releases.iter().map(|r| r.tag.as_str()).collect();
-        assert_eq!(listed, ["v0.2.95", "v2026.10.21"]);
+        let listed: Vec<_> = releases
+            .iter()
+            .map(|r| (r.tag.as_str(), r.nightly.as_deref(), r.prerelease))
+            .collect();
+        assert_eq!(
+            listed,
+            [
+                ("nightly-2026-10-28-9b772b2", Some("nightly"), false),
+                (
+                    "nightly-2026-10-28-83f15fa",
+                    Some("nightly-2026-10-28"),
+                    true
+                ),
+                (
+                    "nightly-2026-10-27-7954902",
+                    Some("nightly-2026-10-27"),
+                    true
+                ),
+                ("v0.2.95", None, false),
+            ]
+        );
         let offered = |installed: &[&str]| {
             let installed: Vec<String> = installed.iter().map(|t| t.to_string()).collect();
             horizon_update(&installable_updates(&releases), &installed).map(|r| r.tag)
         };
-        // The newest release is the update, for a player of an older release, a Nightly, or nobody.
-        assert_eq!(offered(&["v2026.10.21"]), Some("v0.2.95".to_string()));
-        assert_eq!(offered(&[]), Some("v0.2.95".to_string()));
-        assert_eq!(
-            offered(&["nightly-2026-10-28-9b772b2"]),
-            Some("v0.2.95".to_string())
+        let current = Some("nightly-2026-10-28-9b772b2".to_string());
+        // A player of the release channel, a new player, one on an older Nightly of the same day.
+        assert_eq!(offered(&["v0.2.95", "v0.2.94"]), current);
+        assert_eq!(offered(&[]), current);
+        assert_eq!(offered(&["nightly-2026-10-28-83f15fa", "v0.2.95"]), current);
+        assert_eq!(offered(&["nightly-2026-10-28-9b772b2"]), None);
+        // Nightlies come after every release in every list.
+        assert!(compare_versions("nightly-2026-10-27-7954902", "v0.2.95").is_gt());
+        assert!(
+            compare_versions("nightly-2026-10-28-9b772b2", "nightly-2026-10-27-7954902").is_gt()
         );
-        assert_eq!(offered(&["v0.2.95"]), None);
     }
 
     /// Players move to the Nightly at their next check: whoever was on the newest release, on a
@@ -3930,14 +4544,11 @@ pub fn {f}("
     #[test]
     fn links_fall_back_to_the_built_in_ones() {
         let defaults = Links::default();
-        assert_eq!(defaults.discord, "https://discord.gg/HcTeMZxe5E");
+        assert_eq!(defaults.discord, "https://discord.gg/playhorizon");
         assert_eq!(defaults.sponsor, "https://github.com/sponsors/ludovic111");
         assert_eq!(defaults.website, "https://playhorizon.dev");
         // The file on main says the same thing as the defaults.
-        let file = Links::parse(
-            r#"{"discord": "https://discord.gg/HcTeMZxe5E", "sponsor": "https://github.com/sponsors/ludovic111", "website": "https://playhorizon.dev"}"#,
-        );
-        assert_eq!(file, defaults);
+        assert_eq!(Links::parse(include_str!("../links.json")), defaults);
         // Unreadable or missing, offline included: the defaults.
         assert_eq!(Links::parse(""), defaults);
         assert_eq!(Links::parse("<html>404</html>"), defaults);

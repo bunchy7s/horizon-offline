@@ -6,7 +6,7 @@ SectionRenderDispatcher.uploadTerrainBuffersToGpu	port	crates/horizon-client-ren
 SectionRenderDispatcher.schedule	port	crates/horizon-client-render/src/streaming.rs::Streaming::submit	the mesh job goes into the priority queue by distance
 SectionRenderDispatcher.dispose	port	crates/horizon-client-render/src/gfx.rs::Renderer::clear_sections	frees every section's GPU buffers
 SectionRenderDispatcher.getStats	skip:debug		F3 text: compile queue size and free buffers
-SectionRenderDispatcher.RenderSection.getVisibility	missing		player: newly meshed terrain appears at full strength; vanilla fades each section in over the chunkSectionFadeInTime option, and block entities wait for 0.3
+SectionRenderDispatcher.RenderSection.getVisibility	port	crates/horizon-client-render/src/gfx.rs::chunk_visibility	a section's visibility runs 0 to 1 over Options.chunkSectionFadeInTime from the upload; the instance data carries 1 - it to the terrain shader
 SectionRenderDispatcher.RenderSection.setSectionNode	port	crates/horizon-client-render/src/gfx.rs::section_instance	the section's render origin; its 16-block bounds are derived from the origin
 SectionRenderDispatcher.RenderSection.reset	port	crates/horizon-client-render/src/gfx.rs::Renderer::release_section	drops the section's mesh and GPU slices
 SectionRenderDispatcher.RenderSection.resortTransparency	port	crates/horizon-client-render/src/gfx/translucency.rs::SortState::update	translucent quads re-sorted for the camera; gap: minor: the new order goes to the next draw, not a newly uploaded index buffer
@@ -49,10 +49,10 @@ BeeDebugRenderer	missing		minor: F3 bee and hive debug view (hive blacklist, flo
 BrainDebugRenderer	missing		minor: F3 brain debug view (activities, memories, POIs); not drawn
 BreezeDebugRenderer	missing		minor: F3 breeze jump target view; breeze_jump_target is kept in monster_brain.rs but never drawn
 ChunkCullingDebugRenderer	missing		minor: F3 chunk culling frustum view; the occlusion graph has no draw
-ChunkDebugRenderer	missing		minor: F3 chunk info view fed by the integrated server; not drawn
-ChunkDebugRenderer.ChunkData	missing		minor: data for the F3 chunk info view; not built
-CollisionBoxRenderer	missing		minor: F3 block collision box view; not drawn
-DebugRenderer.refreshRendererList	inline	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	the enabled views; Horizon has only chunk borders (show_chunk_borders) and hitboxes (show_hitboxes), the rest are missing
+ChunkDebugRenderer	missing		minor: the visualize_chunks_on_server entry is listed in debug_entries.rs but draws nothing, for want of the server's chunk statuses
+ChunkDebugRenderer.ChunkData	missing		minor: no ChunkData is built, since the view it feeds draws nothing
+CollisionBoxRenderer	home	crates/horizon-client/src/game/debug_renderers.rs	Game::debug_renderer_gizmos outlines the block shapes within 6 of the camera entity's box, white (visualize_collision_boxes)
+DebugRenderer.refreshRendererList	inline	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	the views switched on: chunk borders, hitboxes and entity hitboxes, the 3d crosshair, the structure and test instance boxes (bounding_box_gizmos) and the F3 geometry run from debug_renderer_geometry; the bee, brain, breeze, goal, path, poi, raid, octree, neighbours, light section, village, support and redstone views are not drawn
 DebugRenderer.getTargetedEntity	skip:debug		entity under the crosshair for debug views only
 DebugRenderer.mixColor	skip:debug		colour helper for debug paths
 DebugRenderer.shiftHue	skip:debug		colour helper with no callers
@@ -62,10 +62,10 @@ EntityHitboxDebugRenderer.getServerEntity	skip:debug		the integrated server's en
 GameEventListenerRenderer	missing		minor: F3 game event listener view; not drawn
 GameTestBlockHighlightRenderer	skip:debug		game test block markers; Horizon does not run game tests
 GoalSelectorDebugRenderer	missing		minor: F3 mob goal view; not drawn
-HeightMapRenderer	missing		minor: F3 heightmap view; not drawn
-LightDebugRenderer	missing		minor: F3 light level view; not drawn
-LightSectionDebugRenderer	missing		minor: F3 light section view; not drawn
-LightSectionDebugRenderer.SectionData	missing		minor: data for the F3 light section view; not built
+HeightMapRenderer	home	crates/horizon-client/src/game/debug_renderers.rs	Game::heightmap_shapes fills a small box per column of the 5x5 chunks around the camera, stacked by kind, coloured as getColor (visualize_heightmap)
+LightDebugRenderer	home	crates/horizon-client/src/game/debug_renderers.rs	light_level_texts prints the block and sky light within 10 of the camera (visualize_block_light_levels and visualize_sky_light_levels)
+LightSectionDebugRenderer	missing		minor: the visualize_sky_light_sections entry is listed but draws nothing: the light engine keeps no section data to draw
+LightSectionDebugRenderer.SectionData	missing		minor: no SectionData is built, since the view it feeds draws nothing
 NeighborsUpdateRenderer	missing		minor: F3 neighbour update view; not drawn
 NeighborsUpdateRenderer.LastUpdate	missing		minor: data for the F3 neighbour update view; not kept
 OctreeDebugRenderer	missing		minor: F3 chunk section octree view; not drawn
@@ -73,13 +73,13 @@ PathfindingRenderer	missing		minor: F3 mob path view; not drawn
 PoiDebugRenderer	missing		minor: F3 point of interest view; not drawn
 RaidDebugRenderer	missing		minor: F3 raid centre view; not drawn
 RedstoneWireOrientationsRenderer	missing		minor: F3 redstone wire orientation view; not drawn
-SolidFaceRenderer	missing		minor: F3 solid face view; not drawn
+SolidFaceRenderer	home	crates/horizon-client/src/game/debug_renderers.rs	Game::solid_face_shapes fills the sturdy sides of the outline boxes of the blocks within 6, grown by 0.002 (visualize_solid_faces)
 StructureRenderer	missing		minor: F3 structure bounding box view fed by debug subscriptions; Horizon sends none
-SupportBlockRenderer	missing		minor: F3 support block view; not drawn
+SupportBlockRenderer	missing		minor: the visualize_entity_supporting_blocks entry is listed but draws nothing: Entity.mainSupportingBlockPos is not kept
 VillageSectionsDebugRenderer	missing		minor: F3 village section view; not drawn
-WaterDebugRenderer	missing		minor: F3 water level view; not drawn
+WaterDebugRenderer	home	crates/horizon-client/src/game/debug_renderers.rs	Game::water_level_shapes fills each water block within 10 of the feet to its height and prints its amount over it (visualize_water_levels)
 LevelExtractor.extract	port	crates/horizon-client/src/game.rs::Game::render	the frame's extraction and draw; gap: minor: no separate render state, the frame is built and drawn in one fn
-LevelExtractor.drainTransientBlockQueue	missing		player: temporary blocks the server shows (ClientboundAddTransientBlockPacket) never appear; the packet has an id in horizon-protocol but no handler
+LevelExtractor.drainTransientBlockQueue	port	crates/horizon-client/src/game/transient_blocks.rs::Game::drain_transient_block_queue	ClientboundAddTransientBlock's blocks are drawn as moving blocks until a section mesh compiled after them is uploaded
 LevelExtractor.extractVisibleBlockEntities	inline	crates/horizon-client/src/game.rs::Game::render	block entities of the visible sections; gap: minor: no 0.3 visibility gate, see RenderSection.getVisibility
 LevelExtractor.extractBlockDestroyAnimation	port	crates/horizon-client/src/game.rs::Game::destroy_block_progress	keeps the crumbling progress per breaker for 400 ticks; gap: minor: no 32-block distance cut here
 LevelExtractor.extractGizmos	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_gizmos	the frame's debug gizmos

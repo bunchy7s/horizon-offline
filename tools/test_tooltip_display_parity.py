@@ -11,8 +11,10 @@ def cases(build):
     values = [
         (False, False, False),
         (False, False, True),
+        (False, True, False),
         (False, True, True),
         (True, False, False),
+        (True, False, True),
         (True, True, False),
         (True, True, True),
     ]
@@ -40,4 +42,4 @@ if __name__ == '__main__':
             lab.ROOT / 'crates/horizon-client/src/item_tooltip.rs',
             lab.ROOT / 'crates/horizon-items/src/item_data.rs',
         ],
-        expected_lines=10)
+        expected_lines=12)

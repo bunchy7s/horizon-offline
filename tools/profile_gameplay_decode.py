@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Profile the validation and typed-deserialization passes in separate processes.
 
-Build `cargo build --release -p horizon-client --example gameplay_decode_profile`
+Build `cargo build --release -p horizon-client-lib --example gameplay_decode_profile`
 then run this tool with the matching prepared resources. These passes are
 both currently required for exact JSON error classification/precedence.
 """

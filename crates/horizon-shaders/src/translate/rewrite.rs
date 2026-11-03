@@ -36,12 +36,29 @@ impl Stage<'_> {
              vec2 hz_modf(vec2 x, out vec2 i) { i = trunc(x); return x - i; }\n\
              vec3 hz_modf(vec3 x, out vec3 i) { i = trunc(x); return x - i; }\n\
              vec4 hz_modf(vec4 x, out vec4 i) { i = trunc(x); return x - i; }\n\
+             float hz_sqrt(float x) { return sqrt(max(x, 0.0)); }\n\
+             vec2 hz_sqrt(vec2 x) { return sqrt(max(x, vec2(0.0))); }\n\
+             vec3 hz_sqrt(vec3 x) { return sqrt(max(x, vec3(0.0))); }\n\
+             vec4 hz_sqrt(vec4 x) { return sqrt(max(x, vec4(0.0))); }\n\
              struct hz_FogParameters { vec4 color; float density; float start; float end; float scale; };\n\
              hz_FogParameters hz_Fog;\n\
              float hz_zero = 0.0;\n",
         );
         if self.inverse {
             p.push_str(INVERSE);
+        }
+        if self.gather_offsets {
+            p.push_str(&gather_offsets());
+        }
+        if self.query_lod {
+            p.push_str(&query_lod());
+        }
+        // GLSL's scalar `dot` and `normalize` (genType includes `float`); naga's are vector only.
+        if self.scalar_dot {
+            p.push_str("float dot(float a, float b) { return a * b; }\n");
+        }
+        if self.scalar_normalize {
+            p.push_str("float normalize(float x) { return sign(x); }\n");
         }
         if self.gbuffers {
             // Set by our `main` from the frame's matrices (gbuffers.rs).
@@ -96,14 +113,57 @@ impl Stage<'_> {
         let mut calls: Vec<(&str, &str, usize)> = Vec::new();
         // Sampler parameters of the function being written: name → type.
         let mut params: HashMap<String, String> = HashMap::new();
-        // Names of samplers a local variable or parameter of the function hides.
-        let mut hidden: Vec<&str> = Vec::new();
+        // Names of samplers, bool uniforms and lowered arrays a local or parameter hides.
+        // Each with where its scope starts and the block depth it ends with.
+        let mut hidden: Vec<(&str, usize, i32)> = Vec::new();
+        // Depths of the `for` loops whose body is a single statement, ending at its `;`.
+        let mut unbraced_for: Vec<i32> = Vec::new();
         let mut depth = 0;
         let mut skip_until = 0;
+        // The `;` that closes a statement we rewrite, and what is written in its place.
+        let mut statement_close: Option<(usize, &str)> = None;
+        // The type the function being written returns, when GLSL converts to it implicitly.
+        let mut returns: Option<&str> = None;
         let next = |i: usize| (i + 1..self.tokens.len()).find(|&j| significant(self.tokens[j]));
         let prev = |i: usize| (0..i).rev().find(|&j| significant(self.tokens[j]));
+        let structs: Vec<&str> = (self.tokens.iter().enumerate())
+            .filter(|&(_, &t)| t == "struct")
+            .filter_map(|(i, _)| next(i).map(|j| self.tokens[j]))
+            .collect();
+        // GLSL 1.20's user functions hide all built-ins with the same name (8).
+        let mut own_size = Vec::new();
+        let mut declaration_depth = 0usize;
+        for (i, &t) in self.tokens.iter().enumerate() {
+            match t {
+                "{" => declaration_depth += 1,
+                "}" => declaration_depth = declaration_depth.saturating_sub(1),
+                "textureSize1D" | "textureSize2D" | "textureSize3D"
+                    if declaration_depth == 0
+                        && next(i).is_some_and(|j| self.tokens[j] == "(")
+                        && prev(i)
+                            .is_some_and(|j| is_ident(self.tokens[j]) || self.tokens[j] == "]") =>
+                {
+                    own_size.push(t);
+                }
+                _ => {}
+            }
+        }
         for (i, &t) in self.tokens.iter().enumerate() {
             if i < skip_until {
+                continue;
+            }
+            if let Some((end, close)) = statement_close
+                && end == i
+            {
+                out.push_str(close);
+                statement_close = None;
+                // This `;` may end the single-statement body of a `for`.
+                if calls.is_empty() && unbraced_for.last() == Some(&depth) {
+                    while unbraced_for.last() == Some(&depth) {
+                        unbraced_for.pop();
+                    }
+                    hidden.retain(|&(_, _, d)| d <= depth);
+                }
                 continue;
             }
             if let Some(text) = self.replaced.get(&i) {
@@ -115,6 +175,54 @@ impl Stage<'_> {
                 if t.contains(' ') && !t.contains('\n') {
                     out.push(' ');
                 }
+                continue;
+            }
+            let array_length = |j| {
+                self.runtime_array_length(j).filter(|_| {
+                    !hidden
+                        .iter()
+                        .any(|&(name, from, _)| name == self.tokens[j] && j >= from)
+                })
+            };
+            if let Some((length, close)) = array_length(i) {
+                write!(out, "({length})").unwrap();
+                for t in &self.tokens[i..=close] {
+                    out.extend(t.chars().filter(|&c| c == '\n'));
+                }
+                skip_until = close + 1;
+                continue;
+            }
+            // Dimensions naga reads in reverse (`T x[A][B]`): written reversed, read as GL does.
+            if t == "["
+                && let Some(groups) = self.type_dimensions(i, &structs)
+            {
+                for &(open, close) in groups.iter().rev() {
+                    if (open + 1..close).all(|j| !significant(self.tokens[j])) {
+                        // type_dimensions only accepts an unsized outer dimension with
+                        // an initializer whose element count is known.
+                        write!(out, "[{}]", self.array_length(close).unwrap()).unwrap();
+                    } else {
+                        let mut j = open;
+                        while j <= close {
+                            if let Some((length, end)) = array_length(j) {
+                                write!(out, "({length})").unwrap();
+                                for t in &self.tokens[j..=end] {
+                                    out.extend(t.chars().filter(|&c| c == '\n'));
+                                }
+                                j = end + 1;
+                            } else {
+                                out.push_str(self.tokens[j]);
+                                j += 1;
+                            }
+                        }
+                    }
+                }
+                for pair in groups.windows(2) {
+                    for &gap in &self.tokens[pair[0].1 + 1..pair[1].0] {
+                        out.extend(gap.chars().filter(|&c| c == '\n'));
+                    }
+                }
+                skip_until = groups.last().map_or(i, |g| g.1) + 1;
                 continue;
             }
             // `sqrt(-1.0)`: GL's NaN at run time, which naga would fold and refuse.
@@ -139,15 +247,69 @@ impl Stage<'_> {
                 skip_until = j + 1;
                 continue;
             }
+            // naga's frontend leaves the code after an unconditional `discard` or `return`
+            // unreachable but half-built (a module that fails validation): behind an `if` it
+            // stays reachable as far as naga knows. The braces keep a pack's `else` with the
+            // pack's `if` (`if (c) discard; else ...`). A `return` with a value is guarded only
+            // as a statement of its own with code after it in its block: as an `if`'s branch
+            // the code after it is reachable already, and naga would end our guard's empty
+            // `else` with a `return;` of its own where the function returns a value.
+            // GLSL converts a returned value to the function's type (`return 1;` in a `float`
+            // function); naga does not, so the conversion is written out: `return float(1);`.
+            if matches!(t, "discard" | "return")
+                && let Some(end) = self.statement_end(i)
+            {
+                let value = t == "return" && next(i) != Some(end);
+                let guard = !value
+                    || (prev(i).is_none_or(|j| matches!(self.tokens[j], ";" | "{" | "}"))
+                        && next(end).is_some_and(|j| self.tokens[j] != "}"));
+                let wrap = returns.filter(|_| value && !self.top_level_comma(i, end));
+                if guard || wrap.is_some() {
+                    if guard {
+                        out.push_str("{ if (true) ");
+                    }
+                    out.push_str(t);
+                    if let Some(ty) = wrap {
+                        write!(out, " {ty}(").unwrap();
+                    }
+                    statement_close = Some((
+                        end,
+                        match (wrap.is_some(), guard) {
+                            (true, true) => "); }",
+                            (true, false) => ");",
+                            (false, _) => "; }",
+                        },
+                    ));
+                    continue;
+                }
+            }
             let called = next(i).is_some_and(|j| self.tokens[j] == "(");
             match t {
-                "{" => depth += 1,
+                "{" => {
+                    if depth == 0 {
+                        returns = self.converted_return(i);
+                    }
+                    depth += 1;
+                }
                 "}" => {
                     depth -= 1;
+                    hidden.retain(|&(_, _, d)| d <= depth);
                     if depth == 0 {
                         params.clear();
                         hidden.clear();
+                        returns = None;
                     }
+                }
+                ";" if calls.is_empty() && unbraced_for.last() == Some(&depth) => {
+                    while unbraced_for.last() == Some(&depth) {
+                        unbraced_for.pop();
+                    }
+                    hidden.retain(|&(_, _, d)| d <= depth);
+                }
+                // A prototype (`float h(bool x);`) ends its parameters' scope.
+                ";" if depth == 0 && calls.is_empty() => {
+                    hidden.clear();
+                    params.clear();
                 }
                 "(" => {
                     let callee = prev(i).map_or("", |j| self.tokens[j]);
@@ -159,8 +321,11 @@ impl Stage<'_> {
                     calls.push((callee, close, 0));
                 }
                 ")" => {
-                    if let Some((_, close, _)) = calls.pop() {
+                    if let Some((callee, close, _)) = calls.pop() {
                         out.push_str(close);
+                        if callee == "for" && next(i).is_some_and(|j| self.tokens[j] != "{") {
+                            unbraced_for.push(depth);
+                        }
                     }
                 }
                 "," => {
@@ -188,6 +353,11 @@ impl Stage<'_> {
             if t == "const" && depth > 0 && self.calls_not_constant(i) {
                 continue;
             }
+            // A parameter's `const` (`const in float x`, which naga's parser refuses): it only
+            // promises the function does not write the parameter.
+            if t == "const" && depth == 0 && !calls.is_empty() {
+                continue;
+            }
             // A function definition's sampler parameters: `sampler2D s` → `texture2D s, sampler hz_s_s`.
             if depth == 0 && is_sampler_type(t) && calls.len() == 1 {
                 if let Some(n) = next(i).filter(|&n| is_ident(self.tokens[n])) {
@@ -199,26 +369,50 @@ impl Stage<'_> {
                     continue;
                 }
             }
-            // `float specular`: a variable of the same name as a sampler, from here to the
-            // function's end; `.specular` a member.
-            if sampler_ty.contains_key(t) && !params.contains_key(t) {
+            // `float specular`: a variable of the same name as a sampler or a sampler parameter,
+            // from the end of its initializer to the function's end; `.specular` a member.
+            if sampler_ty.contains_key(t)
+                || params.contains_key(t)
+                || uniforms.get(t).is_some_and(|ty| ty == "bool")
+                || self.core_matrix(t).is_some()
+                || ((depth > 0 || !calls.is_empty()) && self.runtime_array_lengths.contains_key(t))
+            {
                 let before = prev(i).map(|j| self.tokens[j]);
                 if before == Some(".") {
                     out.push_str(t);
                     continue;
                 }
-                if before.is_some_and(|b| is_ident(b) && !matches!(b, "return" | "case" | "else")) {
-                    hidden.push(t);
+                let declares = before
+                    .is_some_and(|b| is_ident(b) && !matches!(b, "return" | "case" | "else"))
+                    || (before == Some(",")
+                        && (calls.is_empty() || calls.last().is_some_and(|c| c.0 == "for"))
+                        && self.is_next_declarator(i));
+                if declares {
+                    // A `for` header's variable ends with the loop's block.
+                    let ends = if calls.last().is_some_and(|c| c.0 == "for") {
+                        depth + 1
+                    } else {
+                        depth.max(1)
+                    };
+                    hidden.push((t, self.scope_start(i), ends));
+                    out.push_str(t);
+                    continue;
                 }
             }
-            if hidden.contains(&t) {
+            if hidden.iter().any(|&(h, from, _)| h == t && i >= from) {
                 out.push_str(t);
                 continue;
             }
+            if let Some(matrix) = self.core_matrix(t) {
+                out.push_str(matrix);
+                continue;
+            }
+            // A sampler named like a function (`texture(texture, uv)`) is the function when called.
             let sampler = params
                 .get(t)
                 .map(String::as_str)
-                .or_else(|| sampler_ty.get(t).copied());
+                .or_else(|| sampler_ty.get(t).copied())
+                .filter(|_| !called);
             if let Some(ty) = sampler {
                 let as_argument = calls.last().is_some_and(|(callee, _, arg)| {
                     self.sampler_functions
@@ -237,17 +431,49 @@ impl Stage<'_> {
                 write!(out, "(hz_bool_{t} != 0)").unwrap();
                 continue;
             }
+            // EXT_gpu_shader4's size names keep their dimension-specific signatures. Resolve
+            // only a known sampler, leaving user functions and mismatched dimensions to naga.
+            let size_sampler = match t {
+                "textureSize1D" => Some("sampler1D"),
+                "textureSize2D" => Some("sampler2D"),
+                "textureSize3D" => Some("sampler3D"),
+                _ => None,
+            };
+            let legacy_size_call = size_sampler.is_some_and(|expected| {
+                if !called || own_size.contains(&t) {
+                    return false;
+                }
+                let mut argument = next(i).and_then(next);
+                while let Some(j) = argument.filter(|&j| self.tokens[j] == "(") {
+                    argument = next(j);
+                }
+                let Some(argument) = argument else {
+                    return false;
+                };
+                let name = self.tokens[argument];
+                if hidden
+                    .iter()
+                    .any(|&(h, from, _)| h == name && argument >= from)
+                {
+                    return false;
+                }
+                params
+                    .get(name)
+                    .map(String::as_str)
+                    .or_else(|| sampler_ty.get(name).copied())
+                    .is_some_and(|ty| ty.strip_prefix(['i', 'u']).unwrap_or(ty) == expected)
+            });
             let replaced: Option<String> = match t {
                 "main" if depth == 0 && called => Some("hz_main".into()),
-                // naga's frontend leaves the code after an unconditional `discard` or `return;`
-                // unreachable but half-built (a module that fails validation): behind an `if`
-                // it stays reachable as far as naga knows.
-                "discard" => Some("if (true) discard".into()),
-                "return" if next(i).is_some_and(|j| self.tokens[j] == ";") => {
-                    Some("if (true) return".into())
-                }
                 // GLSL's `modf`, which naga's frontend lacks.
                 "modf" if called => Some("hz_modf".into()),
+                // `sqrt` of a negative is undefined in GLSL; GL drivers' rounding keeps packs'
+                // `sqrt(1.0 - y * y)` at y = 1 from going below zero, SPIR-V's fused arithmetic
+                // may not, and the NaN spreads (SEUS PTGI HRR: speckled water reflections).
+                // Global initializers keep theirs: they are evaluated when compiling.
+                "sqrt" if called && depth > 0 => Some("hz_sqrt".into()),
+                "textureGatherOffsets" if called => Some("hz_textureGatherOffsets".into()),
+                "textureQueryLod" if called => Some("hz_textureQueryLod".into()),
                 // Matrix inverse, which naga writes for neither Metal nor WGSL.
                 "inverse" if called && self.inverse => Some("hz_inverse".into()),
                 "texture2D" | "texture1D" | "texture3D" | "textureCube" if called => {
@@ -261,6 +487,9 @@ impl Stage<'_> {
                 // GL_EXT_gpu_shader4's names (Bliss).
                 "texelFetch1D" | "texelFetch2D" | "texelFetch3D" if called => {
                     Some("texelFetch".into())
+                }
+                "textureSize1D" | "textureSize2D" | "textureSize3D" if legacy_size_call => {
+                    Some("textureSize".into())
                 }
                 "texture2DProj" if called => Some("textureProj".into()),
                 "texture2DGrad" | "texture2DGradARB" if called => Some("textureGrad".into()),
@@ -288,6 +517,7 @@ impl Stage<'_> {
                 "gl_FragCoord" if !fragment => None,
                 "gl_FragCoord" => Some("hz_FragCoord".into()),
                 "gl_FrontColor" => Some("hz_FrontColor".into()),
+                "gl_FogFragCoord" => Some("hz_FogFragCoord".into()),
                 "gl_Fog" => Some("hz_Fog".into()),
                 // Before the compatibility inputs, of which `gl_Vertex` is a prefix.
                 "gl_VertexID" => Some("gl_VertexIndex".into()),
@@ -309,7 +539,97 @@ impl Stage<'_> {
 }
 
 impl Stage<'_> {
+    /// The length of a lowered global array is still a constant expression. Naga attempts a
+    /// runtime load before resolving `.length()`, so retain the declared size explicitly.
+    fn runtime_array_length(&self, i: usize) -> Option<(&str, usize)> {
+        let (length, declared) = self.runtime_array_lengths.get(self.tokens[i])?;
+        if i <= *declared
+            || self.tokens[..i]
+                .iter()
+                .rfind(|t| significant(t))
+                .is_some_and(|&t| t == ".")
+        {
+            return None;
+        }
+        let mut at = i;
+        for expected in [".", "length", "(", ")"] {
+            at = (at + 1..self.tokens.len()).find(|&j| significant(self.tokens[j]))?;
+            if self.tokens[at] != expected {
+                return None;
+            }
+        }
+        Some((length, at))
+    }
+
     /// Whether the declaration after token `i` calls a built-in in `NOT_CONSTANT` before its `;`.
+    /// The return type of the function whose body opens at token `brace`, when it is one GLSL
+    /// converts returned values to (a scalar or vector of `float`, `int` or `uint`).
+    pub(super) fn converted_return(&self, brace: usize) -> Option<&str> {
+        let prev = |i: usize| (0..i).rev().find(|&j| significant(self.tokens[j]));
+        let close = prev(brace).filter(|&j| self.tokens[j] == ")")?;
+        let mut depth = 0usize;
+        let open = (0..=close).rev().find(|&j| match self.tokens[j] {
+            ")" => {
+                depth += 1;
+                false
+            }
+            "(" => {
+                depth -= 1;
+                depth == 0
+            }
+            _ => false,
+        })?;
+        let ty = self.tokens[prev(prev(open)?)?];
+        matches!(
+            ty,
+            "float"
+                | "vec2"
+                | "vec3"
+                | "vec4"
+                | "int"
+                | "ivec2"
+                | "ivec3"
+                | "ivec4"
+                | "uint"
+                | "uvec2"
+                | "uvec3"
+                | "uvec4"
+        )
+        .then_some(ty)
+    }
+
+    /// Whether tokens `i..end` hold a comma outside brackets (GLSL's comma operator).
+    pub(super) fn top_level_comma(&self, i: usize, end: usize) -> bool {
+        let mut depth = 0usize;
+        self.tokens[i..end].iter().any(|&t| match t {
+            "(" | "[" => {
+                depth += 1;
+                false
+            }
+            ")" | "]" => {
+                depth = depth.saturating_sub(1);
+                false
+            }
+            "," => depth == 0,
+            _ => false,
+        })
+    }
+
+    /// The `;` that ends the statement starting at token `i` (outside brackets).
+    pub(super) fn statement_end(&self, i: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for j in i + 1..self.tokens.len() {
+            match self.tokens[j] {
+                "(" | "[" => depth += 1,
+                ")" | "]" => depth = depth.saturating_sub(1),
+                ";" if depth == 0 => return Some(j),
+                "{" | "}" => return None,
+                _ => {}
+            }
+        }
+        None
+    }
+
     pub(super) fn calls_not_constant(&self, i: usize) -> bool {
         for (j, &t) in self.tokens.iter().enumerate().skip(i + 1) {
             if matches!(t, ";" | "{" | "}") {
@@ -324,27 +644,137 @@ impl Stage<'_> {
         false
     }
 
+    /// When the `[` at token `i` begins two or more array dimensions of a type (after a type
+    /// name, `float[2][3]`, or after the name a type declares, `float x[2][3]`), each one's
+    /// first and last token. naga's frontend nests such dimensions the other way round.
+    fn type_dimensions(&self, i: usize, structs: &[&str]) -> Option<Vec<(usize, usize)>> {
+        let prev = |k: usize| (0..k).rev().find(|&j| significant(self.tokens[j]));
+        let is_type = |t: &str| TYPE_NAMES.contains(&t) || structs.contains(&t);
+        let p = prev(i)?;
+        let declared = is_ident(self.tokens[p])
+            && prev(p).is_some_and(|q| is_type(self.tokens[q]) || self.tokens[q] == "]");
+        if !is_type(self.tokens[p]) && !declared {
+            return None;
+        }
+        let mut groups = Vec::new();
+        let mut open = i;
+        loop {
+            let mut level = 0;
+            let mut close = None;
+            for j in open..self.tokens.len() {
+                match self.tokens[j] {
+                    "[" => level += 1,
+                    "]" => {
+                        level -= 1;
+                        if level == 0 {
+                            close = Some(j);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let close = close?;
+            // An initializer can size the outer dimension. Include it in the reversal
+            // together with the explicit inner dimensions rather than reversing only them.
+            if (open + 1..close).all(|j| !significant(self.tokens[j]))
+                && !(groups.is_empty() && self.array_length(close).is_some())
+            {
+                return None;
+            }
+            groups.push((open, close));
+            match (close + 1..self.tokens.len()).find(|&j| significant(self.tokens[j])) {
+                Some(j) if self.tokens[j] == "[" => open = j,
+                _ => break,
+            }
+        }
+        (groups.len() > 1).then_some(groups)
+    }
+
+    /// Whether the name at `i`, after a `,`, is another declarator of the statement's type
+    /// (`bool a = 1, x = 0;`): the statement starts with a type and a name.
+    fn is_next_declarator(&self, i: usize) -> bool {
+        let follows = (i + 1..self.tokens.len())
+            .find(|&j| significant(self.tokens[j]))
+            .map(|j| self.tokens[j]);
+        if !matches!(follows, Some("=" | "," | ";" | "[")) {
+            return false;
+        }
+        let mut level = 0i32;
+        let mut start = i;
+        let mut j = i;
+        while j > 0 {
+            j -= 1;
+            let t = self.tokens[j];
+            if !significant(t) {
+                continue;
+            }
+            match t {
+                ")" | "]" => level += 1,
+                "(" | "[" if level > 0 => level -= 1,
+                "(" | "[" | "{" | "}" | ";" if level == 0 => break,
+                _ => {}
+            }
+            start = j;
+        }
+        is_ident(self.tokens[start])
+            && !matches!(self.tokens[start], "return" | "case" | "else" | "do")
+            && (start + 1..i)
+                .find(|&j| significant(self.tokens[j]))
+                .is_some_and(|j| is_ident(self.tokens[j]))
+    }
+
+    /// Where the scope of the name declared at token `i` begins: after its initializer (GLSL 4.60
+    /// 4.2.2: `float depth = texture(depth, uv).x` still reads the outer `depth`), else after it.
+    fn scope_start(&self, i: usize) -> usize {
+        let after = (i + 1..self.tokens.len()).find(|&j| significant(self.tokens[j]));
+        if after.is_none_or(|j| self.tokens[j] != "=") {
+            return i + 1;
+        }
+        let mut level = 0i32;
+        for j in i + 1..self.tokens.len() {
+            match self.tokens[j] {
+                "(" | "[" | "{" => level += 1,
+                ")" | "]" | "}" => level -= 1,
+                "," | ";" if level <= 0 => return j,
+                _ => {}
+            }
+        }
+        self.tokens.len()
+    }
+
     /// The element count of an unsized array whose `[]` ends at `close`: the arguments of the
-    /// constructor that follows (`[] = T[](...)` or `[](...)`).
+    /// following constructor, or the top-level elements of its brace initializer (GLSL 4.40,
+    /// 4.1.11). Nested aggregate elements and a trailing initializer comma do not add elements.
     pub(super) fn array_length(&self, close: usize) -> Option<usize> {
         let mut j = close + 1;
         let mut seen_eq = false;
-        while let Some(&t) = self.tokens.get(j) {
-            match t {
-                "(" => break,
+        let end = loop {
+            match self.tokens.get(j).copied()? {
+                "(" => break ")",
+                "{" if seen_eq => break "}",
                 "=" if !seen_eq => seen_eq = true,
                 ";" | "," | ")" | "{" => return None,
                 _ => {}
             }
             j += 1;
-        }
-        let (mut depth, mut args, mut any) = (0, 1, false);
+        };
+        let (mut depth, mut args, mut any) = (0, 0, false);
         for &t in &self.tokens[j + 1..] {
             match t {
-                "(" | "[" | "{" => depth += 1,
-                ")" if depth == 0 => return any.then_some(args),
+                "(" | "[" | "{" => {
+                    depth += 1;
+                    any = true;
+                }
+                t if t == end && depth == 0 => {
+                    let count = args + usize::from(any);
+                    return (count > 0).then_some(count);
+                }
                 ")" | "]" | "}" => depth -= 1,
-                "," if depth == 0 => args += 1,
+                "," if depth == 0 => {
+                    args += 1;
+                    any = false;
+                }
                 _ if significant(t) => any = true,
                 _ => {}
             }
@@ -354,8 +784,95 @@ impl Stage<'_> {
 }
 
 /// What our vertex `main` gives a vertex input of a composite-style program.
+/// GLSL's scalar, vector and matrix type names.
+const TYPE_NAMES: [&str; 35] = [
+    "float", "int", "uint", "bool", "double", "vec2", "vec3", "vec4", "ivec2", "ivec3", "ivec4",
+    "uvec2", "uvec3", "uvec4", "bvec2", "bvec3", "bvec4", "dvec2", "dvec3", "dvec4", "mat2",
+    "mat3", "mat4", "mat2x2", "mat2x3", "mat2x4", "mat3x2", "mat3x3", "mat3x4", "mat4x2", "mat4x3",
+    "mat4x4", "dmat2", "dmat3", "dmat4",
+];
+
 /// `0.0`, `0.`, `.0`, `0.0f`: a floating-point literal zero.
-fn is_zero_literal(t: &str) -> bool {
+/// `textureGatherOffsets` (GLSL 4.60, 8.9.4), which naga's frontend lacks: texel `i` of the
+/// result is texel `i` of the footprint `offsets[i]` texels away. WGSL takes only constant
+/// offsets, so each footprint is gathered at `P` moved by its offset over the texture's size,
+/// which picks the same four texels; the component, a constant in GLSL, picks one of four
+/// gathers.
+fn gather_offsets() -> String {
+    let mut p = String::new();
+    for prefix in ["", "i", "u"] {
+        let (tex, smp) = (format!("{prefix}texture2D"), format!("{prefix}sampler2D"));
+        let vec = format!("{prefix}vec4");
+        write!(
+            p,
+            "{vec} hz_gather({tex} t, sampler s, vec2 p, int c) {{\n\
+             \x20   if (c == 1) return textureGather({smp}(t, s), p, 1);\n\
+             \x20   if (c == 2) return textureGather({smp}(t, s), p, 2);\n\
+             \x20   if (c == 3) return textureGather({smp}(t, s), p, 3);\n\
+             \x20   return textureGather({smp}(t, s), p, 0);\n}}\n\
+             {vec} hz_textureGatherOffsets({tex} t, sampler s, vec2 p, ivec2 o[4], int c) {{\n\
+             \x20   vec2 px = 1.0 / vec2(textureSize({smp}(t, s), 0));\n\
+             \x20   return {vec}(hz_gather(t, s, p + vec2(o[0]) * px, c).x, hz_gather(t, s, p + vec2(o[1]) * px, c).y,\n\
+             \x20       hz_gather(t, s, p + vec2(o[2]) * px, c).z, hz_gather(t, s, p + vec2(o[3]) * px, c).w);\n}}\n\
+             {vec} hz_textureGatherOffsets({tex} t, sampler s, vec2 p, ivec2 o[4]) {{\n\
+             \x20   return hz_textureGatherOffsets(t, s, p, o, 0);\n}}\n"
+        )
+        .unwrap();
+    }
+    p.push_str(
+        "vec4 hz_textureGatherOffsets(texture2D t, samplerShadow s, vec2 p, float r, ivec2 o[4]) {\n\
+         \x20   vec2 px = 1.0 / vec2(textureSize(sampler2DShadow(t, s), 0));\n\
+         \x20   return vec4(textureGather(sampler2DShadow(t, s), p + vec2(o[0]) * px, r).x,\n\
+         \x20       textureGather(sampler2DShadow(t, s), p + vec2(o[1]) * px, r).y,\n\
+         \x20       textureGather(sampler2DShadow(t, s), p + vec2(o[2]) * px, r).z,\n\
+         \x20       textureGather(sampler2DShadow(t, s), p + vec2(o[3]) * px, r).w);\n}\n",
+    );
+    p
+}
+
+/// `textureQueryLod` (GLSL 4.60, 8.9.1), which naga's frontend lacks: `y` is the level of
+/// detail relative to the base level, worked out as texturing does (OpenGL 4.6, 8.14.1: the log2 of the
+/// larger of the coordinates' texel-space changes from one pixel to the next), and `x` the level
+/// that would be read, that clamped to the texture's levels. For a cube map the direction is
+/// first taken to its face.
+fn query_lod() -> String {
+    let mut p = String::new();
+    for prefix in ["", "i", "u"] {
+        for (dim, coord, texel) in [
+            ("2D", "vec2", "p * vec2(textureSize({smp}(t, s), 0))"),
+            (
+                "2DArray",
+                "vec2",
+                "p * vec2(textureSize({smp}(t, s), 0).xy)",
+            ),
+            ("3D", "vec3", "p * vec3(textureSize({smp}(t, s), 0))"),
+            (
+                "Cube",
+                "vec3",
+                "p / max(max(abs(p.x), abs(p.y)), abs(p.z)) * 0.5 * float(textureSize({smp}(t, s), 0).x)",
+            ),
+        ] {
+            let (tex, smp) = (
+                format!("{prefix}texture{dim}"),
+                format!("{prefix}sampler{dim}"),
+            );
+            let texel = texel.replace("{smp}", &smp);
+            write!(
+                p,
+                "vec2 hz_textureQueryLod({tex} t, sampler s, {coord} p) {{\n\
+                 \x20   {coord} q = {texel};\n\
+                 \x20   {coord} dx = dFdx(q), dy = dFdy(q);\n\
+                 \x20   float lod = 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));\n\
+                 \x20   float levels = float(textureQueryLevels({smp}(t, s)));\n\
+                 \x20   return vec2(clamp(lod, 0.0, levels - 1.0), lod);\n}}\n"
+            )
+            .unwrap();
+        }
+    }
+    p
+}
+
+pub(super) fn is_zero_literal(t: &str) -> bool {
     let t = t.trim_end_matches(['f', 'F']);
     t.contains('.') && !t.contains(['e', 'E']) && t.chars().all(|c| c == '0' || c == '.')
 }

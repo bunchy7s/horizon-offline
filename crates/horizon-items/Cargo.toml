@@ -11,6 +11,7 @@ horizon-client-core = { path = "../horizon-client-core" }
 horizon-core = { path = "../horizon-core" }
 horizon-world = { path = "../horizon-world" }
 serde = { version = "1", features = ["derive"] }
+log = "0.4"
 serde_json = { version = "1.0.151", features = ["raw_value"] }
 
 [features]

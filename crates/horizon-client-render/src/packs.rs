@@ -695,18 +695,20 @@ fn build_overlay_uncached(
             merged.insert(name.clone(), bytes);
         }
     }
+    /// A zip entry to write: its pack, its name in the zip and where it goes.
+    type Extract<'a> = (usize, &'a str, PathBuf);
     #[allow(clippy::too_many_arguments)]
-    fn mirror(
+    fn mirror<'a>(
         rel: &str,
         vanilla: &Path,
         out: &Path,
         touched: &BTreeSet<String>,
         hidden: &BTreeSet<String>,
-        files: &BTreeMap<String, (usize, Provided)>,
+        files: &'a BTreeMap<String, (usize, Provided)>,
         merged: &BTreeMap<String, Vec<u8>>,
         filters: &[&Filter],
-        zips: &[Option<Zip>],
         dependencies: &mut cache::Dependencies,
+        extract: &mut Vec<Extract<'a>>,
     ) -> io::Result<()> {
         let src = if rel.is_empty() {
             vanilla.to_path_buf()
@@ -733,12 +735,19 @@ fn build_overlay_uncached(
         } else {
             format!("{rel}/")
         };
-        for f in files.keys().filter_map(|f| f.strip_prefix(&prefix)) {
+        // The files under this directory are one run of the sorted map: walking only that run
+        // keeps a pack of tens of thousands of files in thousands of folders from being
+        // scanned once per folder.
+        for f in files
+            .range(prefix.clone()..)
+            .map_while(|(f, _)| f.strip_prefix(&prefix))
+        {
             names.insert(f.split('/').next().unwrap_or("").to_owned());
         }
         for name in names {
             let child = format!("{prefix}{name}");
-            if hidden.contains(&child) {
+            // Vanilla's files in one file: it describes vanilla's root, not this mirror.
+            if hidden.contains(&child) || child == horizon_core::prepared_files::FILE_NAME {
                 continue;
             }
             if let Some(bytes) = merged.get(&child) {
@@ -747,19 +756,8 @@ fn build_overlay_uncached(
                 let target = out.join(&child);
                 match path {
                     Some(p) => link(p, &target)?,
-                    None => {
-                        if let Some(Some(z)) = zips.get(*owner) {
-                            // One unreadable entry costs that file, not the
-                            // pack: an error here failed the build and the
-                            // reload dropped every server pack in the stack.
-                            match z.read(inner) {
-                                Ok(bytes) => fs::write(&target, bytes)?,
-                                Err(e) => log::warn!(
-                                    "Horizon: skipping unreadable pack entry {inner}: {e}"
-                                ),
-                            }
-                        }
-                    }
+                    // Inflated and written after the walk, on every thread.
+                    None => extract.push((*owner, inner.as_str(), target)),
                 }
             } else if filters.is_empty()
                 && !touched.contains(&child)
@@ -783,8 +781,8 @@ fn build_overlay_uncached(
                     files,
                     merged,
                     filters,
-                    zips,
                     dependencies,
+                    extract,
                 )?;
             } else if filters.iter().any(|f| f.blocks(&child)) {
                 // Hidden by a pack's filter.
@@ -798,6 +796,7 @@ fn build_overlay_uncached(
         }
         Ok(())
     }
+    let mut extract = Vec::new();
     mirror(
         "",
         vanilla,
@@ -807,9 +806,27 @@ fn build_overlay_uncached(
         &files,
         &merged,
         &filters,
-        &zips,
         dependencies,
-    )
+        &mut extract,
+    )?;
+    // Inflating and writing a big pack's files one by one was most of a cold build; its
+    // folders all exist by now.
+    crate::par::par_map(&extract, |(owner, inner, target)| {
+        let Some(Some(z)) = zips.get(*owner) else {
+            return Ok(());
+        };
+        // One unreadable entry costs that file, not the pack: an error here
+        // failed the build and the reload dropped every server pack in the stack.
+        match z.read(inner) {
+            Ok(bytes) => fs::write(target, bytes),
+            Err(e) => {
+                log::warn!("Horizon: skipping unreadable pack entry {inner}: {e}");
+                Ok(())
+            }
+        }
+    })
+    .into_iter()
+    .collect()
 }
 /// Files vanilla loads from every pack in turn (`getResourceStack`) rather
 /// than from the top pack only.
@@ -824,7 +841,14 @@ enum Merge {
     Font,
     /// `SpriteSourceList.load`: sources from the bottom pack up.
     Atlas,
+    /// `BlockStateModelLoader.loadBlockStateDefinitionStack`: every pack's
+    /// definition binds on its own, and a higher one replaces only the states
+    /// it binds. Kept as its layers ([`BLOCKSTATE_LAYERS`]) for the catalog.
+    BlockStates,
 }
+/// The key of a stacked blockstate file: its definitions, bottom first, each
+/// as the pack wrote it.
+pub const BLOCKSTATE_LAYERS: &str = "horizon:layers";
 fn merge_kind(name: &str) -> Option<Merge> {
     let (_, rest) = name.strip_prefix("assets/")?.split_once('/')?;
     if rest == "sounds.json" {
@@ -835,6 +859,7 @@ fn merge_kind(name: &str) -> Option<Merge> {
         "lang" => Some(Merge::Lang),
         "font" => Some(Merge::Font),
         "atlases" => Some(Merge::Atlas),
+        "blockstates" => Some(Merge::BlockStates),
         _ => None,
     }
 }
@@ -842,7 +867,7 @@ fn merge_kind(name: &str) -> Option<Merge> {
 /// does. Layers that do not parse are skipped, as vanilla logs and skips them.
 fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
     use serde_json::{Map, Value};
-    let parsed: Vec<Map<String, Value>> = layers
+    let mut parsed: Vec<Map<String, Value>> = layers
         .iter()
         // SoundManager skips a sounds.json Gson rejects, whole.
         .filter(|b| kind != Merge::Sounds || crate::sound_events::is_valid_file(b))
@@ -885,6 +910,12 @@ fn merge(kind: Merge, layers: &[Vec<u8>]) -> Option<Vec<u8>> {
         }
         Merge::Font => list("providers", &mut parsed.iter().rev()),
         Merge::Atlas => list("sources", &mut parsed.iter()),
+        // One definition is the file as it is.
+        Merge::BlockStates if parsed.len() < 2 => Value::Object(parsed.pop()?),
+        Merge::BlockStates => Value::Object(Map::from_iter([(
+            BLOCKSTATE_LAYERS.to_owned(),
+            Value::Array(parsed.into_iter().map(Value::Object).collect()),
+        )])),
     };
     serde_json::to_vec(&out).ok()
 }
@@ -1388,6 +1419,36 @@ mod tests {
             &[json(r#"{"sources":[1]}"#), json(r#"{"sources":[2]}"#)],
         );
         assert_eq!(parse(atlas.unwrap()), serde_json::json!({"sources":[1,2]}));
+        // BlockStateModelLoader: every definition kept, bottom first, for the
+        // catalog to bind one by one; one that does not parse is skipped.
+        let gate = merge(
+            Merge::BlockStates,
+            &[
+                json(r#"{"variants":{"":{"model":"v"}}}"#),
+                b"not json".to_vec(),
+                json(r#"{"variants":{"powered=true":{"model":"p"}}}"#),
+            ],
+        );
+        assert_eq!(
+            parse(gate.unwrap()),
+            serde_json::json!({BLOCKSTATE_LAYERS:[
+                {"variants":{"":{"model":"v"}}},
+                {"variants":{"powered=true":{"model":"p"}}}
+            ]})
+        );
+        // A single definition stays the file as it is.
+        let alone = merge(
+            Merge::BlockStates,
+            &[json(r#"{"variants":{"":{"model":"p"}}}"#)],
+        );
+        assert_eq!(
+            parse(alone.unwrap()),
+            serde_json::json!({"variants":{"":{"model":"p"}}})
+        );
+        assert_eq!(
+            merge_kind("assets/minecraft/blockstates/oak_fence_gate.json"),
+            Some(Merge::BlockStates)
+        );
         assert_eq!(
             merge_kind("assets/minecraft/lang/en_us.json"),
             Some(Merge::Lang)
@@ -1486,6 +1547,72 @@ mod tests {
                 .file_type()
                 .is_symlink()
         );
+        let _ = fs::remove_dir_all(base);
+    }
+    #[test]
+    fn every_file_of_a_big_stack_comes_from_its_top_pack() {
+        use std::io::Write as _;
+        let base = std::env::temp_dir().join(format!("horizon-pack-stack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let vanilla = base.join("vanilla");
+        // Folders whose names start alike (`item`, `item_extra`, `item2`) and files beside
+        // folders of almost their name: what a prefix lookup could mix up.
+        let names: Vec<String> = (0..400)
+            .map(|i| {
+                let folder = ["item", "item_extra", "item2", "item/sub", "block"][i % 5];
+                format!("assets/ns{}/textures/{folder}/f{i}.png", i % 3)
+            })
+            .chain(["assets/ns0/textures/item.png".to_owned()])
+            .collect();
+        let mut expected: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for name in names.iter().step_by(4) {
+            let path = vanilla.join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, format!("vanilla {name}")).unwrap();
+            expected.insert(name.clone(), format!("vanilla {name}").into_bytes());
+        }
+        let meta = br#"{"pack":{"description":"d","pack_format":97}}"#;
+        // Packs a and b are zips, c a folder; each provides a different part of the names.
+        fs::create_dir_all(base.join("packs/c")).unwrap();
+        fs::write(base.join("packs/c/pack.mcmeta"), meta).unwrap();
+        for (pack, every) in [("a", 2), ("b", 3)] {
+            let file = fs::File::create(base.join(format!("packs/{pack}.zip"))).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            zip.start_file("pack.mcmeta", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(meta).unwrap();
+            for name in names.iter().step_by(every) {
+                zip.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(format!("{pack} {name}").as_bytes()).unwrap();
+                expected.insert(name.clone(), format!("{pack} {name}").into_bytes());
+            }
+            zip.finish().unwrap();
+        }
+        for name in names.iter().skip(1).step_by(5) {
+            let path = base.join("packs/c").join(name);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, format!("c {name}")).unwrap();
+            expected.insert(name.clone(), format!("c {name}").into_bytes());
+        }
+        let all = folder(&base.join("packs"), RESOURCE_FORMAT);
+        let ids = ["file/a.zip", "file/b.zip", "file/c"].map(String::from);
+        let out = base.join("overlay");
+        build_overlay(&vanilla, &enabled(&all, &ids), &out).unwrap();
+        fn walk(dir: &Path, root: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(&path, root, out);
+                } else {
+                    let name = path.strip_prefix(root).unwrap().to_string_lossy();
+                    out.insert(name.replace('\\', "/"), fs::read(&path).unwrap());
+                }
+            }
+        }
+        let mut built = BTreeMap::new();
+        walk(&out.join("assets"), &out, &mut built);
+        assert_eq!(built, expected);
         let _ = fs::remove_dir_all(base);
     }
     #[test]

@@ -9,7 +9,7 @@ use horizon_client::{
     containers::BlockEntity,
     hud::{HudBatch, rgba},
     screen_draw::Measure,
-    text::{self, Text},
+    text::Text,
     ui::{self, EditBox},
     world::World,
 };
@@ -546,9 +546,9 @@ impl Game<'_> {
         }
     }
     /// `CommandSourceStack.sendSuccess` from a command block: its output when
-    /// `send_command_feedback`, and `broadcastToAdmins` when
+    /// `send_command_feedback`, and `broadcastToAdmins` when `broadcast` and
     /// `command_block_output`.
-    pub(super) fn command_block_success(&mut self, pos: Pos, message: Text) {
+    pub(super) fn command_block_success(&mut self, pos: Pos, message: Text, broadcast: bool) {
         let Some(name) = self
             .command_block(pos)
             .filter(|c| c.track_output)
@@ -560,11 +560,8 @@ impl Game<'_> {
         if feedback {
             self.command_block_output(pos, message.clone());
         }
-        if feedback && self.ui.rules.bool("command_block_output") {
-            let broadcast = Text::translate("chat.type.admin", &[name, message])
-                .with_color(text::GRAY)
-                .italic();
-            self.system_message(broadcast);
+        if broadcast && feedback && self.ui.rules.bool("command_block_output") {
+            self.broadcast_source_to_admins(name, message);
         }
     }
 
@@ -806,8 +803,8 @@ impl Game<'_> {
         shortcut: Option<horizon_client::clipboard::EditShortcut>,
         text: Option<&str>,
     ) {
-        let ctrl = self.keys.contains(&KeyCode::ControlLeft);
-        let shift = self.keys.contains(&KeyCode::ShiftLeft);
+        let ctrl = self.has_control_down_with_quirk();
+        let shift = self.has_shift_down();
         // Windows' AltGr is Ctrl+Alt, and its characters still type.
         let types_text = self.types_text();
         let Some(mut s) = self.command_block_screen.take() else {
@@ -920,7 +917,8 @@ impl Game<'_> {
             conditional: p.flags & 2 != 0,
             auto: p.flags & 4 != 0,
         };
-        self.as_guest(host, conn, |game| {
+        // The confirmation (`advMode.setCommand.success`) is the editing player's alone.
+        self.as_guest_messaged(host, conn, |game| {
             if allowed {
                 game.apply_command_block(&edit);
                 // BaseCommandBlock.onUpdated: the clients get the new command.

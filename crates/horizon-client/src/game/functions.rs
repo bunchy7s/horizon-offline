@@ -96,6 +96,48 @@ pub(super) fn content_overlay(
     DataStore::load(&packs).files.into_iter().collect()
 }
 
+/// The files the content tables load from: the world's enabled packs'
+/// (`content_overlay`) with what native mods contribute for this load
+/// (`native_data_pack_files`) below them. `PackOverlay::top` is a path's last
+/// file, so a pack's file still overrides a mod's for the same path, and a
+/// later contribution overrides an earlier one, as packs do. `Game` builds
+/// its tables through here on a world's first open and on `/reload`, so the
+/// mods are asked once per load.
+pub(super) fn overlay_files(
+    world_root: &std::path::Path,
+    resources: &std::path::Path,
+    vanilla_disabled: bool,
+    enabled_features: &[String],
+    contributed: Vec<(String, Vec<u8>)>,
+) -> Vec<(String, Vec<Vec<u8>>)> {
+    let mut files = content_overlay(world_root, resources, vanilla_disabled, enabled_features);
+    if contributed.is_empty() {
+        return files;
+    }
+    // A path's mod files in contribution order, under the pack files.
+    let mut mods: std::collections::BTreeMap<String, Vec<Vec<u8>>> = Default::default();
+    for (path, bytes) in contributed {
+        // One bad file would fail its whole table and drop the world's pack
+        // content with it, so it is skipped alone: every kind is JSON.
+        if let Err(e) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+            log::warn!("Horizon: a native mod's data pack file {path} is not JSON, skipped: {e}");
+            continue;
+        }
+        mods.entry(path).or_default().push(bytes);
+    }
+    for (path, versions) in files.iter_mut() {
+        let Some(under) = mods.remove(path.as_str()) else {
+            continue;
+        };
+        let mut merged = under;
+        merged.append(versions);
+        *versions = merged;
+    }
+    // The paths only a mod has.
+    files.extend(mods);
+    files
+}
+
 impl FnState {
     /// The level function files compile at (`ServerFunctionLibrary`'s
     /// `functionCompilationPermissions`): `function-permission-level` on a
@@ -886,11 +928,14 @@ impl Game<'_> {
             }
         }
     }
-    /// `ReloadCommand.reloadPacks`: no message of its own.
+    /// `ReloadCommand.reloadPacks`: no message of its own. It reloads the
+    /// server's data as `/reload` does (`reload_datapacks`), the content
+    /// tables with the functions.
     fn apply_pack_change(&mut self) {
         self.save_datapack_settings();
         self.rebuild_store();
         self.fns.load_pending = true;
+        self.reload_world_tables();
     }
 
     // ---- predicates -------------------------------------------------------------------
@@ -947,5 +992,88 @@ mod tests {
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// What a native mod contributes (`native_data_pack_files`) joins the load
+    /// the tables are built from, a world's first open and `/reload` alike
+    /// (`Game::build_world_tables` is both), and sits below the world's own
+    /// packs. Each load asks again, so it is the current contribution that
+    /// counts.
+    #[test]
+    fn contributed_files_join_the_load_below_the_worlds_packs() {
+        let dir = std::env::temp_dir().join(format!("horizon-contributed-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let pack = dir.join("datapacks").join("pack");
+        std::fs::create_dir_all(pack.join("data/pkg/tags/item")).unwrap();
+        std::fs::write(pack.join("pack.mcmeta"), "{}").unwrap();
+        std::fs::write(
+            pack.join("data/pkg/tags/item/both.json"),
+            r#"{"replace": true, "values": ["pkg:from_pack"]}"#,
+        )
+        .unwrap();
+        let settings = serde_json::json!({"enabled": ["file/pack"], "disabled": []});
+        std::fs::write(dir.join("datapacks.json"), settings.to_string()).unwrap();
+        let tag = |entry: &str| format!(r#"{{"values": ["{entry}"]}}"#).into_bytes();
+        let files = overlay_files(
+            &dir,
+            std::path::Path::new(""),
+            true,
+            &[],
+            vec![
+                ("tags/pkg:item/both".to_owned(), tag("pkg:from_mod")),
+                ("tags/pkg:item/mod_only".to_owned(), tag("pkg:only_mod")),
+            ],
+        );
+        // The pack's file is the path's last (`PackOverlay::top`), and its
+        // `replace` drops what the mod put below it.
+        let (_, versions) = files
+            .iter()
+            .find(|(id, _)| id == "tags/pkg:item/both")
+            .unwrap();
+        assert!(horizon_world::loot::PackOverlay::top(versions).starts_with(b"{\"replace\""));
+        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
+        assert!(tags["pkg:both"].contains("pkg:from_pack"));
+        assert!(!tags["pkg:both"].contains("pkg:from_mod"));
+        // A path only the mod has reaches the tables too.
+        assert_eq!(
+            tags["pkg:mod_only"].iter().collect::<Vec<_>>(),
+            ["pkg:only_mod"]
+        );
+        // The next load asks again: the new contribution, not the first's.
+        let files = overlay_files(
+            &dir,
+            std::path::Path::new(""),
+            true,
+            &[],
+            vec![("tags/pkg:item/mod_only".to_owned(), tag("pkg:second_load"))],
+        );
+        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
+        assert_eq!(
+            tags["pkg:mod_only"].iter().collect::<Vec<_>>(),
+            ["pkg:second_load"]
+        );
+        // A file that isn't JSON is skipped alone, not the whole load.
+        let files = overlay_files(
+            &dir,
+            std::path::Path::new(""),
+            true,
+            &[],
+            vec![
+                ("tags/pkg:item/mod_only".to_owned(), b"{not json".to_vec()),
+                ("tags/pkg:item/good".to_owned(), tag("pkg:good")),
+            ],
+        );
+        let overlay = horizon_world::loot::PackOverlay { files: &files };
+        let tags = horizon_items::items::load_tags(&dir, "item", &overlay).unwrap();
+        assert!(!tags.contains_key("pkg:mod_only"));
+        assert!(tags["pkg:good"].contains("pkg:good"));
+        // With nothing contributed the overlay is the packs' own.
+        assert_eq!(
+            overlay_files(&dir, std::path::Path::new(""), true, &[], Vec::new()),
+            content_overlay(&dir, std::path::Path::new(""), true, &[])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

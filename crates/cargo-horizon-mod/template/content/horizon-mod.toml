@@ -6,5 +6,5 @@ authors = []
 # A content mod: blocks, items and mob effects from data/ and assets/, no code (API 0.2).
 api = "0.2"
 side = "both"
-# registries: "May add blocks, items and mob effects to your worlds".
+# registries: "May add blocks, items, mob effects and entity types to your worlds".
 capabilities = ["registries"]

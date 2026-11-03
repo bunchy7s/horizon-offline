@@ -182,10 +182,10 @@ pub fn sleep_pose(m: &Mob) -> Option<(f32, [f32; 2])> {
         _ => return None,
     })
 }
-/// `Villager.tick`: the unhappy counter and the gossip decay; a sleeper
-/// hurt or without its bed wakes up (`LivingEntity.hurtServer`,
-/// `LivingEntity.checkBedExists`), and lies the way its bed faces
-/// (`getBedOrientation`). The brain does the rest.
+/// `Villager.tick`: the unhappy counter and the gossip decay; a hurt
+/// sleeper wakes up (`LivingEntity.hurtServer`; the `checkBedExists` wake
+/// runs earlier in `LivingEntity.tick`, for AI-less mobs too), and lies the
+/// way its bed faces (`getBedOrientation`). The brain does the rest.
 pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.extra.ints[0] > 0 {
         m.extra.ints[0] -= 1;
@@ -198,7 +198,7 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         if let Some(p) = bed {
             m.extra.ints[1] = bed_facing_code(w.prop(p[0], p[1], p[2], "facing"));
         }
-        if m.hurt_time > 0 || bed.is_none() {
+        if m.hurt_time > 0 {
             stop_sleeping(m, w, events);
             super::villager_brain::woken(m, w.game_time);
         }
@@ -212,12 +212,8 @@ pub fn set_unhappy(m: &mut Mob, events: &mut Vec<MobEvent>) {
     } else {
         "entity.villager.no"
     };
-    events.push(MobEvent::Sound(
-        sound,
-        [m.position.x, m.position.y, m.position.z],
-        1.0,
-        1.0,
-    ));
+    // Mob.makeSound: the sound volume and the voice pitch (babies ~1.5).
+    m.voice(sound, events);
 }
 /// `VillagerModel.setupAnim`.
 pub fn anim(m: &Mob, s: &State, p: &mut Poses) {
@@ -345,25 +341,28 @@ pub fn work_sound(profession: u8) -> Option<&'static str> {
 }
 /// A `CropBlock` at `p`.
 pub fn crop(w: &MobWorld, p: [i32; 3]) -> bool {
-    matches!(
-        w.block_name(p[0], p[1], p[2]),
-        "minecraft:wheat"
-            | "minecraft:carrots"
-            | "minecraft:potatoes"
-            | "minecraft:beetroots"
-            | "minecraft:torchflower_crop"
-    )
+    w.facts
+        .get(w.world.block(p[0], p[1], p[2]))
+        .has_class("CropBlock")
 }
 /// `CropBlock.isMaxAge` for the block at `p`.
 pub fn ripe_crop(w: &MobWorld, p: [i32; 3]) -> bool {
-    let max = match w.block_name(p[0], p[1], p[2]) {
-        "minecraft:wheat" | "minecraft:carrots" | "minecraft:potatoes" => "7",
-        "minecraft:beetroots" => "3",
-        // TorchflowerCropBlock.getMaxAge is 2, past its age property (0-1):
-        // the crop is never at max age (age 2 is the torchflower itself).
-        _ => return false,
+    let facts = w.facts.get(w.world.block(p[0], p[1], p[2]));
+    if !facts.has_class("CropBlock") {
+        return false;
+    }
+    // The class chain survives content registration, including the two
+    // getMaxAge overrides. PitcherCropBlock is not a CropBlock.
+    let max = if facts.has_class("BeetrootBlock") {
+        3
+    } else if facts.has_class("TorchflowerCropBlock") {
+        2
+    } else {
+        7
     };
-    w.prop(p[0], p[1], p[2], "age") == Some(max)
+    w.prop(p[0], p[1], p[2], "age")
+        .and_then(|age| age.parse::<i32>().ok())
+        .is_some_and(|age| age >= max)
 }
 
 /// The gift loot table of a villager (`GiveGiftToHero.getLootTableToThrow`).
@@ -381,12 +380,16 @@ pub fn gift_table(m: &Mob) -> String {
 // ---- Gossip, food, breeding and golems.
 
 /// `VillagerFood` nutrition (`DataComponents.VILLAGER_FOOD`).
+///
+/// The item registry's value: a data pack's or a mod's item with the component
+/// counts, as one with vanilla's four does. Until a registry is loaded (tests)
+/// those four.
 pub fn food_points(item: &str) -> i32 {
-    match item {
+    horizon_items::items::villager_food(item).unwrap_or(match item {
         "minecraft:bread" => 4,
         "minecraft:potato" | "minecraft:carrot" | "minecraft:beetroot" => 1,
         _ => 0,
-    }
+    })
 }
 /// The farmer's `requestedItems` (`VillagerProfession.FARMER`). Food is picked
 /// up and traded separately, through its villager food value.
@@ -878,7 +881,7 @@ mod tests {
 
     fn villager() -> Mob {
         use crate::mobs::{Anim, Brain, Flags, MobType, Part, Species};
-        use std::{collections::HashMap, sync::Arc};
+        use std::sync::Arc;
         let kind = Arc::new(MobType {
             id: "minecraft:villager".into(),
             species: Species::Villager,
@@ -911,7 +914,7 @@ mod tests {
             ambient_interval: 80,
             flags: Flags::default(),
             model: Arc::new(Part::parse("root", &serde_json::json!({}))),
-            layers: HashMap::new(),
+            layers: Default::default(),
             texture: String::new(),
             brain: Brain::Passive,
             anim: Anim::Villager,
@@ -952,6 +955,23 @@ mod tests {
         assert!(!map.contains_key(&"sleeping_pos".into()));
         read_nbt(&mut awake, &horizon_world::nbt::Tag::Compound(map));
         assert!(!sleeping(&awake));
+    }
+    /// `Villager.setUnhappy` -> `Mob.makeSound(VILLAGER_NO)` plays with
+    /// `LivingEntity.getVoicePitch`: a baby is pitched about 1.5, an adult 1.0.
+    #[test]
+    fn the_unhappy_sound_uses_the_voice_pitch() {
+        let sound_pitch = |age: i32| {
+            let mut m = villager();
+            m.extra.age = age;
+            let mut events = Vec::new();
+            set_unhappy(&mut m, &mut events);
+            match events[0] {
+                MobEvent::Sound(_, _, _, pitch) => pitch,
+                _ => panic!("expected a sound"),
+            }
+        };
+        assert!((0.8..=1.2).contains(&sound_pitch(0)));
+        assert!((1.3..=1.7).contains(&sound_pitch(-24000)));
     }
     #[test]
     fn a_new_profession_rolls_new_offers() {

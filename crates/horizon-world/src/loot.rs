@@ -8,12 +8,15 @@
 //! maps are kept as found (structure search is not run); conditions that
 //! need an entity, tool or damage source fail when the context has none, as
 //! they do for containers.
+use crate::{lazy_json::LazyJson, nbt::Tag};
 use horizon_core::random::{LegacyRandom, RandomSource};
 use serde_json::Value;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fs, io,
     path::Path,
+    rc::Rc,
     sync::{Arc, Mutex, Weak},
 };
 
@@ -57,6 +60,133 @@ impl PackOverlay<'_> {
     pub fn top(files: &[Vec<u8>]) -> &[u8] {
         files.last().map(Vec::as_slice).unwrap_or_default()
     }
+}
+
+/// A loot function of a mod's own kind: the entry named a `type` in a
+/// namespace outside `minecraft:`, and the roll kept it for this call.
+/// The kind, the JSON, the context and the stack to change are here.
+/// API 133.
+#[inline(never)]
+pub fn native_loot_function(
+    kind: &str,
+    data: &Value,
+    ctx: &NativeLootContext<'_>,
+    stack: &mut LootStack,
+) {
+    crate::native_load_hooks::loot_function(kind, data, ctx, stack);
+}
+
+/// A loot condition of a mod's own kind: the entry named a `type` in a
+/// namespace outside `minecraft:`. The kind, the JSON, the context and
+/// whether it holds are here (`holds` starts `false`; a mod that claims
+/// the kind sets it). API 133.
+#[inline(never)]
+pub fn native_loot_condition(
+    kind: &str,
+    data: &Value,
+    ctx: &NativeLootContext<'_>,
+    holds: &mut bool,
+) {
+    crate::native_load_hooks::loot_condition(kind, data, ctx, holds);
+}
+
+/// The tool a loot context names: its item id and enchantments.
+pub struct NativeLootTool {
+    pub item: String,
+    pub enchantments: Vec<(String, i32)>,
+}
+
+/// What a mod's own loot kinds see of the roll: the entity, the damage,
+/// the player who killed it, the tool, the block, the luck, the biome,
+/// where the roll happens, and a seed from the roll's random. The tool and
+/// block are filled by the items engine (block drops, entity drops,
+/// loot_table, interact_loot); the entity, damage and player by the main
+/// loot engine; each is None in the other. A table without a mod's kinds
+/// draws nothing and stays bit-for-bit the same.
+pub struct NativeLootContext<'a> {
+    /// The entity the table names (`this`), if any.
+    pub entity: Option<&'a LootEntity>,
+    /// The damage that killed it, if any.
+    pub damage: Option<&'a LootDamage>,
+    /// The player whose kill dropped the table (`LootEntity`), if any.
+    pub player: Option<&'a LootEntity>,
+    /// The tool used, if any. The items engine fills it (all of its
+    /// tables: block drops, entity drops, loot_table, interact_loot);
+    /// the main loot engine has no tool in its context.
+    pub tool: Option<NativeLootTool>,
+    /// The block a block-drop table breaks, if any. The items engine
+    /// fills it; the main loot engine has no block in its context.
+    pub block: Option<&'a str>,
+    /// `LootContext.getLuck`.
+    pub luck: f32,
+    /// The biome the roll is in, if any.
+    pub biome: Option<&'a str>,
+    /// A seed from the roll's random, for a mod's own draws. Drawn only
+    /// when a mod's kind is in the table.
+    pub seed: i64,
+    /// Where the roll happens: the origin, the block entity and the level,
+    /// when the game rolled the table at a place (a broken block's drops,
+    /// a mob's death loot); None for the other rolls. Either engine fills it.
+    /// API 156.
+    pub place: Option<Rc<NativeLootPlace>>,
+}
+
+/// Where a loot roll happens, as a mod's own loot kinds see it:
+/// `LootContextParams.ORIGIN`, `LootContextParams.BLOCK_ENTITY`, and what
+/// vanilla's own conditions read of `LootContext.getLevel` (`TimeCheck`:
+/// the time; `WeatherCheck`: the rain and the thunder). The game sets it
+/// around a roll with [`with_native_loot_place`]. API 156.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeLootPlace {
+    /// `ORIGIN`: a broken block's centre, a dead mob's position.
+    pub origin: Option<[f64; 3]>,
+    /// `BLOCK_ENTITY`: the broken block's entity as it was before the
+    /// break, saved with its id and position (`saveWithFullMetadata`); a
+    /// mod's block entity carries its own data and its `Items`.
+    pub block_entity: Option<Tag>,
+    /// The level the roll is in.
+    pub level: Option<NativeLootLevel>,
+}
+
+/// The level a loot roll is in, as a mod's own loot kinds see it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NativeLootLevel {
+    /// The dimension's id (`minecraft:overworld`).
+    pub dimension: String,
+    /// `Level.getGameTime`.
+    pub game_time: i64,
+    /// `Level.getDayTime`: it counts on from day to day, so the time of
+    /// day is `day_time % 24000` (night from 13000 to 23000).
+    pub day_time: i64,
+    /// `Level.isRaining`.
+    pub raining: bool,
+    /// `Level.isThundering`.
+    pub thundering: bool,
+}
+
+thread_local! {
+    static NATIVE_LOOT_PLACE: RefCell<Option<Rc<NativeLootPlace>>> = const { RefCell::new(None) };
+}
+
+/// Runs `roll` with `place` as where its loot rolls happen: every
+/// [`NativeLootContext`] made inside it, by either engine, carries it. The
+/// place before is back when `roll` returns, so these nest.
+/// API 156.
+pub fn with_native_loot_place<T>(place: NativeLootPlace, roll: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Rc<NativeLootPlace>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let before = self.0.take();
+            NATIVE_LOOT_PLACE.with(|p| *p.borrow_mut() = before);
+        }
+    }
+    let _restore = Restore(NATIVE_LOOT_PLACE.with(|p| p.replace(Some(Rc::new(place)))));
+    roll()
+}
+
+/// The place [`with_native_loot_place`] set for the rolls now running, if any.
+pub fn current_native_loot_place() -> Option<Rc<NativeLootPlace>> {
+    NATIVE_LOOT_PLACE.with(|p| p.borrow().clone())
 }
 
 /// One generated item stack.
@@ -171,7 +301,7 @@ impl Enchantment {
 
 /// Loot tables, items, enchantments and the tags they reference.
 pub struct LootData {
-    tables: Arc<HashMap<String, Value>>,
+    tables: Arc<LootTables>,
     modifiers: HashMap<String, Value>,
     predicates: HashMap<String, Value>,
     items: HashMap<String, ItemFacts>,
@@ -344,16 +474,53 @@ fn overlay_map(overlay: &PackOverlay, kind: &str, out: &mut HashMap<String, Valu
     }
 }
 
+/// Loot tables by id. Each is kept as its JSON text and read into a [`Value`]
+/// the first time it is rolled: of vanilla's ~1,450 tables a game rolls a
+/// few, and as `Value`s they took ~7 MB for 0.6 MB of JSON. Every table was
+/// read whole when it loaded, so reading it again cannot fail.
+#[derive(Debug, Default)]
+pub struct LootTables(HashMap<String, LazyJson>);
+impl LootTables {
+    /// The table `id`.
+    pub fn get(&self, id: &str) -> Option<&Value> {
+        self.0.get(id).map(LazyJson::get)
+    }
+    pub fn contains_key(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+/// Each table kept as its JSON, the last of an id winning as in a map.
+impl FromIterator<(String, Value)> for LootTables {
+    fn from_iter<I: IntoIterator<Item = (String, Value)>>(tables: I) -> Self {
+        Self(
+            tables
+                .into_iter()
+                .map(|(id, table)| (id, LazyJson::new(&table)))
+                .collect(),
+        )
+    }
+}
+impl std::ops::Index<&str> for LootTables {
+    type Output = Value;
+    /// As a map indexes: panics on a missing table.
+    fn index(&self, id: &str) -> &Value {
+        self.get(id).unwrap_or_else(|| panic!("no loot table {id}"))
+    }
+}
+
 /// The loot tables of every namespace in `root`'s `data/`, with `overlay`'s
 /// over them. Shared while one is alive: `Items` and [`LootData`] of the
 /// same root and packs hold one map, not a copy each (7 MB). The key holds
 /// the packs' bytes and each root file's size and modification time, so a
 /// table changed on disk is read again rather than taken from a held map.
-pub fn shared_tables(
-    root: &Path,
-    overlay: &PackOverlay,
-) -> io::Result<Arc<HashMap<String, Value>>> {
-    static LOADED: Mutex<Vec<(u64, Weak<HashMap<String, Value>>)>> = Mutex::new(Vec::new());
+pub fn shared_tables(root: &Path, overlay: &PackOverlay) -> io::Result<Arc<LootTables>> {
+    static LOADED: Mutex<Vec<(u64, Weak<LootTables>)>> = Mutex::new(Vec::new());
     let key = {
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut hasher = DefaultHasher::new();
@@ -374,7 +541,7 @@ pub fn shared_tables(
             .for_each(|file| file.hash(&mut hasher));
         hasher.finish()
     };
-    let held = |loaded: &mut Vec<(u64, Weak<HashMap<String, Value>>)>| {
+    let held = |loaded: &mut Vec<(u64, Weak<LootTables>)>| {
         loaded.retain(|(_, tables)| tables.strong_count() > 0);
         loaded
             .iter()
@@ -388,11 +555,15 @@ pub fn shared_tables(
     load_kind(&root.join("data"), "loot_table", &mut tables)?;
     overlay_map(overlay, "loot_table", &mut tables);
     // The mods' hooks run outside the lock.
-    let mut each: Vec<_> = tables.iter_mut().collect();
-    each.sort_by(|a, b| a.0.cmp(b.0));
-    for (id, table) in each {
-        native_loot_table_load(id, table);
-    }
+    let mut each: Vec<_> = tables.into_iter().collect();
+    each.sort_by(|a, b| a.0.cmp(&b.0));
+    let tables: LootTables = each
+        .into_iter()
+        .map(|(id, mut table)| {
+            native_loot_table_load(&id, &mut table);
+            (id, table)
+        })
+        .collect();
     let mut loaded = LOADED.lock().unwrap_or_else(|e| e.into_inner());
     // Another thread may have loaded the same tables meanwhile: keep one.
     if let Some(tables) = held(&mut loaded) {
@@ -416,7 +587,7 @@ pub fn shared_tables(
 /// 75.
 #[inline(never)]
 pub fn native_loot_table_load(id: &str, table: &mut Value) {
-    let _ = (id, table);
+    crate::native_load_hooks::loot_table_load(id, table);
 }
 
 fn load_kind(data: &Path, kind: &str, out: &mut HashMap<String, Value>) -> io::Result<()> {
@@ -464,20 +635,15 @@ fn load_dir(
     prefix: &str,
     out: &mut HashMap<String, Value>,
 ) -> io::Result<()> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    // Through `json_folder`: a load holding the folder (the recipes, read by
+    // the item tables, the recipe book and the server's sync too) shares one
+    // read of it.
+    let Ok(folder) = crate::json_folder::read(dir) else {
         return Ok(());
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if path.is_dir() {
-            load_dir(&path, namespace, &format!("{prefix}{stem}/"), out)?;
-        } else if path.extension().is_some_and(|e| e == "json") {
-            let value = serde_json::from_slice(&fs::read(&path)?)?;
-            out.insert(format!("{namespace}:{prefix}{stem}"), value);
-        }
+    for file in &folder.files {
+        let value = serde_json::from_slice(file.bytes()?)?;
+        out.insert(format!("{namespace}:{prefix}{}", file.name), value);
     }
     Ok(())
 }
@@ -1213,6 +1379,13 @@ impl<R: RandomSource> Context<'_, R> {
                         _ => false,
                     }
                 }
+                // A mod's own kind: the hook answers; a bare type name is
+                // minecraft's own and an unknown one fails.
+                k if k.contains(':') && !k.starts_with("minecraft:") => {
+                    let mut holds = false;
+                    native_loot_condition(k, c, &self.native_ctx(), &mut holds);
+                    holds
+                }
                 // An unknown type fails, as in items.rs `condition`.
                 _ => false,
             },
@@ -1236,6 +1409,22 @@ impl<R: RandomSource> Context<'_, R> {
                 self.run(m, stack)
             }
             _ => stack,
+        }
+    }
+    /// The context a mod's own loot kinds see: drawn lazily, only when
+    /// the table has a mod's kind, so the random stays untouched without.
+    fn native_ctx(&mut self) -> NativeLootContext<'_> {
+        let seed = self.random.next_long();
+        NativeLootContext {
+            entity: self.entity.map(|e| &e.this),
+            damage: self.entity.and_then(|e| e.damage.as_ref()),
+            player: self.entity.and_then(|e| e.player.as_ref()),
+            tool: None, // The tool is not in this engine's context.
+            block: None,
+            luck: self.luck,
+            biome: self.biome,
+            seed,
+            place: current_native_loot_place(),
         }
     }
     fn run(&mut self, f: &Value, mut stack: LootStack) -> LootStack {
@@ -1444,6 +1633,10 @@ impl<R: RandomSource> Context<'_, R> {
                     stack.components.retain(|(k, _)| k != id);
                     stack.components.push((id.clone(), value.clone()));
                 }
+            }
+            // A mod's own kind: the hook changes the stack.
+            k if k.contains(':') && !k.starts_with("minecraft:") => {
+                native_loot_function(k, f, &self.native_ctx(), &mut stack);
             }
             // Lore and other data without random draws.
             _ => {}
@@ -1759,6 +1952,32 @@ mod namespace_tests {
         let _ = fs::remove_dir_all(&root);
     }
 
+    /// A table kept as its text reads back as the file's JSON (floats, big
+    /// integers, nesting, key order); a file that is not JSON still fails
+    /// the load.
+    #[test]
+    fn loot_tables_read_back_as_loaded() {
+        let root = std::env::temp_dir().join(format!("horizon-loot-text-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("data/minecraft/loot_table/blocks");
+        fs::create_dir_all(&dir).unwrap();
+        let table = r#"{"type": "minecraft:block", "pools": [{"rolls": 1.5,
+            "bonus_rolls": 0.1, "entries": [{"type": "minecraft:item", "name": "minecraft:stone",
+            "weight": 9007199254740993, "functions": [{"function": "minecraft:set_count",
+            "count": {"type": "minecraft:uniform", "min": -2.25e-7, "max": 1e300}}]}]}],
+            "z": null, "a": [true, false, "\u00e9\n"]}"#;
+        fs::write(dir.join("stone.json"), table).unwrap();
+        let tables = shared_tables(&root, &PackOverlay::NONE).unwrap();
+        let expected: Value = serde_json::from_str(table).unwrap();
+        assert_eq!(tables.get("minecraft:blocks/stone"), Some(&expected));
+        assert_eq!(tables.len(), 1);
+        assert!(tables.get("minecraft:blocks/dirt").is_none());
+        drop(tables);
+        fs::write(dir.join("dirt.json"), r#"{"pools": [}"#).unwrap();
+        assert!(shared_tables(&root, &PackOverlay::NONE).is_err());
+        let _ = fs::remove_dir_all(&root);
+    }
+
     /// A content mods' root: the mods' loot tables and tags load beside
     /// vanilla's, under their own namespaces.
     #[test]
@@ -1892,6 +2111,163 @@ mod namespace_tests {
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:bread"));
         assert!(!data.in_tag("item", "minecraft:food", "minecraft:kelp"));
         let _ = fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod native_kinds_tests {
+    use super::*;
+
+    fn table(name: &str, json: &str) -> LootData {
+        let root = std::env::temp_dir().join(format!("loot-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("data/minecraft/loot_table");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.json"), json).unwrap();
+        // LootData::load reads items.json too.
+        std::fs::write(root.join("items.json"), "{}").unwrap();
+        let data = LootData::load(&root, &PackOverlay::NONE).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        data
+    }
+
+    /// An unclaimed condition fails (the pool drops nothing) and an
+    /// unclaimed function leaves the stack's count as it was.
+    #[test]
+    fn unclaimed_kinds_fail_the_condition_and_leave_the_stack() {
+        let data = table(
+            "cond",
+            r#"{"pools":[{"rolls":1,"condition":{"type":"mymod:always_true"},
+                "entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#,
+        );
+        let mut random = horizon_core::random::LegacyRandom::new(42);
+        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        assert!(items.is_empty());
+
+        let data = table(
+            "func",
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
+                "modifier":[{"type":"mymod:duplicate","factor":2}]}]}"#,
+        );
+        let mut random = horizon_core::random::LegacyRandom::new(42);
+        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].count, 1);
+    }
+
+    /// A table without a mod's kind doesn't shift the random; one with a
+    /// kind draws exactly one `next_long`; the same seed gives the same
+    /// result.
+    #[test]
+    fn a_mod_kind_draws_exactly_one_long_and_a_vanilla_table_none() {
+        // A vanilla table: the random is untouched.
+        let vanilla = table(
+            "seed_vanilla",
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}]}]}"#,
+        );
+        let mut r1 = horizon_core::random::LegacyRandom::new(100);
+        let mut r2 = horizon_core::random::LegacyRandom::new(100);
+        let _ = vanilla.roll("minecraft:test", &mut r1, 0.0, None, None);
+        let expected: Vec<_> = (0..5).map(|_| r2.next_long()).collect();
+        let got: Vec<_> = (0..5).map(|_| r1.next_long()).collect();
+        assert_eq!(got, expected, "vanilla table shifted the random");
+
+        // A mod kind: exactly one next_long is drawn.
+        let modded = table(
+            "seed_mod",
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
+                "modifier":[{"type":"lootmod:x"}]}]}"#,
+        );
+        let mut r3 = horizon_core::random::LegacyRandom::new(100);
+        let mut r4 = horizon_core::random::LegacyRandom::new(100);
+        let _ = modded.roll("minecraft:test", &mut r3, 0.0, None, None);
+        let _ = r4.next_long(); // the one draw
+        let after_mod: Vec<_> = (0..5).map(|_| r4.next_long()).collect();
+        let after_run: Vec<_> = (0..5).map(|_| r3.next_long()).collect();
+        assert_eq!(after_run, after_mod, "mod table drew != 1 next_long");
+
+        // Same seed, same result.
+        let mut r5 = horizon_core::random::LegacyRandom::new(42);
+        let a = modded.roll("minecraft:test", &mut r5, 0.0, None, None);
+        let mut r6 = horizon_core::random::LegacyRandom::new(42);
+        let b = modded.roll("minecraft:test", &mut r6, 0.0, None, None);
+        assert_eq!(a, b, "same seed, different result");
+    }
+
+    fn place(x: f64) -> NativeLootPlace {
+        NativeLootPlace {
+            origin: Some([x, 64.0, 0.5]),
+            ..NativeLootPlace::default()
+        }
+    }
+
+    /// A roll sees the innermost place set around it; the outer one is back
+    /// after the inner returns, and nothing after the outer, even when the
+    /// roll panicked.
+    #[test]
+    fn a_place_holds_for_its_roll_only() {
+        assert_eq!(current_native_loot_place(), None);
+        with_native_loot_place(place(1.5), || {
+            with_native_loot_place(place(2.5), || {
+                assert_eq!(
+                    current_native_loot_place().unwrap().origin,
+                    Some([2.5, 64.0, 0.5])
+                );
+            });
+            assert_eq!(
+                current_native_loot_place().unwrap().origin,
+                Some([1.5, 64.0, 0.5])
+            );
+        });
+        assert_eq!(current_native_loot_place(), None);
+
+        let panicked = std::panic::catch_unwind(|| {
+            with_native_loot_place(place(3.5), || panic!("a roll failed"));
+        });
+        assert!(panicked.is_err());
+        assert_eq!(current_native_loot_place(), None);
+    }
+
+    /// A place changes nothing a table rolls: the same items, and the random
+    /// left where it was, with a mod's kind in the table or not.
+    #[test]
+    fn a_place_leaves_the_roll_as_it_was() {
+        for (name, json) in [
+            (
+                "place_vanilla",
+                r#"{"pools":[{"rolls":{"type":"minecraft:uniform","min":1,"max":4},
+                    "entries":[{"type":"minecraft:item","name":"minecraft:stone"},
+                               {"type":"minecraft:item","name":"minecraft:dirt"}]}]}"#,
+            ),
+            (
+                "place_mod",
+                r#"{"pools":[{"rolls":2,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
+                    "modifier":[{"type":"lootmod:x"}]}]}"#,
+            ),
+        ] {
+            let data = table(name, json);
+            let mut plain = horizon_core::random::LegacyRandom::new(7);
+            let mut placed = horizon_core::random::LegacyRandom::new(7);
+            let without = data.roll("minecraft:test", &mut plain, 0.0, None, None);
+            let with = with_native_loot_place(place(0.5), || {
+                data.roll("minecraft:test", &mut placed, 0.0, None, None)
+            });
+            assert_eq!(with, without, "{name}");
+            assert_eq!(placed.next_long(), plain.next_long(), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_minecraft_function_is_skipped() {
+        let data = table(
+            "vanilla",
+            r#"{"pools":[{"rolls":1,"entries":[{"type":"minecraft:item","name":"minecraft:stone"}],
+                "modifier":[{"type":"minecraft:future_function"},{"type":"minecraft:set_count","count":5}]}]}"#,
+        );
+        let mut random = horizon_core::random::LegacyRandom::new(42);
+        let items = data.roll("minecraft:test", &mut random, 0.0, None, None);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].count, 5);
     }
 }
 

@@ -7,7 +7,7 @@
 use super::{Game, lan::LanHost};
 use horizon_client::{
     blocks::{Fluid, MAP_COLORS},
-    hud::{MAP_SLOTS, Rect},
+    hud::{MAP_SLOTS, Rect, map_slot_sprite},
     items::ItemStack,
     mesher::Vertex,
 };
@@ -38,6 +38,41 @@ pub(super) struct Decoration {
     pub name: Option<String>,
     pub key: Key,
 }
+/// A map as a native mod sees it when `native_map_decorations` is asked.
+// Native mods read it; nothing in Horizon does.
+#[derive(Clone, Copy, Debug)]
+pub struct NativeMapInfo<'a> {
+    /// The map's id (`map_<id>`).
+    pub id: i32,
+    /// The map's centre block `[x, z]`.
+    pub center: [i32; 2],
+    /// `MapItemSavedData.scale`: a map pixel is `1 << scale` blocks.
+    pub scale: u8,
+    /// The dimension the map shows (`minecraft:overworld`).
+    pub dimension: &'a str,
+    pub locked: bool,
+    /// Whether it is drawn in an item frame, not held or on the cartography screen.
+    pub in_frame: bool,
+}
+/// An icon a native mod puts on a map: the same place and pose as vanilla's
+/// decorations (`MapDecoration`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeMapDecoration {
+    /// An atlas sprite: vanilla's `map/decorations/<name>`, or a content
+    /// mod's texture. An unknown sprite is left out.
+    pub sprite: String,
+    /// The position on the map in half map pixels, -128 (left, top) to 127.
+    /// For the world position `(wx, wz)`: `(wx - center_x) / (1 << scale) * 2`,
+    /// and the same for z, floored and clamped.
+    pub x: i8,
+    pub y: i8,
+    /// 0 to 15, in 22.5 degree steps clockwise (only the low four bits count).
+    pub rot: u8,
+    /// Whether it shows in an item frame and on the cartography screen
+    /// (`MapDecorationType.showOnItemFrame`); a held map shows all.
+    pub shown_on_frame: bool,
+}
+
 /// `MapBanner`: a banner a map marks, as `banners` saves it.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct MapBanner {
@@ -675,11 +710,15 @@ const DECORATION_TYPES: [(&str, &str); 40] = [
 /// `MapRenderer.render`'s pose for decoration `d` in map pixels (0..128,
 /// y down) at depth `z`: its quad is (-1, -1) to (1, 1) under it.
 pub(super) fn decoration_pose(d: &Decoration, z: f32) -> glam::Mat4 {
+    decoration_pose_at(d.x, d.y, d.rot, z)
+}
+/// [`decoration_pose`] for a decoration at `x`, `y` (half map pixels) turned `rot`.
+pub(super) fn decoration_pose_at(x: i8, y: i8, rot: u8, z: f32) -> glam::Mat4 {
     glam::Mat4::from_translation(glam::Vec3::new(
-        f32::from(d.x) / 2.0 + 64.0,
-        f32::from(d.y) / 2.0 + 64.0,
+        f32::from(x) / 2.0 + 64.0,
+        f32::from(y) / 2.0 + 64.0,
         z,
-    )) * glam::Mat4::from_rotation_z((f32::from(d.rot) * 360.0 / 16.0).to_radians())
+    )) * glam::Mat4::from_rotation_z((f32::from(rot) * 360.0 / 16.0).to_radians())
         * glam::Mat4::from_scale(glam::Vec3::splat(4.0))
         * glam::Mat4::from_translation(glam::Vec3::new(-0.125, 0.125, 0.0))
 }
@@ -1091,6 +1130,9 @@ impl Game<'_> {
             self.consume_held();
             self.give_or_drop_stack(filled);
         }
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_player_map_filled(player, &name, id);
+        }
         let at = [p.x, p.y, p.z];
         self.audio.play(
             "minecraft:ui.cartography_table.take_result",
@@ -1136,7 +1178,7 @@ impl Game<'_> {
             return true;
         }
         self.trigger_block("minecraft:item_used_on_block", hit.pos, stack);
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }
@@ -1182,7 +1224,7 @@ impl Game<'_> {
             self.consume_held();
             self.give_or_drop_stack(locked);
         }
-        self.stats.add("used", &stack.item, 1);
+        self.award_stat("used", &stack.item, 1);
         self.swing_arm();
         true
     }
@@ -1455,7 +1497,7 @@ impl Game<'_> {
         let Some(p) = self.player.as_ref().map(|p| p.position) else {
             return;
         };
-        let nether = self.dim == super::Dim::Nether;
+        let has_ceiling = self.world.shape.has_ceiling;
         let Some(m) = self.maps.data.get_mut(&id) else {
             return;
         };
@@ -1467,7 +1509,7 @@ impl Game<'_> {
         let px = (p.x - f64::from(cx)).floor() as i32 / scale + 64;
         let pz = (p.z - f64::from(cz)).floor() as i32 / scale + 64;
         let mut radius = 128 / scale;
-        if nether {
+        if has_ceiling {
             radius /= 2;
         }
         let h = m.holder(self.lan_acting.unwrap_or(HOST));
@@ -1499,7 +1541,7 @@ impl Game<'_> {
                 };
                 let mut water_depth = 0i32;
                 let mut height = 0.0f64;
-                if nether {
+                if has_ceiling {
                     let mut noise = min_x.wrapping_add(min_z.wrapping_mul(231_871));
                     noise = noise
                         .wrapping_mul(noise)
@@ -1615,10 +1657,12 @@ impl Game<'_> {
                 ("data", Tag::compound([("map", Tag::Int(last))])),
                 ("DataVersion", Tag::Int(horizon_world::DATA_VERSION)),
             ]);
-            let _ = horizon_client::save::write_dat(
+            if let Err(e) = horizon_client::save::write_dat(
                 &self.world_root.join("data/minecraft/maps/last_id.dat"),
                 tag,
-            );
+            ) {
+                log::warn!("Horizon: the next map id is not saved: {e}");
+            }
         }
     }
     /// The atlas slot showing map `id`, its texture uploaded when it changed.
@@ -1638,7 +1682,7 @@ impl Game<'_> {
             .gui
             .atlas
             .sprites
-            .get(&format!("horizon/map{slot}"))
+            .get(map_slot_sprite(slot)?)
             .copied()?;
         let m = self.maps.data.get_mut(&id)?;
         if m.texture_dirty {
@@ -1700,14 +1744,9 @@ impl Game<'_> {
             ],
             out,
         );
-        let decorations = self
-            .maps
-            .data
-            .get(&id)
-            .map(|m| m.decorations.clone())
-            .unwrap_or_default();
+        let decorations = self.maps.data.get(&id).map_or(&[][..], |m| &m.decorations);
         let mut count = 0;
-        for d in &decorations {
+        for d in decorations {
             if show_only_frame && !shown_on_frame(d.sprite) {
                 continue;
             }
@@ -1736,6 +1775,54 @@ impl Game<'_> {
             );
             count += 1;
         }
+        // A native mod's own icons, over the vanilla ones.
+        for d in self.mod_map_decorations(id, show_only_frame) {
+            let Some(s) = self.gui.atlas.sprites.get(d.sprite.as_str()).copied() else {
+                continue;
+            };
+            let dm = decoration_pose_at(d.x, d.y, d.rot, -0.02 - count as f32 * 0.001);
+            let p = |x: f32, y: f32| dm.transform_point3(glam::Vec3::new(x, y, 0.0)).to_array();
+            let corners = [p(-1.0, 1.0), p(1.0, 1.0), p(1.0, -1.0), p(-1.0, -1.0)];
+            let uvs = [[s.u0, s.v0], [s.u1, s.v0], [s.u1, s.v1], [s.u0, s.v1]];
+            for (c, uv) in corners.into_iter().zip(uvs) {
+                out.push(Vertex {
+                    normal: [0; 4],
+                    pos: m.transform_point3(glam::Vec3::from_array(c)).to_array(),
+                    uv,
+                    layer: 0,
+                    color: 0xFFFF_FFFF,
+                    light,
+                    glint_uv: [0.0, 0.0],
+                });
+            }
+            count += 1;
+        }
+    }
+    /// The icons `native_map_decorations` adds to map `id`, as it is drawn
+    /// (`frame`: in an item frame or on a screen, which show only what
+    /// `shown_on_frame` allows).
+    pub(super) fn mod_map_decorations(&self, id: i32, frame: bool) -> Vec<NativeMapDecoration> {
+        let Some(map) = self.maps.data.get(&id) else {
+            return Vec::new();
+        };
+        let info = NativeMapInfo {
+            id,
+            center: map.center,
+            scale: map.scale,
+            dimension: &map.dimension,
+            locked: map.locked,
+            in_frame: frame,
+        };
+        let mut decorations = Vec::new();
+        self.native_map_decorations(&info, &mut decorations);
+        decorations
+            .into_iter()
+            .filter(|d| !frame || d.shown_on_frame)
+            .map(|d| NativeMapDecoration {
+                rot: d.rot & 15,
+                ..d
+            })
+            .collect()
     }
     /// `renderTwoHandedMap`: map `id` held in both hands, in view space (the
     /// arms under it: `first_person::map_arm_poses`).
@@ -1802,6 +1889,28 @@ impl Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mod_icon_sits_where_a_vanilla_decoration_would() {
+        // Half pixels from the map's centre: x 20 is 10 map pixels right of it.
+        let vanilla = Decoration {
+            sprite: "map/decorations/frame",
+            x: 20,
+            y: -30,
+            rot: 4,
+            name: None,
+            key: Key::Item,
+        };
+        assert_eq!(
+            decoration_pose(&vanilla, -0.02),
+            decoration_pose_at(20, -30, 4, -0.02)
+        );
+        let at = decoration_pose_at(20, -30, 0, 0.0).transform_point3(glam::Vec3::ZERO);
+        assert!(
+            (at.x - 74.0).abs() < 0.6 && (at.y - 49.0).abs() < 0.6,
+            "{at:?}"
+        );
+    }
 
     #[test]
     fn every_target_decoration_type_has_its_sprite() {

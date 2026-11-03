@@ -66,7 +66,7 @@ impl Launcher {
             files: !folder,
             directories: folder,
             multiple: false,
-            prompt: Some("Import".into()),
+            prompt: Some(tr("Import").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(mut paths))) = paths.await {
@@ -98,7 +98,7 @@ impl Launcher {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Use these jars".into()),
+            prompt: Some(tr("Use these jars").into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(mut paths))) = paths.await {
@@ -169,11 +169,11 @@ impl Launcher {
             .gap(px(8.))
             .child(pick("import-file", "Import a pack file…", false))
             .child(pick("import-folder", "Import an instance folder…", true))
-            .child(text(theme::CAPTION).w_full().text_color(t.muted).child(
+            .child(text(theme::CAPTION).w_full().text_color(t.muted).child(tr(
                 ".mrpack (Modrinth), .zip (CurseForge), or a Prism, MultiMC or CurseForge instance. \
                  Horizon ports what it can on this computer, from your own downloads, and plays \
                  the pack as its own profile. Nothing is uploaded or shared.",
-            ));
+            )));
         let mut page = div()
             .flex()
             .flex_col()
@@ -193,11 +193,9 @@ impl Launcher {
             return page;
         }
         if self.packs.is_empty() {
-            return page.child(
-                text(theme::CAPTION)
-                    .text_color(t.muted)
-                    .child("No modpack imported yet: import one, or find one below."),
-            );
+            return page.child(text(theme::CAPTION).text_color(t.muted).child(tr(
+                "No modpack imported yet: import one, or find one below.",
+            )));
         }
         if self.packs.len() > 1 {
             let mut list = div().flex().flex_col();
@@ -205,7 +203,7 @@ impl Launcher {
                 let open = self.pack_open.as_ref() == Some(&p.slug);
                 let slug = p.slug.clone();
                 let right = if open {
-                    caps("Open").text_color(t.accent).into_any_element()
+                    caps(tr("Open")).text_color(t.accent).into_any_element()
                 } else {
                     button(format!("open-{slug}"), "Open", Kind::Ghost, &t)
                         .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -282,10 +280,9 @@ impl Launcher {
                         },
                     )),
                 );
-            let detail = format!(
-                "{} from Horizon's registry, its own profile: {}",
-                p.version,
-                p.mods.join(", ")
+            let detail = trf(
+                "{version} from Horizon's registry, its own profile: {mods}",
+                &[("version", &p.version), ("mods", &p.mods.join(", "))],
             );
             list = list.child(index_row(
                 i + 1,
@@ -311,7 +308,7 @@ impl Launcher {
             .gap(px(4.))
             .p(px(16.))
             .child(
-                caps(if self.pack_busy { "Working" } else { "Done" })
+                caps(tr(if self.pack_busy { "Working" } else { "Done" }))
                     .text_color(if self.pack_busy { t.accent } else { t.muted }),
             )
             .children(self.pack_log.iter().skip(start).map(|line| {
@@ -346,19 +343,22 @@ impl Launcher {
                             .text_color(color)
                             .child(p.count(status).to_string()),
                     )
-                    .child(caps(*label).text_color(t.muted)),
+                    .child(caps(tr(label)).text_color(t.muted)),
             );
         }
         // Prepared, nothing preparing or running (`play_pack` checks the same).
         let can_play = self.can_start_selected();
         let mut buttons = div().flex().flex_wrap().items_center().gap(px(8.));
         let play_label = if p.mods.is_empty() {
-            "Play".to_string()
+            tr("Play").to_string()
         } else {
-            format!("Play with {} mods", p.mods.len())
+            trf(
+                "Play with {count} mods",
+                &[("count", &p.mods.len().to_string())],
+            )
         };
         let mut play = button("pack-play", play_label, Kind::Primary, &t);
-        if p.mods.is_empty() || !can_play || self.pack_busy {
+        if !p.can_play() || !can_play || self.pack_busy {
             play = disabled(play);
         } else {
             let work = p.work.clone();
@@ -367,10 +367,19 @@ impl Launcher {
                 cx.notify();
             }));
         }
-        let port_label = format!("Port {} mods", p.portable);
+        let port_label = if p.indexed_resources == 0 {
+            trf("Port {count} mods", &[("count", &p.portable.to_string())])
+        } else if p.portable == 0 {
+            format!("Get {} resource packs", p.indexed_resources)
+        } else {
+            format!(
+                "Port {} mods + {} resource packs",
+                p.portable, p.indexed_resources
+            )
+        };
         let mut port = button("pack-port", port_label, Kind::Secondary, &t);
         let mut from = button("pack-from", "Use jars from my instance…", Kind::Ghost, &t);
-        if self.pack_busy || p.portable == 0 {
+        if self.pack_busy || !p.can_port() {
             port = disabled(port);
             from = disabled(from);
         } else {
@@ -378,10 +387,14 @@ impl Launcher {
                 this.port_pack(false, cx);
                 cx.notify();
             }));
-            from = from.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.port_pack(true, cx);
-                cx.notify();
-            }));
+            if p.portable == 0 {
+                from = disabled(from);
+            } else {
+                from = from.on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.port_pack(true, cx);
+                    cx.notify();
+                }));
+            }
         }
         let confirming = self.confirm_remove.as_deref() == Some(p.slug.as_str());
         let slug = p.slug.clone();
@@ -418,21 +431,27 @@ impl Launcher {
             cx.notify();
         }));
         buttons = buttons.child(play).child(port).child(from).child(remove);
-        let mut notes = vec![format!(
-            "Port gets the jars of the {} mods this computer can port today (content with data \
+        let mut notes = vec![trf(
+            "Port gets the jars of the {count} mods this computer can port today (content with data \
              and assets only) from the pack's own links, Modrinth, or your folder, and carries \
-             them over. The ports stay here, in {}.",
-            p.portable,
-            short(&p.work)
+             them over. The ports stay here, in {folder}.",
+            &[
+                ("count", &p.portable.to_string()),
+                ("folder", &short(&p.work)),
+            ],
         )];
+        notes.push(format!(
+            "{} resource packs available. Enable them in the game's Resource Packs screen.",
+            p.resourcepacks
+        ));
         if let Some(jars) = p.jars() {
             notes.push(jars);
         }
         for line in &p.left_off {
-            notes.push(format!("Left off: {line}."));
+            notes.push(trf("Left off: {line}.", &[("line", line)]));
         }
         if !can_play {
-            notes.push("Playing needs a prepared Horizon version (Play page).".into());
+            notes.push(tr("Playing needs a prepared Horizon version (Play page).").into());
         }
         let mut rows: Vec<&horizon_port_pack::report::Row> = p
             .rows
@@ -452,11 +471,11 @@ impl Launcher {
         });
         let row = |i: usize| {
             let r = rows[i];
-            let color = match r.status {
-                Status::Ported => t.success,
-                Status::Partial => t.accent,
-                Status::NotYet => t.ink_soft,
-                Status::NotNeeded => t.muted,
+            let (color, status_label) = match r.status {
+                Status::Ported => (t.success, tr("Ported")),
+                Status::Partial => (t.accent, tr("Partial")),
+                Status::NotYet => (t.ink_soft, tr("Not yet")),
+                Status::NotNeeded => (t.muted, tr("Not needed")),
             };
             let name = if r.name.is_empty() || r.name == r.key {
                 r.key.clone()
@@ -469,7 +488,7 @@ impl Launcher {
                 name,
                 Some(detail.into_any_element()),
                 Some(
-                    caps(r.status.label())
+                    caps(status_label)
                         .flex_none()
                         .text_color(color)
                         .into_any_element(),

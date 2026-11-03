@@ -279,7 +279,7 @@ def main():
          *(PARITY / f'{n}.java' for n in ('ParityData', 'VanillaBlockEntityAnimOracle'))], 'compile-java')
     run(['java', '-Xmx2G', '-cp', str(classes) + os.pathsep + dependencies, 'dev.horizonlab.parity.VanillaBlockEntityAnimOracle',
          inputs, build / 'vanilla.txt'], 'vanilla')
-    run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client', '--example', 'client_probe', '--',
+    run(['cargo', 'run', '--quiet', '--profile', 'fast', '-p', 'horizon-client-lib', '--example', 'client_probe', '--',
          'block_entity_anim_fixture', resources, inputs, build / 'rust.txt'], 'rust')
 
     def split(path):

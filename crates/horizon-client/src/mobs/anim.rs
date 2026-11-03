@@ -2,6 +2,7 @@
 //! (quadrupeds, humanoids, creepers, spiders, chickens...) applied to a map of
 //! part poses before the model is drawn.
 use super::{Mob, Part, keyframes::AnimationState, living::wrap};
+use crate::fast_hash::{FxHashMap, FxHashSet};
 use horizon_core::geometry::trig::Mth;
 use std::collections::HashMap;
 use std::f32::consts::{FRAC_PI_6, PI};
@@ -101,15 +102,61 @@ impl AnimState {
     }
     pub fn end_tick(&mut self, _swinging: bool) {}
 }
+/// A part name as `Poses` keys it: its Fx hash, so filling a pose map allocates
+/// nothing (a mob farm resets one per layer per mob each frame). Names are short
+/// and few per model; `no_two_part_names_share_a_key` checks every vanilla model.
+#[inline]
+pub(crate) fn key(name: &str) -> u64 {
+    use std::hash::Hasher;
+    let mut h = crate::fast_hash::FxHasher::default();
+    h.write(name.as_bytes());
+    // The length too, so "a" and "a\0" differ (str's own Hash adds a terminator).
+    h.write_usize(name.len());
+    h.finish()
+}
 /// Part poses for one draw, keyed by part name.
 #[derive(Clone, Default)]
 pub struct Poses {
-    map: HashMap<String, [f32; 9]>,
+    map: FxHashMap<u64, [f32; 9]>,
     dummy: [f32; 9],
     /// Parts with `skipDraw` set: their own cubes are not drawn, children are.
-    skipped: std::collections::HashSet<String>,
+    skipped: FxHashSet<u64>,
     /// Parts with `visible` cleared: neither they nor their children draw.
-    hidden: std::collections::HashSet<String>,
+    hidden: FxHashSet<u64>,
+    /// Names this content: a fresh number at each change, kept by copies
+    /// ([`Poses::version`]).
+    version: u64,
+}
+/// The next [`Poses::version`].
+static NEXT_VERSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+thread_local! {
+    /// Spare `Poses` for [`Poses::pooled`].
+    static POOL: std::cell::RefCell<Vec<Poses>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+/// A [`Poses`] from this thread's pool, given back when dropped.
+pub struct PooledPoses(Poses);
+impl std::ops::Deref for PooledPoses {
+    type Target = Poses;
+    fn deref(&self) -> &Poses {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for PooledPoses {
+    fn deref_mut(&mut self) -> &mut Poses {
+        &mut self.0
+    }
+}
+impl Drop for PooledPoses {
+    fn drop(&mut self) {
+        let poses = std::mem::take(&mut self.0);
+        // A few per thread: a mob's body and layers, a rider's.
+        let _ = POOL.try_with(|pool| {
+            let mut pool = pool.borrow_mut();
+            if pool.len() < 8 {
+                pool.push(poses);
+            }
+        });
+    }
 }
 impl Poses {
     pub fn new(model: &Part) -> Self {
@@ -117,12 +164,41 @@ impl Poses {
         poses.reset(model);
         poses
     }
+    /// Spare `Poses` of an earlier draw on this thread, to fill with `reset` or
+    /// `copy_from` before use: a mob farm poses every mob each frame, and fresh
+    /// maps grow (and rehash) part by part.
+    pub fn pooled() -> PooledPoses {
+        PooledPoses(
+            POOL.try_with(|pool| pool.borrow_mut().pop())
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        )
+    }
+    /// Names the content: two `Poses` with the same version pose every part
+    /// alike (one is a copy of the other, neither changed since). A draw of
+    /// the same model under the same matrix with the same version can reuse
+    /// the first's part matrices (`skin::Skin::draw`).
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+    fn changed(&mut self) {
+        self.version = NEXT_VERSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    /// Makes this a copy of `other`, keeping this one's capacity.
+    pub fn copy_from(&mut self, other: &Poses) {
+        self.map.clone_from(&other.map);
+        self.dummy = other.dummy;
+        self.skipped.clone_from(&other.skipped);
+        self.hidden.clone_from(&other.hidden);
+        self.version = other.version;
+    }
     /// Refills this for another model, keeping the map and the sets' capacity:
     /// a mob draws its body and every equipment layer each frame.
     pub fn reset(&mut self, model: &Part) {
-        fn walk(p: &Part, map: &mut HashMap<String, [f32; 9]>) {
+        fn walk(p: &Part, map: &mut FxHashMap<u64, [f32; 9]>) {
             // ModelPart.createPartLookup fills its map with putIfAbsent: the first part keeps a name.
-            map.entry(p.name.clone()).or_insert(p.pose);
+            map.entry(key(&p.name)).or_insert(p.pose);
             for c in &p.children {
                 walk(c, map);
             }
@@ -132,24 +208,32 @@ impl Poses {
         self.skipped.clear();
         self.hidden.clear();
         walk(model, &mut self.map);
+        self.changed();
     }
     pub fn get(&mut self, name: &str) -> &mut [f32; 9] {
-        match self.map.get_mut(name) {
+        self.changed();
+        match self.map.get_mut(&key(name)) {
             Some(p) => p,
             None => &mut self.dummy,
         }
     }
     pub fn pose(&self, part: &Part) -> [f32; 9] {
-        self.map.get(&part.name).copied().unwrap_or(part.pose)
+        self.map.get(&key(&part.name)).copied().unwrap_or(part.pose)
     }
     pub fn skip_draw(&mut self, name: &str) {
-        self.skipped.insert(name.to_owned());
+        if self.skipped.insert(key(name)) {
+            self.changed();
+        }
     }
     pub fn skips(&self, part: &Part) -> bool {
-        self.skipped.contains(&part.name)
+        self.skips_named(&part.name)
+    }
+    /// `skips` by the part's name.
+    pub fn skips_named(&self, name: &str) -> bool {
+        !self.skipped.is_empty() && self.skipped.contains(&key(name))
     }
     pub fn has(&self, name: &str) -> bool {
-        self.map.contains_key(name)
+        self.map.contains_key(&key(name))
     }
     pub fn xrot(&mut self, n: &str, v: f32) {
         self.get(n)[3] = v;
@@ -162,14 +246,21 @@ impl Poses {
     }
     /// `ModelPart.visible = v`; a hidden part and its children do not draw.
     pub fn visible(&mut self, n: &str, v: bool) {
-        if v {
-            self.hidden.remove(n);
-        } else if self.map.contains_key(n) {
-            self.hidden.insert(n.to_owned());
+        let changed = if v {
+            self.hidden.remove(&key(n))
+        } else {
+            self.map.contains_key(&key(n)) && self.hidden.insert(key(n))
+        };
+        if changed {
+            self.changed();
         }
     }
     pub fn is_hidden(&self, part: &Part) -> bool {
-        self.hidden.contains(&part.name)
+        self.is_hidden_named(&part.name)
+    }
+    /// `is_hidden` by the part's name.
+    pub fn is_hidden_named(&self, name: &str) -> bool {
+        !self.hidden.is_empty() && self.hidden.contains(&key(name))
     }
 }
 /// The LivingEntityRenderState values setupAnim reads.
@@ -186,6 +277,10 @@ pub struct State {
     pub baby: bool,
     pub partial: f32,
 }
+/// `WalkAnimationState.position(partial)`: babies' legs move 3 times as far.
+pub fn walk_position(m: &Mob, alpha: f32) -> f32 {
+    (m.limb_position - m.limb_speed * (1.0 - alpha)) * if m.is_baby() { 3.0 } else { 1.0 }
+}
 pub fn state(m: &Mob, alpha: f32) -> State {
     let body = m.previous_body_yaw + wrap(m.body_yaw - m.previous_body_yaw) * alpha;
     let head = m.previous_head_yaw + wrap(m.head_yaw - m.previous_head_yaw) * alpha;
@@ -198,8 +293,7 @@ pub fn state(m: &Mob, alpha: f32) -> State {
     let walking = m.alive() && !m.extra.passenger;
     State {
         pos: if walking {
-            // WalkAnimationState.position(partial): babies' legs move 3 times as far.
-            (m.limb_position - m.limb_speed * (1.0 - alpha)) * if m.is_baby() { 3.0 } else { 1.0 }
+            walk_position(m, alpha)
         } else {
             0.0
         },
@@ -247,6 +341,8 @@ pub enum ArmPose {
     ThrowTrident,
     /// Playing a goat horn.
     TootHorn,
+    /// Looking through a spyglass (`HumanoidModel.ArmPose.SPYGLASS`).
+    Spyglass,
     /// A spear held out (`HumanoidModel.ArmPose.SPEAR`), at rest or charging.
     Spear,
     /// A brush being used (`HumanoidModel.ArmPose.BRUSH`).
@@ -376,6 +472,8 @@ pub(super) fn crossbow_charge(p: &mut Poses, max: f32, ticks: f32, in_right: boo
     let x = lerp(alpha, p.get(pull)[3], -PI / 2.0);
     p.xrot(pull, x);
 }
+/// `HumanoidModel.SPYGLASS_ARM_ROT_X`.
+const SPYGLASS_ARM_ROT_X: f32 = 1.919_862_2;
 /// `HumanoidModel.poseRightArm` / `poseLeftArm`.
 fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
     let arm = if right { "right_arm" } else { "left_arm" };
@@ -411,6 +509,11 @@ fn pose_arm(p: &mut Poses, pose: ArmPose, right: bool, h: &Hum) {
             let x = p.get(arm)[3];
             p.xrot(arm, x * 0.5 - PI);
             p.yrot(arm, 0.0);
+        }
+        ArmPose::Spyglass => {
+            let crouch = if h.crouching { 0.261_799_4 } else { 0.0 };
+            p.xrot(arm, (hx - SPYGLASS_ARM_ROT_X - crouch).clamp(-2.4, 3.3));
+            p.yrot(arm, hy + if right { -0.261_799_4 } else { 0.261_799_4 });
         }
         ArmPose::TootHorn => {
             p.xrot(arm, hx.clamp(-1.2, 1.2) - 1.483_529_8);
@@ -794,6 +897,7 @@ pub fn setup(
                     Some(_) if using_main && m.extra.blocking => ArmPose::Block,
                     Some("minecraft:bow") if using_main => ArmPose::Bow,
                     Some("minecraft:trident") if using_main => ArmPose::ThrowTrident,
+                    Some("minecraft:spyglass") if using_main => ArmPose::Spyglass,
                     Some("minecraft:goat_horn") if using_main => ArmPose::TootHorn,
                     Some("minecraft:crossbow") if using_main && !m.extra.charged => {
                         ArmPose::CrossbowCharge
@@ -814,6 +918,8 @@ pub fn setup(
                     ArmPose::Spear
                 } else if using_off && m.extra.blocking {
                     ArmPose::Block
+                } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:spyglass") {
+                    ArmPose::Spyglass
                 } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:goat_horn") {
                     ArmPose::TootHorn
                 } else if using_off && m.extra.off_hand.as_deref() == Some("minecraft:brush") {
@@ -931,17 +1037,27 @@ pub fn setup(
             let swing = |o: f32| -((pos * 2.0 + o).mcos() * 0.4) * sp;
             let step = |o: f32| ((pos + o).msin() * 0.4).abs() * sp;
             let legs = [
-                ("hind", 0.0f32, 0.0f32),
-                ("middle_hind", PI, PI),
-                ("middle_front", PI / 2.0, PI / 2.0),
-                ("front", PI * 3.0 / 2.0, PI * 3.0 / 2.0),
+                ("right_hind_leg", "left_hind_leg", 0.0f32, 0.0f32),
+                ("right_middle_hind_leg", "left_middle_hind_leg", PI, PI),
+                (
+                    "right_middle_front_leg",
+                    "left_middle_front_leg",
+                    PI / 2.0,
+                    PI / 2.0,
+                ),
+                (
+                    "right_front_leg",
+                    "left_front_leg",
+                    PI * 3.0 / 2.0,
+                    PI * 3.0 / 2.0,
+                ),
             ];
-            for (n, so, to) in legs {
+            for (right, left, so, to) in legs {
                 let (sw, st) = (swing(so), step(to));
-                p.get(&format!("right_{n}_leg"))[4] += sw;
-                p.get(&format!("left_{n}_leg"))[4] -= sw;
-                p.get(&format!("right_{n}_leg"))[5] += st;
-                p.get(&format!("left_{n}_leg"))[5] -= st;
+                p.get(right)[4] += sw;
+                p.get(left)[4] -= sw;
+                p.get(right)[5] += st;
+                p.get(left)[5] -= st;
             }
         }
         _ => {
@@ -992,21 +1108,22 @@ mod flight_pose_tests {
                 "left_leg",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         player_model_visibility(&mut p, 0, true);
         for part in ["body", "right_arm", "left_arm", "right_leg", "left_leg"] {
-            assert!(p.hidden.contains(part), "{part}");
+            assert!(p.hidden.contains(&key(part)), "{part}");
         }
-        assert!(!p.hidden.contains("head") && !p.hidden.contains("hat"));
+        assert!(!p.hidden.contains(&key("head")) && !p.hidden.contains(&key("hat")));
         // Back in another mode they all show, but for the layers the player hid.
         player_model_visibility(&mut p, 1 << 6, false);
-        assert!(!p.hidden.contains("body") && !p.hidden.contains("left_leg"));
-        assert!(p.hidden.contains("hat"));
+        assert!(!p.hidden.contains(&key("body")) && !p.hidden.contains(&key("left_leg")));
+        assert!(p.hidden.contains(&key("hat")));
     }
     #[test]
     fn blocking_arm_follows_the_head_with_limits_in_both_hands() {
@@ -1019,11 +1136,12 @@ mod flight_pose_tests {
                 let mut p = Poses {
                     map: ["head", "right_arm", "left_arm"]
                         .into_iter()
-                        .map(|n| (n.to_string(), [0.0; 9]))
+                        .map(|n| (key(n), [0.0; 9]))
                         .collect(),
                     dummy: [0.0; 9],
                     skipped: Default::default(),
                     hidden: Default::default(),
+                    version: 0,
                 };
                 let arm = if right { "right_arm" } else { "left_arm" };
                 p.xrot("head", pitch);
@@ -1039,6 +1157,42 @@ mod flight_pose_tests {
                 assert!((pose[3] - expected_pitch).abs() < 1e-6);
                 let side = if right { -FRAC_PI_6 } else { FRAC_PI_6 };
                 assert!((pose[4] - (side + expected_yaw)).abs() < 1e-6);
+                assert_eq!(p.get(if right { "left_arm" } else { "right_arm" })[3], 0.0);
+            }
+        }
+    }
+    /// HumanoidModel.poseRightArm / poseLeftArm's SPYGLASS case: pitch, yaw,
+    /// crouching, and the arm's pitch.
+    #[test]
+    fn a_spyglass_raises_the_arm_with_the_head_in_both_hands() {
+        for right in [false, true] {
+            for (pitch, yaw, crouching, expected_pitch) in [
+                (0.0, 0.0, false, -1.919_862_2),
+                (0.5, 0.3, false, -1.419_862_2),
+                (0.0, 0.0, true, -2.181_661_6),
+                // Looking up: limited to -2.4.
+                (-1.5, 0.0, false, -2.4),
+            ] {
+                let mut p = Poses {
+                    map: ["head", "right_arm", "left_arm"]
+                        .into_iter()
+                        .map(|n| (key(n), [0.0; 9]))
+                        .collect(),
+                    dummy: [0.0; 9],
+                    skipped: Default::default(),
+                    hidden: Default::default(),
+                    version: 0,
+                };
+                let arm = if right { "right_arm" } else { "left_arm" };
+                p.xrot("head", pitch);
+                p.yrot("head", yaw);
+                let mut h = Hum::new(ArmPose::Empty, ArmPose::Empty);
+                h.crouching = crouching;
+                pose_arm(&mut p, ArmPose::Spyglass, right, &h);
+                let pose = *p.get(arm);
+                assert!((pose[3] - expected_pitch).abs() < 1e-6, "{pose:?}");
+                let side = if right { -0.261_799_4 } else { 0.261_799_4 };
+                assert!((pose[4] - (yaw + side)).abs() < 1e-6, "{pose:?}");
                 assert_eq!(p.get(if right { "left_arm" } else { "right_arm" })[3], 0.0);
             }
         }
@@ -1076,11 +1230,12 @@ mod flight_pose_tests {
                 "left_leg",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         enderman::anim(&seated, &state, &mut poses);
         let right = *poses.get("right_leg");
@@ -1131,11 +1286,12 @@ mod flight_pose_tests {
                 "body",
             ]
             .into_iter()
-            .map(|n| (n.to_string(), [0.0; 9]))
+            .map(|n| (key(n), [0.0; 9]))
             .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         let mut ground = make();
         let mut flight = make();
@@ -1172,11 +1328,12 @@ mod flight_pose_tests {
         let make = || Poses {
             map: ["head", "right_arm", "left_arm", "right_leg", "left_leg"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         let same_angle = |a: f32, b: f32| ((a - b + PI).rem_euclid(PI * 2.0) - PI).abs() < 1e-5;
         let mut h = Hum::new(ArmPose::Empty, ArmPose::Empty);
@@ -1238,6 +1395,19 @@ mod flight_pose_tests {
         assert_eq!(dry.get("head")[3], 30.0f32.to_radians());
     }
 
+    #[test]
+    fn walk_position_triples_for_babies() {
+        // WalkAnimationState.position(partial) = (position - speed * (1 - partial)) * scale.
+        let mut m = player();
+        m.limb_position = 2.0;
+        m.limb_speed = 0.5;
+        assert!(!m.is_baby());
+        assert_eq!(walk_position(&m, 0.5), 1.75);
+        m.extra.age = -100;
+        assert!(m.is_baby());
+        assert_eq!(walk_position(&m, 0.5), 5.25);
+    }
+
     /// A player: a humanoid model with a shield in its main hand.
     fn player() -> Mob {
         let mut kind = crate::mobs::sensor_scan_tests::kind();
@@ -1265,11 +1435,12 @@ mod flight_pose_tests {
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         let mut m = player();
         m.extra.main_hand = Some("minecraft:shield".into());
@@ -1286,11 +1457,12 @@ mod flight_pose_tests {
         let mut p = Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         setup(&m, &state, &mut p, &HashMap::new());
         assert!((p.get("right_arm")[3] + PI / 10.0).abs() < 1e-6);
@@ -1314,11 +1486,12 @@ mod flight_pose_tests {
         let make = || Poses {
             map: ["head", "right_arm", "left_arm"]
                 .into_iter()
-                .map(|n| (n.to_string(), [0.0; 9]))
+                .map(|n| (key(n), [0.0; 9]))
                 .collect(),
             dummy: [0.0; 9],
             skipped: Default::default(),
             hidden: Default::default(),
+            version: 0,
         };
         let mut m = player();
         m.extra.main_hand = Some("minecraft:brush".into());

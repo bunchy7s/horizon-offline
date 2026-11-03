@@ -53,13 +53,13 @@ pub(super) fn packed_coords(state: &Info, packed: u8) -> u32 {
 pub(super) fn max_coords(a: u32, b: u32) -> u32 {
     (a >> 4 & 15).max(b >> 4 & 15) << 4 | (a >> 20 & 15).max(b >> 20 & 15) << 20
 }
-/// `LightCoordsUtil.lightCoordsWithEmission` (a quad's element light emission).
-pub(super) fn with_emission(coords: u32, emission: u8) -> u32 {
-    if emission == 0 {
+/// `LightCoordsUtil.lightCoordsWithEmission` (a quad's element light emission), with
+/// NeoForge's separate block and sky minimums: `[emission; 2]` is vanilla's.
+pub(super) fn with_min(coords: u32, [block, sky]: [u8; 2]) -> u32 {
+    if block == 0 && sky == 0 {
         return coords;
     }
-    let e = u32::from(emission);
-    (coords >> 4 & 15).max(e) << 4 | (coords >> 20 & 15).max(e) << 20
+    (coords >> 4 & 15).max(u32::from(block)) << 4 | (coords >> 20 & 15).max(u32::from(sky)) << 20
 }
 /// `LightCoordsUtil.smoothBlend`: zero samples take the centre; samples without
 /// sky light borrow the centre's sky.
@@ -83,9 +83,17 @@ fn weighted_blend(c: [u32; 4], w: [f32; 4]) -> u32 {
     };
     channel(0) | channel(16) << 16
 }
-/// `ARGB.gray` channel: `Mth.floor(brightness * 255)`.
+/// `ARGB.gray` channel: `Mth.floor(brightness * 255)`. Without the `floorf`
+/// call x86-64's baseline instruction set makes of `f32::floor`: truncation,
+/// one lower where that rounded a negative value up (saturating as `as` does).
 pub(super) fn gray(brightness: f32) -> i32 {
-    (brightness * 255.0).floor() as i32
+    let v = brightness * 255.0;
+    let whole = v as i32;
+    if whole as f32 > v {
+        whole.saturating_sub(1)
+    } else {
+        whole
+    }
 }
 /// One channel of `ARGB.scaleRGB(color, float)`.
 pub(super) fn scale(channel: i32, by: f32) -> i32 {
@@ -406,6 +414,28 @@ mod tests {
         );
     }
     #[test]
+    fn gray_floors_like_f32_floor() {
+        let mut values = vec![
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            -0.0,
+            1.0,
+            -1.0,
+            1e10,
+            -1e10,
+        ];
+        for bits in (0..u32::MAX).step_by(7919) {
+            values.push(f32::from_bits(bits));
+        }
+        for i in -3000..3000 {
+            values.push(i as f32 / 1024.0);
+        }
+        for v in values {
+            assert_eq!(gray(v), (v * 255.0).floor() as i32, "{v:e}");
+        }
+    }
+    #[test]
     fn colour_arithmetic_matches_argb_helpers() {
         assert_eq!(gray(1.0), 255);
         assert_eq!(gray(0.8), 204);
@@ -416,9 +446,15 @@ mod tests {
     }
     #[test]
     fn emission_raises_both_channels_and_drops_fractions() {
-        assert_eq!(with_emission(0x0087_0013, 0), 0x0087_0013);
-        assert_eq!(with_emission(0x0087_0013, 3), packed(3, 8));
+        assert_eq!(with_min(0x0087_0013, [0; 2]), 0x0087_0013);
+        assert_eq!(with_min(0x0087_0013, [3; 2]), packed(3, 8));
         assert_eq!(max_coords(packed(3, 9), packed(7, 2)), packed(7, 9));
+    }
+    #[test]
+    fn block_and_sky_minimums_raise_their_own_channel() {
+        assert_eq!(with_min(0x0087_0013, [15, 0]), packed(15, 8));
+        assert_eq!(with_min(0x0087_0013, [0, 15]), packed(1, 15));
+        assert_eq!(with_min(0x0087_0013, [15, 15]), packed(15, 15));
     }
     #[test]
     fn flat_light_reads_the_neighbour_a_face_looks_at() {

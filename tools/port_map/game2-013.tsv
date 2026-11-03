@@ -12,7 +12,7 @@ CopperGolemStatueBlock.getStateForPlacement	port	crates/horizon-world/src/level/
 CopperGolemStatueBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
 CopperGolemStatueBlock.updatePose	inline	crates/horizon-world/src/level/interact.rs::Behaviours::turn_statue	become-statue sound, pose cycle and block_change game event are folded into turn_statue
 CopperGolemStatueBlock.isPathfindable	skip:data		path types come from the per-state path data (mobs/path.rs)
-CopperGolemStatueBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	gap: player: the picked statue does not get its pose in block_state, so a middle-click pick gives it standing
+CopperGolemStatueBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	the statue's pose goes into the item's block_state (copper_golem_pose), picked with or without the block data
 CopperGolemStatueBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
 CopperGolemStatueBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	statue arm runs waterlogged_tick then the default shape update
 CrafterBlock.getAnalogOutputSignal	port	crates/horizon-client/src/game/machines.rs::Containers::signal	crafter signal is the filled or disabled slot count from the block entity
@@ -25,7 +25,7 @@ CraftingTableBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.r
 CreakingHeartBlock.getTicker	port	crates/horizon-world/src/level/creaking.rs::Sim::heart_tick	scheduled heart tick; the uprooted check is done inside heart_update_state
 CreakingHeartBlock.animateTick	port	crates/horizon-client/src/animate_tick.rs::step	ticked in #3516; `CreakingHeartBlock.animateTick` is cited at crates/horizon-client/src/animate_tick.rs:104
 CreakingHeartBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	CreakingHeart arm schedules the 1-tick heart update then the default shape
-CreakingHeartBlock.isSurroundedByLogs	missing		player: the six-side pale oak log check only gates the idle creak sound in animateTick
+CreakingHeartBlock.isSurroundedByLogs	port	crates/horizon-client/src/mobs/creaking_heart.rs::has_required_logs	the six sides must be pale oak logs; a heart without them spawns no creaking
 CreakingHeartBlock.createBlockStateDefinition	skip:data		axis, creaking_heart_state and natural properties come from the block state tables
 CreakingHeartBlock.tryAwardExperience	inline	crates/horizon-client/src/game/creaking.rs::Game::creaking_heart_broken	natural heart drops 20-24 xp orbs when broken by a player outside creative and spectator
 CreakingHeartBlock.getAnalogOutputSignal	port	crates/horizon-client/src/mobs/creaking_heart.rs::output_signal	gap: minor: distance-based signal, no explicit uprooted check; a heart with no creaking or protector gives 0
@@ -90,8 +90,8 @@ DriedGhastBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::
 DriedGhastBlock.tickWaterlogged	inline	crates/horizon-world/src/level/timeline.rs::Sim::dried_ghast_tick	waterlogged branch: transition sound and hydration plus one, or the ghastling spawn event at full hydration
 DriedGhastBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	DriedGhast arm: waterlogged from the spot and facing opposite the player
 DriedGhastBlock.getFluidState	skip:data		waterlogged water source comes from the per-state fluid facts table (Level::fluid)
-DriedGhastBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	gap: player: waterlogs the block like the generic path, but plays no dried ghast place-in-water sound
-DriedGhastBlock.setPlacedBy	missing		player: no dried ghast placement sound is played on placing it (no dried_ghast place or place-in-water sound id is referenced)
+DriedGhastBlock.placeLiquid	port	crates/horizon-world/src/level/fluids.rs::Sim::place_liquid	waterlogged through the generic path, then its own block.dried_ghast.place_in_water sound
+DriedGhastBlock.setPlacedBy	port	crates/horizon-world/src/level/place.rs::Sim::set_placed_by	
 EndGatewayBlock.getPortalDestination	port	crates/horizon-client/src/game/end.rs::Game::gateway_job	gap: minor: the thrown ender pearl branch (no relative flags) is not read, only the player travels through gateways here
 EndPortalFrameBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	EndPortalFrame arm: facing opposite the player and eye set to false
 EndPortalFrameBlock.rotate	skip:data		rotation results come from the exported BlockState rotate table (worldgen/structure.rs)
@@ -107,7 +107,7 @@ FarmlandBlock.canSurvive	port	crates/horizon-world/src/level/survive.rs::Sim::ca
 FarmlandBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Farmland arm: the base block when farmland cannot survive at the spot
 FarmlandBlock.tick	port	crates/horizon-world/src/level/tick.rs::Sim::tick_block	Farmland arm turns the block to its base when it cannot survive
 FarmlandBlock.randomTick	port	crates/horizon-world/src/level/tick.rs::Sim::farmland_random_tick	moisture falls or rises with water in reach and rain above, else turns to base
-FarmlandBlock.turnToBaseBlock	port	crates/horizon-world/src/level/tick.rs::Sim::turn_to_base_block	gap: player: entities standing on it are not pushed up when it turns to dirt (pushEntitiesUp is not read)
+FarmlandBlock.turnToBaseBlock	port	crates/horizon-world/src/level/tick.rs::Sim::turn_to_base_block	the base block is set and Block.pushEntitiesUp goes out as the push_entities_up block event
 FarmlandBlock.isNearWater	inline	crates/horizon-world/src/level/tick.rs::Sim::farmland_random_tick	gap: minor: the 9x2x9 water search is inline and tests the water fluid only, not canBeHydrated
 FenceBlock.isSameFence	inline	crates/horizon-world/src/level/shapes.rs::Sim::fence_connects_to	the same-fence test (fence tag and wooden match) is inline in fence_connects_to
 FenceBlock.getStateForPlacement	port	crates/horizon-world/src/level/place.rs::Sim::placement_class	Fence arm: each horizontal side connects per neighbour and waterlogged from the spot
@@ -126,7 +126,7 @@ FireBlock.setFlammable	skip:data		flammability odds are data (burn odds table re
 FireBlock.bootStrap	skip:data		registry bootstrap of the flammable blocks; Horizon reads the odds from data tables
 FlowerPotBlock.useItemOn	port	crates/horizon-world/src/level/interact.rs::Behaviours::use_item_on	a plant on an empty flower pot pots it, awarding pot_flower and consuming 1 plant; non-empty pot with a plant CONSUMEs
 FlowerPotBlock.useWithoutItem	port	crates/horizon-world/src/level/interact.rs::Sim::use_without_item	FlowerPot arm: non-empty pot gives the plant back and resets to flower_pot; empty pot CONSUMEs
-FlowerPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::clone_item_stack	potted plant picks as the plant item, empty pot as flower_pot
+FlowerPotBlock.getCloneItemStack	port	crates/horizon-client/src/game/block_items.rs::Game::picked_stack	potted plant picks as the plant item, empty pot as flower_pot
 FlowerPotBlock.updateShape	port	crates/horizon-world/src/level/shapes.rs::Sim::update_shape_class	FlowerPot arm: breaks when the block under it stops supporting it
 GrassBlock.isValidBonemealTarget	port	crates/horizon-world/src/level/bonemeal.rs::Sim::bonemeal_valid	grass arm: air above and inside build height
 GrassBlock.stopBonemealSpread	inline	crates/horizon-world/src/level/bonemeal.rs::Sim::grass_bonemeal	the per-step stop test (grass below, full collision at the spot) is inline in the attempt loop

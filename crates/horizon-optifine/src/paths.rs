@@ -15,13 +15,23 @@ use std::path::{Path, PathBuf};
 /// The extension is the caller's: OptiFine adds `.png` to textures that have none.
 ///
 /// `None` when the path would leave the resource root or is malformed: a `..` or `.` segment, an
-/// empty one (`a//b`, a leading `/`), as vanilla's resource paths refuse them. Callers join the
-/// result onto the overlay root, so a pack must never name a file outside it.
+/// empty one (`a//b`, a leading `/`), as vanilla's resource paths refuse them, or a `\` (see
+/// [`valid`]). Callers join the result onto the overlay root, so a pack must never name a file
+/// outside it.
 pub fn resolve(props: &str, value: &str) -> Option<String> {
-    let path = resolve_unchecked(props, value);
+    in_root(resolve_unchecked(props, value))
+}
+
+/// Whether a resource path stays in the root: no `.`, `..` or empty segment, and no `\` (a
+/// separator on Windows, where `..\..` would climb).
+pub fn valid(path: &str) -> bool {
     path.split('/')
-        .all(|segment| !matches!(segment, "" | "." | ".."))
-        .then_some(path)
+        .all(|segment| !matches!(segment, "" | "." | "..") && !segment.contains('\\'))
+}
+
+/// `path` when it stays inside the resource root ([`valid`]).
+pub(crate) fn in_root(path: String) -> Option<String> {
+    valid(&path).then_some(path)
 }
 
 fn resolve_unchecked(props: &str, value: &str) -> String {
@@ -50,6 +60,12 @@ fn resolve_unchecked(props: &str, value: &str) -> String {
 /// `assets/*/mcpatcher/<feature>/` of `root`, as sorted resource paths. `feature` is a folder
 /// (`ctm`, `cit`, `random/entity`, `sky/world0`).
 pub fn properties_files(root: &Path, feature: &str) -> Vec<String> {
+    properties_files_in(root, &["optifine", "mcpatcher"], feature)
+}
+
+/// `properties_files` under other top folders too, for a feature a mod reads from its own
+/// (CIT Resewn's `citresewn/cit/`).
+pub fn properties_files_in(root: &Path, tops: &[&str], feature: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let Ok(namespaces) = fs::read_dir(root.join("assets")) else {
@@ -57,11 +73,34 @@ pub fn properties_files(root: &Path, feature: &str) -> Vec<String> {
     };
     for ns in namespaces.flatten() {
         let ns = ns.file_name().to_string_lossy().into_owned();
-        for top in ["optifine", "mcpatcher"] {
+        for top in tops {
             let base = format!("assets/{ns}/{top}/{feature}");
-            walk(&root.join(&base), &base, 0, &mut seen, &mut out);
+            walk(
+                &root.join(&base),
+                &base,
+                &[".properties"],
+                0,
+                &mut seen,
+                &mut out,
+            );
         }
     }
+    out.sort();
+    out
+}
+
+/// The files under `root/<dir>` (`assets/minecraft/optifine/random`) whose names end in one of
+/// `endings`, as paths from `root`, sorted. Links are followed as [`properties_files`] does.
+pub fn files_under(root: &Path, dir: &str, endings: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    walk(
+        &root.join(dir),
+        dir,
+        endings,
+        0,
+        &mut HashSet::new(),
+        &mut out,
+    );
     out.sort();
     out
 }
@@ -70,7 +109,26 @@ pub fn properties_files(root: &Path, feature: &str) -> Vec<String> {
 /// `PATH_MAX`.
 const MAX_DEPTH: usize = 16;
 
-fn walk(dir: &Path, rel: &str, depth: usize, seen: &mut HashSet<PathBuf>, out: &mut Vec<String>) {
+fn walk(
+    dir: &Path,
+    rel: &str,
+    endings: &[&str],
+    depth: usize,
+    seen: &mut HashSet<PathBuf>,
+    out: &mut Vec<String>,
+) {
+    // A prepared root's folder: from its data file, without listing the disk.
+    if depth == 0
+        && let Some(files) = horizon_core::prepared_files::files_under(dir)
+    {
+        out.extend(
+            files
+                .into_iter()
+                .filter(|file| endings.iter().any(|end| file.ends_with(end)))
+                .map(|file| format!("{rel}/{file}")),
+        );
+        return;
+    }
     // Links are followed (overlay folders are links into the packs and vanilla), so a link back
     // to a parent would loop: each real folder is read once, and never deeper than MAX_DEPTH.
     if depth > MAX_DEPTH || !fs::canonicalize(dir).is_ok_and(|real| seen.insert(real)) {
@@ -84,8 +142,8 @@ fn walk(dir: &Path, rel: &str, depth: usize, seen: &mut HashSet<PathBuf>, out: &
         let rel = format!("{rel}/{name}");
         // `metadata` follows links: overlay folders are links into the packs and vanilla.
         match fs::metadata(e.path()) {
-            Ok(m) if m.is_dir() => walk(&e.path(), &rel, depth + 1, seen, out),
-            Ok(_) if name.ends_with(".properties") => out.push(rel),
+            Ok(m) if m.is_dir() => walk(&e.path(), &rel, endings, depth + 1, seen, out),
+            Ok(_) if endings.iter().any(|end| name.ends_with(end)) => out.push(rel),
             _ => {}
         }
     }
@@ -130,6 +188,9 @@ mod tests {
             "a//b",
             "/etc/passwd",
             "a/./b",
+            "..\\..\\x.jpm",
+            "~/..\\..\\x",
+            "..\\..\\x.png",
         ] {
             assert_eq!(resolve(props, bad), None, "{bad}");
         }

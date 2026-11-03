@@ -299,6 +299,7 @@ impl SpriteAnimator {
         uploads: &mut Uploads,
         tick: u64,
         active: Option<&[u64]>,
+        timing: Option<&mut super::pack_timing::PassTiming>,
     ) {
         if self.collect(tick, active) == 0 {
             return;
@@ -341,7 +342,7 @@ impl SpriteAnimator {
         }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Animated sprites"),
-            timestamp_writes: None,
+            timestamp_writes: timing.and_then(|t| t.compute_writes("Animated sprites")),
         });
         pass.set_pipeline(pipeline);
         for group in &mut self.groups {
@@ -734,7 +735,7 @@ mod tests {
     }
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
@@ -859,7 +860,7 @@ mod tests {
         for tick in [0, 0, 1, 2, 3, 4, 7, 7, 12, 30] {
             let mut encoder = device.create_command_encoder(&Default::default());
             let shown: Vec<_> = animator.sprites.iter().map(|s| s.shown).collect();
-            animator.animate(&mut encoder, &mut uploads, tick, None);
+            animator.animate(&mut encoder, &mut uploads, tick, None, None);
             writes.push(
                 animator
                     .sprites

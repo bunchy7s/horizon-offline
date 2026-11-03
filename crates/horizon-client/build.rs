@@ -2,6 +2,11 @@
 //! resource 1: Explorer and the task bar show it, and the window takes it as its icon.
 //! The optional Segment Heap manifest is embedded in the same resource compilation.
 fn main() {
+    let root =
+        std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../..");
+    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    horizon_mod_api_gen::generate(&root, &out_dir, horizon_mod_api_gen::Target::Client)
+        .expect("generating native mod API");
     let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap_or_default();
     let ico = format!("{dir}/../../packaging/icons/horizon.ico");
     println!("cargo:rerun-if-changed={ico}");
@@ -24,7 +29,15 @@ fn main() {
             resource.set_manifest_file(&manifest);
         }
         if let Err(e) = resource.compile() {
-            panic!("embedding Windows resources: {e}");
+            // The GNU toolchain's `windres` (the launcher's mod builds use it) can't take a path
+            // with a space, and a Windows user name often has one: such a build goes on without
+            // the icon. Release builds run in CI, where the icon stays required.
+            if std::env::var_os("CI").is_some() {
+                panic!("embedding Windows resources: {e}");
+            }
+            println!(
+                "cargo:warning=building without Horizon's icon: embedding Windows resources failed: {e}"
+            );
         }
     }
 }

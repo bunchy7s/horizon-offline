@@ -117,6 +117,8 @@ fn undead(s: Species) -> bool {
             | Species::Zoglin
             | Species::SkeletonHorse
             | Species::ZombieHorse
+            | Species::CamelHusk
+            | Species::ZombieNautilus
     )
 }
 fn arthropod(s: Species) -> bool {
@@ -188,8 +190,9 @@ pub fn protection(m: &Mob, kind: DamageKind) -> f32 {
     protection_points(g, kind).min(20.0)
 }
 pub fn protection_points(g: &Gear, kind: DamageKind) -> f32 {
-    // Protection's `damage_protection` skips #bypasses_invulnerability.
-    if kind == DamageKind::Generic || kind.bypasses_invulnerability() {
+    // Protection's `damage_protection` skips only #bypasses_invulnerability;
+    // plain `generic` damage (the `/damage` default) is protected like any other.
+    if kind.bypasses_invulnerability() {
         return 0.0;
     }
     let fire = matches!(
@@ -253,6 +256,9 @@ mod tests {
         assert_eq!(damage_bonus(&l, Some(Species::Zombie)), 5.0);
         assert_eq!(damage_bonus(&l, Some(Species::Spider)), 2.5);
         assert_eq!(damage_bonus(&l, None), 0.0);
+        for s in [Species::CamelHusk, Species::ZombieNautilus] {
+            assert_eq!(damage_bonus(&l, Some(s)), 5.0);
+        }
     }
     #[test]
     fn protections_count_by_damage_kind() {
@@ -263,7 +269,9 @@ mod tests {
         assert_eq!(protection_points(&g, DamageKind::MobAttack), 4.0);
         assert_eq!(protection_points(&g, DamageKind::Fall), 16.0);
         assert_eq!(protection_points(&g, DamageKind::OnFire), 8.0);
-        assert_eq!(protection_points(&g, DamageKind::Generic), 0.0);
+        assert_eq!(protection_points(&g, DamageKind::Generic), 4.0);
+        assert_eq!(protection_points(&g, DamageKind::GenericKill), 0.0);
+        assert_eq!(protection_points(&g, DamageKind::OutOfWorld), 0.0);
     }
     #[test]
     fn upgrading_keeps_the_higher_level() {

@@ -170,7 +170,7 @@ def main():
         return
     ctl = Path(args.build).resolve() / "horizon-ctl"
     if not ctl.exists():
-        sys.exit(f"{ctl} missing: cargo build --release -p horizon-client --bins")
+        sys.exit(f"{ctl} missing: cargo build --release -p horizon-client -p horizon-client-lib --bins")
     cwd = ROOT / ".local/graphics-bench"
     shutil.rmtree(cwd / "saves" / WORLD, ignore_errors=True)
     cwd.mkdir(parents=True, exist_ok=True)

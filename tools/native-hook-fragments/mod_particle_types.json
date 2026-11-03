@@ -1,5 +1,0 @@
-{
-  "hooks": [],
-  "rust_summary": "a mod's own particle types for `native_send_particles`\n(`ParticleOptions::named`).",
-  "doc_summary": "native mod particle types to `native_send_particles`: `ParticleOptions::named(\"mymod:spark\")` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`\"textures\": [\"mymod:spark/1\", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes). Bundles that use it need `\"hooks\": @API:mod_particle_types@`."
-}

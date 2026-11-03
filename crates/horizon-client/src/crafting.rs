@@ -14,19 +14,86 @@ use horizon_world::nbt::Tag;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
+
+/// A recipe ingredient of a mod's own kind: the entry named a type in a
+/// namespace outside `minecraft:`, and the loader kept it for this call.
+/// The kind and the JSON the file wrote are here; fill `items` with the
+/// item ids the ingredient matches (item ids only: components are not
+/// checked here; a match-time hook follows separately). Duplicates are
+/// removed keeping first-seen order. The hook may be called more than
+/// once per recipe; the answer must be the same. An unclaimed kind
+/// leaves the list empty and the recipe fails, as an unknown kind does.
+/// API 166.
+#[inline(never)]
+pub fn native_ingredient(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    items: &mut Vec<String>,
+) {
+    crate::native_client_hooks::ingredient(kind, data, items);
+}
+
+/// A mod's own ingredient kind, matching a concrete stack at craft time:
+/// the ingredient's `test` calls here with the kind, its JSON and the
+/// stack being matched, `accept` already true (the load-time list named
+/// the item). Set `accept` to false to refuse the stack — its components
+/// are the usual reason. The hook may be called many times a craft; the
+/// answer must be the same for the same stack. API @API:ingredient_test@.
+#[inline(never)]
+pub fn native_ingredient_test(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    crate::native_client_hooks::ingredient_test(kind, data, stack, accept);
+}
+
+/// Keep first-seen order, drop the rest.
+fn dedup_keep_order(items: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|i| seen.insert(i.clone()));
+}
 
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
-pub struct Ingredient(pub HashSet<String>, pub Vec<String>);
+pub struct Ingredient {
+    /// The items it accepts, however the source shape named them.
+    pub items: HashSet<String>,
+    /// The same items in `HolderSet` order (`display`).
+    pub order: Vec<String>,
+    /// A mod's own kind, for matching at craft time: the kind and its
+    /// JSON, as the load-time hook saw them (`native_ingredient_test`).
+    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    /// NeoForge's shapes, with their children parsed: matching a concrete
+    /// stack asks each child its own `test` (a mod's kind among them),
+    /// as on NeoForge — the flat list above only names items.
+    pub children: Option<(Shape, Vec<Self>)>,
+}
+
+/// How a shape's children combine at match time.
+#[derive(Clone, Debug)]
+pub enum Shape {
+    /// Any child matching the stack is enough.
+    Compound,
+    /// Every child must match it.
+    Intersection,
+    /// The first child must, and the second must not.
+    Difference,
+}
 impl Ingredient {
     /// The items of a list, in order.
     pub fn of(items: Vec<String>) -> Self {
-        Self(items.iter().cloned().collect(), items)
+        Self {
+            items: items.iter().cloned().collect(),
+            order: items,
+            custom: None,
+            children: None,
+        }
     }
     pub fn parse(v: &Value, items: &Items) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
@@ -65,6 +132,9 @@ impl Ingredient {
                 .or_else(|| o.get("ingredients"))
                 .and_then(Value::as_array)
         };
+        // The shapes' parsed children, for matching at craft time: every
+        // arm either fills it or returns.
+        let nested;
         let kept = match kind {
             // `CompoundIngredient`: any of its children matching the stack
             // is enough — the union of their items.
@@ -75,12 +145,13 @@ impl Ingredient {
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
-                    for item in &sub.1 {
+                    for item in &sub.order {
                         if !seen.contains(item) {
                             seen.push(item.clone());
                         }
                     }
                 }
+                nested = Some((Shape::Compound, subs));
                 seen
             }
             // `IntersectionIngredient`: every child must match the same
@@ -90,10 +161,11 @@ impl Ingredient {
                     .iter()
                     .map(|s| Self::parse(s, items))
                     .collect::<Option<_>>()?;
+                nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
-                    .1
+                    .order
                     .iter()
-                    .filter(|i| subs[1..].iter().all(|s| s.0.contains(*i)))
+                    .filter(|i| subs[1..].iter().all(|s| s.items.contains(*i)))
                     .cloned()
                     .collect()
             }
@@ -101,18 +173,62 @@ impl Ingredient {
             "neoforge:difference" => {
                 let base = Self::parse(o.get("base")?, items)?;
                 let gone = Self::parse(o.get("subtracted")?, items)?;
-                base.1
+                nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
+                base.order
                     .iter()
-                    .filter(|i| !gone.0.contains(*i))
+                    .filter(|i| !gone.items.contains(*i))
                     .cloned()
                     .collect()
             }
+            // A mod's own kind: the hook answers with the item list it
+            // matches; a bare type name is minecraft's own, not a mod's.
+            k if k.contains(':') && !k.starts_with("minecraft:") => {
+                let mut list = Vec::new();
+                native_ingredient(k, o, &mut list);
+                dedup_keep_order(&mut list);
+                // The kind and its JSON stay with the ingredient: the
+                // load-time list only names items, and matching a concrete
+                // stack (its components) is the match-time hook's.
+                return (!list.is_empty()).then(|| Self {
+                    order: list.clone(),
+                    items: list.iter().cloned().collect(),
+                    custom: Some((k.to_owned(), o.clone())),
+                    children: None,
+                });
+            }
             _ => return None,
         };
-        (!kept.is_empty()).then(|| Self::of(kept))
+        (!kept.is_empty()).then(|| Self {
+            items: kept.iter().cloned().collect(),
+            order: kept,
+            custom: None,
+            children: nested,
+        })
     }
+    /// `Ingredient.test`: a stack the list names — and for a mod's own
+    /// kind, one the match-time hook accepts (`ICustomIngredient.test`).
     pub fn test(&self, stack: &ItemStack) -> bool {
-        self.0.contains(&*stack.item)
+        match &self.children {
+            // Each child its own `test`, as on NeoForge — a mod's kind
+            // among them answers through its hook.
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(stack)),
+            Some((Shape::Difference, kids)) => {
+                kids.first().is_some_and(|k| k.test(stack))
+                    && kids.get(1).is_none_or(|k| !k.test(stack))
+            }
+            None => {
+                if !self.items.contains(&*stack.item) {
+                    return false;
+                }
+                if let Some((kind, data)) = &self.custom {
+                    let mut accept = true;
+                    native_ingredient_test(kind, data, stack, &mut accept);
+                    return accept;
+                }
+                true
+            }
+        }
     }
 }
 /// `PlacementInfo`: the ingredients to find and, per recipe slot, the index
@@ -134,7 +250,7 @@ impl Placement {
         };
         for cell in cells {
             match cell {
-                Some(i) if i.0.is_empty() => return Self::default(),
+                Some(i) if i.items.is_empty() => return Self::default(),
                 Some(i) => {
                     out.slots.push(out.ingredients.len() as i32);
                     out.ingredients.push(i);
@@ -392,7 +508,7 @@ impl Special {
                     // The result keeps the input's item: any item of the ingredient.
                     let all: Vec<ItemStack> = if result.item.is_none() {
                         input
-                            .1
+                            .order
                             .iter()
                             .map(|item| {
                                 let mut stack = made.clone();
@@ -412,7 +528,7 @@ impl Special {
                 result,
             } => {
                 // DyedSlotDemo: the targets cycle fastest, 16 stacks at most.
-                let (targets, dyes) = (&target.1, &dye.1);
+                let (targets, dyes) = (&target.order, &dye.order);
                 let all: Vec<ItemStack> = (0..targets.len() * dyes.len())
                     .map(|i| {
                         let mut made = result.create();
@@ -452,7 +568,7 @@ impl Special {
                 let all = potions(result.create());
                 // The source ingredient is shown as a lingering potion of each kind.
                 let lingering = source
-                    .1
+                    .order
                     .iter()
                     .flat_map(|item| potions(ItemStack::new(item, 1)))
                     .collect();
@@ -1176,49 +1292,16 @@ pub fn recipe_result(v: &Value) -> Option<ItemStack> {
     let template = Template::parse(v)?;
     template.item.is_some().then(|| template.create())
 }
-/// The `.json` files under a `recipe` folder, its subfolders' too, in id
-/// order: each one's path inside the folder without the extension (`a/b`, as a
-/// recipe id has it) and its file. An error when `dir` itself can't be read; a
-/// subfolder or an entry that can't be listed is warned and skipped, as
-/// vanilla's `PathPackResources` keeps what it found.
-pub(crate) fn recipe_files(dir: &Path) -> Result<Vec<(String, PathBuf)>> {
-    let mut files = Vec::new();
-    let mut stack = vec![fs::read_dir(dir)?];
-    while let Some(entries) = stack.pop() {
-        for entry in entries {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(e) => {
-                    log::warn!("Horizon: failed to list an entry of {}: {e}", dir.display());
-                    continue;
-                }
-            };
-            let path = entry.path();
-            if path.is_dir() {
-                match fs::read_dir(&path) {
-                    Ok(list) => stack.push(list),
-                    Err(e) => log::warn!("Horizon: failed to list {}: {e}", path.display()),
-                }
-            } else if path.extension().is_some_and(|e| e == "json") {
-                files.push(path);
-            }
-        }
-    }
-    let mut named: Vec<(String, PathBuf)> = files
-        .into_iter()
-        .map(|path| {
-            let inside = path.strip_prefix(dir).unwrap_or(&path).with_extension("");
-            let name: Vec<_> = inside.iter().map(|c| c.to_string_lossy()).collect();
-            (name.join("/"), path)
-        })
-        .collect();
-    // Vanilla lists resources by id, in a map keyed by it
-    // (`FallbackResourceManager`): `crushing` before `crushing/iron`, where
-    // a path's components put the subfolder's file first.
-    named.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(named)
-}
 /// The type of a recipe the game doesn't craft itself: one outside `minecraft`.
+/// A recipe's whole id from its name in the tables: vanilla's are kept bare
+/// (`oak_planks`), everyone else's whole (`mymod:crusher/iron`).
+pub fn recipe_id(name: &str) -> String {
+    if name.contains(':') {
+        name.to_owned()
+    } else {
+        format!("minecraft:{name}")
+    }
+}
 fn custom_type(v: &Value) -> Option<&str> {
     v["type"]
         .as_str()
@@ -1238,7 +1321,7 @@ pub struct Recipes {
     /// first lookup (furnaces look theirs up every tick).
     cook_index: std::sync::OnceLock<CookIndex>,
 }
-type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, usize>>;
+type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, Vec<usize>>>;
 /// `MinMaxBounds.Ints` as (min, max) with the given defaults.
 fn bounds(v: Option<&Value>, default: (i64, i64), open: (i64, i64)) -> (i64, i64) {
     match v {
@@ -1307,12 +1390,28 @@ fn matches_all(ingredients: &[Ingredient], stacks: &[&ItemStack]) -> bool {
         augment(i, ingredients, stacks, &mut owner, &mut seen)
     })
 }
+/// A resource id with its default namespace filled in — the whole id the
+/// book, the network copy and the advancements' JSON know a recipe by,
+/// whatever the caller passes. `sources` names a `minecraft:` recipe bare
+/// on purpose (vanilla's own ids); this puts the namespace back.
+pub fn qualified(id: &str) -> String {
+    if id.contains(':') {
+        id.to_owned()
+    } else {
+        format!("minecraft:{id}")
+    }
+}
+
 impl Recipes {
     pub fn load(root: &Path, items: &Items, overlay: &PackOverlay) -> Result<Self> {
-        let mut crafting = Vec::new();
-        let mut cooking = Vec::new();
-        let mut custom: HashMap<String, Vec<CustomRecipe>> = HashMap::new();
-        let mut meta = HashMap::new();
+        let sources = Self::sources(root, overlay)?;
+        Self::from_sources(root, items, overlay, sources)
+    }
+    /// The recipe files the tables are built from, each id once: vanilla's by
+    /// bare name, then the content mods' as `<ns>:<name>`, the world's packs'
+    /// over them (`overlay`), parsed, and only those whose load conditions
+    /// hold. A server sends some of them to its clients (`recipe_content`).
+    pub fn sources(root: &Path, overlay: &PackOverlay) -> Result<Vec<(String, Value)>> {
         // Vanilla's recipes by bare name, then content mods' as `<ns>:<name>`.
         let mut sources: Vec<(String, Vec<u8>)> = Vec::new();
         // NeoForge's load conditions: `mod_loaded` asks which mods' data is
@@ -1327,14 +1426,14 @@ impl Recipes {
             }
             mods
         };
-        for (name, p) in recipe_files(&root.join("data/minecraft/recipe"))? {
-            sources.push((name, fs::read(&p)?));
+        for file in &crate::json_folder::read(&root.join("data/minecraft/recipe"))?.files {
+            sources.push((file.name.clone(), file.bytes()?.to_vec()));
         }
         for namespace in crate::mod_content::namespaces(root) {
             let dir = root.join(format!("data/{namespace}/recipe"));
             if dir.is_dir() {
-                for (name, p) in recipe_files(&dir)? {
-                    sources.push((format!("{namespace}:{name}"), fs::read(&p)?));
+                for file in &crate::json_folder::read(&dir)?.files {
+                    sources.push((format!("{namespace}:{}", file.name), file.bytes()?.to_vec()));
                 }
             }
         }
@@ -1356,10 +1455,12 @@ impl Recipes {
                 None => sources.push((name, bytes)),
             }
         }
+        let filters = horizon_items::recipe_filters::RecipeFilters::load(root, overlay);
+        let mut parsed = Vec::with_capacity(sources.len());
         for (name, bytes) in sources {
             // Vanilla's RecipeManager logs a file that does not parse and
             // goes on ("Couldn't parse data file").
-            let v: Value = match serde_json::from_slice(&bytes) {
+            let mut v: Value = match serde_json::from_slice(&bytes) {
                 Ok(v) => v,
                 Err(e) => {
                     log::warn!("Horizon: recipe {name} not loaded: {e}");
@@ -1373,6 +1474,27 @@ impl Recipes {
             }) {
                 continue;
             }
+            // The data's recipe filters, over the final set.
+            if !filters.apply(&recipe_id(&name), &mut v) {
+                continue;
+            }
+            parsed.push((name, v));
+        }
+        Ok(parsed)
+    }
+    /// The tables from `sources` (`Recipes::sources`' shape); `root` and
+    /// `overlay` give the enchantment tags the tables keep.
+    pub fn from_sources(
+        root: &Path,
+        items: &Items,
+        overlay: &PackOverlay,
+        sources: Vec<(String, Value)>,
+    ) -> Result<Self> {
+        let mut crafting = Vec::new();
+        let mut cooking = Vec::new();
+        let mut custom: HashMap<String, Vec<CustomRecipe>> = HashMap::new();
+        let mut meta = HashMap::new();
+        for (name, v) in sources {
             if let Some(kind) = custom_type(&v) {
                 let id = if name.contains(':') {
                     name
@@ -1793,18 +1915,23 @@ impl Recipes {
             .map_or(0.0, |c| c.experience)
     }
     pub fn cook(&self, kind: &str, input: &ItemStack) -> Option<&Cooking> {
+        // Every recipe an item names, not just the first: a mod's match-time
+        // hook may refuse the one the first recipe would take (`Ingredient::test`).
         let index = self.cook_index.get_or_init(|| {
             let mut index = CookIndex::new();
             for (i, c) in self.cooking.iter().enumerate() {
                 let of_kind = index.entry(c.kind.clone()).or_default();
-                for item in &c.ingredient.0 {
-                    of_kind.entry(item.clone()).or_insert(i);
+                for item in &c.ingredient.items {
+                    of_kind.entry(item.clone()).or_default().push(i);
                 }
             }
             index
         });
-        let i = *index.get(kind)?.get(&*input.item)?;
-        self.cooking.get(i)
+        index
+            .get(kind)?
+            .get(&*input.item)?
+            .iter()
+            .find_map(|i| self.cooking.get(*i).filter(|c| c.ingredient.test(input)))
     }
     /// `cook` by scanning every recipe, as it was before the index.
     #[cfg(test)]
@@ -1819,6 +1946,7 @@ impl Recipes {
 mod tests {
     use super::*;
     use crate::banner::BannerLayer;
+    use std::fs;
 
     #[test]
     fn result_count_is_bounded_like_vanilla() {
@@ -1878,6 +2006,59 @@ mod tests {
     /// NeoForge's standard ingredient shapes resolve to their flat item
     /// lists; a kind the loader doesn't know still fails the file.
     #[test]
+    fn an_unclaimed_ingredient_kind_fails_and_dedup_keeps_order() {
+        let items = Items::for_tests(HashMap::new());
+        let json = |s: &str| serde_json::from_str::<Value>(s).unwrap();
+        assert!(
+            Ingredient::parse(&json(r#"{"type":"mymod:aspect","aspect":"fire"}"#), &items,)
+                .is_none()
+        );
+        assert!(
+            Ingredient::parse(&json(r#"{"type":"minecraft:future_shape"}"#), &items,).is_none()
+        );
+        assert!(Ingredient::parse(&json(r#"{"type":"aspect"}"#), &items,).is_none());
+        let mut list = vec!["b".to_string(), "a".to_string(), "b".to_string()];
+        dedup_keep_order(&mut list);
+        assert_eq!(list, vec!["b".to_string(), "a".to_string()]);
+    }
+
+    /// NeoForge's shapes keep their children, and matching a concrete
+    /// stack asks each child its own way — any for compound, all for
+    /// intersection, base-but-not-subtracted for difference. A mod's own
+    /// kind among the children answers through its hook the same way
+    /// (proven on a staged build).
+    #[test]
+    fn nested_shapes_test_each_child_their_own_way() {
+        let items = Items::for_tests(HashMap::new());
+        let parse = |s: &str| {
+            Ingredient::parse(&serde_json::from_str::<Value>(s).unwrap(), &items).unwrap()
+        };
+        let stack = |n: &str| ItemStack {
+            item: n.into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        let compound = parse(
+            r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:birch_planks"]}"#,
+        );
+        assert!(compound.children.is_some(), "the children stay with it");
+        assert!(compound.test(&stack("minecraft:oak_planks")));
+        assert!(compound.test(&stack("minecraft:birch_planks")));
+        assert!(!compound.test(&stack("minecraft:stone")));
+        let inter = parse(
+            r#"{"type":"neoforge:intersection","ingredients":["minecraft:oak_planks",["minecraft:oak_planks","minecraft:birch_planks"]]}"#,
+        );
+        assert!(inter.test(&stack("minecraft:oak_planks")));
+        assert!(!inter.test(&stack("minecraft:birch_planks")));
+        let diff = parse(
+            r#"{"type":"neoforge:difference","base":["minecraft:oak_planks","minecraft:birch_planks"],"subtracted":"minecraft:birch_planks"}"#,
+        );
+        assert!(diff.test(&stack("minecraft:oak_planks")));
+        assert!(!diff.test(&stack("minecraft:birch_planks")));
+    }
+
+    #[test]
     fn neoforge_ingredient_shapes_parse() {
         let mut tags = HashMap::new();
         tags.insert(
@@ -1897,7 +2078,7 @@ mod tests {
         )
         .unwrap();
         // The tag's items come from a HashSet: their order is not fixed.
-        let mut all = union.1.clone();
+        let mut all = union.order.clone();
         all.sort();
         assert_eq!(
             all,
@@ -1913,14 +2094,14 @@ mod tests {
             &items,
         )
         .unwrap();
-        assert_eq!(both.1, ["minecraft:oak_planks"]);
+        assert_eq!(both.order, ["minecraft:oak_planks"]);
         // Difference: the base without the subtracted.
         let no_oak = Ingredient::parse(
             &json(r##"{"type":"neoforge:difference","base":"#minecraft:planks","subtracted":"minecraft:oak_planks"}"##),
             &items,
         )
         .unwrap();
-        assert_eq!(no_oak.1, ["minecraft:birch_planks"]);
+        assert_eq!(no_oak.order, ["minecraft:birch_planks"]);
         // An empty intersection and an unknown kind fail the file, as today.
         let empty = Ingredient::parse(
             &json(
@@ -2161,6 +2342,44 @@ mod tests {
         let recipes = Recipes::load(&root, &items, &PackOverlay { files: &packs }).unwrap();
         let ids = &recipes.custom["mymod:crusher"];
         assert!(ids.iter().any(|r| r.id == "minecraft:pack_yes"));
+        let _ = fs::remove_dir_all(&root);
+    }
+    /// A pack's recipe filter removes a recipe and swaps a mod recipe's input
+    /// in the loaded tables, after the packs are merged.
+    #[test]
+    fn recipe_filters_remove_and_swap() {
+        let root = std::env::temp_dir().join(format!("horizon-filters-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let crusher = |input: &str| {
+            format!(
+                r#"{{"type":"mymod:crusher","input":"{input}","result":{{"id":"mymod:dust"}}}}"#
+            )
+            .into_bytes()
+        };
+        fs::write(
+            root.join("data/minecraft/recipe/iron.json"),
+            crusher("minecraft:iron_ingot"),
+        )
+        .unwrap();
+        fs::write(
+            root.join("data/minecraft/recipe/gold.json"),
+            crusher("minecraft:gold_ingot"),
+        )
+        .unwrap();
+        let filter = br##"{"filters":[
+            {"id":"minecraft:gold","remove":true},
+            {"type":"mymod:*","replace_input":{"from":"minecraft:iron_ingot","to":"#c:ingots/iron"}}
+        ]}"##;
+        let packs = [("recipe_filter/pack:f".to_owned(), vec![filter.to_vec()])];
+        let items = Items::for_tests(HashMap::new());
+        let recipes = Recipes::load(&root, &items, &PackOverlay { files: &packs }).unwrap();
+        let crushed = &recipes.custom["mymod:crusher"];
+        assert_eq!(
+            crushed.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            ["minecraft:iron"]
+        );
+        assert_eq!(crushed[0].json["input"], "#c:ingots/iron");
         let _ = fs::remove_dir_all(&root);
     }
     #[test]

@@ -8,11 +8,17 @@ use horizon_launcher::account::{self, Accounts, SignIn, SignInState};
 use horizon_launcher::backend::{self, Job, Logged};
 use horizon_launcher::instances;
 use serde_json::{json, Value};
-use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub const PROTOCOL: &str = "2025-06-18";
+/// What an agent reads before its first call.
+const INSTRUCTIONS: &str = "Manage Horizon, a Rust reimplementation of Minecraft Java Edition: install versions, prepare them from the player's own Minecraft, start the client or a dedicated server. Every tool is a horizon-launcher CLI command of the same name (mods_search is horizon-launcher mods search). Once play started the game, the game_* tools play it: game_state, game_ui (every widget of the open screen), game_click, game_goto, game_screenshot...";
+
+/// The revisions this server advertises: `horizon_mcp` serves them (`2026-07-28` stateless,
+/// `2025-06-18` for the clients that still open with `initialize`).
+fn server() -> horizon_mcp::Server<'static> {
+    horizon_mcp::Server::new("horizon-launcher", backend::VERSION, INSTRUCTIONS)
+}
 
 struct Session {
     server: Option<Logged>,
@@ -191,15 +197,19 @@ impl Session {
                 let accounts = Accounts::load();
                 let sign_in = self.sign_in.as_ref().map(|s| match s.state() {
                     SignInState::Starting => json!({ "state": "starting" }),
+                    SignInState::Working(phase) => json!({ "state": "working", "phase": phase }),
                     SignInState::Code(c) => json!({ "state": "waiting for the player", "link": c.verification_uri, "code": c.user_code }),
                     SignInState::Done(Ok(a)) => json!({ "state": "signed in", "name": a.name }),
                     SignInState::Done(Err(e)) => json!({ "state": "failed", "error": e }),
                 });
                 Ok(serde_json::to_string_pretty(&json!({
-                    "accounts": accounts.accounts.iter().map(|a| json!({ "name": a.name, "uuid": a.uuid })).collect::<Vec<_>>(),
+                    "accounts": accounts.accounts.iter().map(|a| json!({ "name": a.name, "uuid": a.uuid, "authentication": account::session::status(account::store(), &a.uuid) })).collect::<Vec<_>>(),
                     "plays_as": accounts.selected().map(|a| a.name.clone()),
                     "sign_in_configured": account::client_id().is_some(),
+                    // Sign-ins outlast the launcher: in the keychain, or in the secrets file
+                    // where it refused them (`secrets_file`: the file holds a sign-in).
                     "keychain": account::store().persistent(),
+                    "secrets_file": account::in_secrets_file(),
                     // Play needs an account that owns the game (the owner gate).
                     "owner": accounts.has_owner(account::store()),
                     "sign_in": sign_in,
@@ -255,15 +265,10 @@ impl Session {
         }
     }
 
+    /// The two tool methods; `horizon_mcp` answers the protocol's own (`initialize`,
+    /// `server/discover`) and frames these results for the revision the request speaks.
     fn handle(&mut self, method: &str, params: &Value) -> Result<Value, (i64, String)> {
         match method {
-            "initialize" => Ok(json!({
-                "protocolVersion": params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL),
-                "capabilities": { "tools": {} },
-                "serverInfo": { "name": "horizon-launcher", "version": backend::VERSION },
-                "instructions": "Manage Horizon, a Rust reimplementation of Minecraft Java Edition: install versions, prepare them from the player's own Minecraft, start the client or a dedicated server. Every tool is a horizon-launcher CLI command of the same name (mods_search is horizon-launcher mods search). Once play started the game, the game_* tools play it: game_state, game_ui (every widget of the open screen), game_click, game_goto, game_screenshot...",
-            })),
-            "ping" => Ok(json!({})),
             "tools/list" => {
                 let mut list = tools();
                 if let Some(game) = self.game() {
@@ -316,39 +321,34 @@ pub fn serve() -> Result<(), String> {
         sign_in: None,
         game: None,
     };
-    let stdin = std::io::stdin();
-    let mut stdout = std::io::stdout();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        if line.trim().is_empty() {
-            continue;
-        }
-        let reply = match serde_json::from_str::<Value>(&line) {
-            Err(e) => Some(
-                json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32700, "message": e.to_string() } }),
-            ),
-            Ok(msg) => {
-                let method = msg
-                    .get("method")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                let params = msg.get("params").cloned().unwrap_or(json!({}));
-                // Notifications (no id) get no reply.
-                msg.get("id").cloned().map(|id| match session.handle(method, &params) {
-                    Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-                    Err((code, message)) => json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }),
-                })
-            }
-        };
-        if let Some(reply) = reply {
-            writeln!(stdout, "{reply}")
-                .and_then(|_| stdout.flush())
-                .map_err(|e| e.to_string())?;
-        }
-    }
+    let served = server().serve(|method, params| session.handle(method, params));
     // The session is over: the server it started goes with it.
-    if let Some(mut server) = session.server.take() {
-        server.stop(Duration::from_secs(30));
+    if let Some(mut started) = session.server.take() {
+        started.stop(Duration::from_secs(30));
     }
-    Ok(())
+    served
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_server_advertises_what_it_serves() {
+        let reply = server()
+            .handle_line(
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": {} })
+                    .to_string(),
+                &mut |_: &str, _: &Value| Ok(json!({})),
+            )
+            .unwrap();
+        assert_eq!(
+            reply["result"]["supportedVersions"],
+            json!(horizon_mcp::VERSIONS)
+        );
+        assert_eq!(
+            reply["result"]["_meta"][horizon_mcp::SERVER_INFO_KEY]["name"],
+            "horizon-launcher"
+        );
+    }
 }

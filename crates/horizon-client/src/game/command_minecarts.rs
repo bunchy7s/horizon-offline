@@ -9,10 +9,7 @@ use super::{
     lan::LanHost,
     minecarts::{CartKind, Minecart},
 };
-use horizon_client::{
-    command_block::Mode,
-    text::{self, Text},
-};
+use horizon_client::{command_block::Mode, text::Text};
 use horizon_protocol::packets::play::{self, Serverbound as S};
 
 impl Game<'_> {
@@ -93,7 +90,7 @@ impl Game<'_> {
     /// `CommandSourceStack.sendSuccess` from a command minecart: its output
     /// when `send_command_feedback`, and `broadcastToAdmins` when
     /// `command_block_output`.
-    pub(super) fn cart_command_success(&mut self, id: u32, message: Text) {
+    pub(super) fn cart_command_success(&mut self, id: u32, message: Text, broadcast: bool) {
         let Some(name) = self
             .command_cart_mut(id)
             .filter(|c| c.command.track_output)
@@ -105,11 +102,8 @@ impl Game<'_> {
         if feedback {
             self.cart_command_output(id, message.clone());
         }
-        if feedback && self.ui.rules.bool("command_block_output") {
-            let broadcast = Text::translate("chat.type.admin", &[name, message])
-                .with_color(text::GRAY)
-                .italic();
-            self.system_message(broadcast);
+        if broadcast && feedback && self.ui.rules.bool("command_block_output") {
+            self.broadcast_source_to_admins(name, message);
         }
     }
 
@@ -164,7 +158,7 @@ impl Game<'_> {
             return;
         };
         let allowed = g.creative() && g.permission >= 2;
-        self.as_guest(host, conn, |game| {
+        self.as_guest_messaged(host, conn, |game| {
             if allowed {
                 game.apply_cart_command(p.entity as u32, p.command, p.track_output);
             } else {

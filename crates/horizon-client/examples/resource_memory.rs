@@ -9,6 +9,7 @@
 //! and the process RSS (what the allocator holds on to). On macOS it ends
 //! with `footprint`'s physical footprint, the number the OS charges: RSS also
 //! counts freed pages the allocator marked reusable.
+extern crate horizon_client_lib as horizon_client;
 use horizon_client::{
     assets::Assets, biome::Biomes, blocks::BlockFacts, collisions, crafting::Recipes, items::Items,
     light::LightTables, mesher::MeshTables, models, motion::MotionResources,

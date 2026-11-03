@@ -71,7 +71,8 @@ pub fn stared_at(m: &Mob, w: &MobWorld) -> bool {
             Vec3::new(m.position.x, m.eye_y(), m.position.z),
         )
 }
-/// Enderman.teleport(x, y, z): drop to standing ground, require free space without liquid.
+/// Enderman.teleport(x, y, z): never while riding something; drop to standing
+/// ground, require free space without liquid.
 pub fn teleport_to(
     m: &mut Mob,
     w: &MobWorld,
@@ -80,6 +81,22 @@ pub fn teleport_to(
     z: f64,
     events: &mut Vec<MobEvent>,
 ) -> bool {
+    if m.extra.passenger {
+        return false;
+    }
+    // LivingEntity.randomTeleport: WorldBorder.clampVec3ToBound keeps the
+    // target inside the border (Mth.clamp, 1.0E-5F inside the far edges).
+    let (x, z) = match w.border {
+        Some(border) => {
+            let [min_x, min_z, max_x, max_z] = border.bounds(0.0);
+            let clamp = |v: f64, low: f64, high: f64| if v < low { low } else { v.min(high) };
+            (
+                clamp(x, min_x, max_x - f64::from(1.0e-5_f32)),
+                clamp(z, min_z, max_z - f64::from(1.0e-5_f32)),
+            )
+        }
+        None => (x, z),
+    };
     let (bx, bz) = (x.floor() as i32, z.floor() as i32);
     if !w.world.loaded(bx, bz) {
         return false;
@@ -219,6 +236,13 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.extra.counter2 > 0 {
         let tries = m.extra.counter2;
         m.extra.counter2 = 0;
+        // repeatedlyTryToTeleport (64 tries) returns before any draw while riding;
+        // a single `teleport()` still draws its target first.
+        let tries = if tries > 1 && m.extra.passenger {
+            0
+        } else {
+            tries
+        };
         for _ in 0..tries {
             if teleport_random(m, w, events) {
                 break;
@@ -335,7 +359,7 @@ impl Goal for LookForPlayer {
                     1.0,
                 ));
             }
-        } else if m.ai.target == Some(Who::Player) {
+        } else if m.ai.target == Some(Who::Player) && !m.extra.passenger {
             if stared_at(m, cx.w) {
                 if m.distance_sqr(p.position) < 16.0 {
                     teleport_random(m, cx.w, cx.events);
@@ -521,6 +545,104 @@ mod tests {
         }
     }
 
+    /// Enderman.teleport(x, y, z) fails for a passenger (#4865: one in a boat
+    /// played the teleport sound every tick and snapped back to its seat).
+    /// `repeatedlyTryToTeleport` returns before drawing; `teleport()` still
+    /// draws its three values first.
+    #[test]
+    fn a_seated_enderman_never_teleports() {
+        let build = |world: &mut crate::world::World, registry: &BlockRegistry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for cx in -2..2 {
+                for cz in -2..2 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -32..32 {
+                for z in -32..32 {
+                    world.set(x, -1, z, stone).unwrap();
+                }
+            }
+        };
+        crate::mobs::world::with_built_test_world(&[], build, |w, _| {
+            let mut events = Vec::new();
+            let mut free = enderman();
+            assert!((0..64).any(|_| teleport_random(&mut free, w, &mut events)));
+            assert!(!events.is_empty());
+
+            let mut seated = enderman();
+            seated.extra.passenger = true;
+            events.clear();
+            assert!(!(0..64).any(|_| teleport_random(&mut seated, w, &mut events)));
+            assert!(events.is_empty());
+            assert_eq!(seated.position, Vec3::ZERO);
+
+            for tries in [64, 1] {
+                let mut seated = enderman();
+                seated.extra.passenger = true;
+                let mut expected = enderman().random;
+                if tries == 1 {
+                    expected.next_double();
+                    expected.next_int_bound(64).unwrap();
+                    expected.next_double();
+                }
+                seated.extra.counter2 = tries;
+                ai_step(&mut seated, w, &mut events);
+                assert!(events.is_empty(), "{tries}");
+                assert_eq!(seated.random.next_int(), expected.next_int(), "{tries}");
+            }
+        });
+    }
+
+    /// LivingEntity.randomTeleport clamps the target into the world border
+    /// (`WorldBorder.clampVec3ToBound`), so an enderman never lands outside
+    /// it (#7080). A border of size 10 around the origin ends at x = 5.
+    #[test]
+    fn an_enderman_teleports_inside_the_world_border() {
+        let build = |world: &mut crate::world::World, registry: &BlockRegistry| {
+            let stone = registry.default_state("minecraft:stone").unwrap();
+            for cx in -2..2 {
+                for cz in -2..2 {
+                    world
+                        .chunks
+                        .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                }
+            }
+            for x in -32..32 {
+                for z in -32..32 {
+                    world.set(x, -1, z, stone).unwrap();
+                }
+            }
+        };
+        let border =
+            horizon_core::geometry::border::BorderGeometry::new([0.0, 0.0], 10.0, 29_999_984)
+                .unwrap();
+        crate::mobs::world::with_built_test_world(&[], build, |w, _| {
+            let mut free = enderman();
+            assert!(teleport_to(&mut free, w, 20.5, 0.0, 0.5, &mut Vec::new()));
+            assert_eq!(free.position, Vec3::new(20.5, 0.0, 0.5), "no border");
+
+            let w = MobWorld {
+                border: Some(&border),
+                ..w.clone()
+            };
+            let mut bounded = enderman();
+            assert!(teleport_to(
+                &mut bounded,
+                &w,
+                20.5,
+                0.0,
+                -20.5,
+                &mut Vec::new()
+            ));
+            // Mth.clamp to [min, max - 1.0E-5F] on x and z.
+            let edge = 5.0 - f64::from(1.0e-5_f32);
+            assert_eq!(bounded.position, Vec3::new(edge, 0.0, -5.0));
+        });
+    }
+
     /// Enderman.dropCustomDeathLoot (#3513): a killed enderman drops the
     /// block it carries, mined with a silk touch diamond axe, so a grass
     /// block comes back as a grass block (not dirt) and a nylium as itself.
@@ -557,7 +679,12 @@ mod tests {
         ] {
             let mut m = enderman();
             m.extra.carried = registry.default_state(block);
-            let (out, _) = drops::die(&mut m, &death(true), &mut sequences);
+            let (out, _) = drops::die(
+                &mut m,
+                &death(true),
+                &mut sequences,
+                &mut horizon_core::random::LegacyRandom::new(0),
+            );
             let dropped: Vec<String> = out
                 .into_iter()
                 .flat_map(|d| match d {
@@ -577,7 +704,12 @@ mod tests {
         // doMobLoot off: no dropCustomDeathLoot, so no block either.
         let mut m = enderman();
         m.extra.carried = registry.default_state("minecraft:grass_block");
-        let (out, _) = drops::die(&mut m, &death(false), &mut sequences);
+        let (out, _) = drops::die(
+            &mut m,
+            &death(false),
+            &mut sequences,
+            &mut horizon_core::random::LegacyRandom::new(0),
+        );
         assert!(
             !out.iter()
                 .any(|d| matches!(d, drops::Drop::CarriedBlock(_))),

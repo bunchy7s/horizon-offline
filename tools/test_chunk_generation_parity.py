@@ -66,8 +66,12 @@ class Oracle:
                                  'dev.horizonlab.parity.VanillaChunkGenerationOracle', *map(str, [args[0], out, *args[1:]])],
                                 capture_output=True, text=True, env=dict(os.environ))
         if result.returncode:
-            lines = [l for l in (result.stdout + result.stderr).splitlines() if 'Exception' in l or 'Caused' in l or '\tat ' in l]
-            raise SystemExit('oracle failed: ' + ' | '.join(lines[:10]))
+            output = (result.stdout + result.stderr).splitlines()
+            lines = [l for l in output if 'Exception' in l or 'Caused' in l or '\tat ' in l]
+            # A JVM that dies without an exception (killed for memory, no heap to reserve) has none of those lines:
+            # say how it ended and show its last output, or the failure reads as an empty message.
+            how = f'exit {result.returncode}' + (' (killed by signal %d)' % -result.returncode if result.returncode < 0 else '')
+            raise SystemExit(f'oracle failed ({how}): ' + ' | '.join(lines[:10] or output[-10:]))
 
 
 def rust_binary():

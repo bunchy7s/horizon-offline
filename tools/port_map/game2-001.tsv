@@ -31,7 +31,7 @@ Wolf.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_
 Wolf.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	CollarColor, sound_variant and anger read
 Wolf.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: minor: sound variant is stored but no sound uses it (see getSoundSet)
 Wolf.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::ambient_sound	gap: minor: angry is taken as having a target, not the anger timer
-Wolf.die	missing		minor: a wolf that dies mid-shake keeps its shake state; Horizon never resets the wet and shake fields on death
+Wolf.die	port	crates/horizon-client/src/mobs/tame.rs::die	`drops::die` asks it first: isWet/isShaking and both shake animations are cleared
 Wolf.getHeadRollAngle	port	crates/horizon-client/src/mobs/tame.rs::anim	
 Wolf.applyTamingSideEffects	port	crates/horizon-client/src/mobs/tame.rs::set_tame	
 Wolf.hurtArmor	port	crates/horizon-client/src/mobs.rs::Mob::hurt_wolf_armor	
@@ -53,7 +53,7 @@ EnderDragon.onFlap	port	crates/horizon-client/src/game/dragon.rs::Game::tick_dra
 EnderDragon.defineSynchedData	port	crates/horizon-client/src/game/dragon.rs::Game::lan_dragon_state	DATA_PHASE defined as hovering on the wire
 EnderDragon.tickPart	port	crates/horizon-client/src/game/dragon.rs::Game::place_dragon_parts	
 EnderDragon.getHeadYOffset	inline	crates/horizon-client/src/game/dragon.rs::Game::place_dragon_parts	sitting gives -1, else flight sample 5 minus sample 0
-EnderDragon.knockBack	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_contacts	wing zones push players
+EnderDragon.knockBack	port	crates/horizon-client/src/game/dragon.rs::Game::dragon_contacts	wing zones push players and living mobs; head/neck contacts hurt living mobs
 EnderDragon.handleKillingBlow	inline	crates/horizon-client/src/game/dragon.rs::Dragon::hurt	health set to 1 and dying phase unless sitting
 EnderDragon.knockback	missing		minor: a hit does not push the dragon back outside the sitting phase
 EnderDragon.findClosestNode	port	crates/horizon-client/src/game/dragon.rs::Game::closest_node	
@@ -116,7 +116,7 @@ ArmorStand.setArmorStandPose	port	crates/horizon-client/src/entity_nbt.rs::armor
 ArmorStand.getArmorStandPose	port	crates/horizon-client/src/entity_nbt.rs::armor_stand_to_nbt	Pose tag written from the six pose parts
 BlockAttachedEntity.skipAttackInteraction	inline	crates/horizon-client/src/game/cushions.rs::Game::attack_cushion	the mayInteract gate and the break; frames and paintings keep their own copies
 BlockAttachedEntity.kill	inline	crates/horizon-client/src/game/cushions.rs::Game::break_cushion	removal and the break; no game event
-BlockAttachedEntity.ignoreExplosion	missing		player: explosions do not break paintings, item frames, cushions or armour stands; only players, mobs, items, TNT and minecarts are hurt
+BlockAttachedEntity.ignoreExplosion	port	crates/horizon-client/src/game/explosion.rs::blast_spares_decorations	a source in water spares paintings, item frames, cushions and armour stands, and so does a blast that keeps blocks without mob griefing; read when the blast picks its entities
 BlockAttachedEntity.move	missing		minor: a piston push does not break a cushion, painting or frame here
 BlockAttachedEntity.push	missing		minor: a push from a blast or piston does not break a cushion, painting or frame
 BlockAttachedEntity.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::cushion_from_nbt	gap: minor: no 16-block check on block_pos; the stored block is used as is

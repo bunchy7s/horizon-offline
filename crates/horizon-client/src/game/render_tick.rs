@@ -2,6 +2,7 @@
 //! campfire smoke and rain splashes (`ClientLevel.tickWeatherEffects`).
 use super::{Dim, Game};
 use horizon_client::assets::Properties;
+use horizon_client::camera::NearPlane;
 use horizon_client::fog::{FogData, FogInputs, FogType, fog_type, update_rain_fog};
 use horizon_client::{
     animate_tick::{AnimateContext, animate_tick, campfire_particles, marker_particle_target},
@@ -85,6 +86,18 @@ impl Game<'_> {
             yaw.cos() * pitch.cos(),
         ]
     }
+    /// `Camera.getNearPlane` at the FOV option, as `getFluidInCamera` asks for it.
+    pub(super) fn near_plane(&self) -> NearPlane {
+        let [width, height] = self
+            .renderer
+            .as_ref()
+            .map_or([1, 1], |r| [r.config.width, r.config.height]);
+        self.view.near_plane(
+            self.settings.fov as i32 as f32,
+            width as f32,
+            height.max(1) as f32,
+        )
+    }
     /// `FogRenderer.setupFog` for the frame's camera, and Horizon's Fog option.
     pub(super) fn frame_fog(
         &self,
@@ -95,7 +108,7 @@ impl Game<'_> {
     ) -> FogData {
         let forward = self.forward();
         let at = [camera.x, camera.y, camera.z];
-        let fog_type = fog_type(&self.world, self.res.facts(), at, forward);
+        let fog_type = fog_type(&self.world, self.res.facts(), at, &self.near_plane());
         let (rain, thunder) = if self.dim == Dim::Overworld {
             self.world.weather.levels(self.clock.fraction() as f32)
         } else {
@@ -140,7 +153,59 @@ impl Game<'_> {
         if !self.settings.horizon.fog {
             horizon_client::fog::clear_distance_fog(&mut fog, &input);
         }
+        if self.title.is_none() {
+            fog.color =
+                self.native_fog_color_now(self.clock.fraction() as f32, at, fog_type, fog.color);
+            fog = self.native_fog_now(self.clock.fraction() as f32, at, fog_type, fog);
+        }
         fog
+    }
+    fn native_fog_color_now(
+        &self,
+        partial: f32,
+        camera: [f64; 3],
+        fog_type: FogType,
+        color: [f32; 4],
+    ) -> [f32; 4] {
+        let mut rgb = [color[0], color[1], color[2]];
+        self.native_compute_fog_color(partial, camera, fog_type, &mut rgb);
+        if rgb.iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) {
+            [rgb[0], rgb[1], rgb[2], color[3]]
+        } else {
+            color
+        }
+    }
+    fn native_fog_now(
+        &self,
+        partial: f32,
+        camera: [f64; 3],
+        fog_type: FogType,
+        original: FogData,
+    ) -> FogData {
+        let mut fog = original;
+        self.native_render_fog(partial, camera, fog_type, &mut fog);
+        let distances = [
+            fog.environmental_start,
+            fog.environmental_end,
+            fog.render_distance_start,
+            fog.render_distance_end,
+            fog.sky_end,
+            fog.cloud_end,
+        ];
+        if fog
+            .color
+            .iter()
+            .all(|v| v.is_finite() && (0.0..=1.0).contains(v))
+            && distances.iter().all(|v| v.is_finite())
+            && fog.environmental_end > fog.environmental_start
+            && fog.render_distance_end > fog.render_distance_start
+            && fog.sky_end >= 0.0
+            && fog.cloud_end >= 0.0
+        {
+            fog
+        } else {
+            original
+        }
     }
     /// `FogRenderer.computeFogColor`'s night vision brightenFactor:
     /// `GameRenderer.nightVisionScale`, but not while Darkness is on.
@@ -187,7 +252,7 @@ impl Game<'_> {
                 &self.world,
                 self.res.facts(),
                 [camera.x, camera.y, camera.z],
-                self.forward(),
+                &self.near_plane(),
             ) != FogType::Water
     }
     /// `ScreenEffectRenderer` + `Hud` camera overlays for this frame.
@@ -260,14 +325,14 @@ impl Game<'_> {
             }
         }
         let in_water =
-            fog_type(&self.world, self.res.facts(), eye, self.forward()) == FogType::Water;
+            fog_type(&self.world, self.res.facts(), eye, &self.near_plane()) == FogType::Water;
         let water =
             (in_water && !spectator).then(|| (self.eye_brightness(eye), self.yaw, self.pitch));
         // Hud.extractCameraOverlays; the spyglass scope (and its easing) is
         // drawn on the HUD by draw_spyglass.
         let fx = &self.screen_fx;
         let overlays = hud_overlays::CameraOverlays {
-            vignette: self.settings.vignette.then_some((
+            vignette: self.vignette_shown().then_some((
                 fx.vignette_brightness,
                 self.border.warning_strength(p.position.x, p.position.z),
             )),
@@ -331,7 +396,7 @@ impl Game<'_> {
             self.screen_fx.tick_spinning(nausea);
             // LocalPlayer water vision and AtmosphericFogEnvironment rain fog.
             let in_water =
-                fog_type(&self.world, self.res.facts(), e, self.forward()) == FogType::Water;
+                fog_type(&self.world, self.res.facts(), e, &self.near_plane()) == FogType::Water;
             self.fog.tick(in_water);
             let b = [
                 e[0].floor() as i32,

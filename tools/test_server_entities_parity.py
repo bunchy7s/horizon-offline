@@ -8,7 +8,8 @@ console freezes the ticks, builds a wall and a rail and summons, around the spaw
 set rolling along the rail), boats and a raft (one falling onto the ground), armor stands (posed, small, with
 arms, wearing a helmet, one falling), a chicken jockey, a slime, a pig whose scale `/attribute` sets, item
 frames (one holding a turned diamond), paintings, primed TNT (one falling), a floating falling block, sand
-falling into a cobweb, an arrow that lands and an end crystal. The client records for 20 seconds, the ticks
+falling into a cobweb, sand that falls onto a torch and breaks into an item (added after the tick's tracking pass in
+Horizon), an arrow that lands, a burning arrow and an end crystal. The client records for 20 seconds, the ticks
 running for 200 more after 3, what ClientPacketListener would make of the packets (EntityTranscript): each
 entity's spawn
 packet (position, rotations, data, motion), the entity data it was paired with and all it was sent since, its
@@ -81,11 +82,19 @@ SCENE = [
     # Primed TNT that won't go off (one falling), a floating falling block, an arrow that lands, an end crystal.
     'summon minecraft:tnt 6.5 -60 6.5 {fuse:2000s}',
     'summon minecraft:tnt 6.5 -56 4.5 {fuse:2000s}',
+    # Passengers of primed TNT (EntityType.loadEntityRecursive).
+    'summon minecraft:tnt 4.5 -60 4.5 {fuse:2000s,Passengers:[{id:"minecraft:pig",NoAI:1b}]}',
     'summon minecraft:falling_block 2.5 -58 -0.5 {BlockState:{Name:"minecraft:sand"},NoGravity:1b}',
     # Sand dropped into a cobweb, which holds it (WebBlock.entityInside).
     'setblock -7 -58 0 minecraft:cobweb',
     'summon minecraft:falling_block -6.5 -54 0.5 {BlockState:{Name:"minecraft:sand"}}',
+    # Sand that falls once the ticks run (its scheduled tick), lands on a torch and breaks into an item
+    # (FallingBlockEntity.tick: spawnAtLocation), added in the middle of a tick.
+    'setblock 6 -60 -4 minecraft:torch',
+    'setblock 6 -55 -4 minecraft:sand',
     'summon minecraft:arrow 0.5 -55 -1.5 {Motion:[0.3d,0d,0d]}',
+    # A burning arrow (a Flame bow's): its shared flag of fire (Entity.DATA_SHARED_FLAGS_ID) reaches the client.
+    'summon minecraft:arrow 0.5 -55 2.5 {Motion:[0.3d,0d,0d],Fire:2000s}',
     'summon minecraft:end_crystal -6.5 -60 6.5 {ShowBottom:0b}',
 ]
 
@@ -93,16 +102,26 @@ SCENE = [
 # finalizeSpawn's random modifiers on client-syncable attributes (a leader zombie's max health); their amounts
 # differ from one server to the other.
 RANDOM_MODIFIERS = re.compile(r'(id=minecraft:(?:random_spawn_bonus|leader_zombie_bonus), amount=)[^,]+')
+# An item's yaw and its sideways motion come from the level's random (ItemEntity's constructor), and so do where
+# it slides to and the motion last synced as it comes to rest (vanilla's own runs differ there); where it was added,
+# its upward motion then and the height it rests at don't.
+ITEM_ROTATION = re.compile(r' rot \S+')
+ITEM_SIDEWAYS = re.compile(r'(motion|now) \([^,]+, ([^,]+), [^)]+\)')
+ITEM_LAST_MOTION = re.compile(r'(\| now .* motion )\([^)]+\)')
 
 
 def scene_lines(lines):
     """The transcript's entities in the scene's area (the world's own animals and slimes wander elsewhere), the
-    amounts of random spawn modifiers normalised."""
+    amounts of random spawn modifiers and an item's random yaw and sideways motion normalised."""
     out = []
     for line in lines:
         m = re.match(r'play-entities entity \S+ (-?\d+),-?\d+,(-?\d+)', line)
         if m and -8 <= int(m.group(1)) <= 8 and -7 <= int(m.group(2)) <= 10 or line.startswith('play-entities self '):
-            out.append(RANDOM_MODIFIERS.sub(r'\1~', line))
+            line = RANDOM_MODIFIERS.sub(r'\1~', line)
+            if line.startswith('play-entities entity minecraft:item '):
+                line = ITEM_SIDEWAYS.sub(r'\1 (~, \2, ~)', ITEM_ROTATION.sub(' rot ~', line))
+                line = ITEM_LAST_MOTION.sub(r'\1~', line)
+            out.append(line)
     return out
 
 
@@ -189,8 +208,8 @@ def main():
         java=subprocess.check_output(['java', '--version'], text=True).splitlines()[0],
         entities=len(vanilla), output_sha256=lab.digest(build / 'horizon.txt', 'sha256'),
         scope='Minecarts (one rolling), boats (one falling), armor stands, a chicken jockey, a slime, a pig with a '
-              'scale, item frames, paintings, primed TNT, falling blocks (one held by a cobweb), an arrow and an '
-              'end crystal '
+              'scale, item frames, paintings, primed TNT, falling blocks (one held by a cobweb, one breaking into an '
+              'item on a torch), arrows (one burning) and an end crystal '
               'tracked to a vanilla-codec client by a dedicated server: spawn packets, entity data, equipment, '
               'attributes, passengers and the positions the syncs leave them at.'))
     print(f'server entities: {len(vanilla)} entities identical')

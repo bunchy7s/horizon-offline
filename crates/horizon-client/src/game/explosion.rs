@@ -2,9 +2,12 @@
 //! HashSet, so iteration and the following shuffle match vanilla's random
 //! draws), entity damage with exposure and knockback, block interaction with
 //! merged drops and TNT chain priming, and optional fire.
-use super::Game;
+use super::{
+    Game,
+    entity::{Blast, Entity, EntityHandle, with_entity, with_entity_mut},
+};
 use horizon_client::{
-    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, text::Text,
+    Result, blocks::Fluid, collisions::SceneCollisions, items::ItemStack, mobs::Who, text::Text,
 };
 use horizon_core::{
     geometry::{Vec3, VoxelShape},
@@ -100,6 +103,15 @@ pub(super) fn blast_reaches(center: [f64; 3], diameter: f64, at: [f64; 3]) -> bo
     d / diameter <= 1.0
 }
 
+/// `ItemEntity.ignoreExplosion` through
+/// `ServerExplosion.shouldAffectBlocklikeEntities`: an explosion that does not
+/// affect blocklike entities is ignored entirely by a dropped item. With
+/// `mobGriefing` off that is every blast that keeps blocks; with it on, none
+/// (no wind charge goes through `server_explode`).
+fn items_ignore_explosion(mob_griefing: bool, interaction: BlockInteraction) -> bool {
+    !mob_griefing && interaction == BlockInteraction::Keep
+}
+
 /// Whether a blast leaves item frames, paintings, cushions and armour stands
 /// alone. Without `mobGriefing`, a blast that keeps blocks is ignored
 /// (`ServerExplosion.shouldAffectBlocklikeEntities` through their
@@ -116,28 +128,53 @@ pub(super) fn blast_spares_decorations(
     source_in_water || (!mob_griefing && (interaction == BlockInteraction::Keep || by_mob))
 }
 
-/// A mob in a blast's reach: `hurtServer` when its team allows the damage
-/// (`hurtable`), then `pushFromExplosion` whatever that returned, so a mob
-/// that refuses the hit (invulnerable, in its hurt cooldown, a wither and an
-/// undead `cause`) is still pushed. `Entity.push` sets `needsSync`.
-fn hurt_and_push_mob(
+/// How far the blast's `center` is from `p`.
+fn blast_distance(center: [f64; 3], p: [f64; 3]) -> f64 {
+    ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2)).sqrt()
+}
+
+/// The unit vector from `center` to `origin`, 0 when they coincide.
+fn blast_direction(center: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
+    let d = [
+        origin[0] - center[0],
+        origin[1] - center[1],
+        origin[2] - center[2],
+    ];
+    let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    if l < 1.0e-4 {
+        [0.0; 3]
+    } else {
+        [d[0] / l, d[1] / l, d[2] / l]
+    }
+}
+
+/// The blast as `native_explosion_knockback` tells it: its centre and the
+/// blocks it is about to break.
+struct ExplosionHookContext<'a> {
+    center: [f64; 3],
+    blocks: &'a [[i32; 3]],
+}
+
+/// An entity in the blast's reach: how far (as a share of the blast's
+/// diameter), how much of it the rays see, and the knockback.
+struct Hit {
+    dist: f64,
+    exposure: f32,
+    push: Vec3,
+}
+
+/// Apply blast damage when the mob's team and wither immunity allow it.
+fn hurt_mob(
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
     (amount, source): (f32, horizon_client::mobs::Damage),
-    push: [f64; 3],
 ) {
     let shielded =
         cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
     if hurtable && !shielded {
         m.damage(amount, source);
     }
-    m.velocity = Vec3::new(
-        m.velocity.x + push[0],
-        m.velocity.y + push[1],
-        m.velocity.z + push[2],
-    );
-    m.needs_sync = true;
 }
 
 /// A blast's causing entity and its name (`Explosion.getIndirectSourceEntity`):
@@ -175,12 +212,17 @@ pub(super) fn client_float() -> f32 {
 impl Game<'_> {
     /// `blast_cause` for the blast going off now.
     pub(super) fn blast_attacker(&self) -> Option<(u32, Text)> {
-        blast_cause(
-            self.combat.explosion_owner,
-            self.combat.explosion_source,
-            |id| self.mob_display_name(id),
-            &self.combat.exploded,
-        )
+        // `Explosion.getIndirectSourceEntity`: a primed TNT's owner names the
+        // blast before any mob does, which makes the damage type
+        // `minecraft:player_explosion` (`server_explode` asks this).
+        self.combat.blast_owner.clone().or_else(|| {
+            blast_cause(
+                self.combat.explosion_owner,
+                self.combat.explosion_source,
+                |id| self.mob_display_name(id),
+                &self.combat.exploded,
+            )
+        })
     }
     /// `ServerExplosion.getSeenPercent` for an entity box.
     pub(super) fn seen_percent(&self, center: [f64; 3], min: [f64; 3], max: [f64; 3]) -> f32 {
@@ -254,6 +296,16 @@ impl Game<'_> {
             use horizon_world::level::LevelAccess;
             (level.min_y(), level.max_y())
         });
+        // WitherSkull.getBlockExplosionResistance: a dangerous skull's blast
+        // caps a block the wither may destroy at 0.8.
+        let cap = self.combat.blast_resistance_cap;
+        let wither_immune = cap.and_then(|_| {
+            self.res
+                .items()
+                .block_tags
+                .get("minecraft:wither_immune")
+                .cloned()
+        });
         let mut set: JavaHashMap<Key, ()> = JavaHashMap::default();
         for xx in 0..16 {
             for yy in 0..16 {
@@ -296,12 +348,14 @@ impl Game<'_> {
                                 power -= (resistance + 0.3) * 0.3;
                             }
                             _ if !self.res.facts().is_air(state) || f.fluid != Fluid::None => {
-                                let resistance = if spared {
+                                let base = if spared {
                                     0.0
                                 } else {
                                     f.explosion_resistance.max(fluid)
                                 };
-                                power -= (resistance + 0.3) * 0.3;
+                                let immune =
+                                    wither_immune.as_ref().is_some_and(|t| t.contains(&*f.name));
+                                power -= (blast_resistance(base, cap, immune) + 0.3) * 0.3;
                             }
                             _ => {}
                         }
@@ -332,15 +386,16 @@ impl Game<'_> {
     ///
     /// `cause` is the blast's source as predicates see it, read before the
     /// guests' turns swap their own combat state in.
-    pub(super) fn explosion_hurt_player(
+    fn explosion_hurt_player(
         &mut self,
-        center: [f64; 3],
+        context: &ExplosionHookContext<'_>,
         radius: f32,
         damage_type: &str,
         exploding: Option<u32>,
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
     ) -> Option<[f64; 3]> {
+        let ExplosionHookContext { center, blocks } = *context;
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
         // piece, so two Blast Protection IV pieces cancel it).
@@ -424,23 +479,65 @@ impl Game<'_> {
                         .indicate_damage(center[0] - feet[0], center[2] - feet[2], p.yaw);
                 }
             }
-            if !spectator && !(creative && flying) {
-                let push = [dir[0] * power, dir[1] * power, dir[2] * power];
+        }
+        if !spectator {
+            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+            self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
+            if let Some(p) = self.player.as_mut() {
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
                     p.velocity.z + push[2],
                 );
-                pushed = (!p.health.sync_velocity).then_some(push);
+                if !(creative && flying) {
+                    pushed = (!p.health.sync_velocity).then_some(push);
+                }
             }
         }
         self.combat.forget_noted(outcome.canceled);
         if raised {
-            self.after_block(outcome, None, false);
+            let source = horizon_client::health::HurtSource {
+                damage_type,
+                causing: attacker.map_or(0, |(id, _)| *id as i32),
+                direct: 0,
+            };
+            self.after_block(outcome, (None, false), source);
         }
         pushed
     }
 
+    /// Where a blast at `center` reaches `entity`, unless it ignores the blast
+    /// or is out of range (`getEntities` and `ServerExplosion.hurtEntities`).
+    /// Generic over the kind, so every walked list gets its own copy.
+    fn blast_hit<E: Entity>(
+        &self,
+        entity: &E,
+        center: [f64; 3],
+        diameter: f64,
+        blast: &Blast,
+    ) -> Option<Hit> {
+        if entity.ignores_explosion(blast) || !entity.pushed_by_explosion() {
+            return None;
+        }
+        let feet = entity.position();
+        let dist = blast_distance(center, [feet.x, feet.y, feet.z]) / diameter;
+        if dist > 1.0 {
+            return None;
+        }
+        let b = entity.explosion_box();
+        let (lo, hi) = (b.min_position(), b.max_position());
+        let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
+        let dir = blast_direction(
+            center,
+            [feet.x, feet.y + entity.explosion_eye_height(), feet.z],
+        );
+        let power = (1.0 - dist) * f64::from(exposure);
+        Some(Hit {
+            dist,
+            exposure,
+            push: Vec3::new(dir[0] * power, dir[1] * power, dir[2] * power),
+        })
+    }
     /// `ServerExplosion.hurtEntities` (player, mobs, items, primed TNT, minecarts);
     /// the player takes `damage_type`. Returns the players whose clients add a
     /// push from the explosion packet, and how much (`explosion_hurt_player`).
@@ -450,32 +547,16 @@ impl Game<'_> {
         radius: f32,
         damage_type: &str,
         interaction: BlockInteraction,
+        blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
         if radius < 1.0e-5 {
             return Vec::new();
         }
-        self.explosion_hits_special(center, radius);
+        self.explosion_hits_special(center, radius, blocks);
         let diameter = f64::from(radius * 2.0);
-        let distance = |p: [f64; 3]| {
-            ((p[0] - center[0]).powi(2) + (p[1] - center[1]).powi(2) + (p[2] - center[2]).powi(2))
-                .sqrt()
-        };
         let damage = |dist: f64, exposure: f32| {
             let pow = (1.0 - dist) * f64::from(exposure);
             ((pow * pow + pow) / 2.0 * 7.0 * diameter + 1.0) as f32
-        };
-        let direction = |origin: [f64; 3]| {
-            let d = [
-                origin[0] - center[0],
-                origin[1] - center[1],
-                origin[2] - center[2],
-            ];
-            let l = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-            if l < 1.0e-4 {
-                [0.0; 3]
-            } else {
-                [d[0] / l, d[1] / l, d[2] / l]
-            }
         };
         // `source.doTeamsAllowDamage(entity)`: the exploding mob spares its
         // team mates when its team has no friendly fire (they are still pushed).
@@ -491,8 +572,9 @@ impl Game<'_> {
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
         let blast_source = self.combat.explosion_cause.clone();
+        let context = ExplosionHookContext { center, blocks };
         let own = self.explosion_hurt_player(
-            center,
+            &context,
             radius,
             damage_type,
             exploding,
@@ -511,7 +593,7 @@ impl Game<'_> {
             for conn in guests {
                 let push = self.as_guest(&mut host, conn, |g| {
                     g.explosion_hurt_player(
-                        center,
+                        &context,
                         radius,
                         damage_type,
                         exploding,
@@ -532,167 +614,126 @@ impl Game<'_> {
             .or(exploding)
             .and_then(|id| self.mobs.iter().find(|m| m.id == id))
             .map(|m| m.species());
-        // Mobs, but not the one exploding (`getEntities(source, box)`): a
-        // wither's spawn blast neither hurts nor pushes it. `Warden.ignoreExplosion`:
-        // nor does any blast hurt or push a digging or emerging warden.
-        let spared = exploding.filter(|_| self.combat.explosion_source_named);
-        let mut mobs = std::mem::take(&mut self.mobs);
-        for m in mobs.iter_mut().filter(|m| {
-            m.alive()
-                && spared != Some(m.id)
-                && !(m.species() == horizon_client::mobs::Species::Warden
-                    && horizon_client::mobs::warden::digging_or_emerging(m))
-        }) {
-            let hurtable = teams_allow(self, self.mob_team(m.id));
-            let feet = [m.position.x, m.position.y, m.position.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                continue;
-            }
-            let (w, h) = (m.kind.width / 2.0, m.kind.height);
-            let eye = [feet[0], feet[1] + m.kind.eye_height, feet[2]];
-            let exposure = self.seen_percent(
-                center,
-                [feet[0] - w, feet[1], feet[2] - w],
-                [feet[0] + w, feet[1] + h, feet[2] + w],
-            );
-            // The exploding mob is the damage source's entity, so victims
-            // it kills drop its charged-creeper loot (`Creeper.killedEntity`).
-            let source = horizon_client::mobs::Damage {
-                kind: horizon_client::mobs::DamageKind::Explosion,
-                // A projectile's owner (`getIndirectSourceEntity`), else
-                // the exploding mob itself.
-                attacker: attacker
-                    .as_ref()
-                    .map(|&(id, _)| id)
-                    .filter(|&o| o != m.id)
-                    .map(horizon_client::mobs::Who::Mob),
-                from: Some(center),
+        // `ServerExplosion.hurtEntities`: every entity in reach, on the walk. Each
+        // answers `ignoreExplosion` itself (`Entity::ignores_explosion`); the rest
+        // is the same for all, and only what a blast does to a kind differs. The
+        // walk covers the entities there are now: what the blast drops or spawns
+        // is not hit by it. Destroyed items and orbs are squeezed out afterwards
+        // (as `retain` does), and a destroyed boat or cart shifts its list, so
+        // `gone` counts how far.
+        let blast = Blast {
+            vehicles_ignore: self.combat.blast_owner.is_none()
+                && self.blast_attacker().is_some()
+                && !self.ui.rules.bool("mob_griefing"),
+            items_ignore: items_ignore_explosion(self.ui.rules.bool("mob_griefing"), interaction),
+            spared: exploding.filter(|_| self.combat.explosion_source_named),
+        };
+        let (items_len, orbs_len) = (self.dropped.len(), self.orbs.len());
+        let (mut items_kept, mut orbs_kept) = (0, 0);
+        let (mut boats_gone, mut carts_gone) = (0, 0);
+        for handle in self.entity_handles() {
+            let handle = match handle {
+                EntityHandle::Boat(i) => EntityHandle::Boat(i - boats_gone),
+                EntityHandle::Cart(i) => EntityHandle::Cart(i - carts_gone),
+                other => other,
             };
-            // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`: its
-            // base is 0 for every mob type, so iron golems and ravagers are pushed.
-            let dir = direction(eye);
-            let power = (1.0 - dist) * f64::from(exposure);
-            hurt_and_push_mob(
-                m,
-                hurtable,
-                cause,
-                (damage(dist, exposure), source),
-                [dir[0] * power, dir[1] * power, dir[2] * power],
-            );
+            let hit = with_entity!(self, handle, e => self.blast_hit(e, center, diameter, &blast));
+            let mut destroyed = false;
+            if let Some(Hit {
+                dist,
+                exposure,
+                push,
+            }) = hit
+            {
+                let amount = damage(dist, exposure);
+                let entity = with_entity!(self, handle, e => e.id());
+                match handle {
+                    EntityHandle::Mob(i) => {
+                        let hurtable = teams_allow(self, self.mob_team(self.mobs[i].id));
+                        let m = &mut self.mobs[i];
+                        // The exploding mob is the damage source's entity, so
+                        // victims it kills drop its charged-creeper loot
+                        // (`Creeper.killedEntity`).
+                        let source = horizon_client::mobs::Damage {
+                            kind: horizon_client::mobs::DamageKind::Explosion,
+                            // A projectile's owner (`getIndirectSourceEntity`),
+                            // else the exploding mob itself.
+                            attacker: attacker
+                                .as_ref()
+                                .map(|&(id, _)| id)
+                                .filter(|&o| o != m.id)
+                                .map(horizon_client::mobs::Who::Mob),
+                            from: Some(center),
+                        };
+                        // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`:
+                        // its base is 0 for every mob type, so iron golems and
+                        // ravagers are pushed.
+                        hurt_mob(m, hurtable, cause, (amount, source));
+                    }
+                    // 5 health, destroyed by the explosion damage (nether stars resist).
+                    EntityHandle::Item(i) => {
+                        destroyed = &*self.dropped[i].stack.item != "minecraft:nether_star"
+                            && amount >= 5.0;
+                    }
+                    // `ExperienceOrb.hurtServer` takes the damage off their 5 health.
+                    EntityHandle::Orb(i) => {
+                        destroyed = self.orbs[i].hurt(amount);
+                    }
+                    // `VehicleEntity.hurtServer` (explosions ignite TNT carts);
+                    // a destroyed one is gone before the push.
+                    EntityHandle::Cart(i) => {
+                        let len = self.carts.len();
+                        self.hurt_cart(i, amount, false, true);
+                        carts_gone += len - self.carts.len();
+                    }
+                    // `VehicleEntity.hurtServer`: damage * 10, broken past 40.
+                    EntityHandle::Boat(i) => {
+                        let len = self.boats.len();
+                        self.hurt_boat(i, amount, false);
+                        boats_gone += len - self.boats.len();
+                    }
+                    // `hurtServer` does nothing to the rest.
+                    _ => {}
+                }
+                let mut velocity = [push.x, push.y, push.z];
+                self.native_explosion_knockback(
+                    self.dim.id(),
+                    center,
+                    blocks,
+                    Some(entity),
+                    &mut velocity,
+                );
+                let push = Vec3::new(velocity[0], velocity[1], velocity[2]);
+                match handle {
+                    EntityHandle::Item(_) | EntityHandle::Orb(_) if destroyed => {}
+                    EntityHandle::Cart(_) => {
+                        if let Some(c) = self.carts.iter_mut().find(|c| c.id == entity) {
+                            c.push_from_explosion(push);
+                        }
+                    }
+                    EntityHandle::Boat(_) => {
+                        if let Some(b) = self.boats.iter_mut().find(|b| b.id == entity) {
+                            b.push_from_explosion(push);
+                        }
+                    }
+                    other => with_entity_mut!(self, other, e => e.push_from_explosion(push)),
+                }
+            }
+            match handle {
+                EntityHandle::Item(i) if !destroyed => {
+                    self.dropped.swap(items_kept, i);
+                    items_kept += 1;
+                }
+                EntityHandle::Orb(i) if !destroyed => {
+                    self.orbs.swap(orbs_kept, i);
+                    orbs_kept += 1;
+                }
+                _ => {}
+            }
         }
-        self.mobs = mobs;
-        // Dropped items: 5 health, destroyed by the explosion damage (nether stars resist).
-        let before = self.dropped_ids();
-        let mut items = std::mem::take(&mut self.dropped);
-        items.retain_mut(|item| {
-            let feet = [item.position.x, item.position.y, item.position.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                return true;
-            }
-            let half = 0.125;
-            let exposure = self.seen_percent(
-                center,
-                [feet[0] - half, feet[1], feet[2] - half],
-                [feet[0] + half, feet[1] + 0.25, feet[2] + half],
-            );
-            if &*item.stack.item != "minecraft:nether_star" && damage(dist, exposure) >= 5.0 {
-                return false;
-            }
-            let dir = direction([feet[0], feet[1] + 0.2125, feet[2]]);
-            let power = (1.0 - dist) * f64::from(exposure);
-            item.velocity = Vec3::new(
-                item.velocity.x + dir[0] * power,
-                item.velocity.y + dir[1] * power,
-                item.velocity.z + dir[2] * power,
-            );
-            true
-        });
-        self.dropped = items;
-        self.native_items_left_since(&before);
-        // Experience orbs: `ExperienceOrb.hurtServer` takes the damage off
-        // their 5 health, and `pushFromExplosion` moves the ones that stay
-        // (a 0.5 x 0.5 box, the eyes at 0.85 of its height).
-        let orbs_before = self.orb_ids();
-        let mut orbs = std::mem::take(&mut self.orbs);
-        orbs.retain_mut(|o| {
-            let feet = [o.position.x, o.position.y, o.position.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                return true;
-            }
-            let half = 0.25;
-            let exposure = self.seen_percent(
-                center,
-                [feet[0] - half, feet[1], feet[2] - half],
-                [feet[0] + half, feet[1] + 0.5, feet[2] + half],
-            );
-            if o.hurt(damage(dist, exposure)) {
-                return false;
-            }
-            let dir = direction([feet[0], feet[1] + f64::from(0.5f32 * 0.85f32), feet[2]]);
-            let power = (1.0 - dist) * f64::from(exposure);
-            o.velocity = Vec3::new(
-                o.velocity.x + dir[0] * power,
-                o.velocity.y + dir[1] * power,
-                o.velocity.z + dir[2] * power,
-            );
-            true
-        });
-        self.orbs = orbs;
-        self.native_orbs_left_since(&orbs_before);
-        // Primed TNT: knockback only, from its position (not its eyes).
-        let mut tnts = std::mem::take(&mut self.tnts);
-        for t in &mut tnts {
-            let feet = [t.position.x, t.position.y, t.position.z];
-            let dist = distance(feet) / diameter;
-            if dist > 1.0 {
-                continue;
-            }
-            let half = 0.49;
-            let exposure = self.seen_percent(
-                center,
-                [feet[0] - half, feet[1], feet[2] - half],
-                [feet[0] + half, feet[1] + 0.98, feet[2] + half],
-            );
-            let dir = direction(feet);
-            let power = (1.0 - dist) * f64::from(exposure);
-            t.velocity = Vec3::new(
-                t.velocity.x + dir[0] * power,
-                t.velocity.y + dir[1] * power,
-                t.velocity.z + dir[2] * power,
-            );
-        }
-        self.tnts = tnts;
-        // Minecarts: VehicleEntity.hurtServer (explosions ignite TNT carts),
-        // then the push from their eyes (0.85 of their height).
-        let ids: Vec<u32> = self.carts.iter().map(|c| c.id).collect();
-        for id in ids {
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
-                continue;
-            };
-            let bounds = self.carts[i].bounds();
-            let feet = self.carts[i].position;
-            let dist = distance([feet.x, feet.y, feet.z]) / diameter;
-            if dist > 1.0 {
-                continue;
-            }
-            let (lo, hi) = (bounds.min_position(), bounds.max_position());
-            let exposure = self.seen_percent(center, [lo.x, lo.y, lo.z], [hi.x, hi.y, hi.z]);
-            self.hurt_cart(i, damage(dist, exposure), false, true);
-            let Some(c) = self.carts.iter_mut().find(|c| c.id == id) else {
-                continue;
-            };
-            let eye_height = f64::from((hi.y - lo.y) as f32 * 0.85f32);
-            let dir = direction([feet.x, feet.y + eye_height, feet.z]);
-            let power = (1.0 - dist) * f64::from(exposure);
-            c.velocity = Vec3::new(
-                c.velocity.x + dir[0] * power,
-                c.velocity.y + dir[1] * power,
-                c.velocity.z + dir[2] * power,
-            );
-        }
+        self.dropped.drain(items_kept..items_len);
+        self.orbs.drain(orbs_kept..orbs_len);
+        self.native_leaves_flush();
         // Frames, paintings, cushions and armour stands last: vanilla lists
         // the entities in reach before hurting any, so the items they drop
         // here are neither destroyed nor pushed by the same blast.
@@ -765,9 +806,8 @@ impl Game<'_> {
             // centre of its box.
             let (lo, hi) = self.paintings[i].bounds();
             let at = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
-            if blast_reaches(center, diameter, at) {
-                self.break_painting(i, false);
-            } else {
+            // A painting a mod keeps stays at `i`.
+            if !(blast_reaches(center, diameter, at) && self.break_painting(i, false)) {
                 i += 1;
             }
         }
@@ -825,6 +865,9 @@ impl Game<'_> {
         damage_type: &str,
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            self.native_explosion_prime(center, radius);
+        }
         if let Some(p) = &self.player {
             let d = [
                 p.position.x - center[0],
@@ -840,7 +883,8 @@ impl Game<'_> {
         let mut targets = self.exploded_positions(center, radius, resists);
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
-        let pushed = self.explosion_hurt_entities(center, radius, damage_type, interaction);
+        let pushed =
+            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
@@ -942,16 +986,22 @@ impl Game<'_> {
             // tables' survives_explosion and explosion_decay draw from their
             // random sequence.
             let decay = (interaction == BlockInteraction::DestroyWithDecay).then_some(radius);
-            let mut drops = world_items!(self).block_drops_exploded(
-                self.pack.assets.registry,
-                state,
-                None,
-                &dynamic,
-                &mut self.world.random,
-                Some((&mut self.rand_sequences, self.level.seed)),
-                decay,
-                false,
+            let place = self.loot_place_at(
+                pos.map(|v| f64::from(v) + 0.5),
+                self.loot_block_entity(pos, &name),
             );
+            let mut drops = horizon_world::loot::with_native_loot_place(place, || {
+                world_items!(self).block_drops_exploded(
+                    self.pack.assets.registry,
+                    state,
+                    None,
+                    &dynamic,
+                    &mut self.world.random,
+                    Some((&mut self.rand_sequences, self.level.seed)),
+                    decay,
+                    false,
+                )
+            });
             self.native_block_drops(pos, state, None, None, Some(radius), &mut drops);
             for mut stack in drops {
                 if &*stack.item == "minecraft:air" || stack.count == 0 {
@@ -976,7 +1026,19 @@ impl Game<'_> {
             let r = &mut self.world.random;
             let rot = r.next_double() * f64::from(std::f32::consts::TAU);
             let fuse = r.next_int_bound(20).unwrap_or(0) + 10;
-            self.add_primed_tnt(BlockPos::new(pos[0], pos[1], pos[2]), rot, fuse);
+            // TntBlock.wasExploded hands the new TNT the blast's indirect
+            // source, so a chain reaction keeps the player who started it.
+            let (owner, guest) = match &self.combat.blast_owner {
+                Some(_) => (Some(Who::Player), self.combat.blast_guest),
+                None => (None, None),
+            };
+            self.add_primed_tnt(
+                BlockPos::new(pos[0], pos[1], pos[2]),
+                rot,
+                fuse,
+                owner,
+                guest,
+            );
         }
         Ok(())
     }
@@ -1009,9 +1071,44 @@ fn add_or_append_stack(
     stacks.push((pos, stack));
 }
 
+/// `WitherSkull.getBlockExplosionResistance`: `isDangerous() &&
+/// WitherBoss.canDestroy(state) ? min(0.8, resistance) : resistance`. Air has
+/// no resistance to begin with, and `#wither_immune` blocks keep theirs.
+fn blast_resistance(base: f32, cap: Option<f32>, wither_immune: bool) -> f32 {
+    match cap {
+        Some(cap) if !wither_immune => base.min(cap),
+        _ => base,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A dangerous wither skull's blast treats a block as at most 0.8 harder to
+    /// break, but a `#wither_immune` block keeps its own resistance and any
+    /// other blast is unchanged.
+    #[test]
+    fn a_dangerous_wither_skull_caps_block_resistance() {
+        assert_eq!(blast_resistance(4.0, Some(0.8), false), 0.8);
+        assert_eq!(blast_resistance(0.3, Some(0.8), false), 0.3, "already low");
+        assert_eq!(blast_resistance(4.0, Some(0.8), true), 4.0, "wither immune");
+        assert_eq!(blast_resistance(4.0, None, false), 4.0, "another blast");
+    }
+
+    /// A dropped item survives a mob's blast untouched while `mobGriefing` is
+    /// off, and is thrown and hurt as usual by one that destroys blocks or by
+    /// any blast with the rule back on.
+    #[test]
+    fn items_ignore_a_blast_that_keeps_blocks_with_griefing_off() {
+        assert!(items_ignore_explosion(false, BlockInteraction::Keep));
+        assert!(!items_ignore_explosion(false, BlockInteraction::Destroy));
+        assert!(!items_ignore_explosion(
+            false,
+            BlockInteraction::DestroyWithDecay
+        ));
+        assert!(!items_ignore_explosion(true, BlockInteraction::Keep));
+    }
 
     #[test]
     fn blasts_reach_entities_within_their_diameter() {
@@ -1077,7 +1174,7 @@ mod tests {
     fn a_mob_that_refuses_the_hit_is_still_pushed() {
         use horizon_client::mobs::{Damage, DamageKind, Mob, Species};
         let hit = (10.0, Damage::of(DamageKind::Explosion));
-        let push = [0.5, 0.25, -0.5];
+        let push = Vec3::new(0.5, 0.25, -0.5);
         let mob = |id, species| {
             let mut kind = (*zombie_type()).clone();
             kind.species = species;
@@ -1090,26 +1187,30 @@ mod tests {
         // An ordinary mob is hurt and pushed.
         let mut m = mob(1, Species::Zombie);
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, None, hit, push);
+        hurt_mob(&mut m, true, None, hit);
+        m.push_from_explosion(push);
         assert!(m.health < health);
         pushed(&m);
         // An invulnerable one refuses the hit, and is pushed all the same.
         let mut m = mob(2, Species::Zombie);
         m.invulnerable_flag = true;
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, None, hit, push);
+        hurt_mob(&mut m, true, None, hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A team mate of the exploding mob is not hurt, but pushed.
         let mut m = mob(3, Species::Zombie);
         let health = m.health;
-        hurt_and_push_mob(&mut m, false, None, hit, push);
+        hurt_mob(&mut m, false, None, hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A wither shrugs off a blast an undead caused, and is pushed.
         let mut m = mob(4, Species::Wither);
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, Some(Species::Skeleton), hit, push);
+        hurt_mob(&mut m, true, Some(Species::Skeleton), hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
     }
@@ -1277,5 +1378,39 @@ mod tests {
         add_or_append_stack(&mut stacks, pick(0), [0, 0, 0], &max);
         add_or_append_stack(&mut stacks, pick(5), [0, 0, 0], &max);
         assert_eq!(stacks.len(), 2);
+    }
+
+    /// A blast and a burst of wind cast their rays at, and push from the eyes of,
+    /// the mob as it stands: a baby's and a size-4 slime's own box and eye
+    /// height, not the adult kind's (`Entity.getBoundingBox`, `getEyeHeight`).
+    #[test]
+    fn a_scaled_mob_is_blasted_by_its_own_box_and_eye_height() {
+        use crate::game::entity::Entity;
+        use horizon_client::mobs::{Mob, Species};
+        let mob = |species| {
+            let mut kind = (*zombie_type()).clone();
+            kind.species = species;
+            Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0)
+        };
+        let adult = mob(Species::Zombie);
+        assert_eq!(adult.explosion_box(), adult.bounds());
+        let mut baby = mob(Species::Zombie);
+        baby.extra.age = -24000;
+        let mut slime = mob(Species::Slime);
+        slime.extra.size = 4;
+        for m in [&baby, &slime] {
+            let b = Entity::explosion_box(m);
+            assert_eq!(b, m.bounds());
+            assert_eq!(Entity::explosion_eye_height(m), m.eye_height());
+            assert_ne!(
+                f64::from(m.height()),
+                f64::from(adult.height()),
+                "the case must scale the box"
+            );
+            assert_eq!(
+                b.max_position().y - b.min_position().y,
+                f64::from(m.height())
+            );
+        }
     }
 }

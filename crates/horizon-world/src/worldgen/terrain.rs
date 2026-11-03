@@ -222,6 +222,46 @@ fn local_index(x: i32, y: i32, z: i32) -> usize {
 }
 
 impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
+    /// Its heap bytes by part (`horizon-ctl memory`; scheduled ticks not
+    /// counted): packed block storage, the sections' palettes and lists,
+    /// heightmaps, and the rest (post-processing marks, non-air counts).
+    pub fn heap_bytes(&self) -> [usize; 4] {
+        let blocks = &self.blocks;
+        let [mut storage, mut lists] = [
+            0,
+            blocks.sections.capacity() * std::mem::size_of::<BlockSection<'_>>(),
+        ];
+        for section in &blocks.sections {
+            let [s, l] = section.heap_bytes();
+            storage += s;
+            lists += l;
+        }
+        [
+            storage,
+            lists,
+            self.heightmaps
+                .iter()
+                .flatten()
+                .map(Heightmap::heap_bytes)
+                .sum(),
+            blocks.non_air.capacity() * std::mem::size_of::<u16>()
+                + self.postprocessing.capacity() * std::mem::size_of::<Vec<u16>>()
+                + self
+                    .postprocessing
+                    .iter()
+                    .map(|p| p.capacity() * std::mem::size_of::<u16>())
+                    .sum::<usize>(),
+        ]
+    }
+    /// How many of its sections pack their blocks at each bit width (index
+    /// = bits, 0 = a single state).
+    pub fn storage_bits(&self) -> [usize; 16] {
+        let mut bits = [0; 16];
+        for section in &self.blocks.sections {
+            bits[usize::from(section.storage_bits()).min(15)] += 1;
+        }
+        bits
+    }
     pub fn new(
         position: ChunkPos,
         min_y: i32,
@@ -344,10 +384,17 @@ impl<'r, B: TerrainBlockStates> TerrainChunk<'r, B> {
         let previous = self.set_block_raw(x, y, z, state)?;
         let mut missing = Vec::new();
         for &kind in self.stage.heightmaps() {
-            if self.heightmap(kind).is_some() {
-                self.update_heightmap(kind, x & 15, y, z & 15, state)?;
-            } else {
-                missing.push(kind);
+            match self.heightmap(kind) {
+                // `Heightmap::update` would return at once: no state is read.
+                Some(map) if map.below_update(&self.blocks, x & 15, y, z & 15) => {
+                    if self.blocks.registry.state(state).is_none() {
+                        return Err(TerrainError::InvalidState);
+                    }
+                }
+                Some(_) => {
+                    self.update_heightmap(kind, x & 15, y, z & 15, state)?;
+                }
+                None => missing.push(kind),
             }
         }
         if !missing.is_empty() {

@@ -2,14 +2,16 @@ ExperienceCommand.addExperience	port	crates/horizon-client/src/game/commands.rs:
 ExperienceCommand.setExperience	port	crates/horizon-client/src/game/commands.rs::Game::change_experience	set branch; refuses points that do not fit the level; loop and feedback in cmd_experience
 ExperienceCommand.Type.<init>	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	per-unit (points or levels) keys chosen in cmd_experience
 ExperienceCommand.Type.queryResponse	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_experience	query message built in the query branch of cmd_experience
-FetchProfileCommand.resolveName	missing		player: /fetchprofile name <name> always reports the profile as not found; no profile lookup
-FetchProfileCommand.resolveId	missing		player: /fetchprofile id <uuid> always reports the profile as not found; no profile lookup
+FetchProfileCommand.resolveName	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	the name lookup is queued on the profile resolver and answered on a later tick with commands.fetchprofile.name.success or .failure
+FetchProfileCommand.resolveId	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	the id is parsed with the selector's UUID reader and queued the same way, answered with commands.fetchprofile.id.success or .failure
 FetchProfileCommand.printForEntity	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_fetchprofile	entity branch: player profile links; other entities get no_profile error
+FetchProfileCommand.reportResolvedProfile	port	crates/horizon-client/src/game/commands/extra.rs::Game::report_resolved_profile	the profile as ResolvableProfile.CODEC encodes it, four clickable actions and the head object, sent successfully without broadcasting
 FillBiomeCommand.register	port	crates/horizon-command/src/tree_world.rs::fillbiome	syntax of /fillbiome incl. replace filter
 FillBiomeCommand.quantize	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	quart snap (v >> 2) << 2 done in cmd_fillbiome
 FillBiomeCommand.makeResolver	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_fillbiome	biome cells inside the box set in cmd_fillbiome, filter honoured
 FillCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	fill literal with replace/keep/filter/mode branches
 FillCommand.fillBlocks	port	crates/horizon-client/src/game/commands.rs::Game::cmd_fill	fill with area limit, hollow/outline/destroy/strict/keep modes
+FillCommand.wrapWithMode	port	crates/horizon-command/src/vanilla.rs::fill_modes	the mode literals outline, hollow, destroy and strict laid over the fill node
 ForceLoadCommand.register	port	crates/horizon-command/src/tree_world.rs::forceload	syntax of /forceload add|remove|query
 ForceLoadCommand.queryForceLoad	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	query branch of cmd_forceload
 ForceLoadCommand.removeAll	port	crates/horizon-client/src/game/commands/terrain_cmds.rs::Game::cmd_forceload	remove.all branch of cmd_forceload
@@ -38,6 +40,7 @@ ListPlayersCommand.format	inline	crates/horizon-client/src/game/commands.rs::Gam
 LocateCommand.getHolders	port	crates/horizon-client/src/game/commands.rs::Game::structure_tag	gap: minor: resolves a #tag to its structures; an unknown id is not validated here
 LocateCommand.showLocateResult	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_locate	distance (2D for structures, 3D for biomes) and the success message
 LocateCommand.dist	inline	crates/horizon-client/src/game/commands.rs::Game::cmd_locate	floored horizontal distance computed in cmd_locate
+LocateCommand.locatePoi	port	crates/horizon-client/src/game/commands.rs::Game::cmd_locate_poi	PoiManager.findClosestWithType within 256 blocks of the source, over the loaded chunks
 LookAt.LookAtEntity.perform	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_rotate	facing-entity branch of cmd_rotate; look_at does the yaw and pitch math
 LootCommand.register	port	crates/horizon-command/src/tree_world.rs::loot	loot literal with loot/mine/kill/fish/replace/insert/give/spawn
 LootCommand.addTargets	port	crates/horizon-command/src/tree_world.rs::loot	replace entity|block, insert, give, spawn subcommands
@@ -58,12 +61,13 @@ LootCommand.drop	inline	crates/horizon-client/src/game/commands/terrain_cmds.rs:
 LootContextSources.ContextDecorator.createParams	port	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: keeps only the block and entity picks; no origin or this-entity loot params
 LootContextSources.ContextDecorator.createContext	inline	crates/horizon-client/src/game/commands/compute.rs::Game::compute_context	gap: minor: no LootContext is built
 MsgCommand.register	port	crates/horizon-command/src/vanilla.rs::registered	msg literal with tell and w aliases
-OpCommand.register	missing		minor: no in-game /op literal; ops are set with the horizon-server CLI
+MsgCommand.sendMessage	port	crates/horizon-client/src/lan/hub/chat.rs::Hub::whisper	the outgoing line for the sender and the incoming one for each target
+OpCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"op" reaches the op arm of cmd_profiles on a dedicated server: the entry joins the op list, the lists are synced and commands.op.success is said
 OpCommand.opPlayers	port	crates/horizon-server/src/lists.rs::run	gap: minor: CLI op only (ops.json); no in-game /op
-PardonCommand.register	missing		minor: no in-game /pardon literal
-PardonCommand.pardonPlayers	missing		minor: no pardon path; ban lists exist only as server files (horizon-server-files user_lists.rs)
-PardonIpCommand.register	missing		minor: no in-game /pardon-ip literal
-PardonIpCommand.unban	missing		minor: no pardon-ip path; ban lists exist only as server files
+PardonCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"pardon" reaches the pardon arm of cmd_profiles on a dedicated server
+PardonCommand.pardonPlayers	port	crates/horizon-client/src/game/commands/profiles.rs::Game::cmd_profiles	the profile leaves the ban list and commands.pardon.success is said; none banned gives commands.pardon.failed
+PardonIpCommand.register	inline	crates/horizon-client/src/game/commands.rs::Game::execute_command	"pardon-ip" is dispatched to cmd_ip_bans, next to "ban-ip"
+PardonIpCommand.unban	port	crates/horizon-client/src/game/commands/profiles.rs::Game::cmd_ip_bans	the address leaves the ip ban list with commands.pardonip.success; a target that is not an address gives commands.pardonip.invalid and one that is not banned commands.pardonip.failed
 ParticleCommand.register	port	crates/horizon-command/src/tree_world.rs::particle	particle syntax with viewers, force and normal; execution in cmd_particle
 PerfCommand.register	skip:server		profiler for the dedicated server; not a game behaviour
 PerfCommand.startProfilingDedicatedServer	skip:server		profiler for the dedicated server; not a game behaviour
@@ -73,6 +77,8 @@ PerfCommand.whenStopped	skip:server		profiler for the dedicated server; not a ga
 PlaceCommand.placeJigsaw	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	place.jigsaw branch: pool check, generation, success message
 PlaceCommand.placeStructure	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	place.structure branch: id check, Structure.generate with the biome -> true predicate, checkLoaded over the start's box, per-chunk placeInChunk, success/failed messages
 PlaceCommand.placeTemplate	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place	template placement with rotation, mirror, integrity and strict
+PlaceCommand.checkLoaded	port	crates/horizon-client/src/game/commands/place.rs::Game::place_check_loaded	every chunk of the inclusive range must be in the dimension and loaded
+PlaceCommand.placeFeature	port	crates/horizon-client/src/game/commands/place.rs::Game::cmd_place_generated	the feature, jigsaw and structure branches share the generation path
 PlaySoundCommand.register	port	crates/horizon-command/src/tree_world.rs::sounds	playsound literal with a sound-source literal per source
 PlaySoundCommand.source	port	crates/horizon-command/src/tree_world.rs::sounds	per-source literal with targets, pos, volume, pitch, minVolume
 PlaySoundCommand.playSound	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_playsound	range 16 (16 x volume above 1), minVolume fallback, one seed for all players
@@ -80,6 +86,7 @@ PostEffectCommand.addPostEffect	port	crates/horizon-client/src/game/commands/ext
 PostEffectCommand.clearPostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: player: the cleared list is never drawn anyway
 PostEffectCommand.removePostEffect	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_posteffect	gap: player: the removed effect was never drawn
 PublishCommand.getSuccessMessage	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_publish	published-port message with a copy-on-click port
+PublishCommand.publish	port	crates/horizon-client/src/game/commands/extra.rs::Game::cmd_publish	with IntegratedServer.publishServer: the world is opened to the LAN and the port reported
 RaidCommand.glow	port	crates/horizon-client/src/game/raids.rs::Game::raid_glow	glowing for 1000 ticks, amplifier 1, on the raid's raiders (via cmd_raid raid.glow)
 RaidCommand.setRaidOmenLevel	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.setomen branch
 RaidCommand.spawnLeader	port	crates/horizon-client/src/game/commands/raid.rs::Game::cmd_raid	raid.spawnleader branch: patrol leader and banner
@@ -98,6 +105,7 @@ RecipeCommand.giveRecipes	port	crates/horizon-client/src/game/commands/world_cmd
 RecipeCommand.takeRecipes	port	crates/horizon-client/src/game/commands/world_cmds.rs::Game::cmd_recipe	take branch; recipes removed through change_recipes
 ReloadCommand.discoverNewPacks	port	crates/horizon-client/src/game/functions.rs::Game::reload_datapacks	gap: minor: enables newly found packs that are not disabled; no NeoForge reorder of new packs
 ReloadCommand.register	port	crates/horizon-command/src/tree_misc.rs::register	reload literal
+ReloadCommand.reloadPacks	port	crates/horizon-client/src/game/functions.rs::Game::apply_pack_change	no message of its own; the content tables are reloaded with the functions
 ReturnCommand.ReturnFailCustomExecutor.run	port	crates/horizon-client/src/game/functions.rs::Game::cmd_return	return fail branch: finish_return with no value
 ReturnCommand.ReturnFromCommandCustomModifier.apply	port	crates/horizon-client/src/game/commands/execute.rs::Game::run_return_run	return run: the command's result becomes the frame's return
 ReturnCommand.ReturnValueCustomExecutor.run	port	crates/horizon-client/src/game/functions.rs::Game::cmd_return	return value branch: finish_return with the value

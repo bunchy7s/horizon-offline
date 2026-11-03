@@ -217,7 +217,12 @@ impl Features {
                 &entity_module,
                 entities,
                 &entity_buffers,
-                kind("additive entities", "lightning", None, PLAIN),
+                kind(
+                    "additive entities",
+                    "lightning",
+                    Some(wgpu::Face::Back),
+                    PLAIN,
+                ),
             ),
             weather: set(
                 &entity_module,

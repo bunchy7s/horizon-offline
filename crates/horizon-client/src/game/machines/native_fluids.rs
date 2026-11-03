@@ -183,7 +183,7 @@ impl Game<'_> {
         }
         let state = horizon_world::chunk::BlockState {
             name: name.to_owned(),
-            properties,
+            properties: properties.into(),
         };
         match self.pack.assets.registry.resolve(&state) {
             Ok(id) => self.level_set(pos, id).is_ok(),

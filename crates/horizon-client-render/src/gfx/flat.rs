@@ -42,10 +42,16 @@ struct Plan {
     solid_calls: usize,
     /// Where the shadow camera's solid and translucent calls begin.
     shadow_calls: [usize; 2],
+    /// Where Metal's opaque pass ends and its cutout pass begins in phase 1's calls.
+    pass_calls: [usize; 2],
     total: u64,
 }
 const QUADS: u32 = u32::MAX;
 const GROUP_LIMIT: u32 = 65535;
+/// The page keys of the translucent arena (`Renderer::translucent_arena`, Translucent
+/// Batching): its page plus this. The section arena's pages are their own keys, all far
+/// below it. A call names its key: its vertices come from that arena's page.
+pub const TRANSLUCENT_KEYS: u32 = 1 << 10;
 
 struct PageTable {
     /// Section id of every block of the page.
@@ -53,19 +59,36 @@ struct PageTable {
     group: Option<wgpu::BindGroup>,
 }
 
+/// Writes the fragment's alpha over the frame's and leaves its colour.
+pub(super) const ALPHA_ONLY: wgpu::BlendState = wgpu::BlendState {
+    color: wgpu::BlendComponent {
+        src_factor: wgpu::BlendFactor::Zero,
+        dst_factor: wgpu::BlendFactor::One,
+        operation: wgpu::BlendOperation::Add,
+    },
+    alpha: wgpu::BlendComponent::REPLACE,
+};
 /// A run of the frame's index list drawn from one arena page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Call {
+    /// The page's key (`TRANSLUCENT_KEYS`).
     pub page: u32,
     pub first: u32,
     pub count: u32,
 }
 
 pub struct Flat {
+    /// The solid draws in one pass (`fs_solid`), where the GPU doesn't hide pixels
+    /// by tiles (`split_solid` in `Renderer::draw_frame`: elsewhere than Metal).
     pub solid: wgpu::RenderPipeline,
+    /// The solid draws in two passes over the same draws (terrain.wgsl's `opaque_quad`):
+    /// the quads with no cutout first, through a shader that never discards, then the rest.
+    pub solid_opaque: wgpu::RenderPipeline,
+    pub solid_cutout: wgpu::RenderPipeline,
     /// The solid draws as the water mirror's camera draws them (`fs_solid_mirror`).
     pub solid_mirror: wgpu::RenderPipeline,
     pub translucent: wgpu::RenderPipeline,
+    pub translucent_mark: wgpu::RenderPipeline,
     flatten: wgpu::ComputePipeline,
     compute_layout: wgpu::BindGroupLayout,
     flatten_seen: wgpu::ComputePipeline,
@@ -80,6 +103,9 @@ pub struct Flat {
     /// The layout of a page's bind group 1 (shader packs' terrain pipelines share it).
     pub(super) draw_layout: wgpu::BindGroupLayout,
     blocks_per_page: u64,
+    /// Blocks of a translucent arena page (`TRANSLUCENT_KEYS`), whose pages are larger.
+    translucent_blocks_per_page: u64,
+    /// Block tables by page key.
     pages: Vec<Option<PageTable>>,
     free_ids: Vec<u32>,
     next_id: u32,
@@ -101,6 +127,9 @@ pub struct Flat {
     pub calls: Vec<Call>,
     pub phase1_calls: usize,
     pub solid_calls: usize,
+    /// Metal's two solid passes over phase 1: the opaque one draws
+    /// `calls[..pass_calls[0]]`, the cutout one `calls[pass_calls[1]..phase1_calls]`.
+    pub pass_calls: [usize; 2],
     /// Where a shader pack's shadow camera's solid and translucent calls
     /// begin (`calls.len()` without them): the camera's translucent calls
     /// end at the first.
@@ -197,7 +226,14 @@ fn buffer(
     device.create_buffer(&wgpu::BufferDescriptor {
         label: Some(label),
         size: size.max(16),
-        usage: usage | wgpu::BufferUsages::COPY_DST,
+        // Tests read the tables back.
+        usage: usage
+            | wgpu::BufferUsages::COPY_DST
+            | if cfg!(test) {
+                wgpu::BufferUsages::COPY_SRC
+            } else {
+                wgpu::BufferUsages::empty()
+            },
         mapped_at_creation: false,
     })
 }
@@ -210,7 +246,8 @@ fn buffer(
 /// apart. A phase 2 range names its draw in phase 2 and its call in phase 2
 /// instead of a destination: the call's room holds all of its draws. Draws
 /// from `shadow[0]` (solid) and `shadow[1]` (translucent) on are a shader
-/// pack's shadow camera's, with calls of their own.
+/// pack's shadow camera's, with calls of their own. Phase 1's draws before
+/// `passes[0]` and from `passes[1]` on, the two solid passes' on Metal, too.
 #[allow(clippy::too_many_arguments)]
 fn plan(
     draws: &[[u32; 5]],
@@ -218,7 +255,9 @@ fn plan(
     phase1_draws: usize,
     solid_draws: usize,
     shadow: [usize; 2],
+    passes: [usize; 2],
     align: u64,
+    key: impl Fn(u32, Option<u32>) -> u32,
     calls: &mut Vec<Call>,
     ranges: &mut Vec<Range>,
     segments: &mut Vec<(Source, u64, u64)>,
@@ -228,6 +267,7 @@ fn plan(
     segments.clear();
     let (mut phase1_calls, mut solid_calls) = (None, None);
     let mut shadow_calls = [None; 2];
+    let mut pass_calls = [None; 2];
     let mut total = 0u64;
     let mut by_source: Vec<(Source, Vec<Range>)> = Vec::new();
     for (i, (d, &(page, sorted))) in draws.iter().zip(pages).enumerate() {
@@ -242,7 +282,14 @@ fn plan(
                 shadow_calls[k].get_or_insert(calls.len());
             }
         }
-        let starts = i == phase1_draws || i == solid_draws || shadow.contains(&i);
+        for (k, &from) in passes.iter().enumerate() {
+            if i == from {
+                pass_calls[k].get_or_insert(calls.len());
+            }
+        }
+        let starts =
+            i == phase1_draws || i == solid_draws || shadow.contains(&i) || passes.contains(&i);
+        let page = key(page, sorted);
         match calls.last_mut() {
             Some(last) if last.page == page && !starts => last.count += d[0],
             _ => calls.push(Call {
@@ -277,16 +324,18 @@ fn plan(
         ranges.resize(padded as usize, [0; 4]);
     }
     let solid_calls = solid_calls.unwrap_or(calls.len());
+    let phase1_calls = phase1_calls.unwrap_or(calls.len()).min(solid_calls);
     Plan {
-        phase1_calls: phase1_calls.unwrap_or(calls.len()).min(solid_calls),
+        phase1_calls,
         solid_calls,
         shadow_calls: shadow_calls.map(|c| c.unwrap_or(calls.len())),
+        pass_calls: pass_calls.map(|c| c.unwrap_or(calls.len()).min(phase1_calls)),
         total,
     }
 }
 
 impl Flat {
-    /// `pipeline(layout, label, fragment entry, blend, cull)` builds a
+    /// `pipeline(layout, label, vertex entry, fragment entry, blend, cull)` builds a
     /// terrain pipeline as the per-section ones, without the origin buffer.
     pub fn new(
         device: &wgpu::Device,
@@ -295,6 +344,7 @@ impl Flat {
         min_sections: usize,
         pipeline: impl Fn(
             &wgpu::PipelineLayout,
+            &str,
             &str,
             &str,
             Option<wgpu::BlendState>,
@@ -354,11 +404,35 @@ impl Flat {
         let storage_usage = wgpu::BufferUsages::STORAGE;
         let back = Some(wgpu::Face::Back);
         Self {
-            solid: pipeline(&layout, "Terrain solid (flat)", "fs_solid", None, back),
+            solid: pipeline(
+                &layout,
+                "Terrain solid (flat)",
+                "vs_terrain_flat",
+                "fs_solid",
+                None,
+                back,
+            ),
+            solid_opaque: pipeline(
+                &layout,
+                "Terrain solid opaque (flat)",
+                "vs_terrain_flat_opaque",
+                "fs_opaque",
+                None,
+                back,
+            ),
+            solid_cutout: pipeline(
+                &layout,
+                "Terrain solid cutout (flat)",
+                "vs_terrain_flat_cutout",
+                "fs_solid",
+                None,
+                back,
+            ),
             // The mirror flips the winding: its solid terrain culls the front.
             solid_mirror: pipeline(
                 &layout,
                 "Terrain solid mirrored (flat)",
+                "vs_terrain_flat",
                 "fs_solid_mirror",
                 None,
                 Some(wgpu::Face::Front),
@@ -366,8 +440,17 @@ impl Flat {
             translucent: pipeline(
                 &layout,
                 "Terrain translucent (flat)",
+                "vs_terrain_flat",
                 "fs_translucent",
                 Some(wgpu::BlendState::ALPHA_BLENDING),
+                back,
+            ),
+            translucent_mark: pipeline(
+                &layout,
+                "Terrain translucent HDR mark (flat)",
+                "vs_terrain_flat",
+                "fs_translucent_mark",
+                Some(ALPHA_ONLY),
                 back,
             ),
             flatten,
@@ -385,6 +468,7 @@ impl Flat {
             phase2_group: None,
             draw_layout,
             blocks_per_page: page_vertices.div_ceil(GRAIN),
+            translucent_blocks_per_page: page_vertices.div_ceil(GRAIN),
             pages: Vec::new(),
             free_ids: Vec::new(),
             next_id: 0,
@@ -406,14 +490,15 @@ impl Flat {
             calls: Vec::new(),
             phase1_calls: 0,
             solid_calls: 0,
+            pass_calls: [0; 2],
             shadow_calls: [0; 2],
             min_sections,
             range_align: (u64::from(device.limits().min_storage_buffer_offset_alignment) / 16)
                 .max(1),
         }
     }
-    /// A section uploaded to `vertices` vertices from `start` of `page`: its
-    /// id, which its blocks now name (written through `uploads` in `encoder`).
+    /// A section uploaded to `vertices` vertices from `start` of the page keyed `page`:
+    /// its id, which its blocks now name (written through `uploads` in `encoder`).
     pub fn add(
         &mut self,
         device: &wgpu::Device,
@@ -427,6 +512,28 @@ impl Flat {
             self.next_id += 1;
             self.next_id - 1
         });
+        self.place(device, encoder, uploads, id, page, start, vertices);
+        id
+    }
+    /// Makes the blocks of `vertices` vertices from `start` of the page keyed `page` name
+    /// `id`: a section's other range (its translucent quads, in the translucent arena), or
+    /// a range that moved.
+    #[allow(clippy::too_many_arguments)]
+    pub fn place(
+        &mut self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        uploads: &mut super::upload::Uploads,
+        id: u32,
+        page: u32,
+        start: u64,
+        vertices: u64,
+    ) {
+        let blocks = if page >= TRANSLUCENT_KEYS {
+            self.translucent_blocks_per_page
+        } else {
+            self.blocks_per_page
+        };
         let page = page as usize;
         if self.pages.len() <= page {
             self.pages.resize_with(page + 1, || None);
@@ -435,7 +542,7 @@ impl Flat {
             blocks: buffer(
                 device,
                 "Section ids by block",
-                self.blocks_per_page * 4,
+                blocks * 4,
                 wgpu::BufferUsages::STORAGE,
             ),
             group: None,
@@ -448,7 +555,19 @@ impl Flat {
             first * 4,
             bytemuck::cast_slice(&ids),
         );
-        id
+    }
+    /// The block table of the page keyed `page`, for tests that read it back.
+    #[cfg(test)]
+    pub(super) fn blocks(&self, page: u32) -> &wgpu::Buffer {
+        &self.pages[page as usize]
+            .as_ref()
+            .expect("a page table")
+            .blocks
+    }
+    /// The most vertices a page of the translucent arena holds: its block tables' size.
+    /// Tables made before keep theirs, so this goes with `clear`.
+    pub fn set_translucent_page_vertices(&mut self, vertices: u64) {
+        self.translucent_blocks_per_page = vertices.div_ceil(GRAIN);
     }
     pub fn remove(&mut self, id: u32) {
         self.free_ids.push(id);
@@ -458,7 +577,7 @@ impl Flat {
         self.free_ids.clear();
         self.next_id = 0;
     }
-    /// Forgets the tables of pages the arena released.
+    /// Forgets the tables of pages the arenas released (`live`, by page key).
     pub fn trim(&mut self, live: impl Fn(u32) -> bool) {
         for (i, page) in self.pages.iter_mut().enumerate() {
             if page.is_some() && !live(i as u32) {
@@ -487,9 +606,12 @@ impl Flat {
         phase1_draws: usize,
         solid_draws: usize,
         shadow: [usize; 2],
+        passes: [usize; 2],
         phase2: Option<&wgpu::Buffer>,
+        translucent_arena: bool,
         origins: impl Iterator<Item = (u32, [f32; 4])>,
         sorted_page: impl Fn(u32) -> wgpu::Buffer,
+        timing: Option<&mut super::pack_timing::PassTiming>,
     ) -> bool {
         self.phase2_group = None;
         let phase1_draws = if phase2.is_some() {
@@ -530,6 +652,7 @@ impl Flat {
             phase1_calls,
             solid_calls,
             shadow_calls,
+            pass_calls,
             total,
         } = plan(
             draws,
@@ -537,7 +660,13 @@ impl Flat {
             phase1_draws,
             solid_draws,
             shadow,
+            passes,
             self.range_align,
+            // Translucent draws, and only they, have sorted indices.
+            |page, sorted| match sorted {
+                Some(_) if translucent_arena => page + TRANSLUCENT_KEYS,
+                _ => page,
+            },
             &mut self.calls,
             &mut self.range_data,
             &mut self.segments,
@@ -545,11 +674,13 @@ impl Flat {
         self.phase1_calls = phase1_calls;
         self.solid_calls = solid_calls;
         self.shadow_calls = shadow_calls;
+        self.pass_calls = pass_calls;
         if total == 0 || total * 4 > device.limits().max_storage_buffer_binding_size {
             self.calls.clear();
             self.phase1_calls = 0;
             self.solid_calls = 0;
             self.shadow_calls = [0; 2];
+            self.pass_calls = [0; 2];
             return false;
         }
         if self.range_data.len() as u64 > self.range_capacity {
@@ -668,7 +799,7 @@ impl Flat {
             .collect();
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Flatten section draws"),
-            timestamp_writes: None,
+            timestamp_writes: timing.and_then(|t| t.compute_writes("Flatten")),
         });
         pass.set_pipeline(&self.flatten);
         for (group, count) in &groups {
@@ -700,13 +831,17 @@ impl Flat {
         true
     }
     /// After occlusion culling's test: copies the phase 2 draws it saw.
-    pub fn flatten_phase2(&self, encoder: &mut wgpu::CommandEncoder) {
+    pub fn flatten_phase2(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        timing: Option<&mut super::pack_timing::PassTiming>,
+    ) {
         let Some((group, count)) = &self.phase2_group else {
             return;
         };
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Flatten phase 2 section draws"),
-            timestamp_writes: None,
+            timestamp_writes: timing.and_then(|t| t.compute_writes("Flatten phase 2")),
         });
         pass.set_pipeline(&self.flatten_seen);
         pass.set_bind_group(0, group, &[]);
@@ -724,7 +859,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         self.draw_with(pass, calls, vertices, |_, _| {});
     }
@@ -734,7 +869,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
         page: impl Fn(&mut wgpu::RenderPass<'_>, u32),
     ) {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -751,7 +886,7 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         calls: &[Call],
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
         page: impl Fn(&mut wgpu::RenderPass<'_>, u32),
         instances: u32,
     ) {
@@ -765,7 +900,7 @@ impl Flat {
     pub fn draw_phase2<'a>(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
-        vertices: impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
         for (k, call) in self.calls[self.phase1_calls..self.solid_calls]
@@ -780,13 +915,13 @@ impl Flat {
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         page: u32,
-        vertices: &impl Fn(u32) -> &'a wgpu::Buffer,
+        vertices: &impl Fn(u32) -> wgpu::BufferSlice<'a>,
     ) {
         let table = self.pages[page as usize]
             .as_ref()
             .and_then(|t| t.group.as_ref())
             .expect("prepared page");
-        pass.set_vertex_buffer(0, vertices(page).slice(..));
+        pass.set_vertex_buffer(0, vertices(page));
         pass.set_bind_group(1, table, &[]);
     }
 }
@@ -833,7 +968,9 @@ mod tests {
             solid,
             solid,
             [draws.len(); 2],
+            [draws.len(), 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -867,6 +1004,40 @@ mod tests {
         assert_eq!(ranges.len(), 12);
     }
 
+    /// Metal's opaque pass draws the lists before `passes[0]`, its cutout
+    /// pass those from `passes[1]`: each bound starts a call of its own,
+    /// though its page goes on.
+    #[test]
+    fn plan_splits_calls_where_the_solid_passes_end_and_begin() {
+        let (draws, pages, solid) = sample();
+        let (mut calls, mut ranges, mut segments) = (Vec::new(), Vec::new(), Vec::new());
+        let plan = plan(
+            &draws,
+            &pages,
+            solid,
+            solid,
+            [draws.len(); 2],
+            [3, 1],
+            4,
+            |page, _| page,
+            &mut calls,
+            &mut ranges,
+            &mut segments,
+        );
+        assert_eq!((plan.pass_calls, plan.solid_calls), ([3, 1], 4));
+        let call = |page, first, count| Call { page, first, count };
+        assert_eq!(
+            calls,
+            [
+                call(0, 0, 18),
+                call(0, 18, 12),
+                call(1, 30, 6),
+                call(0, 36, 24),
+                call(0, 60, 18)
+            ]
+        );
+    }
+
     /// A shader pack's shadow draws follow the camera's, in calls of their
     /// own even from the same page: solid ones, then translucent ones.
     #[test]
@@ -882,7 +1053,9 @@ mod tests {
             solid,
             solid,
             [camera, camera + 2],
+            [camera, 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -909,7 +1082,9 @@ mod tests {
             2,
             solid,
             [draws.len(); 2],
+            [draws.len(), 0],
             4,
+            |page, _| page,
             &mut calls,
             &mut ranges,
             &mut segments,
@@ -920,6 +1095,7 @@ mod tests {
                 phase1_calls: 1,
                 solid_calls: 3,
                 shadow_calls: [4, 4],
+                pass_calls: [1, 0],
                 total: 6 * 13
             }
         );
@@ -945,7 +1121,7 @@ mod tests {
     /// of the draws the test saw, in order, and their calls count them.
     #[test]
     fn flatten_writes_the_indices_of_the_per_section_draws() {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
             eprintln!("no GPU adapter: skipped");
             return;
@@ -1024,7 +1200,9 @@ mod tests {
                 phase1,
                 solid,
                 [draws.len(); 2],
+                [draws.len(), 0],
                 align,
+                |page, _| page,
                 &mut calls,
                 &mut ranges,
                 &mut segments,

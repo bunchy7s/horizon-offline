@@ -87,6 +87,30 @@ pub fn fill(out: &mut Vec<Draw>, x0: i32, y0: i32, x1: i32, y1: i32, color: i32)
         color,
     });
 }
+/// What a screen wants drawn behind it, for screens that are Horizon's own.
+///
+/// The panorama is the spinning cube the renderer draws before the HUD, not
+/// something a draw list can hold, so a screen cannot simply emit it: it says
+/// here that it wants one and the renderer obeys. Existing screens that
+/// already show a panorama (the title and the loading screens) decide it
+/// their own way, in `Game::shows_panorama`, and are untouched by this: a
+/// screen that leaves this at [`Backdrop::None`] behaves exactly as before.
+///
+/// This exists so a new Horizon screen can have the menu panorama without
+/// each one growing its own special case in the frame loop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Backdrop {
+    /// Whatever is already behind the screen: the world, or the flat menu
+    /// background the screen draws itself. The default, and what every
+    /// vanilla screen uses.
+    #[default]
+    None,
+    /// The menu panorama, as the title screen shows it. The screen should
+    /// still draw its own panels over it; the panorama only replaces what
+    /// would otherwise be empty background.
+    Panorama,
+}
+
 pub fn sprite(out: &mut Vec<Draw>, sprite: &str, x: i32, y: i32, w: i32, h: i32) {
     out.push(Draw::Sprite {
         sprite: sprite.to_owned(),
@@ -126,6 +150,21 @@ pub fn text(out: &mut Vec<Draw>, text: Text, x: i32, y: i32, color: i32, shadow:
     if (color as u32) >> 24 != 0 {
         out.push(Draw::Text {
             text: text.resolve_legacy(),
+            x,
+            y,
+            color,
+            shadow,
+        });
+    }
+}
+/// `graphics.text` on text the caller already styled, drawn as it is: a `§`
+/// in it stays a character, as `FormattedCharSequence.forward`
+/// (`StringDecomposer.iterate`, not `iterateFormatted`) draws it. An edit box
+/// builds its own sequence that way, so a `§` in its value shows.
+pub fn text_as_typed(out: &mut Vec<Draw>, text: Text, x: i32, y: i32, color: i32, shadow: bool) {
+    if (color as u32) >> 24 != 0 {
+        out.push(Draw::Text {
+            text,
             x,
             y,
             color,
@@ -185,6 +224,11 @@ impl Measure<'_> {
     /// `Font.width`.
     pub fn width(&self, t: &Text) -> i32 {
         self.0.width_text(&t.resolve_legacy()) as i32
+    }
+    /// `Font.width(FormattedCharSequence)` of a sequence drawn as it is: a
+    /// `§` in the text counts as the glyph it is drawn as.
+    pub fn width_drawn(&self, t: &Text) -> i32 {
+        self.0.width_drawn(t) as i32
     }
     pub fn width_str(&self, s: &str) -> i32 {
         self.0.width(s) as i32
@@ -409,8 +453,104 @@ pub fn label(
     }
 }
 
-/// `Button` (`extractDefaultSprite` and the label over its contents, which
-/// must fit: scrolling labels depend on the clock).
+/// `ActiveTextCollector.PERIOD_PER_SCROLLED_PIXEL`.
+const PERIOD_PER_SCROLLED_PIXEL: f64 = 0.5;
+/// `ActiveTextCollector.MIN_SCROLL_PERIOD`.
+const MIN_SCROLL_PERIOD: f64 = 3.0;
+
+/// How far `ActiveTextCollector.defaultScrollingHelper` has slid a line left
+/// of the box's left edge at `now_ms` (`Util.getMillis`), for a line that
+/// overflows the box by `max_position` pixels. A whole cycle takes
+/// `max(max_position * 0.5, 3)` seconds, eased with a sine, so the line rests
+/// a moment at each end; at time 0 it is at the far end.
+pub fn scroll_offset(max_position: i32, now_ms: i64) -> i32 {
+    let time = now_ms as f64 / 1000.0;
+    let period = (f64::from(max_position) * PERIOD_PER_SCROLLED_PIXEL).max(MIN_SCROLL_PERIOD);
+    let alpha = horizon_core::jmath::sin(
+        (std::f64::consts::PI / 2.0)
+            * horizon_core::jmath::cos(std::f64::consts::PI * 2.0 * time / period),
+    ) / 2.0
+        + 0.5;
+    // `Mth.lerp(alpha, 0.0, maxPosition)`, then the `(int)` cast.
+    (0.0 + alpha * (f64::from(max_position) - 0.0)) as i32
+}
+
+/// `ActiveTextCollector.defaultScrollingHelper` with the line height of 9
+/// that `acceptScrolling` passes: a message that fits is centred on
+/// `center_x`, kept inside `[left, right]`; a wider one is left-aligned,
+/// clipped to the box and slides back and forth with the clock (`now_ms`).
+/// Vanilla intersects that clip with the enclosing scissor; `paint` does not
+/// stack scissors, so this must not be drawn inside another `Draw::Scissor`.
+pub fn scrolling_text(
+    out: &mut Vec<Draw>,
+    m: &Measure,
+    message: &Text,
+    center_x: i32,
+    left: i32,
+    right: i32,
+    top: i32,
+    bottom: i32,
+    now_ms: i64,
+) {
+    let line_width = m.width(message);
+    let text_top = (top + bottom - 9) / 2 + 1;
+    let available = right - left;
+    if line_width > available {
+        let pos = scroll_offset(line_width - available, now_ms);
+        out.push(Draw::Scissor {
+            x0: left,
+            y0: top,
+            x1: right,
+            y1: bottom,
+        });
+        text(out, message.clone(), left - pos, text_top, WHITE, true);
+        out.push(Draw::NoScissor);
+    } else {
+        // Here `left + line_width / 2 <= right - line_width / 2`, so the
+        // clamp's bounds are in order.
+        let text_x = center_x.clamp(left + line_width / 2, right - line_width / 2);
+        let at = center_left(text_x, line_width);
+        text(out, message.clone(), at, text_top, WHITE, true);
+    }
+}
+
+/// `ActiveTextCollector.acceptScrollingWithDefaultCenter`: `scrolling_text`
+/// centred between `left` and `right`.
+pub fn scrolling_with_default_center(
+    out: &mut Vec<Draw>,
+    m: &Measure,
+    message: &Text,
+    left: i32,
+    right: i32,
+    top: i32,
+    bottom: i32,
+    now_ms: i64,
+) {
+    let center = (left + right) / 2;
+    scrolling_text(out, m, message, center, left, right, top, bottom, now_ms);
+}
+
+/// `AbstractWidget.extractScrollingStringOverContents`: `message` over the
+/// widget's box less `margin` on each side (centred, or scrolling when too
+/// wide).
+pub fn scrolling_string_over_contents(
+    out: &mut Vec<Draw>,
+    m: &Measure,
+    message: &Text,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    margin: i32,
+    now_ms: i64,
+) {
+    let (left, right) = (x + margin, x + w - margin);
+    scrolling_with_default_center(out, m, message, left, right, y, y + h, now_ms);
+}
+
+/// `Button` (`extractDefaultSprite`, then `AbstractButton.extractDefaultLabel`:
+/// `extractScrollingStringOverContents` with a margin of 2, which scrolls a
+/// label wider than the button with the clock, `now_ms`).
 pub fn button(
     out: &mut Vec<Draw>,
     m: &Measure,
@@ -421,6 +561,7 @@ pub fn button(
     h: i32,
     active: bool,
     highlighted: bool,
+    now_ms: i64,
 ) {
     // Its narration: hovered is the mouse over it (`isHovered`), which the
     // narrator tests.
@@ -439,11 +580,7 @@ pub fn button(
         "widget/button"
     };
     sprite(out, sprite_id, x, y, w, h);
-    let (left, right) = (x + 2, x + w - 2);
-    let lw = m.width(label);
-    let top = (y + y + h - 9) / 2 + 1;
-    let cx = ((left + right) / 2).clamp(left + lw / 2, right - lw / 2);
-    text(out, label.clone(), center_left(cx, lw), top, WHITE, true);
+    scrolling_string_over_contents(out, m, label, x, y, w, h, 2, now_ms);
 }
 /// `Tooltip.splitTooltip` of a widget's tooltip, shown under the mouse.
 pub fn tooltip(out: &mut Vec<Draw>, m: &Measure, message: &Text, mouse: (i32, i32)) {
@@ -771,8 +908,8 @@ impl TextField {
                 displayed.clone()
             };
             let t = styled(half, self.display);
-            let w = m.width(&t);
-            text(out, t, draw_x, ty, color, self.text_shadow);
+            let w = m.width_drawn(&t);
+            text_as_typed(out, t, draw_x, ty, color, self.text_shadow);
             draw_x += w + 1;
         }
         let insert = self.cursor < len || len >= self.max_length;
@@ -785,7 +922,7 @@ impl TextField {
         }
         if !displayed.is_empty() && on_screen && (rel_cursor as usize) < shown_len {
             let t = styled(sub(&displayed, rel_cursor as usize, shown_len), self.cursor);
-            text(out, t, draw_x, ty, color, self.text_shadow);
+            text_as_typed(out, t, draw_x, ty, color, self.text_shadow);
         }
         if let Some(hint) = &self.hint
             && displayed.is_empty()
@@ -826,6 +963,14 @@ impl TextField {
                     self.text_shadow,
                 );
             }
+        }
+        if self.focused {
+            // `TextInputManager.setTextInputArea`, in GUI pixels: the caret
+            // the input method's composition and its candidate window go to.
+            // The chat and in-bed chat boxes and the pack screen's search are
+            // `TextField`s; the other fields are an `EditBox` or a multiline
+            // box, which report their own.
+            crate::preedit::report_caret(cursor_x as f32, ty as f32, 10.0);
         }
     }
 }
@@ -952,5 +1097,188 @@ pub fn paint(batch: &mut HudBatch, atlas: &HudAtlas, draws: &[Draw]) {
     }
     if let Some((lines, at)) = tooltip {
         crate::ui::tooltip(batch, atlas, &lines, at);
+    }
+}
+
+#[cfg(test)]
+mod button_label_tests {
+    use super::*;
+
+    fn atlas() -> HudAtlas {
+        HudAtlas::build(std::path::Path::new("/nonexistent/horizon-test-assets")).unwrap()
+    }
+    /// A label made of `n` copies of one letter.
+    fn label(n: usize) -> Text {
+        Text::literal("W".repeat(n))
+    }
+    /// The calls of one button: its sprite, then (the scissor,) the label.
+    fn draw(m: &Measure, text: &Text, w: i32, now_ms: i64) -> Vec<Draw> {
+        let mut out = Vec::new();
+        button(&mut out, m, text, 10, 20, w, 20, true, false, now_ms);
+        out
+    }
+    fn scissor_of(draws: &[Draw]) -> Option<[i32; 4]> {
+        draws.iter().find_map(|d| match d {
+            Draw::Scissor { x0, y0, x1, y1 } => Some([*x0, *y0, *x1, *y1]),
+            _ => None,
+        })
+    }
+    fn text_x(draws: &[Draw]) -> i32 {
+        draws
+            .iter()
+            .find_map(|d| match d {
+                Draw::Text { x, .. } => Some(*x),
+                _ => None,
+            })
+            .expect("the label is drawn")
+    }
+    /// A button `overflow` px too narrow for `text`, whatever the font.
+    fn width_overflowing_by(m: &Measure, text: &Text, overflow: i32) -> i32 {
+        m.width(text) - overflow + 4
+    }
+
+    /// `defaultScrollingHelper`: `pos` runs from the far end (`maxPosition`, at
+    /// time 0) to 0 at half the period (`max(maxPosition * 0.5, 3)` seconds)
+    /// and back, with `maxPosition / 2` a quarter of the way.
+    #[test]
+    fn the_offset_follows_the_vanilla_period_and_easing() {
+        // 8 px over: a 4 s period. At 3 s the cosine is a hair below 0, so
+        // `pos` is a hair below 4 and the `(int)` cast truncates it to 3.
+        let at = |ms| scroll_offset(8, ms);
+        assert_eq!(
+            [at(0), at(1000), at(2000), at(3000), at(4000)],
+            [8, 4, 0, 3, 8]
+        );
+        // 1 px over: the 3 s minimum period, so 1.5 s is the other end.
+        assert_eq!([scroll_offset(1, 0), scroll_offset(1, 1500)], [1, 0]);
+        // 40 px over: a 20 s period.
+        assert_eq!(
+            [
+                scroll_offset(40, 0),
+                scroll_offset(40, 5000),
+                scroll_offset(40, 10000),
+                scroll_offset(40, 20000)
+            ],
+            [40, 20, 0, 40]
+        );
+        // It never leaves [0, maxPosition], and the minimum period is 3 s even
+        // for a tiny overflow.
+        for max in 1..200 {
+            for ms in (0..60_000).step_by(37) {
+                let pos = scroll_offset(max, ms);
+                assert!((0..=max).contains(&pos), "{max} {ms} {pos}");
+            }
+        }
+        assert_eq!(scroll_offset(2, 1500), 0);
+        // tools/test_pack_screen_parity.py runs vanilla's own
+        // `defaultScrollingHelper` at fixed clocks for the scrolling labels.
+    }
+
+    /// The bug: a label wider than the button panicked in `i32::clamp`. Now it
+    /// is left-aligned, clipped to the button's contents and slides with the
+    /// clock, and every pixel of it stays inside that box.
+    #[test]
+    fn a_label_wider_than_its_button_scrolls_inside_its_box() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let text = label(24);
+        let w = width_overflowing_by(&m, &text, 8);
+        let (left, right) = (10 + 2, 10 + w - 2);
+        for (ms, x) in [(0, left - 8), (1000, left - 4), (2000, left)] {
+            let draws = draw(&m, &text, w, ms);
+            assert_eq!(scissor_of(&draws), Some([left, 20, right, 40]), "{ms}");
+            assert_eq!(text_x(&draws), x, "{ms}");
+            // The scissor wraps the text and nothing else.
+            assert!(matches!(draws[1], Draw::Scissor { .. }));
+            assert!(matches!(draws[2], Draw::Text { .. }));
+            assert_eq!(draws[3], Draw::NoScissor);
+            assert_eq!(draws.len(), 4);
+            // Painted, no vertex of the label leaves the box.
+            let mut batch = HudBatch::new([320, 240]);
+            paint(&mut batch, &atlas, &draws[1..]);
+            assert!(!batch.vertices.is_empty());
+            for v in &batch.vertices {
+                assert!(
+                    (left as f32..=right as f32).contains(&v.pos[0])
+                        && (20.0..=40.0).contains(&v.pos[1]),
+                    "{ms}: {:?}",
+                    v.pos
+                );
+            }
+        }
+    }
+
+    /// A label as wide as the room is centred as before and takes no scissor;
+    /// one pixel more scrolls.
+    #[test]
+    fn the_scroll_starts_one_pixel_past_the_room() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let text = label(10);
+        let lw = m.width(&text);
+        let fits = draw(&m, &text, lw + 4, 0);
+        assert_eq!(scissor_of(&fits), None);
+        assert_eq!(text_x(&fits), 10 + 2);
+        assert_eq!(fits.len(), 2);
+        let over = draw(&m, &text, lw + 3, 0);
+        assert_eq!(scissor_of(&over), Some([12, 20, 10 + lw + 3 - 2, 40]));
+        // maxPosition 1: the far end at time 0, the near one 1.5 s later.
+        assert_eq!(text_x(&over), 12 - 1);
+        assert_eq!(text_x(&draw(&m, &text, lw + 3, 1500)), 12);
+    }
+
+    /// A label that fits stays where it was: centred on the button.
+    #[test]
+    fn a_label_that_fits_is_centred() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        let text = label(6);
+        let lw = m.width(&text);
+        for w in [lw + 5, lw + 6, 150, 200] {
+            let draws = draw(&m, &text, w, 12345);
+            assert_eq!(scissor_of(&draws), None);
+            let (left, right) = (10 + 2, 10 + w - 2);
+            assert_eq!(text_x(&draws), (left + right) / 2 - lw / 2, "{w}");
+        }
+    }
+
+    /// An empty label, and a button too narrow to hold anything (a 1-px one
+    /// has a negative room), neither panic nor draw outside it.
+    #[test]
+    fn empty_labels_and_tiny_buttons_do_not_panic() {
+        let atlas = atlas();
+        let m = Measure(&atlas.font);
+        for text in [Text::empty(), label(1), label(30)] {
+            for w in [-5, 0, 1, 2, 3, 4, 5, 150] {
+                for ms in [0, 1, 1499, 1500, 123_456_789] {
+                    let draws = draw(&m, &text, w, ms);
+                    let mut batch = HudBatch::new([320, 240]);
+                    paint(&mut batch, &atlas, &draws);
+                    if let Some([x0, _, x1, _]) = scissor_of(&draws) {
+                        // Whatever scrolled is clipped to the (maybe empty) box.
+                        for v in batch.vertices.iter().skip(sprite_vertices(&atlas, w)) {
+                            assert!(
+                                x1 <= x0 || (x0 as f32..=x1 as f32).contains(&v.pos[0]),
+                                "{w} {ms}: {:?}",
+                                v.pos
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // 4 px wide leaves no room: an empty label fits it (0 <= 0).
+        assert_eq!(scissor_of(&draw(&m, &Text::empty(), 4, 0)), None);
+        // 1 px wide: the room is -3 px, even an empty label overflows it.
+        assert!(scissor_of(&draw(&m, &Text::empty(), 1, 0)).is_some());
+    }
+
+    /// The vertices of the button's sprite alone.
+    fn sprite_vertices(atlas: &HudAtlas, w: i32) -> usize {
+        let mut batch = HudBatch::new([320, 240]);
+        let mut out = Vec::new();
+        sprite(&mut out, "widget/button", 10, 20, w, 20);
+        paint(&mut batch, atlas, &out);
+        batch.vertices.len()
     }
 }

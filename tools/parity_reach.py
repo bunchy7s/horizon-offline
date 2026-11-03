@@ -192,13 +192,33 @@ def parse_items(code, start, end, items):
                                   "mentions": sorted(words(text)), "paths": sorted(path_words(text)), "qualified": sorted(qualified_words(text)), "invokes": sorted(set(MACRO_USE.findall(text)))})
 
 
+def library_root(crate_dir):
+    """Cargo's library source, including an explicit path outside the package directory."""
+    manifest = crate_dir / "Cargo.toml"
+    text = manifest.read_text(encoding="utf-8") if manifest.is_file() else ""
+    table = re.search(r"^\[lib\]([^\[]*)", text, re.M)
+    path = re.search(r'^path\s*=\s*"([^"\n]+)"', table.group(1), re.M) if table else None
+    return (crate_dir / (path.group(1) if path else "src/lib.rs")).resolve()
+
+
 def crate_roots(crate_dir):
     """A crate's root files: its library, binaries and examples."""
-    roots = [crate_dir / "src" / "lib.rs", crate_dir / "src" / "main.rs"]
-    for folder in (crate_dir / "src" / "bin", crate_dir / "examples"):
-        if folder.is_dir():
-            roots += sorted(folder.glob("*.rs")) + sorted(folder.glob("*/main.rs"))
-    return [root for root in roots if root.is_file()]
+    path = crate_dir / "Cargo.toml"
+    manifest = path.read_text(encoding="utf-8") if path.is_file() else ""
+    roots = [library_root(crate_dir)]
+    if not re.search(r"^autobins\s*=\s*false", manifest, re.M):
+        roots.append(crate_dir / "src" / "main.rs")
+        folder = crate_dir / "src" / "bin"
+        roots += sorted(folder.glob("*.rs")) + sorted(folder.glob("*/main.rs"))
+    if not re.search(r"^autoexamples\s*=\s*false", manifest, re.M):
+        folder = crate_dir / "examples"
+        roots += sorted(folder.glob("*.rs")) + sorted(folder.glob("*/main.rs"))
+    for _, table in re.findall(r"^\[\[(bin|example)\]\]([^\[]*)", manifest, re.M):
+        path = re.search(r'^path\s*=\s*"([^"\n]+)"', table, re.M)
+        if path:
+            roots.append(crate_dir / path.group(1))
+    return [root.resolve() for root in roots if root.is_file()]
+
 
 
 class SourceGraph:
@@ -215,6 +235,8 @@ class SourceGraph:
         self.parent = {}  # module file -> the file declaring it
         self.module_name = {}
         self.roots = set()
+        self.library_roots = {manifest.parent.name: self.relative(library_root(manifest.parent))
+                              for manifest in (self.root / "crates").glob("*/Cargo.toml")}
         self.target_cache = {}
         self.workspace_heads = None
         self.test_only = set()  # modules compiled into tests only
@@ -238,6 +260,16 @@ class SourceGraph:
             packages = [value for flag, value in zip(selection, selection[1:]) if flag == "-p"] or \
                 [manifest.parent.name for manifest in sorted((self.root / "crates").glob("*/Cargo.toml"))]
             roots = set()
+            if name and not any(name in self.targets(self.root / "crates" / package) for package in packages):
+                owners = [manifest.parent.name for manifest in (self.root / "crates").glob("*/Cargo.toml")
+                          if self.targets(manifest.parent).get(name, (None,))[0] == kind.rstrip("s")]
+                if len(owners) == 1:
+                    packages = [*packages, owners[0]]
+            if not name and kind in ("bins", "examples") and "horizon-client" in packages \
+                    and "horizon-client-lib" not in packages \
+                    and (self.root / "crates/horizon-client-lib/Cargo.toml").is_file():
+                # Broad records predate the client package split too.
+                packages = [*packages, "horizon-client-lib"]
             for package in packages:
                 crate = self.root / "crates" / package
                 targets = self.targets(crate)
@@ -270,9 +302,11 @@ class SourceGraph:
         found = {}
         manifest = (crate / "Cargo.toml").read_text(encoding="utf-8") if (crate / "Cargo.toml").is_file() else ""
         package = re.search(r'^\[package\][^\[]*?^name\s*=\s*"([^"]+)"', manifest, re.MULTILINE | re.DOTALL)
-        if (crate / "src" / "main.rs").is_file() and package:
+        if (crate / "src" / "main.rs").is_file() and package and not re.search(r"^autobins\s*=\s*false", manifest, re.M):
             found[package.group(1)] = ("bin", self.relative(crate / "src" / "main.rs"))
         for kind, folder in (("bin", crate / "src" / "bin"), ("example", crate / "examples")):
+            if re.search(rf"^auto{kind}s\s*=\s*false", manifest, re.M):
+                continue
             for path in sorted(folder.glob("*.rs")) + sorted(folder.glob("*/main.rs")):
                 found[path.stem if path.name != "main.rs" else path.parent.name] = (kind, self.relative(path))
         for kind, table in re.findall(r"^\[\[(bin|example)\]\]([^\[]*)", manifest, re.MULTILINE):
@@ -289,7 +323,7 @@ class SourceGraph:
         return self.root_of.get(path, path)
 
     def is_library(self, path):
-        return self.target(path).endswith("/src/lib.rs")
+        return self.target(path) in self.library_roots.values()
 
     def relative(self, path):
         return Path(path).resolve().relative_to(self.root.resolve()).as_posix()
@@ -357,6 +391,10 @@ class SourceGraph:
                 declarations.append([match.group(1), [name for name, _ in stack], attribute.group(1) if attribute else None,
                                      bool(TEST_MODULE.search(window))])
         items = []
+        # An extern-crate alias still links its source crate, even when callers use the alias.
+        for match in re.finditer(r"\bextern\s+crate\s+(\w+)(?:\s+as\s+\w+)?\s*;", code):
+            items.append({"kind": "glue", "names": [], "mentions": [match.group(1)],
+                          "paths": [match.group(1)], "qualified": [], "invokes": []})
         parse_items(code, 0, len(code), items)
         self.files[path] = parsed = {
             "declarations": declarations,
@@ -608,7 +646,7 @@ class SourceGraph:
 
         try:
             for path in universe:
-                if path in entries or path not in self.parent and not path.endswith("/src/lib.rs"):
+                if path in entries or path not in self.parent and not self.is_library(path):
                     open_module(path, "entry, or a file no module places")
             for node in seeds:
                 reach(node, "entry" if node[0] in entries else "always counted")
@@ -627,7 +665,7 @@ class SourceGraph:
                 # A library's root opens once reached code names the crate (`horizon_world::`, `use horizon_command
                 # as command`): its items are out of reach until then.
                 for word in (source["mentions"] | source["paths"]) & idents.keys():
-                    root = f"crates/{idents[word]}/src/lib.rs"
+                    root = self.library_roots[idents[word]]
                     if root in universe and root not in opened:
                         open_module(root, f"{why} names {word}")
                 # Plain mentions reach items of this file and of the modules above it.
@@ -643,7 +681,7 @@ class SourceGraph:
                     for name in item["names"]:
                         for target in sees.get(crate, {crate}):
                             for module in list(by_module.get((target, name), ())) + \
-                                    ([f"crates/{idents[name]}/src/lib.rs"] if name in idents else []):
+                                    ([self.library_roots[idents[name]]] if name in idents else []):
                                 if module not in globbed and module in universe:
                                     globbed.add(module)
                                     wake([(module, index, None) for index in range(len(self.parse(module)["items"]))]

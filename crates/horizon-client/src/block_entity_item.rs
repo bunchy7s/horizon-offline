@@ -29,6 +29,17 @@ pub fn data(stack: &crate::items::ItemStack) -> Option<(String, &Tag)> {
     Some((block_entity_nbt::id(data)?, data))
 }
 
+/// `JukeboxBlock.setPlacedBy`: the item's `minecraft:block_entity_data`
+/// carries a `RecordItem`, so the placed jukebox holds a record and its
+/// `has_record` state has to say so. Vanilla reads the item's data, not the
+/// block entity the placement just filled.
+pub fn carries_record(stack: &crate::items::ItemStack) -> bool {
+    stack
+        .data()
+        .and_then(|d| d.other(BLOCK_ENTITY_DATA))
+        .is_some_and(|data| data.get("RecordItem").is_some())
+}
+
 /// `BlockItem.shouldPrintOpWarning` for a player with game master permission:
 /// the item carries data of an op-only type.
 pub fn op_warning(stack: &crate::items::ItemStack) -> bool {
@@ -283,6 +294,25 @@ fn custom_only(saved: &Tag) -> Compound {
     }
 }
 
+/// `BlockEntity.collectComponents`: explicit components plus the type's implicit components.
+/// Unlike Ctrl + Pick Block, this does not carry the remaining block entity NBT.
+pub fn collected_components(saved: &Tag) -> Compound {
+    let id = block_entity_nbt::id(saved).unwrap_or_default();
+    let mut collected = match saved.get("components") {
+        Some(Tag::Compound(c)) => c.clone(),
+        _ => Compound::new(),
+    };
+    for part in parts(&id) {
+        if let Some((component, value)) = collect(*part, saved) {
+            match value {
+                Some(v) => collected.insert(component.into(), v),
+                None => collected.remove(&JavaString::from(component)),
+            };
+        }
+    }
+    collected
+}
+
 /// `addBlockDataToItem`: the component patch Ctrl + Pick Block gives the clone
 /// item of the block entity saved as `saved` (a full, canonical compound).
 pub fn pick(saved: &Tag) -> Compound {
@@ -310,19 +340,7 @@ pub fn pick(saved: &Tag) -> Compound {
     // ItemStack.applyComponents(collectComponents()): the block entity's own
     // components, then the implicit ones; a value equal to the item's own is
     // no change.
-    let mut collected = match saved.get("components") {
-        Some(Tag::Compound(c)) => c.clone(),
-        _ => Compound::new(),
-    };
-    for part in parts(&id) {
-        if let Some((component, value)) = collect(*part, saved) {
-            match value {
-                Some(v) => collected.insert(component.into(), v),
-                None => collected.remove(&JavaString::from(component)),
-            };
-        }
-    }
-    for (component, value) in collected {
+    for (component, value) in collected_components(saved) {
         if item_default(&component.to_string_lossy()).as_ref() == Some(&value) {
             patch.remove(&component);
         } else {
@@ -593,6 +611,40 @@ mod tests {
         let chest = item("{id:\"minecraft:chest\",LootTable:\"x\"}");
         assert_eq!(spawner_entity(&chest), None);
         assert!(!op_warning(&chest));
+    }
+
+    /// `JukeboxBlock.setPlacedBy` looks for a `RecordItem` in the placed
+    /// item's block entity data, whatever the type it names: only that key
+    /// turns the box's `has_record` on.
+    #[test]
+    fn a_jukebox_item_with_a_record_in_its_data_says_so() {
+        let jukebox = |text: &str| {
+            let components = snbt(&format!("{{\"minecraft:block_entity_data\":{text}}}"));
+            let (damage, extra) = crate::item_data::decode_components(Some(&components));
+            crate::items::ItemStack {
+                damage,
+                extra,
+                ..crate::items::ItemStack::new("minecraft:jukebox", 1)
+            }
+        };
+        // A plain jukebox, and one whose data is only the type id: no record.
+        assert!(!carries_record(&crate::items::ItemStack::new(
+            "minecraft:jukebox",
+            1
+        )));
+        assert!(!carries_record(&jukebox("{id:\"minecraft:jukebox\"}")));
+        assert!(!carries_record(&jukebox(
+            "{id:\"minecraft:jukebox\",Items:[{Slot:0b,id:\"minecraft:stone\",count:1}]}"
+        )));
+        // Creative's Ctrl + Pick Block on a jukebox holding a disc.
+        assert!(carries_record(&jukebox(
+            "{id:\"minecraft:jukebox\",RecordItem:{id:\"minecraft:music_disc_cat\",count:1}}"
+        )));
+        // The key alone counts: `TypedEntityData.contains` never checks the
+        // type, and the state it sets is the one the block is placed as.
+        assert!(carries_record(&jukebox(
+            "{id:\"minecraft:chest\",RecordItem:{id:\"minecraft:music_disc_cat\",count:1}}"
+        )));
     }
 
     #[test]

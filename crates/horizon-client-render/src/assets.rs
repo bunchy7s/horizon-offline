@@ -93,6 +93,8 @@ pub struct RenderAssets {
     pub model_gallery: Vec<Value>,
     pub animations: Vec<crate::sprites::SpriteAnimation>,
     pub sprite_layers: std::collections::BTreeMap<String, u32>,
+    /// OptiFine's emissive block overlays: base sprite and overlay sprite names.
+    pub emissive: Vec<(String, String)>,
     pub translucent_layers: Vec<bool>,
     /// Each layer's `MipmapGenerator` settings.
     pub sprite_mips: Vec<crate::mipmap::Settings>,
@@ -101,7 +103,16 @@ pub struct RenderAssets {
     pub pbr_normals: Vec<u8>,
     pub pbr_specular: Vec<u8>,
     pub pbr_size: u32,
+    /// OptiFine connected textures (empty without `optifine/ctm` files).
+    pub connected: crate::connected::ConnectedTextures,
+    /// Fusion connected textures (empty without Fusion's connecting textures and models).
+    pub fusion: crate::fusion::FusionTextures,
+    /// Counts up each time resources load, from 1: a native mod asks again where blocks'
+    /// sprites are when it changes (`native_block_sprites_version`).
+    pub generation: u64,
 }
+/// The last `RenderAssets::generation` handed out.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -113,8 +124,7 @@ impl Assets {
         if manifest["data_version"].as_i64() != Some(i64::from(DATA_VERSION)) {
             return Err(invalid("resources do not match Horizon's pinned data version").into());
         }
-        let (registry, flags) =
-            BlockRegistry::from_facts_json_with_flags(File::open(root.join("facts.json"))?)?;
+        let (registry, flags) = horizon_world::level::data::load_registry_with_flags(root)?;
         let bundle: Value =
             serde_json::from_reader(BufReader::new(File::open(root.join("block-tags.json"))?))?;
         let mut definitions = TagDefinitions::default();
@@ -220,7 +230,7 @@ impl RenderAssets {
         } else {
             crate::model_library::ParsedModels::default()
         };
-        let models = if draws {
+        let mut models = if draws {
             crate::models::prepare_with_models(root, registry, &mut sprites, &parsed)?
         } else {
             crate::models::PreparedModels::default()
@@ -240,8 +250,44 @@ impl RenderAssets {
         for stage in 0..10 {
             sprites.insert(root, &format!("minecraft:block/destroy_stage_{stage}"))?;
         }
-        if draws {
+        let fusion = if draws {
+            crate::fusion::FusionTextures::load(root, registry, &mut sprites, &mut models.catalog)
+        } else {
+            Default::default()
+        };
+        let mut emissive = Vec::new();
+        let connected = if draws {
             crate::native_emissive::load(root, &mut sprites);
+            // A side's sprite, for rules that connect by tile: the first quad facing it.
+            let catalog = &models.catalog;
+            let mut found = Vec::new();
+            crate::connected::ConnectedTextures::load(
+                root,
+                registry,
+                &mut sprites,
+                |state, face| {
+                    let side = horizon_assets::model::Direction::ALL[face as usize];
+                    catalog
+                        .models_at(
+                            state,
+                            horizon_core::position::BlockPos::new(0, 0, 0),
+                            &mut found,
+                        )
+                        .ok()?;
+                    found
+                        .iter()
+                        .flat_map(|m| &m.faces)
+                        .find(|f| f.quad.facing == side)
+                        .map(|f| f.layer)
+                },
+            )
+        } else {
+            Default::default()
+        };
+        // After the connected tiles: a tile identical to a block shares its layer, and the
+        // overlays skip shared layers.
+        if draws {
+            emissive = crate::native_emissive::load_optifine(root, &mut sprites);
         }
         sprites.save_disk_cache();
         if draws {
@@ -262,11 +308,15 @@ impl RenderAssets {
             model_gallery: models.states,
             animations: sprites.animations,
             sprite_layers: sprites.layers,
+            emissive,
             translucent_layers: sprites.translucent,
             sprite_mips: sprites.mips,
             pbr_normals: sprites.normals,
             pbr_specular: sprites.specular,
             pbr_size: sprites.pbr_size,
+            connected,
+            fusion,
+            generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
         })
     }
 }

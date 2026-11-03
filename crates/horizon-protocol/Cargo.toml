@@ -11,11 +11,14 @@ horizon-core = { path = "../horizon-core" }
 horizon-world = { path = "../horizon-world" }
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs", "runtime_detection"] }
 serde_json = "1.0.151"
+log = "0.4"
 # The shared secret and RSA padding (OS randomness) and the server hash.
 getrandom = "0.3"
 sha1 = "0.10"
 # Secure chat: SHA256withRSA message signatures.
 sha2 = "0.10"
+# AES-NI at run time on x86 for the connection cipher (crypto/blocks.rs).
+aes = "0.8.4"
 
 # The name servers of Windows' network adapters, for Minecraft SRV redirects.
 [target.'cfg(windows)'.dependencies]

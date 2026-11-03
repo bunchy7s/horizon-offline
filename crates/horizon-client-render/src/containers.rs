@@ -3,8 +3,9 @@
 //! from the data-driven `context_int_provider`/`context_float_provider` files.
 pub use crate::chunk::block_entity::{
     Banner, Beacon, BlockEntity, Brushable, Campfire, ChiseledBookshelf, Crafter, CreakingHeart,
-    EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity, ModContainer,
-    ModFluidTanks, PotentSulfur, Shelf, Skull, SkullSkin,
+    EndGateway, Furnace, FurnaceKind, Jukebox, Lectern, MOD_MENUS, ModBlockEntity,
+    ModBlockEntityFields, ModContainer, ModEnergyBuffer, ModFluidTanks, ModRevision, PotentSulfur,
+    Shelf, Skull, SkullSkin,
 };
 use crate::items::ItemStack;
 use std::collections::HashMap;
@@ -256,6 +257,17 @@ impl SkullSkin {
 }
 /// The skull and head blocks (`SkullBlock`, `WallSkullBlock`): every
 /// `*_skull` and `*_head` but the piston's head.
+/// The item slots of the container `name`'s block carries, if any.
+fn container_size(name: &str) -> Option<usize> {
+    match name {
+        "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => Some(27),
+        n if n.ends_with("copper_chest") => Some(27),
+        "minecraft:hopper" => Some(HOPPER_SLOTS),
+        "minecraft:dispenser" | "minecraft:dropper" => Some(9),
+        n if n.ends_with("shulker_box") => Some(27),
+        _ => None,
+    }
+}
 fn is_skull(name: &str) -> bool {
     name.ends_with("_skull") || (name.ends_with("_head") && name != "minecraft:piston_head")
 }
@@ -388,6 +400,9 @@ impl BlockEntity {
         if name == "minecraft:campfire" || name == "minecraft:soul_campfire" {
             return Some(Self::Campfire(Box::default()));
         }
+        if name == "minecraft:jukebox" {
+            return Some(Self::Jukebox(Jukebox::default()));
+        }
         if name == "minecraft:shelf" || name.ends_with("_shelf") {
             return Some(Self::Shelf(Box::default()));
         }
@@ -418,15 +433,56 @@ impl BlockEntity {
         if name == "minecraft:potent_sulfur" {
             return Some(Self::PotentSulfur(PotentSulfur::default()));
         }
-        let size = match name {
-            "minecraft:chest" | "minecraft:trapped_chest" | "minecraft:barrel" => 27,
-            n if n.ends_with("copper_chest") => 27,
-            "minecraft:hopper" => HOPPER_SLOTS,
-            "minecraft:dispenser" | "minecraft:dropper" => 9,
-            n if n.ends_with("shulker_box") => 27,
-            _ => return None,
-        };
-        Some(Self::Chest(vec![None; size]))
+        Some(Self::Chest(vec![None; container_size(name)?]))
+    }
+    /// `BlockEntity.isValidBlockState`: whether this kind of entity belongs
+    /// under `name`'s block — vanilla keeps a set block's existing entity
+    /// only when its type is in the block's set, and drops it for the
+    /// block's own otherwise. Each kind fits the blocks `for_block` maps to
+    /// it (a furnace is its kind's, a sign only its standing or hanging
+    /// kind); a mod block's own can't tell its block here, so a non-vanilla
+    /// name is trusted — a name change drops it either way.
+    pub fn fits(&self, name: &str) -> bool {
+        match self {
+            Self::Chest(items) => container_size(name) == Some(items.len()),
+            Self::Furnace(f) => FurnaceKind::from_block(name) == Some(f.kind),
+            Self::Sign(s) => crate::signs::sign_kind(name) == Some(s.hanging),
+            Self::Sculk(s) => {
+                crate::sculk::SculkEntity::for_block(name).is_some_and(|n| n.id() == s.id())
+            }
+            Self::CommandBlock(_) => crate::command_block::Mode::of_block(name).is_some(),
+            Self::Skull(_) => is_skull(name),
+            Self::Banner(_) => name.ends_with("_banner"),
+            Self::Shelf(_) => name == "minecraft:shelf" || name.ends_with("_shelf"),
+            Self::Mod(_) => !name.starts_with("minecraft:"),
+            Self::Beehive(_) => matches!(name, "minecraft:beehive" | "minecraft:bee_nest"),
+            Self::Campfire(_) => {
+                matches!(name, "minecraft:campfire" | "minecraft:soul_campfire")
+            }
+            Self::Brushable(_) => matches!(
+                name,
+                "minecraft:suspicious_sand"
+                    | "minecraft:suspicious_gravel"
+                    | "minecraft:brushable_block"
+            ),
+            Self::Brewing(_) => name == "minecraft:brewing_stand",
+            Self::Beacon(_) => name == "minecraft:beacon",
+            Self::Jukebox(_) => name == "minecraft:jukebox",
+            Self::Lectern(_) => name == "minecraft:lectern",
+            Self::CreakingHeart(_) => name == "minecraft:creaking_heart",
+            Self::Spawner(_) => name == "minecraft:spawner",
+            Self::TrialSpawner(_) => name == "minecraft:trial_spawner",
+            Self::Vault(_) => name == "minecraft:vault",
+            Self::Crafter(_) => name == "minecraft:crafter",
+            Self::EndGateway(_) => name == "minecraft:end_gateway",
+            Self::DaylightDetector => name == "minecraft:daylight_detector",
+            Self::StructureBlock(_) => name == "minecraft:structure_block",
+            Self::TestBlock(_) => name == "minecraft:test_block",
+            Self::TestInstanceBlock(_) => name == "minecraft:test_instance_block",
+            Self::JigsawBlock(_) => name == "minecraft:jigsaw",
+            Self::PotentSulfur(_) => name == "minecraft:potent_sulfur",
+            Self::ChiseledBookshelf(_) => name == "minecraft:chiseled_bookshelf",
+        }
     }
     pub fn id(&self) -> &str {
         match self {
@@ -726,6 +782,20 @@ mod tests {
             _ => panic!("a jukebox"),
         }
         assert_eq!(entity.contents().len(), 1);
+    }
+
+    /// A placed jukebox gets its block entity (`JukeboxBlock.newBlockEntity`),
+    /// so the item's block entity data lands somewhere and the box can hold a
+    /// disc without a player putting one in.
+    #[test]
+    fn a_placed_jukebox_starts_as_an_empty_jukebox_entity() {
+        let entity = BlockEntity::for_block("minecraft:jukebox").expect("a jukebox");
+        assert_eq!(entity.id(), "minecraft:jukebox");
+        assert!(matches!(entity, BlockEntity::Jukebox(_)));
+        assert_eq!(entity.slots().len(), 1);
+        assert!(entity.slots()[0].is_none());
+        // Another block's name is not a jukebox.
+        assert!(BlockEntity::for_block("minecraft:stone").is_none());
     }
 
     /// A whole amount pays itself without a draw; a fraction is a chance of one more.

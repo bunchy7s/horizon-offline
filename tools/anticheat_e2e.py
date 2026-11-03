@@ -18,7 +18,8 @@ Checks:
 - prediction: `[anticheat]` on, survival: a real Horizon client, through a relay that holds every packet
          20-120 ms, walks, sprint-jumps, strafes and sneaks, with effects given and cleared, over ice and
          soul sand, swims, walks into cows, has blocks changed around it, flies in creative, glides with an
-         elytra and a firework, launches with riptide and rides a boat: it is never flagged. A bot, which
+         elytra and a firework, launches with riptide, rides a boat and hits a cow mid-sprint: it is never
+         flagged. A bot, which
          moves by its own rules and sends no keys, is flagged and sent back.
 - combat: no server.toml (the anticheat's defaults: `combat` acts), survival: a bot attacking a player
          twice a second and swinging each time, as vanilla's client does, is never flagged and its hits
@@ -33,7 +34,7 @@ Checks:
 
 Each server runs in a fresh folder with fresh HORIZON_HOME and XDG folders (lab.game_env), on a free port,
 in a flat world (creative unless the check says otherwise: the bots fly). Build first:
-    cargo build --profile fast -p horizon-client --bin horizon-client --bin horizon-ctl
+    cargo build --profile fast -p horizon-client -p horizon-client-lib --bin horizon-client --bin horizon-ctl
     cargo build --profile fast -p horizon-bots
 """
 import argparse
@@ -347,15 +348,97 @@ def honest_play(game, console):
     at('fill ~-3 ~-2 ~-3 ~3 ~-1 ~11 minecraft:stone')
     game.raw('move', 'back', 2, '--sprint')
     game.wait(40)
+    # A cow hit mid-sprint, the sprint key held: the server stops the sprint (causeExtraKnockback), the
+    # client starts it again as the flag reaches it and says nothing, and sprints on for 4 seconds. On
+    # untouched flat ground, looking down at the cow so the hit lands.
+    console('tp Walker 0.5 -60 -40.5 0 25')
+    game.wait(40)
+    console('summon minecraft:cow 0.5 -60 -36.5 {NoAI:1b}')
+    game.wait(10)
+    game.script(['key w down', 'key ctrl down', 'wait 5', 'mouse left click', 'wait 80', 'key ctrl up',
+                 'key w up', 'wait 20'])
+    # The hit landed: the cow lost half a heart (a fist).
+    console('data get entity @e[type=minecraft:cow,limit=1] Health')
+    console.__self__.wait_for(r'Cow has the following entity data: 9\.0f', 10)
+    console('kill @e[type=minecraft:cow]')
 
 
-def check_prediction(bins, scratch, out, seconds):
-    folder = scratch / 'prediction'
+def water_play(game, console):
+    """In water as players are on the official server: sprint-swimming down and up a deep pool, held at
+    the surface by jump, sinking, sneaking down, climbing out onto a ledge; standing in, against and with
+    a current; carried up a bubble column."""
+    def tp(x, y, z, yaw=0, pitch=0):
+        console(f'tp Walker {x} {y} {z} {yaw} {pitch}')
+        game.wait(20)
+    # Above the flat ground (its top is at -61): a pool 10 deep, with a ledge one block above the water at its far end.
+    console('fill 40 -60 0 50 -50 31 minecraft:stone')
+    console('fill 41 -59 1 49 -50 29 minecraft:water')
+    console('fill 41 -49 30 49 -49 31 minecraft:stone')
+    # A current: a source at one end of a channel one block deep.
+    console('fill 59 -50 -1 63 -49 13 minecraft:stone')
+    console('fill 61 -49 0 61 -49 12 minecraft:air')
+    console('setblock 61 -49 0 minecraft:water')
+    # A bubble column over soul sand.
+    console('fill 70 -60 0 72 -50 2 minecraft:stone')
+    console('fill 71 -59 1 71 -50 1 minecraft:water')
+    console('setblock 71 -60 1 minecraft:soul_sand')
+    game.wait(40)
+    tp(45.5, -51, 3.5)
+    game.raw('look', 0, 40)
+    game.raw('move', 'forward', 2, '--sprint')
+    game.raw('look', 0, -40)
+    game.raw('move', 'forward', 2, '--sprint')
+    game.raw('look', 0, 0)
+    game.script(['key space down', 'wait 60', 'key space up', 'wait 40', 'key shift down', 'wait 30',
+                 'key shift up', 'wait 20'])
+    tp(45.5, -50.5, 25.5)
+    game.raw('move', 'forward', 3, '--jump')
+    game.raw('move', 'forward', 1)
+    tp(61.5, -49, 6.5)
+    game.wait(60)
+    game.raw('look', 180, 0)
+    game.raw('move', 'forward', 2)
+    game.raw('look', 0, 0)
+    game.raw('move', 'forward', 2, '--sprint')
+    tp(71.5, -58, 1.5)
+    game.wait(80)
+    tp(45.5, -48, 33.5)
+    game.wait(20)
+
+
+def items_play(game, console):
+    """Items used on the move, as on the official server: a shield raised from the off hand while
+    walking, trying to sprint, switching hotbar slots and swinging at a cow; raised and lowered in
+    quick taps; a golden apple eaten and a bow drawn while walking."""
+    for slot, item in (('weapon.offhand', 'shield'), ('hotbar.0', 'diamond_sword'),
+                       ('hotbar.1', 'golden_apple 8'), ('hotbar.2', 'bow'), ('hotbar.3', 'dirt 32'),
+                       ('hotbar.4', 'arrow 32')):
+        console(f'item replace entity Walker {slot} with minecraft:{item}')
+    game.wait(20)
+    game.script(['key 1 tap', 'mouse right down', 'key w down', 'wait 40', 'key ctrl down', 'wait 20',
+                 'key ctrl up', 'key 4 tap', 'wait 20', 'key 1 tap', 'wait 20', 'key a down', 'wait 20',
+                 'key a up', 'key space down', 'wait 20', 'key space up', 'key w up', 'mouse right up',
+                 'wait 20'])
+    console('execute as Walker at Walker run summon minecraft:cow ^ ^ ^2')
+    game.wait(10)
+    game.script(['mouse right down', 'wait 10', 'mouse left click', 'wait 10', 'mouse left click',
+                 'wait 10', 'mouse right up', 'wait 10'])
+    console('kill @e[type=minecraft:cow]')
+    game.script(['key w down'] + ['mouse right down', 'wait 3', 'mouse right up', 'wait 3'] * 6
+                + ['key w up', 'wait 10'])
+    game.script(['wait 20'])
+    game.script(['key 2 tap', 'wait 10', 'key w down', 'mouse right down', 'wait 45', 'mouse right up',
+                 'wait 10', 'key 3 tap', 'wait 10', 'mouse right down', 'wait 30', 'mouse right up',
+                 'wait 10', 'key w up', 'wait 20'])
+
+
+def check_prediction(bins, scratch, out, seconds, name='prediction', play=None):
+    folder = scratch / name
     # The other checks stay out of it: this one is about the prediction alone, with the thresholds it gets
     # once trusted (it logs only by default).
     toml = ('[anticheat]\nenabled = true\n[anticheat.timer]\nenabled = false\n[anticheat.ground]\nenabled = false\n'
             '[anticheat.prediction]\nsetback = 5\nalert = 15\nkick = 60\n')
-    server, port = start(bins, folder, toml, out, 'prediction', gamemode='survival', difficulty='peaceful')
+    server, port = start(bins, folder, toml, out, name, gamemode='survival', difficulty='peaceful')
     from lan_e2e import Game  # noqa: E402 (only this check drives a client)
     game = Game('client', bins / f'horizon-ctl{EXE}', lab.RESOURCES.resolve())
     for key in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME', 'HORIZON_LAUNCHER_HOME'):
@@ -368,18 +451,21 @@ def check_prediction(bins, scratch, out, seconds):
             game.raw('connect', f'127.0.0.1:{relay.port}', 'Walker')
             game.raw('wait-for', 'loaded', '--timeout', 300)
             game.wait(60)
-            honest_play(game, server.console)
+            (play or honest_play)(game, server.console)
         except Exception as e:
-            raise Failed(f'prediction: the honest client could not play: {e}') from e
+            raise Failed(f'{name}: the honest client could not play: {e}') from e
         finally:
-            (out / 'prediction-client.log').write_text(game.close())
+            (out / f'{name}-client.log').write_text(game.close())
             relay.close()
             shutil.rmtree(game.work, ignore_errors=True)
             log = folder / 'logs/anticheat.log'
             if log.exists():
-                shutil.copy(log, out / 'prediction-anticheat.log')
+                shutil.copy(log, out / f'{name}-anticheat.log')
         if log.exists() and 'Walker' in log.read_text():
-            raise Failed(f'prediction: the honest client was flagged:\n{log.read_text()}')
+            raise Failed(f'{name}: the honest client was flagged:\n{log.read_text()}')
+        if play:
+            print(f'{name}: the honest client (20-120 ms jitter) was never flagged')
+            return
         cheat = bots(bins, port, out, 'Cheat', 1, 'walk', seconds)
     finally:
         server.stop()
@@ -610,10 +696,20 @@ def check_combat(bins, scratch, out, seconds):
           f'flagged; health left: {health}')
 
 
+def check_prediction_water(bins, scratch, out, seconds):
+    check_prediction(bins, scratch, out, seconds, 'prediction-water', water_play)
+
+
+def check_prediction_items(bins, scratch, out, seconds):
+    check_prediction(bins, scratch, out, seconds, 'prediction-items', items_play)
+
+
 CHECKS = {'off': check_off, 'timer': check_timer, 'ground': check_ground, 'prediction': check_prediction,
-          'prediction-vanilla': check_prediction_vanilla, 'combat': check_combat}
+          'prediction-water': check_prediction_water, 'prediction-items': check_prediction_items,
+          'prediction-vanilla': check_prediction_vanilla,
+          'combat': check_combat}
 # Run when no --check is given: the vanilla client needs a screen session, so it runs only when asked.
-DEFAULT = ['combat', 'ground', 'off', 'prediction', 'timer']
+DEFAULT = ['combat', 'ground', 'off', 'prediction', 'prediction-items', 'prediction-water', 'timer']
 
 
 def main():

@@ -1,6 +1,6 @@
 //! The values OptiFine's `.properties` match against: names (`pattern:`, `ipattern:`, `regex:`,
 //! `iregex:` or exact), integer range lists (`heights`, `damage`, `stackSize`), id lists
-//! (`biomes`, `items`) and block lists with block states (`matchBlocks`, `blocks`).
+//! (`items`, OptiFine's plain `biomes`) and block lists with block states (`matchBlocks`, `blocks`).
 
 use regex::{Regex, RegexBuilder};
 
@@ -25,6 +25,8 @@ impl Name {
             ignore_case,
         };
         let regex = |re: &str, ignore_case| {
+            // On its own first: a stray `)` would otherwise close the anchoring group early.
+            Regex::new(re).ok()?;
             RegexBuilder::new(&format!("^(?:{re})$"))
                 .case_insensitive(ignore_case)
                 .build()
@@ -96,7 +98,8 @@ fn glob(p: &[char], s: &[char]) -> bool {
 }
 
 /// `1 3-5 8-`, separated by spaces or commas; a negative bound is written in parentheses:
-/// `(-64)-0`. An open upper bound (`8-`) runs to `i32::MAX`.
+/// `(-64)-0`, or bare as ETF also reads it: `-64--30`. An open upper bound (`8-`) runs to
+/// `i32::MAX`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeList(pub Vec<(i32, i32)>);
 
@@ -125,17 +128,16 @@ impl RangeList {
     }
 }
 
-/// A number at the start of `s`, bare or in parentheses, and what follows it. A bare leading
-/// `-` is a negative number only when nothing else follows (`-5`).
+/// A number at the start of `s`, bare (`5`, `-5`) or in parentheses, and what follows it.
 fn bound(s: &str) -> Option<(i32, &str)> {
     if let Some(inner) = s.strip_prefix('(') {
         let (n, rest) = inner.split_once(')')?;
         return Some((n.trim().parse().ok()?, rest));
     }
-    if s.starts_with('-') {
-        return Some((s.parse().ok()?, ""));
-    }
-    let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let sign = usize::from(s.starts_with('-'));
+    let end = s[sign..]
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or(s.len(), |i| i + sign);
     Some((s[..end].parse().ok()?, &s[end..]))
 }
 
@@ -242,6 +244,10 @@ mod tests {
         assert!(!m("regex:Bob|Alice", "Alice2"));
         assert!(m("iregex:j(eb)_", "JEB_"));
         assert!(Name::parse("regex:(").is_none());
+        assert!(
+            Name::parse("regex:Excalibur)|(.*").is_none(),
+            "would match every name"
+        );
         assert!(m("pattern:a*b*c", "aXbYc"));
         assert!(!m("pattern:a*b*c", "aXbY"));
         assert!(m("pattern:**", ""));
@@ -261,6 +267,13 @@ mod tests {
             assert!(!r.contains(n), "{n}");
         }
         assert!(RangeList::parse("-5").unwrap().contains(-5));
+        // ETF's bare negative ranges.
+        assert_eq!(
+            RangeList::parse("-64--30 -5-2 -3-").unwrap().0,
+            [(-64, -30), (-5, 2), (-3, i32::MAX)]
+        );
+        assert!(RangeList::parse("-").is_none());
+        assert!(RangeList::parse("--5").is_none());
         assert!(RangeList::parse("1-x").is_none());
         assert!(RangeList::parse("abc").is_none());
     }

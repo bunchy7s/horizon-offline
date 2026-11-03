@@ -39,12 +39,12 @@ StructurePiece.createBoundingBox	port	crates/horizon-world/src/worldgen/structur
 StructurePiece.findCollisionPiece	inline	crates/horizon-world/src/worldgen/structure/end_city.rs::Assembly::children	first piece whose box intersects, with the depth test inline; the fortress builder keeps its bool check in Builder::collides
 StructurePiece.setOrientation	port	crates/horizon-world/src/worldgen/structure/legacy.rs::PieceFrame::new	mirror and rotation from the orientation; set at construction
 StructureSet.entry	skip:java		record constructor for a weighted selection entry
-StructureStart.loadStaticStart	missing		minor: starts are written on save (save.rs) but never read back, so saved piece state is not restored on load
+StructureStart.loadStaticStart	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::saved_starts_at	the starts a chunk saved are read back (old_world.rs::starts_of) and a jigsaw start is rebuilt from its saved pieces
 StructureStart.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureStart::new	the box is a field set here, inflated for terrain-adapting structures
 TemplateStructurePiece.move	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolPiece::moved	template position moved with the box in the same call
-RandomSpreadStructurePlacement.validate	skip:data		codec check that spacing exceeds separation
+RandomSpreadStructurePlacement.validate	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::new	spacing must exceed separation and both stay in 0..=4096, or the set fails to decode; frequency is checked against floatRange(0, 1) beside it
 RandomSpreadStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	candidate chunk equals the source chunk; exclusion zones are a separate flag
-StructurePlacement.getLocatePos	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::locate	reports the chunk's minimum block x and z at y 0; locate offset is zero
+StructurePlacement.getLocatePos	port	crates/horizon-world/src/worldgen/generator_structures.rs::StructureState::locate	the chunk's minimum block x and z at y 0, moved by the set's locate_offset (buried treasure's 9 0 9); start.rs::StructureSet::locate_pos
 JigsawPlacement.isStartTooCloseToWorldHeightLimits	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	padding check on the centre piece box, same test
 JigsawPlacement.getRandomNamedJigsaw	inline	crates/horizon-world/src/worldgen/structure/jigsaw.rs::assemble_drawing	first shuffled jigsaw with the start jigsaw name anchors the centre piece
 JigsawPlacement.Placer.tryPlacingChildren	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::Placer::children	per jigsaw: target pool and fallback, candidates, rotations, expansion hack and bounds

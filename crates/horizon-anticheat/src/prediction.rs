@@ -39,6 +39,11 @@ pub enum Change {
     /// movement speed (the client takes the modifiers as sent, so a sprint modifier the packet
     /// lacks is gone while the client sprints), None when it didn't (the client keeps its own).
     Attributes { sprint: Option<bool> },
+    /// ClientboundSetEntityDataPacket for the player itself with its shared flags: their sprinting
+    /// bit, which the client takes as sent (SynchedEntityData.assignValues sets the flag alone, its
+    /// speed modifier and wasSprinting stay). A client whose sprint the server cleared this way
+    /// starts it again in its next aiStep, which adds the modifier back, and says nothing.
+    Sprinting(bool),
     /// ClientboundUpdateMobEffectPacket or ClientboundRemoveMobEffectPacket for the player itself:
     /// the server's effects, as they are when the replay reaches it. (Their attribute modifiers
     /// are the server's: they reach the client as attributes.)

@@ -13,6 +13,7 @@ use horizon_port_pack::{
     import::Pack,
     pipeline::{self, Log},
     report::{Row, Status},
+    resourcepacks::{self, Report as ResourceReport, State},
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -51,9 +52,19 @@ pub struct Imported {
     pub left_off: Vec<String>,
     /// The mods the port step gets and carries over (content, data tier).
     pub portable: usize,
+    /// Ordinary resource packs staged for this profile; enabling them is the player's choice.
+    pub resourcepacks: usize,
+    /// Index-listed resource packs the port step can obtain (separate from Java mods).
+    pub indexed_resources: usize,
 }
 
 impl Imported {
+    pub fn can_play(&self) -> bool {
+        !self.mods.is_empty() || self.resourcepacks > 0
+    }
+    pub fn can_port(&self) -> bool {
+        self.portable > 0 || self.indexed_resources > 0
+    }
     pub fn title(&self) -> &str {
         if self.pack.name.is_empty() {
             &self.slug
@@ -73,7 +84,13 @@ impl Imported {
         if !self.pack.loader.is_empty() {
             parts.push(format!("{} {}", self.pack.loader, self.pack.loader_version));
         }
-        parts.push(format!("{} files", self.pack.files.len()));
+        parts.push(crate::i18n::trf(
+            "{count} files",
+            &[(
+                "count",
+                &self.rows.len().max(self.pack.files.len()).to_string(),
+            )],
+        ));
         parts.join("  ·  ")
     }
     /// What getting the jars did, in one line, or None before it ran.
@@ -96,10 +113,13 @@ impl Imported {
         ] {
             let n = self.fetched.count(how);
             if n > 0 {
-                parts.push(format!("{n} {what}"));
+                parts.push(format!("{n} {}", crate::i18n::tr(what)));
             }
         }
-        Some(format!("Jars: {}.", parts.join(", ")))
+        Some(crate::i18n::trf(
+            "Jars: {summary}.",
+            &[("summary", &parts.join(", "))],
+        ))
     }
 }
 
@@ -118,7 +138,28 @@ pub fn load(work: &Path) -> Result<Imported, String> {
             .filter(|o| o.how == How::NeedsKey)
             .map(|o| format!("{}: CurseForge downloads coming soon", o.key)),
     );
+    let resources = ResourceReport::load(work);
+    let profile: ResourceReport =
+        pipeline::read_json(&work.join("profile-resourcepacks.json")).unwrap_or_default();
+    for (path, outcome) in resources.files.iter().chain(&profile.files) {
+        if matches!(
+            outcome.state,
+            State::Conflict | State::Failed | State::Missing | State::Unsupported
+        ) {
+            left_off.push(format!("{path}: {:?}: {}", outcome.state, outcome.detail));
+        }
+    }
+    left_off.sort();
+    left_off.dedup();
+    let resourcepacks = resourcepacks::available(work).len();
+    let indexed_resources = pack
+        .files
+        .iter()
+        .filter(|f| f.kind() == "resourcepacks" && f.client != "unsupported")
+        .count();
     Ok(Imported {
+        resourcepacks,
+        indexed_resources,
         slug: work
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -179,6 +220,7 @@ pub fn import(path: &Path, log: Log) -> Result<Imported, String> {
     pipeline::import(path, &work, log)?;
     pipeline::inventory(&work, false, log)?;
     pipeline::report(&work, log)?;
+    prepare_resourcepacks(&work);
     load(&work)
 }
 
@@ -191,6 +233,7 @@ pub fn port(
     log: Log,
 ) -> Result<Imported, String> {
     pipeline::port(work, resources, from, log)?;
+    prepare_resourcepacks(work);
     load(work)
 }
 
@@ -203,7 +246,7 @@ pub fn import_and_port(
     log: Log,
 ) -> Result<Imported, String> {
     let pack = import(path, log)?;
-    if pack.portable == 0 {
+    if !pack.can_port() {
         return Ok(pack);
     }
     port(&pack.work, resources, None, log)
@@ -214,8 +257,8 @@ pub fn import_and_port(
 pub fn outcome(pack: &Imported) -> String {
     let not = pack.count(Status::NotYet);
     format!(
-        "{} is imported{}: {} of its {} files play in Horizon ({} ported, {} partly), {} don't \
-         yet, {} aren't needed{}. Its list says why.",
+        "{} is imported{}: {} of its {} files carried over ({} ported, {} partly), {} don't \
+         yet, {} aren't needed{}. {} resource packs available; enable them in Resource Packs. Its list says why.",
         pack.title(),
         if pack.mods.is_empty() {
             ""
@@ -232,6 +275,7 @@ pub fn outcome(pack: &Imported) -> String {
             0 => String::new(),
             n => format!("; {n} are left off (listed under the pack)"),
         },
+        pack.resourcepacks,
     )
 }
 
@@ -260,9 +304,10 @@ pub fn apply_profile(cmd: &mut Command, work: &Path) -> Result<(), String> {
     }
     // Only mods that load together: the game would refuse the later of two sharing a namespace.
     let (mods, _) = pipeline::loadable(&carried(work));
-    if mods.is_empty() {
-        return Err("Nothing is ported yet: port the pack first.".into());
+    if mods.is_empty() && resourcepacks::available(work).is_empty() {
+        return Err("No content mods or resource packs are available: port the pack first.".into());
     }
+    prepare_resourcepacks(work);
     let home = profile_home(work);
     fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
     let options = home.join("options.txt");
@@ -275,6 +320,16 @@ pub fn apply_profile(cmd: &mut Command, work: &Path) -> Result<(), String> {
         cmd.arg("--dev-mod").arg(m);
     }
     Ok(())
+}
+
+/// Installs the staged resource packs into the profile. A pack that cannot be installed
+/// is logged and left off; it never blocks importing, porting or launching the mods.
+fn prepare_resourcepacks(work: &Path) {
+    let result = resourcepacks::install(work, &profile_home(work))
+        .and_then(|report| pipeline::write_json(&work.join("profile-resourcepacks.json"), &report));
+    if let Err(e) = result {
+        eprintln!("resource packs not installed: {e}");
+    }
 }
 
 #[cfg(test)]
@@ -355,5 +410,71 @@ mod tests {
         assert_eq!(cmd.get_current_dir(), Some(profile_home(&work).as_path()));
         assert!(profile_home(&work).is_dir());
         fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn resource_only_profile_can_play_without_enabling_or_overwriting_packs() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-launcher-resource-profile-{}",
+            std::process::id()
+        ));
+        let work = root.join("ports/looks");
+        fs::create_dir_all(work.join("resourcepacks/Look")).unwrap();
+        fs::write(work.join("resourcepacks/Look/pack.mcmeta"), b"{}").unwrap();
+        fs::write(work.join("resourcepacks/look.zip"), b"zip").unwrap();
+        pipeline::write_json(&work.join("pack.json"), &Pack::default()).unwrap();
+        let home = profile_home(&work);
+        fs::create_dir_all(home.join("resourcepacks")).unwrap();
+        fs::write(home.join("resourcepacks/look.zip"), b"user edit").unwrap();
+        fs::write(home.join("options.txt"), b"resourcePacks:[]\n").unwrap();
+        let mut cmd = Command::new("true");
+        apply_profile(&mut cmd, &work).unwrap();
+        assert_eq!(cmd.get_args().count(), 0);
+        assert_eq!(cmd.get_current_dir(), Some(home.as_path()));
+        assert!(cmd
+            .get_envs()
+            .any(|(k, v)| k == "HORIZON_HOME" && v == Some(home.as_os_str())));
+        assert!(home.join("resourcepacks/Look/pack.mcmeta").is_file());
+        assert_eq!(
+            fs::read(home.join("resourcepacks/look.zip")).unwrap(),
+            b"user edit"
+        );
+        assert_eq!(
+            fs::read(home.join("options.txt")).unwrap(),
+            b"resourcePacks:[]\n"
+        );
+        let pack = load(&work).unwrap();
+        assert!(pack.can_play());
+        assert!(!pack.can_port());
+        assert_eq!(pack.resourcepacks, 2);
+        assert!(pack
+            .left_off
+            .iter()
+            .any(|l| l.contains("Conflict") && l.contains("look.zip")));
+        assert!(outcome(&pack).contains("2 resource packs available"));
+        apply_profile(&mut Command::new("true"), &work).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resource_downloads_enable_port_even_when_no_mods_are_portable() {
+        let root = std::env::temp_dir().join(format!(
+            "horizon-launcher-resource-index-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let pack = Pack {
+            files: vec![horizon_port_pack::import::PackFile {
+                path: "resourcepacks/look.zip".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        pipeline::write_json(&root.join("pack.json"), &pack).unwrap();
+        let p = load(&root).unwrap();
+        assert!(p.can_port());
+        assert!(!p.can_play());
+        assert_eq!(p.portable, 0);
+        assert_eq!(p.indexed_resources, 1);
+        fs::remove_dir_all(root).unwrap();
     }
 }

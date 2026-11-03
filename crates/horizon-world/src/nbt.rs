@@ -25,7 +25,7 @@ pub type Compound = BTreeMap<JavaString, Tag>;
 /// canonicalizes NaNs (`DataOutputStream.writeFloat`); its network output
 /// keeps their bits (Netty's `ByteBuf.writeFloat`). Loading, like vanilla's
 /// valueOf factories, normalizes negative zero to positive zero.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Tag {
     End,
     Byte(i8),

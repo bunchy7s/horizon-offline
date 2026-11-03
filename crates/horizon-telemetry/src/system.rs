@@ -26,6 +26,111 @@ pub fn command_output(program: &str, args: &[&str]) -> Option<String> {
     (out.status.success() && !text.is_empty()).then_some(text)
 }
 
+/// `Windows 11 (26100.2033)`: the build numbers from the registry. `cmd /C ver`
+/// prints the display language's own word for "Version" in the console's OEM
+/// code page, so the same build read as UTF-8 carries U+FFFD in it and differs
+/// between two machines running the same build.
+pub fn windows_version() -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    const KEY: &str = r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion";
+    let value = |name: &str| command_output("reg", &["query", KEY, "/v", name]);
+    windows_version_text(&value("CurrentBuild")?, value("UBR").as_deref())
+}
+
+/// The build and its update revision from the last column of two `reg query`
+/// replies (`CurrentBuild    REG_SZ    26100`, `UBR    REG_DWORD    0x7f1`).
+/// Build 22000 is the first Windows 11.
+fn windows_version_text(build: &str, ubr: Option<&str>) -> Option<String> {
+    let build = number(last_column(build)?)?;
+    let release = if build >= 22_000 { "11" } else { "10" };
+    Some(match ubr.and_then(last_column).and_then(number) {
+        Some(ubr) => format!("Windows {release} ({build}.{ubr})"),
+        None => format!("Windows {release} ({build})"),
+    })
+}
+
+/// The value a `reg query` reply prints in its last column.
+fn last_column(reply: &str) -> Option<&str> {
+    reply.split_whitespace().last()
+}
+
+/// A decimal, or the `0x`-prefixed hex a `REG_DWORD` prints.
+fn number(text: &str) -> Option<u32> {
+    match text.strip_prefix("0x") {
+        Some(hex) => u32::from_str_radix(hex, 16).ok(),
+        None => text.parse().ok(),
+    }
+}
+
+/// The CPU's name from a Linux `/proc/cpuinfo`: x86's `model name`; else an ARM core named by
+/// its implementer and part (an arm64 kernel prints only `CPU implementer: 0x41` and `CPU part:
+/// 0xd0c`, as `lscpu` maps them: `ARM Neoverse-N1`); else the board's `Model` (a Raspberry Pi's
+/// downstream kernel).
+pub fn linux_cpu_name(cpuinfo: &str) -> Option<String> {
+    if let Some(name) = field(cpuinfo, "model name").filter(|n| !n.is_empty()) {
+        return Some(name);
+    }
+    let hex = |key: &str| {
+        let text = field(cpuinfo, key)?;
+        u32::from_str_radix(text.strip_prefix("0x")?, 16).ok()
+    };
+    if let (Some(implementer), Some(part)) = (hex("CPU implementer"), hex("CPU part")) {
+        return Some(arm_core_name(implementer, part));
+    }
+    field(cpuinfo, "Model").filter(|n| !n.is_empty())
+}
+
+/// `lscpu`'s `hw_implementer` and `arm_part` tables, for the cores that run Horizon.
+fn arm_core_name(implementer: u32, part: u32) -> String {
+    let (vendor, core) = match (implementer, part) {
+        (0x41, 0xd01) => ("ARM", "Cortex-A32"),
+        (0x41, 0xd03) => ("ARM", "Cortex-A53"),
+        (0x41, 0xd04) => ("ARM", "Cortex-A35"),
+        (0x41, 0xd05) => ("ARM", "Cortex-A55"),
+        (0x41, 0xd07) => ("ARM", "Cortex-A57"),
+        (0x41, 0xd08) => ("ARM", "Cortex-A72"),
+        (0x41, 0xd09) => ("ARM", "Cortex-A73"),
+        (0x41, 0xd0a) => ("ARM", "Cortex-A75"),
+        (0x41, 0xd0b) => ("ARM", "Cortex-A76"),
+        (0x41, 0xd0c) => ("ARM", "Neoverse-N1"),
+        (0x41, 0xd0d) => ("ARM", "Cortex-A77"),
+        (0x41, 0xd40) => ("ARM", "Neoverse-V1"),
+        (0x41, 0xd41) => ("ARM", "Cortex-A78"),
+        (0x41, 0xd44) => ("ARM", "Cortex-X1"),
+        (0x41, 0xd46) => ("ARM", "Cortex-A510"),
+        (0x41, 0xd47) => ("ARM", "Cortex-A710"),
+        (0x41, 0xd48) => ("ARM", "Cortex-X2"),
+        (0x41, 0xd49) => ("ARM", "Neoverse-N2"),
+        (0x41, 0xd4d) => ("ARM", "Cortex-A715"),
+        (0x41, 0xd4e) => ("ARM", "Cortex-X3"),
+        (0x41, 0xd4f) => ("ARM", "Neoverse-V2"),
+        (0x41, 0xd80) => ("ARM", "Cortex-A520"),
+        (0x41, 0xd81) => ("ARM", "Cortex-A720"),
+        (0x41, 0xd82) => ("ARM", "Cortex-X4"),
+        (0x41, 0xd84) => ("ARM", "Neoverse-V3"),
+        (0x41, 0xd8e) => ("ARM", "Neoverse-N3"),
+        (0x41, _) => ("ARM", ""),
+        (0x42, _) => ("Broadcom", ""),
+        (0x43, _) => ("Cavium", ""),
+        (0x46, _) => ("Fujitsu", ""),
+        (0x48, _) => ("HiSilicon", ""),
+        (0x4e, _) => ("NVIDIA", ""),
+        (0x50, _) => ("APM", ""),
+        (0x51, _) => ("Qualcomm", ""),
+        (0x53, _) => ("Samsung", ""),
+        (0x61, _) => ("Apple", ""),
+        (0xc0, _) => ("Ampere", ""),
+        _ => ("ARM-compatible", ""),
+    };
+    if core.is_empty() {
+        format!("{vendor} (CPU part {part:#05x})")
+    } else {
+        format!("{vendor} {core}")
+    }
+}
+
 fn read(path: &str) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
@@ -45,7 +150,7 @@ fn os_version() -> Option<String> {
     } else if cfg!(target_os = "macos") {
         command_output("sw_vers", &["-productVersion"]).map(|v| format!("macOS {v}"))
     } else if cfg!(windows) {
-        command_output("cmd", &["/C", "ver"])
+        windows_version()
     } else {
         None
     }
@@ -53,12 +158,54 @@ fn os_version() -> Option<String> {
 
 fn cpu() -> Option<String> {
     if cfg!(target_os = "linux") {
-        read("/proc/cpuinfo").and_then(|t| field(&t, "model name"))
+        read("/proc/cpuinfo").and_then(|t| linux_cpu_name(&t))
     } else if cfg!(target_os = "macos") {
         command_output("sysctl", &["-n", "machdep.cpu.brand_string"])
+    } else if cfg!(windows) {
+        windows_cpu()
     } else {
-        std::env::var("PROCESSOR_IDENTIFIER").ok()
+        None
     }
+}
+
+/// The CPU's brand string on Windows (`AMD Ryzen 7 7700X 8-Core Processor`), from the registry's
+/// `ProcessorNameString`. `PROCESSOR_IDENTIFIER` is only the fallback: it always holds the family,
+/// model and stepping (`AMD64 Family 25 Model 97 Stepping 2, AuthenticAMD`), which neither names the
+/// chip nor tells two chips of one family apart. The game, its crash report, the benchmark report
+/// and telemetry all read the CPU through this. Read once: every telemetry item and benchmark
+/// report would run `reg` again.
+pub fn windows_cpu() -> Option<String> {
+    static CPU: OnceLock<Option<String>> = OnceLock::new();
+    CPU.get_or_init(|| {
+        command_output(
+            "reg",
+            &[
+                "query",
+                r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                "/v",
+                "ProcessorNameString",
+            ],
+        )
+        .and_then(|query| processor_name_from_reg_query(&query))
+        .or_else(|| {
+            std::env::var("PROCESSOR_IDENTIFIER")
+                .ok()
+                .map(|id| id.trim().to_owned())
+                .filter(|id| !id.is_empty())
+        })
+    })
+    .clone()
+}
+
+/// The value of `ProcessorNameString` in `reg query ... /v ProcessorNameString` output
+/// (`    ProcessorNameString    REG_SZ    AMD Ryzen 7 7700X 8-Core Processor  `), trimmed: the
+/// registry pads some names with spaces. Lines end in `\r\n`, and the key's own line has no value.
+fn processor_name_from_reg_query(query: &str) -> Option<String> {
+    query.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("ProcessorNameString")?;
+        let value = rest.trim_start().strip_prefix("REG_SZ")?.trim();
+        (!value.is_empty()).then(|| value.to_owned())
+    })
 }
 
 fn ram_bytes() -> Option<u64> {
@@ -528,6 +675,35 @@ pub fn gpu_vendor(name: &str, vendor_id: u32) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_arm64_kernels_cpuinfo_names_the_core_by_implementer_and_part() {
+        // An arm64 kernel prints no `model name` (a Neoverse-N1 and a Cortex-A72 Pi 4).
+        let neoverse = "processor\t: 0\nBogoMIPS\t: 50.00\nFeatures\t: fp asimd\nCPU implementer\t: 0x41\nCPU architecture: 8\nCPU variant\t: 0x3\nCPU part\t: 0xd0c\nCPU revision\t: 1\n";
+        assert_eq!(linux_cpu_name(neoverse).as_deref(), Some("ARM Neoverse-N1"));
+        let pi = "processor\t: 3\nCPU implementer\t: 0x41\nCPU part\t: 0xd08\nCPU revision\t: 3\n\nRevision\t: c03114\nModel\t\t: Raspberry Pi 4 Model B Rev 1.4\n";
+        assert_eq!(linux_cpu_name(pi).as_deref(), Some("ARM Cortex-A72"));
+        // An implementer the table has, a part it does not: the part is kept.
+        let apple = "CPU implementer\t: 0x61\nCPU part\t: 0x023\n";
+        assert_eq!(
+            linux_cpu_name(apple).as_deref(),
+            Some("Apple (CPU part 0x023)")
+        );
+    }
+
+    #[test]
+    fn x86_keeps_its_model_name_and_a_board_without_either_its_model() {
+        let ryzen = "processor\t: 0\nmodel name\t: AMD Ryzen 9 7950X 16-Core Processor\n";
+        assert_eq!(
+            linux_cpu_name(ryzen).as_deref(),
+            Some("AMD Ryzen 9 7950X 16-Core Processor")
+        );
+        assert_eq!(
+            linux_cpu_name("Model\t: Some Board\n").as_deref(),
+            Some("Some Board")
+        );
+        assert_eq!(linux_cpu_name("processor\t: 0\n"), None);
+    }
+
     use super::*;
 
     #[test]
@@ -548,6 +724,23 @@ mod tests {
             Some("32788148 kB")
         );
         assert_eq!(field("NAME=x", "PRETTY_NAME"), None);
+    }
+
+    #[test]
+    fn the_windows_version_comes_from_the_build_numbers() {
+        assert_eq!(
+            windows_version_text(
+                "    CurrentBuild    REG_SZ    26100",
+                Some("    UBR    REG_DWORD    0x7f1")
+            )
+            .as_deref(),
+            Some("Windows 11 (26100.2033)")
+        );
+        assert_eq!(
+            windows_version_text("    CurrentBuild    REG_SZ    19045", None).as_deref(),
+            Some("Windows 10 (19045)")
+        );
+        assert_eq!(windows_version_text("", None), None);
     }
 
     #[test]
@@ -588,6 +781,111 @@ mod tests {
         );
         assert_eq!(size_mb(" 8 GB"), Some(8192));
         assert_eq!(size_mb(" 1536 MB"), Some(1536));
+    }
+
+    #[test]
+    fn the_registry_cpu_name_is_read_from_reg_query() {
+        let name = "AMD Ryzen 7 7700X 8-Core Processor";
+        let key = r"HKEY_LOCAL_MACHINE\HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+        let query = format!("\r\n{key}\r\n    ProcessorNameString    REG_SZ    {name}\r\n\r\n");
+        // CRLF line endings, as `reg query` prints them.
+        assert_eq!(processor_name_from_reg_query(&query).as_deref(), Some(name));
+        // The same with LF only.
+        assert_eq!(
+            processor_name_from_reg_query(&query.replace("\r\n", "\n")).as_deref(),
+            Some(name)
+        );
+        // The registry pads some names with spaces; the name comes without them.
+        let padded = format!("{key}\n    ProcessorNameString    REG_SZ        {name}      \n");
+        assert_eq!(
+            processor_name_from_reg_query(&padded).as_deref(),
+            Some(name)
+        );
+        assert_eq!(
+            processor_name_from_reg_query(&format!(
+                "
+{key}
+    ProcessorNameString    REG_SZ    13th Gen Intel(R) Core(TM) i7-13700F
+"
+            ))
+            .as_deref(),
+            Some("13th Gen Intel(R) Core(TM) i7-13700F")
+        );
+        // Spaces inside the name stay as they are, runs of them too (older Intel names).
+        assert_eq!(
+            processor_name_from_reg_query(
+                "    ProcessorNameString    REG_SZ    Intel(R) Core(TM) i7 CPU         920  @ 2.67GHz\r\n"
+            )
+            .as_deref(),
+            Some("Intel(R) Core(TM) i7 CPU         920  @ 2.67GHz")
+        );
+        // Columns split by tabs.
+        assert_eq!(
+            processor_name_from_reg_query(&format!("\tProcessorNameString\tREG_SZ\t{name}\r\n"))
+                .as_deref(),
+            Some(name)
+        );
+    }
+
+    #[test]
+    fn a_reg_query_without_a_name_gives_none() {
+        // The value is missing: `reg query` prints an error and nothing on stdout, or only the key.
+        assert_eq!(processor_name_from_reg_query(""), None);
+        assert_eq!(
+            processor_name_from_reg_query(
+                "HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\r\n"
+            ),
+            None
+        );
+        // Present but empty.
+        assert_eq!(
+            processor_name_from_reg_query("    ProcessorNameString    REG_SZ    \r\n"),
+            None
+        );
+        assert_eq!(
+            processor_name_from_reg_query("    ProcessorNameString    REG_SZ"),
+            None
+        );
+        // Another value, or another type, is not the name.
+        assert_eq!(
+            processor_name_from_reg_query(
+                "    Identifier    REG_SZ    AMD64 Family 25 Model 97 Stepping 2\r\n"
+            ),
+            None
+        );
+        assert_eq!(
+            processor_name_from_reg_query("    ProcessorNameString    REG_DWORD    0x1\r\n"),
+            None
+        );
+        // Garbage.
+        assert_eq!(processor_name_from_reg_query("REG_SZ\n\n   \n"), None);
+        assert_eq!(
+            processor_name_from_reg_query("\u{0}\u{fffd}\u{fffd}REG_SZ"),
+            None
+        );
+        assert_eq!(
+            processor_name_from_reg_query(
+                "ERROR: The system was unable to find the specified registry key or value."
+            ),
+            None
+        );
+    }
+
+    /// The CPU is the registry's name for it, as PowerShell reads it (not through `reg`), trimmed;
+    /// `PROCESSOR_IDENTIFIER`'s family and model only where the registry has no name, as on some
+    /// VMs. No CI runner tests this crate on Windows: it runs on a contributor's machine.
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_the_cpu_by_its_brand() {
+        let registry = powershell(
+            r"(Get-ItemProperty 'HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0').ProcessorNameString",
+        );
+        let expected = registry.or_else(|| {
+            std::env::var("PROCESSOR_IDENTIFIER")
+                .ok()
+                .map(|id| id.trim().to_owned())
+        });
+        assert_eq!(cpu(), expected);
     }
 
     #[test]

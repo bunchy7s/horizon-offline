@@ -108,8 +108,8 @@ fn trash_stopped_server(
     }
     let state = dir.join(".horizon");
     fs::create_dir_all(&state).map_err(|e| e.to_string())?;
-    // The supervisor holds this same lock throughout starting, running and stopping. Taking it
-    // proves no supervisor is running, so a stale UI/API status cannot delete a live server.
+    // The supervisor holds this same lock throughout starting, running and stopping.
+    // Hold it through the move so a stale UI/API status cannot delete a live server.
     let lock = fs::File::options()
         .create(true)
         .truncate(false)
@@ -511,7 +511,9 @@ pub struct NewServer {
     pub max_players: u32,
     /// Only listed players (and operators) may join.
     pub friends_only: bool,
-    /// Check players' Minecraft accounts: they must sign in with Microsoft.
+    /// Check players' Minecraft accounts: they must sign in with Microsoft. On by default; an offline
+    /// server is a security risk, so it is turned off only per server (`--offline`, or the server's
+    /// settings page).
     pub check_accounts: bool,
     /// Who may join first (whitelisted), and the first of them becomes an operator.
     pub players: Vec<String>,
@@ -529,7 +531,7 @@ impl Default for NewServer {
             difficulty: "normal".into(),
             max_players: 10,
             friends_only: true,
-            check_accounts: false,
+            check_accounts: true,
             players: Vec::new(),
             eula: false,
         }

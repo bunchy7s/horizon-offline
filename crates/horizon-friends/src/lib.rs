@@ -176,9 +176,21 @@ mod tests {
         let (mut ended, _) = l.accept().unwrap();
         drop(deadline(&kept, Duration::from_millis(100)).unwrap());
         let _running = deadline(&ended, Duration::from_millis(100)).unwrap();
+        // Read once the limit has passed: a read already blocked when it
+        // passes is not woken on Windows (shutdown doesn't cancel it there).
+        std::thread::sleep(Duration::from_millis(300));
+        ended
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let started = Instant::now();
-        assert_eq!(ended.read(&mut [0u8; 1]).unwrap(), 0);
-        assert!(started.elapsed() < Duration::from_secs(2));
+        match ended.read(&mut [0u8; 1]) {
+            Ok(n) => assert_eq!(n, 0),
+            Err(e) => assert!(!matches!(
+                e.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            )),
+        }
+        assert!(started.elapsed() < Duration::from_secs(1));
         kept.set_read_timeout(Some(Duration::from_millis(300)))
             .unwrap();
         let e = kept.read(&mut [0u8; 1]).unwrap_err();
@@ -186,5 +198,33 @@ mod tests {
             e.kind(),
             io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
         ));
+    }
+
+    #[test]
+    fn a_deadline_ends_a_peer_that_sends_one_byte_at_a_time() {
+        use std::io::Write;
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut peer = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut s, _) = l.accept().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..100 {
+                if peer.write_all(b"x").is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        // What the callers do: a read timeout that restarts with every byte.
+        s.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+        let _running = deadline(&s, Duration::from_millis(300)).unwrap();
+        let started = Instant::now();
+        while let Ok(n) = s.read(&mut [0u8; 1])
+            && n > 0
+        {}
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
     }
 }

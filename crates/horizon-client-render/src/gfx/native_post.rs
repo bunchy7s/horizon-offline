@@ -14,7 +14,7 @@ use super::Frame;
 const INTERMEDIATE: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// The world's colour and depth views a set of bind groups was made for.
-type WorldViews = (wgpu::TextureView, wgpu::TextureView);
+type WorldViews = (wgpu::TextureView, wgpu::TextureView, wgpu::TextureView);
 
 /// Where a post pass draws.
 #[derive(Clone, Copy, PartialEq)]
@@ -103,6 +103,9 @@ pub struct NativePost {
 /// The `frame` every stage of a pack reads (group 3, binding 0), written once a frame, and
 /// what the material stage reads besides.
 pub struct NativeFrame {
+    /// The solid terrain's second target, the post stage's `scene_surface`.
+    surface: wgpu::Texture,
+    pub surface_view: wgpu::TextureView,
     pub(super) buffer: wgpu::Buffer,
     /// Group 3 of the sky and material stages.
     pub layout: wgpu::BindGroupLayout,
@@ -270,6 +273,8 @@ impl NativeFrame {
             label: Some("Native shader pack frame"),
             entries: &entries,
         });
+        let surface = surface_target(device, [1, 1]);
+        let surface_view = surface.create_view(&Default::default());
         let opaque_depth = depth_copy(device, [1, 1]);
         let opaque_color = color_copy(device, [1, 1], wgpu::TextureFormat::Rgba8Unorm);
         let blank = copy_target(
@@ -332,6 +337,8 @@ impl NativeFrame {
             buffer,
             layout,
             group,
+            surface,
+            surface_view,
             opaque_depth,
             opaque_color,
             reflection: blank.clone(),
@@ -468,6 +475,14 @@ impl NativeFrame {
         self.regroup(device);
     }
 
+    /// Sizes the surface target: the world's while a material stage writes it, else a blank.
+    pub fn fit_surface(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+        if [self.surface.width(), self.surface.height()] != size {
+            self.surface = surface_target(device, size);
+            self.surface_view = self.surface.create_view(&Default::default());
+        }
+    }
+
     /// Binds `view` as this frame's `reflection` (`None`: the blank). The mirror is drawn
     /// before the stages read it.
     pub fn set_reflection(&mut self, device: &wgpu::Device, view: Option<&wgpu::TextureView>) {
@@ -573,6 +588,24 @@ pub fn present_constants<'a>(
         .collect()
 }
 
+/// The solid terrain's surface target of `size`, drawn and read.
+fn surface_target(device: &wgpu::Device, size: [u32; 2]) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("Native shader pack surface"),
+        size: wgpu::Extent3d {
+            width: size[0],
+            height: size[1],
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: super::native_material::SURFACE_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    })
+}
+
 fn texture_entry(binding: u32, sample_type: wgpu::TextureSampleType) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
@@ -652,6 +685,7 @@ impl NativePost {
             texture_entry(8, float),
             texture_entry(9, wgpu::TextureSampleType::Depth),
             texture_entry(10, float),
+            texture_entry(11, wgpu::TextureSampleType::Float { filterable: false }),
         ];
         entries.extend(pack_texture_entries(frame.textures.len()));
         entries
@@ -757,7 +791,7 @@ impl NativePost {
     fn prepare(
         &mut self,
         device: &wgpu::Device,
-        world: (&wgpu::TextureView, &wgpu::TextureView),
+        world: (&wgpu::TextureView, &wgpu::TextureView, &wgpu::TextureView),
         size: [u32; 2],
         history_reset: bool,
     ) {
@@ -830,8 +864,11 @@ impl NativePost {
         if self
             .groups
             .as_ref()
-            .is_some_and(|((color, depth), blank, _)| {
-                color == world.0 && depth == world.1 && *blank == blank_history
+            .is_some_and(|((color, depth, surface), blank, _)| {
+                color == world.0
+                    && depth == world.1
+                    && surface == world.2
+                    && *blank == blank_history
             })
         {
             return;
@@ -894,6 +931,10 @@ impl NativePost {
                         resource: wgpu::BindingResource::TextureView(&self.shadow.2),
                     },
                     wgpu::BindGroupEntry {
+                        binding: 11,
+                        resource: wgpu::BindingResource::TextureView(world.2),
+                    },
+                    wgpu::BindGroupEntry {
                         binding: 10,
                         resource: wgpu::BindingResource::TextureView(&self.shadow.3),
                     },
@@ -920,7 +961,11 @@ impl NativePost {
                 })
             })
             .collect();
-        self.groups = Some(((world.0.clone(), world.1.clone()), blank_history, groups));
+        self.groups = Some((
+            (world.0.clone(), world.1.clone(), world.2.clone()),
+            blank_history,
+            groups,
+        ));
     }
 
     /// Runs the passes over the world target `world` (colour, depth) of `size`, the last onto
@@ -929,7 +974,7 @@ impl NativePost {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        world: (&wgpu::TextureView, &wgpu::TextureView),
+        world: (&wgpu::TextureView, &wgpu::TextureView, &wgpu::TextureView),
         screen: &wgpu::TextureView,
         size: [u32; 2],
         history_reset: bool,
@@ -1249,7 +1294,7 @@ mod tests {
     }
 
     fn device() -> Option<(wgpu::Device, wgpu::Queue)> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::gfx::test_gpu::instance();
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
     }
@@ -1349,7 +1394,7 @@ mod tests {
         post.run(
             &device,
             &mut encoder,
-            (&color, &depth),
+            (&color, &depth, &frame.surface_view),
             &view,
             [4, 4],
             true,
@@ -1456,7 +1501,7 @@ file = \"b.wgsl\"
             post.run(
                 &device,
                 &mut encoder,
-                (&color, &depth),
+                (&color, &depth, &frame.surface_view),
                 &view,
                 [4, 4],
                 history_reset,

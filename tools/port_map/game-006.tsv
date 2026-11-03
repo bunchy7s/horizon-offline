@@ -32,7 +32,9 @@ LinearInterpolationHandler.doInterpolate	inline	crates/horizon-client/src/game/r
 LivingEntity.<init>	port	crates/horizon-client/src/mobs.rs::Mob::new	box, health, random yaw
 LivingEntity.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	gap: player: arrow count (12) and stinger count (13) are never kept or sent, so arrows and bee stingers do not stay stuck in a body
 LivingEntity.hasLandedInLiquid	port	crates/horizon-world/src/living_fall.rs::ImpulseContext::landed_in_liquid	water or lava with getDeltaMovement().y below 9.9999997E-6, from the guest move loop; the grace time still defers it
-LivingEntity.getScale	missing		minor: no scale attribute, so /attribute scale and datapack scaling do nothing; baby and slime sizes come from tables in Mob::dims
+LivingEntity.getDimensions	port	crates/horizon-client/src/mobs/living.rs::dims	getDefaultDimensions(pose).scale(getScale()) for every living entity: the type's box (a class's baby, size or dig dims) with width, height and eye height all times minecraft:scale; a sleeper's 0.2 SLEEPING_DIMENSIONS comes before the scale
+LivingEntity.getScale	port	crates/horizon-client/src/mobs/living.rs::model_scale	the minecraft:scale a client has for any living entity, through sanitizeScale; the server's player reads its own in PlayerMotion::refresh_dimensions (PlayerMotion.scale keeps it for Guest::dimensions)
+LivingEntity.sanitizeScale	inline	crates/horizon-client/src/mobs/living.rs::model_scale	identity for every species Horizon runs as a Mob; Shulker caps the scale at 3 and HappyGhast at 1 (the EnderDragon, always 1, has no Mob)
 LivingEntity.shouldDropLoot	inline	crates/horizon-client/src/mobs/drops.rs::die	mob_drops rule and not a baby (monsters excepted)
 LivingEntity.decreaseAirSupply	port	crates/horizon-client/src/motion/environment.rs::MotionWorld::tick_environment_damage	gap: minor: only the player reads oxygen_bonus (Respiration); a mob loses one air per tick in ai.rs::base_tick
 LivingEntity.setLastHurtByPlayer	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	ai.last_hurt_by_player = 100 on a player's hit; Game::last_hurt_by_player records which guest
@@ -56,7 +58,7 @@ LivingEntity.getKnockback	port	crates/horizon-client/src/game/enchant_effects.rs
 LivingEntity.dropFromLootTable	port	crates/horizon-client/src/mobs/drops.rs::roll	the entity table from its random sequence
 LivingEntity.dropFromEntityInteractLootTable	port	crates/horizon-client/src/game/creatures.rs::Game::interact_armadillo	brush/armadillo is the only table that uses it
 LivingEntity.dropFromShearingLootTable	port	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	sheep by colour; snow golem and bogged in interact_shear_mob; gap: minor: a mooshroom's five mushrooms are hardcoded, not read from the table
-LivingEntity.getFallDamageSound	inline	crates/horizon-client/src/mobs/living.rs::Mob::cause_fall_damage	gap: minor: monsters use the generic small and big fall sounds, not entity.hostile.small_fall and big_fall
+LivingEntity.getFallDamageSound	inline	crates/horizon-client/src/mobs/landing.rs::MobLanding::living_fall_sound	a monster gets entity.hostile.big_fall and entity.hostile.small_fall, anything else the generic pair; a player's comes from landing.rs
 LivingEntity.getHitbox	missing		minor: a rider's hitbox is not cut at its seat height; spear and melee tests use the full box
 LivingEntity.postPiercingAttack	port	crates/horizon-client/src/game/enchant_effects.rs::Game::post_piercing_attack	Lunge's dash after a jab
 LivingEntity.trapdoorUsableAsLadder	port	crates/horizon-world/src/climbing.rs::on_climbable	gap: minor: the player only; a mob's ai.rs::on_climbable checks the climbable tag at its feet, no open trapdoor over a ladder
@@ -90,8 +92,8 @@ LivingEntity.onItemPickup	port	crates/horizon-client/src/game/sulfur_cubes.rs::G
 LivingEntity.isUsingItem	inline	crates/horizon-client/src/game/remote.rs::RemoteInputWorld::using_item	Game::using is Some; a mob's is extra.using_item above 0
 LivingEntity.setLivingEntityFlag	skip:java		bit accessor; the flags are built when synced in game/lan.rs::mob_meta
 LivingEntity.getTicksUsingItem	inline	crates/horizon-client/src/game.rs::Game::tick_used_item	the tick count kept in Game::using
-LivingEntity.stopUsingItem	inline	crates/horizon-client/src/game.rs::Game::tick_used_item	using is set to None when the use ends or the stack is gone
-LivingEntity.getLocalBoundsForPose	missing		minor: no pose boxes; a dismounting rider uses mounts.rs::dismount_mount's own side checks
+LivingEntity.stopUsingItem	port	crates/horizon-client/src/game.rs::Game::stop_using_item	using is dropped when the use ends, and ItemStack.causeUseVibration sends ITEM_INTERACT_FINISH at the player when the stack's use effects ask for it
+LivingEntity.getLocalBoundsForPose	inline	crates/horizon-client/src/game/mounts.rs::rider_poses	the rider's box in each dismount pose, standing, crouching then swimming, from the pose's dimensions at its scale; the strider dismount tests it (strider_dismount_location), the other vehicles use their own side checks
 LivingEntity.wouldNotSuffocateAtTargetPose	port	crates/horizon-client/src/pose.rs::MotionWorld::can_fit_pose	gap: minor: the player's poses only; a camel changing pose is not checked
 LivingEntity.canUsePortal	port	crates/horizon-client/src/game/nether_portal.rs::Game::mob_can_use_portal	gap: minor: a sleeping mob is not excluded
 LivingEntity.setPosToBed	port	crates/horizon-client/src/mobs/villager.rs::start_sleeping	x and z at the bed's centre, y 0.6875 above its base (sleep height plus 0.125)
@@ -103,7 +105,7 @@ LivingEntity.createEquipmentSlotAccess	inline	crates/horizon-client/src/game/com
 LivingEntity.getEquipmentSlot	inline	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	slot names instead of the numeric ids 98, 99 and 100 and up
 LivingEntity.getSlot	port	crates/horizon-client/src/game/commands/items.rs::Game::slots_named	for the player and mobs through /item
 LivingEntity.recreateFromPacket	port	crates/horizon-client/src/game/remote.rs::Game::spawn_entity	position, head yaw and movement of a server's mob
-LivingEntity.getPassengerRidingPosition	port	crates/horizon-client/src/mobs/riders.rs::seat	gap: minor: attachments are a table by species, not scaled by getScale and the age scale
+LivingEntity.getPassengerRidingPosition	port	crates/horizon-client/src/mobs/riders.rs::seat	gap: minor: attachments are a table by species, not scaled by the age scale
 LivingEntity.lerpHeadRotationStep	inline	crates/horizon-client/src/game/remote.rs::Game::tick_remote_entities	head_lerps: 1/steps of the way to the target yaw
 LivingEntity.isInvulnerableTo	inline	crates/horizon-client/src/mobs.rs::Mob::damage_with	gap: minor: the invulnerable flag only; no enchantment damage immunity
 Mob.getMoveControl	port	crates/horizon-client/src/mobs/control.rs::Mob::move_control_tick	a mount is steered through riders.rs::drive
@@ -117,11 +119,11 @@ Mob.burnUndead	inline	crates/horizon-client/src/mobs/ai.rs::ai_step	gap: player:
 Mob.pickUpItem	port	crates/horizon-client/src/mobs/equip.rs::Slot::wants_to_pick_up	ticked in #3514; `Mob.pickUpItem` is cited at crates/horizon-client/src/mobs/equip.rs:211
 Mob.attemptToShearEquipment	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	gap: minor: the happy ghast harness and the llama carpet (llamas.rs interact_llama) only
 Mob.shearItem	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	the item is dropped and the shears lose 1 durability
-Mob.canReplaceCurrentItem	missing		minor: only used by loot pickup (Mob.pickUpItem, missing)
-Mob.compareArmor	missing		minor: only used by loot pickup (Mob.pickUpItem, missing); spawn gear is picked in finalize.rs Ctx::armor
-Mob.compareWeapons	missing		minor: only used by loot pickup (Mob.pickUpItem, missing)
-Mob.getApproximateAttributeWith	missing		minor: only used by loot pickup (Mob.pickUpItem, missing)
-Mob.canReplaceEqualItem	missing		minor: only used by loot pickup (Mob.pickUpItem, missing)
+Mob.canReplaceCurrentItem	port	crates/horizon-client/src/mobs/equip.rs::can_replace_current_item	armour slots compare armour, the main hand weapons and the off hand is never replaced; Mob.pickUpItem's candidate check (game/mob_looting.rs)
+Mob.compareArmor	port	crates/horizon-client/src/mobs/equip.rs::compare_armor	more armour, then more toughness, then canReplaceEqualItem; a PREVENT_ARMOR_CHANGE piece is never taken off
+Mob.compareWeapons	port	crates/horizon-client/src/mobs/equip.rs::compare_weapons	the species' preferred weapon tag first, then more attack damage, then canReplaceEqualItem
+Mob.getApproximateAttributeWith	port	crates/horizon-client/src/mobs/equip.rs::attribute_with	the item's modifiers for the attribute that apply in the slot, on the mob's own base value, in the order the item lists them
+Mob.canReplaceEqualItem	port	crates/horizon-client/src/mobs/equip.rs::can_replace_equal_item	more enchantments, then less damage, then a custom name the current stack lacks
 Mob.checkSpawnObstruction	port	crates/horizon-client/src/mobs/spawn_selection.rs::spawn_obstruction	no liquid in the box and no blocking entity
 Mob.hasValidEquippableItemForSlot	skip:other		Horizon stores only items that fit a slot, so there is nothing to validate
 Mob.createEquipmentParams	inline	crates/horizon-client/src/game/mob_gear.rs::Game::equip_from_table	EntityLootParams with the mob as `this`
@@ -140,7 +142,7 @@ Mob.registerDebugValues	skip:debug		debug overlay values
 Mob.swingForAttack	port	crates/horizon-client/src/mobs/ai.rs::Mob::swing_hand_modified	swing duration with haste, conduit power and mining fatigue
 NeutralMob.addPersistentAngerSaveData	port	crates/horizon-client/src/mobs/bee.rs::to_nbt	gap: minor: anger_end_time only; angry_at (the target's UUID) is not saved, and wolves and polar bears keep a tick counter instead
 NeutralMob.readPersistentAngerSaveData	port	crates/horizon-client/src/mobs/bee.rs::from_nbt	gap: minor: anger_end_time only; angry_at is not read, so a reloaded angry bee picks its target again
-NeutralMob.isAngryAtAllPlayers	missing		minor: the universal_anger game rule has no effect (default off)
+NeutralMob.isAngryAtAllPlayers	inline	crates/horizon-client/src/mobs/tame.rs::angry_at_player	the universal_anger rule on, anger left and no persistent target angers the mob at any player
 NeutralMob.playerDied	port	crates/horizon-client/src/mobs/ai.rs::forgive_dead_player	ticked in #3514; `NeutralMob.playerDied` is cited at crates/horizon-client/src/mobs/ai.rs:2334
 OminousItemSpawner.tick	port	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::tick_ominous_item_spawners	count, then server and client parts
 OminousItemSpawner.tickServer	inline	crates/horizon-client/src/game/ominous_item_spawner.rs::Game::tick_ominous_item_spawners	the about-to-spawn sound 36 ticks ahead, then the item

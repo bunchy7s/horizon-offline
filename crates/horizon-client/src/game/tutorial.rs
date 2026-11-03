@@ -204,9 +204,8 @@ impl super::Game<'_> {
     }
 
     pub(super) fn tutorial_get_item(&mut self, stack: Option<&horizon_client::items::ItemStack>) {
-        // The server thread's settings are a stale copy of the window's, and an
-        // in-frame host acting for a guest is not its own player: a guest's
-        // tutorial is their own client's to record.
+        // The server thread's settings are a stale copy of the window's: a
+        // guest's tutorial is their own client's to record.
         if self.options.dedicated.is_some()
             || self.serving.is_some()
             || self.lan_acting.is_some()
@@ -230,9 +229,8 @@ impl super::Game<'_> {
         state: horizon_world::registry::BlockStateId,
         progress: f32,
     ) {
-        // The server thread's settings are a stale copy of the window's, and an
-        // in-frame host acting for a guest is not its own player: a guest's
-        // tutorial is their own client's to record.
+        // The server thread's settings are a stale copy of the window's: a
+        // guest's tutorial is their own client's to record.
         if self.options.dedicated.is_some()
             || self.serving.is_some()
             || self.lan_acting.is_some()
@@ -561,5 +559,44 @@ impl super::Game<'_> {
             }
             i += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn craft_planks_hint_toast_appears_after_delay_and_clears_on_planks() {
+        let mut tutorial = Tutorial::new(Step::CraftPlanks);
+        tutorial.waiting = 1199;
+        assert_eq!(tutorial.hint(), None);
+
+        tutorial.waiting = 1200;
+        assert_eq!(tutorial.hint(), Some((Hint::CraftPlanks, None)));
+
+        // Receiving an unrelated item (e.g. log or stick) does not complete the step
+        let changed = tutorial.get_item(false, true, false);
+        assert!(!changed);
+        assert_eq!(tutorial.step, Step::CraftPlanks);
+        assert_eq!(tutorial.hint(), Some((Hint::CraftPlanks, None)));
+
+        // Receiving planks completes the tutorial step and dismisses the hint toast
+        let changed = tutorial.get_item(false, false, true);
+        assert!(changed);
+        assert_eq!(tutorial.step, Step::None);
+        assert_eq!(tutorial.hint(), None);
+    }
+
+    #[test]
+    fn initial_tick_with_planks_clears_craft_planks_step() {
+        let mut tutorial = Tutorial::new(Step::CraftPlanks);
+        let previous = Previous {
+            plank: true,
+            ..Default::default()
+        };
+        assert!(tutorial.tick(true, &previous));
+        assert_eq!(tutorial.step, Step::None);
+        assert_eq!(tutorial.hint(), None);
     }
 }

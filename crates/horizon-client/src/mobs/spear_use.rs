@@ -237,6 +237,12 @@ fn stab_attack(
     // `EnchantmentHelper.modifyDamage`.
     let damage = base_damage + gear::melee_bonus(m, species);
     let from = [m.position.x, m.position.y, m.position.z];
+    // `weaponItem.getDamageSource(this)`: the spear's, for the hurt and the pushes.
+    let source = Damage {
+        kind: DamageKind::Spear,
+        attacker: Some(Who::Mob(m.id)),
+        from: Some(from),
+    };
     let mut affected = deals_knockback;
     if deals_damage {
         match target {
@@ -248,11 +254,7 @@ fn stab_attack(
             Who::Mob(id) => events.push(MobEvent::AttackMob {
                 target: id,
                 amount: damage,
-                source: Damage {
-                    kind: DamageKind::Spear,
-                    attacker: Some(Who::Mob(m.id)),
-                    from: Some(from),
-                },
+                source,
             }),
         }
         affected = true;
@@ -266,9 +268,10 @@ fn stab_attack(
         }
     }
     if deals_knockback {
-        cause_extra_knockback(m, target, 0.4_f32, events);
+        cause_extra_knockback(m, target, 0.4_f32, source, events);
         // `LivingEntity.getKnockback`: the Knockback enchantment, halved.
-        cause_extra_knockback(m, target, gear::knockback(m) as f32 / 2.0, events);
+        let power = gear::knockback(m) as f32 / 2.0;
+        cause_extra_knockback(m, target, power, source, events);
     }
     if dismounts && w.target_info(target).is_some_and(|t| t.passenger) {
         affected = true;
@@ -279,7 +282,13 @@ fn stab_attack(
 
 /// `LivingEntity.causeExtraKnockback`: a push along the attacker's facing,
 /// which slows the attacker.
-fn cause_extra_knockback(m: &mut Mob, target: Who, power: f32, events: &mut Vec<MobEvent>) {
+fn cause_extra_knockback(
+    m: &mut Mob,
+    target: Who,
+    power: f32,
+    source: Damage,
+    events: &mut Vec<MobEvent>,
+) {
     if power <= 0.0 {
         return;
     }
@@ -289,6 +298,7 @@ fn cause_extra_knockback(m: &mut Mob, target: Who, power: f32, events: &mut Vec<
         power: f64::from(power),
         x: f64::from((m.yaw * to_rad).msin()),
         z: f64::from(-(m.yaw * to_rad).mcos()),
+        source,
     });
     m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
 }
