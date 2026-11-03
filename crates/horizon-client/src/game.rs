@@ -20835,26 +20835,27 @@ fn missing_resources(root: &std::path::Path) -> Option<String> {
     ))
 }
 
-/// The ordinary launch: load the resources on a worker while the window shows
-/// the loading screen, then swap in the game on the main thread.
-/// Minecraft.<init>: `startedCleanly` left false means the previous start
-/// died while the packs built — its selection rolls back, as
-/// `rollbackResourcePacks` does, instead of failing the same way forever.
-/// True when a start needed the rollback.
+/// `Minecraft.<init>`: `startedCleanly` left false means the previous start
+/// died before `onGameLoadFinished`. Vanilla then leaves fullscreen
+/// ("resetting fullscreen mode") so a start that died on the display mode can
+/// come back; the resource packs are rolled back only when their load fails
+/// (`rollbackResourcePacks`), not here. True when the last start was unclean.
 fn unclean_start_recovery(settings: &mut Settings) -> bool {
     // Vanilla's field defaults true: only an explicit `false` is an unclean
-    // start — an options file that never had the key is not one.
+    // start; an options file that never had the key is not one.
     let unclean = matches!(
         settings.file.get("startedCleanly"),
         Some(horizon_client::options_file::V::Bool(false))
     );
-    if !unclean || settings.resource_packs.is_empty() {
-        return false;
+    if unclean {
+        settings.fullscreen = false;
+        settings.file.fullscreen_resolution = None;
     }
-    settings.resource_packs.clear();
-    true
+    unclean
 }
 
+/// The ordinary launch: load the resources on a worker while the window shows
+/// the loading screen, then swap in the game on the main thread.
 fn run_loading(
     options: Options,
     settings: Settings,
@@ -20989,16 +20990,20 @@ pub fn run_with() -> Result<()> {
     mods::register_components(&vanilla_root)?;
     mods::register_standalone_models();
     let mut early_settings = Settings::load(&Game::options_path());
-    if unclean_start_recovery(&mut early_settings) {
-        log::warn!(
-            "Horizon: the previous start did not finish loading; the configured resource packs were left out"
+    // Minecraft.<init>: read the last start's flag, then mark this one as not
+    // finished until onGameLoadFinished. A dedicated server has no options.txt.
+    if options.execution_role.is_client() {
+        if unclean_start_recovery(&mut early_settings) {
+            log::warn!(
+                "Detected unexpected shutdown during last game startup: resetting fullscreen mode"
+            );
+        }
+        early_settings.file.set(
+            "startedCleanly",
+            horizon_client::options_file::V::Bool(false),
         );
+        early_settings.save(&Game::options_path());
     }
-    early_settings.file.set(
-        "startedCleanly",
-        horizon_client::options_file::V::Bool(false),
-    );
-    early_settings.save(&Game::options_path());
     // Minecraft's constructor opens the narrator; a server has none.
     if options.execution_role.is_client() {
         narrator::start(&early_settings);
@@ -21063,11 +21068,13 @@ pub fn run_with() -> Result<()> {
     )?;
     if let Some(mut game) = game {
         // Minecraft.onGameLoadFinished: a start that made it this far is clean.
-        game.settings.file.set(
-            "startedCleanly",
-            horizon_client::options_file::V::Bool(true),
-        );
-        game.settings.save(&Game::options_path());
+        if game.options.execution_role.is_client() {
+            game.settings.file.set(
+                "startedCleanly",
+                horizon_client::options_file::V::Bool(true),
+            );
+            game.settings.save(&Game::options_path());
+        }
         run_event_loop(game)?;
     }
     Ok(())
@@ -21375,34 +21382,36 @@ mod tests {
         assert_eq!(autosave_interval(0.0), 100);
     }
 
-    /// `Minecraft.<init>`: only a start that died with packs configured rolls
-    /// them back — a clean start or an empty selection loads them normally.
+    /// `Minecraft.<init>`: only an explicit `startedCleanly: false` is an
+    /// unclean start, and it leaves fullscreen; the packs stay selected.
     #[test]
-    fn an_unclean_start_rolls_back_only_configured_packs() {
-        // The key absent (a first boot, or an options file from elsewhere) is
-        // a clean start even when packs are configured.
-        let mut settings = Settings {
+    fn an_unclean_start_leaves_fullscreen_and_keeps_the_packs() {
+        let fullscreen = || Settings {
+            fullscreen: true,
             resource_packs: vec!["pack".into()],
             ..Default::default()
         };
+        // The key absent (a first boot) is a clean start.
+        let mut settings = fullscreen();
         assert!(!unclean_start_recovery(&mut settings));
-        assert_eq!(settings.resource_packs, ["pack"]);
+        assert!(settings.fullscreen);
+        let mut settings = fullscreen();
+        settings.file.fullscreen_resolution = Some("1920x1080@60:24".into());
         settings.file.set(
             "startedCleanly",
             horizon_client::options_file::V::Bool(false),
         );
-        settings.resource_packs.clear();
-        assert!(!unclean_start_recovery(&mut settings));
-        settings.resource_packs = vec!["pack".into()];
         assert!(unclean_start_recovery(&mut settings));
-        assert!(settings.resource_packs.is_empty());
-        settings.resource_packs = vec!["pack".into()];
+        assert!(!settings.fullscreen);
+        assert_eq!(settings.file.fullscreen_resolution, None);
+        assert_eq!(settings.resource_packs, ["pack"]);
+        let mut settings = fullscreen();
         settings.file.set(
             "startedCleanly",
             horizon_client::options_file::V::Bool(true),
         );
         assert!(!unclean_start_recovery(&mut settings));
-        assert_eq!(settings.resource_packs, ["pack"]);
+        assert!(settings.fullscreen);
     }
 
     /// `NativeScreenView.id` (the `screen_render_post` hook) is a mod's
