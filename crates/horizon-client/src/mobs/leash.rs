@@ -317,7 +317,13 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         });
         return;
     }
-    let Some(state) = holder_state(w, holder) else {
+    let state = holder_state(w, holder).filter(|_| {
+        holder != Holder::Player
+            || m.extra
+                .leash_player
+                .is_none_or(|u| w.player.as_ref().is_some_and(|p| p.uuid == u))
+    });
+    let Some(state) = state else {
         // The holder is gone: the lead drops.
         if !matches!(holder, Holder::Player) {
             events.push(MobEvent::LeashBreak {
@@ -612,6 +618,40 @@ pub fn quad_holder_offsets(m: &Mob) -> Option<[[f64; 3]; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_players_leash_does_not_pull_toward_a_different_player() {
+        crate::mobs::world::with_test_world(&[], |world, types| {
+            let mut w = world.clone();
+            let mut cow = Mob::new(
+                1,
+                std::sync::Arc::new(types.types["minecraft:cow"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            let owner = [1, 2, 3, 4];
+            cow.extra.leash = Some(Holder::Player);
+            cow.extra.leash_player = Some(owner);
+            let mut nearby = crate::mobs::world::test_player(Vec3::new(8.5, 64.0, 0.5));
+            nearby.uuid = [5, 6, 7, 8];
+            w.player = Some(nearby);
+            let mut events = Vec::new();
+            tick(&mut cow, &w, &mut events);
+            assert_eq!(
+                cow.velocity,
+                Vec3::ZERO,
+                "absent holder must not use another player"
+            );
+            assert!(events.is_empty());
+            // The same distance does pull once the real holder is the player view.
+            w.player.as_mut().unwrap().uuid = owner;
+            tick(&mut cow, &w, &mut events);
+            assert!(
+                cow.velocity.x > 0.0,
+                "the actual holder must still pull the cow"
+            );
+        });
+    }
 
     #[test]
     fn quad_leash_points_are_vanillas() {
