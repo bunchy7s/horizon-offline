@@ -636,16 +636,22 @@ pub fn tick(
         if m.species() == Species::Endermite {
             endermite_lifetime(m);
         }
+        // AbstractHorse.aiStep (it overrides LivingEntity.aiStep, which NoAI
+        // doesn't skip) and AbstractHorse.tick: a NoAI horse still swishes
+        // its tail before super.aiStep, then heals, grazes and runs its
+        // stand counter and animations.
+        let horse = super::equine::is_equine(m.species())
+            && !super::camel::is_camel(m.species())
+            && !super::llama::is_llama(m.species());
+        if horse {
+            super::equine::tail_tick(m);
+        }
         ageable_step(m, w, level_random, events);
         if m.species() == Species::Chicken {
             farm::chicken_egg_step(m, events);
         }
-        // AbstractHorse.tick runs the stand counter down with or without AI.
-        if super::equine::is_equine(m.species())
-            && !super::camel::is_camel(m.species())
-            && !super::llama::is_llama(m.species())
-        {
-            super::equine::stand_tick(m);
+        if horse {
+            super::equine::ai_step(m, w, events);
         }
     } else {
         ai_step(m, w, level_random, events);

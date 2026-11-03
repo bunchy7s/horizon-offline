@@ -235,14 +235,14 @@ pub fn tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         ));
     }
 }
-/// The crumbs `Breeze.tick`'s pose arm asks `emitGroundParticles` for: inhaling
-/// twenty, standing, shooting and sliding `1 + random.nextInt(1)`, and none for
-/// the long jump (which draws its own trail). The draw is made even when there
-/// is no block to crumble, so it is part of the tick's random.
+/// The crumbs `Breeze.tick`'s pose arm asks `emitGroundParticles` for:
+/// shooting, inhaling and standing `1 + random.nextInt(1)`, sliding twenty, and
+/// none for the long jump (which draws its own trail). The draw is made even
+/// when there is no block to crumble, so it is part of the tick's random.
 pub fn ground_particle_count(m: &mut Mob) -> Option<u32> {
     match pose(m) {
-        INHALING => Some(20),
-        STANDING | SHOOTING | SLIDING => Some(1 + m.random.next_int_bound(1).unwrap_or(0) as u32),
+        SHOOTING | INHALING | STANDING => Some(1 + m.random.next_int_bound(1).unwrap_or(0) as u32),
+        SLIDING => Some(20),
         _ => None,
     }
 }
@@ -360,8 +360,8 @@ mod ground_particle_tests {
         Mob::new(1, kind, at, 0.0)
     }
 
-    /// `Breeze.tick`'s pose arm: inhaling asks for twenty crumbs and makes no
-    /// draw, standing, shooting and sliding ask for `1 + nextInt(1)` and make
+    /// `Breeze.tick`'s pose arm: sliding asks for twenty crumbs and makes no
+    /// draw, shooting, inhaling and standing ask for `1 + nextInt(1)` and make
     /// one, and the long jump asks for none.
     #[test]
     fn the_pose_asks_for_its_crumb_count_and_draws_once_or_never() {
@@ -374,11 +374,10 @@ mod ground_particle_tests {
             probe.next_int_bound(1_000_000).unwrap_or(0)
         };
         for (pose, count, draw) in [
-            (INHALING, 20, false),
+            (SLIDING, 20, false),
             (STANDING, 1, true),
             (SHOOTING, 1, true),
-            // `getPose()` is SLIDING here too, which draws the count.
-            (SLIDING, 1, true),
+            (INHALING, 1, true),
         ] {
             let mut m = breeze(Vec3::new(0.5, 64.0, 0.5));
             set_pose(&mut m, pose);
@@ -448,12 +447,12 @@ mod ground_particle_tests {
                 assert_eq!(at, [4.5, 64.0, 2.5]);
                 assert_eq!(count, 1);
                 assert_eq!(speed, 0.0, "`addParticle(..., 0, 0, 0)`: at rest");
-                // Twenty a tick while inhaling, all at that one spot.
-                let mut inhaling = breeze(Vec3::new(4.5, 64.0, 2.5));
-                set_pose(&mut inhaling, INHALING);
+                // Twenty a tick while sliding, all at that one spot.
+                let mut sliding = breeze(Vec3::new(4.5, 64.0, 2.5));
+                set_pose(&mut sliding, SLIDING);
                 let mut events = Vec::new();
-                let count = ground_particle_count(&mut inhaling).unwrap();
-                emit_ground_particles(&inhaling, w, count, &mut events);
+                let count = ground_particle_count(&mut sliding).unwrap();
+                emit_ground_particles(&sliding, w, count, &mut events);
                 assert!(
                     matches!(
                         events.as_slice(),
