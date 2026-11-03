@@ -1018,6 +1018,13 @@ struct Resources<'a> {
     gpu: Gpu,
     /// The buffers whose format can be bound as an image.
     storable: u16,
+    /// The stage (`texture.<stage>`) of the programs built so far, and the buffers one of them
+    /// flipped: a `texture.<stage>.colortexN` no longer stands in for buffer N in the stage's
+    /// later programs, which read what was written, as in Iris. `final` continues
+    /// `composite`'s. (Super Duper Vanilla's `texture.composite.colortex0` is its clouds, read
+    /// before `composite4` writes bloom there; Bliss's `colortex6` is blue noise until
+    /// `composite5` writes it.)
+    released: std::cell::Cell<(&'static str, u16)>,
     /// The formats and dimensions of the images no `image.*` gives, for their stand-ins.
     stand_ins: &'a std::cell::RefCell<Vec<(wgpu::TextureFormat, wgpu::TextureViewDimension)>>,
 }
@@ -1089,7 +1096,13 @@ fn bindings(
             ));
             return None;
         }
-        let custom = pack_textures::find(textures, group, &s.ty, &s.name);
+        let released = pack.released.get();
+        let custom = pack_textures::find(textures, group, &s.ty, &s.name).filter(|&i| {
+            let t = &textures[i];
+            t.stage != pack_textures::stage(group)
+                || released.0 != t.stage
+                || horizon_shaders::buffer_index(&t.name).is_none_or(|b| released.1 & 1 << b == 0)
+        });
         let image = pack
             .images
             .iter()
@@ -1833,6 +1846,7 @@ impl PackPost {
             indices: indices.as_ref(),
             gpu,
             storable,
+            released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
         };
         let mut build = |mut p: horizon_shaders::PostProgram, geometry: Option<&Geometry<'_>>| {
@@ -1843,6 +1857,10 @@ impl PackPost {
                 p.program.as_ref()?;
             }
             let group = p.group;
+            let stage = pack_textures::stage(group);
+            if pack.released.get().0 != stage {
+                pack.released.set((stage, 0));
+            }
             let mut computes: Vec<Pass> = compute
                 .into_iter()
                 .filter_map(|(name, c)| {
@@ -1899,6 +1917,8 @@ impl PackPost {
                 return None;
             }
             for p in std::iter::once(&pass).chain(&pass.compute) {
+                let (stage, flipped) = pack.released.get();
+                pack.released.set((stage, flipped | p.flip));
                 if !in_shadow {
                     used |= p.reads | p.written | p.flip;
                 }
@@ -4204,6 +4224,83 @@ mod tests {
         assert!(buffer(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::MAP_WRITE).is_err());
     }
 
+    /// `texture.composite.colortex0` stands in for buffer 0 in composite programs until one of
+    /// them flips that buffer; later ones, and `final`, read the buffer (Super Duper Vanilla,
+    /// Bliss, SEUS PTGI HRR). Another stage's flips don't release it.
+    #[test]
+    fn a_custom_texture_over_a_buffer_ends_when_its_stage_flips_it() {
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, _queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let textures = [pack_textures::PackTexture {
+            stage: "composite".into(),
+            name: "colortex0".into(),
+            dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            blur: false,
+            clamp: false,
+            image: pack_textures::Image::Atlas,
+        }];
+        let interface = horizon_shaders::Interface {
+            uniform_size: 48,
+            uniforms: Vec::new(),
+            samplers: vec![horizon_shaders::Sampler {
+                name: "colortex0".into(),
+                ty: "sampler2D".into(),
+                binding: 1,
+            }],
+            outputs: vec![0],
+            draw: false,
+            images: Vec::new(),
+            buffers: Vec::new(),
+        };
+        let buffers = pack_images::Buffers::new(
+            &device,
+            Default::default(),
+            Default::default(),
+            wgpu::ShaderStages::FRAGMENT,
+        );
+        let stand_ins = std::cell::RefCell::new(Vec::new());
+        let pack = Resources {
+            textures: &textures,
+            images: &[],
+            left_out: &[],
+            buffers: &buffers,
+            indices: None,
+            gpu: Gpu::of(&adapter, device.features()),
+            storable: 0,
+            released: std::cell::Cell::new(("", 0)),
+            stand_ins: &stand_ins,
+        };
+        let reads = |group: Group| {
+            let (_, samplers, ..) = bindings(
+                device.features(),
+                &interface,
+                "composite",
+                group,
+                &[1],
+                None,
+                &[T::Rgba8Unorm; BUFFERS],
+                None,
+                &mut Vec::new(),
+                &pack,
+            )
+            .expect("the pass is kept");
+            samplers[0].source
+        };
+        assert!(reads(Group::Composite) == Source::Atlas);
+        pack.released.set(("deferred", 1));
+        assert!(reads(Group::Composite) == Source::Atlas);
+        pack.released.set(("composite", 1));
+        assert!(reads(Group::Composite) == Source::Color(0));
+        assert!(reads(Group::Final) == Source::Color(0));
+    }
+
     /// Iris 1.11.7 runs a program whose image no `image.*` gives, and its loads read zero
     /// (observed with a probe pack). Its pass is kept, the image bound to a stand-in of its
     /// declared format, zero again before each pass even after one stored into it.
@@ -4254,6 +4351,7 @@ mod tests {
             indices: None,
             gpu: Gpu::of(&adapter, device.features()),
             storable: 0,
+            released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
         };
         let mut notes = Vec::new();
