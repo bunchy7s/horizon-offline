@@ -40,6 +40,7 @@ struct MobSpec {
 struct Scenario {
     name: String,
     ticks: i32,
+    trace_events: bool,
     origin: [i32; 2],
     level_seed: i64,
     difficulty: String,
@@ -73,6 +74,7 @@ fn parse(text: &str) -> Vec<Scenario> {
                 for kv in &f[2..] {
                     let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
                     match k {
+                        "traceevents" => s.trace_events = true,
                         "ticks" => s.ticks = v.parse().unwrap_or(0),
                         "levelseed" => s.level_seed = v.parse().unwrap_or(0),
                         "difficulty" => s.difficulty = v.to_owned(),
@@ -341,6 +343,9 @@ impl Game<'_> {
         self.tick_chunks.clear();
         self.sync_tick_chunks();
         self.mobs.clear();
+        if s.trace_events {
+            self.creatures.projectiles.clear();
+        }
         self.dropped.clear();
         self.orbs.clear();
         self.level_events.clear();
@@ -403,6 +408,9 @@ impl Game<'_> {
         let mut player = PlayerMotion::new(self.motion, Vec3::new(at[0], at[1], at[2]))?;
         player.spectator = self.mode == GameMode::Spectator;
         self.player = Some(player);
+        if s.trace_events {
+            self.previous_position = Vec3::new(at[0], at[1], at[2]);
+        }
         self.keys.clear();
         if s.sneak {
             self.keys.insert(KeyCode::ShiftLeft);
@@ -474,6 +482,9 @@ impl Game<'_> {
             ] {
                 *slot = None;
             }
+            if s.trace_events {
+                horizon_client::mobs::warden::finalize(&mut m, false, &mut Vec::new());
+            }
             names.insert(id, format!("m{}", sources.len()));
             sources.push(id);
             self.mobs.push(m);
@@ -490,6 +501,7 @@ impl Game<'_> {
         let mut region_last: HashMap<[i32; 3], String> = HashMap::new();
         let (mut last_player, mut last_rng) = (String::new(), String::new());
         let mut out = String::new();
+        self.lan_entity_events.clear();
         for t in 0..=s.ticks {
             dispense_fixture::start_recording();
             if t > 0 {
@@ -579,9 +591,36 @@ impl Game<'_> {
                 lines.push(format!("new minecraft:experience_orb value={}", orb.value));
             }
             known_orbs = self.orbs.len();
+            if s.trace_events {
+                for m in &self.mobs {
+                    if let Some(st) = &m.extra.warden {
+                        let selected = st.vibration.selector.current().map(|(i, _)| {
+                            serde_json::json!({"event": i.event, "pos": i.pos, "distance": i.distance})
+                        });
+                        lines.push(format!(
+                            "listener {}",
+                            serde_json::json!({"selector": selected})
+                        ));
+                    }
+                }
+                for p in &self.creatures.projectiles {
+                    lines.push(format!(
+                        "projectile {}",
+                        serde_json::json!({"kind": p.kind.id(),
+                        "pos": [p.position.x, p.position.y, p.position.z]})
+                    ));
+                }
+                for (_, event, _) in self.lan_entity_events.drain(..) {
+                    lines.push(format!("entity_event {event}"));
+                }
+            }
             for line in dispense_fixture::stop_recording() {
                 if let Some(rest) = line.strip_prefix("L ") {
                     lines.push(format!("level {rest}"));
+                } else if s.trace_events
+                    && let Some(rest) = line.strip_prefix("G ")
+                {
+                    lines.push(format!("game {rest}"));
                 }
             }
             for (sound, at, volume, pitch) in
@@ -633,6 +672,39 @@ impl Game<'_> {
                 continue;
             }
             match words[0].as_str() {
+                "summon_snowball" => {
+                    let owner = self
+                        .acting_player_uuid()
+                        .iter()
+                        .map(i32::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let nbt = words[1..]
+                        .join(" ")
+                        .replace("$owner", &format!("[I;{owner}]"));
+                    let before = self.creatures.projectiles.len();
+                    self.summon_with_nbt("minecraft:snowball", [30.5, 205.0, 10.5], &nbt)
+                        .map_err(|_| "fixture summon failed")?;
+                    if self.creatures.projectiles.len() != before + 1 {
+                        return Err("fixture summon created no projectile".into());
+                    }
+                }
+                "throw_snowball" => {
+                    self.throw_item(&horizon_client::items::ItemStack::new(
+                        "minecraft:snowball",
+                        1,
+                    ))?;
+                }
+                "mob_snowball" => {
+                    let owner = *sources.first().ok_or("mob_snowball needs a mob")?;
+                    let mut p = horizon_client::projectiles::Projectile::new(
+                        horizon_client::projectiles::ProjectileKind::Snowball,
+                        Vec3::new(4.5, 201.5, 10.5),
+                        Some(Who::Mob(owner)),
+                    );
+                    p.velocity = Vec3::new(0.0, 0.0, 1.5);
+                    self.handle_mob_events(vec![horizon_client::mobs::MobEvent::Projectile(p)])?;
+                }
                 "event" => {
                     let event = horizon_client::sculk::intern(&words[1])
                         .ok_or_else(|| format!("unknown game event {}", words[1]))?;

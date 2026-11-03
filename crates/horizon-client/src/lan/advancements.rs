@@ -143,6 +143,12 @@ impl ServerAdvancements {
         }
     }
 
+    /// `RecipeManager.getRecipeFromDisplay`: the recipe a display id names,
+    /// for `ServerRecipeBook.removeHighlight`.
+    pub fn recipe_of_display(&self, display: i32) -> Option<&str> {
+        self.displays.recipe_of_display(display)
+    }
+
     /// `PlayerAdvancements.reload` (`PlayerList.reloadResources`): the
     /// progress is read again against the new tree (`applyFrom` ignores an
     /// advancement that no longer exists and `AdvancementProgress.update`
@@ -865,6 +871,46 @@ mod tests {
         assert!(len >= 2, "an item list, not empty ({len}) nor a tag");
         assert_eq!(len - 1, 1, "the compound's one item");
         assert_eq!(r.varint().unwrap(), raw);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `RecipeManager.getRecipeFromDisplay`, which
+    /// `handleRecipeBookSeenRecipePacket` asks: the display ids are numbered
+    /// over the recipes in id order, so display 0 is the first recipe and the
+    /// id past the last display names nothing.
+    #[test]
+    fn a_display_id_names_the_recipe_it_was_numbered_for() {
+        let root = resources(
+            "seen_display",
+            &[
+                (
+                    "aaa_shaped",
+                    r#"{"type":"minecraft:crafting_shaped","pattern":["X"],
+                        "key":{"X":"minecraft:raw_copper"},
+                        "result":{"id":"minecraft:copper_ingot"}}"#,
+                ),
+                (
+                    "bbb_smelting",
+                    r#"{"type":"minecraft:smelting","cookingtime":200,"experience":0.7,
+                        "ingredient":"minecraft:raw_copper",
+                        "result":{"id":"minecraft:copper_ingot"}}"#,
+                ),
+            ],
+        );
+        let sync = SyncData::load(&root, &horizon_world::loot::PackOverlay::NONE).unwrap();
+        assert_eq!(
+            sync.advancements.recipe_of_display(0),
+            Some("minecraft:aaa_shaped")
+        );
+        assert_eq!(
+            sync.advancements.recipe_of_display(1),
+            Some("minecraft:bbb_smelting")
+        );
+        assert_eq!(
+            sync.advancements.recipe_of_display(2),
+            None,
+            "past the last display"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

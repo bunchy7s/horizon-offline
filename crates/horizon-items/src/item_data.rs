@@ -237,6 +237,24 @@ impl StackData {
     }
 }
 
+/// `BlockItem.onDestroyed` (`ItemStack.onDestroyed` for a container item): the
+/// stack's `container` is emptied and the stacks it held come back in slot
+/// order — `ItemUtils.onContainerDestroyed` drops each where the entity lay.
+pub fn destroyed_container(stack: &mut ItemStack) -> Vec<ItemStack> {
+    let Some(data) = stack.extra.as_deref_mut() else {
+        return Vec::new();
+    };
+    if data.container.is_empty() {
+        return Vec::new();
+    }
+    // `set(CONTAINER, ItemContainerContents.EMPTY)`: no slot left filled.
+    let mut held = std::mem::take(&mut data.container);
+    stack.tidy();
+    // `nonEmptyItemCopyStream` walks the 256 slots in order.
+    held.sort_by_key(|(slot, _)| *slot);
+    held.into_iter().map(|(_, stack)| stack).collect()
+}
+
 impl ItemStack {
     pub fn new(item: &str, count: u32) -> Self {
         Self {

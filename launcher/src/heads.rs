@@ -75,6 +75,12 @@ fn profile_pixels(png: &[u8]) -> Option<Vec<[u8; 4]>> {
         .flatten()
 }
 
+/// The whole skin PNG `profile_face` kept for `url` in `cache`, if it fetched it.
+pub fn cached_skin(url: &str, cache: &Path) -> Option<Vec<u8>> {
+    use sha1::{Digest, Sha1};
+    std::fs::read(cache.join(format!("{:x}.png", Sha1::digest(url.as_bytes())))).ok()
+}
+
 /// A signed-in profile's public skin, cached independently of its authentication tokens.
 /// This may do disk/network I/O and must run on a worker. Missing skins use the UUID default;
 /// the `bool` says the download failed, so the real skin is worth asking for again later.
