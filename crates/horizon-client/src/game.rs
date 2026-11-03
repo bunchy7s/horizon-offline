@@ -7714,7 +7714,7 @@ impl Game<'_> {
         for mapped in self.settings.keys.translate_all(key) {
             match mapped {
                 Ok(k) => {
-                    self.mapped_key(k, pressed, repeat)?;
+                    self.mapped_key(k, pressed, repeat, key)?;
                 }
                 Err(button) => {
                     let action = match (pressed, repeat) {
@@ -7740,8 +7740,18 @@ impl Game<'_> {
         Ok(())
     }
     /// A key event after rebinding, as the default key of its mapping (the
-    /// keyboard and controllers both end here).
-    fn mapped_key(&mut self, key: KeyCode, pressed: bool, repeat: bool) -> Result<()> {
+    /// keyboard and controllers both end here). `raw` is the physical key
+    /// the event started from (`key` where the caller started from no window
+    /// key): the screens act in that keyspace (`Screen.keyPressed`), where
+    /// `key`, the vanilla default the mapping translated to, may itself be
+    /// another mapping's rebound key.
+    fn mapped_key(
+        &mut self,
+        key: KeyCode,
+        pressed: bool,
+        repeat: bool,
+        raw: KeyCode,
+    ) -> Result<()> {
         // Sneak and sprint are ToggleKeyMappings: a press (or a key
         // repeat) flips them when toggling; only releases reach them
         // behind a screen (KeyboardHandler.keyPress).
@@ -7775,7 +7785,7 @@ impl Game<'_> {
         if repeat && key != KeyCode::KeyQ {
             return Ok(());
         }
-        self.key_pressed(key)
+        self.key_pressed(key, raw)
     }
     /// `KeyMapping.releaseAll` when a screen opens and
     /// `restoreToggleStatesOnScreenClosed` when it closes.
@@ -16080,8 +16090,12 @@ impl Game<'_> {
             sides: BorderRenderer::sides(&self.border_state, camera, distance),
         })
     }
-    /// A key press while a world is open (keyboard or control socket).
-    fn key_pressed(&mut self, key: KeyCode) -> Result<()> {
+    /// A key press while a world is open (keyboard or control socket). `key`
+    /// is the vanilla default the pressed mapping translates to, `raw` the
+    /// physical key as pressed (the same where the caller had no window key):
+    /// `Screen.keyPressed` hears the raw one, and only a raw key settles what
+    /// the container's hotbar keys are now (`checkHotbarKeyPressed`).
+    fn key_pressed(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
         if self.sleeping.is_some()
             && self.screen == Screen::Playing
             && !matches!(
@@ -16147,12 +16161,16 @@ impl Game<'_> {
             // `checkHotbarKeyPressed`: the keys the controls bind to the off
             // hand and the hotbar slots, so a rebound key swaps instead of
             // reaching the screen. The list below keeps Q and the defaults.
+            // The raw key asks what the bindings are now: the translated
+            // `key` is a vanilla default and may itself be another mapping's
+            // rebound key (the off hand on Left Alt while hotbar 7 is on F
+            // would find that F a second time and swap with slot 7).
             _ if (self.screen == Screen::Inventory
                 || (self.screen == Screen::Creative && !self.creative_screen.tab().search))
                 && self
                     .settings
                     .keys
-                    .container_hotbar_key(key)
+                    .container_hotbar_key(raw)
                     .is_some_and(|key| self.inventory_hotkey(key)) => {}
             KeyCode::Digit1
             | KeyCode::Digit2
@@ -17732,7 +17750,7 @@ impl Game<'_> {
                                     Err(b) => self.play_mouse(b, pressed)?,
                                     Ok(k) if pressed => {
                                         self.keys.insert(k);
-                                        self.key_pressed(k)?;
+                                        self.key_pressed(k, k)?;
                                     }
                                     Ok(k) => {
                                         self.keys.remove(&k);
