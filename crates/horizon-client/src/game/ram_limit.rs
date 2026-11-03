@@ -3,7 +3,10 @@
 use super::Game;
 use horizon_client::ram_limit::{self, Step};
 use horizon_client::text::Text;
+use horizon_threads::capped;
 use std::time::Instant;
+
+const MIB: u64 = 1024 * 1024;
 
 impl Game<'_> {
     /// The render distance in use: the player's, unless memory holds it lower.
@@ -25,6 +28,17 @@ impl Game<'_> {
         };
         let has_far = self.settings.horizon.lod_distance > 0;
         let pressure = ram_limit::pressure(limit, self.fps);
+        // Every ten seconds, what the limit sees: a report can show the trace.
+        if self.ticks.is_multiple_of(200) {
+            let (commit, _) = horizon_threads::allocator_commit();
+            log::info!(
+                "Horizon: memory: allocated {} MB of {} MB, commit {} MB, distance {}, {pressure:?}",
+                capped::live_bytes() / MIB,
+                limit / MIB,
+                commit as u64 / MIB,
+                self.render_distance_in_use()
+            );
+        }
         let step = self
             .ram_limit
             .step(Instant::now(), pressure, chosen, has_far);
