@@ -338,6 +338,7 @@ pub fn mob_to_nbt(
     raw: Option<&Tag>,
     registry: Option<&BlockRegistry>,
 ) -> Tag {
+    use crate::mobs::Species as S;
     let base = Base {
         id: &m.kind.id,
         uuid,
@@ -367,6 +368,18 @@ pub fn mob_to_nbt(
         ("PersistenceRequired", Tag::Byte(i8::from(m.persistent))),
     ] {
         put(&mut tag, key, value);
+    }
+    // AbstractFish/Axolotl.addAdditionalSaveData always write the flag.
+    // Tadpole.fromBucket is always true, and its setter ignores loaded input.
+    let from_bucket = match m.species() {
+        S::Tadpole => Some(true),
+        S::Cod | S::Salmon | S::Pufferfish | S::TropicalFish | S::Axolotl => {
+            Some(m.extra.from_bucket)
+        }
+        _ => None,
+    };
+    if let Some(value) = from_bucket {
+        put(&mut tag, "FromBucket", Tag::Byte(i8::from(value)));
     }
     // Mob.addAdditionalSaveData: the death loot table, and its seed when set.
     if let Some(table) = &m.extra.death_loot_table {
@@ -4066,11 +4079,18 @@ fn write_axolotl_memories(m: &Mob, map: &mut Compound) {
         }
     }
 }
-/// The variant tags `Axolotl`, `Rabbit`, `Parrot`, `Salmon` and
-/// `TropicalFish` read; a missing tag is the default variant (a medium
-/// salmon, otherwise index 0).
+/// Saved variants and fish/axolotl bucket flags. Missing variants use a
+/// medium salmon or index 0; a missing bucket flag is false.
 fn read_variant(m: &mut Mob, tag: &Tag) {
     use crate::mobs::Species as S;
+    // AbstractFish/Axolotl.readAdditionalSaveData: false when absent.
+    // Tadpole.setFromBucket ignores the input.
+    if matches!(
+        m.species(),
+        S::Cod | S::Salmon | S::Pufferfish | S::TropicalFish | S::Axolotl
+    ) {
+        m.extra.from_bucket = flag(tag, "FromBucket");
+    }
     let int = |key| number(tag.get(key)).unwrap_or(0) as i32;
     match m.species() {
         S::Axolotl | S::Parrot => m.extra.variant = int("Variant").clamp(0, 4) as u8,
@@ -4363,6 +4383,57 @@ pub fn apply_item_components(m: &mut Mob, stack: &crate::items::ItemStack) {
 #[cfg(test)]
 mod axolotl_nbt_tests {
     use super::*;
+    #[test]
+    fn aquatic_from_bucket_saves_defaults_and_tadpole_constant() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("items.json").exists() {
+            return;
+        }
+        let types: HashMap<_, _> = crate::mobs::MobTypes::load(&root)
+            .unwrap()
+            .types
+            .into_iter()
+            .map(|(id, kind)| (id, Arc::new(kind)))
+            .collect();
+        for kind in [
+            "cod",
+            "salmon",
+            "pufferfish",
+            "tropical_fish",
+            "axolotl",
+            "tadpole",
+        ] {
+            for value in [None, Some(false), Some(true)] {
+                let mut input = Tag::compound([
+                    ("id", string(&format!("minecraft:{kind}"))),
+                    ("Pos", doubles(&[10.5, 220.0, 10.5])),
+                ]);
+                if let (Some(value), Tag::Compound(map)) = (value, &mut input) {
+                    map.insert("FromBucket".into(), Tag::Byte(i8::from(value)));
+                }
+                let m = mob_from_nbt(&input, &types, 1, None).unwrap();
+                let expected = kind == "tadpole" || value.unwrap_or(false);
+                for raw in [None, Some(&input)] {
+                    let saved = mob_to_nbt(&m, [1; 4], raw, None);
+                    assert_eq!(
+                        saved.get("FromBucket"),
+                        Some(&Tag::Byte(i8::from(expected))),
+                        "{kind}, input={value:?}, raw={}",
+                        raw.is_some()
+                    );
+                }
+            }
+        }
+        let pig = Mob::new(1, types["minecraft:pig"].clone(), Vec3::ZERO, 0.0);
+        assert!(
+            mob_to_nbt(&pig, [1; 4], None, None)
+                .get("FromBucket")
+                .is_none()
+        );
+    }
+
     #[test]
     fn bucket_cooldown_and_brain_memories_survive_and_expired_cooldown_is_removed() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

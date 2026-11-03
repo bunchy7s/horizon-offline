@@ -159,6 +159,9 @@ account (signed out, it asks you to sign in):
 - **States**: offline, the page keeps working from what's kept on disk and says how many changes
   wait to sync; a service failure says what you wear still shows in the game, with *Try again* and
   *Copy details* (host, status, time).
+- **A launcher theme** worn (First Light) replaces the sky's six stops and the accent's hue
+  (`Saved::theme`, `Theme::with_sky`), from the outfit kept on disk, so it holds offline too. Taking
+  it off brings the player's own look back.
 - `HORIZON_LAUNCHER_PAGE=wardrobe` in a development build shows the page for a made-up account
   wearing `HORIZON_COSMETICS_LOCAL`'s items; `HORIZON_WARDROBE_STATE=offline|failed|closed|empty`
-  shows that state.
+  shows that state, `theme` wears First Light.
