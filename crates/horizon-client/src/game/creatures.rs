@@ -66,6 +66,13 @@ pub(super) struct Creatures {
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
     /// Wind bursts from a guest's turn, waiting for it to end (game/wind.rs).
     pub wind_bursts: Vec<super::wind::Burst>,
+    /// The wind charge whose burst is being handled, by entity id: which
+    /// entities have already ticked in vanilla's spawn-ordered tick list
+    /// (game/wind.rs).
+    pub wind_source: Option<u32>,
+    /// Wind pushes held until the entity's own tick has run, by entity id
+    /// (game/wind.rs `apply_late_wind_pushes`).
+    pub late_wind_pushes: Vec<(u32, crate::game::Vec3)>,
     /// The players a fishing hook can catch, taken as the hooks tick, and
     /// the pulls on them waiting for the hub (game/fishing.rs).
     pub hook_targets: Vec<super::fishing::HookTarget>,

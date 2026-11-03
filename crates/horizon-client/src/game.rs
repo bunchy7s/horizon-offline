@@ -7601,6 +7601,7 @@ impl Game<'_> {
         if running {
             horizon_client::spans::time("tick_falling", || self.tick_falling())?;
             horizon_client::spans::time("tick_tnt", || self.tick_tnt())?;
+            self.apply_late_wind_pushes();
         }
         if running {
             horizon_client::spans::time("tick_block_entities", || self.tick_block_entities())?;
