@@ -1,0 +1,83 @@
+name: Sync upstream
+# Fetches horizon-rust/main and merges it into this fork's main.
+# Everything merges cleanly → pushed.  Conflict → filed as an issue.
+# Files the fork intentionally diverges on are pre-resolved to ours
+# (launcher CI, backend, etc.) before the attempt.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'  # hourly at :17 past, so it doesn't stack with the hour roll
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: sync-upstream
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/horizon-rust/horizon.git
+          git fetch upstream main
+
+      # Files we intentionally keep our version of — if they conflict we take ours.
+      - name: Keep our CI and backend on conflict
+        run: |
+          cat >> .git/info/attributes << 'EOF'
+          .github/workflows/launcher.yml merge=ours
+          launcher/src/backend.rs merge=ours
+          launcher/Cargo.lock merge=ours
+          launcher/Cargo.toml merge=ours
+          crates/horizon-release-sign/release-keys.txt merge=ours
+          crates/horizon-release-sign/legacy-releases.txt merge=ours
+          EOF
+          git config merge.ours.driver 'git checkout --ours -- "$@" && git add "$@"'
+          git config merge.theirs.driver 'git checkout --theirs -- "$@" && git add "$@"'
+
+      - name: Attempt merge
+        id: merge
+        run: |
+          if git merge upstream/main --no-edit 2>&1; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=conflict" >> "$GITHUB_OUTPUT"
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt
+          fi
+
+      - name: Push
+        if: steps.merge.outputs.status == 'ok'
+        run: git push origin main
+
+      - name: File issue on conflict
+        if: steps.merge.outputs.status == 'conflict'
+        shell: bash
+        run: |
+          # Don't create duplicates — check for an existing open issue.
+          existing=$(gh issue list --label upstream-sync --state open --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
+            echo "Open issue already exists, skipping"
+            exit 0
+          fi
+          conflicts=$(cat /tmp/conflicts.txt)
+          gh issue create \
+            --title "Upstream merge conflict" \
+            --label upstream-sync \
+            --body "The hourly sync with **horizon-rust/main** hit conflicts.
+
+Conflicting files:
+\`\`\`
+$conflicts
+\`\`\`
+
+Resolve locally then [run the workflow](${{ github.server_url }}/${{ github.repository }}/actions/workflows/sync-upstream.yml) again."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
