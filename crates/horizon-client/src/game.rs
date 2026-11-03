@@ -3069,6 +3069,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
+    /// when their own state is back in their record.
+    save_after_guest_turn: bool,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -18990,6 +18993,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            save_after_guest_turn: false,
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,
