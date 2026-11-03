@@ -455,6 +455,17 @@ impl Game<'_> {
             }
         }
     }
+    /// `ServerPlayer.die`: the acting player's `deathCount` objectives go up by one.
+    pub(super) fn score_player_died(&mut self) {
+        let display = self.player_display_comp();
+        let me = self.acting_player_name().to_owned();
+        self.score.board.for_all_objectives_with(
+            sb::CRITERIA_DEATH_COUNT,
+            &me,
+            Some(&display),
+            |v| v.wrapping_add(1),
+        );
+    }
     /// `ServerPlayer.awardKillScore`: total kills and the team kill counts.
     pub(super) fn score_player_killed(&mut self, victim: Target) {
         let victim_name = self.holder_name(victim);
@@ -756,6 +767,7 @@ impl Game<'_> {
         for (location, rgba) in ready {
             self.store_skin(location, rgba);
         }
+        self.cosmetics_frame();
     }
     /// `Hud.extractTabList`: the player list while the player-list key is
     /// held. A local world shows it with a joined LAN guest or a `list`

@@ -380,6 +380,9 @@ struct Pass {
     image_copies: u64,
     /// The pack's images a compute pass's loads read as they were before it: copied first.
     snapshots: u64,
+    /// `scale.<program>` (scale, offset x, offset y): the pass draws only that part of its
+    /// buffers and keeps the rest.
+    viewport: Option<[f32; 3]>,
 }
 
 impl Pass {
@@ -499,7 +502,7 @@ pub struct PackPost {
     clouds: Option<Pass>,
     cloud_draw: Option<Clouds>,
     /// The pack has `gbuffers_clouds`, even one that writes nothing (a pack drawing its own
-    /// clouds discards vanilla's): the game's clouds are not drawn.
+    /// clouds discards vanilla's), or `clouds=off`: the game's clouds are not drawn.
     hides_clouds: bool,
     /// The pack has a sky (`gbuffers_skybasic`) or sun and moon (`gbuffers_skytextured`)
     /// program: vanilla's stays hidden even when the program writes nothing.
@@ -892,6 +895,20 @@ fn target(format: wgpu::TextureFormat) -> Option<wgpu::ColorTargetState> {
     })
 }
 
+/// The viewport of `scale.<program>` (scale, offset x, offset y) on buffers of `size`, in whole
+/// pixels, at least one and inside them. Buffer rows are GL's, so the offsets count from GL's
+/// bottom-left corner as they are.
+fn viewport(size: [u32; 2], [scale, x, y]: [f32; 3]) -> [f32; 4] {
+    let [w, h] = size.map(|n| n as f32);
+    let (x, y) = ((x * w).floor().min(w - 1.0), (y * h).floor().min(h - 1.0));
+    [
+        x,
+        y,
+        (scale * w).floor().clamp(1.0, w - x),
+        (scale * h).floor().clamp(1.0, h - y),
+    ]
+}
+
 fn attach(
     view: &wgpu::TextureView,
     ops: wgpu::Operations<wgpu::Color>,
@@ -1001,6 +1018,13 @@ struct Resources<'a> {
     gpu: Gpu,
     /// The buffers whose format can be bound as an image.
     storable: u16,
+    /// The stage (`texture.<stage>`) of the programs built so far, and the buffers one of them
+    /// flipped: a `texture.<stage>.colortexN` no longer stands in for buffer N in the stage's
+    /// later programs, which read what was written, as in Iris. `final` continues
+    /// `composite`'s. (Super Duper Vanilla's `texture.composite.colortex0` is its clouds, read
+    /// before `composite4` writes bloom there; Bliss's `colortex6` is blue noise until
+    /// `composite5` writes it.)
+    released: std::cell::Cell<(&'static str, u16)>,
     /// The formats and dimensions of the images no `image.*` gives, for their stand-ins.
     stand_ins: &'a std::cell::RefCell<Vec<(wgpu::TextureFormat, wgpu::TextureViewDimension)>>,
 }
@@ -1072,7 +1096,13 @@ fn bindings(
             ));
             return None;
         }
-        let custom = pack_textures::find(textures, group, &s.ty, &s.name);
+        let released = pack.released.get();
+        let custom = pack_textures::find(textures, group, &s.ty, &s.name).filter(|&i| {
+            let t = &textures[i];
+            t.stage != pack_textures::stage(group)
+                || released.0 != t.stage
+                || horizon_shaders::buffer_index(&t.name).is_none_or(|b| released.1 & 1 << b == 0)
+        });
         let image = pack
             .images
             .iter()
@@ -1555,6 +1585,7 @@ fn build_pass(
         compute: Vec::new(),
         sink,
         geometry: p.geometry_triangles,
+        viewport: (!final_pass && p.scale != [1.0, 0.0, 0.0]).then_some(p.scale),
         image_copies,
         snapshots: 0,
     })
@@ -1688,6 +1719,7 @@ fn build_compute(
         geometry: 0,
         image_copies,
         snapshots,
+        viewport: None,
     })
 }
 
@@ -1814,6 +1846,7 @@ impl PackPost {
             indices: indices.as_ref(),
             gpu,
             storable,
+            released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
         };
         let mut build = |mut p: horizon_shaders::PostProgram, geometry: Option<&Geometry<'_>>| {
@@ -1824,6 +1857,10 @@ impl PackPost {
                 p.program.as_ref()?;
             }
             let group = p.group;
+            let stage = pack_textures::stage(group);
+            if pack.released.get().0 != stage {
+                pack.released.set((stage, 0));
+            }
             let mut computes: Vec<Pass> = compute
                 .into_iter()
                 .filter_map(|(name, c)| {
@@ -1880,6 +1917,8 @@ impl PackPost {
                 return None;
             }
             for p in std::iter::once(&pass).chain(&pass.compute) {
+                let (stage, flipped) = pack.released.get();
+                pack.released.set((stage, flipped | p.flip));
                 if !in_shadow {
                     used |= p.reads | p.written | p.flip;
                 }
@@ -2014,7 +2053,7 @@ impl PackPost {
             ids: None,
             cull: false,
         });
-        let hides_clouds = post.clouds.is_some() && cloud_geometry.is_some();
+        let hides_clouds = post.clouds_off || post.clouds.is_some() && cloud_geometry.is_some();
         let weather_geometry = world.weather.then(|| Geometry {
             buffers: &entity_buffers,
             table: None,
@@ -3139,7 +3178,11 @@ impl PackPost {
         encoder: &mut wgpu::CommandEncoder,
         size: [u32; 2],
     ) {
-        let (Some(mut pass), Some(clouds)) = (self.clouds.take(), self.cloud_draw.take()) else {
+        // The pass stays for later frames when this one has no clouds.
+        let Some(clouds) = self.cloud_draw.take() else {
+            return;
+        };
+        let Some(mut pass) = self.clouds.take() else {
             return;
         };
         let group = self.bind(device, queue, encoder, &mut pass, size);
@@ -3203,8 +3246,11 @@ impl PackPost {
         encoder: &mut wgpu::CommandEncoder,
         size: [u32; 2],
     ) {
-        let (Some(mut passes), Some(weather)) = (self.weather.take(), self.weather_draw.take())
-        else {
+        // The passes stay for later frames when this one has no rain or snow.
+        let Some(weather) = self.weather_draw.take() else {
+            return;
+        };
+        let Some(mut passes) = self.weather.take() else {
             return;
         };
         if weather.generation != self.weather_generation {
@@ -3990,18 +4036,27 @@ impl PackPost {
                     .map(|t| &t[usize::from(self.main & 1 << i == 0)])
             };
             let mut attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = Vec::new();
+            // A scaled pass keeps what its buffers hold outside its viewport.
+            let ops = if pass.viewport.is_some() {
+                wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }
+            } else {
+                overwrite
+            };
             if final_pass {
                 attachments.push(attach(screen, overwrite));
                 shown = true;
             } else if pass.sink {
-                attachments.push(attach(&targets.sink, overwrite));
+                attachments.push(attach(&targets.sink, ops));
             } else {
                 for &(location, buffer) in &pass.writes {
                     let l = location as usize;
                     if attachments.len() <= l {
                         attachments.resize(l + 1, None);
                     }
-                    attachments[l] = view(buffer).and_then(|v| attach(v, overwrite));
+                    attachments[l] = view(buffer).and_then(|v| attach(v, ops));
                 }
             }
             {
@@ -4017,6 +4072,10 @@ impl PackPost {
                     && let Some(g) = &self.buffers.group
                 {
                     rp.set_bind_group(4, g, &[]);
+                }
+                if let Some(scale) = pass.viewport {
+                    let [x, y, w, h] = viewport(out, scale);
+                    rp.set_viewport(x, y, w, h, 0.0, 1.0);
                 }
                 rp.draw(0..6, 0..1);
             }
@@ -4165,6 +4224,83 @@ mod tests {
         assert!(buffer(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::MAP_WRITE).is_err());
     }
 
+    /// `texture.composite.colortex0` stands in for buffer 0 in composite programs until one of
+    /// them flips that buffer; later ones, and `final`, read the buffer (Super Duper Vanilla,
+    /// Bliss, SEUS PTGI HRR). Another stage's flips don't release it.
+    #[test]
+    fn a_custom_texture_over_a_buffer_ends_when_its_stage_flips_it() {
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, _queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let textures = [pack_textures::PackTexture {
+            stage: "composite".into(),
+            name: "colortex0".into(),
+            dimension: wgpu::TextureViewDimension::D2,
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            blur: false,
+            clamp: false,
+            image: pack_textures::Image::Atlas,
+        }];
+        let interface = horizon_shaders::Interface {
+            uniform_size: 48,
+            uniforms: Vec::new(),
+            samplers: vec![horizon_shaders::Sampler {
+                name: "colortex0".into(),
+                ty: "sampler2D".into(),
+                binding: 1,
+            }],
+            outputs: vec![0],
+            draw: false,
+            images: Vec::new(),
+            buffers: Vec::new(),
+        };
+        let buffers = pack_images::Buffers::new(
+            &device,
+            Default::default(),
+            Default::default(),
+            wgpu::ShaderStages::FRAGMENT,
+        );
+        let stand_ins = std::cell::RefCell::new(Vec::new());
+        let pack = Resources {
+            textures: &textures,
+            images: &[],
+            left_out: &[],
+            buffers: &buffers,
+            indices: None,
+            gpu: Gpu::of(&adapter, device.features()),
+            storable: 0,
+            released: std::cell::Cell::new(("", 0)),
+            stand_ins: &stand_ins,
+        };
+        let reads = |group: Group| {
+            let (_, samplers, ..) = bindings(
+                device.features(),
+                &interface,
+                "composite",
+                group,
+                &[1],
+                None,
+                &[T::Rgba8Unorm; BUFFERS],
+                None,
+                &mut Vec::new(),
+                &pack,
+            )
+            .expect("the pass is kept");
+            samplers[0].source
+        };
+        assert!(reads(Group::Composite) == Source::Atlas);
+        pack.released.set(("deferred", 1));
+        assert!(reads(Group::Composite) == Source::Atlas);
+        pack.released.set(("composite", 1));
+        assert!(reads(Group::Composite) == Source::Color(0));
+        assert!(reads(Group::Final) == Source::Color(0));
+    }
+
     /// Iris 1.11.7 runs a program whose image no `image.*` gives, and its loads read zero
     /// (observed with a probe pack). Its pass is kept, the image bound to a stand-in of its
     /// declared format, zero again before each pass even after one stored into it.
@@ -4215,6 +4351,7 @@ mod tests {
             indices: None,
             gpu: Gpu::of(&adapter, device.features()),
             storable: 0,
+            released: std::cell::Cell::new(("", 0)),
             stand_ins: &stand_ins,
         };
         let mut notes = Vec::new();
@@ -4271,6 +4408,27 @@ mod tests {
         read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         assert_eq!(&read.slice(..).get_mapped_range().unwrap()[..], &[0; 4]);
+    }
+
+    /// `scale.composite2 = 0.25 0.5 0.25` on a 1280×720 picture: Iris 1.11.7 draws x 640..960
+    /// and GL y 180..360 (a probe pack of our own). Rows are GL's here, so that is rows 180..360.
+    #[test]
+    fn a_scaled_pass_draws_its_part_from_gl_s_corner() {
+        assert_eq!(
+            viewport([1280, 720], [0.25, 0.5, 0.25]),
+            [640.0, 180.0, 320.0, 180.0]
+        );
+        assert_eq!(
+            viewport([1280, 720], [0.5, 0.0, 0.0]),
+            [0.0, 0.0, 640.0, 360.0]
+        );
+        // Whole pixels, at least one, and never past the buffer's edge.
+        assert_eq!(viewport([5, 3], [0.5, 0.0, 0.0]), [0.0, 0.0, 2.0, 1.0]);
+        assert_eq!(viewport([4, 4], [0.01, 0.0, 0.0]), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(
+            viewport([100, 100], [1.0, 0.5, 0.75]),
+            [50.0, 75.0, 50.0, 25.0]
+        );
     }
 
     #[test]

@@ -490,6 +490,13 @@ impl Mob {
             let s = super::aquatic::salmon_scale(self.extra.variant);
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // PolarBear.getDefaultDimensions: the rear-up animation scales the box
+        // by (1, 1 + clientSideStandAnimation / 6), so a bear at full height is
+        // twice as tall, with its eyes twice as high and the same width.
+        if k.species == super::Species::PolarBear {
+            let f = super::polar_bear::stand_box_scale(self);
+            (h, e) = (h * f, e * f);
+        }
         (f64::from(w), f64::from(h), f64::from(e))
     }
     pub fn eye_height(&self) -> f64 {
@@ -715,6 +722,8 @@ impl Mob {
             state,
             at: [at.x, at.y, at.z],
             count,
+            // `sendParticles(..., 0.15)`: the crumbs fly up a little.
+            speed: f64::from(0.15_f32),
         });
     }
     /// Entity.updateFluidInteraction: the fluid state, then touching water
@@ -1017,7 +1026,7 @@ impl Mob {
         // Creeper.causeFallDamage: the fall swells the fuse, up to five ticks
         // short of exploding.
         if self.species() == super::Species::Creeper {
-            self.swell = (self.swell + (distance * 1.5) as i32).min(30 - 5);
+            self.swell = (self.swell + (distance * 1.5) as i32).min(self.max_swell - 5);
         }
         // AbstractHorse.causeFallDamage (llamas override it): a landing of more
         // than a block thuds, and the horse's fall makes no generic fall sound.

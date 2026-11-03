@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "arrow_nock",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_arrow_nock",
+      "side": "both",
+      "cancellable": true,
+      "neoforge": "net.neoforged.neoforge.event.entity.player.ArrowNockEvent (NeoForge.EVENT_BUS, ICancellableEvent)",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "A player is about to nock a bow (`native_arrow_nock`).",
+  "doc_summary": "A player is about to nock a bow: `native_arrow_nock(player, name, bow, hand, has_ammo, cancel)` is asked where `BowItem.use` would start using the item. `has_ammo` is whether `getProjectile` found ammunition (creative always has). Set `cancel` to make the use fail, as `InteractionResult.FAIL`. Crossbows and tridents do not ask. Bundles need \"hooks\": @API:arrow_nock@."
+}

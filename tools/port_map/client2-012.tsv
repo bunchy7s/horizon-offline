@@ -105,8 +105,8 @@ FontOption.Filter.merge	inline	crates/horizon-client-render/src/font.rs::provide
 FontSet.reload	port	crates/horizon-client-render/src/font.rs::Font::load_set	providers into the font set
 FontSet.resetTextures	port	crates/horizon-client-render/src/font.rs::Font::reset_cache	glyph cache and atlas cursor cleared
 FontSet.selectProviders	port	crates/horizon-client-render/src/font.rs::Font::glyphs_by_width	gap: minor: width buckets hold only Space and atlas bitmap glyphs, so TrueType and unihex never appear as obfuscated characters
-FontSet.hasFishyAdvance	missing		minor: no check for advances under 0 or over 32
-FontSet.computeGlyphInfo	port	crates/horizon-client-render/src/font.rs::Font::resolve	gap: minor: no skip of a glyph with a fishy advance in favour of a later provider
+FontSet.hasFishyAdvance	port	crates/horizon-client-render/src/font.rs::fishy_advance	an advance under 0 or over 32 marks the glyph as one to skip; Horizon keeps one advance per glyph where vanilla tests the baked and the unbaked one
+FontSet.computeGlyphInfo	port	crates/horizon-client-render/src/font.rs::Font::resolve	the first provider that has the character with a good advance wins; a fishy glyph is skipped for the next provider, then the missing glyph (vanilla's SelectedGlyphs.any, which keeps the fishy glyph for the plain source, has no Horizon counterpart)
 FontSet.DelayedBake.get	skip:java		lazy bake into the atlas; Font::resolve bakes at once
 FontTexture.dumpContents	skip:debug		writes the atlas to a PNG for debugging
 GlyphRenderTypes.createForGrayscaleTexture	skip:ui		one textured quad path for all glyphs (hud.rs text_styled)

@@ -12,6 +12,7 @@ use horizon_client::{
     arrows::EntityHit,
     blocks::Fluid,
     collisions::SceneCollisions,
+    crafting::Recipes,
     health::{HurtSource, Hurting, Knock, knockback_canceled},
     items::ItemStack,
     mesher::Vertex,
@@ -872,7 +873,10 @@ impl Game<'_> {
     /// Advance every mob one tick, then apply their events.
     pub(super) fn tick_creatures(&mut self) -> Result<()> {
         self.attack_ticks = self.attack_ticks.saturating_add(1);
+        self.refresh_gear_knockback_resistance();
         self.tick_leads();
+        // Vanilla's spawning and raids run before ChunkMap.tick.
+        let from = self.lan_synced_from();
         horizon_client::spans::time("spawn_natural", || self.spawn_natural());
         // ServerChunkCache.tickChunks: the custom spawners tick only with spawn_mobs.
         if self.ui.rules.bool("spawn_mobs") {
@@ -882,6 +886,7 @@ impl Game<'_> {
             self.tick_village_siege();
         }
         self.tick_raids();
+        self.lan_synced_since(from);
         let ticked =
             horizon_client::spans::time("tick_creature_entities", || self.tick_creature_entities());
         self.dismount_underwater_mob_riders();
@@ -1486,7 +1491,7 @@ impl Game<'_> {
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
         let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            drops::die(m, &death, &mut self.rand_sequences)
+            drops::die(m, &death, &mut self.rand_sequences, &mut self.world.random)
         });
         if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
             // Creeper.droppedSkulls: one head per charged explosion.
@@ -1783,19 +1788,31 @@ impl Game<'_> {
             );
         }
     }
+    /// A mob's projectile enters the level.
+    fn launch_mob_projectile(&mut self, mut p: Projectile) {
+        self.next_entity += 1;
+        p.id = self.next_entity;
+        let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
+        // LlamaSpit.recreateFromPacket: the spit's burst on the client.
+        if p.kind == ProjectileKind::LlamaSpit {
+            let v = p.velocity;
+            self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+        }
+        self.add_projectile(p);
+        self.projectile_event("minecraft:projectile_shoot", owner, at);
+    }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
             match e {
                 MobEvent::BubbleColumnParticles { pos } => {
                     self.bubble_column_particles(BlockPos::new(pos[0], pos[1], pos[2]))
                 }
-                MobEvent::LandingDust { state, at, count } => self.landing_dust(
-                    None,
+                MobEvent::LandingDust {
                     state,
-                    Vec3::new(at[0], at[1], at[2]),
+                    at,
                     count,
-                    f64::from(0.15_f32),
-                ),
+                    speed,
+                } => self.landing_dust(None, state, Vec3::new(at[0], at[1], at[2]), count, speed),
                 MobEvent::SquidCycle { mob, at } => self.lan_entity_event(mob as i32, 19, at),
                 MobEvent::RabbitHop { mob, at } => self.lan_entity_event(mob as i32, 1, at),
                 MobEvent::Drown { mob, at } => {
@@ -2074,6 +2091,23 @@ impl Game<'_> {
                 } => {
                     self.mob_hits_mob(target, amount, source);
                 }
+                MobEvent::AttackMobWithEffect {
+                    target,
+                    amount,
+                    source,
+                    effect,
+                    ticks,
+                    amplifier,
+                } => {
+                    // CaveSpider, Husk and WitherSkeleton.doHurtTarget: the
+                    // effect sits inside the branch where the hit landed, and
+                    // `LivingEntity.addEffect` takes a mob as well as a player.
+                    if self.mob_hits_mob(target, amount, source)
+                        && let Some(t) = self.mobs.iter_mut().find(|m| m.id == target)
+                    {
+                        t.add_effect(effect, ticks, amplifier);
+                    }
+                }
                 MobEvent::CubeHurtPlayer { cube, amount, from } => {
                     // AbstractCubeMob.dealDamage: the attack sound (and its
                     // two pitch draws, made even for a silent cube, whose
@@ -2271,17 +2305,40 @@ impl Game<'_> {
                         }
                     }
                 }
-                MobEvent::Projectile(mut p) => {
-                    self.next_entity += 1;
-                    p.id = self.next_entity;
-                    let (owner, at) = (p.owner, [p.position.x, p.position.y, p.position.z]);
-                    // LlamaSpit.recreateFromPacket: the spit's burst on the client.
-                    if p.kind == ProjectileKind::LlamaSpit {
-                        let v = p.velocity;
-                        self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
+                MobEvent::Projectile(p) => self.launch_mob_projectile(p),
+                MobEvent::BowShot {
+                    mob,
+                    weapon,
+                    mut arrow,
+                } => {
+                    self.mob_bow_ammo(mob, &weapon, &mut arrow);
+                    self.launch_mob_projectile(arrow);
+                }
+                MobEvent::CrossbowShot { ammo, mut arrow } => {
+                    if &*ammo.item == "minecraft:firework_rocket" {
+                        // `CrossbowItem.createProjectile`: a rocket, from 0.15 under the eyes.
+                        let mut at = arrow.position;
+                        at.y -= f64::from(0.15f32) - 0.1;
+                        self.launch_angled_rocket(at, arrow.velocity, &ammo, arrow.owner);
+                    } else {
+                        Self::arrow_from_ammo(&ammo, &mut arrow);
+                        self.launch_mob_projectile(arrow);
                     }
-                    self.add_projectile(p);
-                    self.projectile_event("minecraft:projectile_shoot", owner, at);
+                }
+                MobEvent::CrossbowLoad {
+                    mob,
+                    weapon,
+                    at,
+                    pitch,
+                } => {
+                    if self.mob_crossbow_ammo(mob, &weapon) {
+                        self.audio.play(
+                            "minecraft:item.crossbow.loading_end",
+                            Some(at),
+                            1.0,
+                            pitch,
+                        );
+                    }
                 }
                 MobEvent::Spawn(mut m) => {
                     self.next_entity += 1;
@@ -2903,36 +2960,6 @@ impl Game<'_> {
             self.spawn_orbs(at, amount);
         }
     }
-    /// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
-    /// the two dyes, else one of the two picked at random.
-    fn dye_mix(&mut self, a: u8, b: u8) -> u8 {
-        if let Some(mixed) = self.dye_color_mix_in_recipes(a, b) {
-            return mixed;
-        }
-        if self.world.random.next_boolean() {
-            a
-        } else {
-            b
-        }
-    }
-    /// `DyeColor.findColorMixInRecipes`: the dye colour a two-dye crafting
-    /// recipe makes, when its result is a dye.
-    fn dye_color_mix_in_recipes(&self, a: u8, b: u8) -> Option<u8> {
-        let dye = |c: u8| {
-            let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
-            Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
-        };
-        let grid = [dye(a), dye(b), None, None];
-        let (_, result) = self.res.recipes().find(&grid, 2)?;
-        let name = result
-            .item
-            .strip_prefix("minecraft:")?
-            .strip_suffix("_dye")?;
-        let index = horizon_client::mobs::render::DYE_NAMES
-            .iter()
-            .position(|n| *n == name)?;
-        u8::try_from(index).ok()
-    }
     /// `ServerPlayer.tellNeutralMobsThatIDied`: the mobs within 32 blocks
     /// across and 10 up and down get `NeutralMob.playerDied`, when the
     /// `forgive_dead_players` rule is on. A mob's `Who::Player` is the guest
@@ -3163,7 +3190,12 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     // The mix needs all of `self`, so it waits until `child`'s
                     // borrow of the mob list is over.
-                    let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                    let mixed = dye_mix(
+                        self.res.recipes(),
+                        &mut self.world.random,
+                        p.extra.color,
+                        other.extra.color,
+                    );
                     if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                         c.extra.color = mixed;
                     }
@@ -3186,7 +3218,12 @@ impl Game<'_> {
                     child.extra.owner = p.extra.owner;
                     // The mix needs all of `self`, so it waits until `child`'s
                     // borrow of the mob list is over.
-                    let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                    let mixed = dye_mix(
+                        self.res.recipes(),
+                        &mut self.world.random,
+                        p.extra.color,
+                        other.extra.color,
+                    );
                     if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                         c.extra.color = mixed;
                     }
@@ -3232,7 +3269,12 @@ impl Game<'_> {
             // Sheep.getBreedOffspring: the lamb's wool mixes both parents' dyes.
             if p.species() == Species::Sheep {
                 let other = q.as_ref().unwrap_or(&p);
-                let mixed = self.dye_mix(p.extra.color, other.extra.color);
+                let mixed = dye_mix(
+                    self.res.recipes(),
+                    &mut self.world.random,
+                    p.extra.color,
+                    other.extra.color,
+                );
                 if let Some(c) = self.mobs.iter_mut().find(|m| m.id == id) {
                     c.extra.color = mixed;
                 }
@@ -4460,7 +4502,7 @@ impl Game<'_> {
                         .mobs
                         .iter()
                         .find(|m| m.id == id)
-                        .map_or(0.0, |m| m.attrs.knockback_resistance),
+                        .map_or(0.0, |m| m.knockback_resistance()),
                 };
                 let knockback = if !hurt {
                     0.0
@@ -4659,7 +4701,16 @@ impl Game<'_> {
                         to = Vec3::new(target[0], target[1], target[2]);
                     }
                 }
-                if p.owner == Some(Who::Player) && self.player.is_some() && !cancel {
+                // ThrownEnderpearl.isAllowedToTeleportOwner: an owner who is
+                // dead or asleep cannot take the pearl, so it is discarded
+                // where it lands (no teleport and no 5 damage).
+                let taken = self.player.as_ref().is_some_and(|pl| {
+                    horizon_client::projectiles::owner_can_take_pearl(
+                        !pl.health.dead_or_dying(),
+                        self.sleeping.is_some(),
+                    )
+                });
+                if p.owner == Some(Who::Player) && taken && !cancel {
                     // ThrownEnderpearl: 5% endermite where the player was
                     // (when monsters spawn), teleport, 5 damage.
                     if self.world.random.next_float() < 0.05
@@ -6326,7 +6377,7 @@ impl Game<'_> {
             Some(stored) => {
                 let mut models = self.skin_models.borrow_mut();
                 models.begin(&mut self.skin_frame.borrow_mut(), stored);
-                models.eyes = renderer.is_some_and(|r| r.skins_eyes());
+                models.tagged = renderer.is_some_and(|r| r.skins_tagged());
             }
             None => self.skin_frame.borrow_mut().clear_draws(),
         }
@@ -6533,11 +6584,7 @@ impl Game<'_> {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
                 horizon_client::mobs::render::render_skinned(
                     mob,
                     alpha as f32,
@@ -6598,6 +6645,25 @@ impl Game<'_> {
                 self.shoulder_parrots_geometry(mob, camera, alpha as f32, packed, out);
                 self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
+            }
+            // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
+            // with it.
+            if !layers_only
+                && horizon_cosmetics::enabled()
+                && (is_player || &*mob.kind.id == "minecraft:mannequin")
+            {
+                let mark = self.skin_frame.borrow().mark();
+                let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
+                let gpu = skinning;
+                if let Some((lo, hi)) =
+                    self.cosmetics_geometry(mob, false, base, alpha as f32, packed, gpu, out)
+                {
+                    skinned = Some(match skinned {
+                        Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
+                        Some((first, None)) => (first, Some((lo, hi))),
+                        None => (mark, Some((lo, hi))),
+                    });
+                }
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {
@@ -7252,6 +7318,36 @@ fn killed_by_mob(m: &Mob) -> bool {
 /// `Animal.finalizeSpawnChildFromBreeding`'s player: the one who fed the
 /// parent, or else the one who fed the partner (`getLoveCause`). `Some(None)`
 /// is the host, `Some(Some(conn))` a guest. Both animals are spent.
+/// `DyeColor.getMixedColor`: the colour of the crafting recipe that mixes
+/// the two dyes, else one of the two picked at random.
+fn dye_mix(recipes: &Recipes, random: &mut impl RandomSource, a: u8, b: u8) -> u8 {
+    if let Some(mixed) = dye_color_mix_in_recipes(recipes, a, b) {
+        return mixed;
+    }
+    if random.next_boolean() { a } else { b }
+}
+
+/// `DyeColor.findColorMixInRecipes`: the dye colour a two-dye crafting recipe
+/// makes, when its result is a dye. The two dyes are the grid's first row
+/// (`CraftingInput.of(2, 1, ...)`) and the recipe manager answers for it; the
+/// result's `_dye` item names the colour.
+fn dye_color_mix_in_recipes(recipes: &Recipes, a: u8, b: u8) -> Option<u8> {
+    let dye = |c: u8| {
+        let name = horizon_client::mobs::render::DYE_NAMES[usize::from(c) & 15];
+        Some(ItemStack::new(&format!("minecraft:{name}_dye"), 1))
+    };
+    let grid = [dye(a), dye(b), None, None];
+    let (_, result) = recipes.find(&grid, 2)?;
+    let name = result
+        .item
+        .strip_prefix("minecraft:")?
+        .strip_suffix("_dye")?;
+    let index = horizon_client::mobs::render::DYE_NAMES
+        .iter()
+        .position(|n| *n == name)?;
+    u8::try_from(index).ok()
+}
+
 fn breeding_credit(
     love_cause: &mut std::collections::HashMap<u32, Option<u32>>,
     parent: u32,
@@ -7529,5 +7625,60 @@ mod knockback_tests {
         // the raw strength, and the push that follows is halved.
         assert_eq!(push(9203, 0.5), (0.0, 0.2, -0.2));
         assert_eq!(seen(9203)[0].2.strength, 0.4);
+    }
+}
+
+#[cfg(test)]
+mod dye_mix_tests {
+    use super::*;
+
+    /// `DyeColor.getMixedColor` for the offspring a sheep, wolf or cat breed
+    /// gets: the colour of the crafting recipe that mixes its parents' two
+    /// dyes (vanilla's `crafting_shapeless` rows: red + yellow makes orange,
+    /// blue + green cyan, blue + red purple), and a pair no recipe mixes
+    /// keeps one of the two.
+    #[test]
+    fn two_dyes_mix_by_their_crafting_recipe() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("data/minecraft/recipe").is_dir() {
+            return;
+        }
+        let registry = horizon_world::level::data::load_registry(&root).unwrap();
+        let facts = crate::blocks::BlockFacts::load(&root, &registry).unwrap();
+        let overlay = horizon_world::loot::PackOverlay::NONE;
+        let items = crate::items::Items::load(&root, &registry, &facts, &overlay).unwrap();
+        let recipes = Recipes::load(&root, &items, &overlay).unwrap();
+        let dye = |name: &str| {
+            u8::try_from(
+                horizon_client::mobs::render::DYE_NAMES
+                    .iter()
+                    .position(|n| *n == name)
+                    .unwrap_or_else(|| panic!("{name} is not a dye colour")),
+            )
+            .unwrap()
+        };
+        let mut random = horizon_core::random::LegacyRandom::new(1);
+        for (first, second, mixed) in [
+            ("red", "yellow", "orange"),
+            ("blue", "green", "cyan"),
+            ("blue", "red", "purple"),
+            ("green", "white", "lime"),
+        ] {
+            let (a, b, made) = (dye(first), dye(second), dye(mixed));
+            assert_eq!(
+                dye_color_mix_in_recipes(&recipes, a, b),
+                Some(made),
+                "{first} + {second} makes {mixed}"
+            );
+            // The recipe answers, so the coin never has to.
+            assert_eq!(dye_mix(&recipes, &mut random, a, b), made);
+        }
+        // Two dyes that no recipe mixes keep one of the two colours.
+        let (orange, cyan) = (dye("orange"), dye("cyan"));
+        assert_eq!(dye_color_mix_in_recipes(&recipes, orange, cyan), None);
+        let kept = dye_mix(&recipes, &mut random, orange, cyan);
+        assert!(kept == orange || kept == cyan, "kept {kept}");
     }
 }

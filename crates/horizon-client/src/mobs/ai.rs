@@ -424,12 +424,12 @@ pub fn register(m: &mut Mob) {
     }
 }
 /// Mob.tick additions that run before the entity tick (creeper fuse, puffing).
-fn pre_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
+fn pre_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Wither && m.alive() {
         super::wither::steer(m);
     }
     if m.species() == Species::Breeze {
-        super::breeze::tick(m, events);
+        super::breeze::tick(m, w, events);
     }
     match family(m.species()) {
         Family::Hostile => {
@@ -593,7 +593,7 @@ pub fn tick(
     }
     drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
-    pre_tick(m, events);
+    pre_tick(m, w, events);
     if m.removed {
         return false;
     }
@@ -1477,10 +1477,11 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     let self_pushable = m.alive()
         && m.species() != Species::Shulker
         && !on_climbable(m, w)
-        && (m.species() != Species::Creaking || super::creaking::can_move(m));
+        && (m.species() != Species::Creaking || super::creaking::can_move(m))
+        && !super::equine::is_vehicle(m);
     // Each with whether it rides a vehicle (`Entity.isPassenger`) and
     // whether it shares this one's root vehicle (`isPassengerOfSameVehicle`).
-    let mut targets: Vec<(Who, Vec3, bool, bool)> = Vec::new();
+    let mut targets: Vec<(Who, Vec3, bool, bool, bool)> = Vec::new();
     if let Some(p) = &w.player
         // Entity.push: passengers of the same vehicle never push each other.
         && m.rider.is_none()
@@ -1488,13 +1489,13 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         && !p.spectator
         && p.bounds.intersects(bounds)
     {
-        targets.push((Who::Player, p.position, p.passenger, false));
+        targets.push((Who::Player, p.position, p.passenger, false, false));
     }
     let root = root_vehicle(w, m.id, m.extra.mount);
     for o in w.others_near(bounds) {
         if o.id != m.id && o.alive && o.pushable && o.bounds.intersects(bounds) {
             let same = root_vehicle(w, o.id, o.vehicle) == root;
-            targets.push((Who::Mob(o.id), o.position, o.passenger, same));
+            targets.push((Who::Mob(o.id), o.position, o.passenger, same, o.is_vehicle));
         }
     }
     // EntitySelector.pushableBy(this): the teams' collision rules.
@@ -1510,7 +1511,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         m.damage(6.0, Damage::of(DamageKind::Cramming));
     }
-    for (who, at, _, same) in targets {
+    for (who, at, _, same, vehicle) in targets {
         // Warden.doPush: touching it angers it, then the push itself.
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
@@ -1545,7 +1546,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         za *= f64::from(0.05_f32);
         // A guest's server-side push never reaches its client (ServerPlayer
         // motion is synced only when hurt): its client pushes it itself.
-        if who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote) {
+        if !vehicle && (who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote)) {
             events.push(MobEvent::Push {
                 target: who,
                 velocity: [-xa, 0.0, -za],
@@ -1920,8 +1921,15 @@ pub fn speed_bonus(m: &Mob) -> f64 {
 }
 /// The ambient, hurt and death sounds of species that pick them by state
 /// (`getHurtSound` / `getDeathSound` overrides); the type's otherwise.
+/// `Goat.getAmbientSound`, `Goat.getHurtSound`, and `Goat.getDeathSound`
+/// select the screaming voices from the goat's saved flag.
 pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
     match m.species() {
+        Species::Goat if m.extra.screaming => [
+            "entity.goat.screaming.ambient",
+            "entity.goat.screaming.hurt",
+            "entity.goat.screaming.death",
+        ],
         Species::Nautilus | Species::ZombieNautilus => super::nautilus::sounds(m),
         Species::SulfurCube => super::sulfur_cube::sounds(m),
         Species::Armadillo => super::armadillo::sounds(m),
@@ -2346,9 +2354,12 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     let from = [m.position.x, m.position.y, m.position.z];
     let source = Damage::mob(m.id, from);
     let first_event = cx.events.len();
+    // `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` all test
+    // `target instanceof LivingEntity`, so the effect reaches a mob the hit
+    // lands on and not only the player.
     match m.species() {
         // CaveSpider.doHurtTarget: poison for 7 s on normal, 15 s on hard.
-        Species::CaveSpider if who == Who::Player && cx.w.difficulty.base >= 2 => {
+        Species::CaveSpider if cx.w.difficulty.base >= 2 => {
             cx.events.push(MobEvent::EffectPlayer {
                 effect: "minecraft:poison",
                 ticks: if cx.w.difficulty.base == 2 { 7 } else { 15 } * 20,
@@ -2357,7 +2368,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
         // Husk.doHurtTarget: hunger for 140 ticks per whole point of the
         // local difficulty, only with an empty main hand.
-        Species::Husk if who == Who::Player && m.extra.main_hand.is_none() => {
+        Species::Husk if m.extra.main_hand.is_none() => {
             let ticks = 140 * cx.w.difficulty.effective as i32;
             if ticks > 0 {
                 cx.events.push(MobEvent::EffectPlayer {
@@ -2367,7 +2378,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
                 })
             }
         }
-        Species::WitherSkeleton if who == Who::Player => cx.events.push(MobEvent::EffectPlayer {
+        Species::WitherSkeleton => cx.events.push(MobEvent::EffectPlayer {
             effect: "minecraft:wither",
             ticks: 200,
             amplifier: 0,
@@ -2415,38 +2426,54 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             seconds: 2,
         });
     }
+    // The effect picked above goes with the hit: it applies only when the
+    // target takes damage (a shield-blocked hit gives none), for a mob as for
+    // the player, since those `doHurtTarget`s take any `LivingEntity`.
+    let effect = cx.events[first_event..]
+        .iter()
+        .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
+        .and_then(|k| match cx.events.remove(first_event + k) {
+            MobEvent::EffectPlayer {
+                effect,
+                ticks,
+                amplifier,
+            } => Some((effect, ticks, amplifier)),
+            _ => None,
+        });
     match who {
-        // The effect picked above goes with the hit: it applies only when
-        // the player takes damage (a shield-blocked hit gives none).
-        Who::Player => {
-            let effect = cx.events[first_event..]
-                .iter()
-                .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
-                .map(|k| cx.events.remove(first_event + k));
-            cx.events.push(match effect {
-                Some(MobEvent::EffectPlayer {
-                    effect,
-                    ticks,
-                    amplifier,
-                }) => MobEvent::AttackPlayerWithEffect {
-                    amount,
-                    from,
-                    effect,
-                    ticks,
-                    amplifier,
-                },
-                _ => MobEvent::AttackPlayer(amount, from),
-            });
-        }
-        Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
-            target: id,
-            amount,
-            source,
+        Who::Player => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackPlayerWithEffect {
+                amount,
+                from,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackPlayer(amount, from),
+        }),
+        Who::Mob(id) => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackMobWithEffect {
+                target: id,
+                amount,
+                source,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackMob {
+                target: id,
+                amount,
+                source,
+            },
         }),
     }
     // Mob.doHurtTarget ends with playAttackSound once the hit landed.
     if super::creaking::is_creaking(m) {
         m.voice("entity.creaking.attack", cx.events);
+    }
+    // Rabbit.playAttackSound: only the killer bunny.
+    if m.species() == Species::Rabbit {
+        super::rabbit::attack_sound(m, cx.events);
     }
     // Panda.playAttackSound: playSound(PANDA_BITE, 1.0, 1.0).
     if m.species() == Species::Panda && !m.silent {
@@ -2979,6 +3006,126 @@ mod poison_effect_tests {
 }
 
 #[cfg(test)]
+mod hit_effect_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// The effects of a cave spider's bite, a bare-handed husk's blow and a
+    /// wither skeleton's hit go to the `LivingEntity` the hit landed on:
+    /// `doHurtTarget` tests `target instanceof LivingEntity`, not `Player`.
+    /// Biting a mob carries the effect with the hit — poison for 140 ticks on
+    /// normal, hunger for 140 (effective difficulty 1.5), wither for 200 —
+    /// where the mob is hit 2. Without the fix each of these is a plain
+    /// `AttackMob` and the mob keeps no effect at all (0 ticks).
+    #[test]
+    fn a_melee_effect_rides_the_hit_onto_a_mob() {
+        let cases = [
+            ("minecraft:cave_spider", "minecraft:poison", 140),
+            ("minecraft:husk", "minecraft:hunger", 140),
+            ("minecraft:wither_skeleton", "minecraft:wither", 200),
+        ];
+        let mut carried: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = Vec::new();
+        let mut strays: Vec<(&str, bool, bool)> = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            for (kind, _, _) in cases {
+                let mut m = Mob::new(
+                    1,
+                    Arc::new(types.types[kind].clone()),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                let mut cx = Cx {
+                    w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+                carried.push((
+                    kind,
+                    events.iter().find_map(|e| match e {
+                        MobEvent::AttackMobWithEffect {
+                            target,
+                            effect,
+                            ticks,
+                            amplifier,
+                            ..
+                        } => Some((*target, *effect, *ticks, *amplifier)),
+                        _ => None,
+                    }),
+                ));
+                strays.push((
+                    kind,
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::EffectPlayer { .. })),
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::AttackMob { .. })),
+                ));
+            }
+        });
+        if !ran {
+            return;
+        }
+        let expected: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = cases
+            .iter()
+            .map(|(kind, effect, ticks)| (*kind, Some((2, *effect, *ticks, 0))))
+            .collect();
+        assert_eq!(carried, expected);
+        for (kind, on_player, effectless) in strays {
+            assert!(!on_player, "{kind} left its effect on the player");
+            assert!(!effectless, "{kind} sent a second, effectless hit");
+        }
+    }
+
+    /// On easy the cave spider's poison timer is 0, so nothing rides the hit:
+    /// the mob it bites takes the damage alone (`AttackMob`, no effect).
+    #[test]
+    fn an_easy_cave_spiders_bite_carries_no_effect() {
+        let mut out: Option<Vec<String>> = None;
+        let ran = with_test_world(&[], |w, types| {
+            let mut easy = w.clone();
+            easy.difficulty = super::super::spawning::LocalDifficulty::new(1, 18000, 0, 0.0);
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types["minecraft:cave_spider"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut cx = Cx {
+                w: &easy,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+            out = Some(
+                events
+                    .iter()
+                    .filter(|e| {
+                        matches!(
+                            e,
+                            MobEvent::AttackMob { .. } | MobEvent::AttackMobWithEffect { .. }
+                        )
+                    })
+                    .map(|e| match e {
+                        MobEvent::AttackMob { target, .. } => format!("plain {target}"),
+                        MobEvent::AttackMobWithEffect { effect, .. } => format!("effect {effect}"),
+                        _ => unreachable!(),
+                    })
+                    .collect(),
+            );
+        });
+        if !ran {
+            return;
+        }
+        assert_eq!(out, Some(vec!["plain 2".to_owned()]));
+    }
+}
+
+#[cfg(test)]
 mod same_vehicle_push_tests {
     use super::*;
     use crate::mobs::world::with_test_world;
@@ -3073,6 +3220,73 @@ mod same_vehicle_push_tests {
         assert_eq!(velocity, Vec3::ZERO, "its rider pushes the camel");
         let (pushed, _) = push(true).unwrap();
         assert_eq!(pushed, vec![3], "the camel pushes the zombie");
+    }
+
+    #[test]
+    fn a_ridden_horse_is_not_pushed_but_still_pushes() {
+        let pair = |ridden: bool| {
+            let mut out = None;
+            with_test_world(&[], |_, types| {
+                let mob = |id: u32, name: &str, at: Vec3| {
+                    Mob::new(id, std::sync::Arc::new(types.types[name].clone()), at, 0.0)
+                };
+                let mut horse = mob(1, "minecraft:horse", Vec3::new(0.5, 64.0, 0.5));
+                if ridden {
+                    horse.extra.rider = Some(3);
+                }
+                let cow = mob(2, "minecraft:cow", Vec3::new(1.4, 64.0, 0.5));
+                out = Some((horse, cow));
+            });
+            out
+        };
+        let pushed = |events: &[MobEvent]| -> Vec<u32> {
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::Push {
+                        target: Who::Mob(id),
+                        ..
+                    } => Some(*id),
+                    _ => None,
+                })
+                .collect()
+        };
+        let Some((mut horse, cow)) = pair(true) else {
+            return;
+        };
+        let mut events = Vec::new();
+        with_test_world(&[cow.seen(None)], |w, _| {
+            push_entities(&mut horse, w, &mut events)
+        });
+        assert_eq!(pushed(&events), vec![2], "the ridden horse pushes the cow");
+        assert_eq!(
+            horse.velocity,
+            Vec3::ZERO,
+            "the cow pushes the ridden horse"
+        );
+
+        let (horse, mut cow) = pair(true).unwrap();
+        let mut events = Vec::new();
+        with_test_world(&[horse.seen(None)], |w, _| {
+            push_entities(&mut cow, w, &mut events)
+        });
+        assert_eq!(
+            pushed(&events),
+            Vec::<u32>::new(),
+            "the cow pushes the ridden horse"
+        );
+        assert!(cow.velocity.x > 0.0, "the ridden horse pushes the cow away");
+
+        let (horse, mut cow) = pair(false).unwrap();
+        let mut events = Vec::new();
+        with_test_world(&[horse.seen(None)], |w, _| {
+            push_entities(&mut cow, w, &mut events)
+        });
+        assert_eq!(
+            pushed(&events),
+            vec![1],
+            "the cow pushes a horse nobody rides"
+        );
     }
 }
 

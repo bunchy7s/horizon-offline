@@ -36,6 +36,10 @@ impl Stage<'_> {
              vec2 hz_modf(vec2 x, out vec2 i) { i = trunc(x); return x - i; }\n\
              vec3 hz_modf(vec3 x, out vec3 i) { i = trunc(x); return x - i; }\n\
              vec4 hz_modf(vec4 x, out vec4 i) { i = trunc(x); return x - i; }\n\
+             float hz_sqrt(float x) { return sqrt(max(x, 0.0)); }\n\
+             vec2 hz_sqrt(vec2 x) { return sqrt(max(x, vec2(0.0))); }\n\
+             vec3 hz_sqrt(vec3 x) { return sqrt(max(x, vec3(0.0))); }\n\
+             vec4 hz_sqrt(vec4 x) { return sqrt(max(x, vec4(0.0))); }\n\
              struct hz_FogParameters { vec4 color; float density; float start; float end; float scale; };\n\
              hz_FogParameters hz_Fog;\n\
              float hz_zero = 0.0;\n",
@@ -374,6 +378,11 @@ impl Stage<'_> {
                 "main" if depth == 0 && called => Some("hz_main".into()),
                 // GLSL's `modf`, which naga's frontend lacks.
                 "modf" if called => Some("hz_modf".into()),
+                // `sqrt` of a negative is undefined in GLSL; GL drivers' rounding keeps packs'
+                // `sqrt(1.0 - y * y)` at y = 1 from going below zero, SPIR-V's fused arithmetic
+                // may not, and the NaN spreads (SEUS PTGI HRR: speckled water reflections).
+                // Global initializers keep theirs: they are evaluated when compiling.
+                "sqrt" if called && depth > 0 => Some("hz_sqrt".into()),
                 "textureGatherOffsets" if called => Some("hz_textureGatherOffsets".into()),
                 "textureQueryLod" if called => Some("hz_textureQueryLod".into()),
                 // Matrix inverse, which naga writes for neither Metal nor WGSL.
