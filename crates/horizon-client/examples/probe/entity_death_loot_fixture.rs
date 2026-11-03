@@ -164,8 +164,8 @@ pub fn main() -> horizon_client::Result<()> {
                             m.extra.head = item;
                             Some(gear::HEAD)
                         }
-                        "body" if drops::head_is_body(m.species()) => {
-                            m.extra.head = item;
+                        "body" => {
+                            m.extra.body = item;
                             None
                         }
                         "saddle" => {

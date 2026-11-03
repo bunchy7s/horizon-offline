@@ -150,6 +150,7 @@ mod tests {
     fn orb_at(x: f64, y: f64, z: f64) -> Taken {
         let at = horizon_core::geometry::Vec3::new(x, y, z);
         Taken::Orb(Box::new(ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: at,

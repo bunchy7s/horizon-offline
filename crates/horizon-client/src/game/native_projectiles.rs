@@ -211,9 +211,9 @@ impl Game<'_> {
         arrow_events: &mut Vec<(Vec3, ArrowEvent)>,
     ) {
         // The mods see the projectiles where they will be, as `projectile_hit` does.
-        self.creatures.projectiles = std::mem::take(projectiles);
+        self.creatures.projectiles = std::mem::take(projectiles).into();
         let canceled = self.native_projectile_impacts(&impacts);
-        *projectiles = std::mem::take(&mut self.creatures.projectiles);
+        *projectiles = std::mem::take(&mut self.creatures.projectiles).into();
         if !canceled.contains(&true) {
             return;
         }

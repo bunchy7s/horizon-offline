@@ -20,6 +20,8 @@ use horizon_core::{
 };
 
 pub(super) struct ThrownTrident {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     /// The entity id a server tracks it by (0 until it is tracked).
     pub id: u32,
     pub(super) stack: ItemStack,
@@ -100,6 +102,7 @@ impl ThrownTrident {
     /// A trident a server sent (`handleAddEntity`): placed and moved by it.
     pub(super) fn remote(id: u32, position: Vec3, yaw: f32, pitch: f32) -> Self {
         Self {
+            join: Default::default(),
             id,
             stack: ItemStack::new("minecraft:trident", 1),
             position,
@@ -419,6 +422,7 @@ impl Game<'_> {
         );
         let id = self.take_entity_id();
         self.tridents.push(ThrownTrident {
+            join: Default::default(),
             id,
             loyalty: thrown.enchantment_level("minecraft:loyalty"),
             stack: thrown,
@@ -920,3 +924,4 @@ impl Game<'_> {
         }
     }
 }
+horizon_client::impl_joined!(ThrownTrident);

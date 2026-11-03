@@ -1678,4 +1678,89 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn minecart_sound_volume_scales_with_speed_and_silences_when_stopped() {
+        let cart = CartSound {
+            id: 42,
+            position: [10.0, 64.0, 5.0],
+            speed: 0.0,
+        };
+        let mut s = SoundInstance::minecart(&cart, SoundEngine::unseeded());
+        assert!(s.can_start_silent);
+        assert_eq!(s.volume, 0.0);
+
+        // Stationary cart has volume 0.
+        let mut ctx = TickContext {
+            carts: vec![cart],
+            ..TickContext::default()
+        };
+        s.tick(&ctx);
+        assert_eq!(s.volume, 0.0);
+        assert!(!s.stopped);
+
+        // Moving cart scales volume with clamp(speed, 0, 0.5) * 0.7.
+        ctx.carts[0].speed = 0.2;
+        s.tick(&ctx);
+        assert!((s.volume - 0.2 * 0.7).abs() < 1e-6, "volume: {}", s.volume);
+
+        ctx.carts[0].speed = 1.0;
+        s.tick(&ctx);
+        assert!((s.volume - 0.5 * 0.7).abs() < 1e-6, "volume: {}", s.volume);
+
+        // Frozen clock silences cart.
+        ctx.frozen = true;
+        s.tick(&ctx);
+        assert_eq!(s.volume, 0.0);
+        ctx.frozen = false;
+
+        // Removing cart stops the instance.
+        ctx.carts.clear();
+        s.tick(&ctx);
+        assert!(s.stopped);
+    }
+    #[test]
+    fn riding_minecart_sound_scales_with_speed_and_switches_underwater() {
+        let cart = CartSound {
+            id: 99,
+            position: [0.0, 60.0, 0.0],
+            speed: 0.4,
+        };
+        let mut surface = SoundInstance::riding_minecart(&cart, false, SoundEngine::unseeded());
+        let mut underwater = SoundInstance::riding_minecart(&cart, true, SoundEngine::unseeded());
+
+        let mut ctx = TickContext {
+            vehicle: Some(99),
+            carts: vec![cart],
+            player_underwater: false,
+            ..TickContext::default()
+        };
+
+        // Surface riding active on surface.
+        surface.tick(&ctx);
+        underwater.tick(&ctx);
+        assert!(
+            (surface.volume - 0.4 * 0.75).abs() < 1e-6,
+            "{}",
+            surface.volume
+        );
+        assert_eq!(underwater.volume, 0.0);
+
+        // Submerged player switches active sound.
+        ctx.player_underwater = true;
+        surface.tick(&ctx);
+        underwater.tick(&ctx);
+        assert_eq!(surface.volume, 0.0);
+        assert!(
+            (underwater.volume - 0.4 * 0.75).abs() < 1e-6,
+            "{}",
+            underwater.volume
+        );
+
+        // Dismounting stops both instances.
+        ctx.vehicle = None;
+        surface.tick(&ctx);
+        underwater.tick(&ctx);
+        assert!(surface.stopped);
+        assert!(underwater.stopped);
+    }
 }

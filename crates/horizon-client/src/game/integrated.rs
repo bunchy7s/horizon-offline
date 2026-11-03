@@ -823,6 +823,8 @@ impl Game<'_> {
     /// `MinecraftServer.stopServer`: the players are saved and sent away,
     /// then the world is saved.
     fn stop_integrated(&mut self) -> Result<()> {
+        // Abort background terrain generation/decoration on shutdown, matching vanilla behavior.
+        self.streaming.abort_generation();
         // The close request: lifecycle observation stops.
         self.native_lifecycle.begin_close();
         // MinecraftServer.stopServer's start: everyone is still here.
@@ -844,9 +846,12 @@ impl Game<'_> {
                     translatable("multiplayer.disconnect.server_shutdown", &[]),
                 );
             }
+            let has_remote_guests = host.hub.guests.iter().any(|g| g.conn != 0);
             self.lan = Some(host);
+            if has_remote_guests {
+                std::thread::sleep(Duration::from_millis(50));
+            }
         }
-        std::thread::sleep(Duration::from_millis(100));
         // ServerPlayer.disconnect: nobody is left in a bed.
         self.free_player_beds()?;
         self.save_game()?;

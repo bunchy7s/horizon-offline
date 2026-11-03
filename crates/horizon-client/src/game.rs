@@ -1830,6 +1830,8 @@ impl LevelAccess for GameLevel<'_> {
 /// FallingBlockEntity carrying a block state.
 #[derive(Clone, Debug)]
 struct FallingBlock {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id: from the entity counter on the server, the server's on
     /// a client.
     id: u32,
@@ -2562,7 +2564,7 @@ struct Game<'a> {
     bee_sounds: HashMap<u32, bool>,
     /// Guardians whose attack hum is playing.
     guardian_sounds: HashSet<u32>,
-    dropped: Vec<ItemEntity>,
+    dropped: horizon_client::join_seq::JoinList<ItemEntity>,
     next_entity: u32,
     /// The last entity id the running server tick found before its levels
     /// ticked: an item with a later one was added this tick and first ticks
@@ -2594,7 +2596,7 @@ struct Game<'a> {
     /// Chunks a respawn search waits for this tick, kept loading beside the
     /// player's own (taken by `update_world`).
     spawn_wait: Vec<(i32, i32)>,
-    mobs: Vec<Mob>,
+    mobs: horizon_client::join_seq::JoinList<Mob>,
     /// `mobs` by network id, for the packets that name one (`game/mob_index.rs`).
     mob_index: mob_index::MobIndex,
     creatures: creatures::Creatures,
@@ -2673,7 +2675,7 @@ struct Game<'a> {
     ticks_until_autosave: i64,
     applied_modifiers: Vec<(String, String)>,
     experience: Experience,
-    orbs: Vec<ExperienceOrb>,
+    orbs: horizon_client::join_seq::JoinList<ExperienceOrb>,
     xp_delay: u32,
     last_level_up: u64,
     /// The arm swing (`LivingEntity.SwingState`) and how many swings started.
@@ -2759,7 +2761,7 @@ struct Game<'a> {
     tickets: horizon_client::ticket_levels::ChunkTickets,
     random_tick_sections: horizon_client::random_tick_sections::RandomTickSections,
     level_events: Vec<LevelEvent>,
-    falling: Vec<FallingBlock>,
+    falling: horizon_client::join_seq::JoinList<FallingBlock>,
     /// Blocks the server shows for a moment (`ClientboundAddTransientBlockPacket`).
     transient_blocks: transient_blocks::TransientBlocks,
     paintings: Vec<horizon_client::entities::Painting>,
@@ -2770,7 +2772,7 @@ struct Game<'a> {
     /// The `map=true` frame variants.
     map_frame_model: frames::FrameModel,
     glow_map_frame_model: frames::FrameModel,
-    armor_stands: Vec<horizon_client::entities::ArmorStand>,
+    armor_stands: horizon_client::join_seq::JoinList<horizon_client::entities::ArmorStand>,
     /// `Cushion` decoration entities (game/cushions.rs).
     cushions: Vec<horizon_client::entities::Cushion>,
     /// Entities of types Horizon does not simulate.
@@ -2790,7 +2792,7 @@ struct Game<'a> {
     spectated_post_effect: Option<&'static str>,
     /// `LocalPlayer.experienceDisplayStartTick`: (last progress, seen a change, tick).
     experience_display: (f32, bool, u64),
-    boats: Vec<boats::Boat>,
+    boats: horizon_client::join_seq::JoinList<boats::Boat>,
     /// The boats a mob's lead can hang on, for this tick's mob ticks.
     leash_boats: Vec<(u32, horizon_client::mobs::leash::HolderState)>,
     boat_models: boats::BoatModels,
@@ -2800,7 +2802,7 @@ struct Game<'a> {
     cushion_model: Option<horizon_client::mobs::Part>,
     /// Models drawn only once such an entity shows up (lead knots, wind charges...).
     entity_models: EntityModels,
-    carts: Vec<minecarts::Minecart>,
+    carts: horizon_client::join_seq::JoinList<minecarts::Minecart>,
     /// The boats and minecarts `native_vehicle_moved` follows (lan_vehicles.rs).
     watched_vehicles: Vec<lan_vehicles::WatchedVehicle>,
     /// Songs playing from jukeboxes (tracked sound handles).
@@ -2862,8 +2864,8 @@ struct Game<'a> {
     hook: Option<fishing::Hook>,
     /// The other players' hooks a server tracks to this client.
     remote_hooks: Vec<fishing::RemoteHook>,
-    tridents: Vec<trident::ThrownTrident>,
-    rockets: Vec<fireworks::Rocket>,
+    tridents: horizon_client::join_seq::JoinList<trident::ThrownTrident>,
+    rockets: horizon_client::join_seq::JoinList<fireworks::Rocket>,
     /// Ominous trial spawners' item spawners.
     ominous_spawners: Vec<ominous_item_spawner::OminousItemSpawner>,
     creaking: creaking::CreakingState,
@@ -2874,7 +2876,7 @@ struct Game<'a> {
     trident_model: Option<horizon_client::mobs::Part>,
     arrow_model: Option<horizon_client::mobs::Part>,
     bee_stinger_model: Option<horizon_client::mobs::Part>,
-    tnts: Vec<tnt::PrimedTnt>,
+    tnts: horizon_client::join_seq::JoinList<tnt::PrimedTnt>,
     hoppers: HashMap<(i32, i32, i32), machines::HopperState>,
     /// The screen of a mod block's menu open on this client (`native_screen`).
     mod_screen: Option<native_hooks::OpenNativeScreen>,
@@ -3921,6 +3923,7 @@ impl Game<'_> {
         // ItemEntity.bobOffs comes from the entity's own random, not the level's.
         let bob = self.particles.random().next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             health: 5,
             fire_ticks: 0,
@@ -4351,7 +4354,7 @@ impl Game<'_> {
             }
             kept.push(item);
         }
-        self.dropped = kept;
+        self.dropped = kept.into();
         self.spawn_destroyed_contents(destroyed);
     }
     /// `ItemUtils.onContainerDestroyed`: each stack a destroyed item held
@@ -5345,6 +5348,7 @@ impl Game<'_> {
                     );
                     self.next_entity += 1;
                     self.falling.push(FallingBlock {
+                        join: Default::default(),
                         id: self.next_entity,
                         state,
                         start_pos: pos,
@@ -5691,7 +5695,7 @@ impl Game<'_> {
             }
         }
         // Blocks that started falling meanwhile tick from the next tick on.
-        let started = std::mem::replace(&mut self.falling, kept);
+        let started = std::mem::replace(&mut self.falling, kept.into());
         self.falling.extend(started);
         self.process_level_events()?;
         if let Some(error) = collision_error {
@@ -8352,6 +8356,7 @@ impl Game<'_> {
                     &mut batch,
                     self.cursor,
                     self.settings.file.bool("hideSplashTexts"),
+                    self.settings.file.bool("hideServerAddress"),
                 );
             }
             // ScreenEvent.Render.Post over the title's own screens: a mod draws
@@ -13445,6 +13450,7 @@ impl Game<'_> {
         let p = Vec3::new(at[0], at[1], at[2]);
         self.next_entity += 1;
         self.orbs.push(ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: self.next_entity,
             position: p,
@@ -18760,7 +18766,7 @@ impl<'a> Game<'a> {
             was_fall_flying: false,
             bee_sounds: HashMap::new(),
             guardian_sounds: HashSet::new(),
-            dropped: Vec::new(),
+            dropped: Default::default(),
             next_entity: 0,
             ticked_entities_through: u32::MAX,
             particles,
@@ -18776,7 +18782,7 @@ impl<'a> Game<'a> {
             spawn_spiral: Default::default(),
             player_spawn: None,
             spawn_wait: Vec::new(),
-            mobs: Vec::new(),
+            mobs: Default::default(),
             mob_index: Default::default(),
             creatures: Default::default(),
             sculk: Default::default(),
@@ -18817,7 +18823,7 @@ impl<'a> Game<'a> {
             ticks_until_autosave: 6000,
             applied_modifiers: Vec::new(),
             experience: Experience::default(),
-            orbs: Vec::new(),
+            orbs: Default::default(),
             xp_delay: 0,
             last_level_up: 0,
             swing: Default::default(),
@@ -18864,7 +18870,7 @@ impl<'a> Game<'a> {
             tickets: Default::default(),
             random_tick_sections: Default::default(),
             level_events: Vec::new(),
-            falling: Vec::new(),
+            falling: Default::default(),
             transient_blocks: Default::default(),
             paintings: Vec::new(),
             painting_variants: prepared.painting_variants,
@@ -18873,7 +18879,7 @@ impl<'a> Game<'a> {
             glow_frame_model: prepared.glow_frame_model,
             map_frame_model: prepared.map_frame_model,
             glow_map_frame_model: prepared.glow_map_frame_model,
-            armor_stands: Vec::new(),
+            armor_stands: Default::default(),
             cushions: Vec::new(),
             others: Vec::new(),
             armor_stand_assets: prepared.armor_stand_assets,
@@ -18884,13 +18890,13 @@ impl<'a> Game<'a> {
             post_effects: Vec::new(),
             spectated_post_effect: None,
             experience_display: Default::default(),
-            boats: Vec::new(),
+            boats: Default::default(),
             leash_boats: Vec::new(),
             boat_models: prepared.boat_models,
             crystal_model: prepared.crystal_model,
             cushion_model: prepared.cushion_model,
             entity_models: prepared.entity_models,
-            carts: Vec::new(),
+            carts: Default::default(),
             watched_vehicles: Vec::new(),
             jukebox_sounds: HashMap::new(),
             bolts: Vec::new(),
@@ -18932,8 +18938,8 @@ impl<'a> Game<'a> {
             mount_menu: Default::default(),
             hook: None,
             remote_hooks: Vec::new(),
-            tridents: Vec::new(),
-            rockets: Vec::new(),
+            tridents: Default::default(),
+            rockets: Default::default(),
             ominous_spawners: Vec::new(),
             creaking: Default::default(),
             spawners: Default::default(),
@@ -18941,7 +18947,7 @@ impl<'a> Game<'a> {
             trident_model: prepared.trident_model,
             arrow_model: prepared.arrow_model,
             bee_stinger_model: prepared.bee_stinger_model,
-            tnts: Vec::new(),
+            tnts: Default::default(),
             hoppers: HashMap::new(),
             mod_screen: None,
             mod_container_viewers: HashMap::new(),
@@ -21921,6 +21927,7 @@ mod tests {
     fn a_falling_block_keeps_its_model_offset() {
         let at = Vec3::new(3.5, 70.25, -1.5);
         let falling = FallingBlock {
+            join: Default::default(),
             id: 0,
             state: BlockStateId(7),
             start_pos: BlockPos::new(3, 72, -2),

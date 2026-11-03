@@ -60,7 +60,7 @@ pub(super) struct NativeSound {
 /// Mob-system state owned by the game.
 #[derive(Default)]
 pub(super) struct Creatures {
-    pub projectiles: Vec<Projectile>,
+    pub projectiles: horizon_client::join_seq::JoinList<Projectile>,
     /// The entities a family tells the mods ticked, kept between ticks
     /// (game/native_ticks.rs).
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
@@ -481,7 +481,7 @@ impl Game<'_> {
         let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
             return;
         };
-        let body = horizon_client::mobs::drops::head_is_body(m.species());
+        let body = horizon_client::mobs::drops::body_slot_species(m.species());
         let slot = if body {
             EquipmentSlot::Body
         } else {
@@ -518,7 +518,7 @@ impl Game<'_> {
         match (body, broke) {
             (true, false) => m.extra.body_damage = stack.damage as i32,
             (true, true) => {
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
             }
             (false, false) => m.extra.armor[0] = Some(stack),
@@ -597,7 +597,7 @@ impl Game<'_> {
                 return;
             };
             if lost >= max {
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
                 true
             } else {
@@ -761,6 +761,7 @@ impl Game<'_> {
                     "temper": m.extra.variant3,
                     "chested": m.extra.chested,
                     "head": m.extra.head.as_deref(),
+                    "body": m.extra.body.as_deref(),
                     "warden": horizon_client::mobs::warden::describe(m),
                     "villager": horizon_client::mobs::villager::ext(m).map(|e| serde_json::json!({
                         "food_level": e.food_level,
@@ -5657,14 +5658,14 @@ impl Game<'_> {
                 if item == "minecraft:shears"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && !sneaking =>
             {
                 let mut stack = ItemStack::new("minecraft:wolf_armor", 1);
                 stack.damage = m.extra.body_damage.max(0) as u32;
                 stack.extra = m.extra.body_extra.take();
                 armor_drop = Some(stack);
-                m.extra.head = None;
+                m.extra.body = None;
                 m.extra.body_damage = 0;
                 eat = Some(("item.armor.unequip_wolf", 1.0, 1.0));
                 self.damage_held_tool();
@@ -5688,10 +5689,10 @@ impl Game<'_> {
                 if item == "minecraft:wolf_armor"
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
-                    && m.extra.head.is_none()
+                    && m.extra.body.is_none()
                     && !m.is_baby() =>
             {
-                m.extra.head = Some(item.as_str().into());
+                m.extra.body = Some(item.as_str().into());
                 m.extra.body_damage = held_damage;
                 m.extra.body_extra = held_extra;
                 consume = true;
@@ -5704,7 +5705,7 @@ impl Game<'_> {
                     && m.extra.tame
                     && m.extra.owner == Some(acting)
                     && m.extra.sitting
-                    && m.extra.head.is_some()
+                    && m.extra.body.is_some()
                     && m.extra.body_damage > 0 =>
             {
                 m.extra.body_damage = (m.extra.body_damage

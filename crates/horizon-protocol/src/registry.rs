@@ -187,6 +187,15 @@ impl Dynamic {
             if let Some(Tag::Byte(v)) = map.get(&JavaString::from("has_ceiling")) {
                 d.has_ceiling = *v != 0;
             }
+            // Any number, as vanilla's codec reads it (Horizon's own server sends a
+            // world pack's JSON numbers as doubles).
+            d.ambient_light = match map.get(&JavaString::from("ambient_light")) {
+                Some(Tag::Float(v)) => f32::from_bits(*v),
+                Some(Tag::Double(v)) => f64::from_bits(*v) as f32,
+                Some(Tag::Int(v)) => *v as f32,
+                Some(Tag::Byte(v)) => f32::from(*v),
+                _ => d.ambient_light,
+            };
             // DimensionType.defaultClock: the world clock this level's day
             // time follows (absent in the Nether).
             d.default_clock = match map.get(&JavaString::from("default_clock")) {
@@ -211,6 +220,8 @@ pub struct DimensionType {
     pub has_skylight: bool,
     /// `DimensionType.hasCeiling`: weather, spawning and maps read it.
     pub has_ceiling: bool,
+    /// `DimensionType.ambientLight`: the light every block gets, whatever its light level.
+    pub ambient_light: f32,
     /// `DimensionType.defaultClock`: the `minecraft:world_clock` this level
     /// samples for day time (`None` in the Nether).
     pub default_clock: Option<String>,
@@ -224,6 +235,11 @@ impl DimensionType {
             "minecraft:overworld_caves" => (-64, 384, 384, true, true, Some("minecraft:overworld")),
             _ => (-64, 384, 384, true, false, Some("minecraft:overworld")),
         };
+        let ambient_light = match name {
+            "minecraft:the_nether" => 0.1,
+            "minecraft:the_end" => 0.25,
+            _ => 0.0,
+        };
         Self {
             name: name.to_owned(),
             min_y,
@@ -231,6 +247,7 @@ impl DimensionType {
             logical_height,
             has_skylight,
             has_ceiling,
+            ambient_light,
             default_clock: default_clock.map(str::to_owned),
         }
     }
@@ -292,6 +309,8 @@ mod tests {
         // The type's data leaves has_ceiling out; the Nether default holds.
         assert!(d.dimension(1).has_ceiling);
         assert_eq!(d.dimension(1).default_clock, None);
+        // ...and so does its ambient light.
+        assert_eq!(d.dimension(1).ambient_light, 0.1);
         assert_eq!(ceil_log2(35723), 16);
         assert_eq!(ceil_log2(65), 7);
         assert_eq!(ceil_log2(64), 6);
@@ -316,5 +335,33 @@ mod tests {
         let dim = d.dimension(0);
         assert_eq!(dim.name, "pack:custom");
         assert_eq!(dim.default_clock.as_deref(), Some("minecraft:overworld"));
+    }
+
+    #[test]
+    fn dimension_reads_ambient_light() {
+        let mut d = Dynamic::default();
+        d.add(RegistryData {
+            registry: "minecraft:dimension_type".into(),
+            entries: vec![RegistryEntry {
+                id: "pack:custom".into(),
+                data: Some(Tag::compound([
+                    ("height", Tag::Int(384)),
+                    ("ambient_light", Tag::Float(0.375f32.to_bits())),
+                ])),
+            }],
+        });
+        assert_eq!(d.dimension(0).ambient_light, 0.375);
+        // A world pack's JSON number, as Horizon's server sends it.
+        d.add(RegistryData {
+            registry: "minecraft:dimension_type".into(),
+            entries: vec![RegistryEntry {
+                id: "pack:custom".into(),
+                data: Some(Tag::compound([(
+                    "ambient_light",
+                    Tag::Double(0.5f64.to_bits()),
+                )])),
+            }],
+        });
+        assert_eq!(d.dimension(0).ambient_light, 0.5);
     }
 }

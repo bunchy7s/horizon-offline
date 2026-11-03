@@ -103,7 +103,7 @@ fn main_rs(ids: &[&str], named: bool) -> String {
 #![forbid(unsafe_code)]
 
 #[global_allocator]
-static ALLOCATOR: horizon_threads::Allocator = horizon_threads::Allocator;
+static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 
 static MOD_API_LEVEL: [u8; horizon_mods::api_level::MARK.len()] = horizon_mods::api_level::MARK;
 
@@ -342,6 +342,17 @@ mod tests {
         assert!(!value.contains_key("dependencies"));
         assert!(value.contains_key("injection"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn generated_main_uses_the_games_allocator() {
+        let game = include_str!("../../../crates/horizon-client/src/main.rs");
+        let allocator = game
+            .lines()
+            .find(|line| line.starts_with("static ALLOCATOR:"))
+            .unwrap();
+        let generated = main_rs(&[], false);
+        assert!(generated.lines().any(|line| line == allocator));
     }
 
     #[test]

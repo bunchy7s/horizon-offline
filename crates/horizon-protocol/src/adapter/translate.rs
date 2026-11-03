@@ -6,6 +6,7 @@
 //! ([`ids::renumbering`]) and encoded again for Horizon; ids in plain fields are renumbered between the two.
 //! A packet whose layout changed is read in the older layout by hand here.
 use super::{
+    ServerVersion,
     ids::{self, Ids, Way},
     session::Session,
 };
@@ -54,6 +55,18 @@ pub fn clientbound(
         return Ok(Some((id, None)));
     };
     use packet_ids::play::clientbound as cb;
+    // A release at a time: an older server's packets are brought to 26.2's layout first, oldest step first.
+    let mut before: Option<Vec<u8>> = None;
+    type Step = fn(&Session, State, i32, &[u8]) -> Result<Option<Vec<u8>>>;
+    let steps: [(ServerVersion, Step); 1] = [(ServerVersion::V26_1, v26_1::clientbound)];
+    for (from, step) in steps {
+        if session.version.at_most(from)
+            && let Some(next) = step(session, state, id, before.as_deref().unwrap_or(payload))?
+        {
+            before = Some(next);
+        }
+    }
+    let payload = before.as_deref().unwrap_or(payload);
     let out = match (state, id) {
         (State::Configuration, packet_ids::configuration::clientbound::UPDATE_TAGS) => {
             let mut p = configuration::Clientbound::decode(id, payload)?;
@@ -157,7 +170,7 @@ pub fn clientbound(
             | cb::RECIPE_BOOK_ADD
             | cb::PLACE_GHOST_RECIPE,
         ) => redecode(ids, id, payload)?,
-        _ => return Ok(Some((id, None))),
+        _ => return Ok(Some((id, before))),
     };
     Ok(Some((id, Some(out))))
 }
@@ -207,6 +220,10 @@ pub fn serverbound(
             w.varint(action);
             w.bytes(r.rest());
             renumbered(id, w.data)
+        }
+        // 26.1 is told the entity a spectator picked by its UUID (spectate_entity, at the same id).
+        (State::Play, sb::SPECTATOR_ACTION) if session.version == ServerVersion::V26_1 => {
+            v26_1::spectate(session, payload)
         }
         // 26.3's punch took over 26.2's swing of the main hand.
         (State::Play, sb::PUNCH) => {
@@ -566,6 +583,177 @@ fn animate(payload: &[u8]) -> Result<(i32, Vec<u8>)> {
     w.varint(id);
     w.u8(action);
     Ok((packet_ids::play::clientbound::ANIMATE, w.data))
+}
+
+/// 26.1 to 26.2: what changed in the packets of the release before.
+mod v26_1 {
+    use super::*;
+
+    /// 26.1's packet in 26.2's layout; `None` when it is laid out alike.
+    pub fn clientbound(
+        session: &Session,
+        state: State,
+        id: i32,
+        payload: &[u8],
+    ) -> Result<Option<Vec<u8>>> {
+        use packet_ids::play::clientbound as cb;
+        Ok(match (state, id) {
+            // 26.2 adds the session's id after the profile; 26.1 has none to give.
+            (State::Login, packet_ids::login::clientbound::LOGIN_FINISHED) => {
+                let mut body = payload.to_vec();
+                body.extend_from_slice(&[0; 16]);
+                Some(body)
+            }
+            (State::Play, cb::LOGIN) => Some(login(payload)?),
+            (State::Play, cb::SET_PLAYER_TEAM) => Some(team(payload)?),
+            (State::Play, cb::ADD_ENTITY) => {
+                let mut r = Reader::new(payload);
+                let entity = r.varint()?;
+                let uuid = r.uuid()?;
+                session.uuids.lock().unwrap().insert(entity, uuid);
+                None
+            }
+            (State::Play, cb::REMOVE_ENTITIES) => {
+                let mut r = Reader::new(payload);
+                let n = r.count(r.remaining())?;
+                let mut uuids = session.uuids.lock().unwrap();
+                for _ in 0..n {
+                    uuids.remove(&r.varint()?);
+                }
+                None
+            }
+            _ => None,
+        })
+    }
+
+    /// 26.2 tells the client whether the server checks accounts (after the spawn info); 26.1 doesn't, so
+    /// it reads as an offline server's.
+    fn login(payload: &[u8]) -> Result<Vec<u8>> {
+        let mut r = Reader::new(payload);
+        r.i32()?;
+        r.bool()?;
+        let n = r.count(r.remaining())?;
+        for _ in 0..n {
+            r.string(32767)?;
+        }
+        for _ in 0..3 {
+            r.varint()?;
+        }
+        for _ in 0..3 {
+            r.bool()?;
+        }
+        super::spawn_info(&mut r)?;
+        let at = r.position();
+        let mut body = payload[..at].to_vec();
+        body.push(0);
+        body.extend_from_slice(&payload[at..]);
+        Ok(body)
+    }
+
+    /// 26.1's team parameters: name, options, visibility, collision, colour as a ChatFormatting (RESET for
+    /// none), prefix, suffix. 26.2 sends name, prefix, suffix, visibility, collision, an optional
+    /// TeamColor (ChatFormatting's first 16, in order) and the options last.
+    fn team(payload: &[u8]) -> Result<Vec<u8>> {
+        let mut r = Reader::new(payload);
+        let mut w = Writer::new();
+        w.string(&r.string(32767)?);
+        let method = r.i8()?;
+        w.i8(method);
+        if method == 0 || method == 2 {
+            let name = r.nbt()?;
+            let options = r.i8()?;
+            let visibility = r.varint()?;
+            let collision = r.varint()?;
+            let color = r.varint()?;
+            let prefix = r.nbt()?;
+            let suffix = r.nbt()?;
+            w.nbt(&name);
+            w.nbt(&prefix);
+            w.nbt(&suffix);
+            w.varint(visibility);
+            w.varint(collision);
+            <crate::buf::Opt<crate::buf::VarInt>>::write(
+                &(0..16).contains(&color).then_some(color),
+                &mut w,
+            );
+            w.i8(options);
+        }
+        w.bytes(r.rest());
+        Ok(w.data)
+    }
+
+    /// Horizon's spectator_action names an entity by its network id; 26.1's spectate_entity (at the same
+    /// id) by its UUID. Nothing is sent for one the client never saw added, or for no entity.
+    pub fn spectate(session: &Session, payload: &[u8]) -> Result<Option<(i32, Vec<u8>)>> {
+        let Some(target) = <crate::buf::OptVarInt>::read(&mut Reader::new(payload))? else {
+            return Ok(None);
+        };
+        let Some(uuid) = session.uuids.lock().unwrap().get(&target).copied() else {
+            return Ok(None);
+        };
+        let mut w = Writer::new();
+        w.uuid(uuid);
+        Ok(Some((SPECTATE_ENTITY, w.data)))
+    }
+
+    /// 26.1's serverbound `spectate_entity` (play).
+    const SPECTATE_ENTITY: i32 = 62;
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_26_1_team_reads_as_26_2s() {
+            let mut w = Writer::new();
+            w.string("red");
+            w.i8(0);
+            w.nbt(&horizon_world::nbt::Tag::String("Red".into()));
+            w.i8(3);
+            w.varint(1);
+            w.varint(2);
+            w.varint(12); // RED
+            w.nbt(&horizon_world::nbt::Tag::String("[".into()));
+            w.nbt(&horizon_world::nbt::Tag::String("]".into()));
+            w.varint(1);
+            w.string("Steve");
+            let body = team(&w.data).unwrap();
+            let p =
+                play::Clientbound::decode(packet_ids::play::clientbound::SET_PLAYER_TEAM, &body)
+                    .unwrap();
+            let play::Clientbound::SetPlayerTeam(t) = p else {
+                panic!("{p:?}")
+            };
+            let params = t.parameters.unwrap();
+            assert_eq!(params.color, Some(12));
+            assert_eq!(params.options, 3);
+            assert_eq!(params.name_tag_visibility, 1);
+            assert_eq!(params.prefix, horizon_world::nbt::Tag::String("[".into()));
+            assert_eq!(t.players, vec!["Steve".to_string()]);
+        }
+
+        #[test]
+        fn reset_is_no_team_colour() {
+            let mut w = Writer::new();
+            w.string("t");
+            w.i8(2);
+            w.nbt(&horizon_world::nbt::Tag::String("T".into()));
+            w.i8(0);
+            w.varint(0);
+            w.varint(0);
+            w.varint(21); // RESET
+            w.nbt(&horizon_world::nbt::Tag::String("".into()));
+            w.nbt(&horizon_world::nbt::Tag::String("".into()));
+            let body = team(&w.data).unwrap();
+            let p =
+                play::Clientbound::decode(packet_ids::play::clientbound::SET_PLAYER_TEAM, &body)
+                    .unwrap();
+            let play::Clientbound::SetPlayerTeam(t) = p else {
+                panic!("{p:?}")
+            };
+            assert_eq!(t.parameters.unwrap().color, None);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1200,6 +1200,7 @@ impl Loading {
                 batch,
                 self.menu.cursor,
                 self.settings.file.bool("hideSplashTexts"),
+                self.settings.file.bool("hideServerAddress"),
             );
         }
         if let Some(focus) = self.menu.key_focus
