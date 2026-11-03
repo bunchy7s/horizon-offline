@@ -148,6 +148,11 @@ impl Game<'_> {
                 let c = self.carts.iter().find(|c| c.id == id)?;
                 c.to_nbt(uuid, self.persist.raw.get(&id))
             }
+            Target::Fangs(id) => {
+                let uuid = self.uuid_for(id);
+                let f = self.fangs.list.iter().find(|f| f.id == id)?;
+                self.fangs_to_nbt(f, uuid)
+            }
             Target::Other(id) => {
                 let uuid = self.uuid_for(id);
                 let o = self.others.iter().find(|o| o.id == id)?.clone();
@@ -313,6 +318,16 @@ impl Game<'_> {
                     slot.bob_offset = bob;
                 }
             }
+            Target::Fangs(id) => {
+                let owner = self.loaded_fangs_owner(&tag);
+                let at = entity_nbt::position(&tag).ok_or_else(stale)?;
+                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
+                    f.pos = [at.x, at.y, at.z];
+                    f.yaw = entity_nbt::rotation(&tag)[0];
+                    f.warmup = horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
+                    f.owner = owner;
+                }
+            }
             Target::Stand(id) => {
                 let new = entity_nbt::armor_stand_from_nbt(&tag, id).ok_or_else(stale)?;
                 if let Some(slot) = self.armor_stands.iter_mut().find(|a| a.id == id) {
@@ -327,7 +342,12 @@ impl Game<'_> {
             }
             _ => return Err(stale()),
         }
-        if let Target::Mob(id) | Target::Item(id) | Target::Stand(id) | Target::Frame(id) = t {
+        if let Target::Mob(id)
+        | Target::Item(id)
+        | Target::Stand(id)
+        | Target::Frame(id)
+        | Target::Fangs(id) = t
+        {
             self.persist.raw.insert(id, tag);
         }
         Ok(())
@@ -366,6 +386,7 @@ impl Game<'_> {
             | Target::Crystal(id)
             | Target::Dragon(id)
             | Target::Other(id)
+            | Target::Fangs(id)
             | Target::Cloud(id) => Some(self.persist.raw.entry(id).or_insert_with(empty)),
             _ => None,
         }

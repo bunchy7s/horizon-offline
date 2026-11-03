@@ -59,6 +59,8 @@ pub(super) enum Target {
     /// An entity of a type Horizon does not simulate (markers, displays,
     /// interactions...): kept as its saved data at a position.
     Other(u32),
+    /// Active evoker fangs, including command-loaded ones.
+    Fangs(u32),
     /// An End crystal, by its entity id (`minecraft:end_crystal`).
     Crystal(u32),
     /// The Ender Dragon, by its entity id (`minecraft:ender_dragon`).
@@ -151,6 +153,7 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Boat(id)
     | Target::Cart(id)
     | Target::Other(id)
+    | Target::Fangs(id)
     | Target::Crystal(id)
     | Target::Dragon(id)
     | Target::Tnt(id)
@@ -576,6 +579,7 @@ impl Game<'_> {
                 .iter()
                 .find(|t| t.id == id)
                 .map(|t| [t.position.x, t.position.y, t.position.z]),
+            Target::Fangs(id) => self.fangs.list.iter().find(|f| f.id == id).map(|f| f.pos),
             Target::Spawner(id) => self
                 .ominous_spawners
                 .iter()
@@ -631,6 +635,7 @@ impl Game<'_> {
             Target::Falling(_) => "minecraft:falling_block".into(),
             Target::Rocket(_) => "minecraft:firework_rocket".into(),
             Target::Trident(_) => "minecraft:trident".into(),
+            Target::Fangs(_) => "minecraft:evoker_fangs".into(),
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
             Target::Cloud(_) => "minecraft:area_effect_cloud".into(),
         }
@@ -701,6 +706,7 @@ impl Game<'_> {
                     | Target::Boat(id)
                     | Target::Cart(id)
                     | Target::Other(id)
+                    | Target::Fangs(id)
                     | Target::Cloud(id) => self.persist_raw(id).and_then(|r| r.get("CustomName")),
                     _ => None,
                 };
@@ -894,6 +900,7 @@ impl Game<'_> {
         candidates.extend(self.item_frames.iter().map(|f| Target::Frame(f.id)));
         candidates.extend(self.paintings.iter().map(|p| Target::Painting(p.id)));
         candidates.extend(self.others.iter().map(|o| Target::Other(o.id)));
+        candidates.extend(self.fangs.list.iter().map(|f| Target::Fangs(f.id)));
         // The End crystals and the dragon (EndCrystal and EnderDragon
         // are entities of their own).
         candidates.extend(self.crystals.iter().map(|c| Target::Crystal(c.id)));
@@ -936,6 +943,7 @@ impl Game<'_> {
             Target::Boat(id),
             Target::Cart(id),
             Target::Other(id),
+            Target::Fangs(id),
             Target::Crystal(id),
             Target::Dragon(id),
             Target::Tnt(id),
@@ -963,6 +971,7 @@ impl Game<'_> {
             Target::Boat(id) => self.boats.iter().any(|b| b.id == id),
             Target::Cart(id) => self.carts.iter().any(|c| c.id == id),
             Target::Other(id) => self.others.iter().any(|o| o.id == id),
+            Target::Fangs(id) => self.fangs.list.iter().any(|f| f.id == id),
             Target::Crystal(id) => self.crystals.iter().any(|c| c.id == id),
             Target::Dragon(id) => self.dragon.as_ref().is_some_and(|d| d.id == id),
             Target::Tnt(id) => self.tnts.iter().any(|t| t.id == id),
@@ -1606,6 +1615,14 @@ impl Game<'_> {
                     }
                 }
             }
+            Target::Fangs(id) => {
+                if let Some(f) = self.fangs.list.iter_mut().find(|f| f.id == id) {
+                    f.pos = [v.x, v.y, v.z];
+                    if let Some([yaw, _]) = rotation {
+                        f.yaw = yaw;
+                    }
+                }
+            }
             Target::Other(id) => {
                 if let Some(o) = self.others.iter_mut().find(|o| o.id == id) {
                     o.position = v;
@@ -2152,6 +2169,7 @@ impl Game<'_> {
                 self.carts.retain(|c| c.id != id);
             }
             Target::Other(id) => self.others.retain(|o| o.id != id),
+            Target::Fangs(id) => self.fangs.list.retain(|f| f.id != id),
             Target::Crystal(id) => self.kill_crystal(id),
             Target::Dragon(id) => self.kill_dragon(id),
             Target::Tnt(id) => self.tnts.retain(|t| t.id != id),
