@@ -5,7 +5,13 @@
 //! or login for both directions, `login_finished` and `login_acknowledged` move each direction to
 //! configuration, `finish_configuration` to play, and `start_configuration` / `configuration_acknowledged`
 //! back to configuration.
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::{
+    collections::HashMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicU8, Ordering},
+    },
+};
 
 use super::{ServerVersion, translate};
 use crate::{
@@ -39,6 +45,8 @@ pub struct Session {
     pub version: ServerVersion,
     reading: AtomicU8,
     writing: AtomicU8,
+    /// Entity UUIDs by network id, for a server that is told which entity a spectator picked by its UUID.
+    pub(super) uuids: Mutex<HashMap<i32, u128>>,
 }
 
 impl Session {
@@ -47,6 +55,7 @@ impl Session {
             version,
             reading: AtomicU8::new(0),
             writing: AtomicU8::new(0),
+            uuids: Mutex::new(HashMap::new()),
         }
     }
     pub fn reading(&self) -> State {

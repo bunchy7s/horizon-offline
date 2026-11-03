@@ -2,10 +2,14 @@
 //! `older-servers`). Horizon's packets are 26.3's; a server on another protocol numbers them differently.
 //! This maps packet ids per connection state, both ways; a [`Session`] follows one connection's states
 //! and renumbers what goes through it. [`ids`] renumbers the registry ids inside packets as the shared
-//! readers decode them, and `translate` rewrites the packets whose layout changed.
+//! readers decode them, and `translate` rewrites the packets whose layout changed. An older version is
+//! translated a release at a time (26.1 to 26.2, then 26.2 to 26.3), with its ids mapped straight to the
+//! pinned ones.
 pub mod ids;
 pub mod session;
 mod translate;
+pub mod v26_1_2;
+mod v26_1_2_ids;
 pub mod v26_2;
 mod v26_2_ids;
 
@@ -23,16 +27,26 @@ pub enum ServerVersion {
     #[default]
     Current,
     V26_2,
+    /// 26.1, 26.1.1 and 26.1.2: one protocol.
+    V26_1,
 }
 
 impl ServerVersion {
-    pub const ALL: [Self; 2] = [Self::Current, Self::V26_2];
+    /// Newest first.
+    pub const ALL: [Self; 3] = [Self::Current, Self::V26_2, Self::V26_1];
+
+    /// Whether this is `other` or an older release: the translation steps from `other` up apply.
+    pub fn at_most(self, other: Self) -> bool {
+        let age = |v: Self| Self::ALL.iter().position(|&a| a == v).unwrap_or(0);
+        age(self) >= age(other)
+    }
 
     /// The protocol number its handshake states.
     pub fn protocol(self) -> i32 {
         match self {
             Self::Current => crate::PROTOCOL_VERSION,
             Self::V26_2 => v26_2::PROTOCOL,
+            Self::V26_1 => v26_1_2::PROTOCOL,
         }
     }
 
@@ -41,6 +55,7 @@ impl ServerVersion {
         match self {
             Self::Current => crate::GAME_VERSION,
             Self::V26_2 => v26_2::NAME,
+            Self::V26_1 => "26.1",
         }
     }
 
@@ -65,15 +80,21 @@ impl ServerVersion {
     /// version itself.
     pub fn ids(self) -> Option<&'static ids::Ids> {
         // Before 26.3 a tag slot display was a bare tag id.
+        const BEFORE_26_3: ids::Quirks = ids::Quirks {
+            tag_slot_display_is_id: true,
+        };
         static V26_2: ids::Ids = ids::Ids {
-            quirks: ids::Quirks {
-                tag_slot_display_is_id: true,
-            },
+            quirks: BEFORE_26_3,
             ..v26_2_ids::IDS
+        };
+        static V26_1: ids::Ids = ids::Ids {
+            quirks: BEFORE_26_3,
+            ..v26_1_2_ids::IDS
         };
         match self {
             Self::Current => None,
             Self::V26_2 => Some(&V26_2),
+            Self::V26_1 => Some(&V26_1),
         }
     }
 
@@ -82,6 +103,8 @@ impl ServerVersion {
             (Self::Current, _) => return Some(id),
             (Self::V26_2, Direction::Clientbound) => v26_2::clientbound(state),
             (Self::V26_2, Direction::Serverbound) => v26_2::serverbound(state),
+            (Self::V26_1, Direction::Clientbound) => v26_1_2::clientbound(state),
+            (Self::V26_1, Direction::Serverbound) => v26_1_2::serverbound(state),
         };
         let mapped = *table.get(usize::try_from(id).ok()?)?;
         mapped.map(i32::from)
@@ -124,7 +147,13 @@ mod tests {
             ServerVersion::from_protocol(crate::PROTOCOL_VERSION),
             Some(ServerVersion::Current)
         );
-        assert_eq!(ServerVersion::from_protocol(775), None);
+        assert_eq!(
+            ServerVersion::from_protocol(775),
+            Some(ServerVersion::V26_1)
+        );
+        assert_eq!(ServerVersion::from_protocol(774), None);
+        assert!(ServerVersion::V26_1.at_most(ServerVersion::V26_2));
+        assert!(!ServerVersion::V26_2.at_most(ServerVersion::V26_1));
     }
 
     #[test]
