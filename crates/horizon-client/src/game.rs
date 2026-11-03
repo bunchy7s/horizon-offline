@@ -3628,6 +3628,11 @@ impl Game<'_> {
         player.item_use_slows_sprint = item_use_slows_sprint;
         player.respiration = respiration;
         player.glider = glider;
+        // On someone else's server the glide flag is the server's
+        // (`DATA_SHARED_FLAGS_ID`, applied by the SetEntityData handler); the
+        // game's own integrated server has no such round trip, so the client
+        // keeps predicting the clear a tick after the landing glide.
+        player.server_owns_glide = self.integrated.is_none();
         let _ = player.set_sleeping(sleeping);
         player.leather_boots = leather_boots;
         player.freeze_immune = freeze_immune;
