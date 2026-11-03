@@ -1798,8 +1798,11 @@ impl Game<'_> {
             let v = p.velocity;
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
+        let arrow = p.arrow.is_some();
         self.add_projectile(p);
-        self.projectile_event("minecraft:projectile_shoot", owner, at);
+        if arrow {
+            self.projectile_event("minecraft:projectile_shoot", owner, at);
+        }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
@@ -3648,6 +3651,7 @@ impl Game<'_> {
         let mut hits = Vec::new();
         let mut deflections: Vec<[f64; 3]> = Vec::new();
         let mut arrow_events = Vec::new();
+        let mut shoot_events = Vec::new();
         let mut trails = Vec::new();
         let mut bubble_tops = Vec::new();
         let mut keep_flags = vec![true; projectiles.len()];
@@ -3801,6 +3805,9 @@ impl Game<'_> {
                 if shooter.is_some() {
                     p.owner = Some(Who::Player);
                 }
+                if let Some(at) = p.take_shoot_event() {
+                    shoot_events.push((p.owner, p.guest, [at.x, at.y, at.z]));
+                }
                 // AbstractHurtingProjectile.tick ends with createParticleTrail.
                 if super::remote_projectiles::has_smoke_trail(&p.kind) {
                     trails.push(p.position);
@@ -3900,6 +3907,26 @@ impl Game<'_> {
                 &mut hits,
                 &mut arrow_events,
             );
+        }
+        for (owner, guest, at) in shoot_events {
+            if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
+                let dispatched = if let Some(mut host) = self.lan.take() {
+                    let result = self.as_guest(&mut host, conn, |g| {
+                        g.projectile_event("minecraft:projectile_shoot", owner, at);
+                    });
+                    self.lan = Some(host);
+                    result.is_some()
+                } else {
+                    false
+                };
+                // An owner who left cannot resolve to the host. The event
+                // still occurs, with no resolved owner (Projectile.getOwner).
+                if !dispatched {
+                    self.projectile_event("minecraft:projectile_shoot", None, at);
+                }
+            } else {
+                self.projectile_event("minecraft:projectile_shoot", owner, at);
+            }
         }
         self.smoke_trails(trails);
         for pos in bubble_tops {
@@ -6156,7 +6183,6 @@ impl Game<'_> {
             on_ground,
         );
         self.add_projectile(proj);
-        self.player_projectile_shot();
         // ItemStack.use's applyAfterUseComponentSideEffects: the pearl's
         // second is the `use_cooldown` component, as for any thrown item.
         self.apply_use_cooldown(stack);

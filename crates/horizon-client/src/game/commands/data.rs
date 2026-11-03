@@ -871,7 +871,7 @@ impl Game<'_> {
         }
     }
     /// The `summon <entity> <pos> <nbt>` form.
-    pub(super) fn summon_with_nbt(
+    pub(in crate::game) fn summon_with_nbt(
         &mut self,
         kind: &str,
         pos: [f64; 3],
