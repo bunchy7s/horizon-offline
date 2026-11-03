@@ -561,6 +561,15 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+        self.native_block_sprites(blocks)
+    }
+    fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>> {
+        self.native_texture_sprites(textures)
+    }
+    fn block_sprites_version(&self) -> u64 {
+        self.native_block_sprites_version()
+    }
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
         self.native_recipe_book_category(kind)
     }

@@ -930,6 +930,12 @@ pub struct Renderer {
     sprite_split: u32,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
+    /// The sprite arrays as the terrain samples them (`SPRITE_ARRAYS` views, `sprite_unused`
+    /// past the ones in use, the Mipmap Levels option's levels), for native mods
+    /// (`WorldDrawn::block_sprites`).
+    sprite_views: Vec<wgpu::TextureView>,
+    /// Nearest, repeating, nearest mip level: for drawing a sprite's texels sharp elsewhere.
+    sprite_nearest: wgpu::Sampler,
     mip_levels: u32,
     /// The mipmap levels sampled (the Mipmap Levels option), at most `mip_levels - 1`.
     mipmaps: u32,
@@ -1208,6 +1214,22 @@ fn sprite_views(
         })
         .collect()
 }
+/// The block sprites sampled sharp, for native mods (`WorldDrawn::block_sprites`): nearest,
+/// repeating, the nearest mip level.
+const SPRITE_NEAREST: wgpu::SamplerDescriptor<'static> = wgpu::SamplerDescriptor {
+    label: Some("Block sprites (nearest)"),
+    address_mode_u: wgpu::AddressMode::Repeat,
+    address_mode_v: wgpu::AddressMode::Repeat,
+    address_mode_w: wgpu::AddressMode::ClampToEdge,
+    mag_filter: wgpu::FilterMode::Nearest,
+    min_filter: wgpu::FilterMode::Nearest,
+    mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+    lod_min_clamp: 0.0,
+    lod_max_clamp: 32.0,
+    compare: None,
+    anisotropy_clamp: 1,
+    border_color: None,
+};
 /// The terrain sprites' sampler: LevelRenderer.chunkLayerSampler's linear one (clamped to the
 /// edge) in every Texture Filtering mode, with `anisotropy` samples when it is above 1 (wgpu
 /// then needs a linear mipmap filter too).
@@ -2651,6 +2673,7 @@ impl Renderer {
             });
         let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None);
         let sprite_sampler = device.create_sampler(&sprite_sampler_descriptor(1));
+        let sprite_nearest = device.create_sampler(&SPRITE_NEAREST);
         let lightmap = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Lightmap"),
             size: wgpu::Extent3d {
@@ -4015,12 +4038,14 @@ impl Renderer {
             lightmap,
             sprite_textures,
             sprite_unused,
+            sprite_views,
             mip_levels,
             mipmaps: mip_levels - 1,
             terrain_layout: bindings,
             terrain_sprites: sprite_constants.map(|(_, v)| v),
             sprite_split: split,
             sprite_sampler,
+            sprite_nearest,
             texture_filtering: 0,
             max_anisotropy: 1,
             lightmap_view,
@@ -5706,7 +5731,7 @@ impl Renderer {
         self.rebuild_terrain_group();
     }
     fn rebuild_terrain_group(&mut self) {
-        let views = sprite_views(
+        self.sprite_views = sprite_views(
             &self.sprite_textures,
             &self.sprite_unused,
             Some(self.mipmaps + 1),
@@ -5716,12 +5741,17 @@ impl Renderer {
             "Horizon terrain resources",
             &self.terrain_layout,
             &self.globals,
-            &views,
+            &self.sprite_views,
             &self.sprite_sampler,
             &self.lightmap_view,
             &self.lightmap_sampler,
             &self.emission_stats.view,
         );
+    }
+    /// Block sprite layers per array on this device: a sprite's array is its layer over it, its
+    /// layer in that array the rest (`block_sprites::Lookup`).
+    pub fn sprite_split(&self) -> u32 {
+        self.sprite_split
     }
     /// The Mipmap Levels option: block textures sample at most `levels`
     /// reduced copies (0: none).
@@ -8924,6 +8954,13 @@ impl Renderer {
                 motion: frame.entity_motion,
                 atlas: self.hud.atlas_texture.as_ref(),
                 quad_indices: &self.indices,
+                block_sprites: native_render::BlockSpriteArrays {
+                    views: &self.sprite_views,
+                    split: self.sprite_split,
+                    size: self.sprite_textures[0].width(),
+                    nearest: &self.sprite_nearest,
+                    filtered: &self.sprite_sampler,
+                },
             });
         }
         let overlay = Overlay {
