@@ -1892,6 +1892,20 @@ def villager_command_names():
     return ops + setup('/forceload remove 0 0')
 
 
+def animal_signed_in_love():
+    ops = setup('/forceload add 0 0')
+    for case, value in enumerate(('-32769', '-32768', '-129', '-128', '-1',
+                                  '-1b', '-128b', '0', '1', '37'), 1):
+        target = f'00000000-0000-0000-0000-0038{case:08x}'
+        ops += setup(f'/summon pig 4 200 4 {{UUID:[I;0,0,56,{case}],'
+                     f'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,InLove:{value}}}')
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops.append(cmd(f'/data remove entity {target} InLove'))
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops += setup(f'/kill {target}')
+    return ops + setup('/forceload remove 0 0')
+
+
 def mob_fire_resistance_damage():
     ops = setup('/forceload add 0 0')
     case = 0
@@ -2225,6 +2239,7 @@ def groups():
 
 
 
+        ('animal signed InLove', animal_signed_in_love()),
         ('mob fire resistance damage', mob_fire_resistance_damage()),
 
 
