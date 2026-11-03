@@ -11,7 +11,7 @@ use crate::{
     world::World,
 };
 
-/// What the menus need to know about items.
+/// What the menus need to know about items and the slots' rules.
 pub trait Rules {
     fn items(&self) -> &Items;
     fn max_stack(&self, item: &str) -> u32;
@@ -21,6 +21,18 @@ pub trait Rules {
     /// slot ("head", "chest", "legs", "feet", "mainhand", "offhand").
     fn equip_slot(&self, item: &str) -> Option<&str> {
         self.items().get(item)?.equip_slot.as_deref()
+    }
+    /// `Slot.mayPickup`: whether the stack in menu slot `slot` may be taken
+    /// out. A block container's slots and the player's own allow it; a mod's
+    /// menu can refuse.
+    fn may_pickup(&self, _slot: usize, _stack: &ItemStack) -> bool {
+        true
+    }
+    /// `Player.canDropItems`: a client that drops items faster than its
+    /// throttle allows stops sending THROW clicks (`LocalPlayer.canDropItems`
+    /// is its `dropSpamThrottler`'s answer).
+    fn can_drop_items(&self) -> bool {
+        true
     }
 }
 
@@ -252,6 +264,23 @@ impl View<'_> {
         }
         rules.max_stack(&stack.item).max(1)
     }
+    /// `Slot.mayPickup`: whether menu slot `i` gives its stack up. The
+    /// armour slots refuse while a survival player wears a binding curse
+    /// (`ArmorSlot.mayPickup`: `PREVENT_ARMOR_CHANGE` and no creative); the
+    /// menu's rules answer for their own slots.
+    fn may_pickup(&self, i: usize, rules: &dyn Rules) -> bool {
+        let stack = self.get(i);
+        if self.container.is_none()
+            && (5..=8).contains(&i)
+            && !self.guest.creative()
+            && stack
+                .as_ref()
+                .is_some_and(|s| s.enchantment_level("minecraft:binding_curse") > 0)
+        {
+            return false;
+        }
+        stack.is_none_or(|s| rules.may_pickup(i, &s))
+    }
     /// The ranges quick move uses: (container start..end, main, hotbar).
     fn player_ranges(&self) -> (std::ops::Range<usize>, std::ops::Range<usize>) {
         match &self.container {
@@ -333,10 +362,14 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
         } else {
             move_to(view, stack, 0..n, false, rules)
         }
-    } else if (5..=8).contains(&i) || i == 45 || i < 5 {
+    } else if (5..=8).contains(&i) || i < 5 {
         move_to(view, stack, 9..45, false, rules)
     } else {
-        // Wear it, otherwise swap between the main inventory and the hotbar.
+        // Wear it, otherwise the stack fills the inventory: from the main
+        // slots for the hotbar and the off hand, from the hotbar for the
+        // main ones. The off hand is in this arm too, so armour worn there
+        // is put on like any other (InventoryMenu.quickMoveStack asks for
+        // the item's equipment slot before it looks at the clicked index).
         let armor = rules
             .armor_index(&stack.item)
             .filter(|a| view.get(5 + a).is_none());
@@ -370,8 +403,10 @@ fn quick_move(view: &mut View, i: usize, rules: &dyn Rules) {
             })
         } else if hotbar.contains(&i) {
             move_to(view, stack, main, false, rules)
-        } else {
+        } else if main.contains(&i) {
             move_to(view, stack, hotbar, false, rules)
+        } else {
+            move_to(view, stack, 9..45, false, rules)
         }
     };
     view.set(i, rest);
@@ -431,8 +466,15 @@ pub fn click(
             }
             input::PICKUP => pickup(view, slot, button, rules),
             input::QUICK_MOVE => {
+                // doClick calls quickMoveStack again while the clicked slot
+                // still holds the item it moved, because moveItemStackTo fills
+                // one empty slot per call. move_to here fills every empty slot
+                // of its range in one pass and leaves the same remainder, so
+                // one call is vanilla's loop: a full inventory keeps its stack,
+                // and a stack too big for one slot spreads over several.
                 if let Ok(i) = usize::try_from(slot)
                     && i < view.len()
+                    && view.may_pickup(i, rules)
                 {
                     quick_move(view, i, rules);
                 }
@@ -452,7 +494,8 @@ pub fn click(
                 }
             }
             input::THROW => {
-                if view.guest.carried.is_none()
+                if rules.can_drop_items()
+                    && view.guest.carried.is_none()
                     && let Ok(i) = usize::try_from(slot)
                     && view.enabled(i)
                     && let Some(mut stack) = view.get(i)
@@ -511,6 +554,11 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
             }
         }
         (Some(mut s), None) => {
+            // doClick's PICKUP arm takes from the slot only while
+            // `Slot.mayPickup` allows it.
+            if !view.may_pickup(i, rules) {
+                return;
+            }
             let take = if right { s.count.div_ceil(2) } else { s.count };
             let taken = ItemStack {
                 count: take,
@@ -521,6 +569,12 @@ fn pickup(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
             view.guest.carried = Some(taken);
         }
         (Some(mut s), Some(mut c)) => {
+            // Merging into, swapping with and topping the hand up from the
+            // slot are all takes (`allowModification`: mayPickup and
+            // mayPlace).
+            if !view.may_pickup(i, rules) {
+                return;
+            }
             if !view.may_place(i, &c, rules) {
                 // A slot that takes nothing gives onto the same carried item,
                 // as far as the hand holds (`tryRemove`).
@@ -673,10 +727,20 @@ fn swap(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
 }
 
 fn pickup_all(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
-    let _ = slot;
+    let Ok(i) = usize::try_from(slot) else {
+        return;
+    };
+    if i >= view.len() {
+        return;
+    }
     let Some(mut carried) = view.guest.carried.clone() else {
         return;
     };
+    // doClick returns when the clicked slot holds a stack it may pick up, so
+    // a double-click collects from an empty slot or one that refuses.
+    if view.get(i).is_some() && view.may_pickup(i, rules) {
+        return;
+    }
     let max = rules.max_stack(&carried.item).max(1);
     // Button 0 walks the slots from the first, button 1 from the last.
     let order: Vec<usize> = if button == 0 {
@@ -691,6 +755,10 @@ fn pickup_all(view: &mut View, slot: i32, button: i32, rules: &dyn Rules) {
                 break;
             }
             if !view.enabled(i) || (view.container.is_none() && i == 0) {
+                continue;
+            }
+            // Each swept slot must give its stack up too.
+            if !view.may_pickup(i, rules) {
                 continue;
             }
             let Some(mut s) = view.get(i) else {
@@ -1289,6 +1357,290 @@ mod tests {
             view.get(45).as_ref().map(|s| &*s.item),
             Some("minecraft:shield")
         );
+    }
+
+    /// Rules that refuse a pickup in some menu slots and can stop drops.
+    struct StrictRules {
+        items: Items,
+        refuse: &'static [usize],
+        drops: bool,
+    }
+    impl StrictRules {
+        fn new(refuse: &'static [usize]) -> Self {
+            Self {
+                items: Items::for_tests(Default::default()),
+                refuse,
+                drops: true,
+            }
+        }
+    }
+    impl Rules for StrictRules {
+        fn items(&self) -> &Items {
+            &self.items
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, item: &str) -> Option<usize> {
+            (item == "minecraft:diamond_chestplate").then_some(1)
+        }
+        fn may_pickup(&self, slot: usize, _: &ItemStack) -> bool {
+            !self.refuse.contains(&slot)
+        }
+        fn can_drop_items(&self) -> bool {
+            self.drops
+        }
+    }
+
+    /// `Slot.mayPickup`: a pickup and a quick move leave a slot's stack alone
+    /// when the menu's rules refuse it there, while the slot next to it still
+    /// gives its own stack up.
+    #[test]
+    fn guest_pickup_and_quick_move_need_the_slots_consent() {
+        let rules = StrictRules::new(&[0]);
+        let mut g = guest();
+        let mut chest = vec![
+            Some(ItemStack::new("minecraft:stone", 5)),
+            Some(ItemStack::new("minecraft:dirt", 2)),
+        ];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // The refused slot takes no click and gives nothing to the cursor.
+        click(&mut view, &mut drag, 0, 0, input::PICKUP, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.guest.carried, None);
+        // A quick move out of it takes nothing with it either.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert!(view.get(2).is_none());
+        // The slot next to it takes both clicks.
+        click(&mut view, &mut drag, 1, 0, input::PICKUP, &rules);
+        assert!(view.get(1).is_none());
+        assert_eq!(
+            view.guest.carried.as_ref().map(|s| (&*s.item, s.count)),
+            Some(("minecraft:dirt", 2))
+        );
+        let back = view.guest.carried.take();
+        view.set(1, back);
+        click(&mut view, &mut drag, 1, 0, input::QUICK_MOVE, &rules);
+        // A container's quick move fills the inventory from its end.
+        assert_eq!(
+            view.get(37).as_ref().map(|s| &*s.item),
+            Some("minecraft:dirt")
+        );
+    }
+
+    /// `doClick`'s PICKUP_ALL arm returns when the clicked slot holds a stack
+    /// it may pick up, so a double-click collects from an empty slot, or from
+    /// one that refuses, only.
+    #[test]
+    fn guest_pickup_all_starts_from_an_empty_or_refusing_slot() {
+        let rules = StrictRules::new(&[]);
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 5)), None];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // One stone short of a full stack, over a slot that holds stone.
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(63));
+        // The empty slot next to it does collect that one stone.
+        click(&mut view, &mut drag, 1, 1, input::PICKUP_ALL, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+        // A refusing slot is where a collect may start: the stone comes from
+        // the slot that allows it, the refused one is left alone.
+        let refusing = StrictRules::new(&[0]);
+        view.set(0, Some(ItemStack::new("minecraft:stone", 5)));
+        view.set(1, Some(ItemStack::new("minecraft:stone", 5)));
+        view.guest.carried = Some(ItemStack::new("minecraft:stone", 63));
+        click(&mut view, &mut drag, 0, 1, input::PICKUP_ALL, &refusing);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert_eq!(view.get(1).map(|s| s.count), Some(4));
+        assert_eq!(view.guest.carried.as_ref().map(|s| s.count), Some(64));
+    }
+
+    /// `Player.canDropItems`: a client that has dropped too fast sends THROW
+    /// clicks the menu does not act on.
+    #[test]
+    fn guest_throw_needs_can_drop_items() {
+        let mut rules = StrictRules::new(&[]);
+        rules.drops = false;
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:stone", 5))];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        let (drops, _) = click(&mut view, &mut drag, 0, 0, input::THROW, &rules);
+        assert!(drops.is_empty());
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        rules.drops = true;
+        let (drops, _) = click(&mut view, &mut drag, 0, 0, input::THROW, &rules);
+        assert_eq!(drops.iter().fold(0, |n, s| n + s.count), 1);
+        assert_eq!(view.get(0).map(|s| s.count), Some(4));
+    }
+
+    /// `ArmorSlot.mayPickup`: a survival guest cannot take cursed armour off;
+    /// a creative one can, by a click and by a shift-click.
+    #[test]
+    fn guest_survival_cannot_remove_cursed_armour() {
+        let rules = StrictRules::new(&[]);
+        for (game_mode, taken) in [
+            (crate::lan::guest::SURVIVAL, false),
+            (crate::lan::guest::CREATIVE, true),
+        ] {
+            for mode in [input::PICKUP, input::QUICK_MOVE] {
+                let mut g = guest();
+                let mut cursed = ItemStack::new("minecraft:diamond_chestplate", 1);
+                cursed.set_crafting_enchantments(vec![("minecraft:binding_curse".into(), 1)]);
+                g.armor[1] = Some(cursed);
+                g.game_mode = game_mode;
+                let mut drag = None;
+                let mut view = View {
+                    guest: &mut g,
+                    container: None,
+                    shulker: false,
+                    hidden: &[],
+                };
+                // Menu slot 6 is the chest slot.
+                click(&mut view, &mut drag, 6, 0, mode, &rules);
+                assert_eq!(view.get(6).is_some(), !taken);
+                assert_eq!(view.guest.carried.is_some() || view.get(9).is_some(), taken);
+            }
+        }
+    }
+
+    struct ArmorRules;
+    impl Rules for ArmorRules {
+        fn items(&self) -> &Items {
+            unreachable!("a quick move reads no item catalog");
+        }
+        fn max_stack(&self, _: &str) -> u32 {
+            64
+        }
+        fn armor_index(&self, item: &str) -> Option<usize> {
+            (item == "minecraft:iron_helmet").then_some(0)
+        }
+        fn equip_slot(&self, _: &str) -> Option<&str> {
+            None
+        }
+    }
+
+    /// A shift-click from the off-hand slot wears the armour it holds:
+    /// `InventoryMenu.quickMoveStack` asks for the item's equipment slot
+    /// before it looks at the clicked index, so the helmet goes to the empty
+    /// helmet slot. With that slot taken, and for anything else in the off
+    /// hand, the stack fills the main inventory before the hotbar.
+    #[test]
+    fn inventory_quick_move_wears_armor_from_the_off_hand() {
+        let rules = ArmorRules;
+        let mut g = guest();
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: None,
+            shulker: false,
+            hidden: &[],
+        };
+        // Menu slot 45 is the off hand; 5 to 8 are the armour slots, head first.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(5).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        assert!(view.get(9).is_none());
+        // The helmet slot is taken: the next helmet goes to the inventory.
+        view.guest.offhand = Some(ItemStack::new("minecraft:iron_helmet", 1));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(
+            view.get(9).as_ref().map(|s| &*s.item),
+            Some("minecraft:iron_helmet")
+        );
+        assert!(view.get(45).is_none());
+        // Anything else fills the main inventory before the hotbar.
+        view.guest.offhand = Some(ItemStack::new("minecraft:diamond", 3));
+        click(&mut view, &mut drag, 45, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(10).as_ref().map(|s| s.count), Some(3));
+        assert!(view.get(36).is_none());
+        assert!(view.get(45).is_none());
+    }
+
+    /// `doClick` repeats `quickMoveStack` while the clicked slot keeps the
+    /// item, because `moveItemStackTo` fills one empty slot per call. This
+    /// engine's `move_to` fills every empty slot of its range in one pass, so a
+    /// single quick move must spread a stack over several slots with the same
+    /// remainder vanilla's loop leaves, and a full inventory must leave the
+    /// stack where it is.
+    #[test]
+    fn one_quick_move_spreads_a_stack_like_vanillas_repeat() {
+        struct SmallRules;
+        impl Rules for SmallRules {
+            fn items(&self) -> &Items {
+                unreachable!("a quick move reads no item catalog");
+            }
+            fn max_stack(&self, item: &str) -> u32 {
+                if item == "minecraft:snowball" { 16 } else { 64 }
+            }
+            fn armor_index(&self, _: &str) -> Option<usize> {
+                None
+            }
+        }
+        let rules = SmallRules;
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:snowball", 40))];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // A container's quick move fills the inventory from its end: 16
+        // snowballs in the last hotbar slot (menu slot 36), 16 in the one
+        // before it, 8 in the third, and nothing left in the chest.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert!(view.get(0).is_none());
+        assert_eq!(view.get(36).map(|s| s.count), Some(16));
+        assert_eq!(view.get(35).map(|s| s.count), Some(16));
+        assert_eq!(view.get(34).map(|s| s.count), Some(8));
+        // Two slots' worth of room only: the loop vanilla runs would stop
+        // after the second call, so 8 stay in the chest.
+        for i in 0..36 {
+            view.guest.inventory[i] = Some(ItemStack::new("minecraft:dirt", 1));
+        }
+        view.set(0, Some(ItemStack::new("minecraft:snowball", 40)));
+        // The fill starts at the hotbar's end: menu slots 36 and 35.
+        view.guest.inventory[8] = None;
+        view.guest.inventory[7] = None;
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(8));
+        assert_eq!(view.get(36).map(|s| s.count), Some(16));
+        assert_eq!(view.get(35).map(|s| s.count), Some(16));
+        // A full inventory moves nothing at all.
+        for i in 0..36 {
+            view.guest.inventory[i] = Some(ItemStack::new("minecraft:dirt", 1));
+        }
+        view.set(0, Some(ItemStack::new("minecraft:snowball", 5)));
+        let (drops, changed) = click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert!(drops.is_empty() && changed.is_empty());
     }
 
     /// `AbstractContainerMenu.isContainerClickButton`: a pickup and a quick

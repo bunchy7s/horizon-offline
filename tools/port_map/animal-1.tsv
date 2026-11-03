@@ -109,6 +109,8 @@ CamelAi.initCoreActivity	inline	crates/horizon-client/src/mobs/camel.rs::registe
 CamelAi.initIdleActivity	inline	crates/horizon-client/src/mobs/camel.rs::register	breed, tempt, follow parent, stroll, random sitting, look
 CamelAi.CamelPanic.checkExtraStartConditions	port	crates/horizon-client/src/mobs/camel.rs::CamelPanic::can_use	
 CamelAi.RandomSitting.checkExtraStartConditions	port	crates/horizon-client/src/mobs/camel.rs::RandomSitting::can_use	gap: no leash or suffocation (canCamelChangePose) check
+Chicken.isFlapping	port	crates/horizon-client/src/mobs/farm.rs::chicken_process_flapping	strict flyDist > nextFlap, used by air movement and live Game flap dispatch
+Chicken.onFlap	port	crates/horizon-client/src/mobs/farm.rs::chicken_process_flapping	nextFlap = flyDist + flapSpeed / 2, no sound
 Chicken.registerGoals	port	crates/horizon-client/src/mobs/farm.rs::register	
 Chicken.getSoundSet	inline	crates/horizon-client/src/mobs/ai.rs::voice_sounds	gap: baby sets only; the picky sound variant is stored but never used
 Chicken.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: baby copies the first parent's variant, no random parent

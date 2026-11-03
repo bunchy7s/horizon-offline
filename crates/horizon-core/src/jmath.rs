@@ -17,6 +17,23 @@
 //! So these functions return what vanilla returns on the same machine, on
 //! Linux and on an Apple silicon Mac alike.
 
+/// `Math.round(float)`, bit for bit: exact (no `x + 0.5` in `f32`), ties toward
+/// positive infinity, saturating to the `int` range, NaN to 0.
+pub fn round_f32(a: f32) -> i32 {
+    let bits = a.to_bits() as i32;
+    let biased_exp = (bits & 0x7F80_0000) >> 23;
+    let shift = (22 + 127) - biased_exp;
+    if shift & -32 == 0 {
+        let mut r = bits & 0x007F_FFFF | 0x0080_0000;
+        if bits < 0 {
+            r = -r;
+        }
+        ((r >> shift) + 1) >> 1
+    } else {
+        a as i32
+    }
+}
+
 /// `Math.sin`.
 pub fn sin(x: f64) -> f64 {
     if cfg!(target_arch = "aarch64") {
@@ -533,6 +550,25 @@ pub mod aarch64 {
 
 #[cfg(test)]
 mod tests {
+    use super::{aarch64, fdlibm, round_f32};
+
+    #[test]
+    fn round_f32_is_exact_like_java() {
+        for (x, expected) in [
+            (0.499_999_97, 0),
+            (0.5, 1),
+            (-0.5, 0),
+            (2.5, 3),
+            (-2.5, -2),
+            (1e10, i32::MAX),
+            (-1e10, i32::MIN),
+            (f32::NAN, 0),
+            (8_388_609.0, 8_388_609),
+        ] {
+            assert_eq!(round_f32(x), expected, "{x}");
+        }
+    }
+
     #[test]
     fn round_ties_toward_positive_infinity() {
         for (x, want) in [
@@ -550,8 +586,6 @@ mod tests {
             assert_eq!(super::round(x), want, "round({x})");
         }
     }
-
-    use super::{aarch64, fdlibm};
 
     fn check1(f: fn(f64) -> f64, (x, expected): (u64, u64)) {
         assert_eq!(f(f64::from_bits(x)).to_bits(), expected, "{x:x}");

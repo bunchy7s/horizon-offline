@@ -434,3 +434,85 @@ mod portal_tests {
         assert!(crate::mobs::mob_can_use_portal(&wolf));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use std::sync::Arc;
+
+    /// A creaking with no heart bound to it, at the origin.
+    fn creaking() -> Mob {
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:creaking".into();
+        k.species = Species::Creaking;
+        // The creaking row of the species table, hurt sound and all.
+        k.sounds = [
+            "entity.creaking.ambient",
+            "entity.generic.hurt",
+            "entity.creaking.death",
+        ];
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// The sounds a hit on `m` left in its outbox.
+    fn hurt_sounds(m: &Mob) -> Vec<&'static str> {
+        m.outbox
+            .iter()
+            .filter_map(|e| match e {
+                MobEvent::Sound(s, ..) => Some(*s),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_creaking_with_no_heart_hurts_like_a_monster() {
+        // Creaking.hurtServer: without a home the blow goes to
+        // Monster.hurtServer, whose getHurtSound is the hostile hurt — not
+        // the generic one.
+        let mut m = creaking();
+        assert!(m.damage(1.0, Damage::player([0.0, 0.0, 1.0])));
+        assert_eq!(
+            hurt_sounds(&m),
+            ["entity.hostile.hurt"],
+            "an unbound creaking is hurt like a monster"
+        );
+    }
+
+    #[test]
+    fn a_heart_bound_creaking_sways_when_a_blow_gets_through() {
+        // Only #bypasses_invulnerability reaches a bound creaking
+        // (Creaking.hurtServer hands those straight to Monster), and that is
+        // the blow whose hurt sound Creaking.getHurtSound answers with the sway.
+        let mut m = creaking();
+        m.extra.home = Some([0, 64, 0]);
+        assert!(m.damage(1.0, Damage::of(DamageKind::OutOfWorld)));
+        assert_eq!(
+            hurt_sounds(&m),
+            ["entity.creaking.sway"],
+            "a heart-bound creaking sways"
+        );
+    }
+
+    #[test]
+    fn a_giant_hurts_and_dies_like_a_monster() {
+        // Giant overrides none of Monster's sounds, so its hurt and death are
+        // the hostile pair.
+        let mut m = creaking();
+        let k = Arc::make_mut(&mut m.kind);
+        k.id = "minecraft:giant".into();
+        k.species = Species::Giant;
+        k.sounds = ["", "entity.generic.hurt", "entity.generic.death"];
+        m.health = 100.0;
+        assert!(m.damage(1.0, Damage::player([0.0, 0.0, 1.0])));
+        assert_eq!(hurt_sounds(&m), ["entity.hostile.hurt"], "a giant's hurt");
+        m.outbox.clear();
+        // The invulnerability frames are over: the next blow is a full one.
+        m.invulnerable = 0;
+        assert!(m.damage(200.0, Damage::player([0.0, 0.0, 1.0])));
+        assert!(!m.alive());
+        assert_eq!(hurt_sounds(&m), ["entity.hostile.death"], "a giant's death");
+    }
+}
