@@ -88,14 +88,18 @@ impl Game<'_> {
             return;
         };
         self.next_entity += 1;
+        let id = self.next_entity;
+        let saved = horizon_client::entity_nbt::uuid(&tag);
+        // Its saved UUID and the attachments saved under it (#7398).
+        self.remember_uuid(id, saved, &tag);
+        let uuid = self.uuid_for(id);
         self.ominous_spawners.push(OminousItemSpawner {
-            id: self.next_entity,
+            id,
             item,
             position: [at.x, at.y, at.z],
             spawn_item_after,
             tick_count: 0,
-            uuid: horizon_client::entity_nbt::uuid(&tag)
-                .unwrap_or_else(horizon_client::save::random_uuid),
+            uuid,
             raw: Some(Box::new(tag)),
         });
     }

@@ -131,6 +131,13 @@ pub fn hypot(x: f64, y: f64) -> f64 {
     fdlibm::hypot(x, y)
 }
 
+/// `Math.round(double)`: the nearest `long`, ties toward positive infinity
+/// (so `-2.5` is `-2`), saturating, `NaN` is 0.
+pub fn round(x: f64) -> i64 {
+    let f = x.floor();
+    (if x - f >= 0.5 { f + 1.0 } else { f }) as i64
+}
+
 fn hi(x: f64) -> i32 {
     (x.to_bits() >> 32) as i32
 }
@@ -559,6 +566,24 @@ mod tests {
             (8_388_609.0, 8_388_609),
         ] {
             assert_eq!(round_f32(x), expected, "{x}");
+        }
+    }
+
+    #[test]
+    fn round_ties_toward_positive_infinity() {
+        for (x, want) in [
+            (-2.5, -2),
+            (2.5, 3),
+            (-0.5, 0),
+            (-1.5, -1),
+            (0.5, 1),
+            (-2.6, -3),
+            (0.49999999999999994, 0),
+            (f64::NAN, 0),
+            (f64::INFINITY, i64::MAX),
+            (f64::NEG_INFINITY, i64::MIN),
+        ] {
+            assert_eq!(super::round(x), want, "round({x})");
         }
     }
 
