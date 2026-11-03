@@ -2,9 +2,10 @@
 //! `older-servers`). Horizon's packets are 26.3's; a server on another protocol numbers them differently.
 //! This maps packet ids per connection state, both ways; a [`Session`] follows one connection's states
 //! and renumbers what goes through it. [`ids`] renumbers the registry ids inside packets as the shared
-//! readers decode them; nothing translates packet layouts yet.
+//! readers decode them, and `translate` rewrites the packets whose layout changed.
 pub mod ids;
 pub mod session;
+mod translate;
 pub mod v26_2;
 mod v26_2_ids;
 
