@@ -2,6 +2,7 @@
 //! This supplies identities and default properties, not block behavior.
 mod facts;
 mod json;
+pub(crate) mod snapshot;
 use crate::{DATA_VERSION, chunk::BlockState, compression::invalid, nbt::Tag};
 pub use json::BlockStateJsonCodec;
 pub(crate) use json::java_integer;

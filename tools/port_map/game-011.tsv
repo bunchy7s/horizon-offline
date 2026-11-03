@@ -94,7 +94,7 @@ Cat.createAttributes	skip:data		attributes come from entity-types.json
 Cat.handleLieDown	inline	crates/horizon-client/src/mobs/tame.rs::cat_ai_step	gap: minor: purring and the amounts are ported; lying on top of a sleeping player (a 0.15 shift of the pose) is not tracked
 Cat.updateLieDownAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
 Cat.updateRelaxStateOneAmount	port	crates/horizon-client/src/mobs/tame.rs::cat_amounts	
-Cat.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	gap: minor: a sitting cat is refused as a mate, vanilla only needs both tame and in love
+Cat.canMate	inline	crates/horizon-client/src/mobs/goals.rs::Breed::can_use	both tamed; the seeker's sitting pose does not matter, and only a wolf's partner is refused while it sits
 Cat.removeWhenFarAway	port	crates/horizon-client/src/mobs/ai.rs::feline_removed_when_far	`!isTame() && tickCount > 2400`, read by check_despawn's removable flag
 Cat.reassessTameGoals	inline	crates/horizon-client/src/mobs/tame.rs::register_cat	the player avoidance goal is conditioned on being untamed instead of added and removed
 Cat.tryToTame	inline	crates/horizon-client/src/game/creatures.rs::Game::interact_mob	one chance in three, then tame, sitting, event 7 or 6 and the advancement trigger
@@ -135,6 +135,7 @@ Salmon.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read
 Salmon.get	inline	crates/horizon-client/src/entity_nbt.rs::bucket_components	the size component goes onto the bucket
 Salmon.applyImplicitComponent	port	crates/horizon-client/src/entity_nbt.rs::apply_item_components	size from the bucket, the salmon/size component
 Salmon.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	weighted size: small 30, medium 50, large 15
+Salmon.getDefaultDimensions	port	crates/horizon-client/src/mobs/living.rs::Mob::awake_dims_in	the variant's bounding box scale (small 0.5, medium 1.0, large 1.5) over the whole box, through aquatic::salmon_scale
 TropicalFish.packVariant	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	packed pattern, base colour and pattern colour; lan.rs::mob_meta packs it for sync
 TropicalFish.defineSynchedData	port	crates/horizon-client/src/game/lan.rs::mob_meta	packed variant entry
 TropicalFish.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::read_variant	an unknown pattern is a kob

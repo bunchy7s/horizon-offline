@@ -1,0 +1,48 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity"
+    },
+    {
+      "name": "level",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_level"
+    },
+    {
+      "name": "entity_position",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_position",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_block_position",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_block_position",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_rotation",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_rotation",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_kind",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_kind",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_uuid",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_uuid",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_level",
+      "target": "horizon_client::game::native_entity_refs::Game<'_>::native_entity_level",
+      "receiver": "entity"
+    }
+  ],
+  "rust_summary": "entity and level handles (`EntityRef`, `LevelRef`, `native_entity`, `native_level`) and an entity's position, block position, rotation, type, UUID and level.",
+  "doc_summary": "`EntityRef` and `LevelRef`, handles a mod keeps and calls `Host` through: `host.entity(id)` and `host.level(dimension)` make them, and `entity.position(host)`, `block_position`, `rotation`, `kind`, `uuid` and `level` read an entity. Bundles need \"hooks\": @API:entity_handles@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_entity_refs.rs"
+  ]
+}

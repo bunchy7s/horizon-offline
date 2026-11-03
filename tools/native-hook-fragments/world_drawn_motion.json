@@ -1,0 +1,8 @@
+{
+  "hooks": [],
+  "rust_summary": "`WorldDrawn::motion`: which mob, player or dropped item each run of the frame's entity quads is.",
+  "doc_summary": "`WorldDrawn::motion` in `native_world_drawn`: which mob, player or dropped item each run of the frame's entity\nquads is, by its entity id, recorded every frame, so a mod can match an entity's vertices with last frame's. Bundles\nthat read it need `\"hooks\": @API:world_drawn_motion@`.",
+  "comments": [
+    "crates/horizon-client-render/src/gfx/native_render.rs"
+  ]
+}

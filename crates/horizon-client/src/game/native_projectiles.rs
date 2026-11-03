@@ -227,7 +227,11 @@ impl Game<'_> {
             if present.is_none() && listed[impact.index] {
                 continue;
             }
-            let (p, keep, events) = self.native_projectile_through(impact.before);
+            let mut before = impact.before;
+            // Replaying a canceled impact must not repeat the first-tick event
+            // already queued by the original tick.
+            before.has_been_shot = hits[impact.hit_slot].0.has_been_shot;
+            let (p, keep, events) = self.native_projectile_through(before);
             flown.extend(events);
             match (present, keep) {
                 (Some(i), true) => projectiles[i] = p,
@@ -270,8 +274,13 @@ impl Game<'_> {
             p.owner = shooter;
         }
         let mut targets = self.projectile_targets();
-        if p.arrow.is_some() {
-            targets.extend(self.carts.iter().map(|c| (Who::Mob(c.id), c.bounds())));
+        if p.arrow.is_some()
+            || matches!(
+                p.kind,
+                horizon_client::projectiles::ProjectileKind::Snowball
+            )
+        {
+            targets.extend(self.vehicle_targets());
         }
         if mob_shot || pvp {
             targets.extend(self.lan_projectile_targets());
