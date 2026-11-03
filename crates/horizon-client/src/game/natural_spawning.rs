@@ -40,6 +40,7 @@ pub(super) struct SpawnScratch {
 
 /// A player in the level in place, as spawning and despawning see it.
 pub(super) struct LevelPlayer {
+    pub(super) uuid: u128,
     pub(super) position: Vec3,
     pub(super) bounds: Aabb,
     pub(super) alive: bool,
@@ -336,6 +337,22 @@ impl SpawnLevel for GameLevel<'_, '_> {
     }
 }
 impl NaturalLevel for GameLevel<'_, '_> {
+    fn spawn_hooks(&self) -> bool {
+        !horizon_client::mod_api::mods().is_empty()
+    }
+    fn potential_spawns(&self, category: Category, pos: [i32; 3], entries: &mut Vec<SpawnEntry>) {
+        let mut canceled = false;
+        self.game.native_potential_spawns(
+            self.game.dim.id(),
+            category.name(),
+            pos,
+            entries,
+            &mut canceled,
+        );
+        if canceled {
+            entries.clear();
+        }
+    }
     fn min_y(&self) -> i32 {
         self.w.world.bottom_y()
     }
@@ -553,6 +570,10 @@ impl<'a> Game<'a> {
     /// `level_players` one at a time, without collecting them.
     fn level_players_iter(&self) -> impl Iterator<Item = LevelPlayer> + '_ {
         let local = self.player_view().map(|p| LevelPlayer {
+            uuid: self
+                .level
+                .player_uuid
+                .map_or(0, horizon_client::lan::playerdata::ints_uuid),
             position: p.position,
             bounds: p.bounds,
             alive: p.alive,
@@ -565,6 +586,7 @@ impl<'a> Game<'a> {
                 .iter()
                 .filter(|g| h.hub.here(g))
                 .map(|g| LevelPlayer {
+                    uuid: g.uuid,
                     position: Vec3::new(g.position[0], g.position[1], g.position[2]),
                     bounds: super::lan_mobs::guest_bounds(g),
                     alive: !g.dead,
@@ -794,6 +816,7 @@ mod tests {
 
     fn player(x: f64, y: f64, z: f64, spectator: bool) -> LevelPlayer {
         LevelPlayer {
+            uuid: 0,
             position: Vec3::new(x, y, z),
             bounds: Aabb::new(Vec3::new(x, y, z), Vec3::new(x, y, z)),
             alive: true,

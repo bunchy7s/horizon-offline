@@ -4643,6 +4643,27 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         Flow::Continue
     }
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn potential_spawns(&self, host: &dyn Host, event: &mut PotentialSpawnsEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn village_siege(&self, host: &mut dyn Host, event: &mut VillageSiegeEvent<'_>) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
     /// Invalid declarations are logged and skipped; the first valid category
@@ -14332,6 +14353,69 @@ pub fn dispatch_note_block_change(
         }
     }
     *new_note = event.new_note;
+}
+/// What [`Hooks::potential_spawns`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct PotentialSpawnsEvent<'a> {
+    pub dimension: &'a str,
+    pub category: &'a str,
+    pub pos: [i32; 3],
+    pub entries: &'a mut Vec<SpawnEntry>,
+}
+pub fn dispatch_potential_spawns(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    category: &str,
+    pos: [i32; 3],
+    entries: &mut Vec<SpawnEntry>,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = PotentialSpawnsEvent {
+        dimension,
+        category,
+        pos,
+        entries,
+    };
+    for mod_hook in super::entered(mods, "potential_spawns") {
+        if matches!(mod_hook.potential_spawns(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+}
+/// What [`Hooks::village_siege`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct VillageSiegeEvent<'a> {
+    pub dimension: &'a str,
+    pub player: u128,
+    pub attempted_pos: [f64; 3],
+}
+pub fn dispatch_village_siege(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    dimension: &str,
+    player: u128,
+    attempted_pos: [f64; 3],
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = VillageSiegeEvent {
+        dimension,
+        player,
+        attempted_pos,
+    };
+    for mod_hook in super::entered(mods, "village_siege") {
+        if matches!(mod_hook.village_siege(host, &mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
 }
 /// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
