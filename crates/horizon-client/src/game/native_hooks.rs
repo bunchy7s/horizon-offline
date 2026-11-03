@@ -5621,6 +5621,81 @@ impl Game<'_> {
         );
     }
 
+    /// A mob or server player is about to die (NeoForge's `LivingDeathEvent`,
+    /// vanilla's `LivingEntity.die`): its health has run out, and the loot,
+    /// experience and death message have not run. `entity` is its id and
+    /// `kind` its type (`minecraft:zombie`, `minecraft:player`); `damage_type`
+    /// names the last blow (`minecraft:player_attack`) and `attacker` is the
+    /// mob that dealt it, 0 for none or a player. Set `cancel` to keep it alive:
+    /// Horizon decides death by health, so it stays at 1 health. The hook
+    /// fires once per death attempt. Armor stands, boats and other non-mob
+    /// entities are not told. API @API:living_death@.
+    pub(super) fn native_living_death(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        damage_type: &str,
+        attacker: u32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_death(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            damage_type,
+            attacker,
+            cancel,
+        );
+    }
+
+    /// A mob is about to convert into another type (NeoForge's
+    /// `LivingConversionEvent.Pre`, vanilla's `Mob.convertTo`): a zombie
+    /// drowning, a piglin or hoglin in the Overworld, a tadpole growing, a
+    /// mooshroom sheared by a dispenser, a pig or villager struck by
+    /// lightning. `outcome` is the new type. Set `cancel` to keep the mob as
+    /// it is; a drowning zombie starts its timers again. Not told: a
+    /// mooshroom a player shears, a zombie villager's cure, a villager turned
+    /// by a zombie. API @API:living_conversion_pre@.
+    pub(super) fn native_living_conversion_pre(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        outcome: &str,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_living_conversion_pre(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            outcome,
+            cancel,
+        );
+    }
+
+    /// A mob converted into another type (NeoForge's
+    /// `LivingConversionEvent.Post`): `entity` is gone, `converted` took its
+    /// place. Fires with `native_entity_transform`, after the new mob joined
+    /// the level, for the conversions `native_living_conversion_pre` tells.
+    /// API @API:living_conversion_post@.
+    pub(super) fn native_living_conversion_post(
+        &mut self,
+        entity: u32,
+        kind: &str,
+        converted: u32,
+        converted_kind: &str,
+    ) {
+        mod_api::dispatch_living_conversion_post(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            converted,
+            converted_kind,
+        );
+    }
+
     /// A thrown splash or lingering potion applied its hit effects.
     /// 287.
     pub(super) fn native_potion_splash(&mut self, item: &str, pos: [f64; 3]) {
