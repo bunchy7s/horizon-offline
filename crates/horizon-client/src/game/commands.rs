@@ -2438,17 +2438,40 @@ impl Game<'_> {
         if ctx.has("keep") && current != self.world.air {
             return Err(err("commands.setblock.failed", &[]));
         }
-        if ctx.has("destroy") && current != self.world.air {
+        // SetBlockCommand.setBlock skips placement when destruction already
+        // leaves an air state and the requested state is also air.
+        let place_needed = if ctx.has("destroy") {
             self.destroy_block_dropping(pos)?;
-        }
-        let state = self.block_input_state(pos, &b, state, ctx.has("strict"))?;
-        let placed = self.place_state(pos, state, ctx.has("strict"))?;
-        let loaded = match &b.nbt {
-            Some(nbt) => self.load_block_entity_nbt(pos, nbt),
-            None => false,
+            let remaining = self.world.block(pos[0], pos[1], pos[2]);
+            !(self.res.facts().is_air(state) && self.res.facts().is_air(remaining))
+        } else {
+            true
         };
-        if !placed && !loaded {
-            return Err(err("commands.setblock.failed", &[]));
+        if place_needed {
+            let state = self.block_input_state(pos, &b, state, ctx.has("strict"))?;
+            let placed = self.place_state(pos, state, ctx.has("strict"))?;
+            let loaded = match &b.nbt {
+                Some(nbt) => self.load_block_entity_nbt(pos, nbt),
+                None => false,
+            };
+            if !placed && !loaded {
+                return Err(err("commands.setblock.failed", &[]));
+            }
+        } else if !ctx.has("strict") {
+            // ServerLevel.updateNeighboursOnBlockSet still runs when placing
+            // air was unnecessary. The unchanged air has no analog output or
+            // removal side effects, so only its neighbours need notification.
+            let remaining = self.world.block(pos[0], pos[1], pos[2]);
+            self.with_level(|b, level, ticks| {
+                b.update_neighbors_at(
+                    level,
+                    ticks,
+                    horizon_core::position::BlockPos::new(pos[0], pos[1], pos[2]),
+                    b.block(remaining),
+                );
+            });
+            self.process_level_events()
+                .map_err(|e| CommandError::new(Text::literal(e.to_string())))?;
         }
         self.feedback(Text::tr(
             "commands.setblock.success",

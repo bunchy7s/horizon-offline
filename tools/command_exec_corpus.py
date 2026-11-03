@@ -1877,6 +1877,64 @@ def mob_max_health_bounds():
     ]
     return ops
 
+def setblock_destroy_air():
+    """Destroy-to-air skips placement, including already-air targets (#7691)."""
+    pos = '24 220 10'
+    # Keep this section nonempty so strict placement can retain air variants.
+    out = setup('/tick freeze', '/gamerule block_drops true',
+                '/scoreboard objectives add destroy_air dummy',
+                '/setblock 24 219 11 minecraft:stone strict')
+    for before, after, mode in [
+        ('stone', 'air', 'destroy'),
+        ('air', 'air', 'destroy'),
+        ('stone', 'cave_air', 'destroy'),
+        ('cave_air', 'air', 'destroy'),
+        ('cave_air', 'cave_air', 'destroy'),
+        ('stone', 'void_air', 'destroy'),
+        ('void_air', 'air', 'destroy'),
+        ('water', 'air', 'destroy'),
+        ('stone', 'dirt', 'destroy'),
+        ('stone', 'stone', 'destroy'),
+        ('air', 'dirt', 'destroy'),
+        ('air', 'air', 'replace'),
+        ('stone', 'air', 'replace'),
+    ]:
+        out += setup('/kill @e[type=minecraft:item]',
+                     f'/setblock {pos} minecraft:{before} strict',
+                     '/scoreboard players set result destroy_air -99',
+                     '/scoreboard players set success destroy_air -99')
+        out += [
+            cmd(f'/execute if block {pos} minecraft:{before}'),
+            cmd('/execute store success score success destroy_air '
+                'store result score result destroy_air run '
+                f'setblock {pos} minecraft:{after} {mode}'),
+            cmd('/scoreboard players get success destroy_air'),
+            cmd('/scoreboard players get result destroy_air'),
+            *[cmd(f'/execute if block {pos} minecraft:{air}')
+              for air in ('air', 'cave_air', 'void_air')],
+            cmd('/execute if entity @e[type=minecraft:item]'),
+            cmd('/execute as @e[type=minecraft:item] run data get entity @s Item'),
+        ]
+    # Skipping BlockInput.place must still notify neighbours. A strict write
+    # leaves this unsupported power value intact until a neighbour updates it.
+    out += setup(f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:stone strict',
+                 '/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]'),
+            cmd(f'/setblock {pos} minecraft:air destroy'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=0]'),
+            cmd(f'/execute if block {pos} minecraft:air')]
+    out += setup('/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd(f'/setblock {pos} minecraft:air replace'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]')]
+    out += setup('/kill @e[type=minecraft:item]', f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 220 10 minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:air strict',
+                 '/setblock 24 219 11 minecraft:air strict',
+                 '/scoreboard objectives remove destroy_air', '/tick unfreeze')
+    return out
+
+
 def forceload_query_order():
     """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
     return [
@@ -1924,6 +1982,7 @@ def groups():
         ('player state', player_state()),
         ('experience level boundaries', experience_level_boundaries()),
         ('blocks and border', world_blocks()),
+        ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('mob armor damage', mob_armor_damage()),
