@@ -65,6 +65,33 @@ impl Game<'_> {
         finalize::value_with(m, Attr::KnockbackResistance, &extra)
     }
 
+    /// Each mob's `gear_knockback_resistance`, for the pushes that read the
+    /// mob (`Mob::knockback`, Punch, the mace's smash): worked out for the
+    /// mobs that wear or hold something, since the mob does not know items.
+    pub(super) fn refresh_gear_knockback_resistance(&mut self) {
+        let values: Vec<Option<f64>> = self
+            .mobs
+            .iter()
+            .map(|m| {
+                let e = &m.extra;
+                [
+                    &e.main_hand,
+                    &e.off_hand,
+                    &e.feet,
+                    &e.legs,
+                    &e.chest,
+                    &e.head,
+                ]
+                .iter()
+                .any(|s| s.is_some())
+                .then(|| self.mob_knockback_resistance(m))
+            })
+            .collect();
+        for (m, value) in self.mobs.iter_mut().zip(values) {
+            m.gear_knockback_resistance = value;
+        }
+    }
+
     /// The registry id of a client-syncable attribute the entity type has
     /// (`AttributeMap.getInstance` is null for the others), by name.
     fn synced_attribute(&self, entity: &str, name: &str) -> Option<i32> {

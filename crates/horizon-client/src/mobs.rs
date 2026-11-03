@@ -1159,6 +1159,10 @@ pub struct Mob {
     /// `Entity.needsSync`: knocked back, pushed or jumped since its server
     /// last sent it, so the next update goes out at once.
     pub needs_sync: bool,
+    /// `getAttributeValue(KNOCKBACK_RESISTANCE)` with the modifiers of the
+    /// items it wears or holds, which the game works out each tick for a mob
+    /// that has any (the mob itself knows no item): `None` for the rest.
+    pub gear_knockback_resistance: Option<f64>,
     pub health: f32,
     pub hurt_time: i32,
     pub invulnerable: i32,
@@ -2649,6 +2653,7 @@ impl Mob {
             horizontal_collision: false,
             vertical_collision_below: false,
             needs_sync: false,
+            gear_knockback_resistance: None,
             hurt_time: 0,
             invulnerable: 0,
             death_time: 0,
@@ -3183,6 +3188,11 @@ impl Mob {
     pub fn knockback_effect(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, damage: f32) {
         self.knockback_by(power, xd, zd, source, Some(damage));
     }
+    /// `getAttributeValue(KNOCKBACK_RESISTANCE)`: the mob's own, and what its gear adds.
+    pub fn knockback_resistance(&self) -> f64 {
+        self.gear_knockback_resistance
+            .unwrap_or(self.attrs.knockback_resistance)
+    }
     fn knockback_by(&mut self, power: f64, xd: f64, zd: f64, source: &Damage, effect: Option<f32>) {
         if let Some(damage) = effect
             && self.species() == Species::SulfurCube
@@ -3211,7 +3221,7 @@ impl Mob {
             x: mut xd,
             z: mut zd,
         } = knock;
-        let power = power * (1.0 - self.attrs.knockback_resistance);
+        let power = power * (1.0 - self.knockback_resistance());
         if power <= 0.0 {
             return;
         }
