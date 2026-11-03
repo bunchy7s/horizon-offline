@@ -389,8 +389,8 @@ classes come from the reviewed table, Modrinth categories and sides; with jars, 
 only): content 54, library 33, client-ui 26, performance 25, other 14, unknown 2, server-only 1;
 40 rows matched the reviewed ATM10 table; three dependency layers (93 / 57 / 5).
 
-`carry` copies a jar's `assets/<id>/`, `data/<id>/`, `data/minecraft/tags/` and `data/c/tags/`
-into `mods/<id>/carry/`, a folder content mod (API 0.2) the game loads with `--dev-mod`, and
+`carry` copies a jar's `assets/<id>/`, `data/<id>/`, `data/minecraft/tags/`, `data/c/tags/` and the
+sources it adds to vanilla's atlases (`assets/minecraft/atlases/`) into `mods/<id>/carry/`, a folder content mod (API 0.2) the game loads with `--dev-mod`, and
 keeps what a content mod may not hold (other namespaces, vanilla data) in `outside/`. Files of
 the mod's own content that the game's content loader would refuse whole also go to `outside/`,
 listed with the reason in the report's `unreadable`: paths vanilla does not read (upper case),
