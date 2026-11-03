@@ -912,5 +912,13 @@
   "Play downloads the game from Mojang the first time, with the Java it needs.": "初回のプレイ時に、必要な Java と一緒に Mojang からゲームをダウンロードします。",
   "Save changes": "変更を保存",
   "The big modpacks' home": "大型 Modpack の定番",
-  "{first} or {last}": "{first} または {last}"
+  "{first} or {last}": "{first} または {last}",
+  "Could not reach Horizon's cosmetics service. Check your internet connection.": "Horizon のコスメティックサービスに接続できませんでした。インターネット接続を確認してください。",
+  "Your Wardrobe session ended. Open the Wardrobe again.": "ワードローブのセッションが終了しました。ワードローブを開き直してください。",
+  "The founder set can't be claimed right now.": "ファウンダーセットは今は受け取れません。",
+  "That item isn't in your Wardrobe.": "そのアイテムはワードローブにありません。",
+  "Horizon's cosmetics service had a problem. Try again later.": "Horizon のコスメティックサービスで問題が発生しました。後でもう一度お試しください。",
+  "Mojang could not confirm your account. Sign in again and retry.": "Mojang がアカウントを確認できませんでした。もう一度サインインしてやり直してください。",
+  "Sign in with a Minecraft account first.": "まず Minecraft アカウントでサインインしてください。",
+  "Mojang's session server is not answering. Try again later.": "Mojang のセッションサーバーが応答していません。後でもう一度お試しください。"
 }
