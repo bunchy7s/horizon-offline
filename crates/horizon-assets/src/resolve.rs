@@ -22,6 +22,8 @@ pub struct ResolvedCuboidModel {
     pub textures: BTreeMap<String, Material>,
     /// Cyclic and dangling aliases are absent from `textures`.
     pub unresolved_textures: BTreeSet<String>,
+    /// NeoForge's `render_type`; the leaf-most model that sets one wins.
+    pub render_type: Option<String>,
     geometry: Option<Arc<CuboidModel>>,
     generated: bool,
 }
@@ -74,6 +76,7 @@ impl ModelLibrary {
             )]),
             elements: None,
             display: None,
+            render_type: None,
         }
     }
     pub fn new(models: BTreeMap<String, CuboidModel>) -> Result<Self> {
@@ -194,6 +197,7 @@ impl ModelLibrary {
             .iter()
             .find_map(|m| m.gui_light)
             .unwrap_or(GuiLight::Side);
+        let render_type = chain.iter().find_map(|m| m.render_type.clone());
         let geometry = chain
             .iter()
             .find(|m| m.elements.is_some())
@@ -264,6 +268,7 @@ impl ModelLibrary {
             display,
             textures,
             unresolved_textures,
+            render_type,
             geometry,
             generated,
         })
@@ -283,6 +288,8 @@ pub fn missing_model() -> CuboidModel {
                     texture: "missingno".to_owned(),
                     uv: Some([0.0, 0.0, 16.0, 16.0]),
                     rotation: 0,
+                    light_emission: None,
+                    neoforge_data: None,
                 }),
             )
         })
@@ -298,10 +305,12 @@ pub fn missing_model() -> CuboidModel {
             rotation: None,
             shade_direction_override: None,
             light_emission: 0,
+            neoforge_data: None,
         })]),
         display: Some(ItemTransforms {
             contexts: std::array::from_fn(|_| DisplayTransform::Inherit),
         }),
+        render_type: None,
         textures: BTreeMap::from([
             (
                 "particle".to_owned(),
@@ -567,5 +576,97 @@ mod tests {
         assert!(!library.resolves("item/orphan"));
         assert!(!library.resolves("item/a"));
         assert!(!library.resolves("Item/Stick"));
+    }
+    const LIGHTS: &str = r##"{"textures":{"a":"block/a"},"render_type":"minecraft:cutout","elements":[
+        {"from":[0,0,0],"to":[16,16,16],"light_emission":4,"neoforge_data":{"block_light":9,"color":-65536,"ambient_occlusion":false},
+         "faces":{"north":{"texture":"#a","neoforge_data":{"block_light":2,"sky_light":15,"unknown":1}},
+                  "south":{"texture":"#a","light_emission":11},
+                  "up":{"texture":"#a"}}}]}"##;
+    #[test]
+    fn neoforge_data_of_a_face_overrides_its_element_key_by_key() {
+        use crate::bake::bake_block_model;
+        let library = library(&[("block/lights", LIGHTS)]);
+        let model = library.resolve("block/lights").unwrap();
+        let quads =
+            bake_block_model(&model, crate::bake::BlockModelTransform::new([0; 3], false)).unwrap();
+        let by = |d| quads.iter().find(|q| q.facing == d).unwrap();
+        let north = by(Direction::North);
+        assert_eq!(north.light, [4, 15]);
+        assert_eq!(north.color, Some(-65536));
+        assert_eq!(north.ambient_occlusion, Some(false));
+        assert_eq!(by(Direction::South).light, [11, 11]);
+        assert_eq!(by(Direction::South).light_emission, 11);
+        assert_eq!(by(Direction::Up).light, [9, 4]);
+        assert!(
+            quads
+                .iter()
+                .all(|q| q.render_type == Some(crate::bake::RenderType::Cutout))
+        );
+    }
+    #[test]
+    fn vanilla_models_bake_without_extra_face_data() {
+        use crate::bake::bake_block_model;
+        let library = library(&[(
+            "block/plain",
+            r##"{"textures":{"a":"block/a"},"elements":[{"from":[0,0,0],"to":[16,16,16],"light_emission":6,"faces":{"up":{"texture":"#a"}}}]}"##,
+        )]);
+        let model = library.resolve("block/plain").unwrap();
+        let quad = &bake_block_model(&model, crate::bake::BlockModelTransform::new([0; 3], false))
+            .unwrap()[0];
+        assert_eq!((quad.light, quad.light_emission), ([6, 6], 6));
+        assert_eq!(
+            (quad.color, quad.ambient_occlusion, quad.render_type),
+            (None, None, None)
+        );
+    }
+    #[test]
+    fn render_type_comes_from_the_leaf_most_model_and_loses_its_prefix() {
+        let library = library(&[
+            ("block/base", r#"{"render_type":"translucent"}"#),
+            ("block/mid", r#"{"parent":"block/base"}"#),
+            (
+                "block/leaf",
+                r#"{"parent":"block/mid","render_type":"minecraft:cutout_mipped"}"#,
+            ),
+            ("block/bare", r#"{"parent":"block/mid"}"#),
+        ]);
+        let render = |name| library.resolve(name).unwrap().render_type;
+        assert_eq!(render("block/leaf").as_deref(), Some("cutout_mipped"));
+        assert_eq!(render("block/bare").as_deref(), Some("translucent"));
+        assert_eq!(render("block/absent"), None);
+        assert_eq!(
+            crate::bake::RenderType::by_name("minecraft:tripwire"),
+            Some(crate::bake::RenderType::Tripwire)
+        );
+        assert_eq!(crate::bake::RenderType::by_name("mod:glow"), None);
+    }
+    #[test]
+    fn neoforge_data_colour_and_legacy_emission_spellings() {
+        let model = CuboidModel::from_json(
+            r##"{"elements":[{"from":[0,0,0],"to":[1,1,1],"faces":{
+                "up":{"texture":"#a","neoforge_data":{"color":"#80FF0000","light_emission":7}},
+                "down":{"texture":"#a","neoforge_data":{"color":4294967295,"block_light":99}}}}]}"##,
+        )
+        .unwrap();
+        let elements = model.elements.unwrap();
+        let faces = &elements[0].as_ref().unwrap().faces;
+        let up = faces[&Direction::Up]
+            .as_ref()
+            .unwrap()
+            .neoforge_data
+            .unwrap();
+        assert_eq!(
+            (up.color, up.block_light, up.sky_light),
+            (Some(0x80FF0000u32 as i32), Some(7), Some(7))
+        );
+        let down = faces[&Direction::Down]
+            .as_ref()
+            .unwrap()
+            .neoforge_data
+            .unwrap();
+        assert_eq!(
+            (down.color, down.block_light, down.sky_light),
+            (Some(-1), Some(15), None)
+        );
     }
 }

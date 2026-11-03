@@ -31,7 +31,7 @@ FlyNodeEvaluator.hasMalus	inline	crates/horizon-client/src/mobs/path.rs::Finder:
 FlyNodeEvaluator.getCachedPathType	port	crates/horizon-client/src/mobs/path.rs::Finder::fly_path_type	-
 FlyNodeEvaluator.iteratePathfindingStartNodeCandidatePositions	inline	crates/horizon-client/src/mobs/path.rs::Finder::start	gap: minor: flying start candidates are the four corners only; the small-mob branch (ten random positions in the inflated box) is not ported
 pathfinder/Node.createDebugStreamCodec	skip:debug	-	stream codec for the debug path overlay
-pathfinder/Node.cloneAndMove	missing	-	minor: only used by PathNavigation.trimPath to raise path nodes over cauldrons by one block; that trim is not ported, so mobs may bump on cauldron rims
+pathfinder/Node.cloneAndMove	inline	crates/horizon-client/src/mobs/path.rs::Path::raise_cauldron_nodes	the copy-and-move is written in place: PathNode is Copy, so the cauldron trim writes the raised y
 pathfinder/Node.createHash	skip:java	-	Java map key; Horizon indexes nodes inside Finder
 pathfinder/Node.distanceTo	port	crates/horizon-client/src/mobs/path.rs::Node::distance	both overloads: node to node and node to block position
 pathfinder/Node.distanceToXZ	missing	-	minor: only the Warden path finder uses horizontal distance as its cost; Horizon costs use 3D distance everywhere (Finder::find)

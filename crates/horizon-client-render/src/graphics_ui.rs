@@ -636,9 +636,25 @@ fn on_off(on: bool) -> String {
 }
 /// A control's caption and its value, both through the language table: Horizon's captions are
 /// English sentences, and some of the values ("Off", "12 chunks") are words too.
+/// "Caption: value" (`options.generic_value`), both looked up in the language table.
 fn labelled(caption: &str, value: impl std::fmt::Display) -> Text {
     let value = value.to_string();
-    Text::literal(format!("{}: {}", lang::get(caption), lang::get(&value)))
+    Text::option_name_value(
+        Text::literal(lang::get(caption)),
+        Text::literal(lang::get(&value)),
+    )
+}
+/// "Caption: 50%" (`options.percent_value`, Options.percentValueLabel): French and German put a
+/// space before the `%`.
+fn labelled_percent(caption: &str, percent: u32) -> Text {
+    Text::translate_with_fallback(
+        "options.percent_value",
+        "%s: %s%%",
+        &[
+            Text::literal(lang::get(caption)),
+            Text::literal(percent.to_string()),
+        ],
+    )
 }
 
 impl H {
@@ -744,7 +760,7 @@ impl H {
                 ),
                 n => labelled("Worker Threads", n),
             },
-            H::ResolutionScale => labelled("Resolution Scale", format!("{}%", g.resolution_scale)),
+            H::ResolutionScale => labelled_percent("Resolution Scale", g.resolution_scale),
             H::Antialiasing => labelled(
                 "Anti-aliasing",
                 match (g.fxaa, g.taa) {
@@ -782,7 +798,7 @@ impl H {
                 ),
                 n => labelled("Black Level", format!("{:.2}", n as f32 / 100.0)),
             },
-            H::HdrUiBrightness => labelled("UI Brightness", format!("{}%", g.hdr_ui_brightness)),
+            H::HdrUiBrightness => labelled_percent("UI Brightness", g.hdr_ui_brightness),
             H::HdrKey => {
                 Text::translate("Shortcut: %s", &[crate::keybinds::display_name(&g.hdr_key)])
             }
@@ -3198,6 +3214,51 @@ mod tests {
             .filter(|m| !["An", "Aus", "FSR 3.1", "key.keyboard.unknown"].contains(&m.as_str()))
             .collect();
         assert_eq!(missed, Vec::<String>::new());
+    }
+    /// Horizon's captions join label and value with the language's `options.generic_value` and
+    /// `options.percent_value`, as vanilla's beside them on the same page do (#6072). The
+    /// templates are 26.3's.
+    #[test]
+    fn horizon_captions_use_the_languages_separator() {
+        struct Vanilla;
+        impl lang::ResourceSource for Vanilla {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                let (generic, percent) = match path {
+                    "assets/minecraft/lang/en_us.json" => ("%s: %s", "%s: %s%%"),
+                    "assets/minecraft/lang/fr_fr.json" => ("%s : %s", "%s : %s %%"),
+                    "assets/minecraft/lang/zh_cn.json" => ("%s：%s", "%s：%s%%"),
+                    "assets/minecraft/lang/en_ud.json" => ("%2$s :%1$s", "%s: %s%%"),
+                    _ => return None,
+                };
+                serde_json::to_vec(&serde_json::json!({
+                    "options.generic_value": generic,
+                    "options.percent_value": percent,
+                }))
+                .ok()
+            }
+        }
+        let mut s = Settings::default();
+        s.horizon.leaf_culling = LeafCullingMode::Hollow;
+        s.horizon.resolution_scale = 75;
+        for (code, leaf, scale) in [
+            ("en_us", "Leaf Culling: Hollow", "Resolution Scale: 75%"),
+            (
+                "fr_fr",
+                "Occlusion feuillage : Creux",
+                "Échelle de résolution : 75 %",
+            ),
+            ("zh_cn", "树叶剔除：镂空", "渲染比例：75%"),
+            // Value first.
+            ("en_ud", "Hollow :Leaf Culling", "Resolution Scale: 75%"),
+        ] {
+            let (shown, _) = lang::scoped(lang::Language::load(&[&Vanilla], code), || {
+                (
+                    Item::Horizon(H::LeafCulling).label(&s).plain(),
+                    Item::Horizon(H::ResolutionScale).label(&s).plain(),
+                )
+            });
+            assert_eq!(shown, (leaf.into(), scale.into()), "{code}");
+        }
     }
     /// Leaf Culling, Frame Generation and Shadow Cache came with English captions only (#1927).
     #[test]

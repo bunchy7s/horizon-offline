@@ -94,6 +94,7 @@ AbstractContainerMenu.setRemoteSlotUnsafe	port	crates/horizon-client/src/game/re
 AbstractContainerMenu.getClickAction	inline	crates/horizon-client/src/menu.rs::Menu::click	button 0 is the primary action, 1 the secondary
 AbstractContainerMenu.tryItemClickBehaviourOverride	port	crates/horizon-client/src/menu/bundle.rs::Menu::bundle_click	a bundle takes or puts items on a click on another stack; the NeoForge event is not modelled
 AbstractContainerMenu.initializeContents	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's full content is applied to the open menu
+AbstractContainerMenu.isContainerClickButton	inline	crates/horizon-client/src/lan/menu.rs::click	a pickup or a quick move on any button but 0 and 1 changes nothing; THROW takes one item for button 0 and the whole stack otherwise
 AbstractContainerMenu.isValidQuickcraftType	inline	crates/horizon-client/src/menu.rs::Menu::click	drag types 0 and 1 always, type 2 only in creative
 AbstractContainerMenu.canItemQuickReplace	port	crates/horizon-client/src/menu.rs::Menu::quick_replace	a slot takes the stack when empty or the same item with room
 AbstractContainerMenu.transferState	skip:other		copies the remote-slot cache back to the player's inventory on close; Horizon's guest inventory is the one copy

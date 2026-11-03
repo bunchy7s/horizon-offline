@@ -83,7 +83,7 @@ pub(super) fn upload(
 }
 
 /// The stage name of `texture.<stage>.*` a program of `group` reads.
-fn stage(group: Group) -> &'static str {
+pub(super) fn stage(group: Group) -> &'static str {
     match group {
         Group::Gbuffers | Group::Translucent | Group::Shadow => "gbuffers",
         Group::Setup => "setup",
