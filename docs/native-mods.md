@@ -2427,6 +2427,12 @@ a dimension.
 - `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
   alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
   read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
+  `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
+  Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
+  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
+  slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
+  body slot keep only the item, not the stack's count and components.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.

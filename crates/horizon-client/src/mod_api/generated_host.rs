@@ -1409,6 +1409,45 @@ pub trait Host {
         let _ = level;
         unimplemented!("Host::level_day_time")
     }
+    /// The entity as a living entity (vanilla's `LivingEntity`: a mob, a
+    /// player, an armor stand or the dragon), or None for another kind or a
+    /// stale handle. API @API:living_refs@.
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        let _ = entity;
+        unimplemented!("Host::living")
+    }
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        let _ = living;
+        let _ = slot;
+        unimplemented!("Host::living_equipment")
+    }
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API
+    /// @API:living_refs@.
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        let _ = living;
+        let _ = hand;
+        unimplemented!("Host::living_hand_item")
+    }
+    /// Puts `stack` (None: empties it) in equipment slot `slot`
+    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// when the entity has no such slot: a player has no body or saddle
+    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
+    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
+    /// its main hand, as `/item` does. API @API:living_refs@.
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        let _ = living;
+        let _ = slot;
+        let _ = stack;
+        unimplemented!("Host::living_set_equipment")
+    }
     /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
     /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
     /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,
@@ -1554,5 +1593,32 @@ impl LevelRef {
     /// every level; it keeps counting past 24000. API @API:level_reads@.
     pub fn day_time(self, host: &dyn Host) -> Option<i64> {
         host.level_day_time(self)
+    }
+}
+impl LivingRef {
+    /// The stack in equipment slot `slot` (`LivingEntity.getItemBySlot`):
+    /// None when it is empty, the entity has no such slot (a player has no
+    /// body or saddle slot), or the handle is stale. API @API:living_refs@.
+    pub fn equipment(self, host: &dyn Host, slot: EquipmentSlot) -> Option<ItemStack> {
+        host.living_equipment(self, slot)
+    }
+    /// The stack in hand `hand` (`LivingEntity.getItemInHand`). API
+    /// @API:living_refs@.
+    pub fn hand_item(self, host: &dyn Host, hand: Hand) -> Option<ItemStack> {
+        host.living_hand_item(self, hand)
+    }
+    /// Puts `stack` (None: empties it) in equipment slot `slot`
+    /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
+    /// when the entity has no such slot: a player has no body or saddle
+    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
+    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
+    /// its main hand, as `/item` does. API @API:living_refs@.
+    pub fn set_equipment(
+        self,
+        host: &mut dyn Host,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        host.living_set_equipment(self, slot, stack)
     }
 }

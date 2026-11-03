@@ -582,6 +582,23 @@ impl Host for super::Game<'_> {
     fn level_day_time(&self, level: LevelRef) -> Option<i64> {
         self.native_level_day_time(level)
     }
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        self.native_living(entity)
+    }
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        self.native_living_equipment(living, slot)
+    }
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        self.native_living_hand_item(living, hand)
+    }
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.native_living_set_equipment(living, slot, stack)
+    }
     fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
         self.native_block_sprites(blocks)
     }
