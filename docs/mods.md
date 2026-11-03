@@ -383,13 +383,17 @@ A pool addition holds `"elements"` as a pool does, a processor list addition `"p
 Lithostitched's `add_structure_set_entries`, `add_template_pool_elements` and `add_processor_list_processors` modifiers
 do on NeoForge and Fabric, and `horizon-port-pack carry` writes the last two from those.
 
-A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) generate in
-biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in `data/<ns>/neoforge/biome_modifier/`
-(older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types). `add_features` appends its `features` to one
-generation `step` of every biome in `biomes`; `remove_features` takes them out of its `steps` (every step when it lists
-none); `none` does nothing. `biomes` and `features` are an id, a `#tag` or a list of ids; `biomes` may also be
-NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal, each in mod and file order, and a
-feature already in the step is not added twice.
+A mod's own configured and placed features (`data/<ns>/worldgen/configured_feature/`, `placed_feature/`) and mob spawn
+changes reach biomes it does not own (vanilla's) through NeoForge's biome modifiers, files in
+`data/<ns>/neoforge/biome_modifier/` (older Forge mods: `data/<ns>/forge/biome_modifier/`, `forge:` types).
+`add_features` appends its `features` to one generation `step` of every biome in `biomes`; `remove_features` takes them
+out of its `steps` (every step when it lists none); `add_spawns` appends its `spawners` (one `{ "type", "weight",
+"minCount", "maxCount" }` object or a list of them) to each entity type's category in
+`minecraft:gameplay/natural_mob_spawns`, turning `minCount` and `maxCount` into 26.3's `count`; `remove_spawns` takes its
+`entity_types` out of every category; `add_spawn_costs` sets `spawn_costs` (`{ "energy_budget", "charge" }`) for its
+`entity_types`, and `remove_spawn_costs` removes them; `none` does nothing. `biomes`, `features` and `entity_types` are
+an id, a `#tag`, a list of ids, or NeoForge's `any`, `or`, `and` or `not`. Every addition comes before every removal,
+each in mod and file order, and a feature already in the step is not added twice.
 
 ```json
 { "type": "neoforge:add_features", "biomes": "#minecraft:is_overworld",
@@ -399,12 +403,13 @@ feature already in the step is not added twice.
 The modifiers rewrite the biomes when the content root builds, and the generator orders every biome's features as
 vanilla's `FeatureSorter` does, so an added feature takes its place in that order (its random seed follows from it). A
 biome no modifier names keeps its text, and a world without mods keeps vanilla's biomes byte for byte. A modifier
-naming a biome, biome tag, feature or feature tag the game doesn't have (another mod's, a `#c:` convention tag), or of a
-type not read yet (spawns and climate: `add_spawns`, `add_carvers`, a mod's own serializer), is skipped with a warning
-naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a type
-that is read (an unknown step, a missing field) stops the build, and the game starts without content mods ("content
-mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features` doesn't read a mod's
-`placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to it too.
+naming a biome, biome tag, feature, feature tag, entity type or entity type tag the game doesn't have (another mod's, a
+`#c:` convention tag), or of a type not read yet (`add_carvers`, climate, a mod's own serializer), is skipped with a
+warning naming the mod and file, as NeoForge skips what it can't resolve; the mods still load. A malformed modifier of a
+type that is read (an unknown step, a missing field, `minCount > maxCount`) stops the build, and the game starts without
+content mods ("content mods not loaded: ..." in the log). Feature tags are vanilla's for now (`#tag` in `features`
+doesn't read a mod's `placed_feature` tags yet); a world's data pack that replaces a biome replaces the mods' changes to
+it too.
 
 A pool element may be one of Lithostitched's: `lithostitched:limited` (`delegate`, `limit`, `min_depth`) places its
 `delegate` at most `limit` times in one structure start, and `lithostitched:guaranteed` (`delegate`, `count`,

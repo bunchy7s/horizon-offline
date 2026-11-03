@@ -1,11 +1,12 @@
 //! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist`,
-//! `/transfer` and `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands,
-//! PardonCommand, BanIpCommands, PardonIpCommand, BanListCommands,
-//! TransferCommand, WhitelistCommand): commands of a dedicated server, run on
-//! its lists by an operator in game (the console has its own handlers in
-//! game/dedicated.rs). Also `/stop`, `/save-all`, `/save-off` and `/save-on`
-//! (StopCommand, SaveAllCommand, SaveOffCommand, SaveOnCommand), on the
-//! switches the lists share.
+//! `/setidletimeout`, `/transfer` and `/whitelist` (OpCommand, DeOpCommands,
+//! BanPlayerCommands, PardonCommand, BanIpCommands, PardonIpCommand,
+//! BanListCommands, SetPlayerIdleTimeoutCommand, TransferCommand,
+//! WhitelistCommand): commands of a dedicated server, run on its lists by an
+//! operator in game (the console has its own handlers in game/dedicated.rs).
+//! Also `/stop`, `/save-all`, `/save-off` and `/save-on` (StopCommand,
+//! SaveAllCommand, SaveOffCommand, SaveOnCommand), on the switches the lists
+//! share.
 use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     server::user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -332,6 +333,23 @@ impl Game<'_> {
         Ok(players.len() as i32)
     }
 
+    /// `SetPlayerIdleTimeoutCommand.setIdleTimeout`: the minutes of idleness
+    /// after which a player is kicked (`multiplayer.disconnect.idling`), 0 for
+    /// never. The reply names the minutes, or says the timeout is off, and the
+    /// command's result is the number of minutes.
+    pub(super) fn cmd_setidle_timeout(&mut self, ctx: &Context) -> R<i32> {
+        let lists = self.dedicated_lists()?;
+        let Some(Arg::Int(minutes)) = ctx.get("minutes") else {
+            return Ok(0);
+        };
+        let minutes = *minutes;
+        // DedicatedServer.setPlayerIdleTimeout: the live sweep reads it, and
+        // server.properties keeps it.
+        self.set_player_idle_timeout(&lists, minutes);
+        self.feedback(idle_timeout_reply(minutes));
+        Ok(minutes)
+    }
+
     /// `TransferCommand.register` and `TransferCommand.transfer`: each target's
     /// client is handed to `hostname:port` (`ClientboundTransferPacket`), and
     /// the source is told who went — the player's name for one, the count for
@@ -530,5 +548,44 @@ impl Game<'_> {
                 Ok(count)
             }
         }
+    }
+}
+
+/// `SetPlayerIdleTimeoutCommand.setIdleTimeout`'s reply: the minutes, or
+/// `commands.setidletimeout.success.disabled` when the timeout is off.
+fn idle_timeout_reply(minutes: i32) -> Text {
+    if minutes > 0 {
+        Text::translate(
+            "commands.setidletimeout.success",
+            &[Text::literal(minutes.to_string())],
+        )
+    } else {
+        Text::translate("commands.setidletimeout.success.disabled", &[])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::idle_timeout_reply;
+
+    /// `SetPlayerIdleTimeoutCommand.setIdleTimeout`: minutes above zero are
+    /// named in `commands.setidletimeout.success`, and zero turns the timeout
+    /// off with `commands.setidletimeout.success.disabled`.
+    #[test]
+    fn the_idle_timeout_reply_names_the_minutes_or_says_it_is_off() {
+        let reply = idle_timeout_reply(5);
+        assert_eq!(
+            reply.translation_key(),
+            Some("commands.setidletimeout.success"),
+            "{reply:?}"
+        );
+        assert_eq!(reply.component()["with"], serde_json::json!([5]));
+        let off = idle_timeout_reply(0);
+        assert_eq!(
+            off.translation_key(),
+            Some("commands.setidletimeout.success.disabled")
+        );
+        // The disabled message takes no argument.
+        assert!(off.component().get("with").is_none(), "{off:?}");
     }
 }

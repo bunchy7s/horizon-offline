@@ -1960,8 +1960,19 @@ impl Game<'_> {
                 MobEvent::SoundId(name, at, volume, pitch) => {
                     self.audio.play(&name, Some(at), volume, pitch)
                 }
-                // The sculk layer tracks the game's steps itself
-                // (`entity_motion_events`).
+                MobEvent::GameEvent {
+                    event, at, source, ..
+                } if event == "minecraft:flap"
+                    && self.mobs.iter().any(|m| {
+                        m.id == source && matches!(m.species(), Species::Chicken | Species::Parrot)
+                    }) =>
+                {
+                    let ctx = self.who_context(Some(Who::Mob(source)), None);
+                    self.post_game_event(event, at, ctx);
+                }
+                // The sculk layer tracks steps and bee/bat flaps itself
+                // (`entity_motion_events`, `tick_mob_sculk_events`). Birds
+                // above use their movement's flyDist/nextFlap threshold.
                 MobEvent::GameEvent { .. } => {}
                 MobEvent::AttackPlayer(amount, from) => {
                     self.mob_hits_player(amount, from, "minecraft:mob_attack");

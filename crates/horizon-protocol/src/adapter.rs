@@ -1,7 +1,15 @@
 //! Speaking to servers of an older release: the first layer of the native protocol adapter (roadmap
 //! `older-servers`). Horizon's packets are 26.3's; a server on another protocol numbers them differently.
-//! This maps packet ids per connection state, both ways. It does not translate packet contents.
+//! This maps packet ids per connection state, both ways; a [`Session`] follows one connection's states
+//! and renumbers what goes through it. [`ids`] renumbers the registry ids inside packets as the shared
+//! readers decode them, and `translate` rewrites the packets whose layout changed.
+pub mod ids;
+pub mod session;
+mod translate;
 pub mod v26_2;
+mod v26_2_ids;
+
+pub use session::Session;
 
 use crate::{
     Direction, Result, State,
@@ -51,6 +59,22 @@ impl ServerVersion {
     /// no such packet, so it must not be sent.
     pub fn serverbound_id(self, state: State, id: i32) -> Option<i32> {
         self.map(state, Direction::Serverbound, id)
+    }
+
+    /// How this version numbers block states and registries, against the pinned one. `None` for the pinned
+    /// version itself.
+    pub fn ids(self) -> Option<&'static ids::Ids> {
+        // Before 26.3 a tag slot display was a bare tag id.
+        static V26_2: ids::Ids = ids::Ids {
+            quirks: ids::Quirks {
+                tag_slot_display_is_id: true,
+            },
+            ..v26_2_ids::IDS
+        };
+        match self {
+            Self::Current => None,
+            Self::V26_2 => Some(&V26_2),
+        }
     }
 
     fn map(self, state: State, direction: Direction, id: i32) -> Option<i32> {
