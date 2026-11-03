@@ -4337,9 +4337,12 @@ impl Game<'_> {
                 self.remote_menu_state(p.container, p.state);
                 for (slot, item) in p.items.iter().enumerate() {
                     let stack = self.to_stack(item);
+                    self.tutorial_get_item(stack.as_ref());
                     self.set_menu_slot(p.container, slot as i32, stack);
                 }
-                self.carried = self.to_stack(&p.carried);
+                let carried = self.to_stack(&p.carried);
+                self.tutorial_get_item(carried.as_ref());
+                self.carried = carried;
                 self.remote_synced();
             }
             C::ContainerSetSlot(p) => {
