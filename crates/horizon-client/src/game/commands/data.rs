@@ -370,14 +370,18 @@ impl Game<'_> {
             _ => None,
         }
     }
-    fn set_entity_tags(&mut self, t: Target, tags: &[String]) {
-        if let Some(raw) = self.raw_mut(t) {
-            let list = tags
-                .iter()
-                .map(|s| Tag::String(s.as_str().into()))
-                .collect();
-            set_key(raw, "Tags", Tag::List(list));
-        }
+    /// Writes `t`'s `Tags`; false when its kind keeps no saved compound to
+    /// write them to.
+    pub(in crate::game) fn set_entity_tags(&mut self, t: Target, tags: &[String]) -> bool {
+        let Some(raw) = self.raw_mut(t) else {
+            return false;
+        };
+        let list = tags
+            .iter()
+            .map(|s| Tag::String(s.as_str().into()))
+            .collect();
+        set_key(raw, "Tags", Tag::List(list));
+        true
     }
 
     // ---- accessors -----------------------------------------------------

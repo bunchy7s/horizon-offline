@@ -23,6 +23,15 @@ pub(super) struct Env<'a, 'g> {
     game: &'a Game<'g>,
 }
 impl ItemEnv for Env<'_, '_> {
+    fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let mut value = false;
+        self.game
+            .native_item_model_property(property, stack, &mut value);
+        value
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }

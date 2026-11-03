@@ -615,6 +615,10 @@ pub(super) struct Remote {
     /// The player's own shared flag 5 (`Entity.isInvisible`) as the server
     /// last set it.
     pub(super) own_invisible: bool,
+    /// The player's own shared flag 0 (`Entity.isOnFire`) as the server last
+    /// set it: its fire (blaze fireballs, fire aspect, lightning) never
+    /// reaches the window's own `fire_ticks` otherwise.
+    own_on_fire: bool,
     /// `LivingEntity.DATA_ARROW_COUNT_ID` and `DATA_STINGER_COUNT_ID` of the
     /// own player, as the server synced them.
     pub(super) own_arrows: i32,
@@ -1069,6 +1073,7 @@ impl Game<'_> {
             level_player_textures: HashMap::new(),
             glowing: Default::default(),
             own_invisible: false,
+            own_on_fire: false,
             own_arrows: 0,
             own_stingers: 0,
             own_shoulders: [None; 2],
@@ -3055,6 +3060,7 @@ impl Game<'_> {
                 if let Some(r) = self.remote.as_mut() {
                     r.carried = Some(0);
                     r.own_invisible = false;
+                    r.own_on_fire = false;
                     r.online_mode = p.online_mode;
                     r.enforces_secure_chat = p.enforces_secure_chat;
                     r.entity_id = p.player_id;
@@ -3102,6 +3108,7 @@ impl Game<'_> {
                     // (its shared flags) to the new one; without it they reset.
                     if let Some(r) = self.remote.as_mut() {
                         r.own_invisible = false;
+                        r.own_on_fire = false;
                     }
                 }
                 let dimension_changed = self.dim != Dim::from_id(&p.spawn.dimension);
@@ -3619,8 +3626,19 @@ impl Game<'_> {
                                     // keep its glide travel (#7616).
                                     pl.fall_flying = flags & -128 != 0;
                                 }
+                                let on_fire = flags & 0x01 != 0;
                                 if let Some(r) = self.remote.as_mut() {
                                     r.own_invisible = flags & 0x20 != 0;
+                                    let was_on_fire =
+                                        std::mem::replace(&mut r.own_on_fire, on_fire);
+                                    // The server put the fire out: the
+                                    // window's countdown ends with it.
+                                    if was_on_fire
+                                        && !on_fire
+                                        && let Some(pl) = self.player.as_mut()
+                                    {
+                                        pl.fire_ticks = pl.fire_ticks.min(0);
+                                    }
                                 }
                             }
                             // Entity.DATA_AIR_SUPPLY_ID and
@@ -5928,6 +5946,13 @@ impl Game<'_> {
                 .passenger_pose_tick()?;
             }
         }
+        // The server decides fire the window cannot predict (blaze fireballs,
+        // fire aspect, lightning): Entity.isOnFire reads the synched flag, so
+        // the predicted tick's countdown must not end it while it is set.
+        player.fire_ticks = hold_server_fire(
+            player.fire_ticks,
+            self.remote.as_ref().is_some_and(|r| r.own_on_fire),
+        );
         // LocalPlayer.onUpdateAbilities: flight turned on or off (a double
         // jump, a spectator, landing) is sent to the server.
         let flying = player.flying;
@@ -10355,9 +10380,19 @@ fn client_millis() -> u64 {
         .as_millis() as u64
 }
 
+/// `Entity.isOnFire` for the window's player: while the server's flag is set
+/// the predicted tick's countdown never takes `fire_ticks` below 1.
+fn hold_server_fire(fire_ticks: i32, server_on_fire: bool) -> i32 {
+    if server_on_fire {
+        fire_ticks.max(1)
+    } else {
+        fire_ticks
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{keep_client_state, remote_use_swings, synced_local_use};
+    use super::{hold_server_fire, keep_client_state, remote_use_swings, synced_local_use};
     use horizon_client::{
         containers::{Beacon, BlockEntity},
         items::ItemStack,
@@ -10400,6 +10435,21 @@ mod tests {
         assert!(!remote_use_swings(&stack("minecraft:iron_spear"), false));
         // A consumable (food, a drink) starts its use without a swing.
         assert!(!remote_use_swings(&stack("minecraft:apple"), true));
+    }
+
+    /// The server's on-fire flag keeps the predicted countdown (which
+    /// `fluid_base_tick` runs down) from ending the fire; a clear flag leaves
+    /// the window's own contact fire alone.
+    #[test]
+    fn the_servers_fire_flag_holds_the_burning_state_through_the_countdown() {
+        let mut ticks = 1;
+        for _ in 0..5 {
+            ticks = hold_server_fire(ticks - 1, true);
+            assert!(ticks > 0, "still burning");
+        }
+        assert_eq!(hold_server_fire(300, true), 300, "a longer fire is not cut");
+        assert_eq!(hold_server_fire(7, false), 7, "predicted lava fire stays");
+        assert_eq!(hold_server_fire(0, false), 0);
     }
 
     #[test]

@@ -140,6 +140,7 @@ mod tests {
                     color: None,
                     ambient_occlusion: None,
                     render_type: None,
+                    shade: true,
                 },
             }],
         }
