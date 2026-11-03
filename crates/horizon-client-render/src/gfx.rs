@@ -828,6 +828,12 @@ pub struct Renderer {
     /// Solid quads facing away from the eye are left out (`mesher::Sides`).
     sides_on: bool,
     sky: wgpu::RenderPipeline,
+    /// The main sky without the sunrise fan, which `sunrise_pipeline` draws as
+    /// geometry over it. The mirror keeps `sky`: its per-pixel fan is cheap at
+    /// the reflection's size and needs no second projection.
+    sky_base: wgpu::RenderPipeline,
+    sunrise_pipeline: wgpu::RenderPipeline,
+    sunrise_buffer: wgpu::Buffer,
     dark_disc: wgpu::RenderPipeline,
     /// Clears the world pass's depth to the far plane so the first-person hand draws in the
     /// same pass (`hand_in_world`), as the hand's own pass would clear it.
@@ -1770,7 +1776,8 @@ async fn open_backend(
     // targets with the adapter's own format features) and R11F_G11F_B10F: a float
     // stand-in neither clamps nor drops NaN. Subgroups: shader packs' compute programs
     // (`MC_GL_KHR_shader_subgroup_*`); storage buffers in vertex shaders, clearing and
-    // atomics on images: their buffers and images.
+    // atomics on images: their buffers and images. Filtering 32-bit float textures: shader
+    // packs' RGBA32F buffers, which GL filters and mipmaps.
     let features = timing::GpuTimer::features(&adapter)
         | cull::Cull::features(&adapter)
         | oit::features(&adapter)
@@ -1783,7 +1790,8 @@ async fn open_backend(
                 | wgpu::Features::SUBGROUP
                 | wgpu::Features::VERTEX_WRITABLE_STORAGE
                 | wgpu::Features::CLEAR_TEXTURE
-                | wgpu::Features::TEXTURE_ATOMIC));
+                | wgpu::Features::TEXTURE_ATOMIC
+                | wgpu::Features::FLOAT32_FILTERABLE));
     let driver = format!("{} {}", info.driver, info.driver_info);
     startup_step(format_args!(
         "requesting the device (driver {}) with features [{features}] and the adapter's \
@@ -2372,6 +2380,47 @@ impl Renderer {
             false,
             false,
             None,
+        );
+        let sky_base = pipeline(
+            "Sky base",
+            "vs_sky",
+            "fs_sky_base",
+            &[],
+            tri,
+            None,
+            false,
+            false,
+            None,
+        );
+        let sunrise_attributes = wgpu::vertex_attr_array![0=>Float32x4, 1=>Float32];
+        let sunrise_buffers = [Some(wgpu::VertexBufferLayout {
+            array_stride: 20,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &sunrise_attributes,
+        })];
+        let sunrise_blend = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                operation: wgpu::BlendOperation::Add,
+            },
+            // The sky's HDR alpha is the destination's; the fan only tints it.
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let sunrise_pipeline = pipeline(
+            "Sunrise fan",
+            "vs_sunrise",
+            "fs_sunrise",
+            &sunrise_buffers,
+            tri,
+            None,
+            false,
+            false,
+            Some(sunrise_blend),
         );
         let dark_disc = pipeline(
             "Dark disc",
@@ -3704,6 +3753,12 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let sunrise_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Sunrise fan vertices"),
+            size: (sunrise_fan::VERTICES * 5 * std::mem::size_of::<f32>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let entity_capacity = 1 << 14;
         let entity_skin = entity_skin::EntitySkin::new(
             &device,
@@ -3884,6 +3939,9 @@ impl Renderer {
             cull,
             flat,
             sky,
+            sky_base,
+            sunrise_pipeline,
+            sunrise_buffer,
             dark_disc,
             depth_reset,
             lines,
@@ -4364,6 +4422,18 @@ impl Renderer {
         };
         let c = post.shadow_casters();
         ((c.entities && !c.only_player) || c.blocks, c.entities)
+    }
+
+    /// A standard pack replaces mobs' vanilla blob shadows only when its compiled
+    /// shadow path actually draws entities other than the player.
+    pub fn pack_entity_shadows(&self) -> bool {
+        self.pack_post
+            .as_ref()
+            .and_then(|(_, post)| post.as_ref())
+            .is_some_and(|post| {
+                let casters = post.shadow_casters();
+                casters.entities && !casters.only_player
+            })
     }
 
     pub fn has_section(&self, key: SectionKey) -> bool {
@@ -5091,8 +5161,8 @@ impl Renderer {
             if self.detail_columns.remove(&(x, z)) == Some(complete) {
                 self.detail_revision += 1;
             }
-            self.occlusion.remove_column(x, z);
         }
+        self.occlusion.remove_columns(&gone);
         let kept = |key: &SectionKey| !gone.contains(&(key.0, key.2));
         let before = self.block_entities.len();
         self.block_entities.retain(|key, _| kept(key));
@@ -5317,9 +5387,6 @@ impl Renderer {
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
-    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`): not
-    /// while a shader pack or a native pack draws entities from their vertices, nor while
-    /// frame generation follows them.
     /// The posed models' store size (`SkinFrame::base`), with entity skinning.
     pub fn skinned_models(&self) -> Option<u32> {
         self.entity_skin
@@ -5327,19 +5394,26 @@ impl Renderer {
             .map(entity_skin::EntitySkin::stored)
     }
 
+    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`).
+    /// Standard packs need every bridge stage; native packs, frame generation and
+    /// native observers of the CPU entity stream retain their existing fallback.
     pub fn skins_entities(&self) -> bool {
         self.entity_skin.is_some()
             && !self.frame_gen.on
-            && self.pack_post.is_none()
+            && self.pack_post.as_ref().is_none_or(|(_, post)| {
+                post.as_ref().is_some_and(|post| post.skins_entities())
+                    && !native_render::render_needs().entity_spans
+            })
             && self.native.is_none()
     }
 
-    /// Whether the eyes render type's layers may be posed on the GPU too
-    /// (`mobs::skin::SkinModels::eyes`): only with improved transparency off,
+    /// Whether the layers tagged `OIT_ENTITY` (the eyes render type's, horse
+    /// markings, a slime's outer cube) may be posed on the GPU too
+    /// (`mobs::skin::SkinModels::tagged`): only with improved transparency off,
     /// where they are ordinary entity quads. On, `EntityBatch` sorts them into
     /// its stages by the CPU vertices' `OIT_ENTITY` tag.
-    pub fn skins_eyes(&self) -> bool {
-        self.skins_entities() && !self.improved_transparency
+    pub fn skins_tagged(&self) -> bool {
+        self.skins_entities() && !self.improved_transparency && self.pack_post.is_none()
     }
 
     pub fn frame_generation_share(&self) -> Option<f32> {
@@ -6225,6 +6299,27 @@ impl Renderer {
         };
         self.uploads
             .buffer(&mut encoder, &self.globals, 0, bytemuck::bytes_of(&globals));
+        // The sunrise fan as sixteen triangles. Its clip positions use the sky's
+        // own view (no TAA jitter, bob or spin: `fs_sky`'s `view_ray` has none),
+        // and its apex weight interpolates the barycentric the shader used to
+        // compute for every sky pixel.
+        if frame.sky.sunrise_color[3] > 0.001 && !frame.title && frame.skybox {
+            let sky_view_proj = views.primary().view_proj(Mat4::IDENTITY);
+            let mut mesh = [[0.0f32; 5]; sunrise_fan::VERTICES];
+            for (to, from) in mesh
+                .iter_mut()
+                .zip(sunrise_fan::mesh(frame.sky.sunrise_color[3], sun))
+            {
+                let clip = sky_view_proj * glam::Vec4::new(from[0], from[1], from[2], 1.0);
+                *to = [clip.x, clip.y, clip.z, clip.w, from[3]];
+            }
+            self.uploads.buffer(
+                &mut encoder,
+                &self.sunrise_buffer,
+                0,
+                bytemuck::cast_slice(&mesh),
+            );
+        }
         laps.lap("r_targets");
         // GameRenderer.render3dHud: the hand's projection at hudFov, with the
         // bob in its pose rather than the projection (same product).
@@ -6886,6 +6981,17 @@ impl Renderer {
             self.uploads
                 .buffer(&mut encoder, &self.outline, 0, bytemuck::cast_slice(&lines));
         }
+        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
+            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
+            None => false,
+        });
+        let pack_skin = !frame.title
+            && skin.is_some()
+            && self
+                .pack_post
+                .as_ref()
+                .and_then(|(_, post)| post.as_ref())
+                .is_some_and(|post| post.skins_entities());
         // While a shader pack draws entities, the runs of `entity_spans` its programs draw are
         // left out of Horizon's own entity draw.
         let mut entities = frame.entities;
@@ -6900,6 +7006,7 @@ impl Renderer {
                 frame.entity_spans,
                 frame.crumbling_sprite,
                 &mut self.pack_entity_rest,
+                skin.filter(|_| pack_skin),
             );
             entities = &self.pack_entity_rest;
         }
@@ -6936,11 +7043,11 @@ impl Renderer {
         );
         self.entity_batch.append_shadow_only(frame.shadow_only);
         // The posed models' vertices come first: the ordinary entities' draw takes them in.
-        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
-            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
-            None => false,
-        });
-        let posed = skin.map_or(0, |s| s.vertices);
+        let posed = if pack_skin {
+            0
+        } else {
+            skin.map_or(0, |s| s.vertices)
+        };
         let entity_quads = entity_quads + posed / 4;
         let weather_quads = frame.weather.len() as u32 / 4;
         let world_quads = entity_quads
@@ -7037,15 +7144,33 @@ impl Renderer {
             );
         }
         if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
-            skinner.dispatch(
-                &self.device,
-                &mut self.uploads,
-                &mut encoder,
-                skin,
-                &self.entity_buffer,
-                0,
-                outline_base,
-            );
+            if pack_skin {
+                let target = self
+                    .pack_post
+                    .as_ref()
+                    .and_then(|(_, post)| post.as_ref())
+                    .and_then(|post| post.skin_target())
+                    .expect("GPU pack entity target");
+                skinner.dispatch_pack(
+                    &self.device,
+                    &mut self.uploads,
+                    &mut encoder,
+                    skin,
+                    target,
+                    &self.entity_buffer,
+                    outline_base,
+                );
+            } else {
+                skinner.dispatch(
+                    &self.device,
+                    &mut self.uploads,
+                    &mut encoder,
+                    skin,
+                    &self.entity_buffer,
+                    0,
+                    outline_base,
+                );
+            }
         }
         let static_sections = frame.static_block_entities;
         let mut static_bytes_uploaded = 0;
@@ -7851,8 +7976,13 @@ impl Renderer {
                     {
                         Some((sky, native)) => sky.draw(&mut pass, native),
                         None => {
-                            pass.set_pipeline(&self.sky);
+                            pass.set_pipeline(&self.sky_base);
                             pass.draw(0..3, 0..1);
+                            if frame.sky.sunrise_color[3] > 0.001 {
+                                pass.set_pipeline(&self.sunrise_pipeline);
+                                pass.set_vertex_buffer(0, self.sunrise_buffer.slice(..));
+                                pass.draw(0..sunrise_fan::VERTICES as u32, 0..1);
+                            }
                         }
                     }
                 }
@@ -8791,6 +8921,7 @@ impl Renderer {
                 camera: frame.camera,
                 entities: frame.entities,
                 spans: frame.entity_spans,
+                motion: frame.entity_motion,
                 atlas: self.hud.atlas_texture.as_ref(),
                 quad_indices: &self.indices,
             });
@@ -9132,20 +9263,30 @@ impl Renderer {
                 .contains(wgpu::TextureUsages::COPY_SRC)
         {
             let device = &self.device;
-            self.post_effects
-                .get_or_insert_with(|| crate::post_chain::PostEffects::new(device))
-                .apply(
-                    &self.device,
-                    &self.queue,
-                    encoder,
-                    target_texture,
-                    view_target,
-                    [self.config.width, self.config.height],
-                    // The scaled world pass drew its own depth buffer.
-                    overlay.world_depth.then_some(&self.depth),
-                    &frame.post_effects,
-                    timing.as_mut(),
-                );
+            let post = self
+                .post_effects
+                .get_or_insert_with(|| crate::post_chain::PostEffects::new(device));
+            // The chains a spectated mob applies compile in the background from the
+            // first frame in a world, not in the frame that first needs one.
+            post.preload(
+                &self.device,
+                &self.queue,
+                frame.post_effects.root,
+                &crate::post_chain::SPECTATOR_CHAINS,
+                target_texture.format(),
+            );
+            post.apply(
+                &self.device,
+                &self.queue,
+                encoder,
+                target_texture,
+                view_target,
+                [self.config.width, self.config.height],
+                // The scaled world pass drew its own depth buffer.
+                overlay.world_depth.then_some(&self.depth),
+                &frame.post_effects,
+                timing.as_mut(),
+            );
         }
         if !frame.screen.is_empty() {
             let attachments = [Some(wgpu::RenderPassColorAttachment {
