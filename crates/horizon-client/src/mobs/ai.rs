@@ -2610,30 +2610,44 @@ fn flower_contact_effects(m: &mut Mob, w: &MobWorld) {
 /// MobEffect ticking for the effects mobs receive (poison, wither,
 /// regeneration), and a content mod's on a server.
 fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
-    let mut effects = std::mem::take(&mut m.extra.effects);
-    for (effect, ticks, amp) in &mut effects {
-        let interval = |base: i32| (base >> (*amp).max(0)).max(1);
+    // LivingEntity.tickEffects ticks each active effect with the mob's list
+    // still in place: the damage a Poison or Wither tick deals reads the
+    // list it finds (Resistance softens the hit, Infested spawns silverfish,
+    // a totem adds its effects to it). An effect a tick appends ticks from
+    // the next tick on.
+    let first = m.extra.effects.len();
+    let mut i = 0;
+    while i < m.extra.effects.len() && i < first {
+        let (effect, amp) = (m.extra.effects[i].0, m.extra.effects[i].2);
         // MobEffectInstance.tickServer: an infinite (-1) effect times its
         // ticks by the mob's tickCount and never counts down.
-        let infinite = *ticks == -1;
-        let count = if infinite { m.age as i32 } else { *ticks };
-        match *effect {
+        let infinite = m.extra.effects[i].1 == -1;
+        let count = if infinite {
+            m.age as i32
+        } else {
+            m.extra.effects[i].1
+        };
+        let interval = |base: i32| (base >> amp.max(0)).max(1);
+        // A refused mod effect is left at 0 ticks for the retain below.
+        let mut expired = false;
+        match effect {
             "minecraft:poison"
                 if count % interval(25) == 0 && !m.kind.flags.undead && m.health > 1.0 =>
             {
                 m.damage(1.0, Damage::of(DamageKind::Magic));
             }
             "minecraft:wither" if count % interval(40) == 0 => {
-                m.damage(1.0, Damage::of(DamageKind::Magic));
+                // WitherMobEffect.applyEffectTick: damageSources().wither().
+                m.damage(1.0, Damage::of(DamageKind::Wither));
             }
             // InstantenousMobEffect: applied on every tick it has time left
             // (`/effect give` keeps the effect listed for its few ticks; the hit
             // frames let a harming one through once).
             "minecraft:instant_damage" | "minecraft:instant_health" if count >= 1 => {
                 m.apply_heal_or_harm(
-                    *effect == "minecraft:instant_damage",
+                    effect == "minecraft:instant_damage",
                     m.kind.flags.undead,
-                    *amp,
+                    amp,
                     1.0,
                 );
             }
@@ -2644,37 +2658,39 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
-                if !infinite && *ticks <= 0 {
+                if !infinite && m.extra.effects[i].1 <= 0 {
+                    i += 1;
                     continue;
                 }
                 if let Some(mods) = mods
-                    && !mods.tick_mod_effect(id, m.id, count, *amp)
+                    && !mods.tick_mod_effect(id, m.id, count, amp)
                 {
                     // Removed before it counts down.
-                    *ticks = 0;
-                    continue;
+                    expired = true;
                 }
             }
             _ => {}
         }
-        if !infinite {
-            *ticks -= 1;
+        if !infinite && m.extra.effects.get(i).is_some_and(|e| e.0 == effect) {
+            let ticks = &mut m.extra.effects[i].1;
+            *ticks = if expired { 0 } else { *ticks - 1 };
         }
+        i += 1;
     }
     // AbsorptionMobEffect.removeAttributeModifiers: the hearts it gave go with it.
-    for (effect, ticks, amp) in &effects {
-        if *effect == "minecraft:absorption" && *ticks <= 0 && *ticks != -1 {
-            m.absorption = (m.absorption - 4.0 * (*amp + 1) as f32).max(0.0);
+    for i in 0..m.extra.effects.len() {
+        let e = m.extra.effects[i];
+        if e.0 == "minecraft:absorption" && e.1 <= 0 && e.1 != -1 {
+            m.absorption = (m.absorption - 4.0 * (e.2 + 1) as f32).max(0.0);
         }
     }
-    effects.retain(|e| e.1 > 0 || e.1 == -1);
+    m.extra.effects.retain(|e| e.1 > 0 || e.1 == -1);
     m.extra
         .hidden_effects
-        .retain(|h| effects.iter().any(|e| e.0 == *h));
+        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
     m.extra
         .ambient_effects
-        .retain(|h| effects.iter().any(|e| e.0 == *h));
-    m.extra.effects = effects;
+        .retain(|h| m.extra.effects.iter().any(|e| e.0 == *h));
 }
 
 /// `Entity.getMovementEmission` is not NONE (silverfish, endermites,
@@ -3007,6 +3023,89 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), 0.01);
         pig.velocity.y = 0.5;
         assert_eq!(pig.effective_gravity(), full);
+    }
+
+    /// `LivingEntity.tickEffects` ticks each effect with the mob's list in
+    /// place: a Poison hit reads Resistance there (0.8 of 1.0 at level I).
+    #[test]
+    fn effect_ticks_find_the_other_effects() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.health = 20.0;
+        pig.extra.effects.push(("minecraft:poison", 25, 0));
+        pig.extra.effects.push(("minecraft:resistance", -1, 0));
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.health, 19.2);
+        // `onMobHurt` finds Infested in the same in-place list: the hurt mob
+        // leaves a silverfish call in the outbox.
+        let mut pig = Mob::new(2, pig_kind.clone(), Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.extra.effects.push(("minecraft:poison", 25, 0));
+        pig.extra.effects.push(("minecraft:infested", -1, 0));
+        tick_effects(&mut pig, None);
+        assert!(
+            pig.outbox
+                .iter()
+                .any(|e| matches!(e, MobEvent::Infested { .. })),
+            "a hurt while infested pushes Infested"
+        );
+    }
+
+    /// `checkTotemDeathProtection` inside a tick's damage adds the totem's
+    /// effects to the live list: they stay on the mob after the tick.
+    #[test]
+    fn a_totem_fired_by_effect_damage_keeps_its_effects() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.extra
+            .set_main_hand(Some("minecraft:totem_of_undying".into()));
+        pig.extra.effects.push(("minecraft:instant_damage", 5, 4));
+        tick_effects(&mut pig, None);
+        assert_eq!(pig.health, 1.0);
+        for effect in [
+            "minecraft:regeneration",
+            "minecraft:absorption",
+            "minecraft:fire_resistance",
+        ] {
+            assert!(
+                pig.extra.effects.iter().any(|e| e.0 == effect && e.1 > 0),
+                "{effect} kept after the totem fired"
+            );
+        }
+    }
+
+    /// `WitherMobEffect.applyEffectTick` hurts with `wither`, not `magic`:
+    /// the damage the tick deals keeps its kind.
+    #[test]
+    fn the_wither_effect_hurts_with_wither() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("entity-types.json").exists() {
+            return;
+        }
+        let data = MobTypes::load(&root).unwrap();
+        let pig_kind = Arc::new(data.types.get("minecraft:pig").unwrap().clone());
+        let mut pig = Mob::new(1, pig_kind, Vec3::new(0.0, 4.0, 0.0), 0.0);
+        pig.extra.effects.push(("minecraft:wither", 40, 0));
+        tick_effects(&mut pig, None);
+        assert_eq!(
+            pig.last_damage.map(|(d, _)| d.kind),
+            Some(DamageKind::Wither)
+        );
     }
 }
 
