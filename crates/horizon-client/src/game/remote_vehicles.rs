@@ -561,7 +561,7 @@ mod tests {
             return;
         };
         assert!(!client_moves(&m, true), "ghast without a harness");
-        m.extra.head = Some("minecraft:white_happy_ghast_harness".into());
+        m.extra.body = Some("minecraft:white_happy_ghast_harness".into());
         assert!(client_moves(&m, true), "harnessed adult");
         assert!(!client_moves(&m, false), "behind another rider");
         m.extra.age = -1;

@@ -49,6 +49,74 @@ struct Rope {
     /// `getQuadLeashOffsets`, when the entity supports a quad lead.
     quad: Option<[[f64; 3]; 4]>,
 }
+/// Whether a mob's lead is held by `acting` (`getLeashHolder() == player`).
+fn held_by_acting_player(
+    leash: Option<Holder>,
+    leash_player: Option<[i32; 4]>,
+    acting: [i32; 4],
+) -> bool {
+    leash == Some(Holder::Player) && leash_player.is_none_or(|p| p == acting)
+}
+
+/// Resolve a `Pending` leash holder loaded from NBT.
+fn resolve_pending_leash(
+    pending: Pending,
+    player_uuid: [i32; 4],
+    owner_uuid: Option<[i32; 4]>,
+    is_guest: impl FnOnce([i32; 4]) -> bool,
+    mob_by_uuid: impl FnOnce([i32; 4]) -> Option<u32>,
+    boat_by_uuid: impl FnOnce([i32; 4]) -> Option<u32>,
+) -> Option<(Holder, Option<[i32; 4]>)> {
+    match pending {
+        Pending::Knot(p) => Some((Holder::Knot(p), None)),
+        Pending::Uuid(u) if is_guest(u) || owner_uuid == Some(u) => Some((Holder::Player, Some(u))),
+        // Old integrated worlds wrote offline_uuid("Player") for every holder.
+        // Only that known sentinel can be mapped to the integrated owner; a
+        // different level player UUID may belong to somebody else. Old guest
+        // leashes lost their real UUID, so this owner recovery is best effort.
+        Pending::Uuid(u)
+            if u == player_uuid
+                && u == horizon_client::lan::playerdata::uuid_ints(
+                    horizon_protocol::crypto::offline_uuid("Player"),
+                )
+                && owner_uuid.is_some() =>
+        {
+            Some((Holder::Player, owner_uuid))
+        }
+        Pending::Uuid(u) => mob_by_uuid(u)
+            .map(|id| (Holder::Mob(id), None))
+            .or_else(|| boat_by_uuid(u).map(|id| (Holder::Boat(id), None))),
+    }
+}
+
+/// Write a mob's `leash` NBT entry into `tag`.
+fn write_mob_leash_tag(
+    tag: &mut Tag,
+    holder: Option<Holder>,
+    pending: Option<Pending>,
+    leash_player: Option<[i32; 4]>,
+    level_player_uuid: Option<[i32; 4]>,
+    mob_uuid: impl FnOnce(u32) -> [i32; 4],
+) {
+    let Tag::Compound(map) = tag else { return };
+    map.remove(&"leash".into());
+    let uuid = match (holder, pending) {
+        (Some(Holder::Player), _) => leash_player.or(level_player_uuid).or(Some([0, 0, 0, 1])),
+        (Some(Holder::Mob(id) | Holder::Boat(id)), _) => Some(mob_uuid(id)),
+        (_, Some(Pending::Uuid(u))) => Some(u),
+        _ => None,
+    };
+    let value = match (holder, pending) {
+        (Some(h), _) => leash::to_nbt(h, uuid),
+        (None, Some(Pending::Knot(p))) => leash::to_nbt(Holder::Knot(p), None),
+        (None, Some(Pending::Uuid(u))) => leash::to_nbt(Holder::Player, Some(u)),
+        _ => None,
+    };
+    if let Some(v) = value {
+        map.insert("leash".into(), v);
+    }
+}
+
 impl Game<'_> {
     pub(super) fn lead_sound(&mut self, sound: &str, at: [f64; 3]) {
         self.audio
@@ -112,8 +180,7 @@ impl Game<'_> {
         (0..self.mobs.len())
             .filter(|&i| {
                 let m = &self.mobs[i];
-                m.extra.leash == Some(Holder::Player)
-                    && m.extra.leash_player.is_none_or(|p| p == acting)
+                held_by_acting_player(m.extra.leash, m.extra.leash_player, acting)
                     && (m.position.x - around.x).abs() <= 16.0
                     && (m.position.y - around.y).abs() <= 16.0
                     && (m.position.z - around.z).abs() <= 16.0
@@ -202,22 +269,35 @@ impl Game<'_> {
                 .retain(|id, (_, at)| *at != dim || mobs.iter().any(|m| m.id == *id && !m.removed));
         }
         let player_uuid = self.level.player_uuid.unwrap_or([0, 0, 0, 1]);
+        let owner_uuid = self
+            .serving
+            .as_ref()
+            .map(|s| s.owner)
+            .or_else(|| self.lan.as_ref().and_then(|h| h.hub.singleplayer_owner))
+            .map(horizon_client::lan::playerdata::uuid_ints);
         for i in 0..self.mobs.len() {
             let Some(pending) = self.mobs[i].extra.leash_pending else {
                 continue;
             };
-            let holder = match pending {
-                Pending::Knot(p) => Some(Holder::Knot(p)),
-                Pending::Uuid(u) if u == player_uuid => Some(Holder::Player),
-                Pending::Uuid(u) => self
-                    .mob_by_uuid(u)
-                    .map(Holder::Mob)
-                    .or_else(|| self.boat_by_uuid(u).map(Holder::Boat)),
-            };
+            let holder = resolve_pending_leash(
+                pending,
+                player_uuid,
+                owner_uuid,
+                |u| {
+                    self.lan.as_ref().is_some_and(|h| {
+                        h.hub
+                            .guests
+                            .iter()
+                            .any(|g| horizon_client::lan::playerdata::uuid_ints(g.uuid) == u)
+                    })
+                },
+                |u| self.mob_by_uuid(u),
+                |u| self.boat_by_uuid(u),
+            );
             let m = &mut self.mobs[i];
-            if let Some(h) = holder {
+            if let Some((h, player)) = holder {
                 if h == Holder::Player {
-                    m.extra.leash_player = Some(player_uuid);
+                    m.extra.leash_player = player;
                 }
                 m.extra.leash = Some(h);
                 m.extra.leash_pending = None;
@@ -230,26 +310,18 @@ impl Game<'_> {
     }
     /// The `leash` tag of a mob about to be saved.
     pub(super) fn write_leash(&mut self, tag: &mut Tag, index: usize) {
-        let Tag::Compound(map) = tag else { return };
-        map.remove(&"leash".into());
         let m = &self.mobs[index];
-        let holder = m.extra.leash;
-        let pending = m.extra.leash_pending;
-        let uuid = match (holder, pending) {
-            (Some(Holder::Player), _) => Some(self.level.player_uuid.unwrap_or([0, 0, 0, 1])),
-            (Some(Holder::Mob(id) | Holder::Boat(id)), _) => Some(self.mob_uuid(id)),
-            (_, Some(Pending::Uuid(u))) => Some(u),
-            _ => None,
-        };
-        let value = match (holder, pending) {
-            (Some(h), _) => leash::to_nbt(h, uuid),
-            (None, Some(Pending::Knot(p))) => leash::to_nbt(Holder::Knot(p), None),
-            (None, Some(Pending::Uuid(u))) => leash::to_nbt(Holder::Player, Some(u)),
-            _ => None,
-        };
-        if let Some(v) = value {
-            map.insert("leash".into(), v);
-        }
+        let (holder, pending, leash_player) =
+            (m.extra.leash, m.extra.leash_pending, m.extra.leash_player);
+        let level_player_uuid = self.level.player_uuid;
+        write_mob_leash_tag(
+            tag,
+            holder,
+            pending,
+            leash_player,
+            level_player_uuid,
+            |id| self.mob_uuid(id),
+        );
     }
     /// `Entity.interact`'s leash part for a mob. Returns whether it was used.
     pub(super) fn interact_leash(&mut self, index: usize, item: &str) -> bool {
@@ -303,12 +375,12 @@ impl Game<'_> {
         }
         // Mob.checkAndHandleImportantInteractions: only the player the lead
         // is tied to unties it (`getLeashHolder() == player`).
-        if self.mobs[index].extra.leash == Some(Holder::Player)
-            && self.mobs[index]
-                .extra
-                .leash_player
-                .is_none_or(|p| p == self.acting_player_uuid())
-        {
+        let acting = self.acting_player_uuid();
+        if held_by_acting_player(
+            self.mobs[index].extra.leash,
+            self.mobs[index].extra.leash_player,
+            acting,
+        ) {
             let creative = self.creative;
             self.break_leash_used(id, !creative);
             self.lead_game_event("minecraft:entity_interact", at);
@@ -666,7 +738,12 @@ impl Game<'_> {
 
 #[cfg(test)]
 mod rope_hold_tests {
-    use super::rope_hold_angles;
+    use super::{
+        Holder, Pending, Tag, held_by_acting_player, leash, resolve_pending_leash,
+        rope_hold_angles, write_mob_leash_tag,
+    };
+    use horizon_client::lan::playerdata::uuid_ints;
+    use horizon_protocol::crypto::offline_uuid;
 
     #[test]
     fn rope_hold_angles_lerp_by_half_the_partial_tick() {
@@ -676,5 +753,118 @@ mod rope_hold_tests {
         assert!((x - 10.0_f64.to_radians()).abs() < 1e-6);
         let (y, _) = rope_hold_angles((90.0, 20.0), (50.0, 0.0), 0.0);
         assert!((y - 90.0_f64.to_radians()).abs() < 1e-6);
+    }
+
+    #[test]
+    fn player_leash_survives_save_and_reopen_for_owner_and_guest() {
+        // Integrated servers initialize `level.player_uuid` to `offline_uuid("Player")`,
+        // while the single-player owner joins `hub.guests` under their actual profile UUID.
+        let level_player_uuid = uuid_ints(offline_uuid("Player"));
+        let owner_uuid = uuid_ints(offline_uuid("Player46606"));
+        let guest_uuid = uuid_ints(offline_uuid("Alex"));
+
+        for acting in [owner_uuid, guest_uuid] {
+            let mut tag = Tag::Compound(Default::default());
+            write_mob_leash_tag(
+                &mut tag,
+                Some(Holder::Player),
+                None,
+                Some(acting),
+                Some(level_player_uuid),
+                |_| [0; 4],
+            );
+            let pending = leash::pending_from_nbt(tag.get("leash")).expect("saved leash tag");
+            assert_eq!(pending, Pending::Uuid(acting));
+
+            let (holder, restored_player) = resolve_pending_leash(
+                pending,
+                level_player_uuid,
+                Some(owner_uuid),
+                |u| u == owner_uuid || u == guest_uuid,
+                |_| None,
+                |_| None,
+            )
+            .expect("restored player leash");
+            assert_eq!(holder, Holder::Player);
+            assert_eq!(restored_player, Some(acting));
+            assert!(held_by_acting_player(Some(holder), restored_player, acting));
+            let other = if acting == owner_uuid {
+                guest_uuid
+            } else {
+                owner_uuid
+            };
+            assert!(!held_by_acting_player(Some(holder), restored_player, other));
+        }
+    }
+
+    #[test]
+    fn legacy_singleplayer_uuid_leash_restores_to_integrated_owner() {
+        let level_player_uuid = uuid_ints(offline_uuid("Player"));
+        let owner_uuid = uuid_ints(offline_uuid("Player46606"));
+
+        let (holder, restored_player) = resolve_pending_leash(
+            Pending::Uuid(level_player_uuid),
+            level_player_uuid,
+            Some(owner_uuid),
+            |_| false,
+            |_| None,
+            |_| None,
+        )
+        .expect("restored legacy singleplayer leash");
+        assert_eq!(holder, Holder::Player);
+        assert_eq!(restored_player, Some(owner_uuid));
+        assert!(held_by_acting_player(
+            Some(holder),
+            restored_player,
+            owner_uuid
+        ));
+    }
+
+    #[test]
+    fn an_absent_players_uuid_is_not_reassigned_to_the_owner() {
+        let owner = uuid_ints(offline_uuid("LeashOwner"));
+        let absent = uuid_ints(offline_uuid("Alex"));
+        // Even an imported world's player UUID is not evidence of ownership.
+        for level in [uuid_ints(offline_uuid("Player")), absent] {
+            assert!(
+                resolve_pending_leash(
+                    Pending::Uuid(absent),
+                    level,
+                    Some(owner),
+                    |_| false,
+                    |_| None,
+                    |_| None,
+                )
+                .is_none()
+            );
+        }
+        // An entity with that UUID still resolves as an entity, not the owner.
+        assert_eq!(
+            resolve_pending_leash(
+                Pending::Uuid(absent),
+                absent,
+                Some(owner),
+                |_| false,
+                |u| (u == absent).then_some(17),
+                |_| None,
+            ),
+            Some((Holder::Mob(17), None))
+        );
+    }
+
+    #[test]
+    fn legacy_player_uuid_without_an_integrated_owner_stays_pending() {
+        let legacy = uuid_ints(offline_uuid("Player"));
+        assert!(
+            resolve_pending_leash(
+                Pending::Uuid(legacy),
+                legacy,
+                None,
+                |_| false,
+                |_| None,
+                |_| None,
+            )
+            .is_none()
+        );
     }
 }

@@ -15,6 +15,8 @@ use super::{
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
 use horizon_client::entity_rules::EntityRules;
+use horizon_client::join_seq::JoinSeq;
+use horizon_client::join_seq::Joined as _;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
@@ -352,7 +354,7 @@ macro_rules! define_entity_handles {
         }
 
         /// One entity, by list and index.
-        #[derive(Clone, Copy, Hash, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
         pub(super) enum EntityHandle {
             $($kind(usize),)*
         }
@@ -360,7 +362,43 @@ macro_rules! define_entity_handles {
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
         /// world stays readable while the entities change.
         pub(super) struct TakenEntities {
-            $(pub(super) $field: Vec<$ty>,)*
+            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty>,)*
+        }
+
+
+        impl EntityLists<'_> {
+            /// Visits every entity once, in the order they joined, whatever the
+            /// kind: a merge of the lists, each already in join order, by a
+            /// cursor per list. Static dispatch and nothing allocated. Checked:
+            /// a list out of join order, or an entity that never joined, stops
+            /// the walk with the entity at fault.
+            #[allow(dead_code)] // read by the tick order slices that follow
+            pub(super) fn walk_in_join_order(
+                self,
+                visit: impl FnMut(EntityHandle, JoinSeq),
+            ) -> Result<(), JoinOrderError> {
+                let lens = [$(self.$field.len()),*];
+                merge_in_join_order(
+                    lens,
+                    |kind, i| {
+                        let mut at = 0;
+                        $(if kind == at {
+                            return self.$field[i].join_seq();
+                        } at += 1;)*
+                        let _ = at;
+                        unreachable!("kind {kind} is not a list")
+                    },
+                    |kind, i| {
+                        let mut at = 0;
+                        $(if kind == at {
+                            return EntityHandle::$kind(i);
+                        } at += 1;)*
+                        let _ = at;
+                        unreachable!("kind {kind} is not a list")
+                    },
+                    visit,
+                )
+            }
         }
 
         impl Game<'_> {
@@ -400,7 +438,59 @@ macro_rules! define_entity_handles {
 }
 pub(crate) use define_entity_handles;
 
+/// Why [`EntityLists::walk_in_join_order`] stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // read by the tick order slices that follow
+pub(super) enum JoinOrderError {
+    /// Never put in its list through the list's own `push`, so it has no
+    /// join number.
+    Unjoined(EntityHandle),
+    /// Joined before an entity the walk had already visited: its list is out
+    /// of join order.
+    OutOfOrder(EntityHandle),
+}
+
+/// The merge behind the join-order walk, over `N` lists: `lens` are their
+/// lengths, `seq(list, i)` the join number of entity `i` of a list, `handle`
+/// names it. Each step takes the lowest next number among the `N` cursors
+/// (a stack array; no allocation).
+#[allow(dead_code)] // read by the tick order slices that follow
+fn merge_in_join_order<const N: usize>(
+    lens: [usize; N],
+    seq: impl Fn(usize, usize) -> JoinSeq,
+    handle: impl Fn(usize, usize) -> EntityHandle,
+    mut visit: impl FnMut(EntityHandle, JoinSeq),
+) -> Result<(), JoinOrderError> {
+    let mut cursor = [0usize; N];
+    let mut last = JoinSeq::UNJOINED;
+    loop {
+        let mut best: Option<(usize, JoinSeq)> = None;
+        for list in 0..N {
+            if cursor[list] < lens[list] {
+                let s = seq(list, cursor[list]);
+                if !s.is_joined() {
+                    return Err(JoinOrderError::Unjoined(handle(list, cursor[list])));
+                }
+                if best.is_none_or(|(_, b)| s < b) {
+                    best = Some((list, s));
+                }
+            }
+        }
+        let Some((list, s)) = best else {
+            return Ok(());
+        };
+        let h = handle(list, cursor[list]);
+        if s <= last {
+            return Err(JoinOrderError::OutOfOrder(h));
+        }
+        last = s;
+        cursor[list] += 1;
+        visit(h, s);
+    }
+}
+
 entity_lists!(define_entity_handles,);
+horizon_client::impl_joined!(FallingBlock);
 
 macro_rules! entity_borrow {
     (shared, $place:expr) => {
@@ -499,7 +589,10 @@ macro_rules! save_lists {
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         $(for i in 0..$game$(.$list)+.len() {
             if let Some((key, tag)) = <$ty as $crate::game::entity::Entity>::save_nbt($game, i, $keys) {
-                $out.entry(key).or_default().push(tag);
+                $out.entry(key).or_default().push((
+                    $game$(.$list)+[i].join_seq(),
+                    tag,
+                ));
             }
         })*
     };
@@ -507,6 +600,7 @@ macro_rules! save_lists {
 pub(crate) use save_lists;
 
 /// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
+/// each with its join number (`$out` maps a chunk to `(JoinSeq, Tag)` pairs),
 /// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
 /// nothing allocated beyond the tags. A kind added to the lists cannot be left
 /// out, since `save_nbt` has no default.
@@ -572,7 +666,16 @@ impl Game<'_> {
         keys: &HashSet<ChunkKey>,
         out: &mut HashMap<ChunkKey, Vec<Tag>>,
     ) {
-        save_entities_of_every_kind!(self, keys, out);
+        // Saved by chunk in the order they joined, so a reload adds them in
+        // that order (a chunk's entity list is in insertion order in vanilla).
+        let mut staged: HashMap<ChunkKey, Vec<(JoinSeq, Tag)>> = HashMap::new();
+        save_entities_of_every_kind!(self, keys, staged);
+        for (key, mut tags) in staged {
+            tags.sort_by_key(|(seq, _)| *seq);
+            out.entry(key)
+                .or_default()
+                .extend(tags.into_iter().map(|(_, tag)| tag));
+        }
     }
 }
 
@@ -1422,5 +1525,138 @@ mod trident_selector_tests {
     fn a_thrown_trident_is_a_selector_target() {
         let t = ThrownTrident::remote(9, Vec3::new(0.5, 100.0, 0.5), 0.0, 0.0);
         assert_eq!(t.selector_target(), Some(Target::Trident(9)));
+    }
+}
+
+#[cfg(test)]
+mod join_order_tests {
+    use super::{EntityHandle, EntityLists, JoinOrderError};
+    use crate::game::{boats::Boat, fireworks::Rocket, trident::ThrownTrident};
+    use horizon_client::entities::ArmorStand;
+    use horizon_client::join_seq::JoinList;
+    use horizon_core::geometry::Vec3;
+
+    fn at() -> Vec3 {
+        Vec3::new(0.5, 100.0, 0.5)
+    }
+
+    struct Lists {
+        stands: JoinList<ArmorStand>,
+        tridents: JoinList<ThrownTrident>,
+        rockets: JoinList<Rocket>,
+        boats: JoinList<Boat>,
+    }
+
+    impl Lists {
+        fn view(&self) -> EntityLists<'_> {
+            EntityLists {
+                mobs: &[],
+                dropped: &[],
+                boats: &self.boats,
+                carts: &[],
+                armor_stands: &self.stands,
+                tnts: &[],
+                falling: &[],
+                orbs: &[],
+                projectiles: &[],
+                rockets: &self.rockets,
+                tridents: &self.tridents,
+            }
+        }
+        fn walk(&self) -> Result<Vec<EntityHandle>, JoinOrderError> {
+            let mut seen = Vec::new();
+            self.view().walk_in_join_order(|h, _| seen.push(h))?;
+            Ok(seen)
+        }
+    }
+
+    /// Joins five kinds' entities interleaved, the way a level gets them.
+    fn mixed() -> (Lists, Vec<EntityHandle>) {
+        let mut l = Lists {
+            stands: JoinList::default(),
+            tridents: JoinList::default(),
+            rockets: JoinList::default(),
+            boats: JoinList::default(),
+        };
+        l.trident(1);
+        l.rocket(2);
+        l.stand(3);
+        l.boat(4);
+        l.trident(5);
+        l.stand(6);
+        l.rocket(7);
+        let joined = vec![
+            EntityHandle::Trident(0),
+            EntityHandle::Rocket(0),
+            EntityHandle::ArmorStand(0),
+            EntityHandle::Boat(0),
+            EntityHandle::Trident(1),
+            EntityHandle::ArmorStand(1),
+            EntityHandle::Rocket(1),
+        ];
+        (l, joined)
+    }
+
+    impl Lists {
+        fn stand(&mut self, id: u32) {
+            self.stands.push(ArmorStand::new(id, at(), 0.0));
+        }
+        fn trident(&mut self, id: u32) {
+            self.tridents
+                .push(ThrownTrident::remote(id, at(), 0.0, 0.0));
+        }
+        fn rocket(&mut self, id: u32) {
+            self.rockets.push(Rocket::remote(id, at(), Vec3::ZERO));
+        }
+        fn boat(&mut self, id: u32) {
+            self.boats.push(Boat::new(id, "oak".into(), at(), 0.0));
+        }
+    }
+
+    /// The walk visits entities in the order they joined, not list by list.
+    #[test]
+    fn mixed_kinds_are_visited_in_join_order() {
+        let (lists, joined) = mixed();
+        assert_eq!(lists.walk().unwrap(), joined);
+        // Walked list by list they would come in another order.
+        assert_ne!(joined[0], EntityHandle::ArmorStand(0));
+    }
+
+    /// An entity taken out and put back (a tick takes its list) keeps its place.
+    #[test]
+    fn an_entity_put_back_keeps_its_join_number() {
+        let (mut lists, joined) = mixed();
+        let taken = std::mem::take(&mut lists.tridents);
+        let before: Vec<_> = taken
+            .iter()
+            .map(horizon_client::join_seq::Joined::join_seq)
+            .collect();
+        let mut back = JoinList::default();
+        for t in taken {
+            back.push(t);
+        }
+        lists.tridents = back;
+        let after: Vec<_> = lists
+            .tridents
+            .iter()
+            .map(horizon_client::join_seq::Joined::join_seq)
+            .collect();
+        assert_eq!(before, after);
+        assert_eq!(lists.walk().unwrap(), joined);
+    }
+
+    /// The walk is checked: a list out of join order, or an entity that never
+    /// went through the list's `push`, is reported and not walked past.
+    #[test]
+    fn the_walk_reports_a_list_out_of_order_and_an_entity_that_never_joined() {
+        let (mut lists, _) = mixed();
+        lists.tridents.swap(0, 1);
+        assert!(matches!(lists.walk(), Err(JoinOrderError::OutOfOrder(_))));
+        let (mut lists, _) = mixed();
+        Vec::push(&mut lists.stands, ArmorStand::new(9, at(), 0.0));
+        assert_eq!(
+            lists.walk(),
+            Err(JoinOrderError::Unjoined(EntityHandle::ArmorStand(2)))
+        );
     }
 }

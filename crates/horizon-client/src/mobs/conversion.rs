@@ -45,6 +45,7 @@ pub fn single(from: &Mob, to: &mut Mob, params: Params) {
         }
         to.extra.off_hand = from.extra.off_hand.clone();
         to.extra.head = from.extra.head.clone();
+        to.extra.body = from.extra.body.clone();
         to.extra.chest = from.extra.chest.clone();
         to.extra.legs = from.extra.legs.clone();
         to.extra.feet = from.extra.feet.clone();

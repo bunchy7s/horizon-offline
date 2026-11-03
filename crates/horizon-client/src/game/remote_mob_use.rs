@@ -53,7 +53,7 @@ impl Game<'_> {
             // Pig / Strider.mobInteract: a saddled one is ridden.
             Species::Pig | Species::Strider => m.extra.saddled && !sneaking,
             // HappyGhast.mobInteract: a harnessed adult is ridden.
-            Species::HappyGhast => !baby && m.extra.head.is_some(),
+            Species::HappyGhast => !baby && m.extra.body.is_some(),
             // TamableAnimal (wolf, cat, parrot) on a client: CONSUME once tame.
             Species::Wolf | Species::Cat | Species::Parrot => m.extra.tame,
             // Allay.mobInteract: gives an item or takes it back.

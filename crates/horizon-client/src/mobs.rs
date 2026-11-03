@@ -932,7 +932,7 @@ pub struct Extra {
     /// `Mob.canPickUpLoot` (also lets dispensers equip it).
     pub pick_up_loot: bool,
     pub saddled: bool,
-    /// The durability a wolf's body armor (`extra.head`) has lost.
+    /// The durability a wolf's body armor (`extra.body`) has lost.
     pub body_damage: i32,
     /// The components (dye, name...) of that armor stack.
     pub body_extra: Option<Box<crate::item_data::StackData>>,
@@ -976,7 +976,11 @@ pub struct Extra {
     /// Components of the current held stack; setters clear these on replacement.
     main_hand_stack: Option<crate::items::ItemStack>,
     pub off_hand: Option<Arc<str>>,
+    /// The head item (`getItemBySlot(HEAD)`), on every mob.
     pub head: Option<Arc<str>>,
+    /// The body item (`getItemBySlot(BODY)`): a horse's armour, a llama's
+    /// carpet, a wolf's armour, a harness, a sulfur cube's swallowed block.
+    pub body: Option<Arc<str>>,
     /// Worn armour below the head (humanoid mobs).
     pub chest: Option<Arc<str>>,
     pub legs: Option<Arc<str>>,
@@ -1175,6 +1179,8 @@ impl Extra {
 
 #[derive(Clone, Debug)]
 pub struct Mob {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub kind: Arc<MobType>,
     pub position: Vec3,
@@ -2181,9 +2187,6 @@ impl Mob {
     pub fn equipment_stacks(&self) -> [Option<crate::items::ItemStack>; 8] {
         use crate::items::ItemStack;
         let e = &self.extra;
-        // A horse's armour, a llama's carpet, a harness: Horizon keeps the body
-        // slot's item (6) in `head`.
-        let body = drops::head_is_body(self.species());
         let wolf = self.species() == Species::Wolf;
         let slots = [
             (0usize, &e.main_hand, e.main_hand_stack()),
@@ -2191,12 +2194,10 @@ impl Mob {
             (2, &e.feet, e.armor[3].as_ref()),
             (3, &e.legs, e.armor[2].as_ref()),
             (4, &e.chest, e.armor[1].as_ref()),
-            // The body slot's item is no worn armour.
-            (
-                if body { 6 } else { 5 },
-                &e.head,
-                e.armor[0].as_ref().filter(|_| !body),
-            ),
+            // The body slot's item is no worn armour: a horse's armour, a
+            // llama's carpet, a harness go out on their own (6).
+            (5usize, &e.head, e.armor[0].as_ref()),
+            (6, &e.body, None),
         ];
         let mut out: [Option<ItemStack>; 8] = Default::default();
         for (slot, item, worn) in slots {
@@ -2694,6 +2695,7 @@ impl Mob {
         );
         let _ = random.next_int();
         let mut mob = Self {
+            join: Default::default(),
             id,
             health: kind.max_health,
             position,
@@ -2792,6 +2794,11 @@ impl Mob {
                 | Species::Fox
                 | Species::Panda
         );
+        // Salmon.defineSynchedData: DATA_TYPE starts at Variant.DEFAULT (MEDIUM,
+        // id 1), so a salmon finalizeSpawn never sized keeps the type's box.
+        if mob.species() == Species::Salmon {
+            mob.extra.variant = 1;
+        }
         // The PathNavigation constructor: the base follow range.
         mob.ai.nav.max_visited_nodes = (mob.kind.follow_range * 16.0).floor() as i32;
         ai::register(&mut mob);
@@ -2863,12 +2870,12 @@ impl Mob {
     /// the last-hurt-by bookkeeping goals read.
     /// The `armor` and `armor_toughness` modifiers of worn humanoid armour.
     pub fn worn_armor(&self) -> (f32, f32) {
-        // An equine keeps its horse armor in `extra.head`: the item's `armor`
+        // An equine keeps its horse armor in `extra.body`: the item's `armor`
         // and `armor_toughness` modifiers of the body slot.
         if equine::is_equine(self.species()) {
             return self
                 .extra
-                .head
+                .body
                 .as_deref()
                 .map_or((0.0, 0.0), spawning::horse_armor_stats);
         }
@@ -3086,11 +3093,10 @@ impl Mob {
         // it hands `doHurtEquipment` the body slot alone. A wolf's armour has
         // its own rule (`Wolf.actuallyHurt`, `hurt_wolf_armor`) and a player's
         // four pieces theirs, so the other "body slot" species — donkey, mule,
-        // llama, camel, the skeleton and zombie horses — wear nothing, whatever
-        // `drops::head_is_body` says about where the item lives.
+        // llama, camel, the skeleton and zombie horses — wear nothing.
         if let Some(damage) = armor_hit
             && self.species() == Species::Horse
-            && self.extra.head.is_some()
+            && self.extra.body.is_some()
         {
             self.outbox.push(MobEvent::ArmorHurt {
                 mob: self.id,
@@ -3193,7 +3199,7 @@ impl Mob {
     /// the world and the untyped kills).
     fn wolf_armor_absorbs(&self, source: &Damage) -> bool {
         self.species() == Species::Wolf
-            && self.extra.head.as_deref() == Some("minecraft:wolf_armor")
+            && self.extra.body.as_deref() == Some("minecraft:wolf_armor")
             && !matches!(
                 source.kind,
                 DamageKind::Drown
@@ -3221,7 +3227,7 @@ impl Mob {
         let after = before + damage.ceil() as i32;
         let at = [self.position.x, self.position.y, self.position.z];
         if after >= WOLF_ARMOR_DURABILITY {
-            self.extra.head = None;
+            self.extra.body = None;
             self.extra.body_damage = 0;
             self.extra.body_extra = None;
             self.outbox
@@ -4666,7 +4672,7 @@ mod armor_hurt_tests {
             from: None,
         };
         let mut m = horse();
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         assert!(m.damage(6.0, hit), "the hit landed");
         let owed = m.outbox.iter().find_map(|e| match e {
             MobEvent::ArmorHurt { amount, .. } => Some(*amount),
@@ -4691,12 +4697,11 @@ mod armor_hurt_tests {
     /// base one is empty, `LivingEntity.java:1887`), so a donkey wearing a body
     /// item — `/item replace entity @e[type=minecraft:donkey,limit=1]
     /// armor.body with minecraft:wolf_armor` — wears nothing, even though
-    /// `drops::head_is_body` stores a donkey's body item in the slot a horse's
-    /// goes in.
+    /// vanilla only gives a horse's body piece the wear.
     #[test]
     fn a_donkey_wearing_a_body_item_wears_nothing() {
         let mut donkey = mob("minecraft:donkey", Species::Donkey);
-        donkey.extra.head = Some("minecraft:wolf_armor".into());
+        donkey.extra.body = Some("minecraft:wolf_armor".into());
         assert!(
             donkey.damage(6.0, Damage::of(DamageKind::MobAttack)),
             "the hit landed"
@@ -4710,13 +4715,50 @@ mod armor_hurt_tests {
         );
     }
 
+    /// Vanilla holds a head item and a body item at once on the mobs with a
+    /// body slot (`LivingEntity.setItemSlot` over `EntityEquipment`): the
+    /// packet keeps the helmet on 5 and the armour on 6, `/item` reads each
+    /// back, and the armour value is the body piece's.
+    #[test]
+    fn a_horse_holds_a_helmet_and_its_body_armour_at_once() {
+        use horizon_world::player_inventory::EquipmentSlot;
+        let mut m = horse();
+        m.extra.head = Some("minecraft:iron_helmet".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
+        let gear = m.equipment_stacks();
+        assert_eq!(
+            gear[5].as_ref().map(|s| s.item.as_ref().to_owned()),
+            Some("minecraft:iron_helmet".to_owned())
+        );
+        assert_eq!(
+            gear[6].as_ref().map(|s| s.item.as_ref().to_owned()),
+            Some("minecraft:diamond_horse_armor".to_owned())
+        );
+        let slot = |s| m.item_by_slot(s).map(|i| i.item.as_ref().to_owned());
+        assert_eq!(
+            slot(EquipmentSlot::Head),
+            Some("minecraft:iron_helmet".to_owned())
+        );
+        assert_eq!(
+            slot(EquipmentSlot::Body),
+            Some("minecraft:diamond_horse_armor".to_owned())
+        );
+        let (armor, _) = m.worn_armor();
+        assert!(armor > 0.0, "the body piece armors the horse");
+        // Death keeps both (`Mob.dropCustomDeathLoot` by slot).
+        let body = crate::mobs::drops::slot_item(&m, "body").unwrap();
+        let head = crate::mobs::drops::slot_item(&m, "head").unwrap();
+        assert_eq!(body.item, "minecraft:diamond_horse_armor");
+        assert_eq!(head.item, "minecraft:iron_helmet");
+    }
+
     /// `getDamageAfterArmorAbsorb` asks `hurtArmor` only when the damage type
     /// is not in `#bypasses_armor` (`LivingEntity.java:1907-1909`), so a horse
     /// that falls keeps its body piece whole.
     #[test]
     fn a_fall_does_not_wear_the_body_piece() {
         let mut m = horse();
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         assert!(
             m.damage(6.0, Damage::of(DamageKind::Fall)),
             "the fall landed"
@@ -4738,7 +4780,7 @@ mod armor_hurt_tests {
         let mut m = horse();
         let k = Arc::make_mut(&mut m.kind);
         k.armor = 20.0;
-        m.extra.head = Some("minecraft:diamond_horse_armor".into());
+        m.extra.body = Some("minecraft:diamond_horse_armor".into());
         let before = m.health;
         assert!(m.damage(8.0, Damage::of(DamageKind::MobAttack)));
         assert!(m.health < before, "the hit reached the health");
@@ -4830,3 +4872,4 @@ mod totem_tests {
         );
     }
 }
+crate::impl_joined!(Mob);

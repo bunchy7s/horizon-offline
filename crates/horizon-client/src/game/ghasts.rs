@@ -66,10 +66,10 @@ impl Game<'_> {
         }
         let at = m.center();
         let sneaking = self.keys.contains(&winit::keyboard::KeyCode::ShiftLeft);
-        let harnessed = m.extra.head.is_some();
+        let harnessed = m.extra.body.is_some();
         // Equippable.equipOnInteract: a harness goes on a bare adult.
         if item.ends_with("_harness") && item.starts_with("minecraft:") && !harnessed {
-            self.mobs[index].extra.head = Some(item.into());
+            self.mobs[index].extra.body = Some(item.into());
             self.audio
                 .play("minecraft:entity.happy_ghast.equip", Some(at), 1.0, 1.0);
             self.consume_held();
@@ -79,7 +79,7 @@ impl Game<'_> {
         if item == "minecraft:shears"
             && harnessed
             && !sneaking
-            && let Some(harness) = self.mobs[index].extra.head.take()
+            && let Some(harness) = self.mobs[index].extra.body.take()
         {
             self.audio
                 .play("minecraft:entity.happy_ghast.unequip", Some(at), 1.0, 1.0);

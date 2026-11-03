@@ -202,7 +202,8 @@ impl Game<'_> {
                 let item = match *key {
                     "mainhand" => &m.extra.main_hand,
                     "offhand" => &m.extra.off_hand,
-                    "head" | "body" => &m.extra.head,
+                    "head" => &m.extra.head,
+                    "body" => &m.extra.body,
                     "chest" => &m.extra.chest,
                     "legs" => &m.extra.legs,
                     "feet" => &m.extra.feet,
@@ -284,9 +285,8 @@ impl Game<'_> {
                 let item = stack.as_ref().map(|s| s.item.clone());
                 // The worn armour stack goes with the id: a kept stack of the
                 // previous piece would otherwise still be what the mob wears.
-                let body = horizon_client::mobs::drops::head_is_body(m.species());
                 let worn = match *key {
-                    "head" if !body => Some(0),
+                    "head" => Some(0),
                     "chest" => Some(1),
                     "legs" => Some(2),
                     "feet" => Some(3),
@@ -298,7 +298,8 @@ impl Game<'_> {
                 match *key {
                     "mainhand" => m.extra.set_main_hand_stack(stack),
                     "offhand" => m.extra.off_hand = item,
-                    "head" | "body" => m.extra.head = item,
+                    "head" => m.extra.head = item,
+                    "body" => m.extra.body = item,
                     "chest" => m.extra.chest = item,
                     "legs" => m.extra.legs = item,
                     "feet" => m.extra.feet = item,

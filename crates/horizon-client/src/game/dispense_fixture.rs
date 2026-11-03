@@ -5,7 +5,7 @@
 //! changed in the format of `VanillaDispenserOracle`.
 use super::{
     Game,
-    dispenser::{Slot, body_in_head, mob_set_slot, mob_slot_item},
+    dispenser::{Slot, mob_set_slot, mob_slot_item},
 };
 use horizon_client::{
     Result,
@@ -431,7 +431,16 @@ impl Game<'_> {
             out.push(self.fixture_describe(i, t));
         }
         let log = LOG.with(|log| log.borrow_mut().take()).unwrap_or_default();
+        // LevelEventHandler's lava fizz (1501): the client plays it from the
+        // level event, so it is not captured as a shared sound (#7652).
+        let fizzes: Vec<String> = log
+            .iter()
+            .filter_map(|line| line.strip_prefix("L 1501 "))
+            .filter_map(|rest| rest.split(' ').next())
+            .map(|pos| format!("S {pos} minecraft:block.lava.extinguish"))
+            .collect();
         out.extend(log);
+        out.extend(fizzes);
         for (sound, at, _, _) in self.audio.capture.take().unwrap_or_default() {
             out.push(format!("S {} {sound}", floor_pos(at)));
         }
@@ -936,6 +945,7 @@ impl Game<'_> {
             &mut mob.extra.main_hand,
             &mut mob.extra.off_hand,
             &mut mob.extra.head,
+            &mut mob.extra.body,
             &mut mob.extra.chest,
             &mut mob.extra.legs,
             &mut mob.extra.feet,
@@ -951,8 +961,8 @@ impl Game<'_> {
         if flag("baby") && ageable {
             mob.extra.age = -24000;
         }
-        let tamable =
-            body_in_head(s) || matches!(s, Species::Cat | Species::Parrot | Species::Ocelot);
+        let tamable = horizon_client::mobs::drops::body_slot_species(s)
+            || matches!(s, Species::Cat | Species::Parrot | Species::Ocelot);
         if flag("tame") && tamable {
             mob.extra.tame = true;
         }

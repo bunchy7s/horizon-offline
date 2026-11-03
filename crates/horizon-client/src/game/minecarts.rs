@@ -93,6 +93,8 @@ impl CartKind {
 }
 #[derive(Clone, Debug)]
 pub(super) struct Minecart {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     pub kind: CartKind,
     pub position: Vec3,
@@ -322,6 +324,7 @@ impl Minecart {
     }
     pub fn new(id: u32, kind: CartKind, position: Vec3) -> Self {
         Self {
+            join: Default::default(),
             id,
             kind,
             position,
@@ -2908,3 +2911,4 @@ mod tests {
         assert_eq!(loaded.push, Vec3::new(0.5, 0.0, 0.25));
     }
 }
+horizon_client::impl_joined!(Minecart);
