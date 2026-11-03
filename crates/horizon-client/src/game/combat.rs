@@ -158,6 +158,12 @@ pub(super) struct CombatTracker {
     fall_before: f64,
 }
 impl CombatTracker {
+    /// The last blow taken: its damage type and the causing entity's id (0
+    /// for none), for `LivingDeathEvent`.
+    pub(super) fn last_blow(&self) -> Option<(&str, u32)> {
+        let e = self.entries.last()?;
+        Some((&e.damage_type, e.attacker.as_ref().map_or(0, |a| a.0)))
+    }
     fn mark(&mut self) {
         let marks = (self.pending.len(), self.pending_direct.len());
         self.noted_since.get_or_insert(marks);

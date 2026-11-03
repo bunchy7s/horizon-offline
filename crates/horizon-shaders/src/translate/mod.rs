@@ -289,6 +289,14 @@ fn translate(
             samplers.insert(name.clone(), ty.clone());
         }
     }
+    if gbuffers.is_some() {
+        // The references use the geometry transform state instead of a second frame slot.
+        for name in ["projectionMatrix", "modelViewMatrix"] {
+            if uniforms.get(name).is_some_and(|ty| ty == "mat4") {
+                uniforms.remove(name);
+            }
+        }
+    }
     // `alphaTestRef` is the program's alpha test reference: a constant of the program.
     let alpha_test_ref = gbuffers
         .filter(|_| uniforms.get("alphaTestRef").is_some_and(|t| t == "float"))
@@ -1444,6 +1452,110 @@ mod tests {
         }
     }
 
+    /// Core matrix state and compatibility matrix state describe the same geometry transform.
+    #[test]
+    fn gbuffers_core_matrices_use_frame_state() {
+        for declaration in ["", "uniform mat4 projectionMatrix, modelViewMatrix;"] {
+            for profile in ["330 compatibility", "330 core"] {
+                let source = format!(
+                    "#version {profile}\n{declaration}\nin vec3 vaPosition;\nvoid main() {{ gl_Position = projectionMatrix * modelViewMatrix * vec4(vaPosition, 1.0); }}\n"
+                );
+                let p = core_matrix_program(&source, false).unwrap();
+                for name in ["projectionMatrix", "modelViewMatrix"] {
+                    assert!(!p.interface.uniforms.iter().any(|u| u.name == name));
+                }
+                for name in ["gbufferProjection", "gbufferModelView"] {
+                    assert!(p.interface.uniforms.iter().any(|u| u.name == name));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn core_matrix_aliases_preserve_authored_names_and_errors() {
+        for declarations in [
+            "mat4 projectionMatrix = mat4(2.0), modelViewMatrix = mat4(3.0);",
+            "mat4 projectionMatrix; mat4 modelViewMatrix;",
+            "const mat4 projectionMatrix = mat4(2.0), modelViewMatrix = mat4(3.0);",
+            "uniform mat4 projectionMatrix, modelViewMatrix;",
+        ] {
+            let source = format!(
+                "#version 330\n{declarations}\n\
+                 struct S {{ mat4 projectionMatrix; mat4 modelViewMatrix; }};\n\
+                 vec4 local(mat4 projectionMatrix, mat4 modelViewMatrix) {{\n\
+                 return projectionMatrix * modelViewMatrix * vec4(1.0); }}\n\
+                 void main() {{\n\
+                 S s; s.projectionMatrix = mat4(1.0); s.modelViewMatrix = mat4(1.0);\n\
+                 vec4 p = projectionMatrix * modelViewMatrix * vec4(1.0);\n\
+                 {{ mat4 projectionMatrix = modelViewMatrix; p += projectionMatrix * vec4(1.0); }}\n\
+                 for (int modelViewMatrix = 0; modelViewMatrix < 2; modelViewMatrix++) p.x += float(modelViewMatrix);\n\
+                 gl_Position = p + local(s.projectionMatrix, s.modelViewMatrix); }}"
+            );
+            core_matrix_program(&source, false).unwrap_or_else(|e| panic!("{declarations}: {e:?}"));
+        }
+        core_matrix_program(
+            "#version 330\nmat4 projectionMatrix() { return mat4(2.0); }\nvoid main() { gl_Position = projectionMatrix() * modelViewMatrix * vec4(1.0); }", false,
+        ).unwrap();
+        let unknown = core_matrix_program(
+            "#version 330\nvoid main() { gl_Position = unknownMatrix * vec4(1.0); }",
+            false,
+        )
+        .err()
+        .unwrap();
+        assert!(unknown.iter().any(|e| e.message.contains("unknownMatrix")));
+        let shadow = core_matrix_program(
+            "#version 330\nvoid main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(1.0); }", true,
+        ).unwrap();
+        for name in ["shadowProjection", "shadowModelView"] {
+            assert!(shadow.interface.uniforms.iter().any(|u| u.name == name));
+        }
+        // Composite shaders have their own transform; undeclared core names stay errors.
+        let composite = program(
+            &[
+                (
+                    "composite.vsh",
+                    "#version 330\nvoid main() { gl_Position = projectionMatrix * vec4(1.0); }",
+                ),
+                (
+                    "composite.fsh",
+                    "#version 330\nout vec4 c; void main() { c = vec4(1.0); }",
+                ),
+            ],
+            Target::Buffers,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            composite
+                .iter()
+                .any(|e| e.message.contains("projectionMatrix"))
+        );
+    }
+
+    fn core_matrix_program(source: &str, shadow: bool) -> Result<Program, Vec<Error>> {
+        let files = [
+            ("shaders/gbuffers_line.vsh", source),
+            (
+                "shaders/gbuffers_line.fsh",
+                "#version 330\nout vec4 color; void main() { color = vec4(1.0); }",
+            ),
+        ];
+        let pack = Pack::from_zip_bytes("core-matrices.zip", zip(&files)).unwrap();
+        let macros = Macros::standard();
+        let vertex = preprocess(&pack, "gbuffers_line.vsh", &macros);
+        let fragment = preprocess(&pack, "gbuffers_line.fsh", &macros);
+        let inputs = GbuffersInputs {
+            body: "hz_Vertex = vec4(0.25, 0.5, -2.0, 1.0);".into(),
+            attributes: vec![("vaPosition".into(), "hz_Vertex.xyz".into())],
+            ..Default::default()
+        };
+        if shadow {
+            translate_shadow(&vertex, &fragment, &inputs)
+        } else {
+            translate_gbuffers(&vertex, &fragment, Target::Buffers, &inputs)
+        }
+    }
+
     #[test]
     fn compute_dispatch_does_not_guess_unsupported_scalar_expressions() {
         for declaration in [
@@ -1538,6 +1650,28 @@ mod tests {
             Target::Window,
         );
         assert!(p.is_ok(), "{:?}", p.err());
+    }
+
+    /// `sqrt` of a negative is undefined in GLSL: in functions it reads zero, as packs written
+    /// against GL drivers expect at `sqrt(1.0 - y * y)` with y rounding just above 1. A global
+    /// constant keeps the built-in, so it stays a constant (an array's size here).
+    #[test]
+    fn sqrt_in_functions_never_takes_a_negative() {
+        let fsh = "#version 120\nconst int n = int(sqrt(16.0));\nfloat w[n];\n\
+                   vec2 f(vec2 v) { float y = v.x; return vec2(sqrt(1.0 - y * y), sqrt(v).y); }\n\
+                   void main() { w[3] = 1.0; gl_FragColor = vec4(f(vec2(1.0)), w[3], 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Window,
+        )
+        .unwrap();
+        let clamped = p.fragment.functions.iter().any(|(_, f)| {
+            f.expressions.iter().any(|(_, e)| {
+                matches!(e, naga::Expression::Math { fun: naga::MathFunction::Sqrt, arg, .. }
+                    if matches!(f.expressions[*arg], naga::Expression::Math { fun: naga::MathFunction::Max, .. }))
+            })
+        });
+        assert!(clamped, "sqrt's argument is clamped at zero");
     }
 
     #[test]

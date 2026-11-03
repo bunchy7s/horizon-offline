@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_incoming_damage_v2",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_incoming_damage_v2",
+      "neoforge": "LivingIncomingDamageEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ],
+  "rust_summary": "a host-aware player-weapon damage hook (`native_living_incoming_damage_v2`), leaving v1 compatible.",
+  "doc_summary": "`native_living_incoming_damage_v2`: a host-aware damage hook for a player's melee, sweep and spear hits on mobs, including LAN guests. It supplies the attacker/victim network ids, damage type, optional source position, victim position/view vector and the weapon snapshot (read `ItemStack::enchantments()` for ids and levels). Mods can change damage, cancel delivery and use Host helpers, including sounds. It fires after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; v1 then sees the changed amount unless v2 canceled. Projectiles, player victims, dragons, mob attacks and environmental damage still only fire v1. No extra work or allocation when no mods are loaded. This is additive, like `menu_button_v2`, not a signature change to v1. Bundles need \"hooks\": @API:living_incoming_damage_v2@."
+}

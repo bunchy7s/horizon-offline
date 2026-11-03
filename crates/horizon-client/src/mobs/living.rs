@@ -407,6 +407,24 @@ impl Mob {
     pub fn eye_y(&self) -> f64 {
         self.position.y + self.eye_height()
     }
+    /// `LivingEntity.getScale`: the `minecraft:scale` the server sent on this
+    /// living entity (`extra.model_scale`, 0 when none came), through the
+    /// species' `sanitizeScale` override. Every box, eye height, seat and
+    /// shadow radius takes it.
+    pub fn model_scale(&self) -> f32 {
+        let scale = if self.extra.model_scale > 0.0 {
+            self.extra.model_scale
+        } else {
+            1.0
+        };
+        match self.species() {
+            // HappyGhast.sanitizeScale: min(scale, 1), it never grows.
+            super::Species::HappyGhast => scale.min(1.0),
+            // Shulker.sanitizeScale: min(scale, 3).
+            super::Species::Shulker => scale.min(3.0),
+            _ => scale,
+        }
+    }
     /// Entity dimensions: the type's, a class's BABY_DIMENSIONS, or the
     /// slime size scaling.
     /// `EntityDimensions` (float width, height and eye height) widened to double.
@@ -427,15 +445,12 @@ impl Mob {
     /// `Pose.LONG_JUMPING` (what `LongJumpUtil` checks an arc with).
     pub fn awake_dims_in(&self, long_jumping: bool) -> (f64, f64, f64) {
         let k = &self.kind;
-        // Avatar.POSES: a player's or mannequin's box follows its pose, and
-        // LivingEntity.getDimensions scales it by `minecraft:scale`
-        // (`getScale`): a fake player's giant NPC is clickable on its body.
+        // `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
+        // getScale())` on every living entity: the species' box (a player's or
+        // mannequin's follows its pose, Avatar.POSES) times its
+        // `minecraft:scale` (`getScale`), width, height and eye height alike.
+        let scale = self.model_scale();
         if matches!(&*k.id, "minecraft:player" | "minecraft:mannequin") {
-            let scale = if self.extra.model_scale > 0.0 {
-                self.extra.model_scale
-            } else {
-                1.0
-            };
             let d = self.extra.avatar_pose.dimensions(scale);
             return (
                 f64::from(d.width),
@@ -484,7 +499,33 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
-        (f64::from(w), f64::from(h), f64::from(e))
+        // Shulker.getDefaultDimensions: the last scale, over everything
+        // above, is the lid opening upward on a shell attached to the floor.
+        if k.species == super::Species::Shulker
+            && let Some(s) = super::shulker::peek_height_scale(self)
+        {
+            (h, e) = (h * s, e * s);
+        }
+        // Salmon.getDefaultDimensions: the variant's bounding box scale (small
+        // 0.5, medium 1.0, large 1.5) over the whole fish box.
+        if k.species == super::Species::Salmon {
+            let s = super::aquatic::salmon_scale(self.extra.variant);
+            (w, h, e) = (w * s, h * s, e * s);
+        }
+        // PolarBear.getDefaultDimensions: the rear-up animation scales the box
+        // by (1, 1 + clientSideStandAnimation / 6), so a bear at full height is
+        // twice as tall, with its eyes twice as high and the same width.
+        if k.species == super::Species::PolarBear {
+            let f = super::polar_bear::stand_box_scale(self);
+            (h, e) = (h * f, e * f);
+        }
+        // `EntityDimensions.scale(getScale())`: width and height by the scale,
+        // the eye height by its height factor (the same one).
+        (
+            f64::from(w * scale),
+            f64::from(h * scale),
+            f64::from(e * scale),
+        )
     }
     pub fn eye_height(&self) -> f64 {
         self.dims().2
@@ -655,8 +696,13 @@ impl Mob {
         // Entity.checkSupportingBlock
         self.supporting = self.supporting_block(w, moved);
         self.movement_emission(w, moved, events);
-        // Entity.applyEffectsFromBlocks: bubble columns push the mob, and the
-        // server shows the surface of one it is at the top of.
+    }
+    /// `Entity.applyEffectsFromBlocks` as `LivingEntity.aiStep` runs it, after
+    /// `travel` has moved the mob and applied the drag of its fluid (not inside
+    /// `Entity.move`): bubble columns push the mob, so the push is not slowed
+    /// by that tick's drag, and the server shows the surface of one it is at the
+    /// top of.
+    pub fn apply_effects_from_blocks(&mut self, w: &MobWorld, events: &mut Vec<MobEvent>) {
         let mut tops = Vec::new();
         if crate::motion::bubble_column_push_over(
             w.world,
@@ -709,6 +755,8 @@ impl Mob {
             state,
             at: [at.x, at.y, at.z],
             count,
+            // `sendParticles(..., 0.15)`: the crumbs fly up a little.
+            speed: f64::from(0.15_f32),
         });
     }
     /// Entity.updateFluidInteraction: the fluid state, then touching water
@@ -823,9 +871,22 @@ impl Mob {
                 source: self.id,
                 state: horizon_world::registry::BlockStateId(0),
             });
-        } else if w.facts.is_air(state) && self.species() == super::Species::Parrot {
-            // Entity.processFlappingMovement: a move ending in the air.
-            super::parrot::process_flapping(self, events);
+        } else if w.facts.is_air(state) {
+            // Entity.processFlappingMovement: onFlap runs before the game
+            // event. Silent birds still emit it, independently of sound.
+            let flapped = match self.species() {
+                super::Species::Chicken => super::farm::chicken_process_flapping(self),
+                super::Species::Parrot => super::parrot::process_flapping(self, events),
+                _ => false,
+            };
+            if flapped {
+                events.push(MobEvent::GameEvent {
+                    event: "minecraft:flap",
+                    at: [self.position.x, self.position.y, self.position.z],
+                    source: self.id,
+                    state: horizon_world::registry::BlockStateId(0),
+                });
+            }
         }
     }
     /// `Entity.nextStep`: the next whole metre walked; a warden's steps come
@@ -1972,6 +2033,71 @@ mod tests {
         );
     }
 
+    /// `LivingEntity.aiStep` calls `travel` and only then
+    /// `applyEffectsFromBlocks`, so the lift of a bubble column is added after
+    /// the water's drag and is not scaled by it. A pig 1.0 high in a column of
+    /// two blocks of water takes the plain water velocity from `travel`, and
+    /// the lift (0.06 for each column block its box touches) on top of it.
+    #[test]
+    fn a_bubble_column_lifts_a_mob_after_travel_not_inside_it() {
+        let run = |column: bool| {
+            let mut out = None;
+            let build =
+                |world: &mut crate::world::World,
+                 registry: &horizon_world::registry::BlockRegistry| {
+                    world.chunks.insert(
+                        (0, 0),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                    );
+                    let stone = registry.default_state("minecraft:stone").unwrap();
+                    let water = registry.default_state("minecraft:water").unwrap();
+                    let mut lift = registry
+                        .state(registry.default_state("minecraft:bubble_column").unwrap())
+                        .unwrap()
+                        .clone();
+                    lift.properties.insert("drag".into(), "false".into());
+                    let lift = registry.resolve(&lift).unwrap();
+                    for x in 0..=2 {
+                        for z in 0..=2 {
+                            world.set(x, 0, z, stone).unwrap();
+                            for y in 1..=6 {
+                                world.set(x, y, z, water).unwrap();
+                            }
+                        }
+                    }
+                    if column {
+                        for y in 1..=6 {
+                            world.set(1, y, 1, lift).unwrap();
+                        }
+                    }
+                };
+            crate::mobs::world::with_built_test_world(&[], build, |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:iron_golem"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(1.5, 2.0, 1.5), 0.0);
+                m.fluids.in_water = true;
+                m.fluids.water = 1.0;
+                m.travel(w, Vec3::ZERO, &mut Vec::new());
+                let after_travel = m.velocity.y;
+                m.apply_effects_from_blocks(w, &mut Vec::new());
+                out = Some((after_travel, m.velocity.y));
+            });
+            out
+        };
+        let (Some((plain, _)), Some((travelled, lifted))) = (run(false), run(true)) else {
+            return;
+        };
+        assert_eq!(
+            travelled, plain,
+            "travel alone does not take the column's lift"
+        );
+        // The golem's 2.7 high box touches three column blocks (y 2, 3, 4).
+        assert!(
+            (lifted - plain - 3.0 * 0.06).abs() < 1.0e-9,
+            "three column blocks lift it by 0.18 after the drag, got {}",
+            lifted - plain
+        );
+    }
+
     /// `Entity.collectColliders`: the world border's wall stops a mob's move
     /// as it stops the player's (#7080). A border of size 10 around (8, 8)
     /// has its east wall at x = 13.
@@ -2036,5 +2162,92 @@ mod tests {
         // The mob stands over block (4, 7) but its feet block is (5, 7).
         let straddling = landing_dust_at(Vec3::new(5.1, 65.0, 7.5), [4, 64, 7]);
         assert_eq!(straddling, Vec3::new(5.0, 65.0, 7.5));
+    }
+    /// `LivingEntity.getDimensions` is `getDefaultDimensions(pose).scale(
+    /// getScale())` on every living entity, not only on a player or mannequin
+    /// whose pose sets the box (`Avatar.POSES`): a cow's `EntityType.COW` box
+    /// (0.9 x 1.4, its eyes at 1.3) at `minecraft:scale` 2 is 1.8 x 2.8 with
+    /// the eyes at 2.6, and the box `Mob.bounds` hands the hitbox raycast, the
+    /// attack range and the leash pins grows with it.
+    #[test]
+    fn a_scale_attribute_grows_every_living_entitys_box() {
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let mut cow = Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0);
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 0.9) && close(h, 1.4) && close(e, 1.3),
+            "no scale: {w}x{h}x{e}"
+        );
+        cow.extra.model_scale = 2.0;
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 1.8) && close(h, 2.8) && close(e, 2.6),
+            "scale 2: {w}x{h}x{e}"
+        );
+        let b = cow.bounds();
+        assert!(
+            close(b.min_position().x, -0.9)
+                && close(b.max_position().x, 0.9)
+                && close(b.max_position().y, 2.8),
+            "scale 2 box: {b:?}"
+        );
+        // `RangedAttribute("attribute.name.scale", 1.0, 0.0625, 16.0)`: its
+        // floor shrinks the cow to 0.05625 x 0.0875, eyes at 0.08125.
+        cow.extra.model_scale = 0.0625;
+        let (w, h, e) = cow.dims();
+        assert!(
+            close(w, 0.05625) && close(h, 0.0875) && close(e, 0.08125),
+            "scale 0.0625: {w}x{h}x{e}"
+        );
+    }
+    /// `LivingEntity.getDimensions` answers a sleeping entity with
+    /// `SLEEPING_DIMENSIONS` before it ever reaches `getScale`: a sleeper's
+    /// 0.2 box and eye height stay 0.2 whatever its `minecraft:scale`.
+    #[test]
+    fn a_sleeping_mob_keeps_its_bed_box_unscaled() {
+        use crate::mobs::Species;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:villager".into();
+        kind.species = Species::Villager;
+        let mut villager = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        // Villager.sleeping: the bed's facing code, not 0.
+        villager.extra.ints[1] = 1;
+        villager.extra.model_scale = 4.0;
+        let (w, h, e) = villager.dims();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            close(w, 0.2) && close(h, 0.2) && close(e, 0.2),
+            "asleep: {w}x{h}x{e}"
+        );
+    }
+    /// `LivingEntity.sanitizeScale`: a shulker takes at most 3 and a happy
+    /// ghast at most 1, and the box takes the capped value (`EntityType.SHULKER`
+    /// is 1 x 1 with its eyes at 0.5).
+    #[test]
+    fn a_species_caps_the_scale_it_takes() {
+        use crate::mobs::Species;
+        let mob = |id: &str, species: Species| {
+            let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+            kind.id = id.into();
+            kind.species = species;
+            (kind.width, kind.height, kind.eye_height) = (1.0, 1.0, 0.5);
+            Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0)
+        };
+        let mut shulker = mob("minecraft:shulker", Species::Shulker);
+        shulker.extra.model_scale = 4.0;
+        assert_eq!(shulker.model_scale(), 3.0);
+        let (w, h, e) = shulker.dims();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(
+            close(w, 3.0) && close(h, 3.0) && close(e, 1.5),
+            "shulker: {w}x{h}x{e}"
+        );
+        let mut ghast = mob("minecraft:happy_ghast", Species::HappyGhast);
+        ghast.extra.model_scale = 2.0;
+        assert_eq!(ghast.model_scale(), 1.0);
+        // Every other species takes the attribute as it came.
+        let mut cow = mob("minecraft:cow", Species::Cow);
+        cow.extra.model_scale = 4.0;
+        assert_eq!(cow.model_scale(), 4.0);
     }
 }

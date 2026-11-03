@@ -1324,7 +1324,17 @@ impl Game<'_> {
                     center[1],
                     center[2] + (angle.sin() * 32.0).floor() as i32,
                 ];
-                if self.find_siege_spawn_pos(&centers, spot).is_some() {
+                if let Some(attempted_pos) = self.find_siege_spawn_pos(&centers, spot) {
+                    let mut canceled = false;
+                    self.native_village_siege(
+                        self.dim.id(),
+                        player.uuid,
+                        attempted_pos,
+                        &mut canceled,
+                    );
+                    if canceled {
+                        return false;
+                    }
                     self.raiding.siege.spot = spot;
                     self.raiding.siege.next_spawn_time = 0;
                     self.raiding.siege.zombies_to_spawn = 20;

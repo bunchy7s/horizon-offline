@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "living_conversion_post",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_conversion_post",
+      "neoforge": "LivingConversionEvent.Post",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a mob converted into another (`native_living_conversion_post`).",
+  "doc_summary": "a mob that converted into another type, as NeoForge's `LivingConversionEvent.Post`: `native_living_conversion_post(entity, kind, converted, converted_kind)` runs on the server after the new mob joined. Bundles need \"hooks\": @API:living_conversion_post@."
+}

@@ -927,6 +927,8 @@ struct Pipeline<R: RandomSource> {
     carver_cache: Mutex<HashMap<(i32, i32), BiomeId>>,
     pub(super) decoration: Option<Arc<super::generator_decoration::Decoration>>,
     pub(super) structures: Option<super::generator_structures::StructureState>,
+    /// Definitions for explicit placement when automatic structure starts are off.
+    manual_structures: std::sync::OnceLock<Option<super::generator_structures::StructureState>>,
     /// The noise settings' `spawn_target` points.
     spawn_target: Vec<SpawnTargetPoint>,
     /// The chunks an older version generated, which new chunks blend with.
@@ -1221,6 +1223,7 @@ where
             carver_cache: Mutex::new(HashMap::new()),
             decoration: None,
             structures: None,
+            manual_structures: std::sync::OnceLock::new(),
             spawn_target,
             old_world: std::sync::OnceLock::new(),
             debug_density,
@@ -1243,8 +1246,55 @@ where
             if let Some(state) = pipeline.structures.as_mut() {
                 state.fixed_biome = generator["biome_source"]["type"] == "minecraft:fixed";
             }
+            // ChunkGenerator.createState reads getOrigin: a noise generator
+            // answers the chunk of its NoiseSpawnFinder position, others
+            // chunk 0 0. Only a dimension-origin structure set reads it.
+            if pipeline
+                .structures
+                .as_ref()
+                .is_some_and(|state| state.needs_dimension_origin())
+                && let Ok([x, z]) = pipeline.spawn_column()
+            {
+                let origin = ChunkPos::new(x >> 4, z >> 4);
+                if let Some(state) = pipeline.structures.as_mut() {
+                    state.set_dimension_origin(origin);
+                }
+            }
         }
         Ok(pipeline)
+    }
+    /// `NoiseBasedChunkGenerator.getOrigin`'s spawn column: the
+    /// NoiseSpawnFinder position, or 0 0 when the noise settings have no
+    /// spawn target (`ChunkGenerator.getOrigin`). Cached.
+    fn spawn_column(&self) -> Result<[i32; 2], GeneratorError> {
+        if let Some(position) = self.spawn_position.get() {
+            return Ok(*position);
+        }
+        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
+        let position = if self.spawn_target.is_empty() {
+            [0, 0]
+        } else {
+            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
+                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
+        };
+        Ok(*self.spawn_position.get_or_init(|| position))
+    }
+    /// Manual placement reads the registry without enabling the automatic
+    /// structure state, its placement sets, starts or locate searches.
+    fn placement_structures(&self) -> Option<&super::generator_structures::StructureState> {
+        self.structures.as_ref().or_else(|| {
+            self.manual_structures
+                .get_or_init(|| {
+                    super::generator_structures::StructureState::new(
+                        &self.data,
+                        &BTreeSet::new(),
+                        Arc::new(std::sync::OnceLock::new()),
+                    )
+                    .ok()
+                    .flatten()
+                })
+                .as_ref()
+        })
     }
     fn generation(&self) -> WorldGenerationContext {
         // `new WorldGenerationContext(generator, level)`: the larger minimum Y and the smaller
@@ -2536,8 +2586,7 @@ where
         structure: &str,
         chunk: ChunkPos,
     ) -> Option<Arc<super::structure::start::StructureStart>> {
-        self.structures
-            .as_ref()?
+        self.placement_structures()?
             .structure_start(
                 &mut StructureQueries {
                     pipeline: self,
@@ -2589,17 +2638,7 @@ where
         Box::new(self.region_random_at(center))
     }
     fn spawn_position(&self) -> Result<[i32; 2], GeneratorError> {
-        if let Some(position) = self.spawn_position.get() {
-            return Ok(*position);
-        }
-        // ChunkGenerator.getOrigin is 0 0 without a spawn target.
-        let position = if self.spawn_target.is_empty() {
-            [0, 0]
-        } else {
-            find_spawn_position(&self.spawn_target, &mut SamplerContext::cached())
-                .map_err(|e| GeneratorError::Stage("spawn search", e.to_string()))?
-        };
-        Ok(*self.spawn_position.get_or_init(|| position))
+        self.spawn_column()
     }
     fn locate(
         &self,
@@ -3117,7 +3156,7 @@ where
         // waterlogging applied. The pieces draw from the GenerationContext's
         // random, seeded from the level seed and the position's chunk, not
         // from the level random.
-        let structures = self.structures.as_ref()?;
+        let structures = self.placement_structures()?;
         let mut random = horizon_core::random::WorldgenRandom::new(LegacyRandom::new(0));
         random.set_large_feature_seed(self.seed, query.position[0] >> 4, query.position[2] >> 4);
         let aliases = BTreeMap::new();
@@ -3395,16 +3434,29 @@ impl OverworldGenerator {
         dimension: &str,
         with_structures: bool,
     ) -> Result<Self, GeneratorError> {
-        let preset_json: Value = serde_json::from_str(
-            data.world_presets
-                .get(preset)
-                .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
-        )?;
-        // A data pack's level stem replaces the preset's, as the world's
-        // dimension registry does.
-        let stem = match data.dimensions.get(dimension) {
-            Some(json) => serde_json::from_str(json)?,
-            None => preset_json["dimensions"][dimension].clone(),
+        Self::for_world_with_settings(data, seed, preset, dimension, with_structures, None)
+    }
+    /// A saved level stem supplies the generator and dimension type when no data
+    /// pack replaces that dimension. Worlds without one use the preset's stem.
+    pub fn for_world_with_settings(
+        data: Arc<GeneratorData>,
+        seed: i64,
+        preset: &str,
+        dimension: &str,
+        with_structures: bool,
+        saved_stem: Option<&Value>,
+    ) -> Result<Self, GeneratorError> {
+        let stem = if let Some(json) = data.dimensions.get(dimension) {
+            serde_json::from_str(json)?
+        } else if let Some(stem) = saved_stem {
+            stem.clone()
+        } else {
+            let preset_json: Value = serde_json::from_str(
+                data.world_presets
+                    .get(preset)
+                    .ok_or_else(|| resource(format!("missing world preset {preset}")))?,
+            )?;
+            preset_json["dimensions"][dimension].clone()
         };
         let generator = stem["generator"].clone();
         // The level's build range: its dimension type's, a data pack's

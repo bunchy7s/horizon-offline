@@ -746,7 +746,8 @@ impl Game<'_> {
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
             let old_level = self.experience.level;
-            self.experience.give(a.rewards.experience);
+            let points = self.xp_change(a.rewards.experience).map_or(0, |p| p.max(0));
+            self.experience.give(points);
             self.native_player_level_changed(old_level);
         }
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.

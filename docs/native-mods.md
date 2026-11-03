@@ -15,6 +15,34 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Conditional item model properties
+
+A client mod supplies its own namespaced `minecraft:condition` property by implementing
+`Hooks::item_model_property`. This hook is the registration: match your property name, answer
+through `value`, and leave other names untouched. The resolver calls it when choosing a branch,
+not when loading resources. It defaults to false without a provider and skips dispatch entirely
+when no trait mods are loaded. Vanilla properties do not enter the hook.
+
+```rust,ignore
+fn item_model_property(
+    &self,
+    _host: &dyn Host,
+    event: &mut ItemModelPropertyEvent<'_>,
+) {
+    if event.property == "example:charged" {
+        event.value = event.stack.patch.get("example:charged").and_then(Option::as_ref)
+            .and_then(serde_json::Value::as_bool) == Some(true);
+    }
+}
+```
+
+`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
+defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
+Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
+`minecraft:condition` node. Custom special model renderers are not supplied by this hook.
+Bundles need `"hooks": @API:item_model_property@` once this pending hook is stamped.
+
 ## Item frame rendering
 
 `native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame. Bundles need "hooks": @API:render_item_in_frame@.
@@ -352,6 +380,17 @@ contract is never changed, its `mod_api` entry (the trait method's contract) inc
 a version. Helpers (`native_text`, `native_player`…) have no hook entry; the catalog's `helpers` list names the ones
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
+
+### Host-aware weapon damage (API next)
+
+`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; v1 keeps its signature and firing point.
+It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
+and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
+levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
+It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
+v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
+projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
+without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
 
 ### The build's warnings
 
@@ -884,6 +923,57 @@ player killed while leashed drops on its next tick, naming the killer. Bundles t
 `"hooks": 102`.
 
 API 103 adds native mod particle types to `native_send_particles`: `ParticleOptions::named("mymod:spark")` sends a particle of the mod's own type, drawn by Horizon clients from the sprite set in the mod's `assets/<namespace>/particles/<path>.json` (`"textures": ["mymod:spark/1", ...]`, resolved as `particle/<texture>` in the atlas). The name must be namespaced; a client without that file draws nothing for it, vanilla clients (whose brand isn't Horizon's) aren't sent it, and the call still returns true. The type behaves as vanilla's `SimpleParticleType` with a sprite set: a plain billboard, no tint, 20 to 40 ticks, its motion the game's default spread (the speed sets its direction, not how fast it goes). Bundles that use it need `"hooks": 103`.
+
+A mod particle may opt into declarative behaviour in that same particle JSON (no new hook API):
+
+```json
+{
+  "textures": ["mymod:spark"],
+  "horizon:behaviour": {
+    "velocity": [0.0, 0.15, 0.0],
+    "velocity_jitter": [0.02, 0.0, 0.02],
+    "animation": "loop",
+    "frame_ticks": 3,
+    "gravity": 0.5,
+    "friction": 0.96,
+    "lifetime": 40,
+    "size": [0.1, 0.0],
+    "alpha": [1.0, 0.0]
+  }
+}
+```
+
+`animation` chooses how the particle walks through its sprites: `age` (first to last over its
+lifetime), `loop` (cycles every `frame_ticks` ticks, 1..200, only valid with `loop`), `random` (one random
+sprite, kept) or `first` (the first sprite, kept). Without `animation` the particle keeps the sprite it was
+spawned with, as before.
+
+Every field is optional. Omit `horizon:behaviour` (or use `{}`) to keep the existing behaviour,
+including its random draws, unchanged. `velocity` replaces the initial randomized velocity with
+an exact vector in blocks/tick, plus the velocity the spawn call passed; omit it to retain the spawn's default spread. `velocity_jitter` adds a random
+offset per axis, uniform in `-j..=j` (0..16 each, drawn from the particle's seeded generator, so the same
+seed gives the same particle); declaring it alone starts from zero plus the spawn velocity. Each component must
+be finite and within -16..16. `gravity` is the vanilla multiplier: each tick subtracts
+`0.04 * gravity` from vertical velocity before moving (negative rises; range -100..100).
+After movement, `friction` multiplies all velocity components (0..1); normal block collisions
+and the vanilla on-ground horizontal multiplier of 0.7 still apply. Omitted gravity remains 0,
+omitted friction remains the engine default (0.98), and omitted lifetime remains 20..39 ticks.
+`lifetime` is an integer from 1 to 12000; removal uses the existing base tick: it moves that many
+times and is removed on the following tick.
+
+`size` and `alpha` are `[start, end]` linear curves over `age / lifetime`, clamped to their
+endpoints. Size is billboard half-width/half-height in blocks (0..16), not a multiplier;
+alpha is opacity (0..1). The start value applies immediately at spawn, then the curves update
+once per tick, reaching the end after `lifetime` motion ticks. Omitted size keeps the random
+spawn size; omitted alpha stays 1. Fading particles use the blended particle layer.
+Malformed declarations, unknown behaviour fields, non-finite or out-of-range numbers reject the
+whole behaviour object with a log warning, falling back to the existing particle behaviour;
+the sprite set still loads. Vanilla particle JSONs are unaffected. Resource reloads apply new
+declarations to newly spawned particles; live particles keep their spawn-time values.
+The engine copies fixed-size numeric data at spawn and performs no new allocations per particle
+tick. This first slice supports only linear size/opacity curves and constant gravity/friction;
+there is no per-particle code hook.
+
 
 API 104 adds the open screen hears of a key press (`native_screen_key_pressed_pre`) and of each character it types (`native_screen_char_typed_pre`), as vanilla's `ScreenEvent.KeyPressed.Pre` and `.CharacterTyped.Pre`: the screen, vanilla's key name (`key.keyboard.e`, as `native_key` hands it over; a key with no name fires nothing), whether the press is an auto-repeat, the character, GLFW's modifier bits (shift 1, control 2, alt 4, super 8), and `screen.mouse` for the pointer. A cancelled press goes no further — no focus move, no Escape-close, no inventory or hotbar key, no typing by the key itself, no `native_key` — while its release still arrives, so a `native_key` listener sees that release without its press, and the characters no mod cancelled still reach the text box, as vanilla's separate `charTyped` comes for a cancelled `keyPressed` too. A cancelled character drops only that character and never reaches a text box; control characters (Enter, Backspace, Tab, Delete, Escape, a Control letter) are keys and fire nothing. A key's characters fire after the key has acted, as GLFW's char callback comes after its key callback, so a key that closes the screen (the inventory key) reports no character (the closed screen hears none) and one that moves the focus types into the box it moved to. The input method's committed text fires the character hook too. They fire for the window and the control socket's `key` and `type` (not its `\b` backspace), after the fullscreen, screenshot, debug and narrator keys, never on the title screen itself (Options and the pack list opened from it do fire), the connect and loading screens, the prompts, books and sign editors drawn over gameplay, or while a world loads or saves. Bundles need "hooks": 104.
 
@@ -1787,6 +1877,21 @@ The catalog does not cover helper methods or arbitrary private game code.
 Injections name them with `hook` and `hook_version` ("Named hook points" above); raw
 targets and the `hooks` metadata continue to work as before.
 
+### Knockback hook versions
+
+`living_knockback_v2` keeps `living_knockback` version 1 unchanged, as `menu_button_v2` does for
+its older hook: v1's function signature is a target mixin mods attach to, so it cannot gain
+arguments. Both already receive the raw strength before knockback resistance (v1 did before
+v2 existed). V2 adds three things: the attacker's network entity id (falling back to a known
+last hurt-by mob, or 0 when unknown), what the attacker holds (`attacker_main` and
+`attacker_off`: a player's selected and off-hand stacks, a mob's main hand; none when unknown,
+recorded only while a native mod is loaded), and armor-stand sweeps. V2 runs after v1 on
+their shared paths; cancellation from either prevents motion, so a trait mod that listens to
+both sees each hit twice and should pick one. Mob melee, player hits, sweeps and spears use the
+shared knockback path; direct velocity pushes (explosions, Punch arrows, hoglin throws) are not
+`LivingEntity.knockback` and do not fire it. The fragment assigns the new API number when
+stamped; the existing hook stays version 1.
+
 ### Reading server blocks (draft)
 
 A native server tick hook can call `native_server_block` with its context, a dimension id and a block position. It returns the block name and state properties from a loaded chunk. It does not load a chunk or open a dimension. Reads outside that hook, from a stale context, from unavailable dimensions or outside the world bounds return an error.
@@ -2370,6 +2475,21 @@ a dimension.
 
 - `entity.position(host)`, `block_position`, `rotation` (yaw and pitch), `kind` (`minecraft:zombie`), `uuid` (`&mut`:
   an entity with no UUID yet gets its own) and `level` read the entity.
+- `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
+  whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
+  `view_vector` and `distance_to_sqr(host, pos)` read and move it.
+- `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
+  alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
+  read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
+  `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
+  Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
+  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
+  slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
+  body slot keep only the item, not the stack's count and components.
+- `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
+  do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
+  `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2608,9 +2728,10 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
-  entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
-  player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
-  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
+  entity atlas, the shared quad index buffer and the block sprite arrays ([block textures](#block-textures)). Not
+  called on the title screen's panorama. `motion` says which mob, player or dropped item each run of the entity quads
+  is, by its entity id, so a mod can match an entity's vertices with last frame's (a motion blur's own motion
+  vectors); `spans` only name the type.
 - `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
   entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
@@ -2622,6 +2743,37 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
   several mods can ask. It's asked as each frame is built, so keep it cheap.
+
+### Block textures
+
+`crates/horizon-client/src/game/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
+blocks in its own pass (flying debris as voxels, say) with the player's own block textures, resource packs included,
+as the terrain samples them. API @API:native_block_sprites@.
+
+- `WorldDrawn::block_sprites` (`BlockSpriteArrays`) holds the block sprite arrays as `D2Array` views: the terrain's
+  eight, a 1-layer stand-in past the ones in use, each with the mip levels the Mipmap Levels option leaves, animated
+  layers at the frame shown. Each texture is a whole square layer of `size` texels, its UVs 0 to 1 across it,
+  gamma-encoded as the world uses it. `split` layers go to an array (2048 on most GPUs, fewer where the GPU holds
+  fewer): every vanilla texture is usually in array 0. `nearest` samples texels sharp (nearest, repeating, the
+  nearest mip level), `filtered` is the terrain's own sampler.
+- `native_block_sprites(blocks)` says, for each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left
+  out take the default), what its model draws on each side, in `Direction` order (down, up, north, south, west,
+  east): its faces in the order drawn, each with its `sprite` (`array`, `layer`, `animated`, `cutout`), its `rect`
+  on the side and `inset` from the side's plane (a whole face is 0, 0, 1, 1 and 0), its `uv` map, its `tint` source
+  and whether it is `translucent`; the model's `particle` sprite; whether it is a plain `cube`. None for a block the
+  game doesn't know. A side's axes run along x then z for down and up, x then y for north and south, z then y for
+  west and east, from the block's corner nearest 0, 0, 0 (`block_sprites::side_axes`); the point (a, b) of a side
+  shows the sprite at `(uv[0], uv[1]) + a * (uv[2], uv[3]) + b * (uv[4], uv[5])`, rotations and mirrors included
+  (for a plain block's north side, `u = 1 - x, v = 1 - y`). A tinted face is multiplied by its source's colour:
+  `Grass`, `Foliage`, `DryFoliage` and `Water` are the biome's where the block is, `Fixed` a constant (spruce
+  leaves, redstone at its power). A grass block's side is two faces, the side and then its grey overlay tinted with
+  grass. The model is the state's first random variant; faces that don't lie flat on a side (a flower's crossed
+  planes) are left out, and the `particle` sprite stands for them. Fluids give their still texture on every side.
+- `native_texture_sprites(textures)`: a texture's sprite by name (`block/stone`), none for one no model uses.
+- `native_block_sprites_version()` changes each time the resources load (a resource pack turned on or off moves the
+  layers, and the arrays are new): ask again then.
+
+Look blocks up once and keep what you need (a few words a block for your own shader), not every frame.
 
 ### Menu slot rules
 
@@ -2975,10 +3127,14 @@ Ok::<(), AttachmentError>(())
 For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
-`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
-entities, boats, minecarts, armor stands, cushions, item frames, paintings and the
-server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
-not covered. Player UUIDs cover online guests and the acting player. Mutable level
+`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover every entity in
+the level apart from players: mobs, items, experience orbs, projectiles, tridents,
+falling blocks, primed TNT, fireworks, boats, minecarts, armor stands, cushions, item
+frames, paintings, End crystals, the ender dragon, ominous item spawners and the
+server's `OtherEntity` records. An entity keeps its UUID through saves, so its saved
+attachments load back with it; an orb saved with a `count` above one loads as several
+orbs, and only the first keeps the attachments. Player UUIDs cover online guests and
+the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. Unserialized values disappear on unload or restart. A saved
 value is stored under `horizon:attachments`, then the mod namespace and attachment name,

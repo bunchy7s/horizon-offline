@@ -105,6 +105,8 @@ pub struct SkinFrame {
     pub new_model: Vec<SkinVertex>,
     pub parts: Vec<SkinPart>,
     pub jobs: Vec<SkinJob>,
+    /// Shader identities in the GPU output vertex space; empty without a pack.
+    pub spans: Vec<super::pack_draw::EntitySpan>,
     /// Vertices the jobs write: a whole number of quads.
     pub vertices: u32,
     /// Glowing entities' silhouettes posed here (`OutlineBufferSource`'s copy of
@@ -119,6 +121,7 @@ impl SkinFrame {
     pub fn clear_draws(&mut self) {
         self.parts.clear();
         self.jobs.clear();
+        self.spans.clear();
         self.vertices = 0;
         self.outline_jobs.clear();
         self.outline_vertices = 0;
@@ -157,6 +160,7 @@ impl SkinFrame {
         self.jobs.truncate(jobs);
         self.parts.truncate(parts);
         self.vertices = vertices;
+        self.spans.retain(|s| s.start <= vertices);
     }
 
     /// Whether the renderer has anything to take.
@@ -332,43 +336,102 @@ impl EntitySkin {
         base: u32,
         outline_base: u32,
     ) {
-        if frame.jobs.is_empty() && frame.outline_jobs.is_empty() {
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame
+                .jobs
+                .iter()
+                .map(|job| SkinJob {
+                    dst: job.dst + base,
+                    ..*job
+                })
+                .chain(frame.outline_jobs.iter().map(|job| SkinJob {
+                    dst: job.dst + outline_base,
+                    ..*job
+                })),
+            out,
+        );
+    }
+
+    /// A standard pack owns the body output; glowing silhouettes keep the ordinary
+    /// entity buffer. Both routes use the same model/normal/back-face decoder.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn dispatch_pack(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &SkinFrame,
+        out: &wgpu::Buffer,
+        outline_out: &wgpu::Buffer,
+        outline_base: u32,
+    ) {
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame.jobs.iter().copied(),
+            out,
+        );
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame.outline_jobs.iter().map(|job| SkinJob {
+                dst: job.dst + outline_base,
+                ..*job
+            }),
+            outline_out,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_jobs(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        parts: &[SkinPart],
+        jobs: impl Iterator<Item = SkinJob>,
+        out: &wgpu::Buffer,
+    ) {
+        self.staged.clear();
+        self.staged.extend(jobs);
+        if self.staged.is_empty() {
             return;
         }
         let Some(model) = &self.model_buffer else {
             return;
         };
         // Whole rows of workgroups past `ROW` jobs: the padding jobs write nothing.
-        let count = (frame.jobs.len() + frame.outline_jobs.len()) as u32;
+        let count = self.staged.len() as u32;
         let rows = count.div_ceil(ROW);
         let padded = if rows > 1 {
             (rows * ROW) as usize
         } else {
             count as usize
         };
-        self.staged.clear();
-        let moved = |at: u32| {
-            move |job: &SkinJob| SkinJob {
-                dst: job.dst + at,
-                ..*job
-            }
-        };
-        self.staged.extend(frame.jobs.iter().map(moved(base)));
-        self.staged
-            .extend(frame.outline_jobs.iter().map(moved(outline_base)));
         self.staged.resize(padded, SkinJob::default());
-        self.parts.ensure(
-            device,
-            (frame.parts.len() * std::mem::size_of::<SkinPart>()) as u64,
-        );
+        self.parts
+            .ensure(device, std::mem::size_of_val(parts) as u64);
         self.jobs
             .ensure(device, (padded * std::mem::size_of::<SkinJob>()) as u64);
-        let (Some(parts), Some(jobs)) = (&self.parts.buffer, &self.jobs.buffer) else {
+        let (Some(parts_buffer), Some(jobs)) = (&self.parts.buffer, &self.jobs.buffer) else {
             return;
         };
-        uploads.buffer(encoder, parts, 0, bytemuck::cast_slice(&frame.parts));
+        uploads.buffer(encoder, parts_buffer, 0, bytemuck::cast_slice(parts));
         uploads.buffer(encoder, jobs, 0, bytemuck::cast_slice(&self.staged));
-        let key = [model.clone(), parts.clone(), jobs.clone(), out.clone()];
+        let key = [
+            model.clone(),
+            parts_buffer.clone(),
+            jobs.clone(),
+            out.clone(),
+        ];
         if self.group.as_ref().is_none_or(|(_, k)| *k != key) {
             let entries: Vec<_> = key
                 .iter()
@@ -526,6 +589,7 @@ mod tests {
             normals.z_axis.normalize_or_zero(),
         );
         let frame = SkinFrame {
+            spans: Vec::new(),
             reset: false,
             base: 0,
             new_model: model.clone(),
@@ -685,6 +749,63 @@ mod tests {
                 ..*of
             };
             assert_eq!(bytemuck::bytes_of(copy), bytemuck::bytes_of(&marked));
+        }
+
+        // Standard packs own the model buffer, while outlines follow unrelated CPU
+        // geometry in the ordinary buffer. Neither output may overwrite the other's gap.
+        let buffers = [frame.vertices + 3, before + frame.outline_vertices + 2].map(|vertices| {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: u64::from(vertices) * 44,
+                usage: EntitySkin::usage(true) | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &vec![0xab; buffer.size() as usize]);
+            buffer
+        });
+        let reads = buffers.each_ref().map(|buffer| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer.size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let mut uploads = Uploads::new(&device);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        skin.dispatch_pack(
+            &device,
+            &mut uploads,
+            &mut encoder,
+            &frame,
+            &buffers[0],
+            &buffers[1],
+            before,
+        );
+        for (buffer, read) in buffers.iter().zip(&reads) {
+            encoder.copy_buffer_to_buffer(buffer, 0, read, 0, buffer.size());
+        }
+        uploads.finish(&encoder);
+        queue.submit([encoder.finish()]);
+        for read in &reads {
+            read.slice(..)
+                .map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        for (i, (expected, start)) in [(&expected, 0usize), (&outline, before as usize)]
+            .into_iter()
+            .enumerate()
+        {
+            let data = reads[i].slice(..).get_mapped_range().unwrap();
+            let first = start * 44;
+            let last = first + expected.len() * 44;
+            assert!(data[..first].iter().all(|b| *b == 0xab), "prefix {i}");
+            assert_eq!(
+                &data[first..last],
+                bytemuck::cast_slice::<_, u8>(expected),
+                "output {i}"
+            );
+            assert!(data[last..].iter().all(|b| *b == 0xab), "suffix {i}");
         }
     }
 }

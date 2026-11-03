@@ -297,6 +297,10 @@ impl PackEntities {
         (buffer, group)
     }
 
+    pub fn skin_target(&self) -> &wgpu::Buffer {
+        &self.vertices
+    }
+
     pub fn vertices(&self) -> wgpu::BufferSlice<'_> {
         self.vertices.slice(..)
     }
@@ -322,11 +326,32 @@ impl PackEntities {
         crack: ([f32; 4], [u32; 2]),
         shadow: Casters,
         rest: &mut Vec<Vertex>,
+        skin: Option<&super::entity_skin::SkinFrame>,
     ) {
         self.draws.clear();
         self.scratch.clear();
         self.uniforms.clear();
         rest.clear();
+        let posed = skin.map_or(0, |s| s.vertices);
+        if let Some(skin) = skin {
+            for (span, range, overlay) in skin_runs(skin) {
+                let program = program_of(&span).expect("tagged skin stage");
+                let pack = drawn[program] && !span.hidden;
+                let casts = shadow.cast(&span, program);
+                if !pack && !casts {
+                    continue;
+                }
+                self.push_draw(
+                    span,
+                    range.start,
+                    range.len() as u32,
+                    program,
+                    pack,
+                    casts,
+                    overlay,
+                );
+            }
+        }
         let first = spans.first().map_or(entities.len(), |s| s.start as usize);
         rest.extend_from_slice(&entities[..first.min(entities.len())]);
         for (span, range) in runs(entities.len(), spans) {
@@ -347,35 +372,24 @@ impl PackEntities {
             if program == DESTROY {
                 project_cracks(&mut self.scratch[start as usize..], crack.0, crack.1);
             }
-            let (entity_id, block_id) = match program {
-                BLOCK => (0, span.id),
-                _ => (span.id, 0),
-            };
-            let mut bytes = [0u8; SLOT as usize];
-            bytes[0..4].copy_from_slice(&(span.stage as i32).to_le_bytes());
-            bytes[4..8].copy_from_slice(&entity_id.to_le_bytes());
-            bytes[8..12].copy_from_slice(&block_id.to_le_bytes());
-            // The overlay: the layer's low 16 bits (HDR output's tier rides in the high ones).
-            for (i, c) in entity_color(run[0].layer & 0xffff).iter().enumerate() {
-                bytes[16 + 4 * i..20 + 4 * i].copy_from_slice(&c.to_le_bytes());
-            }
-            self.uniforms.extend_from_slice(&bytes);
-            self.uniforms
-                .resize(self.uniforms.len() + (self.stride - SLOT) as usize, 0);
-            self.draws.push(Draw {
-                base: start,
-                quads: run.len() as u32 / 4,
+            self.push_draw(
+                span,
+                posed + start,
+                run.len() as u32,
                 program,
                 pack,
-                shadow: casts,
-                slot: self.draws.len() as u32,
-            });
+                casts,
+                run[0].layer & 0xffff,
+            );
         }
-        if self.draws.is_empty() {
+        if self.draws.is_empty() && posed == 0 {
             return;
         }
         let vertex_size = std::mem::size_of::<Vertex>() as u64;
-        let (need_vertices, need_slots) = (self.scratch.len() as u64, self.draws.len() as u64);
+        let (need_vertices, need_slots) = (
+            u64::from(posed) + self.scratch.len() as u64,
+            self.draws.len() as u64,
+        );
         let have_vertices = self.vertices.size() / vertex_size;
         let have_slots = self.slots.size() / self.stride;
         if need_vertices > have_vertices {
@@ -391,8 +405,52 @@ impl PackEntities {
             self.quads = quads.next_power_of_two();
             self.indices = quad_indices(device, self.quads);
         }
-        queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(&self.scratch));
-        queue.write_buffer(&self.slots, 0, &self.uniforms);
+        if !self.scratch.is_empty() {
+            queue.write_buffer(
+                &self.vertices,
+                u64::from(posed) * vertex_size,
+                bytemuck::cast_slice(&self.scratch),
+            );
+        }
+        if !self.uniforms.is_empty() {
+            queue.write_buffer(&self.slots, 0, &self.uniforms);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push_draw(
+        &mut self,
+        span: EntitySpan,
+        start: u32,
+        vertices: u32,
+        program: usize,
+        pack: bool,
+        casts: bool,
+        overlay: u32,
+    ) {
+        let (entity_id, block_id) = match program {
+            BLOCK => (0, span.id),
+            _ => (span.id, 0),
+        };
+        let mut bytes = [0u8; SLOT as usize];
+        bytes[0..4].copy_from_slice(&(span.stage as i32).to_le_bytes());
+        bytes[4..8].copy_from_slice(&entity_id.to_le_bytes());
+        bytes[8..12].copy_from_slice(&block_id.to_le_bytes());
+        // The overlay: the layer's low 16 bits (HDR output's tier rides in the high ones).
+        for (i, c) in entity_color(overlay & 0xffff).iter().enumerate() {
+            bytes[16 + 4 * i..20 + 4 * i].copy_from_slice(&c.to_le_bytes());
+        }
+        self.uniforms.extend_from_slice(&bytes);
+        self.uniforms
+            .resize(self.uniforms.len() + (self.stride - SLOT) as usize, 0);
+        self.draws.push(Draw {
+            base: start,
+            quads: vertices / 4,
+            program,
+            pack,
+            shadow: casts,
+            slot: self.draws.len() as u32,
+        });
     }
 }
 
@@ -596,5 +654,260 @@ mod crack_projection_tests {
         );
         assert!((vertices[2].uv[0] - vertices[0].uv[0]) > 15.0 / 4096.0);
         assert!((vertices[1].uv[1] - vertices[0].uv[1]) > 15.0 / 9216.0);
+    }
+}
+
+/// Intersects shader identities with overlay runs, without reading posed vertices back.
+fn skin_runs(skin: &super::entity_skin::SkinFrame) -> Vec<(EntitySpan, Range<u32>, u32)> {
+    let mut out: Vec<(EntitySpan, Range<u32>, u32)> = Vec::new();
+    let mut span_index = 0;
+    for job in &skin.jobs {
+        let mut at = job.dst;
+        let end = at + job.count;
+        while at < end {
+            while span_index + 1 < skin.spans.len() && skin.spans[span_index + 1].start <= at {
+                span_index += 1;
+            }
+            let Some(&span) = skin.spans.get(span_index) else {
+                break;
+            };
+            let stop = end.min(skin.spans.get(span_index + 1).map_or(end, |s| s.start));
+            if stop <= at {
+                break;
+            }
+            if let Some((old, range, overlay)) = out.last_mut()
+                && (EntitySpan { start: 0, ..*old }) == (EntitySpan { start: 0, ..span })
+                && *overlay == job.overlay
+                && range.end == at
+            {
+                range.end = stop;
+            } else {
+                out.push((span, at..stop, job.overlay));
+            }
+            at = stop;
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod gpu_span_tests {
+    use super::*;
+    use crate::gfx::entity_skin::{SkinFrame, SkinJob};
+    #[test]
+    fn posed_draws_preserve_subject_ids_overlays_and_hidden_shadow_casters() {
+        let mut skin = SkinFrame {
+            vertices: 24,
+            ..Default::default()
+        };
+        skin.spans = vec![
+            EntitySpan {
+                start: 0,
+                stage: render_stage("ENTITIES"),
+                id: 40,
+                ..Default::default()
+            },
+            EntitySpan {
+                start: 12,
+                stage: render_stage("ENTITIES"),
+                id: 41,
+                hidden: true,
+                ..Default::default()
+            },
+        ];
+        skin.jobs = vec![
+            SkinJob {
+                dst: 0,
+                count: 4,
+                overlay: 1,
+                ..Default::default()
+            },
+            SkinJob {
+                dst: 4,
+                count: 4,
+                overlay: 1,
+                ..Default::default()
+            },
+            SkinJob {
+                dst: 8,
+                count: 12,
+                overlay: 5,
+                ..Default::default()
+            },
+            SkinJob {
+                dst: 20,
+                count: 4,
+                overlay: 5,
+                ..Default::default()
+            },
+        ];
+        let runs = skin_runs(&skin);
+        assert_eq!(
+            runs.iter()
+                .map(|(s, r, o)| (s.id, r.clone(), *o, s.hidden))
+                .collect::<Vec<_>>(),
+            [
+                (40, 0..8, 1, false),
+                (40, 8..12, 5, false),
+                (41, 12..24, 5, true)
+            ]
+        );
+        assert_eq!(entity_color(runs[0].2)[3], 0.30196077);
+        assert!(
+            Casters {
+                entities: true,
+                ..Default::default()
+            }
+            .cast(&runs[2].0, ENTITY)
+        );
+        skin.truncate((2, 0, 8));
+        assert_eq!(skin.vertices, 8);
+        assert_eq!(skin.spans.len(), 1);
+    }
+
+    #[test]
+    fn posed_and_cpu_draws_keep_offsets_uniforms_and_special_fallbacks() {
+        let instance = crate::gfx::test_gpu::instance();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&Default::default())) else {
+            return;
+        };
+        let Ok((device, queue)) = pollster::block_on(adapter.request_device(&Default::default()))
+        else {
+            return;
+        };
+        let layout = super::super::pack_draw::DrawUniforms::new(&device);
+        let mut geometry = PackEntities::new(&device, &layout.layout);
+        let entity = |start, id| EntitySpan {
+            start,
+            id,
+            stage: render_stage("ENTITIES"),
+            ..Default::default()
+        };
+        let mut skin = SkinFrame {
+            vertices: 12,
+            spans: vec![
+                entity(0, 40),
+                EntitySpan {
+                    hidden: true,
+                    ..entity(4, 41)
+                },
+                EntitySpan {
+                    start: 8,
+                    id: 99,
+                    stage: render_stage("BLOCK_ENTITIES"),
+                    emissive: true,
+                    ..Default::default()
+                },
+            ],
+            jobs: [1 | (2 << 16), 5, 0]
+                .into_iter()
+                .enumerate()
+                .map(|(i, overlay)| SkinJob {
+                    dst: i as u32 * 4,
+                    count: 4,
+                    overlay,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let cpu = vec![
+            Vertex {
+                layer: 0,
+                ..bytemuck::Zeroable::zeroed()
+            };
+            8
+        ];
+        let spans = [entity(4, 50)];
+        let mut rest = Vec::new();
+        let shadows = Casters {
+            entities: true,
+            blocks: true,
+            ..Default::default()
+        };
+        geometry.prepare(
+            &device,
+            &queue,
+            &layout.layout,
+            &cpu,
+            &spans,
+            [true; PROGRAMS],
+            ([0.; 4], [1; 2]),
+            shadows,
+            &mut rest,
+            Some(&skin),
+        );
+        assert_eq!(rest.len(), 4, "untagged CPU prefix stays in Horizon's draw");
+        assert_eq!(geometry.scratch.len(), 4, "only CPU geometry is uploaded");
+        assert_eq!(
+            geometry
+                .draws
+                .iter()
+                .map(|d| (d.base, d.quads, d.pack, d.shadow))
+                .collect::<Vec<_>>(),
+            [
+                (0, 1, true, true),
+                (4, 1, false, true),
+                (8, 1, true, true),
+                (12, 1, true, true)
+            ]
+        );
+        let slot = |i: usize| &geometry.uniforms[i * geometry.stride as usize..][..SLOT as usize];
+        let word = |bytes: &[u8], at| i32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        assert_eq!((word(slot(0), 4), word(slot(0), 8)), (40, 0));
+        assert_eq!((word(slot(1), 4), word(slot(1), 8)), (41, 0));
+        assert_eq!((word(slot(2), 4), word(slot(2), 8)), (0, 99));
+        assert_eq!((word(slot(3), 4), word(slot(3), 8)), (50, 0));
+        let hurt: &[f32] = bytemuck::cast_slice(&slot(0)[16..32]);
+        assert_eq!(&hurt[..3], &[1.0, 0.0, 0.0]);
+        assert!((hurt[3] - 77.0 / 255.0).abs() < 1e-6);
+        let flash: &[f32] = bytemuck::cast_slice(&slot(1)[16..32]);
+        assert_eq!(&flash[..3], &[1.0, 1.0, 1.0]);
+        assert!((flash[3] - 192.0 / 255.0).abs() < 1e-6);
+        assert_eq!(word(slot(2), 0), render_stage("BLOCK_ENTITIES") as i32);
+
+        let mut special = cpu.clone();
+        special[4..].iter_mut().for_each(|v| v.layer = 2);
+        geometry.prepare(
+            &device,
+            &queue,
+            &layout.layout,
+            &special,
+            &spans,
+            [true; PROGRAMS],
+            ([0.; 4], [1; 2]),
+            shadows,
+            &mut rest,
+            None,
+        );
+        assert!(geometry.draws.is_empty());
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&rest),
+            bytemuck::cast_slice::<_, u8>(&special)
+        );
+
+        // Culling can retain hidden jobs for a pack whose entity caster is absent.
+        // The compute output must still fit, even though no visible/shadow draw uses it.
+        skin.vertices = 5000;
+        skin.jobs.truncate(1);
+        skin.jobs[0].count = 5000;
+        skin.spans = vec![EntitySpan {
+            hidden: true,
+            ..entity(0, 60)
+        }];
+        geometry.prepare(
+            &device,
+            &queue,
+            &layout.layout,
+            &[],
+            &[],
+            [false; PROGRAMS],
+            ([0.; 4], [1; 2]),
+            Casters::default(),
+            &mut rest,
+            Some(&skin),
+        );
+        assert!(geometry.draws.is_empty());
+        assert!(geometry.skin_target().size() >= 5000 * 44);
     }
 }

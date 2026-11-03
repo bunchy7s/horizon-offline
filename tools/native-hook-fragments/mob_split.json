@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "mob_split",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_mob_split",
+      "neoforge": "MobSplitEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a slime or magma cube splitting on death, cancellable (`native_mob_split`).",
+  "doc_summary": "a slime or magma cube about to split into smaller ones on death, as NeoForge's `MobSplitEvent`: `native_mob_split(parent, kind, size, child_size, count, cancel)` runs on the server for a parent above size 1 after vanilla drew the child count. A mod may change `count` (0 to 64) or set `cancel` to spawn no children. Bundles need \"hooks\": @API:mob_split@."
+}

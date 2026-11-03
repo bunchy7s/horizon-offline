@@ -574,6 +574,12 @@ impl MusicManager {
         sounds: &mut impl Sounds,
     ) -> bool {
         let mut instance = SoundInstance::for_music(&music.sound, SoundEngine::unseeded());
+        // No track off and no row to play: vanilla's startPlaying as it is.
+        // `resolve` picks the track, and an event with nothing to play (or no
+        // event) is still the current music, with the delay at its maximum.
+        if only.is_none() && self.off.is_empty() {
+            return self.play_current(instance, only, sounds);
+        }
         // The event's own random picks the track, as `resolve` would.
         let mut random = instance.random.clone();
         let sound = sounds
@@ -596,9 +602,20 @@ impl MusicManager {
             }
             return false;
         };
-        // The manager resolved the sound itself; `resolve` keeps it (`getOrResolve`).
+        // The manager resolved the sound itself; `resolve` keeps it.
         instance.sound = Some(sound);
         instance.event = Some(None);
+        instance.chosen = true;
+        self.play_current(instance, only, sounds)
+    }
+    /// The rest of `MusicManager.startPlaying`: play `instance` as the current
+    /// music (a Music page row replaces the track already playing).
+    fn play_current(
+        &mut self,
+        instance: SoundInstance,
+        only: Option<&str>,
+        sounds: &mut impl Sounds,
+    ) -> bool {
         // "Play now" takes the manager's slot: the track already playing stops
         // (a situation's own track is replaced by `set_current` below).
         if only.is_some()
