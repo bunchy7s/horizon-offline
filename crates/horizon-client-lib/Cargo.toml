@@ -225,3 +225,7 @@ path = "../horizon-client/tests/tall_column.rs"
 [[test]]
 name = "wide_states"
 path = "../horizon-client/tests/wide_states.rs"
+
+[[example]]
+name = "chunk_encoding_bench"
+path = "../horizon-client/examples/chunk_encoding_bench.rs"

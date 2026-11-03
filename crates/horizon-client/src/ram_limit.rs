@@ -4,6 +4,7 @@
 //! Under pressure, [`Governor`] turns far terrain off and lowers the render distance in use, never
 //! the option the player saved, and gives them back when there is room. Only a game that can't run
 //! under the limit at all ends with a crash report.
+use horizon_threads::capped;
 use horizon_threads::memory_limit::{self, Pressure};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -12,6 +13,8 @@ use std::time::{Duration, Instant};
 /// The command's name, which the chat box lists with the server's.
 pub const COMMAND: &str = "ramlimit";
 const ENV: &str = "HORIZON_MEMORY_LIMIT_MB";
+/// A ceiling at the allocator: past it the game ends instead of paging.
+const HARD_ENV: &str = "HORIZON_MEMORY_HARD_MB";
 const MIB: u64 = 1024 * 1024;
 /// The lowest render distance the game runs at (`Options.renderDistance`'s lowest).
 pub const LOWEST_DISTANCE: i32 = 2;
@@ -135,6 +138,17 @@ const SLOW_FPS: f32 = 30.;
 /// See [`memory_limit::pressure`]. Under a cap the system enforces the game is already under the
 /// limit, so nothing the player sees goes unless the game is slow as well.
 pub fn pressure(limit: u64, fps: f32) -> Pressure {
+    if capped::limit().is_some() {
+        // A hard ceiling is a budget of its own: what the process commits
+        // decides, and a smooth frame does not excuse holding more. Shedding
+        // down to it is the point, so frames suffering is not the trigger.
+        return horizon_threads::allocator_commit()
+            .0
+            .try_into()
+            .map_or(Pressure::Steady, |commit| {
+                memory_limit::pressure_of_commit(commit, limit)
+            });
+    }
     let pressure = memory_limit::pressure(limit);
     needed(pressure, memory_limit::system_enforced(), fps)
 }
@@ -163,10 +177,28 @@ pub fn start(home: &Path, side: &'static str) {
             Err(_) => log::warn!("{ENV}={value} is not a number of MiB: no limit set"),
         }
     }
+    if let Ok(value) = std::env::var(HARD_ENV) {
+        match value.trim().parse::<u64>() {
+            Ok(mb) => set_hard(Some(mb)),
+            Err(_) => log::warn!("{HARD_ENV}={value} is not a number of MiB: no hard limit set"),
+        }
+    }
 }
 
 fn set(mb: Option<u64>) {
     memory_limit::set(mb.map(|mb| mb.saturating_mul(MIB)), exceeded);
+}
+
+/// Sets the ceiling at the allocator, and with no working set limit yet, gives
+/// the governor the same budget: alone, a hard ceiling would end the game
+/// before anything stepped down.
+fn set_hard(mb: Option<u64>) {
+    capped::set_limit(mb.map(|mb| mb.saturating_mul(MIB)));
+    if let Some(mb) = mb
+        && memory_limit::get().is_none()
+    {
+        set(Some(mb));
+    }
 }
 
 fn exceeded(used: u64, limit: u64) {
@@ -188,6 +220,7 @@ fn exceeded(used: u64, limit: u64) {
 enum Request {
     Show,
     Set(Option<u64>),
+    SetHard(Option<u64>),
     Usage,
 }
 
@@ -197,28 +230,44 @@ fn parse(command: &str) -> Option<Request> {
     if words.next() != Some(COMMAND) {
         return None;
     }
-    Some(match (words.next(), words.next()) {
-        (None, _) => Request::Show,
-        (Some("off"), None) => Request::Set(None),
-        (Some(mb), None) => mb
+    Some(match (words.next(), words.next(), words.next()) {
+        (None, _, _) => Request::Show,
+        (Some("off"), None, _) => Request::Set(None),
+        (Some("hard"), Some("off"), None) => Request::SetHard(None),
+        (Some("hard"), Some(mb), None) => mb
+            .parse()
+            .map_or(Request::Usage, |mb| Request::SetHard(Some(mb))),
+        (Some(mb), None, _) => mb
             .parse()
             .map_or(Request::Usage, |mb| Request::Set(Some(mb))),
         _ => Request::Usage,
     })
 }
 
-fn describe(limit: Option<u64>, used: Option<u64>) -> String {
+fn describe(limit: Option<u64>, hard: Option<u64>, used: Option<u64>) -> String {
     let limit = limit.map_or("off".to_owned(), |limit| format!("{} MB", limit / MIB));
-    match used {
-        Some(used) => format!("RAM limit: {limit}. The game holds {} MB.", used / MIB),
-        None => format!("RAM limit: {limit}."),
-    }
+    let hard_off = hard.is_none();
+    let hard = hard.map_or("off".to_owned(), |hard| format!("{} MB", hard / MIB));
+    let holds = used.map_or(String::new(), |used| {
+        // With a hard limit, the number that counts is the process's commit,
+        // since that is what the budget is spent on.
+        let what = if hard_off { "game" } else { "process" };
+        format!(" The {what} holds {} MB.", used / MIB)
+    });
+    format!("RAM limit: {limit}. Hard limit: {hard}.{holds}")
 }
 
 /// Runs `/ramlimit` and returns what to say in chat, or None when `command` is another command.
 pub fn run(command: &str) -> Option<String> {
     Some(match parse(command)? {
-        Request::Show => describe(memory_limit::get(), memory_limit::resident_bytes()),
+        Request::Show => describe(
+            memory_limit::get(),
+            capped::limit(),
+            match capped::limit() {
+                Some(_) => Some(horizon_threads::allocator_commit().0 as u64),
+                None => memory_limit::resident_bytes(),
+            },
+        ),
         Request::Set(None) => {
             set(None);
             "RAM limit off until the game closes.".to_owned()
@@ -230,7 +279,22 @@ pub fn run(command: &str) -> Option<String> {
                  slower if it's very low."
             )
         }
-        Request::Usage => "Usage: /ramlimit, /ramlimit <MB> or /ramlimit off".to_owned(),
+        Request::SetHard(None) => {
+            set_hard(None);
+            "Hard memory limit off until the game closes.".to_owned()
+        }
+        Request::SetHard(Some(mb)) => {
+            set_hard(Some(mb));
+            format!(
+                "Hard memory limit set to {mb} MB until the game closes: past it the game ends \
+                 instead of paging."
+            )
+        }
+        Request::Usage => {
+            "Usage: /ramlimit, /ramlimit <MB>, /ramlimit off, /ramlimit hard <MB> or /ramlimit \
+             hard off"
+                .to_owned()
+        }
     })
 }
 
@@ -333,6 +397,12 @@ mod tests {
         assert_eq!(parse("ramlimit off"), Some(Request::Set(None)));
         assert_eq!(parse("ramlimit 1"), Some(Request::Set(Some(1))));
         assert_eq!(parse("ramlimit 8192"), Some(Request::Set(Some(8192))));
+        assert_eq!(
+            parse("ramlimit hard 512"),
+            Some(Request::SetHard(Some(512)))
+        );
+        assert_eq!(parse("ramlimit hard off"), Some(Request::SetHard(None)));
+        assert_eq!(parse("ramlimit hard lots"), Some(Request::Usage));
     }
 
     #[test]
@@ -347,9 +417,12 @@ mod tests {
     #[test]
     fn the_answer_shows_the_limit_and_what_is_held() {
         assert_eq!(
-            describe(Some(2048 * MIB), Some(512 * MIB)),
-            "RAM limit: 2048 MB. The game holds 512 MB."
+            describe(Some(2048 * MIB), Some(1024 * MIB), Some(512 * MIB)),
+            "RAM limit: 2048 MB. Hard limit: 1024 MB. The process holds 512 MB."
         );
-        assert_eq!(describe(None, None), "RAM limit: off.");
+        assert_eq!(
+            describe(None, None, None),
+            "RAM limit: off. Hard limit: off."
+        );
     }
 }

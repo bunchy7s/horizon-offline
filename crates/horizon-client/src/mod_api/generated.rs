@@ -3552,12 +3552,16 @@ pub trait Hooks: Send + Sync {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -4567,6 +4571,13 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    fn item_model_property(&self, host: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
     /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
@@ -4579,10 +4590,58 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
+    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
+    /// this has a host and snapshots of the weapon, victim position/view and
+    /// DamageSource position. The acting player's network id is `causing`
+    /// (also the direct entity). Weapon enchantments include their levels.
+    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_incoming_damage_v2(
+        &self,
+        host: &mut dyn Host,
+        event: &mut LivingIncomingDamageV2Event<'_>,
+    ) -> Flow {
+        let _ = host;
+        let _ = event;
+        Flow::Continue
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
+    }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
         let _ = host;
         let _ = event;
+    }
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn note_block_change(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut NoteBlockChangeEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
     }
     /// Declare categories for custom recipe types, with registered item icons.
     /// Asked lazily once per recipe table by `native_recipe_book_category`.
@@ -14061,6 +14120,30 @@ pub fn dispatch_item_container(
         }
     }
 }
+/// What [`Hooks::item_model_property`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemModelPropertyEvent<'a> {
+    pub property: &'a str,
+    pub stack: &'a StackView,
+    pub value: bool,
+}
+pub fn dispatch_item_model_property(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    property: &str,
+    stack: &StackView,
+    value: &mut bool,
+) {
+    let mut event = ItemModelPropertyEvent {
+        property,
+        stack,
+        value: *value,
+    };
+    for mod_hook in super::entered(mods, "item_model_property") {
+        mod_hook.item_model_property(host, &mut event);
+    }
+    *value = event.value;
+}
 /// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct LivingGetProjectileEvent<'a> {
@@ -14093,6 +14176,105 @@ pub fn dispatch_living_get_projectile(
         mod_hook.living_get_projectile(host, &mut event);
     }
 }
+/// What [`Hooks::living_incoming_damage_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingIncomingDamageV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub damage_type: &'a str,
+    pub causing: i32,
+    pub source_position: Option<[f64; 3]>,
+    pub victim_position: [f64; 3],
+    pub victim_view: [f64; 3],
+    pub weapon: Option<&'a ItemStack>,
+    pub amount: f32,
+}
+pub fn dispatch_living_incoming_damage_v2(
+    host: &mut dyn Host,
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    damage_type: &str,
+    causing: i32,
+    source_position: Option<[f64; 3]>,
+    victim_position: [f64; 3],
+    victim_view: [f64; 3],
+    weapon: Option<&ItemStack>,
+    amount: &mut f32,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingIncomingDamageV2Event {
+        entity,
+        kind,
+        damage_type,
+        causing,
+        source_position,
+        victim_position,
+        victim_view,
+        weapon,
+        amount: *amount,
+    };
+    for mod_hook in super::entered(mods, "living_incoming_damage_v2") {
+        if matches!(
+            mod_hook.living_incoming_damage_v2(host, &mut event),
+            Flow::Cancel
+        ) {
+            *canceled = true;
+            break;
+        }
+    }
+    *amount = event.amount;
+}
+/// What [`Hooks::living_knockback_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingKnockbackV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+pub fn dispatch_living_knockback_v2(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
+    strength: &mut f64,
+    x: &mut f64,
+    z: &mut f64,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingKnockbackV2Event {
+        entity,
+        kind,
+        attacker,
+        attacker_main,
+        attacker_off,
+        strength: *strength,
+        x: *x,
+        z: *z,
+    };
+    for mod_hook in super::entered(mods, "living_knockback_v2") {
+        if matches!(mod_hook.living_knockback_v2(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *strength = event.strength;
+    *x = event.x;
+    *z = event.z;
+}
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct MovementInputEvent {
@@ -14122,6 +14304,34 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::note_block_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct NoteBlockChangeEvent<'a> {
+    pub context: &'a NativeNoteBlockChange<'a>,
+    pub new_note: i32,
+}
+pub fn dispatch_note_block_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    context: &NativeNoteBlockChange<'_>,
+    new_note: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = NoteBlockChangeEvent {
+        context,
+        new_note: *new_note,
+    };
+    for mod_hook in super::entered(mods, "note_block_change") {
+        if matches!(mod_hook.note_block_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *new_note = event.new_note;
 }
 /// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
