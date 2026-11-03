@@ -140,7 +140,7 @@ HorseInventoryMenu.<init>	port	crates/horizon-client/src/game/lan_mount_menu.rs:
 InventoryMenu.isHotbarSlot	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the hotbar range check is inline in the shift-click arm
 InventoryMenu.slotsChanged	port	crates/horizon-client/src/menu.rs::Menu::inventory_slots_changed	the crafting result is recomputed when the grid changes
 InventoryMenu.removed	port	crates/horizon-client/src/game/lan_crafting.rs::Game::lan_crafting_closed	the window-0 craft grid goes back when the inventory closes; the host side of a guest's inventory
-InventoryMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the inventory, armour, grid and offhand
+InventoryMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the inventory, armour, grid and offhand, in vanilla's order: the item's equipment slot first, so armour in the off hand is worn
 InventoryMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is never picked up in bulk
 ItemCombinerMenu.createInputSlots	inline	crates/horizon-client/src/menu.rs::Menu::new	the anvil's input slots are set up when the menu is made; mayPlace is Menu::may_place
 ItemCombinerMenu.createResultSlot	inline	crates/horizon-client/src/menu.rs::Menu::new	the result slot is set up when the menu is made and takes no placed items
