@@ -52,7 +52,11 @@ pub enum Message {
 pub const FILTERS: [(&str, &str, &str); 6] = [
     ("horizon.pack.filter.realistic", "categories", "realistic"),
     ("horizon.pack.filter.simplistic", "categories", "simplistic"),
-    ("horizon.pack.filter.vanillaLike", "categories", "vanilla-like"),
+    (
+        "horizon.pack.filter.vanillaLike",
+        "categories",
+        "vanilla-like",
+    ),
     ("horizon.pack.filter.x16", "resolutions", "16x"),
     ("horizon.pack.filter.x32", "resolutions", "32x"),
     ("horizon.pack.filter.x64", "resolutions", "64x"),
@@ -79,10 +83,7 @@ pub fn search_url(query: &str, chosen: &std::collections::BTreeSet<usize>) -> St
             .iter()
             .map(|(_, terms)| format!("[{}]", terms.join(",")))
             .collect();
-        facets = format!(
-            "[[\"project_type:resourcepack\"],{}]",
-            extra.join(",")
-        );
+        facets = format!("[[\"project_type:resourcepack\"],{}]", extra.join(","));
     }
     format!(
         "{API}/search?limit={LIMIT}&index=relevance&facets={}&query={}",
@@ -197,6 +198,19 @@ pub fn safe_file_name(name: &str) -> String {
     if cleaned.is_empty() {
         cleaned = "pack".into();
     }
+    // Windows' device names cannot be files, whatever their extension.
+    let stem = cleaned.split('.').next().unwrap_or_default().trim_end();
+    let device = matches!(
+        stem.to_ascii_uppercase().as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+    ) || (stem.len() == 4
+        && ["COM", "LPT"]
+            .iter()
+            .any(|p| stem[..3].eq_ignore_ascii_case(p))
+        && stem.as_bytes()[3].is_ascii_digit());
+    if device {
+        cleaned.insert(0, '_');
+    }
     if !cleaned.to_ascii_lowercase().ends_with(".zip") {
         cleaned.push_str(".zip");
     }
@@ -204,20 +218,17 @@ pub fn safe_file_name(name: &str) -> String {
 }
 
 /// `name` in `dir`, numbered when something of that name is already there, so
-/// a download never replaces a pack the player already has.
-pub fn free_path(dir: &Path, name: &str) -> PathBuf {
+/// a download never replaces a pack the player already has. `None` once every
+/// number up to 999 is taken.
+pub fn free_path(dir: &Path, name: &str) -> Option<PathBuf> {
     let path = dir.join(name);
     if !path.exists() {
-        return path;
+        return Some(path);
     }
     let (stem, extension) = name.rsplit_once('.').unwrap_or((name, "zip"));
-    for n in 2..1000 {
-        let candidate = dir.join(format!("{stem} ({n}).{extension}"));
-        if !candidate.exists() {
-            return candidate;
-        }
-    }
-    path
+    (2..1000)
+        .map(|n| dir.join(format!("{stem} ({n}).{extension}")))
+        .find(|candidate| !candidate.exists())
 }
 
 /// The browser's state, owned by the pack screen.
@@ -360,7 +371,7 @@ impl Browser {
         let sender = self.sender.clone();
         spawn("pack-browser-icons", move || {
             for (id, url) in wanted {
-                match get_bytes(&url) {
+                match get_bytes(&url, MAX_ICON_BYTES) {
                     Ok(bytes) => {
                         if sender.send(Message::Icon(id, bytes)).is_err() {
                             return;
@@ -405,7 +416,7 @@ fn download_pack(versions: &str, dir: &Path) -> Message {
         Ok(found) => found,
         Err(reason) => return Message::Failed(reason),
     };
-    let body = match get_bytes(&url) {
+    let body = match get_bytes(&url, MAX_PACK_BYTES) {
         Ok(body) => body,
         Err(reason) => return Message::Failed(reason),
     };
@@ -421,7 +432,9 @@ fn download_pack(versions: &str, dir: &Path) -> Message {
     if let Err(e) = std::fs::create_dir_all(dir) {
         return Message::Failed(e.to_string());
     }
-    let path = free_path(dir, &name);
+    let Some(path) = free_path(dir, &name) else {
+        return Message::Failed(format!("{name}: every numbered name is taken"));
+    };
     // Written beside the pack and renamed, so a pack list never sees a
     // half-written zip.
     let partial = path.with_extension("partial");
@@ -441,6 +454,19 @@ fn download_pack(versions: &str, dir: &Path) -> Message {
 /// A pack Modrinth serves is capped: a reply past this is refused rather than
 /// read into memory.
 const MAX_PACK_BYTES: usize = 512 * 1024 * 1024;
+/// A project icon is a small image; one past this is not read.
+const MAX_ICON_BYTES: usize = 2 * 1024 * 1024;
+
+/// Only HTTPS: a reply names the URLs fetched next (icons, files), and a plain
+/// `http://` one could point anywhere unencrypted, the player's own network
+/// included.
+fn https_only(url: &str) -> Result<(), String> {
+    if url.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!("{url} is not an https address"))
+    }
+}
 
 fn get_text(url: &str) -> Result<String, String> {
     ureq::get(url)
@@ -451,8 +477,9 @@ fn get_text(url: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
+fn get_bytes(url: &str, max: usize) -> Result<Vec<u8>, String> {
     use std::io::Read;
+    https_only(url)?;
     let response = ureq::get(url)
         .set("User-Agent", AGENT)
         .call()
@@ -460,59 +487,22 @@ fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     response
         .into_reader()
-        .take(MAX_PACK_BYTES as u64 + 1)
+        .take(max as u64 + 1)
         .read_to_end(&mut body)
         .map_err(|e| e.to_string())?;
-    if body.len() > MAX_PACK_BYTES {
-        return Err("the pack is larger than this screen downloads".into());
+    if body.len() > max {
+        return Err(format!("{url} is larger than {max} bytes"));
     }
     Ok(body)
 }
 
-/// SHA-1 of `bytes` as lowercase hex (FIPS 180-4), for the checksum Modrinth
-/// states beside each file.
+/// SHA-1 of `bytes` as lowercase hex, for the checksum Modrinth states beside
+/// each file (the `sha1` crate the skins already use).
 fn sha1_hex(bytes: &[u8]) -> String {
-    let mut h: [u32; 5] = [0x6745_2301, 0xEFCD_AB89, 0x98BA_DCFE, 0x1032_5476, 0xC3D2_E1F0];
-    let mut message = bytes.to_vec();
-    let bits = (bytes.len() as u64).wrapping_mul(8);
-    message.push(0x80);
-    while message.len() % 64 != 56 {
-        message.push(0);
-    }
-    message.extend_from_slice(&bits.to_be_bytes());
-    for chunk in message.chunks_exact(64) {
-        let mut w = [0u32; 80];
-        for (i, word) in chunk.chunks_exact(4).enumerate() {
-            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
-        }
-        for i in 16..80 {
-            w[i] = (w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]).rotate_left(1);
-        }
-        let [mut a, mut b, mut c, mut d, mut e] = h;
-        for (i, word) in w.iter().enumerate() {
-            let (f, k) = match i {
-                0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
-                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
-                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
-                _ => (b ^ c ^ d, 0xCA62_C1D6),
-            };
-            let temp = a
-                .rotate_left(5)
-                .wrapping_add(f)
-                .wrapping_add(e)
-                .wrapping_add(k)
-                .wrapping_add(*word);
-            e = d;
-            d = c;
-            c = b.rotate_left(30);
-            b = a;
-            a = temp;
-        }
-        for (slot, value) in h.iter_mut().zip([a, b, c, d, e]) {
-            *slot = slot.wrapping_add(value);
-        }
-    }
-    h.iter().map(|word| format!("{word:08x}")).collect()
+    crate::skins::sha1(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[cfg(test)]
@@ -624,6 +614,12 @@ mod tests {
         assert_eq!(safe_file_name("Nice Pack (v2).zip"), "Nice Pack (v2).zip");
         // Keeps its ending whatever its case, rather than gaining a second one.
         assert_eq!(safe_file_name("Pack.ZIP"), "Pack.ZIP");
+        // Windows' device names get a prefix; a longer stem keeps its name.
+        assert_eq!(safe_file_name("CON"), "_CON.zip");
+        assert_eq!(safe_file_name("aux.zip"), "_aux.zip");
+        assert_eq!(safe_file_name("com1.tar.zip"), "_com1.tar.zip");
+        assert_eq!(safe_file_name("console.zip"), "console.zip");
+        assert_eq!(safe_file_name("COM10.zip"), "COM10.zip");
     }
 
     #[test]
@@ -632,11 +628,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::fs::remove_file(dir.join("p.zip"));
         let _ = std::fs::remove_file(dir.join("p (2).zip"));
-        assert_eq!(free_path(&dir, "p.zip"), dir.join("p.zip"));
+        assert_eq!(free_path(&dir, "p.zip"), Some(dir.join("p.zip")));
         std::fs::write(dir.join("p.zip"), b"x").unwrap();
-        assert_eq!(free_path(&dir, "p.zip"), dir.join("p (2).zip"));
+        assert_eq!(free_path(&dir, "p.zip"), Some(dir.join("p (2).zip")));
         std::fs::write(dir.join("p (2).zip"), b"x").unwrap();
-        assert_eq!(free_path(&dir, "p.zip"), dir.join("p (3).zip"));
+        assert_eq!(free_path(&dir, "p.zip"), Some(dir.join("p (3).zip")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
