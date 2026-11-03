@@ -13,6 +13,7 @@ pub mod block_entities;
 pub mod block_entity_anim;
 pub mod block_entity_cem;
 pub mod block_entity_render;
+pub mod block_sprites;
 pub mod bluemap;
 pub mod bluemap_detect;
 pub mod border_render;

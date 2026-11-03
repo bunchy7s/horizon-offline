@@ -178,13 +178,15 @@ impl Game<'_> {
             }
             Target::Crystal(id) => {
                 let c = self.crystals.iter().find(|c| c.id == id)?;
-                let (uuid, raw) = self.persist_anon("minecraft:end_crystal", c.position);
+                let raw = self.persist_anon("minecraft:end_crystal", c.position);
+                let uuid = self.persist.uuids.get(&id).copied();
                 let tag = c.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
             Target::Dragon(id) => {
                 let d = self.dragon.as_ref().filter(|d| d.id == id)?;
-                let (uuid, raw) = self.persist_anon("minecraft:ender_dragon", d.position);
+                let raw = self.persist_anon("minecraft:ender_dragon", d.position);
+                let uuid = self.persist.uuids.get(&id).copied();
                 let tag = d.to_nbt(uuid.unwrap_or_else(random_uuid), raw);
                 crate::game::persist::with_raw(tag, self.persist.raw.get(&id))
             }
@@ -271,6 +273,7 @@ impl Game<'_> {
                     // Runtime-only state (AI, animation) carries over.
                     let old = std::mem::replace(slot, new);
                     slot.ai = old.ai;
+                    slot.extra.armor_attributes = old.extra.armor_attributes;
                     slot.age = old.age;
                     slot.previous = slot.position;
                 }
@@ -870,7 +873,7 @@ impl Game<'_> {
         }
     }
     /// The `summon <entity> <pos> <nbt>` form.
-    pub(super) fn summon_with_nbt(
+    pub(in crate::game) fn summon_with_nbt(
         &mut self,
         kind: &str,
         pos: [f64; 3],

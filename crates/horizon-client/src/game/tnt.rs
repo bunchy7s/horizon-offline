@@ -97,15 +97,9 @@ impl PrimedTnt {
         // Entity.applyEffectsFromBlocks: a bubble column lifts or drags it, and the
         // columns it is at the top of send their surface particles.
         let mut tops = Vec::new();
-        horizon_client::motion::bubble_column_push_over(
-            world,
-            assets.registry,
-            facts,
-            collision,
-            self.bounds(),
-            &mut self.velocity,
-            |pos| tops.push(pos),
-        );
+        self.push_by_bubble_column_over(world, assets.registry, facts, collision, |pos| {
+            tops.push(pos)
+        });
         if self.on_ground {
             // Entity.applyEffectsFromBlocks -> SlimeBlock.stepOn.
             let under = world.block(
@@ -468,7 +462,8 @@ impl Game<'_> {
                 continue;
             }
             for m in self.mobs.iter_mut().filter(|m| m.extra.mount == Some(id)) {
-                let offset = horizon_client::mobs::riders::vehicle_attachment(m);
+                // Primed TNT's box is 0.98 wide.
+                let offset = horizon_client::mobs::riders::vehicle_attachment(m, 0.98);
                 m.position = tnt_seat(pos, offset);
                 m.previous = tnt_seat(prev, offset);
                 m.velocity = Vec3::ZERO;
