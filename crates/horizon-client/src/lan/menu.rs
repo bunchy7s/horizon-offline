@@ -466,6 +466,12 @@ pub fn click(
             }
             input::PICKUP => pickup(view, slot, button, rules),
             input::QUICK_MOVE => {
+                // doClick calls quickMoveStack again while the clicked slot
+                // still holds the item it moved, because moveItemStackTo fills
+                // one empty slot per call. move_to here fills every empty slot
+                // of its range in one pass and leaves the same remainder, so
+                // one call is vanilla's loop: a full inventory keeps its stack,
+                // and a stack too big for one slot spreads over several.
                 if let Ok(i) = usize::try_from(slot)
                     && i < view.len()
                     && view.may_pickup(i, rules)
@@ -1574,6 +1580,67 @@ mod tests {
         assert_eq!(view.get(10).as_ref().map(|s| s.count), Some(3));
         assert!(view.get(36).is_none());
         assert!(view.get(45).is_none());
+    }
+
+    /// `doClick` repeats `quickMoveStack` while the clicked slot keeps the
+    /// item, because `moveItemStackTo` fills one empty slot per call. This
+    /// engine's `move_to` fills every empty slot of its range in one pass, so a
+    /// single quick move must spread a stack over several slots with the same
+    /// remainder vanilla's loop leaves, and a full inventory must leave the
+    /// stack where it is.
+    #[test]
+    fn one_quick_move_spreads_a_stack_like_vanillas_repeat() {
+        struct SmallRules;
+        impl Rules for SmallRules {
+            fn items(&self) -> &Items {
+                unreachable!("a quick move reads no item catalog");
+            }
+            fn max_stack(&self, item: &str) -> u32 {
+                if item == "minecraft:snowball" { 16 } else { 64 }
+            }
+            fn armor_index(&self, _: &str) -> Option<usize> {
+                None
+            }
+        }
+        let rules = SmallRules;
+        let mut g = guest();
+        let mut chest = vec![Some(ItemStack::new("minecraft:snowball", 40))];
+        let mut drag = None;
+        let mut view = View {
+            guest: &mut g,
+            container: Some(&mut chest),
+            shulker: false,
+            hidden: &[],
+        };
+        // A container's quick move fills the inventory from its end: 16
+        // snowballs in the last hotbar slot (menu slot 36), 16 in the one
+        // before it, 8 in the third, and nothing left in the chest.
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert!(view.get(0).is_none());
+        assert_eq!(view.get(36).map(|s| s.count), Some(16));
+        assert_eq!(view.get(35).map(|s| s.count), Some(16));
+        assert_eq!(view.get(34).map(|s| s.count), Some(8));
+        // Two slots' worth of room only: the loop vanilla runs would stop
+        // after the second call, so 8 stay in the chest.
+        for i in 0..36 {
+            view.guest.inventory[i] = Some(ItemStack::new("minecraft:dirt", 1));
+        }
+        view.set(0, Some(ItemStack::new("minecraft:snowball", 40)));
+        // The fill starts at the hotbar's end: menu slots 36 and 35.
+        view.guest.inventory[8] = None;
+        view.guest.inventory[7] = None;
+        click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(8));
+        assert_eq!(view.get(36).map(|s| s.count), Some(16));
+        assert_eq!(view.get(35).map(|s| s.count), Some(16));
+        // A full inventory moves nothing at all.
+        for i in 0..36 {
+            view.guest.inventory[i] = Some(ItemStack::new("minecraft:dirt", 1));
+        }
+        view.set(0, Some(ItemStack::new("minecraft:snowball", 5)));
+        let (drops, changed) = click(&mut view, &mut drag, 0, 0, input::QUICK_MOVE, &rules);
+        assert_eq!(view.get(0).map(|s| s.count), Some(5));
+        assert!(drops.is_empty() && changed.is_empty());
     }
 
     /// `AbstractContainerMenu.isContainerClickButton`: a pickup and a quick
