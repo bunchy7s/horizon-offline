@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "potential_spawns",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_potential_spawns",
+      "side": "server",
+      "cancellable": true,
+      "neoforge": "LevelEvent.PotentialSpawns",
+      "mod_api": {
+        "contract": "cancel",
+        "out": "canceled"
+      }
+    }
+  ],
+  "rust_summary": "Possible natural spawn entries, mutable and cancellable (`native_potential_spawns`).",
+  "doc_summary": "`native_potential_spawns(dimension, category, pos, entries, canceled)`, run on the server when natural spawning builds its possible spawn list (NeoForge's `LevelEvent.PotentialSpawns`, vanilla's `NaturalSpawner.mobsAt`). Mods may add or remove entries; canceling empties the list. Bundles need \"hooks\": @API:native_potential_spawns@."
+}

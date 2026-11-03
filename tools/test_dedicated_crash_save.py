@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A dedicated server that panics in a tick still saves its world, and keeps what the panic left unsure.
+"""A dedicated server saves connected players on save-all/stop and keeps safe data after a panic.
 
 `MinecraftServer.runServer` catches what the tick throws and still stops the server. Horizon's
 `stop_after_crash` does the same, but a panic can interrupt a guest's turn (the game holds that
@@ -7,6 +7,8 @@ player's state swapped in) or a tick that has the hub out. `HORIZON_CRASH_FIXTUR
 panic at one of those points. Each run below joins a real Horizon client, panics the server, and
 checks, from the files the server leaves:
 
+- Connected player: save-all writes five diamonds while the player stays joined;
+  stop writes the newer inventory of twelve diamonds.
 - `guest`: the panic comes in the joined player's turn (which runs with the hub out of the game,
   as every network turn does). The player's file is byte for byte what the previous clean stop
   wrote, and a block placed before the panic is still there on the next start.
@@ -112,8 +114,51 @@ def crash(directory, fixture, port, out, trigger):
     return '\n'.join(server.lines)
 
 
+def connected_saves(build):
+    """Save-all and stop persist a player who is still connected, before logout can save them."""
+    try:
+        from . import anvil_dump, lan_e2e
+    except ImportError:
+        import anvil_dump
+        import lan_e2e
+    directory = build / 'connected-server'
+    port = free_port()
+    write_server_dir(directory, port)
+    server = start(directory)
+    client = lan_e2e.Game('autosave', binary().with_name('horizon-ctl'), lab.RESOURCES)
+    file = directory / 'world' / 'players' / 'data' / f'{offline_uuid(PLAYER)}.dat'
+
+    def diamonds():
+        player = anvil_dump.plain(anvil_dump.read_dat(file), full=True)
+        return sum(item['count'] for item in player['Inventory'] if item['id'] == 'minecraft:diamond')
+
+    try:
+        client.raw('launch', '--headless', '--game', binary())
+        client.raw('connect', f'127.0.0.1:{port}', PLAYER)
+        client.raw('wait-for', 'loaded', '--timeout', 300)
+        server.wait_for(rf'{PLAYER} joined the game')
+        assert not file.exists(), 'the player was already saved before save-all'
+        server.console(f'give {PLAYER} minecraft:diamond 5')
+        server.console('save-all flush')
+        # Console commands execute in order: the marker follows the save barrier.
+        server.console('say SAVED-CONNECTED-PLAYER')
+        server.wait_for(r'\[Server\] SAVED-CONNECTED-PLAYER')
+        assert not any(f'{PLAYER} left the game' in line for line in server.lines)
+        assert diamonds() == 5, 'save-all did not persist the connected player inventory'
+        server.console(f'give {PLAYER} minecraft:diamond 7')
+        server.console('say STOP-WITH-CONNECTED-PLAYER')
+        server.wait_for(r'\[Server\] STOP-WITH-CONNECTED-PLAYER')
+        assert not any(f'{PLAYER} left the game' in line for line in server.lines)
+        server.stop()
+        assert diamonds() == 12, 'stop did not persist the newer connected player inventory'
+    finally:
+        client.close()
+        server.stop()
+    print('connected player save-all and stop: ok', flush=True)
+
+
 def main():
-    subprocess.run(['cargo', 'build', '--profile', 'fast', '-p', 'horizon-client', '--bin', 'horizon-client'], cwd=lab.ROOT, check=True)
+    subprocess.run(['cargo', 'build', '--profile', 'fast', '-p', 'horizon-client', '-p', 'horizon-client-lib', '--bin', 'horizon-client', '--bin', 'horizon-ctl'], cwd=lab.ROOT, check=True)
     build = lab.LOCAL / 'dedicated-crash-save'
     shutil.rmtree(build, ignore_errors=True)
     build.mkdir(parents=True)
@@ -123,6 +168,7 @@ def main():
     out = build / 'client'
     out.mkdir()
     problems = []
+    connected_saves(build)
 
     # A clean stop writes the player's file.
     server = start(directory)

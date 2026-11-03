@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "compute_fov_modifier",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_compute_fov_modifier",
+      "neoforge": "ComputeFovModifierEvent",
+      "side": "client",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "a per-tick player FOV modifier hook (`native_compute_fov_modifier`).",
+  "doc_summary": "a per-tick player FOV modifier hook (`native_compute_fov_modifier`). Bundles need \"hooks\": @API:compute_fov_modifier@."
+}

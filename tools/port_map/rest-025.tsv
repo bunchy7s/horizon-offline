@@ -1,4 +1,14 @@
 PistonMovingBlockEntity.moveCollidedEntities	port	crates/horizon-client/src/game/piston_push.rs::Game::push_for_piston	push loop; per-box distance from crates/horizon-world/src/piston_push.rs::collided_amount
+PistonMovingBlockEntity.tick	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston_tick	a moving piston reports the push moveCollidedEntities would do at its new progress, and the caller moves the entities because Ticks has none
+PistonMovingBlockEntity.finalTick	port	crates/horizon-world/src/level/pistons.rs::Sim::moving_piston_final_tick	the arrival: the moved state is placed and the block's own update runs
+PistonMovingBlockEntity.getExtendedProgress	port	crates/horizon-world/src/piston_push.rs::extended_progress	where along its travel the moved block is, in blocks
+PistonMovingBlockEntity.getMovement	port	crates/horizon-world/src/piston_push.rs::get_movement	how far an entity stands inside the block it must be pushed out of, along the movement's axis
+PistonMovingBlockEntity.moveByPositionAndProgress	port	crates/horizon-world/src/piston_push.rs::move_by_position_and_progress	a box moved to the block's position and on to where the moved block currently is
+PistonMovingBlockEntity.matchesStickyCritera	port	crates/horizon-world/src/piston_push.rs::matches_sticky_criteria	the sticky test on the block ahead of the piston
+PistonMovingBlockEntity.getCollisionRelatedBlockState	port	crates/horizon-world/src/piston_push.rs::uses_moved_state	the collision state is the moved block's, unless a retracting source piston shows its head
+PistonMovingBlockEntity.fixEntityWithinPistonBase	port	crates/horizon-world/src/piston_push.rs::fix_within_piston_base	a retracting source piston drags an entity still inside its own block out the opposite way
+PistonMovingBlockEntity.saveAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_to_nbt	the moved state, facing, progress, extending and source fields, into the compound the entity's id and position are written to as well
+PistonMovingBlockEntity.loadAdditional	port	crates/horizon-client/src/game/persist.rs::Game::moving_piston_from_nbt	the moved state, facing, progress, extending and source read back, for an entity whose block is still a moving piston
 SideChainPart.whenConnectedToTheRight	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_right	same arms as vanilla
 SideChainPart.whenConnectedToTheLeft	port	crates/horizon-world/src/level/shelf.rs::Part::connected_to_the_left	same arms as vanilla
 ProtoChunk.getFluidState	port	crates/horizon-world/src/worldgen/feature_region.rs::TerrainRegion::fluid_state	gap: minor: read through the region's block queries; no chunk-level accessor, fluid comes from the block state
@@ -9,6 +19,6 @@ FlyNodeEvaluator.findAcceptedNode	port	crates/horizon-client/src/mobs/path.rs::F
 LevelStorageSource.writeGameRules	port	crates/horizon-client-core/src/gamerules.rs::GameRules::save	gap: minor: writes in place with no temp-file swap; no runtime caller, the game saves rules through level.game_rules in level.dat
 LevelStorageSource.readLevelSummary	port	crates/horizon-client/src/title.rs::list_worlds	a world whose level.dat cannot be read is listed as corrupted (#4219); gap: minor: symlinked worlds are not flagged
 LevelStorageSource.readLightweightData	port	crates/horizon-client/src/save.rs::read_dat	gap: minor: reads the whole level.dat; Player and WorldGenSettings are not skipped
-LevelStorageSource.validateAndCreateAccess	missing		minor: opening a world does not refuse a folder holding symbolic links, vanilla does; backup and delete do check links (title/world_management.rs)
+LevelStorageSource.validateAndCreateAccess	port	crates/horizon-client/src/title/world_management.rs::symlinks	DirectoryValidator.validateDirectory: Title::play walks the folder for links before the session lock and refuses the world with the symlink warning
 SavedDataStorage.scheduleSave	inline	crates/horizon-client/src/game.rs::Game::save_game_metadata	gap: minor: each saved-data file is written directly on every save; no dirty check and no async batching
 TrackedWaypoint.ChunkWaypoint.writeContents	port	crates/horizon-protocol/src/packets/play.rs::TrackedWaypoint::write	chunk arm writes varint 2, then x and z

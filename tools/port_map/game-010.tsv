@@ -13,14 +13,14 @@ AmphibiousPathNavigation.isStableDestination	inline	crates/horizon-client/src/mo
 FlyingPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Flying picks Evaluator::Fly
 FlyingPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: always true, vanilla is false for a flier that rides something
 GroundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Ground picks Evaluator::Walk
-GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: on ground or in liquid, the isPassenger case is missing
+GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	onGround || isInLiquid || isPassenger: a mob riding a vehicle keeps making and following paths
 GroundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, surface_y, z
 GroundPathNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	unloaded chunk gives no path, then the surface search (surface_position) unless below_surface
 GroundPathNavigation.getSurfaceY	port	crates/horizon-client/src/mobs/nav.rs::Mob::surface_y	floats up through water up to 16 blocks when the mob can float, else floor(y + 0.5)
-GroundPathNavigation.trimPath	missing		player: avoid_sun is set by the skeleton's RestrictSun goal but nothing truncates the path at the first sunlit node, so skeletons chasing you by day walk out into the sun instead of stopping in the shade
+GroundPathNavigation.trimPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::trim_path	with avoid_sun on a ground or wall-climbing mob: the mob standing under sky keeps its path, otherwise the nodes are cut at the first one that can see the sky
 PathNavigation.getGroundY	inline	crates/horizon-client/src/mobs/nav.rs::Mob::nav_tick	target y is the floor level under the node unless the block below is air
 PathNavigation.shouldTargetNextNodeInDirection	port	crates/horizon-client/src/mobs/nav.rs::Mob::should_target_next_node	
-PathNavigation.trimPath	missing		minor: path nodes on a cauldron are not raised one block, so a route ending on a cauldron (leatherworker job site) aims into the block
+PathNavigation.trimPath	port	crates/horizon-client/src/mobs/path.rs::Path::raise_cauldron_nodes	the cauldron node moves onto the rim and the node after it follows when it is not above it; Mob::trim_path runs it from nav_move_to_path
 PathNavigation.isClearForMovementBetween	port	crates/horizon-client/src/mobs/world.rs::MobWorld::clear_between	collider clip from start to the target raised by half the height, optionally stopped by fluids
 PathNavigation.shouldRecomputePath	inline	crates/horizon-client/src/mobs/nav.rs::Mob::should_recompute_path	called for every block write that changes a collision shape (`mobs.rs::blocks_changed`, `World::path_writes`); the recompute happens at the start of the mob's next navigation tick, not inside sendBlockUpdated
 WallClimberNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	WallClimber kind remembers climb_to before the ground path
@@ -68,7 +68,7 @@ TargetingConditions.test	port	crates/horizon-client/src/mobs/goals.rs::Mob::play
 DefaultRandomPos.generateRandomPosTowardDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	Mob::toward builds the position, default_check does limits, home, stable and malus
 GoalUtils.mobRestricted	port	crates/horizon-client/src/mobs/goals.rs::Mob::restricted	home within radius + distance + 1, then isRestricted
 GoalUtils.hasMalus	inline	crates/horizon-client/src/mobs/goals.rs::Mob::default_check	path type malus must be 0, also in land_up_out_of_solid
-LandRandomPos.getPosTowards	missing		player: iron golems wander anywhere; GolemRandomStrollInVillageGoal and MoveBackToVillageGoal are not registered, so a golem does not drift toward villagers who want it or back to the village
+LandRandomPos.getPosTowards	port	crates/horizon-client/src/mobs/goals.rs::Mob::land_random_pos_towards	the direction from the mob to the point, then the ten tries within a quarter turn of it; gap: player: the golem goals that call it (GolemRandomStrollInVillageGoal, MoveBackToVillageGoal) are not registered, so a golem still wanders anywhere
 LandRandomPos.getPosInDirection	inline	crates/horizon-client/src/mobs/goals.rs::Mob::land_random_pos_away	only the away direction is wired; the toward call has no user
 LandRandomPos.movePosUpOutOfSolid	port	crates/horizon-client/src/mobs/goals.rs::Mob::land_up_out_of_solid	up out of solid, then no water and no malus
 RandomPos.generateRandomDirection	port	crates/horizon-client/src/mobs/goals.rs::Mob::random_direction	
@@ -102,7 +102,7 @@ PoiSection.refresh	inline	crates/horizon-client-render/src/poi_sections.rs::PoiS
 PoiSection.Packed.unpack	skip:other		POI files are not loaded into sections
 PoiTypes.registerBlockStates	inline	crates/horizon-client/src/save.rs::poi_type	state to POI type and max tickets in one match
 PoiTypes.bootstrap	port	crates/horizon-client/src/save.rs::poi_type	every POI type with its tickets (bed heads of the sixteen colours only, cauldrons, bell 32); villagers use villager_brain::state_poi for jobs, beds and bell
-Bat.isFlapping	missing		minor: a flying bat's wing beat (every 10 ticks) sends no FLAP vibration, so sculk sensors do not hear it
+Bat.isFlapping	missing		a flying bat's wing beat (every 10 ticks) sends no minecraft:flap vibration, so sculk sensors do not hear it; mobs/living.rs posts that event for a bee every other tick and for a parrot, and nothing else
 Bat.getAmbientSound	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	Species::Bat arm: a resting bat is silent three times in four
 Bat.isResting	port	crates/horizon-client/src/mobs/bat.rs::resting	
 Bat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	BatFlags byte, bit 0 resting
@@ -126,6 +126,6 @@ Dolphin.MoveToItemGoal.start	port	crates/horizon-client/src/mobs/dolphin.rs::Mov
 AbstractChestedHorse.dropEquipment	port	crates/horizon-client/src/mobs/drops.rs::die	the stored items and then a chest drop, chested cleared
 AbstractChestedHorse.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	ChestedHorse and Items for llamas, donkeys and mules
 AbstractChestedHorse.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	ChestedHorse and Items, 15 slots
-AbstractChestedHorse.getSlot	missing		minor: slot 499 (horse.chest) is not mapped for mobs, so /item replace entity ... horse.chest does nothing
+AbstractChestedHorse.getSlot	missing		slot 499 (horse.chest) is not mapped for mobs, so /item replace entity ... horse.chest does nothing; the mob slot names Horizon resolves are the eight of loot::EQUIPMENT_SLOTS
 AbstractChestedHorse.equipChest	port	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	tamed donkey or mule takes a held chest with the sound; llamas do it in game/llamas.rs interact_llama
 AbstractChestedHorse.playChestEquipsSound	inline	crates/horizon-client/src/game/mounts.rs::Game::interact_mount	entity.donkey.chest with the random pitch; llamas play entity.llama.chest in llama_sound

@@ -98,7 +98,7 @@ fn projectile_kind(kind: &str) -> Option<ProjectileKind> {
         "minecraft:breeze_wind_charge" => ProjectileKind::BreezeWindCharge,
         // Homing state stays on the server; the client interpolates its positions.
         "minecraft:shulker_bullet" => ProjectileKind::ShulkerBullet {
-            target: horizon_client::mobs::Who::Player,
+            target: Some(horizon_client::mobs::Who::Player),
             dir: None,
             steps: 0,
             delta: [0.0; 3],
@@ -276,6 +276,15 @@ impl Game<'_> {
         let smoke = ParticleOptions::simple(ParticleType::Smoke);
         for p in at {
             self.particles.add(&smoke, [p.x, p.y + 0.5, p.z], [0.0; 3]);
+        }
+    }
+
+    pub(super) fn throwable_bubbles(&mut self, at: Vec<([f64; 3], [f64; 3])>) {
+        let bubble = ParticleOptions::simple(ParticleType::Bubble);
+        for (position, speed) in at {
+            for _ in 0..4 {
+                self.particles.add(&bubble, position, speed);
+            }
         }
     }
 
@@ -514,6 +523,14 @@ impl Game<'_> {
                 }
             } else if let Some(p) = self.creatures.projectiles.iter_mut().find(|p| p.id == id) {
                 match (&mut p.kind, index, value) {
+                    // Entity.DATA_SHARED_FLAGS_ID's FLAG_ONFIRE: Entity.isOnFire on
+                    // a client, which draws the flames. A client doesn't count the
+                    // fire down: the flag goes off when the server's fire is out.
+                    (_, 0, Value::Byte(flags)) => {
+                        if let Some(a) = p.arrow.as_mut() {
+                            a.fire_ticks = i32::from(flags & 1);
+                        }
+                    }
                     // AbstractArrow.ID_FLAGS (critical) and IN_GROUND.
                     (ProjectileKind::Arrow { critical, .. }, 8, Value::Byte(flags)) => {
                         *critical = flags & 1 != 0;
@@ -639,6 +656,10 @@ impl Game<'_> {
         // updates (10 to 20 ticks apart); a block stops them there, and only
         // the server decides what they hit.
         let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let bubbles: Vec<_> = projectiles
+            .iter()
+            .filter_map(Projectile::water_bubbles)
+            .collect();
         let mut tridents = std::mem::take(&mut self.tridents);
         {
             let w = self.mob_world_base(&[]);
@@ -675,6 +696,7 @@ impl Game<'_> {
             .collect();
         self.smoke_trails(trails);
         self.shulker_bullet_trails();
+        self.throwable_bubbles(bubbles);
         // FireworkRocketEntity.tick: a rocket attached to another entity
         // follows it, and every rocket leaves its spark trail on a client. One
         // boosting this client's own player ticks after it (`tick_own_rockets`).
@@ -806,7 +828,8 @@ impl Game<'_> {
         }
         for p in &self.creatures.projectiles {
             out.push(json!({"id": p.id, "kind": format!("{:?}", p.kind).split([' ', '{']).next().unwrap_or(""), "position": at(p.position), "velocity": at(p.velocity),
-                "player_owned": p.owner == Some(horizon_client::mobs::Who::Player)}));
+                "player_owned": p.owner == Some(horizon_client::mobs::Who::Player),
+                "on_fire": p.arrow.as_ref().is_some_and(|a| a.on_fire())}));
         }
         for (kind, p, _) in self.potions.thrown_entities() {
             out.push(json!({"kind": kind, "position": at(p)}));
@@ -850,7 +873,9 @@ mod tests {
 
     /// The same, under the id a server tracks it by.
     fn tracked(kind: ProjectileKind, id: u32) -> Projectile {
-        Projectile { id, ..thrown(kind) }
+        let mut p = thrown(kind);
+        p.id = id;
+        p
     }
 
     #[test]

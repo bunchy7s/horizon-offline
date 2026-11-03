@@ -1,0 +1,24 @@
+{
+  "attributes": {
+    "minecraft:gameplay/natural_mob_spawns": {
+      "argument": {
+        "spawn_costs": {},
+        "spawns_by_category": {
+          "monster": [{ "type": "minecraft:stray", "count": 4, "weight": 80 }]
+        }
+      },
+      "modifier": "overlay"
+    },
+    "minecraft:visual/sky_color": "#c8e0ff"
+  },
+  "carvers": ["minecraft:cave"],
+  "downfall": 0.5,
+  "effects": {
+    "foliage_color": "#6080c0",
+    "grass_color": "#80a0ff",
+    "water_color": "#3938c9"
+  },
+  "features": [[], [], [], [], [], [], [], [], [], [], ["minecraft:freeze_top_layer"]],
+  "has_precipitation": true,
+  "temperature": -0.7
+}

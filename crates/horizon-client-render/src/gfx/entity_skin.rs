@@ -105,8 +105,15 @@ pub struct SkinFrame {
     pub new_model: Vec<SkinVertex>,
     pub parts: Vec<SkinPart>,
     pub jobs: Vec<SkinJob>,
+    /// Shader identities in the GPU output vertex space; empty without a pack.
+    pub spans: Vec<super::pack_draw::EntitySpan>,
     /// Vertices the jobs write: a whole number of quads.
     pub vertices: u32,
+    /// Glowing entities' silhouettes posed here (`OutlineBufferSource`'s copy of
+    /// their draws, [`SkinFrame::outline_since`]): `dst` counts from the first.
+    pub outline_jobs: Vec<SkinJob>,
+    /// Vertices the outline jobs write.
+    pub outline_vertices: u32,
 }
 
 impl SkinFrame {
@@ -114,7 +121,26 @@ impl SkinFrame {
     pub fn clear_draws(&mut self) {
         self.parts.clear();
         self.jobs.clear();
+        self.spans.clear();
         self.vertices = 0;
+        self.outline_jobs.clear();
+        self.outline_vertices = 0;
+    }
+
+    /// Copies the draws since job `first` into the glowing entities' outline
+    /// (`Frame::glowing`'s, on the GPU), as `glowing.rs`'s `mark_outline` copies
+    /// vertices: the same ones, in `color` (`Vertex::color`) with no normal.
+    pub fn outline_since(&mut self, first: usize, color: u32) {
+        for i in first..self.jobs.len() {
+            let job = self.jobs[i];
+            self.outline_jobs.push(SkinJob {
+                dst: self.outline_vertices,
+                color,
+                mode: SkinJob::FLAT,
+                ..job
+            });
+            self.outline_vertices += job.count;
+        }
     }
 
     /// The renderer took the new models.
@@ -134,11 +160,15 @@ impl SkinFrame {
         self.jobs.truncate(jobs);
         self.parts.truncate(parts);
         self.vertices = vertices;
+        self.spans.retain(|s| s.start <= vertices);
     }
 
     /// Whether the renderer has anything to take.
     pub fn pending(&self) -> bool {
-        self.reset || !self.new_model.is_empty() || !self.jobs.is_empty()
+        self.reset
+            || !self.new_model.is_empty()
+            || !self.jobs.is_empty()
+            || !self.outline_jobs.is_empty()
     }
 }
 
@@ -293,7 +323,8 @@ impl EntitySkin {
     }
 
     /// Records the frame's jobs: they write `frame.vertices` vertices into
-    /// `out` from vertex `base` on. Call after the CPU vertices' upload.
+    /// `out` from vertex `base` on, and the outline jobs `frame.outline_vertices`
+    /// from vertex `outline_base` on. Call after the CPU vertices' upload.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn dispatch(
         &mut self,
@@ -303,39 +334,104 @@ impl EntitySkin {
         frame: &SkinFrame,
         out: &wgpu::Buffer,
         base: u32,
+        outline_base: u32,
     ) {
-        if frame.jobs.is_empty() {
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame
+                .jobs
+                .iter()
+                .map(|job| SkinJob {
+                    dst: job.dst + base,
+                    ..*job
+                })
+                .chain(frame.outline_jobs.iter().map(|job| SkinJob {
+                    dst: job.dst + outline_base,
+                    ..*job
+                })),
+            out,
+        );
+    }
+
+    /// A standard pack owns the body output; glowing silhouettes keep the ordinary
+    /// entity buffer. Both routes use the same model/normal/back-face decoder.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn dispatch_pack(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        frame: &SkinFrame,
+        out: &wgpu::Buffer,
+        outline_out: &wgpu::Buffer,
+        outline_base: u32,
+    ) {
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame.jobs.iter().copied(),
+            out,
+        );
+        self.dispatch_jobs(
+            device,
+            uploads,
+            encoder,
+            &frame.parts,
+            frame.outline_jobs.iter().map(|job| SkinJob {
+                dst: job.dst + outline_base,
+                ..*job
+            }),
+            outline_out,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_jobs(
+        &mut self,
+        device: &wgpu::Device,
+        uploads: &mut Uploads,
+        encoder: &mut wgpu::CommandEncoder,
+        parts: &[SkinPart],
+        jobs: impl Iterator<Item = SkinJob>,
+        out: &wgpu::Buffer,
+    ) {
+        self.staged.clear();
+        self.staged.extend(jobs);
+        if self.staged.is_empty() {
             return;
         }
         let Some(model) = &self.model_buffer else {
             return;
         };
         // Whole rows of workgroups past `ROW` jobs: the padding jobs write nothing.
-        let count = frame.jobs.len() as u32;
+        let count = self.staged.len() as u32;
         let rows = count.div_ceil(ROW);
         let padded = if rows > 1 {
             (rows * ROW) as usize
         } else {
-            frame.jobs.len()
+            count as usize
         };
-        self.staged.clear();
-        self.staged.extend(frame.jobs.iter().map(|job| SkinJob {
-            dst: job.dst + base,
-            ..*job
-        }));
         self.staged.resize(padded, SkinJob::default());
-        self.parts.ensure(
-            device,
-            (frame.parts.len() * std::mem::size_of::<SkinPart>()) as u64,
-        );
+        self.parts
+            .ensure(device, std::mem::size_of_val(parts) as u64);
         self.jobs
             .ensure(device, (padded * std::mem::size_of::<SkinJob>()) as u64);
-        let (Some(parts), Some(jobs)) = (&self.parts.buffer, &self.jobs.buffer) else {
+        let (Some(parts_buffer), Some(jobs)) = (&self.parts.buffer, &self.jobs.buffer) else {
             return;
         };
-        uploads.buffer(encoder, parts, 0, bytemuck::cast_slice(&frame.parts));
+        uploads.buffer(encoder, parts_buffer, 0, bytemuck::cast_slice(parts));
         uploads.buffer(encoder, jobs, 0, bytemuck::cast_slice(&self.staged));
-        let key = [model.clone(), parts.clone(), jobs.clone(), out.clone()];
+        let key = [
+            model.clone(),
+            parts_buffer.clone(),
+            jobs.clone(),
+            out.clone(),
+        ];
         if self.group.as_ref().is_none_or(|(_, k)| *k != key) {
             let entries: Vec<_> = key
                 .iter()
@@ -369,8 +465,22 @@ impl EntitySkin {
 /// the same way: the reference its tests hold the shader and the game's walk
 /// (`mobs::skin`) to. `model` is the whole store.
 pub fn expand(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
-    let mut out = vec![bytemuck::Zeroable::zeroed(); frame.vertices as usize];
-    for job in &frame.jobs {
+    expand_jobs(model, frame, &frame.jobs, frame.vertices)
+}
+
+/// [`expand`] of the frame's outline jobs: the silhouettes they write.
+pub fn expand_outline(model: &[SkinVertex], frame: &SkinFrame) -> Vec<Vertex> {
+    expand_jobs(model, frame, &frame.outline_jobs, frame.outline_vertices)
+}
+
+fn expand_jobs(
+    model: &[SkinVertex],
+    frame: &SkinFrame,
+    jobs: &[SkinJob],
+    vertices: u32,
+) -> Vec<Vertex> {
+    let mut out = vec![bytemuck::Zeroable::zeroed(); vertices as usize];
+    for job in jobs {
         for k in 0..job.count {
             let v = model[(job.first + k) as usize];
             let part = &frame.parts[(job.part + v.part) as usize];
@@ -479,6 +589,7 @@ mod tests {
             normals.z_axis.normalize_or_zero(),
         );
         let frame = SkinFrame {
+            spans: Vec::new(),
             reset: false,
             base: 0,
             new_model: model.clone(),
@@ -557,13 +668,30 @@ mod tests {
                 },
             ],
             vertices: 120,
+            outline_jobs: Vec::new(),
+            outline_vertices: 0,
         };
+        // A glowing entity's silhouette: the item job and the first job again,
+        // in its team colour with no normal.
+        let mut frame = frame;
+        frame.jobs.push(frame.jobs[2]);
+        frame.jobs.last_mut().expect("pushed").dst = 120;
+        frame.jobs.push(SkinJob {
+            dst: 144,
+            ..frame.jobs[0]
+        });
+        frame.vertices = 192;
+        frame.outline_since(4, 0xff20_c0e0);
+        assert_eq!(frame.outline_vertices, 72);
         let expected = expand(&model, &frame);
-        // The posed vertices land after 5 others, which they leave alone.
+        let outline = expand_outline(&model, &frame);
+        // The posed vertices land after 5 others, which they leave alone, and the
+        // silhouettes 3 past them.
         let before = 5u32;
+        let outline_base = before + frame.vertices + 3;
         let out = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
-            size: u64::from(before + frame.vertices) * 44,
+            size: u64::from(outline_base + frame.outline_vertices) * 44,
             usage: EntitySkin::usage(true) | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
@@ -572,7 +700,15 @@ mod tests {
         let mut uploads = Uploads::new(&device);
         let mut encoder = device.create_command_encoder(&Default::default());
         assert!(skin.register(&device, &mut uploads, &mut encoder, &frame));
-        skin.dispatch(&device, &mut uploads, &mut encoder, &frame, &out, before);
+        skin.dispatch(
+            &device,
+            &mut uploads,
+            &mut encoder,
+            &frame,
+            &out,
+            before,
+            outline_base,
+        );
         let read = device.create_buffer(&wgpu::BufferDescriptor {
             label: None,
             size: out.size(),
@@ -594,6 +730,82 @@ mod tests {
                 bytemuck::bytes_of(want),
                 "vertex {i}: {got:?} != {want:?}"
             );
+        }
+        let silhouettes = &got[(outline_base - before) as usize..];
+        assert_eq!(silhouettes.len(), outline.len());
+        for (i, (got, want)) in silhouettes.iter().zip(&outline).enumerate() {
+            assert_eq!(
+                bytemuck::bytes_of(got),
+                bytemuck::bytes_of(want),
+                "silhouette {i}: {got:?} != {want:?}"
+            );
+        }
+        // A silhouette is its draw's vertex with the colour and no normal
+        // (`mark_outline`).
+        for (copy, of) in outline.iter().zip(&expected[120..]) {
+            let marked = Vertex {
+                color: 0xff20_c0e0,
+                normal: [0; 4],
+                ..*of
+            };
+            assert_eq!(bytemuck::bytes_of(copy), bytemuck::bytes_of(&marked));
+        }
+
+        // Standard packs own the model buffer, while outlines follow unrelated CPU
+        // geometry in the ordinary buffer. Neither output may overwrite the other's gap.
+        let buffers = [frame.vertices + 3, before + frame.outline_vertices + 2].map(|vertices| {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: u64::from(vertices) * 44,
+                usage: EntitySkin::usage(true) | wgpu::BufferUsages::COPY_SRC,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &vec![0xab; buffer.size() as usize]);
+            buffer
+        });
+        let reads = buffers.each_ref().map(|buffer| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: buffer.size(),
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let mut uploads = Uploads::new(&device);
+        let mut encoder = device.create_command_encoder(&Default::default());
+        skin.dispatch_pack(
+            &device,
+            &mut uploads,
+            &mut encoder,
+            &frame,
+            &buffers[0],
+            &buffers[1],
+            before,
+        );
+        for (buffer, read) in buffers.iter().zip(&reads) {
+            encoder.copy_buffer_to_buffer(buffer, 0, read, 0, buffer.size());
+        }
+        uploads.finish(&encoder);
+        queue.submit([encoder.finish()]);
+        for read in &reads {
+            read.slice(..)
+                .map_async(wgpu::MapMode::Read, |r| r.unwrap());
+        }
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        for (i, (expected, start)) in [(&expected, 0usize), (&outline, before as usize)]
+            .into_iter()
+            .enumerate()
+        {
+            let data = reads[i].slice(..).get_mapped_range().unwrap();
+            let first = start * 44;
+            let last = first + expected.len() * 44;
+            assert!(data[..first].iter().all(|b| *b == 0xab), "prefix {i}");
+            assert_eq!(
+                &data[first..last],
+                bytemuck::cast_slice::<_, u8>(expected),
+                "output {i}"
+            );
+            assert!(data[last..].iter().all(|b| *b == 0xab), "suffix {i}");
         }
     }
 }

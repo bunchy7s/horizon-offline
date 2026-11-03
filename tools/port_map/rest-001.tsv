@@ -1,18 +1,20 @@
-Axis.rotateDegrees	skip:other		degrees overload of rotate; Horizon converts degrees to radians at each call site
+Axis.rotateDegrees	skip:other		the degrees overload of the axis rotation; Horizon's `math.rs::quaternion_from_axis_angle` takes the angle in radians and each call site converts
 Divisor.nextInt	skip:ui		even-spacing helper for GridLayout and EqualSpacingLayout; Horizon lays out its UI with its own code
-GivensParameters.fromUnnormalized	skip:other		Givens rotation helper for the SVD split used by Transformation.ensureDecomposed only
-GivensParameters.fromPositiveAngle	skip:other		Givens rotation helper for the SVD split (builds MatrixUtil PI_4) only
-GivensParameters.aroundX	skip:other		Givens rotation helper for the SVD split only
-GivensParameters.aroundY	skip:other		Givens rotation helper for the SVD split only
-GivensParameters.aroundZ	skip:other		Givens rotation helper for the SVD split only
-GivensParameters.cos	skip:other		Givens helper for the SVD split only
-MatrixUtil.mulComponentWise	missing		minor: unsure: the 0.5 GUI and 0.75 first-person foil decal scale of ItemFeatureRenderer.computeFoilDecalPose is not found; glint scale is per context in item_render.rs Glint (see client2-004.tsv:15)
-MatrixUtil.approxGivensQuat	skip:other		Jacobi step helper for the SVD split only
-MatrixUtil.qrGivensQuat	skip:other		QR Givens helper for the SVD split only
-MatrixUtil.similarityTransform	skip:other		Jacobi step helper for the SVD split only
-MatrixUtil.stepJacobi	skip:other		Jacobi eigen step for the SVD split only
-MatrixUtil.eigenvalueJacobi	skip:other		Jacobi eigen solver for the SVD split only
-MatrixUtil.svdDecompose	skip:other		SVD of a matrix-built Transformation; Horizon's display data arrives decomposed (text_display.rs) and item transforms stay matrices (item_model.rs::transformation)
+GivensParameters.fromUnnormalized	port	crates/horizon-assets/src/math.rs::Givens::unnormalized	the half angle divided by its own length
+GivensParameters.fromPositiveAngle	inline	crates/horizon-assets/src/math.rs::Givens::quarter_pi	only the pi/4 case is built (MatrixUtil.PI_4): the half angle's sine, and its cosine from cos = sqrt(1 - sin^2)
+GivensParameters.aroundX	inline	crates/horizon-assets/src/math.rs::Givens::quaternion	axis 0 of the one per-axis builder; matrix() is the Matrix3f form of the same three
+GivensParameters.aroundY	inline	crates/horizon-assets/src/math.rs::Givens::quaternion	axis 1 of the one per-axis builder
+GivensParameters.aroundZ	inline	crates/horizon-assets/src/math.rs::Givens::quaternion	axis 2 of the one per-axis builder
+GivensParameters.cos	port	crates/horizon-assets/src/math.rs::Givens::cos	cos(2 * half) from the half angle's sine and cosine
+GivensParameters.sin	port	crates/horizon-assets/src/math.rs::Givens::sin	2 * sin_half * cos_half
+GivensParameters.inverse	port	crates/horizon-assets/src/math.rs::Givens::inverse	the half angle's sine negated, its cosine kept
+MatrixUtil.mulComponentWise	missing		its only caller is ItemFeatureRenderer.computeFoilDecalPose, the 0.5 GUI and 0.75 first-person foil decal matrix; horizon-assets' math.rs has the SVD half of MatrixUtil but no component-wise product, and item_render.rs scales the glint per context
+MatrixUtil.approxGivensQuat	port	crates/horizon-assets/src/math.rs::approx_givens	the 3 + 2*sqrt(2) threshold, then the unnormalised pair or PI_4
+MatrixUtil.qrGivensQuat	port	crates/horizon-assets/src/math.rs::qr_givens	the 1e-6 case, the sign swap for a negative a1, then the normalised pair
+MatrixUtil.similarityTransform	inline	crates/horizon-assets/src/math.rs::step_jacobi	the R^T * m * R in step_jacobi's rotate closure, and R's quaternion onto q
+MatrixUtil.stepJacobi	port	crates/horizon-assets/src/math.rs::step_jacobi	the xy, xz and yz pairs, each past its 1e-6 test
+MatrixUtil.eigenvalueJacobi	inline	crates/horizon-assets/src/math.rs::svd_decompose	the five step_jacobi passes over a^T * a, then the quaternion normalised
+MatrixUtil.svdDecompose	port	crates/horizon-assets/src/math.rs::svd_decompose	translation, left rotation, scale and right rotation from the matrix; new Transformation(matrix) splits it this way
 MatrixUtil.checkProperty	skip:java		JOML matrix property cache check; Horizon's affine matrices are plain values
 OctahedralGroup.trace	skip:java		group enumeration index for the Cayley table; Horizon indexes block rotations by quarter turns
 OctahedralGroup.rotate	port	crates/horizon-assets/src/bake/transform.rs::BlockModelTransform::direction	rotates a face direction through the blockstate's quarter-turn matrix (nearest axis)
@@ -57,7 +59,7 @@ SharedConstants.debugFlag	skip:debug		debug flag reader
 SharedConstants.debugIntValue	skip:debug		debug value reader
 SharedConstants.setVersion	skip:data		version is a compiled constant
 SharedConstants.debugVoidTerrain	skip:debug		debug world generation switch
-SystemReport.<init>	port	crates/horizon-client-render/src/crash.rs::system_details	gap: minor: no storage, process or JVM lines
+SystemReport.<init>	port	crates/horizon-client-render/src/crash.rs::system_details	the report's detail rows: Horizon and Minecraft version, operating system, CPU and memory, then what the game set as it ran; gap: minor: no storage, process or JVM lines
 SystemReport.printMemoryUsage	skip:other		JVM heap usage text; a Rust build has no JVM heap
 SystemReport.printJvmFlags	skip:other		JVM input arguments; a Rust build has none
 SystemReport.setDetail	port	crates/horizon-client-render/src/crash.rs::set_detail	gap: minor: flat detail list

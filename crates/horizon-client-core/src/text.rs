@@ -246,6 +246,28 @@ impl Text {
         t.source = Some(Value::Object(c).into());
         t
     }
+    /// Component.translatableWithFallback(key, fallback, args): `translate`, with `fallback` as
+    /// the template when the language has no `key`.
+    pub fn translate_with_fallback(key: &str, fallback: &str, args: &[Text]) -> Self {
+        let template = lang::current()
+            .and_then(|l| l.get(key).map(str::to_owned))
+            .unwrap_or_else(|| fallback.to_owned());
+        let mut t = format_translation(&template, args);
+        let mut c = Map::new();
+        c.insert("translate".into(), key.into());
+        c.insert("fallback".into(), fallback.into());
+        if !args.is_empty() {
+            c.insert("with".into(), args.iter().map(Text::argument).collect());
+        }
+        t.source = Some(Value::Object(c).into());
+        t
+    }
+    /// CommonComponents.optionNameValue: "Caption: value" joined as the language joins them
+    /// (`options.generic_value`: "%s : %s" in French, "%s：%s" in Chinese). English's "%s: %s"
+    /// when the language has no such key, as without prepared resources.
+    pub fn option_name_value(caption: Text, value: Text) -> Self {
+        Self::translate_with_fallback("options.generic_value", "%s: %s", &[caption, value])
+    }
     /// A translatable message whose arguments are plain strings.
     pub fn tr(key: &str, args: &[&dyn std::fmt::Display]) -> Self {
         let args: Vec<Text> = args.iter().map(|a| Text::literal(a.to_string())).collect();
