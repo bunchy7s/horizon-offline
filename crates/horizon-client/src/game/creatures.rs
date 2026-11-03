@@ -145,6 +145,15 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
     fn targets(&self) -> &[(Who, Aabb)] {
         &self.targets
     }
+    /// `BaseFireBlock.entityInside` for a thrown projectile: fire and soul
+    /// fire set it alight for 160 ticks.
+    fn ignites(&self, p: [i32; 3]) -> bool {
+        let state = self.w.world.block(p[0], p[1], p[2]);
+        matches!(
+            &*self.w.facts.get(state).name,
+            "minecraft:fire" | "minecraft:soul_fire"
+        )
+    }
     fn empty(&self, p: [i32; 3]) -> bool {
         self.w.facts.is_air(self.w.world.block(p[0], p[1], p[2]))
     }
@@ -626,6 +635,22 @@ impl Game<'_> {
         params: horizon_client::mobs::conversion::Params,
     ) -> Option<u32> {
         let t = self.res.mob_types().get(kind).cloned()?;
+        // LivingConversionEvent.Pre: the caller already marked the mob removed,
+        // so a canceled conversion puts it back as it was.
+        let mut cancel = false;
+        let from_kind = super::native_hooks::mob_kind(from);
+        self.native_living_conversion_pre(from.id, &from_kind, kind, &mut cancel);
+        if cancel {
+            match self.mobs.iter_mut().find(|m| m.id == from.id) {
+                Some(kept) => kept.removed = false,
+                None => {
+                    let mut kept = from.clone();
+                    kept.removed = false;
+                    self.mobs.push(kept);
+                }
+            }
+            return None;
+        }
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, from.position, from.yaw);
         horizon_client::mobs::conversion::single(from, &mut mob, params);
@@ -655,6 +680,7 @@ impl Game<'_> {
             .id
             .clone();
         self.native_entity_transform(from.id, &from.kind.id, id, &transformed_kind);
+        self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
         Some(id)
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.
@@ -942,6 +968,7 @@ impl Game<'_> {
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let guests = self.lan_guest_views();
         let players = self.level_players();
+        let nearest = super::natural_spawning::NearestPlayers::new(&players);
         let mut bindings = match self.lan.as_mut() {
             Some(host) if !guests.is_empty() => std::mem::take(&mut host.mob_players),
             _ => Default::default(),
@@ -1001,13 +1028,9 @@ impl Game<'_> {
                 // getCurrentDifficultyAt(blockPosition()): the mob's own chunk,
                 // not the local player's (a server thread has no player).
                 w.difficulty = self.local_difficulty([m.position.x, m.position.y, m.position.z]);
-                w.nearest_player = super::natural_spawning::nearest_player(
-                    &players,
-                    m.position.x,
-                    m.position.y,
-                    m.position.z,
-                )
-                .map(|p| p.position);
+                w.nearest_player = nearest
+                    .nearest(m.position.x, m.position.y, m.position.z)
+                    .map(|p| p.position);
                 let seen_guest = if guests.is_empty() {
                     None
                 } else {
@@ -1193,8 +1216,43 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
+    /// `LivingDeathEvent` for a mob whose health ran out: whether a native
+    /// mod canceled the death. A canceled mob stays alive at 1 health.
+    fn mob_death_canceled(&mut self, m: &Mob) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let (damage_type, attacker) = match m.last_damage {
+            Some((d, _)) => (source_damage_type(d), d.attacker),
+            None => ("minecraft:generic", None),
+        };
+        let attacker = match attacker {
+            Some(Who::Mob(id)) => id,
+            Some(Who::Player) => {
+                let conn = self.last_hurt_by_player.get(&m.id).copied().flatten();
+                let guests = self.lan.as_ref().map(|host| host.hub.guests.as_slice());
+                let guest = guests.and_then(|all| all.iter().find(|g| Some(g.conn) == conn));
+                guest.map_or(0, |g| g.entity_id as u32)
+            }
+            None => 0,
+        };
+        let kind = super::native_hooks::mob_kind(m);
+        let mut cancel = false;
+        self.native_living_death(m.id, &kind, damage_type, attacker, &mut cancel);
+        if cancel {
+            self.died.remove(&m.id);
+            if let Some(alive) = self.mobs.iter_mut().find(|o| o.id == m.id) {
+                alive.health = 1.0;
+                alive.death_time = 0;
+            }
+        }
+        cancel
+    }
     /// LivingEntity.die / dropAllDeathLoot.
     fn mob_died(&mut self, m: &Mob) {
+        if self.mob_death_canceled(m) {
+            return;
+        }
         // LivingEntity.die: a sleeper gets up, and its bed is free again.
         if let Some(bed) = horizon_client::mobs::villager::sleeping_pos(m) {
             self.wake_villager(m.id);
@@ -1569,6 +1627,8 @@ impl Game<'_> {
         let mut hurt = false;
         let mut infested = false;
         let aim = self.attacker_aim(source.attacker);
+        // So `living_knockback_v2` sees who hit and what they hold.
+        let _attacker = self.knockback_scope_for(source.attacker);
         if let Some(t) = self.mobs.iter_mut().find(|m| m.id == target) {
             let hit = t.damage_aimed(amount, source, aim);
             hurt = hit;
@@ -1982,6 +2042,10 @@ impl Game<'_> {
                 } => match target {
                     // A player's source names no melee attacker, as its damage's doesn't.
                     Who::Player => {
+                        let _attacker = self.knockback_scope(match source.attacker {
+                            Some(Who::Mob(id)) => id as i32,
+                            _ => 0,
+                        });
                         let source = HurtSource {
                             damage_type: source_damage_type(source),
                             causing: 0,
@@ -3411,6 +3475,11 @@ impl Game<'_> {
         };
         // The causing entity for the death message.
         let owner = self.combat.projectile_owner.take();
+        let _attacker = self.knockback_scope(
+            attacker
+                .or(owner)
+                .map_or_else(horizon_client::health::knockback_attacker, |id| id as i32),
+        );
         if let Some(a) = attacker.or(owner) {
             self.note_attacker(damage_type, a);
         }
@@ -3529,7 +3598,7 @@ impl Game<'_> {
     /// `LivingEntity.knockback` on the player: pushed `power` away from the
     /// direction (`xd`, `zd`), less its knockback resistance, and up only from
     /// the ground.
-    /// The native knockback hook runs once the resistance is applied, with
+    /// The native knockback hook runs before resistance is applied, with
     /// `source`, the hit's.
     pub(super) fn knock_back_player(
         &mut self,
@@ -3538,6 +3607,14 @@ impl Game<'_> {
         zd: f64,
         source: HurtSource<'_>,
     ) {
+        let credit = match self.player_hurt_by() {
+            Some((Who::Mob(id), _)) => id as i32,
+            _ => 0,
+        };
+        let _attacker = self.knockback_scope(match horizon_client::health::knockback_attacker() {
+            0 => credit,
+            attacker => attacker,
+        });
         if let Some(p) = self.player.as_mut() {
             knock_back(p, &mut self.world.random, power, (xd, zd), source);
         }
@@ -4285,6 +4362,7 @@ impl Game<'_> {
         }
     }
     pub(super) fn projectile_hit(&mut self, p: &Projectile, hit: Hit) -> Result<()> {
+        let _attacker = self.knockback_scope_for(p.owner);
         // Projectile.onHitBlock: BlockState.onProjectileHit, for every
         // projectile (a wind charge out of the world's top has no face).
         if let Hit::Block { pos, at, face } = hit
@@ -6504,13 +6582,34 @@ impl Game<'_> {
             }));
         }
         let len = out.len();
-        self.cull_entity_vertices(out, entity_start);
+        let hidden = self.cull_entity_vertices(out, entity_start);
         if out.len() < len {
             if let Some((mark, _)) = skinned {
                 self.skin_frame.borrow_mut().truncate(mark);
             }
         } else if corners.is_some() {
+            if let Some((mark, _)) = skinned {
+                // Previous GPU-only entities can leave zero-length CPU spans at
+                // this same offset. Use this query's result, not their metadata.
+                if hidden {
+                    let mut skin = self.skin_frame.borrow_mut();
+                    let end = skin.vertices as usize;
+                    horizon_client::gfx::pack_draw::EntitySpan::hide(
+                        &mut skin.spans,
+                        mark.2 as usize,
+                        end,
+                    );
+                }
+            }
             out.truncate(len - 2);
+            // The temporary bounds are not real geometry. Keep the culling end marker
+            // at the true CPU end before the next entity appends a span there.
+            for span in self.entity_spans.borrow_mut().iter_mut().rev() {
+                if span.start as usize <= out.len() {
+                    break;
+                }
+                span.start = out.len() as u32;
+            }
         }
     }
 
@@ -7024,6 +7123,14 @@ impl Game<'_> {
                     * glam::Mat4::from_quat(self.camera_orientation());
                 self.submit_item_world(&state, pose, packed, out);
                 continue;
+            }
+            // `Entity.displayFireAnimation`: a thrown item that flew through a
+            // fire block burns (`ThrowableProjectile.tick`'s
+            // `applyEffectsFromBlocks`), and ThrownItemRenderer draws the flame
+            // over its box as any other entity renderer does.
+            if a.on_fire() {
+                let size = a.kind.size() as f32;
+                flame_geometry(atlas, c, size, size, self.yaw, light, out);
             }
             let Some(name) = a.item_sprite() else {
                 continue;
@@ -7663,8 +7770,8 @@ mod knockback_tests {
         false
     }
 
-    /// `LivingEntity.knockback` on a player: the hook runs after the
-    /// knockback resistance and before the motion changes; a mod's strength or
+    /// `LivingEntity.knockback` on a player: the hook runs before the
+    /// knockback resistance and the motion changes; a mod's strength or
     /// direction pushes, a cancel pushes nothing, and without a mod in the way
     /// the push is vanilla's. Needs the prepared data in
     /// `.local/horizon-client/26.3`; skipped without it.

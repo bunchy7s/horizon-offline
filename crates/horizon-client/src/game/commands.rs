@@ -7,7 +7,7 @@ pub(super) use data::place_summoned;
 mod effects;
 pub(super) mod execute;
 pub(super) mod extra;
-mod items;
+pub(in crate::game) mod items;
 mod misc;
 mod place;
 mod players;
@@ -73,6 +73,8 @@ pub(super) enum Target {
     Trident(u32),
     /// An ominous item spawner, by its entity id (`minecraft:ominous_item_spawner`).
     Spawner(u32),
+    /// A simulated lingering, creeper or dragon area-effect cloud.
+    Cloud(u32),
 }
 /// An entity of a type Horizon does not simulate: its compound lives in the
 /// entity memory (`persist.raw`), its position and rotation here.
@@ -155,7 +157,8 @@ fn non_player_entity_id(t: Target) -> Option<i32> {
     | Target::Falling(id)
     | Target::Rocket(id)
     | Target::Trident(id)
-    | Target::Spawner(id)) = t
+    | Target::Spawner(id)
+    | Target::Cloud(id)) = t
     else {
         return None;
     };
@@ -171,6 +174,21 @@ impl Game<'_> {
         {
             self.native_player_level_change(player, &name, from, to);
         }
+    }
+
+    /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
+    /// points: the amount to give, or `None` when a mod cancelled it.
+    pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
+        if horizon_client::mod_api::mods().is_empty() {
+            return Some(amount);
+        }
+        let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        else {
+            return Some(amount);
+        };
+        let (mut amount, mut cancel) = (amount, false);
+        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        (!cancel).then_some(amount)
     }
 
     /// Commands.performCommand for a line without its slash.
@@ -552,6 +570,7 @@ impl Game<'_> {
                 .iter()
                 .find(|r| r.id == id)
                 .map(|r| [r.position.x, r.position.y, r.position.z]),
+            Target::Cloud(id) => self.breath_clouds.iter().find(|c| c.id == id).map(|c| c.at),
             Target::Trident(id) => self
                 .tridents
                 .iter()
@@ -613,6 +632,7 @@ impl Game<'_> {
             Target::Rocket(_) => "minecraft:firework_rocket".into(),
             Target::Trident(_) => "minecraft:trident".into(),
             Target::Spawner(_) => "minecraft:ominous_item_spawner".into(),
+            Target::Cloud(_) => "minecraft:area_effect_cloud".into(),
         }
     }
     /// The name of the player the game acts for: a guest's own while their
@@ -638,14 +658,22 @@ impl Game<'_> {
                 Some(g) => self.player_text(&g.name, g.uuid),
                 None => Text::empty(),
             },
+            // ItemEntity.getName: its CustomName, else the stack's item name
+            // (`getItemName`: `minecraft:item_name`, else the item's own).
             Target::Item(id) => {
-                let item = self
-                    .dropped
-                    .iter()
-                    .find(|i| i.id == id)
-                    .map(|i| i.stack.item.to_string())
-                    .unwrap_or_default();
-                Text::literal(self.pack.names.display_item(&item))
+                if let Some(c) = self.persist_raw(id).and_then(|r| r.get("CustomName")) {
+                    return horizon_client::scoreboard::comp_text(
+                        &horizon_client::scoreboard::tag_to_json(c),
+                    );
+                }
+                let stack = self.dropped.iter().find(|i| i.id == id).map(|i| &i.stack);
+                match stack.and_then(|s| s.item_name()) {
+                    Some(name) => Text::literal(name),
+                    None => {
+                        let item = stack.map(|s| s.item.to_string()).unwrap_or_default();
+                        Text::literal(self.pack.names.display_item(&item))
+                    }
+                }
             }
             // FallingBlockEntity.getTypeName: `entity.minecraft.falling_block_type`
             // with the block's name.
@@ -659,19 +687,11 @@ impl Game<'_> {
                 let block = Text::translate(&format!("block.{block}"), &[]);
                 Text::translate("entity.minecraft.falling_block_type", &[block])
             }
-            Target::Mob(id)
-                if self
-                    .mobs
-                    .iter()
-                    .any(|m| m.id == id && m.custom_name.is_some()) =>
-            {
-                let name = self
-                    .mobs
-                    .iter()
-                    .find(|m| m.id == id)
-                    .and_then(|m| m.custom_name.clone());
-                Text::literal(name.unwrap_or_default())
-            }
+            Target::Mob(id) => self
+                .mobs
+                .iter()
+                .find(|m| m.id == id)
+                .map_or_else(|| Text::translate("entity.", &[]), |m| m.command_name()),
             other => {
                 // Entity.getDisplayName: the CustomName component, else the type.
                 let custom = match other {
@@ -680,7 +700,8 @@ impl Game<'_> {
                     | Target::Painting(id)
                     | Target::Boat(id)
                     | Target::Cart(id)
-                    | Target::Other(id) => self.persist_raw(id).and_then(|r| r.get("CustomName")),
+                    | Target::Other(id)
+                    | Target::Cloud(id) => self.persist_raw(id).and_then(|r| r.get("CustomName")),
                     _ => None,
                 };
                 if let Some(c) = custom {
@@ -880,6 +901,12 @@ impl Game<'_> {
             candidates.push(Target::Dragon(d.id));
         }
         candidates.extend(self.ominous_spawners.iter().map(|s| Target::Spawner(s.id)));
+        candidates.extend(
+            self.breath_clouds
+                .iter()
+                .filter(|c| c.id != 0)
+                .map(|c| Target::Cloud(c.id)),
+        );
         candidates
     }
     /// The loaded levels, in the order the server holds them: the
@@ -916,6 +943,7 @@ impl Game<'_> {
             Target::Rocket(id),
             Target::Trident(id),
             Target::Spawner(id),
+            Target::Cloud(id),
         ]
         .into_iter()
         .find(|t| self.level_holds(*t))
@@ -942,6 +970,7 @@ impl Game<'_> {
             Target::Rocket(id) => self.rockets.iter().any(|r| r.id == id),
             Target::Trident(id) => self.tridents.iter().any(|t| t.id == id),
             Target::Spawner(id) => self.ominous_spawners.iter().any(|s| s.id == id),
+            Target::Cloud(id) => self.breath_clouds.iter().any(|c| c.id == id),
         }
     }
     /// Run `f` with the level that holds the entity a target names in place
@@ -1070,6 +1099,9 @@ impl Game<'_> {
             "ban-ip" | "pardon-ip" => self.cmd_ip_bans(id, ctx),
             id if id.starts_with("banlist") => self.cmd_banlist(id),
             id if id.starts_with("whitelist.") => self.cmd_whitelist(id, ctx),
+            "stop" => self.cmd_stop(),
+            "save-all" => self.cmd_save_all(),
+            "save-off" | "save-on" => self.cmd_auto_save(id == "save-on"),
             "transfer" => self.cmd_transfer(ctx),
             "fetchprofile" => self.cmd_fetchprofile(ctx),
             "publish" => self.cmd_publish(ctx),
@@ -1623,6 +1655,11 @@ impl Game<'_> {
                     s.position = [v.x, v.y, v.z];
                 }
             }
+            Target::Cloud(id) => {
+                if let Some(c) = self.breath_clouds.iter_mut().find(|c| c.id == id) {
+                    c.at = pos;
+                }
+            }
             // Wall-mounted entities do not move.
             Target::Frame(_) | Target::Painting(_) => {}
         }
@@ -2122,6 +2159,7 @@ impl Game<'_> {
             Target::Rocket(id) => self.rockets.retain(|r| r.id != id),
             Target::Trident(id) => self.tridents.retain(|t| t.id != id),
             Target::Spawner(id) => self.ominous_spawners.retain(|s| s.id != id),
+            Target::Cloud(id) => self.breath_clouds.retain(|c| c.id != id),
         }
         // The orbs marked for removal are gone (Entity.kill removes them).
         self.orbs.retain(|o| o.age < u32::MAX / 2);
@@ -3017,7 +3055,7 @@ impl Game<'_> {
                 // boundary and emits the level-change hook itself.
                 self.give_levels(amount);
                 return true;
-            } else {
+            } else if let Some(amount) = self.xp_change(amount) {
                 self.give_points(amount);
             }
         } else if levels {
@@ -3921,6 +3959,7 @@ mod look_at_tests {
             Target::Rocket(7),
             Target::Trident(7),
             Target::Spawner(7),
+            Target::Cloud(7),
         ] {
             assert_eq!(non_player_entity_id(t), Some(7), "{t:?}");
         }

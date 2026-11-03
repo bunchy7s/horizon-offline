@@ -201,11 +201,13 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+mod native_block_sprites;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_data;
 mod native_entity_motion;
 mod native_entity_refs;
 mod native_explosions;
@@ -215,7 +217,9 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_level_refs;
 mod native_lifecycle;
+mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mobs;
@@ -1219,6 +1223,25 @@ impl LevelAccess for GameLevel<'_> {
             self.native_block_form(self.dimension, pos, from, to, &mut cancel);
         }
         !cancel
+    }
+    fn note_block_change(
+        &self,
+        pos: BlockPos,
+        instrument: &str,
+        old: i32,
+        mut new: i32,
+    ) -> Option<i32> {
+        let mut cancel = false;
+        if self.native_authoritative {
+            let context = horizon_client::mod_api::NativeNoteBlockChange {
+                dimension: self.dimension,
+                pos,
+                instrument,
+                old_note: old,
+            };
+            self.native_note_block_change(&context, &mut new, &mut cancel);
+        }
+        (!cancel).then_some(new)
     }
     fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
         let mut cancel = false;
@@ -2400,6 +2423,9 @@ struct Game<'a> {
     /// The cursor icon the window shows (`widgets::take_cursor` each frame).
     cursor_icon: horizon_client::widgets::Cursor,
     captured: bool,
+    /// Native grab mode used by winit. Linux window managers can drop the
+    /// grab without a focus event, leaving `captured` true but stale.
+    capture_mode: Option<CursorGrabMode>,
     /// The window held the pointer when it lost focus: the system lets a
     /// grabbed pointer go with the focus, and a window that comes back still
     /// wanting it takes it again (`MouseHandler.grabMouse`, whose grab
@@ -2509,6 +2535,8 @@ struct Game<'a> {
     message: Option<(String, Instant)>,
     save: Arc<SaveDir>,
     level: Level,
+    /// Must precede session_lock: dropping the writer drains writes while the world is locked.
+    player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
     audio: Audio,
     music: horizon_client::music::MusicManager,
@@ -3041,6 +3069,9 @@ struct Game<'a> {
     /// have each chest open.
     lid_openers: HashMap<(i32, i32, i32), i32>,
     lan_acting: Option<u32>,
+    /// A guest's `/save-all`: saved once their turn ends (`run_guest_command`),
+    /// when their own state is back in their record.
+    save_after_guest_turn: bool,
     player_attachments: horizon_world::attachments::Attachments,
     /// The joined guests' attachments, by UUID: here rather than in their
     /// records, so a hook in one guest's turn (when the hub is out of
@@ -3904,7 +3935,7 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             age: 0,
-            pickup_delay,
+            pickup_delay: i64::from(pickup_delay),
             bob_offset: bob,
             ticks: 0,
             needs_sync: false,
@@ -3938,8 +3969,9 @@ impl Game<'_> {
         block_entity: Option<horizon_world::nbt::Tag>,
     ) -> horizon_world::loot::NativeLootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
-        // Level.canHaveWeather: the Nether has a ceiling, the End is the End.
-        let weather = self.dim == Dim::Overworld;
+        // Level.canHaveWeather: sky light, no ceiling and not the End.
+        let weather =
+            self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim != Dim::End;
         horizon_world::loot::NativeLootPlace {
             origin: Some(origin),
             block_entity,
@@ -4135,13 +4167,14 @@ impl Game<'_> {
                 item.velocity.z.abs() + 1.0,
             );
             obstacles.near(item.bounds().inflate(reach), &mut nearby);
-            let alive = item.tick(
+            let alive = entity::tick_item(
+                item,
                 &self.world,
                 self.pack.assets.registry,
                 self.res.facts(),
                 self.collision,
-                no_physics,
                 &self.res.motion().fluids,
+                no_physics,
                 &nearby,
                 Some(self.border.geometry()),
             );
@@ -7416,6 +7449,7 @@ impl Game<'_> {
             self.world.weather.tick_levels();
             self.tick_weather_effects();
         }
+        let _ = self.finish_player_autosaves(false);
         // MinecraftServer.tickServer's countdown, then autoSave: three
         // hundred seconds of ticks at the rate the server runs at now.
         self.ticks_until_autosave -= 1;
@@ -7915,6 +7949,7 @@ impl Game<'_> {
         // Splitscreen: another player has the pointer; this one's menus leave it alone.
         if !self.keyboard_mouse {
             self.captured = false;
+            self.capture_mode = None;
             return;
         }
         if capture && !self.captured && !cfg!(target_os = "macos") {
@@ -7945,6 +7980,7 @@ impl Game<'_> {
                 self.mouse.set_ignore_first_move();
             }
             self.captured = capture;
+            self.capture_mode = None;
         } else if capture {
             self.mouse.set_ignore_first_move();
             // macOS warps by re-associating the mouse with the pointer,
@@ -7960,10 +7996,14 @@ impl Game<'_> {
             if self.focused {
                 warp(window);
             }
-            self.captured = window
-                .set_cursor_grab(CursorGrabMode::Locked)
-                .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
-                .is_ok();
+            self.capture_mode = if window.set_cursor_grab(CursorGrabMode::Locked).is_ok() {
+                Some(CursorGrabMode::Locked)
+            } else if window.set_cursor_grab(CursorGrabMode::Confined).is_ok() {
+                Some(CursorGrabMode::Confined)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             // Windows already warped above, inside the clip's own position.
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             if self.captured && self.focused {
@@ -7987,6 +8027,7 @@ impl Game<'_> {
                 let _ = window.set_cursor_grab(CursorGrabMode::None);
             }
             self.captured = false;
+            self.capture_mode = None;
         }
         // MouseHandler.grabMouse and releaseMouse: the mouse position is
         // the window's centre whenever the pointer's grab state changes, so
@@ -8001,6 +8042,33 @@ impl Game<'_> {
             self.cursor = pos;
         }
         if !self.options.offscreen || self.split_window {
+            window.set_cursor_visible(!self.captured);
+        }
+    }
+    /// A Linux window manager can release the native pointer grab while the
+    /// window remains focused. Reapply the recorded mode on the next gameplay
+    /// click or wheel event, without warping the pointer or consuming input.
+    fn reassert_pointer_capture(&mut self) {
+        #[cfg(target_os = "linux")]
+        if self.screen == Screen::Playing
+            && self.focused
+            && self.captured
+            && !self.options.offscreen
+            && let (Some(window), Some(mode)) = (&self.window, self.capture_mode)
+        {
+            let other = match mode {
+                CursorGrabMode::Locked => CursorGrabMode::Confined,
+                CursorGrabMode::Confined => CursorGrabMode::Locked,
+                CursorGrabMode::None => return,
+            };
+            self.capture_mode = if window.set_cursor_grab(mode).is_ok() {
+                Some(mode)
+            } else if window.set_cursor_grab(other).is_ok() {
+                Some(other)
+            } else {
+                None
+            };
+            self.captured = self.capture_mode.is_some();
             window.set_cursor_visible(!self.captured);
         }
     }
@@ -11534,6 +11602,7 @@ impl Game<'_> {
     /// `Player.attack` on a mob: the damage, knockback, sweep, particles and
     /// sounds.
     pub(super) fn attack_mob(&mut self, index: usize) {
+        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
@@ -13574,9 +13643,13 @@ impl Game<'_> {
     /// `Player.giveExperiencePoints`, and `giveExperienceLevels`' level-up
     /// sound every fifth level (at most every 100 ticks).
     pub(super) fn give_orb_points(&mut self, gained: u32) {
+        let Some(gained) = self.xp_change(gained as i32) else {
+            return;
+        };
+        let gained = gained.max(0);
         let at = self.eye_position();
         let old_level = self.experience.level;
-        let gave = self.experience.give(gained as i32);
+        let gave = self.experience.give(gained);
         self.native_player_level_changed(old_level);
         // Player.giveExperienceLevels runs per level, so the first multiple of 5
         // crossed plays the sound (and starts the cooldown for the rest).
@@ -14265,37 +14338,30 @@ impl Game<'_> {
                 && (position.y - f64::from(bed[1])).abs() <= 2.0
                 && (position.z - f64::from(bed[2]) - 0.5).abs() <= 3.0
         };
-        if !reachable(head) && !reachable(foot) {
-            self.tell_sleeper(
-                "block.minecraft.bed.too_far_away",
-                "You may not rest now; the bed is too far away",
-                true,
-            );
-            return;
-        }
+        let mut problem: Option<&'static str> = if !reachable(head) && !reachable(foot) {
+            Some("too_far_away")
+        } else {
+            None
+        };
         // ServerPlayer.bedBlocked: Player.freeAt (not suffocating) for the
         // blocks above the head and the foot, as `in_wall` reads suffocating.
-        let blocked = [head, foot].iter().any(|bed| {
-            let f = self
-                .res
-                .facts()
-                .get(self.world.block(bed[0], bed[1] + 1, bed[2]));
-            f.full_collision && f.solid_render
-        });
+        let blocked = problem.is_none()
+            && [head, foot].iter().any(|bed| {
+                let f = self
+                    .res
+                    .facts()
+                    .get(self.world.block(bed[0], bed[1] + 1, bed[2]));
+                f.full_collision && f.solid_render
+            });
         if blocked {
-            self.tell_sleeper(
-                "block.minecraft.bed.obstructed",
-                "This bed is obstructed",
-                true,
-            );
-            return;
+            problem = Some("obstructed");
         }
         // In reach (bedInRange), day or night: setRespawnPosition(
         // RespawnConfig(the head, the player's yaw), not forced). It replaces
         // an anchor or a spawnpoint; respawning checks the bed is still there
         // and finds where to stand up (findRespawnAndUseSpawnBlock).
         // Straw beds never set it (`straw_bed_rule`).
-        if self.bed_sets_spawn(state) {
+        if problem.is_none() && self.bed_sets_spawn(state) {
             let config = respawn_anchor::RespawnConfig::wrapped(self.dim, head, yaw, false);
             // ServerPlayer.setRespawnPosition: the chat message only when the
             // point moved (`isSamePosition`).
@@ -14335,16 +14401,12 @@ impl Game<'_> {
                 };
             }
         }
-        if !(self.dim == Dim::Overworld && self.sky_darken() >= 4) {
-            self.tell_sleeper(
-                "block.minecraft.bed.no_sleep",
-                "You can sleep only at night or during thunderstorms",
-                true,
-            );
-            return;
+        if problem.is_none() && !(self.dim == Dim::Overworld && self.sky_darken() >= 4) {
+            problem = Some("not_possible_now");
         }
         // Creative players skip the monster check (`!this.isCreative()`).
-        let monsters = !self.creative
+        if problem.is_none()
+            && !self.creative
             && self.mobs.iter().any(|m| {
                 // `Monster.class` entities that `isPreventingPlayerRest`: a
                 // zombified piglin only while it is angry.
@@ -14355,13 +14417,41 @@ impl Game<'_> {
                     && (m.position.x - position.x).abs() < 8.0
                     && (m.position.y - position.y).abs() < 5.0
                     && (m.position.z - position.z).abs() < 8.0
-            });
-        if monsters {
-            self.tell_sleeper(
-                "block.minecraft.bed.not_safe",
-                "You may not rest now; there are monsters nearby",
-                true,
-            );
+            })
+        {
+            problem = Some("not_safe");
+        }
+        // NeoForge's CanPlayerSleepEvent: a mod may clear or replace the
+        // problem vanilla found, or add one.
+        let mut problem = problem.map(str::to_owned);
+        if let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone()) {
+            self.native_can_player_sleep(player, &name, head, &mut problem);
+        }
+        if let Some(problem) = problem {
+            match problem.as_str() {
+                "too_far_away" => self.tell_sleeper(
+                    "block.minecraft.bed.too_far_away",
+                    "You may not rest now; the bed is too far away",
+                    true,
+                ),
+                "obstructed" => self.tell_sleeper(
+                    "block.minecraft.bed.obstructed",
+                    "This bed is obstructed",
+                    true,
+                ),
+                "not_safe" => self.tell_sleeper(
+                    "block.minecraft.bed.not_safe",
+                    "You may not rest now; there are monsters nearby",
+                    true,
+                ),
+                "not_possible_now" => self.tell_sleeper(
+                    "block.minecraft.bed.no_sleep",
+                    "You can sleep only at night or during thunderstorms",
+                    true,
+                ),
+                // `other_problem` and any name a mod invents: refused without a message.
+                _ => {}
+            }
             return;
         }
         // ServerPlayer.startSleepInBed: a percentage above 100 cannot skip the night.
@@ -15096,11 +15186,22 @@ impl Game<'_> {
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
+        let _ = self.finish_player_autosaves(wait);
         self.native_world_saved(wait);
         if dedicated {
             dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
+    }
+    fn finish_player_autosaves(&mut self, wait: bool) -> Result<bool> {
+        let saved = self.player_autosaves.completed(wait);
+        if !saved.is_empty() {
+            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
+            for player in saved {
+                self.native_player_save_to_file(player.uuid, &player.name, &directory);
+            }
+        }
+        self.player_autosaves.writes_finished()
     }
     fn save_game_metadata(&mut self) -> Result<()> {
         self.save_maps();
@@ -15115,6 +15216,8 @@ impl Game<'_> {
         self.save_schedule();
         self.save_warden_tracker();
         self.sync_level();
+        // Level::write can synchronously replace the integrated owner file.
+        let _ = self.finish_player_autosaves(true);
         let stored_owner = self.store_owner();
         write_level_for_role(
             &mut self.level,
@@ -15137,11 +15240,9 @@ impl Game<'_> {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
             let mut host = host;
-            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
                 self.guest_attachments_into(g);
-                horizon_client::lan::playerdata::save(g, &self.world_root);
-                self.native_player_save_to_file(g.uuid, &g.name, &directory);
+                self.player_autosaves.enqueue(g, &self.world_root);
             }
             self.lan = Some(host);
         }
@@ -16980,6 +17081,14 @@ impl Game<'_> {
         ) {
             self.last_input = Instant::now();
         }
+        if !self.pad_synthetic_input()
+            && matches!(
+                event,
+                WindowEvent::MouseInput { .. } | WindowEvent::MouseWheel { .. }
+            )
+        {
+            self.reassert_pointer_capture();
+        }
         // The real mouse takes the pointer back from the keyboard's focus.
         self.key_focus_mouse(event_loop, &event);
         // The screen's narration hears of the input before the screen takes
@@ -18523,6 +18632,7 @@ impl<'a> Game<'a> {
             cursor: (0.0, 0.0),
             cursor_icon: horizon_client::widgets::Cursor::Arrow,
             captured: false,
+            capture_mode: None,
             regrab_on_refocus: false,
             keyboard_mouse: true,
             split_window: false,
@@ -18579,6 +18689,7 @@ impl<'a> Game<'a> {
             message: None,
             save,
             level,
+            player_autosaves: Default::default(),
             session_lock: None,
             audio,
             music: {
@@ -18882,6 +18993,7 @@ impl<'a> Game<'a> {
             lan_global_events: Vec::new(),
             lid_openers: HashMap::new(),
             lan_acting: None,
+            save_after_guest_turn: false,
             player_attachments: Default::default(),
             guest_attachments: HashMap::new(),
             lan_break_pos: None,

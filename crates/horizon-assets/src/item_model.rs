@@ -432,6 +432,17 @@ impl ItemModelNode {
     pub fn decode(v: &Value) -> Result<Self> {
         let m = object(v)?;
         let kind = ident(required(m, "type")?)?;
+        if kind == "minecraft:condition" {
+            let property = ident(required(m, "property")?)?;
+            if !property.starts_with("minecraft:") {
+                return Ok(Self::Condition {
+                    transformation: optional_transformation(m)?,
+                    property: ConditionProperty::Custom(property),
+                    on_true: Box::new(Self::decode(required(m, "on_true")?)?),
+                    on_false: Box::new(Self::decode(required(m, "on_false")?)?),
+                });
+            }
+        }
         Ok(match kind.as_str() {
             "minecraft:empty" => Self::Empty,
             "minecraft:model" => Self::Model(ModelLeaf {
@@ -647,6 +658,7 @@ impl TintSource {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConditionProperty {
+    Custom(String),
     CustomModelData(i32),
     UsingItem,
     Broken,
@@ -979,6 +991,10 @@ pub struct Context<'a> {
 
 /// Host services the resolver cannot derive from data alone.
 pub trait ItemEnv {
+    /// A mod's namespaced conditional property, false when no mod supplies it.
+    fn item_model_property(&self, _property: &str, _stack: &StackView) -> bool {
+        false
+    }
     /// `PotionContents.getColorOr` for the potion/effects part: the mixed
     /// effect colour, or `None` when the contents have no visible effects.
     fn potion_effect_color(&self, _potion_contents: &Value) -> Option<i32> {
@@ -1332,6 +1348,9 @@ impl Resolve<'_> {
     fn condition(&self, property: &ConditionProperty) -> bool {
         let owner = self.ctx.owner;
         match property {
+            ConditionProperty::Custom(property) => {
+                self.env.item_model_property(property, self.stack)
+            }
             ConditionProperty::CustomModelData(i) => {
                 self.component("minecraft:custom_model_data")
                     .and_then(|d| custom_data_at(d, "flags", *i))
