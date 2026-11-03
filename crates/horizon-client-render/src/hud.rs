@@ -197,7 +197,12 @@ fn decode_webp(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     } else {
         let mut rgb = vec![0u8; (width as usize) * (height as usize) * 3];
         decoder.read_image(&mut rgb).map_err(|e| e.to_string())?;
-        for (out, pixel) in rgba.chunks_exact_mut(4).zip(rgb.chunks_exact(3)) {
+        for (out, pixel) in rgba
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(rgb.as_chunks::<3>().0)
+        {
             out.copy_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
         }
     }
@@ -220,7 +225,7 @@ fn decode_jpeg(data: &[u8]) -> Result<(u32, u32, Vec<u8>)> {
     let mut rgba = Vec::with_capacity(count * 4);
     match channels {
         3 => {
-            for p in pixels.chunks_exact(3) {
+            for p in pixels.as_chunks::<3>().0 {
                 rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
             }
         }
