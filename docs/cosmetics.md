@@ -97,8 +97,19 @@ does the asking.
   (development, the bench); `HORIZON_COSMETICS_API=<url>` points the game at another service, and
   `HORIZON_COSMETICS_LOCAL=<folder>` reads items from a folder instead: every player and every
   mannequin wears its first item of each slot (the art and the bench, without the network).
-- **Settings** (Extras, under "Cosmetics", shown only with the flag on): *My cosmetics* and *Other
-  players' cosmetics*, both on. Off, the game asks for nothing about those players.
+- **Settings** (Extras, under "Cosmetics", shown only with the flag on), the same three as the
+  launcher's Wardrobe (`horizon_cosmetics::prefs`, lines of `horizon-extras.txt`):
+  - *My cosmetics: Shown / Hidden* is the account's (`PUT /v1/visible`): hidden, every Horizon
+    player sees you without them, you included. The game signs in for that one call the way the
+    launcher does (`horizon_cosmetics::account`, Mojang's `join` with the player's session) and
+    notes what the service confirmed in `cosmetics-visible.txt`; offline it tries again after 15 s,
+    doubling to 10 minutes, until the service takes it. An unchanged switch sends nothing.
+  - *Other players' cosmetics: Shown → Name tags only → Hidden*. Hidden, the game asks for nothing
+    about them; name tags only, their name tag styles show and nothing on their bodies.
+  - *Others' auras and trails*, off by default (no item of that kind exists yet).
+- **Name tag styles** (`game/names.rs`): the mark, 8 text pixels square, before the name and a
+  one-pixel line in the style's colour under the name's background, in the name tag's own pass
+  (the mark is in the atlas like the other items' textures).
 - **Drawing** (`game/cosmetics.rs`): an item's texture takes one of the skin atlas's 64×64 slots
   and its boxes are posed on the wearer's bone each frame, through the same GPU skin path as the
   player model (the CPU path where that is off), lit and culled with the player. A helmet hides a

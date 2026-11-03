@@ -131,6 +131,7 @@ impl Game<'_> {
             let at = glam::DVec3::new(m.position.x, m.position.y, m.position.z);
             (at.distance_squared(camera) < 64.0 * 64.0).then_some((m, name, false))
         });
+        let own = self.own_name_tag().map(|(m, _)| m.id);
         let players = players
             .into_iter()
             .chain(self.own_name_tag())
@@ -219,6 +220,7 @@ impl Game<'_> {
                         lines: vec![(text, 0.0)],
                         light: l,
                         discrete,
+                        style: None,
                     });
                 }
                 continue;
@@ -262,11 +264,18 @@ impl Game<'_> {
                 (m.position.y + f64::from(m.height())).floor() as i32,
                 m.position.z.floor() as i32,
             );
+            // A Horizon player's name tag style (cosmetics), beside the name.
+            let style = if player && horizon_cosmetics::enabled() {
+                self.cosmetics_tag(m, Some(m.id) == own)
+            } else {
+                None
+            };
             tags.push(NameTag {
                 at: p,
                 lines,
                 light: l,
                 discrete,
+                style,
             });
         }
         drop(player_ids);
@@ -348,6 +357,7 @@ impl Game<'_> {
                 lines,
                 light: l,
                 discrete: false,
+                style: None,
             });
         }
         // ItemFrameRenderer.shouldShowName/getNameTag: only the targeted
@@ -410,6 +420,7 @@ impl Game<'_> {
                         center.z.floor() as i32,
                     ),
                     discrete: false,
+                    style: None,
                 });
             }
         }
@@ -436,7 +447,7 @@ impl Game<'_> {
             if tag.discrete {
                 self.mark_translucent_entity(out.len(), "minecraft:name_tag");
                 let light = vertex_light(tag.light);
-                patches.extend(self.name_tag_quads(
+                patches.extend(self.styled_name_tag_quads(
                     o,
                     &tag.lines,
                     FADED,
@@ -445,6 +456,7 @@ impl Game<'_> {
                     light,
                     NAME_TAG_UNIT,
                     out,
+                    tag.style,
                 ));
                 continue;
             }
@@ -452,7 +464,7 @@ impl Game<'_> {
             let lit = (tag.light >> 4).max(2) << 4 | (tag.light & 15).max(2);
             self.mark_entity(out.len(), "minecraft:name_tag");
             let light = vertex_light(lit);
-            patches.extend(self.name_tag_quads(
+            patches.extend(self.styled_name_tag_quads(
                 o,
                 &tag.lines,
                 0xFF,
@@ -461,9 +473,10 @@ impl Game<'_> {
                 light,
                 NAME_TAG_UNIT,
                 out,
+                tag.style,
             ));
             // RenderPipelines.TEXT_SEE_THROUGH: no depth test, no lightmap.
-            patches.extend(self.name_tag_quads(
+            patches.extend(self.styled_name_tag_quads(
                 o,
                 &tag.lines,
                 FADED,
@@ -472,6 +485,7 @@ impl Game<'_> {
                 0,
                 NAME_TAG_UNIT,
                 see_through,
+                tag.style,
             ));
         }
         self.map_patches.extend(patches);
@@ -492,6 +506,26 @@ impl Game<'_> {
         unit: f32,
         out: &mut Vec<Vertex>,
     ) -> Vec<horizon_client::font::Patch> {
+        self.styled_name_tag_quads(
+            o, lines, text_alpha, background, text_layer, light, unit, out, None,
+        )
+    }
+
+    /// [`Self::name_tag_quads`], with a cosmetic style on the last line (the name): its mark
+    /// before the text and its line under the background.
+    #[allow(clippy::too_many_arguments)]
+    fn styled_name_tag_quads(
+        &self,
+        o: glam::DVec3,
+        lines: &[(Text, f64)],
+        text_alpha: u32,
+        background: bool,
+        text_layer: u32,
+        light: u32,
+        unit: f32,
+        out: &mut Vec<Vertex>,
+        style: Option<TagStyle>,
+    ) -> Vec<horizon_client::font::Patch> {
         // Options.getBackgroundOpacity(0.25) black, as ARGB.color.
         const BACKGROUND: u32 = 0x3F00_0000;
         // The camera's facing (Camera.rotation()), turned round in third-person
@@ -507,7 +541,8 @@ impl Game<'_> {
         let up = right.cross(forward).normalize_or_zero();
         let away = forward.as_vec3() * 0.002;
         let mut batch = HudBatch::new([1, 1]);
-        for (text, lift) in lines {
+        let last = lines.len().saturating_sub(1);
+        for (n, (text, lift)) in lines.iter().enumerate() {
             let o = (o + glam::DVec3::new(0.0, *lift, 0.0)).as_vec3();
             let (r, u) = (right.as_vec3() * unit, up.as_vec3() * unit);
             // Text space: x right, y down (scale 0.025, -0.025).
@@ -527,6 +562,22 @@ impl Game<'_> {
                 text_alpha << 24 | 0xFF_FFFF,
                 if background { BACKGROUND } else { 0 },
             );
+            if let Some(style) = style.filter(|_| n == last) {
+                let x = -self.gui.atlas.font.width_text(text) / 2.0;
+                let alpha = text_alpha << 24;
+                // The mark, 8 text pixels square, a pixel left of the background.
+                batch.rect_uv(x - 10.0, y0, 8.0, 8.0, style.mark, alpha | 0xFF_FFFF);
+                // The line, a pixel tall, under the background (which runs from -1 to 9).
+                let width = self.gui.atlas.font.width_text(text);
+                batch.fill(
+                    &self.gui.atlas,
+                    x - 1.0,
+                    y0 + 9.0,
+                    width + 1.0,
+                    1.0,
+                    alpha | style.line,
+                );
+            }
             for (i, quad) in batch.vertices.as_chunks::<6>().0.iter().enumerate() {
                 let shift = if i * 6 < behind {
                     away
@@ -572,6 +623,16 @@ struct NameTag {
     lines: Vec<(Text, f64)>,
     light: u8,
     discrete: bool,
+    style: Option<TagStyle>,
+}
+
+/// A cosmetic name tag style: a mark before the name and a line under it.
+#[derive(Clone, Copy)]
+pub(super) struct TagStyle {
+    /// The mark's place in the GUI atlas.
+    pub mark: horizon_client::hud::Rect,
+    /// The line's colour, `0xrrggbb`.
+    pub line: u32,
 }
 
 #[cfg(test)]

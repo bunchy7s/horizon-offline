@@ -481,7 +481,15 @@ impl Http {
         }
     }
 
-    fn read(answer: Result<ureq::Response, ureq::Error>) -> Result<Vec<u8>, String> {
+    pub(crate) fn agent(&self) -> &ureq::Agent {
+        &self.agent
+    }
+
+    pub(crate) fn base(&self) -> &str {
+        &self.base
+    }
+
+    pub(crate) fn read(answer: Result<ureq::Response, ureq::Error>) -> Result<Vec<u8>, String> {
         use std::io::Read;
         let answer = answer.map_err(|e| match e {
             ureq::Error::Status(code, _) => format!("HTTP {code}"),

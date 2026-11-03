@@ -497,7 +497,12 @@
   "horizon.pack.addFailed": "The pack could not be added: %s",
   "horizon.extras.header.cosmetics": "Cosmetics",
   "horizon.extras.cosmetics_mine": "My cosmetics",
-  "horizon.extras.cosmetics_mine.tooltip": "Shows the cosmetics you wear on your own player, in third person and the inventory.",
+  "horizon.extras.cosmetics_mine.tooltip": "Hidden: every Horizon player sees you without your cosmetics, you included. The same switch as the launcher's Wardrobe.",
   "horizon.extras.cosmetics_others": "Other players' cosmetics",
-  "horizon.extras.cosmetics_others.tooltip": "Shows the cosmetics other Horizon players wear. Off, the game never asks what they wear."
+  "horizon.extras.cosmetics_others.tooltip": "What other Horizon players wear: everything, only their name tag styles, or nothing. Hidden, the game never asks what they wear.",
+  "horizon.extras.cosmetics_auras": "Others' auras and trails",
+  "horizon.extras.cosmetics_auras.tooltip": "Auras and trails other players wear. Off by default.",
+  "horizon.extras.cosmetics.shown": "Shown",
+  "horizon.extras.cosmetics.hidden": "Hidden",
+  "horizon.extras.cosmetics.name_tags": "Name tags only"
 }
