@@ -25,6 +25,12 @@ fn holder(text: Text) -> Holder {
 fn ticks_to_seconds(ticks: i64) -> String {
     super::percent_f(ticks as f64 / 20.0, 2)
 }
+/// `WorldBorderCommand.ERROR_TOO_BIG`'s argument: vanilla hands the message the
+/// double `5.9999968E7` (the value `setSize` compares against too), and a `%s`
+/// substitution prints a double with `Double.toString`.
+fn size_limit_text() -> String {
+    horizon_client::java_text::double_to_string(MAX_SIZE)
+}
 
 impl Game<'_> {
     // ---- /forceload ----------------------------------------------------------
@@ -352,7 +358,10 @@ impl Game<'_> {
                     return Err(err("commands.worldborder.set.failed.small", &[]));
                 }
                 if distance > MAX_SIZE {
-                    return Err(err("commands.worldborder.set.failed.big", &[&"5.999997E7"]));
+                    return Err(err(
+                        "commands.worldborder.set.failed.big",
+                        &[&size_limit_text()],
+                    ));
                 }
                 let shown = Text::literal(super::percent_f(distance, 1));
                 if time > 0 {
@@ -767,5 +776,19 @@ impl Game<'_> {
         )?;
         self.feedback(message);
         Ok(total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `WorldBorderCommand.ERROR_TOO_BIG` is built with the double
+    /// `5.9999968E7`, the same value `setSize` compares `distance` against, and
+    /// the `%s` substitution of a translatable renders a double with
+    /// `Double.toString`: the message names `5.9999968E7`, not a rounded
+    /// `5.999997E7`.
+    #[test]
+    fn the_too_big_message_names_the_limit_as_vanilla_prints_it() {
+        assert_eq!(super::MAX_SIZE, 5.9999968E7);
+        assert_eq!(super::size_limit_text(), "5.9999968E7");
     }
 }

@@ -3864,9 +3864,16 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
-            if let Some(eyes) = drops {
-                self.as_guest(host, conn, |game| game.drop_inventory(eyes));
-            }
+            // ServerPlayer.die: the drops, then the deathCount objectives, then
+            // the `deaths` statistic and the two timers it resets.
+            self.as_guest(host, conn, |game| {
+                if let Some(eyes) = drops {
+                    game.drop_inventory(eyes);
+                }
+                game.score_player_died();
+                game.award_custom_stat("deaths", 1);
+                game.stats.reset_death_timers();
+            });
             self.spawn_orbs(at, reward);
         }
     }
