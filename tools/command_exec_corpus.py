@@ -918,6 +918,36 @@ def items_and_loot():
     ]
 
 
+def bird_flap_sensors():
+    # Real mob movement -> Game event dispatch -> sculk sensor. Silent birds
+    # still emit vibrations; NoAI controls must keep the same positions too.
+    ops = setup('/gamerule random_tick_speed 0', '/tp @s 1.5 200 1.5')
+    target = '@e[tag=flap_bird,limit=1]'
+    for species in ('chicken', 'parrot'):
+        for no_ai in (0, 1):
+            ops += setup('/kill @e[tag=flap_bird]',
+                         '/fill 0 200 0 15 206 15 air',
+                         '/fill 0 199 0 15 199 15 stone')
+            ops += [{'op': 'tick', 'n': 45}]
+            ops += setup('/setblock 9 200 10 sculk_sensor strict')
+            ops += [{'op': 'tick', 'n': 2}]
+            ops += [cmd('/execute if block 9 200 10 sculk_sensor[sculk_sensor_phase=inactive,power=0]')]
+            ops += setup(f'/summon {species} 6.5 205 10.5 '
+                         f'{{Tags:["flap_bird"],NoAI:{no_ai}b,Silent:1b,NoGravity:1b,'
+                         'Motion:[0d,-1d,0d],attributes:['
+                         '{id:"minecraft:movement_speed",base:0d},'
+                         '{id:"minecraft:flying_speed",base:0d}]}')
+            ops += [cmd(f'/execute if entity {target}'),
+                    cmd(f'/data get entity {target} Pos')]
+            for _ in range(30):
+                ops += [{'op': 'tick', 'n': 1},
+                        cmd(f'/data get entity {target} Pos'),
+                        cmd('/execute if block 9 200 10 sculk_sensor[sculk_sensor_phase=active,power=8]')]
+            ops += [cmd('/data get block 9 200 10 last_vibration_frequency')]
+    return ops + setup('/kill @e[tag=flap_bird]', '/setblock 9 200 10 air strict',
+                       '/gamerule random_tick_speed 3')
+
+
 def item_nbt_count_bounds():
     """ItemStack's NBT count codec defaults invalid counts to one (#7724)."""
     stand = '@e[type=minecraft:armor_stand,tag=h085,limit=1]'
@@ -2267,6 +2297,7 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+        ('bird flap sensors', bird_flap_sensors()),
 
         ('loot set damage', loot_set_damage()),
 

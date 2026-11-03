@@ -871,9 +871,22 @@ impl Mob {
                 source: self.id,
                 state: horizon_world::registry::BlockStateId(0),
             });
-        } else if w.facts.is_air(state) && self.species() == super::Species::Parrot {
-            // Entity.processFlappingMovement: a move ending in the air.
-            super::parrot::process_flapping(self, events);
+        } else if w.facts.is_air(state) {
+            // Entity.processFlappingMovement: onFlap runs before the game
+            // event. Silent birds still emit it, independently of sound.
+            let flapped = match self.species() {
+                super::Species::Chicken => super::farm::chicken_process_flapping(self),
+                super::Species::Parrot => super::parrot::process_flapping(self, events),
+                _ => false,
+            };
+            if flapped {
+                events.push(MobEvent::GameEvent {
+                    event: "minecraft:flap",
+                    at: [self.position.x, self.position.y, self.position.z],
+                    source: self.id,
+                    state: horizon_world::registry::BlockStateId(0),
+                });
+            }
         }
     }
     /// `Entity.nextStep`: the next whole metre walked; a warden's steps come
