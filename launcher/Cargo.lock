@@ -2684,6 +2684,7 @@ dependencies = [
  "horizon-core",
  "horizon-friends",
  "horizon-mcp",
+ "horizon-mod-api-gen",
  "horizon-mods",
  "horizon-port-pack",
  "horizon-prepare",
@@ -2725,6 +2726,16 @@ name = "horizon-mcp"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+]
+
+[[package]]
+name = "horizon-mod-api-gen"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
 ]
 
 [[package]]

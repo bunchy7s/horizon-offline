@@ -8,6 +8,8 @@ description = "Downloads, prepares and starts Horizon builds"
 [workspace]
 
 [dependencies]
+# The catalog and mod-owned trait injections share their generation rules.
+horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
 # its own name. wgpu renders on Linux, not blade (#3812).
 gpui = { package = "gpui-fast", version = "0.1.13" }

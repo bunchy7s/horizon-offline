@@ -11,7 +11,9 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-mod generated;
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/native_render_generated.rs"));
+}
 pub use generated::{HandDrawnEvent, RenderHooks, RenderNeedsEvent, WorldDrawnEvent};
 pub use wgpu;
 
