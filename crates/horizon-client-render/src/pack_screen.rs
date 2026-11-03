@@ -399,7 +399,6 @@ const ICON: i32 = 34;
 /// The browser's search box and the button beside it.
 const BROWSER_SEARCH_W: i32 = 200;
 const SEARCH_BTN_W: i32 = 56;
-const SEARCH_Y: i32 = 32;
 /// The Back and Install buttons.
 const BACK_W: i32 = 60;
 const BACK_H: i32 = 20;
