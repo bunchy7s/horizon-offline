@@ -331,5 +331,10 @@
   "horizon.pages.open.split_setup": "Splitscreen …",
   "horizon.pages.split_settings": "Splitscreen-Einstellungen",
   "horizon.pages.split_setup": "Splitscreen",
-  "horizon.pages.split_setup.tooltip": "Spieler an diesem Computer: Controller können deiner Welt beitreten."
+  "horizon.pages.split_setup.tooltip": "Spieler an diesem Computer: Controller können deiner Welt beitreten.",
+  "horizon.extras.header.cosmetics": "Kosmetik",
+  "horizon.extras.cosmetics_mine": "Meine Kosmetik",
+  "horizon.extras.cosmetics_mine.tooltip": "Zeigt die Kosmetik, die du trägst, an deinem eigenen Spieler, in der dritten Person und im Inventar.",
+  "horizon.extras.cosmetics_others": "Kosmetik anderer Spieler",
+  "horizon.extras.cosmetics_others.tooltip": "Zeigt die Kosmetik anderer Horizon-Spieler. Aus fragt das Spiel nie, was sie tragen."
 }

@@ -1211,6 +1211,31 @@ mod tests {
         }
     }
 
+    /// A zombie in full netherite (0.1 a piece) is pushed 60 % as far as one
+    /// with no armour: `knockback` scales by the attribute's value with the
+    /// gear's modifiers, which the game hands the mob as `gear_knockback_resistance`.
+    #[test]
+    fn a_mobs_gear_resists_knockback() {
+        use crate::mobs::{Damage, Mob};
+        let hit = Damage::player([3.0, 0.0, 0.0]);
+        let pushed = |gear: Option<f64>, own: f64| {
+            let mut m = Mob::new(
+                9200,
+                crate::mobs::sensor_scan_tests::kind(),
+                Default::default(),
+                0.0,
+            );
+            m.on_ground = true;
+            m.attrs.knockback_resistance = own;
+            m.gear_knockback_resistance = gear;
+            m.knockback(0.4, 3.0, 0.0, &hit);
+            m.velocity.x
+        };
+        assert_eq!(pushed(None, 0.0), -0.4);
+        assert!((pushed(Some(0.4), 0.0) - -0.4 * 0.6).abs() < 1e-12);
+        // The gear's value is the whole attribute: it replaces the mob's own.
+        assert!((pushed(Some(0.4), 0.5) - -0.4 * 0.6).abs() < 1e-12);
+    }
     /// `LivingEntity.knockback`: the hook runs once the knockback resistance
     /// took its share and before the motion changes; a mod's strength or
     /// direction is what pushes, a cancel pushes nothing, and with no mod in

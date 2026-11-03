@@ -7,7 +7,7 @@ use std::fmt::Write;
 use naga::ShaderStage;
 
 use super::Error;
-use super::rewrite::attribute_value;
+use super::rewrite::{attribute_value, is_zero_literal};
 use crate::Preprocessed;
 use crate::macros::lex;
 
@@ -75,6 +75,8 @@ pub(super) struct Stage<'p> {
     pub(super) replaced: HashMap<usize, String>,
     /// Globals whose initializer runs in our `main` (`g = hz_init_g();`), in order.
     pub(super) inits: Vec<String>,
+    /// Their captured array size constants and declarator ends: `.length()` stays type-only.
+    pub(super) runtime_array_lengths: HashMap<String, (String, usize)>,
     pub(super) errors: Vec<Error>,
 }
 
@@ -245,6 +247,46 @@ pub(super) fn is_ident(t: &str) -> bool {
     t.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
 }
 
+fn outer_array_length(ty: &str) -> Option<&str> {
+    let open = ty.find('[')?;
+    let mut depth = 0;
+    for (offset, c) in ty[open..].char_indices() {
+        match c {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&ty[open + 1..open + offset]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Synthesized return types need the same dimension reversal as source type tokens.
+fn reversed_array_dimensions(ty: &str) -> String {
+    let Some(open) = ty.find('[') else {
+        return ty.to_owned();
+    };
+    let mut tail = &ty[open..];
+    let mut dimensions = Vec::new();
+    while !tail.is_empty() {
+        let Some(length) = outer_array_length(tail).filter(|_| tail.starts_with('[')) else {
+            return ty.to_owned();
+        };
+        let end = length.len() + 2;
+        dimensions.push(&tail[..end]);
+        tail = &tail[end..];
+    }
+    let mut result = ty[..open].to_owned();
+    for dimension in dimensions.into_iter().rev() {
+        result.push_str(dimension);
+    }
+    result
+}
+
 impl<'p> Stage<'p> {
     pub(super) fn scan(pp: &'p Preprocessed, kind: ShaderStage) -> Self {
         let mut s = Stage {
@@ -273,6 +315,7 @@ impl<'p> Stage<'p> {
             gbuffers: false,
             replaced: HashMap::new(),
             inits: Vec::new(),
+            runtime_array_lengths: HashMap::new(),
             errors: Vec::new(),
         };
         s.rename_vulkan_types();
@@ -639,23 +682,59 @@ impl<'p> Stage<'p> {
         }
         declarators.push((begin, assign, words.len()));
         let constant = words[..eq].iter().any(|&i| text(i) == "const");
-        // What naga cannot evaluate at global scope: a conditional, or a call to a built-in its
-        // constant evaluator lacks.
-        let runtime = |d: &(usize, Option<usize>, usize)| {
-            (d.0..d.2).any(|n| {
-                text(words[n]) == "?"
-                    || (NOT_CONSTANT.contains(&text(words[n]))
-                        && words.get(n + 1).is_some_and(|&j| text(j) == "("))
-            })
-        };
-        if constant && !declarators.iter().any(runtime) {
-            return;
-        }
         // The first declarator's name ends the type.
         let first_end = declarators[0].1.unwrap_or(declarators[0].2);
-        let Some(name_at) = words[..first_end].iter().rposition(|&i| is_ident(text(i))) else {
+        let mut brackets = 0usize;
+        let Some(name_at) = words[..first_end].iter().rposition(|&i| match text(i) {
+            "]" => {
+                brackets += 1;
+                false
+            }
+            "[" => {
+                brackets = brackets.saturating_sub(1);
+                false
+            }
+            t => brackets == 0 && is_ident(t),
+        }) else {
             return;
         };
+        // The zero-division rewrite reads hz_zero, so even a literal-only expression must run
+        // at invocation time. Its value is unspecified in GLSL; keep the existing arithmetic
+        // policy rather than inventing a finite replacement. Later dependent constants must
+        // run after it, while unrelated constants (including comma declarators) stay constant.
+        let mut runtime_names: BTreeSet<&str> = self.inits.iter().map(String::as_str).collect();
+        let runtime: Vec<bool> = declarators
+            .iter()
+            .enumerate()
+            .map(|(n, &(begin, assign, end))| {
+                let run = assign.is_some_and(|a| {
+                    !constant
+                        || (a + 1..end).any(|n| {
+                            let t = text(words[n]);
+                            let next = words.get(n + 1).map(|&i| text(i));
+                            t == "?"
+                                || (NOT_CONSTANT.contains(&t) && next == Some("("))
+                                || (t == "/" && next.is_some_and(is_zero_literal))
+                                || (runtime_names.contains(t)
+                                    && text(words[n - 1]) != "."
+                                    && next != Some("(")
+                                    // A sized array's length depends on its type, not its values.
+                                    && ![".", "length", "(", ")"].iter().enumerate().all(
+                                        |(offset, &t)| {
+                                            words.get(n + offset + 1).is_some_and(|&i| text(i) == t)
+                                        },
+                                    ))
+                        })
+                });
+                if run {
+                    runtime_names.insert(text(words[if n == 0 { name_at } else { begin }]));
+                }
+                run
+            })
+            .collect();
+        if !runtime.iter().any(|&run| run) {
+            return;
+        }
         // The type, with a `vec3[]`'s count written in.
         let mut ty = String::new();
         for &i in &words[..name_at] {
@@ -694,13 +773,37 @@ impl<'p> Stage<'p> {
                 }
             }
             let next = if n + 1 < declarators.len() {
-                format!(" {ty}")
+                let qualifier = if constant && !runtime[n + 1] {
+                    "const "
+                } else {
+                    ""
+                };
+                format!(" {qualifier}{ty}")
             } else {
                 String::new()
             };
             let end_token = words.get(end).copied().unwrap_or(to);
             match assign {
-                Some(a) => {
+                Some(a) if runtime[n] => {
+                    let dimensions = if array.is_empty() { &ty } else { &array };
+                    let capture = if let Some(length) = outer_array_length(dimensions) {
+                        // Bind the size in declaration scope: a use site's local `count` must
+                        // not change the length of a global declared with `[count]`.
+                        let mut bound = format!("hz_array_length_{name}");
+                        while self.tokens.contains(&bound.as_str())
+                            || self
+                                .runtime_array_lengths
+                                .values()
+                                .any(|(n, _)| n == &bound)
+                        {
+                            bound.push('_');
+                        }
+                        self.runtime_array_lengths
+                            .insert(name.clone(), (bound.clone(), end_token));
+                        format!(" const int {bound} = int({length});")
+                    } else {
+                        String::new()
+                    };
                     // Scalars, vectors and matrices convert; arrays and structs must match.
                     let scalar = array.is_empty()
                         && !ty.contains('[')
@@ -712,19 +815,24 @@ impl<'p> Stage<'p> {
                     } else {
                         (String::new(), "")
                     };
+                    let return_ty = format!(
+                        "{}{}",
+                        reversed_array_dimensions(&ty),
+                        reversed_array_dimensions(&array),
+                    );
                     replaced.push((
                         words[a],
-                        format!("; {ty}{array} hz_init_{name}() {{ return {open}"),
+                        format!(";{capture} {return_ty} hz_init_{name}() {{ return {open}"),
                     ));
                     replaced.push((end_token, format!("{close}; }}{next}")));
                     names.push(name);
                 }
-                None if n + 1 < declarators.len() => replaced.push((end_token, format!(";{next}"))),
-                None => {}
+                _ if n + 1 < declarators.len() => replaced.push((end_token, format!(";{next}"))),
+                _ => {}
             }
         }
         for &i in &words[..name_at] {
-            if text(i) == "const" {
+            if runtime[0] && text(i) == "const" {
                 self.removed.push(i..i + 1);
             }
         }
