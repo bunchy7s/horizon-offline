@@ -76,6 +76,9 @@ does the asking.
   hash (they never change for one); a file past the limits is left out and not asked for again.
 - **Offline**: a request that fails leaves every answer as it was, and the next one waits 15 s, then
   30 s, doubling up to 10 minutes. A player whose item didn't arrive is asked for again after 15 s.
+- **Across restarts**: the last answers are kept beside the item files (`worn.json`: each player's item
+  ids and hashes, written only when an answer changes them). They are read only when the service doesn't
+  answer, so a game started while it is down still shows what players last wore, until it answers.
 
 ## In the game
 
