@@ -28,6 +28,33 @@ use horizon_world::nbt::Tag;
 /// The handle of the local player among a bell's gathered entities.
 const PLAYER: u64 = u64::MAX;
 
+/// `ContainerOpenersCounter.getEntitiesWithContainerOpen` as Horizon can
+/// answer it: of the containers players have open at this moment, the ones at
+/// `key` (`ChestBlockEntity$1.isOwnContainer` compares the menu's container
+/// with the block entity, and a double chest counts for both halves).
+pub(super) fn openers_at(open: &[(i32, i32, i32)], key: (i32, i32, i32)) -> i32 {
+    open.iter().filter(|&&at| at == key).count() as i32
+}
+
+/// `ContainerOpenersCounter.recheckOpeners`: the opener count a recount finds
+/// at `key`, and the count it replaces. The entry is dropped at zero, as
+/// `Game::count_opener` does when the last opener leaves, so the next opener to
+/// arrive counts from zero.
+pub(super) fn recheck_opener_count(
+    counts: &mut std::collections::HashMap<(i32, i32, i32), i32>,
+    open: &[(i32, i32, i32)],
+    key: (i32, i32, i32),
+) -> (i32, i32) {
+    let previous = counts.get(&key).copied().unwrap_or(0);
+    let count = openers_at(open, key);
+    if count == 0 {
+        counts.remove(&key);
+    } else if count != previous {
+        counts.insert(key, count);
+    }
+    (previous, count)
+}
+
 impl Game<'_> {
     /// `BlockEntity.triggerEvent(a, b)` on the client copy of the block entity at `pos`.
     pub(super) fn block_entity_event(&mut self, pos: [i32; 3], a: i32, b: i32) {
@@ -176,6 +203,13 @@ impl Game<'_> {
         let after = *count;
         if after == 0 {
             self.lid_openers.remove(&key);
+        }
+        // `ContainerOpenersCounter.incrementOpeners`: the first opener
+        // schedules the five-tick recheck of who still has the container open
+        // (`scheduleRecheck`, `CHECK_TICK_DELAY`).
+        if open && before == 0 {
+            let pos = BlockPos::new(key.0, key.1, key.2);
+            self.with_level(|b, level, ticks| b.schedule_tick(level, ticks, pos, 5));
         }
         (before, after)
     }
@@ -837,5 +871,62 @@ impl Game<'_> {
             }
         }
         Some(skin.fallback.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// A chest a player opened, then closed without the close path (a death, a
+    /// teleport, a dropped connection): the tracked count is stale and the
+    /// five-tick recheck has to correct it, which is what closes the lid and
+    /// plays the close sound.
+    #[test]
+    fn a_stale_opener_count_is_recounted_away() {
+        let mut counts = HashMap::new();
+        let chest = (1, 2, 3);
+        // Opened: `incrementOpeners` made it one.
+        assert_eq!(recheck_opener_count(&mut counts, &[chest], chest), (0, 1));
+        assert_eq!(counts.get(&chest), Some(&1));
+        // Nobody has it open any more.
+        assert_eq!(recheck_opener_count(&mut counts, &[], chest), (1, 0));
+        assert_eq!(counts.get(&chest), None, "the entry goes at zero");
+        // The next opener counts from zero, so the lid still opens and the
+        // sound still plays.
+        assert_eq!(recheck_opener_count(&mut counts, &[chest], chest), (0, 1));
+    }
+
+    #[test]
+    fn a_recount_that_agrees_leaves_the_count_alone() {
+        let mut counts = HashMap::new();
+        let chest = (1, 2, 3);
+        recheck_opener_count(&mut counts, &[chest], chest);
+        assert_eq!(
+            recheck_opener_count(&mut counts, &[chest], chest),
+            (1, 1),
+            "no change, so no sound and no block event"
+        );
+        assert_eq!(counts.get(&chest), Some(&1));
+    }
+
+    /// A double chest answers for both halves: a player with the left half open
+    /// is an opener of the right half too.
+    #[test]
+    fn both_halves_of_a_double_chest_count() {
+        let (left, right) = ((1, 2, 3), (1, 2, 4));
+        let open = [left, right];
+        let mut counts = HashMap::new();
+        assert_eq!(recheck_opener_count(&mut counts, &open, right), (0, 1));
+        assert_eq!(counts.get(&right), Some(&1));
+        // Two players on the same half, and someone on another chest.
+        let elsewhere = (9, 9, 9);
+        let open = [left, left, elsewhere];
+        assert_eq!(recheck_opener_count(&mut counts, &open, left), (0, 2));
+        assert_eq!(counts.get(&left), Some(&2));
+        assert_eq!(recheck_opener_count(&mut counts, &open, elsewhere), (0, 1));
+        assert_eq!(openers_at(&open, elsewhere), 1);
+        assert_eq!(openers_at(&open, (0, 0, 0)), 0);
     }
 }

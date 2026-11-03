@@ -107,7 +107,12 @@ pub struct RenderAssets {
     pub connected: crate::connected::ConnectedTextures,
     /// Fusion connected textures (empty without Fusion's connecting textures and models).
     pub fusion: crate::fusion::FusionTextures,
+    /// Counts up each time resources load, from 1: a native mod asks again where blocks'
+    /// sprites are when it changes (`native_block_sprites_version`).
+    pub generation: u64,
 }
+/// The last `RenderAssets::generation` handed out.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
@@ -311,6 +316,7 @@ impl RenderAssets {
             pbr_size: sprites.pbr_size,
             connected,
             fusion,
+            generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
         })
     }
 }
