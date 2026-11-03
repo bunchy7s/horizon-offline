@@ -288,7 +288,7 @@ impl<'a> Split<'a> {
                     game.native_key_event(key, false, false);
                 }
                 for key in std::mem::take(&mut game.keys) {
-                    if let Err(e) = game.mapped_key(key, false, false) {
+                    if let Err(e) = game.mapped_key(key, false, false, key) {
                         log::warn!("Horizon: splitscreen: releasing input: {e}");
                     }
                 }

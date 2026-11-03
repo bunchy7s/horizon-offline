@@ -1267,6 +1267,7 @@ name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "log",
  "png",
  "serde",
  "serde_json",
@@ -1489,6 +1490,7 @@ name = "horizon-command"
 version = "0.1.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-protocol",
  "horizon-world",
 ]

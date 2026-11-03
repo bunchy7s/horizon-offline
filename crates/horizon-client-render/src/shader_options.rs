@@ -178,7 +178,10 @@ impl ShaderOptions {
             Some(name) => self.named(&format!("profile.{name}"), name),
             None => Text::literal(lang::get("generator.custom")),
         };
-        Text::literal(format!("{}: ", lang::get("horizon.shader_options.profile"))).append(value)
+        Text::option_name_value(
+            Text::literal(lang::get("horizon.shader_options.profile")),
+            value,
+        )
     }
 
     /// What the pack says of an option, a screen or the profiles (`option.NAME.comment`...).
@@ -224,9 +227,7 @@ impl ShaderOptions {
                 }
             }
             let cut: String = chars[..end].iter().collect();
-            let label = Text::legacy(&format!("{cut}..."))
-                .append(": ")
-                .append(value.clone());
+            let label = Text::option_name_value(Text::legacy(&format!("{cut}...")), value.clone());
             if measure(&label) <= width {
                 return (label, true);
             }
@@ -235,9 +236,10 @@ impl ShaderOptions {
 
     /// `Name: value`, in the pack's words, the value yellow when it is not the default.
     pub fn option_label(&self, name: &str) -> Text {
-        self.named(&format!("option.{name}"), name)
-            .append(": ")
-            .append(self.value_text(name))
+        Text::option_name_value(
+            self.named(&format!("option.{name}"), name),
+            self.value_text(name),
+        )
     }
 
     /// The value of option `name` as the pack names it, yellow when it is not the default.

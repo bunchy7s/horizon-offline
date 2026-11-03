@@ -46,4 +46,5 @@ pub mod sources;
 pub mod tailscale;
 pub mod telemetry;
 pub mod themes;
+pub mod wardrobe;
 pub mod worlds;
