@@ -880,9 +880,10 @@ use super::{
     native_mob_draw::{NativeMobRender, NativePlayerRender},
     native_panel_recipes::RecipePage,
 };
+use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, WorldPhase,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext,
+    NativeNoteBlockChange, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -891,7 +892,7 @@ pub(crate) use horizon_client::mod_api::{
 };
 use horizon_client::{
     atlas_sources::qualified,
-    biome::BiomeColors,
+    biome::{BiomeColors, SpawnEntry},
     block_entities::Pos,
     chat::ChatSource,
     containers::{
@@ -1270,6 +1271,21 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_block_burn(self, mod_api::mods(), dimension, pos, cancel);
+    }
+
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
+    #[inline(always)]
+    pub(super) fn native_note_block_change(
+        &self,
+        context: &NativeNoteBlockChange<'_>,
+        new_note: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_note_block_change(self, mod_api::mods(), context, new_note, cancel);
     }
 
     /// On an authoritative server, a note block at `pos` is about to sound.
@@ -2034,6 +2050,17 @@ impl Game<'_> {
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
+    }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    pub(super) fn native_item_model_property(
+        &self,
+        property: &str,
+        stack: &StackView,
+        value: &mut bool,
+    ) {
+        mod_api::dispatch_item_model_property(self, mod_api::mods(), property, stack, value);
     }
     /// The frame rate this window is about to be held to: Max Framerate after the
     /// inactivity throttle and Battery Mode (260 is unlimited). `focused` is whether the
@@ -5408,6 +5435,29 @@ impl Game<'_> {
         mod_api::dispatch_time_skip(self, mod_api::mods(), dimension, from, to, cause, cancel);
     }
 
+    /// Possible natural spawns at a server position (NeoForge's
+    /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
+    /// remove entries, or cancel to make the list empty.
+    /// @API:native_potential_spawns@.
+    pub(super) fn native_potential_spawns(
+        &self,
+        dimension: &str,
+        category: &str,
+        pos: [i32; 3],
+        entries: &mut Vec<SpawnEntry>,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_potential_spawns(
+            self,
+            mod_api::mods(),
+            dimension,
+            category,
+            pos,
+            entries,
+            canceled,
+        );
+    }
+
     /// The world's spawn point changed to `pos` and `angle`. 244.
     pub(super) fn native_spawn_change(&mut self, pos: [i32; 3], angle: [f32; 2]) {
         mod_api::dispatch_spawn_change(self, mod_api::mods(), pos, angle);
@@ -5441,6 +5491,26 @@ impl Game<'_> {
     /// already in the world. 286.
     pub(super) fn native_portal_create(&mut self, dimension: &str, pos: [i32; 3]) {
         mod_api::dispatch_portal_create(self, mod_api::mods(), dimension, pos);
+    }
+
+    /// A village siege found a spawn position on the server. Set `canceled`
+    /// to stop the siege. There is one siege per dimension.
+    /// @API:native_village_siege@.
+    pub(super) fn native_village_siege(
+        &mut self,
+        dimension: &str,
+        player: u128,
+        attempted_pos: [f64; 3],
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_village_siege(
+            self,
+            mod_api::mods(),
+            dimension,
+            player,
+            attempted_pos,
+            canceled,
+        );
     }
 
     /// A raid wave has been spawned at `pos`; `wave` is its one-based wave
@@ -7155,6 +7225,41 @@ impl Game<'_> {
             canceled,
         );
     }
+    /// A player's weapon hit on a mob, before `Mob::damage_with` borrows the
+    /// victim: melee, sweep and spear hits, including LAN guests. Unlike v1,
+    /// this has a host and snapshots of the weapon, victim position/view and
+    /// DamageSource position. The acting player's network id is `causing`
+    /// (also the direct entity). Weapon enchantments include their levels.
+    /// Runs after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before v1; cancellation refuses
+    /// delivery. Other damage routes still only fire v1. API @API:living_incoming_damage_v2@.
+    pub(super) fn native_living_incoming_damage_v2(
+        &mut self,
+        entity: i32,
+        kind: &str,
+        damage_type: &str,
+        causing: i32,
+        source_position: Option<[f64; 3]>,
+        victim_position: [f64; 3],
+        victim_view: [f64; 3],
+        weapon: Option<&ItemStack>,
+        amount: &mut f32,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_incoming_damage_v2(
+            self,
+            mod_api::mods(),
+            entity,
+            kind,
+            damage_type,
+            causing,
+            source_position,
+            victim_position,
+            victim_view,
+            weapon,
+            amount,
+            canceled,
+        );
+    }
     /// `LivingEntity.knockback` is about to push entity `entity` of type `kind`
     /// (`minecraft:zombie`, `minecraft:player`) `strength` away from the direction (`x`, `z`),
     /// on the raw strength, before the entity's knockback resistance takes its share and its motion
@@ -7196,6 +7301,38 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    pub(super) fn native_living_knockback_v2(
+        entity: i32,
+        kind: &str,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback_v2(
+            mod_api::mods(),
+            entity,
+            kind,
+            attacker,
+            attacker_main,
+            attacker_off,
             strength,
             x,
             z,
@@ -7313,10 +7450,70 @@ impl Game<'_> {
     }
 }
 
+impl Game<'_> {
+    /// `health::knockback_from` that, while a native mod listens, also records what the attacker
+    /// holds (the player's selected and off-hand stacks, a mob's main hand) for
+    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
+    pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
+        use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
+        if mod_api::mods().is_empty() {
+            return knockback_from_holding(attacker, [None, None]);
+        }
+        let held = if attacker != 0 && attacker == knockback_attacker() {
+            knockback_held()
+        } else if self
+            .player
+            .as_ref()
+            .is_some_and(|p| p.entity_id == attacker)
+        {
+            [self.stack_in(self.selected).cloned(), self.offhand.clone()]
+        } else if let Some(mob) = self.mobs.iter().find(|m| m.id as i32 == attacker) {
+            [mob.extra.main_hand_stack().cloned(), None]
+        } else {
+            [None, None]
+        };
+        knockback_from_holding(attacker, held)
+    }
+    /// [`Self::knockback_scope`] for the attacker a damage source names: the player, a mob, or
+    /// (none) whoever the enclosing scope already names.
+    pub(super) fn knockback_scope_for(&self, attacker: Option<Who>) -> impl Drop + use<> {
+        self.knockback_scope(match attacker {
+            Some(Who::Player) => self.player.as_ref().map_or(0, |p| p.entity_id),
+            Some(Who::Mob(id)) => id as i32,
+            None => horizon_client::health::knockback_attacker(),
+        })
+    }
+}
+
 /// `native_living_knockback` for the knockback code (`health::KNOCKBACK`): whether it
 /// canceled the push. Its one caller. The pushed entity and the source are named as the
 /// damage hook names them.
 pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
+    if mod_api::mods().is_empty() {
+        return false;
+    }
+    let attacker = match &pushed {
+        Hurting::Mob(mob, damage) => match damage.attacker.or(mob.ai.last_hurt_by) {
+            Some(Who::Mob(id)) => id as i32,
+            _ => horizon_client::health::knockback_attacker(),
+        },
+        Hurting::Player(_, source)
+        | Hurting::Dragon(_, source)
+        | Hurting::ArmorStand(_, source) => {
+            if source.causing != 0 {
+                source.causing
+            } else {
+                horizon_client::health::knockback_attacker()
+            }
+        }
+    };
+    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
+    #[allow(clippy::match_like_matches_macro)]
+    let stand = if let Hurting::ArmorStand(..) = &pushed {
+        true
+    } else {
+        false
+    };
     let (entity, kind, source) = hurt_server_args(pushed);
     let HurtSource {
         damage_type,
@@ -7324,18 +7521,33 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         direct,
     } = source;
     let mut canceled = false;
-    Game::native_living_knockback(
+    if !stand {
+        Game::native_living_knockback(
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
+        );
+    }
+    let mut canceled_v2 = false;
+    let held = horizon_client::health::knockback_held();
+    Game::native_living_knockback_v2(
         entity,
         kind,
-        damage_type,
-        causing,
-        direct,
+        attacker,
+        held[0].as_ref(),
+        held[1].as_ref(),
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,
-        &mut canceled,
+        &mut canceled_v2,
     );
-    canceled
+    canceled || canceled_v2
 }
 
 pub(super) fn block_contact(
@@ -7398,6 +7610,7 @@ fn hurt_server_args(hurting: Hurting<'_>) -> (i32, &str, HurtSource<'_>) {
         Hurting::Player(entity, source) => (entity, "minecraft:player", source),
         Hurting::Mob(mob, damage) => (mob.id as i32, mob.kind.id.as_str(), mob_source(damage)),
         Hurting::Dragon(entity, source) => (entity, "minecraft:ender_dragon", source),
+        Hurting::ArmorStand(entity, source) => (entity, "minecraft:armor_stand", source),
     }
 }
 /// A mob's damage as its `DamageSource`: the causing entity is known when it
@@ -7886,7 +8099,8 @@ impl Game<'_> {
                 id: e.id,
                 position: [e.position.x, e.position.y, e.position.z],
                 stack: e.stack.clone(),
-                pickup_delay: e.pickup_delay,
+                // API 42 exposes an unsigned delay; keep its existing projection.
+                pickup_delay: e.pickup_delay.clamp(0, i64::from(u32::MAX)) as u32,
             })
             .collect()
     }

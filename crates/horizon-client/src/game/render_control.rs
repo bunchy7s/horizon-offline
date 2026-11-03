@@ -14,6 +14,7 @@ pub const HELP: &[&str] = &[
     "section-draws [flat|indirect]  how terrain sections are drawn (A/B checks); replies the mode",
     "section-cull [on|off]          occlusion culling of solid sections (A/B checks); replies the mode",
     "section-sides [on|off]         leave out solid quads facing away from the eye (A/B checks); replies the mode",
+    "gpu-culling [on|off]           list and draw the near solid sections on the GPU where the device can (A/B checks); replies the mode",
 ];
 
 impl Game<'_> {

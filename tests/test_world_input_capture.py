@@ -63,6 +63,7 @@ class WorldInputCaptureTests(unittest.TestCase):
 use std::cell::Cell;
 #[derive(Clone, Copy, PartialEq)]
 enum Screen { Playing, Paused, Inventory, Chat }
+#[derive(Clone, Copy)]
 enum CursorGrabMode { Locked, Confined, None }
 mod winit {
     pub mod dpi {
@@ -108,7 +109,7 @@ struct ServerPacks { prompt: Option<()> }
 struct Game {
     focused: bool, agent_pointer: bool, window: Option<Window>, mouse: Mouse,
     keyboard_mouse: bool, split_window: bool, view_at: [u32; 2],
-    captured: bool, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
+    captured: bool, capture_mode: Option<CursorGrabMode>, regrab_on_refocus: bool, title: Option<()>, screen: Screen,
     remote: Option<Remote>,
     mining: bool, lan_acting: Option<u32>, renderer: Option<Renderer>, cursor: (f32, f32),
     server_packs: ServerPacks, command_prompt: Option<()>, options: Options,
@@ -117,7 +118,7 @@ impl Default for Game {
     fn default() -> Self {
         Self { focused: true, agent_pointer: false, window: Some(Window::default()),
             keyboard_mouse: true, split_window: false, view_at: [0, 0],
-            mouse: Mouse::default(), captured: false, regrab_on_refocus: false, title: None,
+            mouse: Mouse::default(), captured: false, capture_mode: None, regrab_on_refocus: false, title: None,
             screen: Screen::Playing, remote: None, mining: false, lan_acting: None,
             renderer: None, cursor: (0.0, 0.0), server_packs: ServerPacks::default(),
             command_prompt: None, options: Options::default() }

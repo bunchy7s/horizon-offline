@@ -79,12 +79,12 @@ pub fn outline_vertices(edges: &[[f64; 6]], camera: glam::DVec3) -> Vec<[f32; 6]
         .collect()
 }
 
-/// Whether the renderer should initialize its GPU occlusion pass.
+/// Whether the renderer should initialize its occlusion culling pass (`cull`).
 ///
 /// Software adapters spend more time running the culling pass than drawing
 /// the sections it removes. Keep the pass available for explicit A/B checks,
 /// while leaving hardware adapters on the existing default.
-fn gpu_culling_requested(info: &wgpu::AdapterInfo, env: Option<&str>) -> bool {
+fn occlusion_culling_requested(info: &wgpu::AdapterInfo, env: Option<&str>) -> bool {
     env != Some("0") && (env.is_some() || info.device_type != wgpu::DeviceType::Cpu)
 }
 
@@ -126,6 +126,7 @@ mod end_sky;
 pub mod entity_skin;
 mod flat;
 mod frame_gen;
+mod gpu_culling;
 mod hdr;
 mod hdr_icc;
 mod hdr_stats;
@@ -385,6 +386,9 @@ struct SectionGpu {
     sorted_indices: Option<(u32, u64)>,
     /// Its id for flat draws (`flat::Flat::add`), when they are on.
     flat_id: Option<u32>,
+    /// Its record's id in GPU culling's table (`gpu_culling::Records`), while
+    /// that is on and it has solid quads.
+    gpu_id: Option<u32>,
     /// When it began to fade in over the far terrain it replaces, which
     /// stays whole behind it until then: a section new where far tiles are
     /// drawn. Meshed again, it stays as it was.
@@ -435,6 +439,12 @@ impl SectionGpu {
             (self.translucent > 0).then(|| (page, start, u64::from(self.translucent) * 4)),
         )
     }
+    /// Whether GPU culling keeps a record of it at `key` while it is on (`gpu_id`):
+    /// it has solid quads, in one of the level's `sections`, which the pass's
+    /// tables span.
+    fn gpu_recorded(&self, key: SectionKey, sections: usize) -> bool {
+        self.solid > 0 && (0..sections as i32).contains(&key.1)
+    }
 }
 /// Which of a mesh's ranges `move_off_page` moves: what it holds in the section
 /// arena (`split`: its solid quads alone, `SectionGpu::vertex_ranges`), its
@@ -475,17 +485,23 @@ impl Part {
 /// hold on `page` of `arena` (`part`) goes to its other pages in video memory,
 /// until the next range would pass `budget` bytes (it keeps what is left; the
 /// first range moves whatever its size, so none keeps the page closed), the
-/// copies into `encoder` and, in the section arena, the ranges' flat draw ids
-/// (`flat`) along. False when the other pages have no room left.
+/// copies into `encoder`, the ranges' flat draw ids (`flat`) and, in the
+/// section arena, GPU culling's records (`records`) along. False when the other
+/// pages have no room left.
 fn move_off_page<'a>(
     arena: &mut arena::Arena,
     encoder: &mut wgpu::CommandEncoder,
     mut flat: Option<(&mut flat::Flat, &wgpu::Device, &mut upload::Uploads)>,
+    mut records: Option<&mut gpu_culling::Records>,
     meshes: impl Iterator<Item = &'a mut SectionGpu>,
     page: u32,
     part: Part,
     budget: &mut u64,
 ) -> bool {
+    debug_assert!(
+        records.is_none() || matches!(part, Part::Section { .. }),
+        "records follow the section arena's ranges"
+    );
     let mut moved = false;
     for s in meshes {
         // Nothing of a mesh here: split, one without solid quads (its (0, 0) is no
@@ -510,6 +526,12 @@ fn move_off_page<'a>(
             flat.place(device, encoder, uploads, id, key, to.1, vertices);
         }
         part.set(s, to);
+        // Its solid quads start the range in either layout.
+        if let (Part::Section { .. }, Some(records), Some(id)) =
+            (part, records.as_deref_mut(), s.gpu_id)
+        {
+            records.relocate(id, to.0, to.1);
+        }
         *budget = budget.saturating_sub(bytes);
         moved = true;
     }
@@ -827,6 +849,16 @@ pub struct Renderer {
     cull_on: bool,
     /// Solid quads facing away from the eye are left out (`mesher::Sides`).
     sides_on: bool,
+    /// The near solid sections' draws listed on the GPU (`gpu_culling`): its pass
+    /// and records while it is on, where the device can (`gpu_culling_supported`),
+    /// and whether the last frame drew them so (`gpu_frame`).
+    gpu_culling: Option<gpu_culling::GpuCulling>,
+    gpu_culling_supported: bool,
+    gpu_frame: bool,
+    /// GPU frames since GPU culling was switched on: the first and every 64th after it
+    /// check its records (`check_gpu_records`).
+    #[cfg(debug_assertions)]
+    gpu_checks: u32,
     sky: wgpu::RenderPipeline,
     /// The main sky without the sunrise fan, which `sunrise_pipeline` draws as
     /// geometry over it. The mirror keeps `sky`: its per-pixel fan is cheap at
@@ -1451,15 +1483,18 @@ fn mip_chain(
 /// The wgpu instance options, without wgpu's validation of indirect draws
 /// in release builds. That validation (meant for untrusted WebGPU content)
 /// copies every indirect draw through a compute pass before the render pass
-/// and costs about a tenth of `render`'s CPU time on Metal. The only indirect
-/// draws are the section draws `render` writes from resident sections, in
+/// and costs about a tenth of `render`'s CPU time on Metal. The draws it checks
+/// are the section draws `render` writes from resident sections, in
 /// bounds by construction: index counts within `indices`, vertices within
 /// the section's arena range, first instances below the origins written that
 /// frame. Debug builds keep validating them; `WGPU_VALIDATION_INDIRECT_CALL=1`
 /// turns it back on. DirectX 12 keeps it too: there wgpu-core's validation
 /// pass is also what passes each draw's first instance to shaders reading
 /// `instance_index`, and DirectX 12 is the fallback, where working matters
-/// more than CPU time.
+/// more than CPU time. GPU culling's count draws (`gpu_culling`) are written on
+/// the GPU and never validated, in any build or backend: they are in bounds by
+/// construction too (that module's doc), and no shader they run reads
+/// `instance_index`.
 /// `allow_nonconformant` offers the adapters wgpu hides for reporting no Vulkan
 /// conformance version: Mesa's hasvk, which drives Ivy Bridge and Haswell,
 /// reports 0.0.0.0 while it works. `open_device` asks for them only on a second
@@ -1799,12 +1834,13 @@ async fn open_backend(
     // stand-in neither clamps nor drops NaN. Subgroups: shader packs' compute programs
     // (`MC_GL_KHR_shader_subgroup_*`); storage buffers in vertex shaders, clearing and
     // atomics on images: their buffers and images. Filtering 32-bit float textures: shader
-    // packs' RGBA32F buffers, which GL filters and mipmaps.
+    // packs' RGBA32F buffers, which GL filters and mipmaps. Count draws: GPU culling's (`gpu_culling`).
     let features = timing::GpuTimer::features(&adapter)
         | cull::Cull::features(&adapter)
         | oit::features(&adapter)
         | (adapter.features()
             & (wgpu::Features::INDIRECT_FIRST_INSTANCE
+                | wgpu::Features::MULTI_DRAW_INDIRECT_COUNT
                 | wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
                 | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
@@ -3846,6 +3882,14 @@ impl Renderer {
         let batchable = translucent_batchable(&adapter.get_info(), multi_draw);
         crate::graphics::offer_translucent_batching(batchable);
         let translucent_batching = batchable && translucent_batching;
+        let gpu_culling_supported = gpu_culling::supported(
+            &adapter.get_info(),
+            device.features(),
+            adapter.get_downlevel_capabilities().flags,
+            &device.limits(),
+            multi_draw,
+            flat.as_ref().map(|f| f.min_sections),
+        );
         // A new renderer runs no shader pack: the game loads the picked one on its
         // first world frame (`shader_pack`: the picked pack draws flat, a `shaders/`
         // pack or one of Horizon's own with `[shadow]`), and the frames before it, the
@@ -3882,7 +3926,7 @@ impl Renderer {
         let cull_env = std::env::var("HORIZON_GPU_CULL");
         let adapter_info = adapter.get_info();
         let cull = cull::Cull::supported(&adapter, &device)
-            .filter(|_| gpu_culling_requested(&adapter_info, cull_env.as_deref().ok()))
+            .filter(|_| occlusion_culling_requested(&adapter_info, cull_env.as_deref().ok()))
             .map(|depth_test| match cull_env.as_deref() {
                 Ok("shader") => cull::DepthTest::InShader,
                 _ => depth_test,
@@ -3918,9 +3962,14 @@ impl Renderer {
         }
         if previous.is_none() {
             startup_step(format_args!(
-                "pipelines ready (multi-draw {}, occlusion culling {}, GPU timer {})",
+                "pipelines ready (multi-draw {}, occlusion culling {}, GPU culling {}, GPU timer {})",
                 on_off(multi_draw),
                 on_off(cull.is_some()),
+                if gpu_culling_supported {
+                    "available"
+                } else {
+                    "unavailable"
+                },
                 on_off(gpu_timer.is_some()),
             ));
         }
@@ -3959,6 +4008,11 @@ impl Renderer {
             flat_on: flat.is_some(),
             cull_on: cull.is_some(),
             sides_on: true,
+            gpu_culling: None,
+            gpu_culling_supported,
+            gpu_frame: false,
+            #[cfg(debug_assertions)]
+            gpu_checks: 0,
             cull,
             flat,
             sky,
@@ -4411,8 +4465,86 @@ impl Renderer {
     pub fn culled_sections(&self) -> Option<([usize; 2], f32)> {
         self.cull
             .as_ref()
-            .filter(|_| self.cull_on)
+            .filter(|_| self.cull_on && !self.gpu_frame)
             .map(|c| c.hidden)
+    }
+    /// Whether the near solid sections' draws are listed on the GPU where frames
+    /// allow it (`gpu_culling`).
+    pub fn gpu_culling(&self) -> bool {
+        self.gpu_culling.is_some()
+    }
+    /// Whether the last frame drew them so.
+    pub fn gpu_frame(&self) -> bool {
+        self.gpu_frame
+    }
+    /// Switches GPU culling, for A/B checks. Its pass and its records of the
+    /// resident sections are made when it is switched on and dropped when it is
+    /// switched off: nothing is kept for it while it is off.
+    pub fn set_gpu_culling(&mut self, on: bool) -> Result<()> {
+        if !on {
+            if self.gpu_culling.take().is_some() {
+                for s in self.sections.values_mut() {
+                    s.gpu_id = None;
+                }
+            }
+            self.gpu_frame = false;
+            return Ok(());
+        }
+        if self.gpu_culling.is_some() {
+            return Ok(());
+        }
+        if !self.gpu_culling_supported {
+            return Err("GPU culling is unavailable on this device".into());
+        }
+        let Some(mut gpu) = gpu_culling::GpuCulling::new(&self.device) else {
+            // Not offered from now on.
+            self.gpu_culling_supported = false;
+            return Err("GPU culling could not be set up on this device".into());
+        };
+        let sections = self.layout.sections();
+        for (key, s) in self.sections.iter_mut() {
+            if s.gpu_recorded(key, sections) {
+                s.gpu_id = Some(gpu.records.insert(key, s.page, s.start, s.solid));
+            }
+        }
+        self.gpu_culling = Some(gpu);
+        #[cfg(debug_assertions)]
+        {
+            self.gpu_checks = 0;
+        }
+        Ok(())
+    }
+    /// Debug builds: GPU culling's records are the sections' as they are now,
+    /// compaction's moves included: each section it keeps a record of
+    /// (`SectionGpu::gpu_recorded`) has its own, no record is left without its
+    /// section, and each page they count is the arena's. A record left behind
+    /// would draw another section's quads, or from a freed page.
+    #[cfg(debug_assertions)]
+    fn check_gpu_records(&self) {
+        let Some(gpu) = &self.gpu_culling else {
+            return;
+        };
+        let (records, sections) = (&gpu.records, self.layout.sections());
+        let mut pages = vec![0; records.page_sections().len()];
+        let mut live = 0;
+        for (key, s) in self.sections.iter() {
+            let recorded = s.gpu_recorded(key, sections);
+            assert_eq!(s.gpu_id.is_some(), recorded, "{key:?}: a record");
+            if let Some(id) = s.gpu_id {
+                let record = gpu_culling::Record::new(key, s.page, s.start, s.solid);
+                assert_eq!(records.at(id), Some(&record), "{key:?}: its record {id}");
+                pages[s.page as usize] += 1;
+                live += 1;
+            }
+        }
+        assert_eq!(records.live(), live, "records of sections gone");
+        assert_eq!(records.page_sections(), pages, "records per page");
+        for (page, &n) in pages.iter().enumerate() {
+            assert!(
+                n == 0 || self.arena.has_page(page as u32),
+                "records on freed page {page}"
+            );
+        }
     }
     pub fn section_count(&self) -> usize {
         self.sections.len()
@@ -4530,7 +4662,13 @@ impl Renderer {
             key,
             section.is_some() || (mesh.solid.is_empty() && mesh.translucent.is_empty()),
         );
-        if let Some(section) = section {
+        if let Some(mut section) = section {
+            if let Some(gpu) = &mut self.gpu_culling
+                && section.gpu_recorded(key, self.layout.sections())
+            {
+                let (page, start, quads) = (section.page, section.start, section.solid);
+                section.gpu_id = Some(gpu.records.insert(key, page, start, quads));
+            }
             self.sections.insert_with_bounds(key, section, mesh.bounds);
         }
     }
@@ -4662,6 +4800,7 @@ impl Renderer {
             ),
             sorted_indices,
             flat_id,
+            gpu_id: None,
             fading: None,
             leaving: None,
             animated_layers,
@@ -4734,6 +4873,9 @@ impl Renderer {
         if let (Some(flat), Some(id)) = (&mut self.flat, s.flat_id) {
             flat.remove(id);
         }
+        if let (Some(gpu), Some(id)) = (&mut self.gpu_culling, s.gpu_id) {
+            gpu.records.remove(id);
+        }
         if let Some((page, start)) = s.sorted_indices {
             self.sorted_indices
                 .release(page, start, u64::from(s.translucent) * 6);
@@ -4780,9 +4922,11 @@ impl Renderer {
             .flat
             .as_mut()
             .map(|f| (f, &self.device, &mut self.section_uploads));
+        // GPU culling's records move with the sections.
+        let gpu = self.gpu_culling.as_mut().map(|g| &mut g.records);
         let split = self.translucent_arena.is_some();
         let (arena, part) = (&mut self.arena, Part::Section { split });
-        if !move_off_page(arena, encoder, flat, meshes, page, part, &mut budget) {
+        if !move_off_page(arena, encoder, flat, gpu, meshes, page, part, &mut budget) {
             // The other pages have no room after all.
             arena.reopen();
         }
@@ -4853,7 +4997,8 @@ impl Renderer {
             _ => None,
         }
         .map(|f| (f, &self.device, &mut self.section_uploads));
-        if !move_off_page(arena, encoder, flat, meshes, page, part, &mut budget) {
+        // GPU culling's records follow the section arena alone.
+        if !move_off_page(arena, encoder, flat, None, meshes, page, part, &mut budget) {
             // New ranges took the room: both pages stay, drawn, until a later try.
             arena.reopen();
             self.shrink_gate.wait(now, SHRINK_RETRY);
@@ -4993,6 +5138,9 @@ impl Renderer {
         self.detail_revision += 1;
         // A dimension change drops every page at once: freed later, off this thread.
         self.graveyard.add(self.arena.clear());
+        if let Some(gpu) = &mut self.gpu_culling {
+            gpu.records.clear();
+        }
         if let Some(arena) = &mut self.translucent_arena {
             self.graveyard.add(arena.clear());
         }
@@ -5208,6 +5356,10 @@ impl Renderer {
             for id in released.iter().filter_map(|s| s.flat_id) {
                 flat.remove(id);
             }
+        }
+        if let Some(gpu) = &mut self.gpu_culling {
+            gpu.records
+                .remove_all(released.iter().filter_map(|s| s.gpu_id));
         }
         self.sorted_indices
             .release_all(released.iter().filter_map(|s| {
@@ -6414,6 +6566,65 @@ impl Renderer {
                 self.start_occlusion(camera, frame.detail_distance)
             });
         }
+        // A shader pack's shadow pass draws the sections in its camera's box, all of them (the
+        // occlusion graph follows the eye, not the light), within shadowDistanceRenderMul.
+        let shadow_view = self
+            .pack_post
+            .as_ref()
+            .and_then(|p| p.1.as_ref())
+            .filter(|_| !frame.title)
+            .and_then(|p| p.shadow_view(frame))
+            .or_else(|| {
+                // One of Horizon's own packs with `[shadow]` uses the same lists.
+                let native = self.native.as_ref().filter(|_| !frame.title)?;
+                native.shadow.as_ref()?;
+                native.frame.shadow_view(frame)
+            });
+        let pack_terrain = !frame.title
+            && self
+                .pack_post
+                .as_ref()
+                .and_then(|p| p.1.as_ref())
+                .is_some_and(|p| p.has_terrain());
+        // The near solid sections' draws listed on the GPU (`gpu_culling`): never where a
+        // shader pack's terrain, a shadow pass or the water mirror draws the CPU's lists.
+        // Decided before the walk, so that a pass whose buffers no longer fit can still
+        // switch GPU culling off.
+        let radius = (frame.detail_distance / 16.0) as i32;
+        let mut gpu_frame = self.gpu_culling.is_some()
+            && !frame.title
+            && !pack_terrain
+            && shadow_view.is_none()
+            && mirror_plane.is_none();
+        #[cfg(debug_assertions)]
+        if gpu_frame {
+            if self.gpu_checks.is_multiple_of(64) {
+                self.check_gpu_records();
+            }
+            self.gpu_checks = self.gpu_checks.wrapping_add(1);
+        }
+        if gpu_frame && let Some(gpu) = &mut self.gpu_culling {
+            let input = gpu_culling::FrameInputs {
+                camera,
+                min_y: self.sections.min_y(),
+                sections: self.layout.sections() as i32,
+                radius,
+            };
+            gpu_frame = crate::spans::time("gpu culling", || {
+                gpu.prepare(
+                    &self.device,
+                    &self.queue,
+                    &mut self.uploads,
+                    &mut encoder,
+                    &input,
+                )
+            });
+            if !gpu_frame {
+                log::warn!("Horizon renderer: GPU culling off: its buffers do not fit");
+                let _ = self.set_gpu_culling(false);
+            }
+        }
+        self.gpu_frame = gpu_frame;
         let reachable = &self.occlusion;
         let cutout = &self.lod_cutout;
         // Sections fading out (`leave_section`) are past the render distance:
@@ -6428,7 +6639,7 @@ impl Renderer {
         crate::spans::time("visibility", || {
             self.sections.visible(
                 camera,
-                (frame.detail_distance / 16.0) as i32,
+                radius,
                 &Frusta(view, mirror),
                 |k| !culling || reachable.contains(k),
                 |x, z| {
@@ -6451,20 +6662,6 @@ impl Renderer {
             );
             visible_lods.sort_unstable_by_key(|v| (v.distance, v.key));
         }
-        // A shader pack's shadow pass draws the sections in its camera's box, all of them (the
-        // occlusion graph follows the eye, not the light), within shadowDistanceRenderMul.
-        let shadow_view = self
-            .pack_post
-            .as_ref()
-            .and_then(|p| p.1.as_ref())
-            .filter(|_| !frame.title)
-            .and_then(|p| p.shadow_view(frame))
-            .or_else(|| {
-                // One of Horizon's own packs with `[shadow]` uses the same lists.
-                let native = self.native.as_ref().filter(|_| !frame.title)?;
-                native.shadow.as_ref()?;
-                native.frame.shadow_view(frame)
-            });
         let mut shadow_visible = std::mem::take(&mut self.shadow_visible);
         shadow_visible.clear();
         if let Some(v) = &shadow_view {
@@ -6613,12 +6810,6 @@ impl Renderer {
         // the frame has draws enough goes by the last one's.
         // A shader pack drawing terrain draws all of it: occlusion culling reads the depth of
         // Horizon's own terrain draw.
-        let pack_terrain = !frame.title
-            && self
-                .pack_post
-                .as_ref()
-                .and_then(|p| p.1.as_ref())
-                .is_some_and(|p| p.has_terrain());
         let mut cull = self
             .cull
             .as_mut()
@@ -6629,6 +6820,8 @@ impl Renderer {
                     && self.multi_draw
                     // Occlusion is found from the camera, not the mirror's eye.
                     && mirror.is_none()
+                    // It tests the CPU's lists, which leave out GPU culling's sections.
+                    && !gpu_frame
                     && visible.len() >= c.min_sections
             })
             .and_then(|cull| cull.begin(&self.device).then_some(cull));
@@ -6648,8 +6841,27 @@ impl Renderer {
             }
         };
         let mut opaque_draws = 0;
+        debug_assert!(
+            !(split_solid && gpu_frame),
+            "GPU culling is never offered on Metal"
+        );
+        // In a GPU frame the GPU lists the draws of the whole sections within the render
+        // distance that have records (`gpu_culling`). Here stay those fading in or out, whose
+        // instances carry their fade, and those past the distance (far terrain's cutout, and
+        // columns leaving).
+        let from = resident::camera_column(camera);
+        let whole_bits = section_instance([0.0; 3], 0, 1.0)[3].to_bits();
         for (i, v) in visible.iter().enumerate() {
             let s = self.sections.get(v.slot);
+            if gpu_frame
+                && let Some(id) = s.gpu_id
+                && self.origins[i][3].to_bits() == whole_bits
+                && crate::streaming::in_view_distance(from, radius, v.key.0, v.key.2)
+                && let Some(gpu) = &mut self.gpu_culling
+            {
+                gpu.choose(id);
+                continue;
+            }
             let first_phase = cull.as_ref().is_none_or(|c| c.first(v.slot));
             let (draws, pages) = if first_phase {
                 (&mut self.draws, &mut self.draw_pages)
@@ -6696,6 +6908,9 @@ impl Renderer {
             {
                 c.drawn(i, v.slot, indices);
             }
+        }
+        if gpu_frame && let Some(gpu) = &self.gpu_culling {
+            gpu.upload_choices(&mut self.uploads, &mut encoder);
         }
         // Phase 2's draws are tested where grouping left them.
         let runs = self
@@ -6951,6 +7166,11 @@ impl Renderer {
         } else {
             self.section_draws
         };
+        // GPU culling's draws: one per section, a call per page.
+        if gpu_frame && let Some(gpu) = &self.gpu_culling {
+            self.section_draws += gpu.chosen() as usize;
+            self.section_draw_calls += gpu.draw_calls();
+        }
         let debug_depth = frame.debug_lines.len() as u32;
         let debug_top = frame.debug_lines_on_top.len() as u32;
         let crosshair = frame.debug_crosshair.len() as u32;
@@ -7433,6 +7653,9 @@ impl Renderer {
         let flat_frame = match &mut self.flat {
             Some(flat)
                 if self.flat_on
+                    // They copy the CPU's lists alone (GPU culling is never offered
+                    // where vanilla frames draw flat).
+                    && !gpu_frame
                     && !self.draws.is_empty()
                     && (self.drawn_sections >= flat.min_sections
                         || pack_terrain
@@ -7502,6 +7725,9 @@ impl Renderer {
         });
         if let Some(timer) = &mut self.gpu_timer {
             timer.begin(&mut encoder);
+        }
+        if gpu_frame && let Some(gpu) = &self.gpu_culling {
+            gpu.dispatch(&mut encoder, self.own_timing.as_mut());
         }
         // The world's targets: the screen, or the scaled target of `post`.
         let pack_post = !frame.title && self.pack_post.as_ref().is_some_and(|p| p.1.is_some());
@@ -8211,6 +8437,11 @@ impl Renderer {
                         None => {
                             for (pipeline, draws) in passes {
                                 pass.set_pipeline(pipeline);
+                                // GPU culling's draws first, all within the render distance.
+                                if gpu_frame && let Some(gpu) = &self.gpu_culling {
+                                    gpu.draw(&mut pass, &self.arena);
+                                    pass.set_vertex_buffer(1, self.instances.slice(..));
+                                }
                                 self.draw_sections(
                                     &mut pass,
                                     &self.indirect,
@@ -9933,10 +10164,10 @@ mod tests {
     fn software_occlusion_culling_is_opt_in() {
         let cpu = adapter(wgpu::DeviceType::Cpu);
         let discrete = adapter(wgpu::DeviceType::DiscreteGpu);
-        assert!(!super::gpu_culling_requested(&cpu, None));
-        assert!(super::gpu_culling_requested(&discrete, None));
-        assert!(super::gpu_culling_requested(&cpu, Some("all")));
-        assert!(!super::gpu_culling_requested(&discrete, Some("0")));
+        assert!(!super::occlusion_culling_requested(&cpu, None));
+        assert!(super::occlusion_culling_requested(&discrete, None));
+        assert!(super::occlusion_culling_requested(&cpu, Some("all")));
+        assert!(!super::occlusion_culling_requested(&discrete, Some("0")));
     }
 
     /// Translucent Batching is offered with indirect multi-draws that aren't OpenGL's, flat
@@ -9953,6 +10184,51 @@ mod tests {
         assert!(batchable(&metal, true));
         assert!(!batchable(&vulkan, false));
         assert!(!batchable(&gl, true));
+    }
+
+    /// GPU culling is offered where the device draws counts the GPU wrote and runs compute
+    /// shaders with storage buffers enough, where Translucent Batching is (indirect
+    /// multi-draws that aren't OpenGL's) and vanilla frames are never drawn flat, and never
+    /// on Intel Gen11/Gen12's Vulkan driver, whose draws read instance-rate origins from the
+    /// wrong first instance, even with flat draws off there.
+    #[test]
+    fn gpu_culling_is_offered_where_counts_are_drawn_and_vanilla_never_draws_flat() {
+        let vulkan = adapter(wgpu::DeviceType::DiscreteGpu);
+        let mut gl = adapter(wgpu::DeviceType::DiscreteGpu);
+        gl.backend = wgpu::Backend::Gl;
+        let mut intel = adapter(wgpu::DeviceType::IntegratedGpu);
+        (intel.vendor, intel.device) = (0x8086, 0x9a49); // Tiger Lake
+        let counts = wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
+        let compute = wgpu::DownlevelFlags::COMPUTE_SHADERS;
+        let storage = |buffers| wgpu::Limits {
+            max_storage_buffers_per_shader_stage: buffers,
+            ..Default::default()
+        };
+        let offered = |info, features, downlevel, buffers, multi_draw, flat| {
+            super::gpu_culling::supported(
+                info,
+                features,
+                downlevel,
+                &storage(buffers),
+                multi_draw,
+                flat,
+            )
+        };
+        // No flat draws, or flat draws for a shader pack's terrain alone.
+        assert!(offered(&vulkan, counts, compute, 8, true, None));
+        assert!(offered(&vulkan, counts, compute, 8, true, Some(usize::MAX)));
+        // Vanilla frames drawn flat past MIN_SECTIONS (Metal), or all of them.
+        let min = super::flat::MIN_SECTIONS;
+        assert!(!offered(&vulkan, counts, compute, 8, true, Some(min)));
+        assert!(!offered(&vulkan, counts, compute, 8, true, Some(0)));
+        let none = wgpu::Features::empty();
+        assert!(!offered(&vulkan, none, compute, 8, true, None));
+        let no_compute = wgpu::DownlevelFlags::empty();
+        assert!(!offered(&vulkan, counts, no_compute, 8, true, None));
+        assert!(!offered(&vulkan, counts, compute, 7, true, None));
+        assert!(!offered(&vulkan, counts, compute, 8, false, None));
+        assert!(!offered(&gl, counts, compute, 8, true, None));
+        assert!(!offered(&intel, counts, compute, 8, true, None));
     }
 
     /// The pack-flat rule: with Translucent Batching translucent quads have an arena of
