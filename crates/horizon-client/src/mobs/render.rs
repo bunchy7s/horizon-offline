@@ -1094,8 +1094,8 @@ fn enderman_render_offset(m: &Mob, alpha: f32) -> glam::DVec3 {
     }
     let frame = (m.age as f32 + alpha).to_bits();
     let mut random = LegacyRandom::new((i64::from(m.id) << 32) ^ i64::from(frame));
-    // `0.02 * state.scale`, the enderman's scale being 1.
-    let d = 0.02;
+    // `0.02 * state.scale`.
+    let d = 0.02 * f64::from(m.model_scale());
     let x = random.next_gaussian() * d;
     let z = random.next_gaussian() * d;
     glam::DVec3::new(x, 0.0, z)
@@ -1113,27 +1113,48 @@ pub fn base_transform_at(m: &Mob, alpha: f32, origin: glam::Mat4) -> glam::Mat4 
     let sleep = (m.species() == Species::Villager || avatar(m))
         .then(|| super::villager::sleep_pose(m))
         .flatten();
-    let rotation = match sleep {
-        // setupRotations for Pose.SLEEPING, with the head moved toward the pillow.
+    // `LivingEntityRenderer.submit` moves a sleeper toward the pillow before
+    // it scales the model, so the bed offset is not scaled and the pose after
+    // it is. Keep the two apart.
+    let (sleep_offset, rotation) = match sleep {
         Some((angle, step)) => {
             // The eye height of the standing pose (LivingEntityRenderer
             // extracts `getEyeHeight(Pose.STANDING)` for a bed).
             let eye = if avatar(m) {
-                m.kind.eye_height as f32
+                // `getEyeHeight(Pose.STANDING)` on an avatar is the standing
+                // box's eye height, `minecraft:scale` included.
+                m.kind.eye_height as f32 * m.model_scale()
             } else {
                 m.awake_dims().2 as f32
             };
             let head = eye - 0.1;
-            glam::Mat4::from_translation(glam::Vec3::new(-step[0] * head, 0.0, -step[1] * head))
-                * glam::Mat4::from_rotation_y(angle.to_radians())
-                * glam::Mat4::from_rotation_z(90.0_f32.to_radians())
-                * glam::Mat4::from_rotation_y(270.0_f32.to_radians())
+            (
+                glam::Mat4::from_translation(glam::Vec3::new(
+                    -step[0] * head,
+                    0.0,
+                    -step[1] * head,
+                )),
+                // setupRotations for Pose.SLEEPING.
+                glam::Mat4::from_rotation_y(angle.to_radians())
+                    * glam::Mat4::from_rotation_z(90.0_f32.to_radians())
+                    * glam::Mat4::from_rotation_y(270.0_f32.to_radians()),
+            )
         }
-        None => super::aquatic::rotations(m, alpha, body)
-            .unwrap_or_else(|| glam::Mat4::from_rotation_y((180.0 - body).to_radians())),
+        None => (
+            glam::Mat4::IDENTITY,
+            super::aquatic::rotations(m, alpha, body)
+                .unwrap_or_else(|| glam::Mat4::from_rotation_y((180.0 - body).to_radians())),
+        ),
     };
-    // PufferfishRenderer.setupRotations: bobs before LivingEntityRenderer's.
-    let mut base = origin * pufferfish_bob(m, alpha) * rotation;
+    // `LivingEntityRenderer.submit`: `poseStack.scale(state.scale, ...)` for
+    // every living entity, after the sleeping offset and before
+    // setupRotations, so a pose translation scales with the model but the bed
+    // it lies in does not.
+    let mut base = origin
+        * sleep_offset
+        * glam::Mat4::from_scale(glam::Vec3::splat(m.model_scale()))
+        * pufferfish_bob(m, alpha)
+        * rotation;
     if m.death_time > 0 && !super::creaking::tearing_down(m) {
         let f = ((m.death_time as f32 + alpha - 1.0) / 20.0 * 1.6)
             .sqrt()
@@ -1291,14 +1312,10 @@ fn red_overlay(m: &Mob) -> bool {
 }
 fn species_scale(m: &Mob, alpha: f32) -> glam::Mat4 {
     if avatar(m) {
-        // AvatarRenderer.scale, shared by the inventory and world renderer, on
-        // top of the entity's own `scale` (`LivingEntityRenderer.submit`).
-        let own = if m.extra.model_scale > 0.0 {
-            m.extra.model_scale
-        } else {
-            1.0
-        };
-        return glam::Mat4::from_scale(glam::Vec3::splat(0.9375 * own));
+        // AvatarRenderer.scale, shared by the inventory and world renderer.
+        // The entity's own `scale` is `LivingEntityRenderer.submit`'s, applied
+        // by `base_transform_at` before setupRotations.
+        return glam::Mat4::from_scale(glam::Vec3::splat(0.9375));
     }
     match m.species() {
         Species::Wither => {
@@ -3954,5 +3971,119 @@ mod random_texture_tests {
         let drawn = uvs(&m, &data, &vanilla_only);
         assert_eq!(drawn.len(), 4, "still drawn");
         assert!(drawn.iter().all(|uv| uv[0] <= 0.5 && uv[1] <= 0.5));
+    }
+
+    /// `EndermanRenderer.getRenderOffset` moves a creepy enderman by
+    /// `0.02 * state.scale` blocks sideways: at `minecraft:scale` 2 the same
+    /// gaussian offset doubles, and at the default it is the old 0.02.
+    #[test]
+    fn a_scaled_creepy_endermans_render_offset_scales() {
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:enderman".into();
+        kind.species = Species::Enderman;
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        // Enderman.isCreepy: the angry flag that adds the offset.
+        m.extra.flag = true;
+        m.extra.model_scale = 1.0;
+        let one = enderman_render_offset(&m, 0.5);
+        assert!(one.length() > 0.0, "the offset is the renderer's gaussian");
+        m.extra.model_scale = 2.0;
+        let two = enderman_render_offset(&m, 0.5);
+        assert!((two.x - 2.0 * one.x).abs() < 1.0e-12, "{two:?} vs {one:?}");
+        assert!((two.z - 2.0 * one.z).abs() < 1.0e-12, "{two:?} vs {one:?}");
+        assert_eq!(two.y, 0.0);
+    }
+
+    /// `LivingEntityRenderer.submit` translates a sleeper toward its pillow
+    /// before `poseStack.scale(state.scale)`: the bed offset is not scaled and
+    /// the pose after it is. The uniform scale after `setupRotations` instead
+    /// would leave the pose's own translations unscaled; the one before the
+    /// sleeping translation would scale the bed.
+    #[test]
+    fn a_scaled_sleepers_bed_offset_is_not_scaled() {
+        use crate::mobs::Species;
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:villager".into();
+        kind.species = Species::Villager;
+        (kind.width, kind.height, kind.eye_height) = (0.6, 1.95, 1.62);
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        // Villager.sleeping: the bed faces north, so the head goes to +z.
+        m.extra.ints[1] = 1;
+        // The eye height of the standing pose, as `submit` extracts it.
+        let bed = |m: &Mob| {
+            let eye = m.awake_dims().2 as f32;
+            glam::Vec3::new(0.0, 0.0, eye - 0.1)
+        };
+        let unscaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let unscaled_pose = glam::Mat4::from_translation(-bed(&m)) * unscaled;
+        m.extra.model_scale = 2.0;
+        let scaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let scaled_pose = glam::Mat4::from_translation(-bed(&m)) * scaled;
+        let expected = glam::Mat4::from_scale(glam::Vec3::splat(2.0)) * unscaled_pose;
+        let got = scaled_pose.to_cols_array();
+        let want = expected.to_cols_array();
+        for i in 0..16 {
+            assert!(
+                (got[i] - want[i]).abs() < 1.0e-4,
+                "element {i}: {} != {}\nscaled: {got:?}\nunscaled x2: {want:?}",
+                got[i],
+                want[i]
+            );
+        }
+    }
+
+    /// A sleeping avatar's bed offset is `getEyeHeight(Pose.STANDING) - 0.1`,
+    /// and the standing eye height carries `minecraft:scale`: at scale 2 the
+    /// bed offset is 3.14, not the type's 1.52, and the pose after it doubles.
+    #[test]
+    fn a_scaled_sleeping_avatar_uses_its_scaled_eye_height() {
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:player".into();
+        (kind.width, kind.height, kind.eye_height) = (0.6, 1.8, 1.62);
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.ints[1] = 1;
+        let bed = |m: &Mob| {
+            let eye = m.kind.eye_height as f32 * m.model_scale();
+            glam::Vec3::new(0.0, 0.0, eye - 0.1)
+        };
+        let unscaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let unscaled_pose = glam::Mat4::from_translation(-bed(&m)) * unscaled;
+        m.extra.model_scale = 2.0;
+        let scaled = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        let scaled_pose = glam::Mat4::from_translation(-bed(&m)) * scaled;
+        let expected = glam::Mat4::from_scale(glam::Vec3::splat(2.0)) * unscaled_pose;
+        let got = scaled_pose.to_cols_array();
+        let want = expected.to_cols_array();
+        for i in 0..16 {
+            assert!(
+                (got[i] - want[i]).abs() < 1.0e-4,
+                "element {i}: {} != {}\nscaled: {got:?}\nunscaled x2: {want:?}",
+                got[i],
+                want[i]
+            );
+        }
+    }
+
+    /// The avatar's 0.9375 `AvatarRenderer.scale` and the entity's own
+    /// `minecraft:scale` are two factors: at scale 2 the model is 1.875 times
+    /// the model's, not 3.75, so the submitted scale is not applied twice.
+    #[test]
+    fn an_avatar_at_scale_two_scales_its_model_once() {
+        use horizon_core::geometry::Vec3;
+        let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
+        kind.id = "minecraft:player".into();
+        let mut m = Mob::new(1, std::sync::Arc::new(kind), Vec3::ZERO, 0.0);
+        m.extra.model_scale = 2.0;
+        let transform = base_transform_at(&m, 0.5, glam::Mat4::IDENTITY);
+        for axis in [glam::Vec3::X, glam::Vec3::Y, glam::Vec3::Z] {
+            let length = transform.transform_vector3(axis).length();
+            assert!(
+                (length - 1.875).abs() < 1.0e-5,
+                "{axis:?} scales by {length}, not 2 * 0.9375"
+            );
+        }
     }
 }

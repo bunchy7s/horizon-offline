@@ -2,7 +2,7 @@
 //! `/posteffect`, `/fetchprofile`, `/spectate`, `/publish`, `/unpublish`,
 //! `/waypoint`, `/debug`, `/jfr` and `/test`; on a dedicated server only,
 //! `/op`, `/deop`, `/ban`, `/ban-ip`, `/banlist`, `/pardon`, `/pardon-ip`,
-//! `/transfer` and `/whitelist`.
+//! `/setidletimeout`, `/transfer` and `/whitelist`.
 use super::{
     Dispatcher, Suggests,
     args::ArgType,
@@ -265,6 +265,19 @@ pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
     d.executes(t, "ban");
     let reason = d.argument(t, "reason", ArgType::Message);
     d.executes(reason, "ban");
+
+    // SetPlayerIdleTimeoutCommand: minutes, 0 to never kick for idleness.
+    let idle = d.literal(root, "setidletimeout");
+    d.requires(idle, ADMINS);
+    let minutes = d.argument(
+        idle,
+        "minutes",
+        ArgType::Integer {
+            min: 0,
+            max: i32::MAX,
+        },
+    );
+    d.executes(minutes, "setidletimeout");
 
     // TransferCommand: <hostname> [<port> [<players>]], the port 1 to 65535.
     let transfer = d.literal(root, "transfer");

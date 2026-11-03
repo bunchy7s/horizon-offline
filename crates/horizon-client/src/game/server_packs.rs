@@ -350,6 +350,7 @@ impl Game<'_> {
             return;
         }
         self.drive_pack_reload();
+        self.drive_pack_browser();
         // One reload at a time: the player's own waits under its overlay
         // before the server's packs can ask for theirs (`ServerPacks` keeps
         // its own reload from overlapping).
