@@ -463,6 +463,12 @@ fn nearly_full(name: &str) -> bool {
             | "minecraft:farmland"
             | "minecraft:honey_block"
     ) || name.ends_with("_stairs")
+        || name.contains("fence")
+        || name.contains("_wall")
+        || name.contains("bars")
+        || name.contains("_pane")
+        || name.contains("chain")
+        || name.contains("ladder")
 }
 /// Clears the detail bits of a tile's cells whose chunk lies in `area`, but
 /// for the chunks `kept` (seen in the world): `request_detail` asks for them
@@ -3226,7 +3232,7 @@ mod tests {
         assert!(nearly_full("minecraft:powder_snow"));
         assert!(nearly_full("minecraft:dirt_path"));
         assert!(nearly_full("minecraft:oak_stairs"));
-        assert!(!nearly_full("minecraft:oak_fence"));
+        assert!(nearly_full("minecraft:oak_fence"));
         assert!(!nearly_full("minecraft:wheat"));
     }
     #[test]

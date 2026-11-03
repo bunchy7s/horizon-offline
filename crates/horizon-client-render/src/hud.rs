@@ -2757,6 +2757,24 @@ mod tests {
     }
 
     #[test]
+    fn decode_bytes_ignores_a_bad_ihdr_checksum() {
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 2, 2);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[7; 16]).unwrap();
+            writer.finish().unwrap();
+        }
+        // The IHDR chunk's CRC is the 4 bytes after its 13 data bytes.
+        let ihdr = encoded.windows(4).position(|w| w == b"IHDR").unwrap();
+        encoded[ihdr + 4 + 13] ^= 0xFF;
+        let (w, h, rgba) = decode_bytes(&encoded).expect("a bad IHDR CRC decodes, as stb_image's");
+        assert_eq!((w, h, rgba.len()), (2, 2, 16));
+    }
+
+    #[test]
     fn clip_since_keeps_the_visible_part_of_a_straddling_triangle() {
         let mut batch = HudBatch::new([320, 240]);
         let start = batch.vertices.len();

@@ -730,6 +730,15 @@ fn float(value: &Value, key: &'static str) -> Result<f32, DecodeError> {
         .map(|v| v as f32)
         .ok_or(DecodeError::Field(key))
 }
+/// A required float field vanilla reads through `Codec.floatRange`: a value
+/// outside the range, or a NaN, is refused at decode rather than clamped.
+fn float_range(value: &Value, key: &'static str, min: f32, max: f32) -> Result<f32, DecodeError> {
+    let v = float(value, key)?;
+    if !(min..=max).contains(&v) {
+        return Err(DecodeError::Field(key));
+    }
+    Ok(v)
+}
 impl Processor {
     fn decode(
         value: &Value,
@@ -760,7 +769,7 @@ impl Processor {
                     Some(v) => Some(holder_set(v, bindings)?),
                     None => None,
                 },
-                integrity: float(value, "integrity")?,
+                integrity: float_range(value, "integrity", 0., 1.)?,
             },
             "minecraft:gravity" => Self::Gravity {
                 heightmap: match value.get("heightmap").and_then(Value::as_str) {
@@ -777,10 +786,18 @@ impl Processor {
             "minecraft:block_age" => Self::BlockAge(float(value, "mossiness")?),
             "minecraft:lava_submerged_block" => Self::LavaSubmerged,
             "minecraft:blackstone_replace" => Self::BlackstoneReplace,
-            "minecraft:capped" => Self::Capped {
-                delegate: Box::new(Self::decode(&value["delegate"], resources, bindings)?),
-                limit: IntProvider::from_json(&value["limit"].to_string())?,
-            },
+            "minecraft:capped" => {
+                // CappedProcessor's limit is IntProviders.POSITIVE_CODEC: a
+                // provider that can draw 0 or less is refused at decode.
+                let limit = IntProvider::from_json(&value["limit"].to_string())?;
+                if limit.bounds()[0] < 1 {
+                    return Err(DecodeError::Field("capped limit"));
+                }
+                Self::Capped {
+                    delegate: Box::new(Self::decode(&value["delegate"], resources, bindings)?),
+                    limit,
+                }
+            }
             "minecraft:rule" => Self::Rule(
                 value["rules"]
                     .as_array()

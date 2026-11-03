@@ -104,6 +104,12 @@ ticks still grows: `"random_ticks": true` for every state (or `false`, to stop a
 `state_properties`) is one of the values. The block's native `native_random_tick` hook then fires as it does
 for a vanilla block that ticks, and its sections count it.
 
+`render_shape` says how a block is drawn whatever its template does, as vanilla's `getRenderShape`:
+`"MODEL"` puts its block model in the chunk mesh, `"ENTITYBLOCK_ANIMATED"` leaves the model out for a block whose
+moving parts its block entity draws every frame (a turning shaft, a machine's arm), and `"INVISIBLE"` draws nothing.
+Its outline, collision, light and occlusion stay as declared: on a template that occludes (stone), the faces it
+covers stay hidden, so a block drawn by its block entity usually takes a template that doesn't (glass).
+
 A block copies its template's states. It can also declare state properties of
 its own, which its template does not have — how a pipe says which sides it
 connects to, or a machine whether it is running. Its states then become its
@@ -328,8 +334,9 @@ data, and client prediction of its clicks.
 
 The fence: files go in the mod's own namespaces (`assets/<id>/`,
 `data/<id>/`, and those its manifest lists), plus additions to vanilla tags
-(`data/minecraft/tags/`) and to the convention tags NeoForge and Fabric mods
-share (`data/c/tags/`).
+(`data/minecraft/tags/`), to the convention tags NeoForge and Fabric mods
+share (`data/c/tags/`), and sources added to vanilla's atlases
+(`assets/minecraft/atlases/`), which follow vanilla's own as a reload appends them.
 Templates and `sounds` name vanilla blocks; unknown keys are refused.
 
 Some Java mods ship their files under other names than their mod id (Towns and Towers, mod id `t_and_t`, under

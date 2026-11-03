@@ -484,6 +484,13 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // PolarBear.getDefaultDimensions: the rear-up animation scales the box
+        // by (1, 1 + clientSideStandAnimation / 6), so a bear at full height is
+        // twice as tall, with its eyes twice as high and the same width.
+        if k.species == super::Species::PolarBear {
+            let f = super::polar_bear::stand_box_scale(self);
+            (h, e) = (h * f, e * f);
+        }
         (f64::from(w), f64::from(h), f64::from(e))
     }
     pub fn eye_height(&self) -> f64 {
@@ -655,8 +662,13 @@ impl Mob {
         // Entity.checkSupportingBlock
         self.supporting = self.supporting_block(w, moved);
         self.movement_emission(w, moved, events);
-        // Entity.applyEffectsFromBlocks: bubble columns push the mob, and the
-        // server shows the surface of one it is at the top of.
+    }
+    /// `Entity.applyEffectsFromBlocks` as `LivingEntity.aiStep` runs it, after
+    /// `travel` has moved the mob and applied the drag of its fluid (not inside
+    /// `Entity.move`): bubble columns push the mob, so the push is not slowed
+    /// by that tick's drag, and the server shows the surface of one it is at the
+    /// top of.
+    pub fn apply_effects_from_blocks(&mut self, w: &MobWorld, events: &mut Vec<MobEvent>) {
         let mut tops = Vec::new();
         if crate::motion::bubble_column_push_over(
             w.world,
@@ -709,6 +721,8 @@ impl Mob {
             state,
             at: [at.x, at.y, at.z],
             count,
+            // `sendParticles(..., 0.15)`: the crumbs fly up a little.
+            speed: f64::from(0.15_f32),
         });
     }
     /// Entity.updateFluidInteraction: the fluid state, then touching water
@@ -1969,6 +1983,71 @@ mod tests {
         assert!(
             (lift - f64::from(0.04_f32)).abs() < 1.0e-9,
             "a ridden horse gains 0.04 a tick, got {lift}"
+        );
+    }
+
+    /// `LivingEntity.aiStep` calls `travel` and only then
+    /// `applyEffectsFromBlocks`, so the lift of a bubble column is added after
+    /// the water's drag and is not scaled by it. A pig 1.0 high in a column of
+    /// two blocks of water takes the plain water velocity from `travel`, and
+    /// the lift (0.06 for each column block its box touches) on top of it.
+    #[test]
+    fn a_bubble_column_lifts_a_mob_after_travel_not_inside_it() {
+        let run = |column: bool| {
+            let mut out = None;
+            let build =
+                |world: &mut crate::world::World,
+                 registry: &horizon_world::registry::BlockRegistry| {
+                    world.chunks.insert(
+                        (0, 0),
+                        std::sync::Arc::new(crate::chunk::Chunk::empty(0, 0)),
+                    );
+                    let stone = registry.default_state("minecraft:stone").unwrap();
+                    let water = registry.default_state("minecraft:water").unwrap();
+                    let mut lift = registry
+                        .state(registry.default_state("minecraft:bubble_column").unwrap())
+                        .unwrap()
+                        .clone();
+                    lift.properties.insert("drag".into(), "false".into());
+                    let lift = registry.resolve(&lift).unwrap();
+                    for x in 0..=2 {
+                        for z in 0..=2 {
+                            world.set(x, 0, z, stone).unwrap();
+                            for y in 1..=6 {
+                                world.set(x, y, z, water).unwrap();
+                            }
+                        }
+                    }
+                    if column {
+                        for y in 1..=6 {
+                            world.set(1, y, 1, lift).unwrap();
+                        }
+                    }
+                };
+            crate::mobs::world::with_built_test_world(&[], build, |w, types| {
+                let kind = std::sync::Arc::new(types.types["minecraft:iron_golem"].clone());
+                let mut m = Mob::new(1, kind, Vec3::new(1.5, 2.0, 1.5), 0.0);
+                m.fluids.in_water = true;
+                m.fluids.water = 1.0;
+                m.travel(w, Vec3::ZERO, &mut Vec::new());
+                let after_travel = m.velocity.y;
+                m.apply_effects_from_blocks(w, &mut Vec::new());
+                out = Some((after_travel, m.velocity.y));
+            });
+            out
+        };
+        let (Some((plain, _)), Some((travelled, lifted))) = (run(false), run(true)) else {
+            return;
+        };
+        assert_eq!(
+            travelled, plain,
+            "travel alone does not take the column's lift"
+        );
+        // The golem's 2.7 high box touches three column blocks (y 2, 3, 4).
+        assert!(
+            (lifted - plain - 3.0 * 0.06).abs() < 1.0e-9,
+            "three column blocks lift it by 0.18 after the drag, got {}",
+            lifted - plain
         );
     }
 
