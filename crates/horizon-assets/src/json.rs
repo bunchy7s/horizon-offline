@@ -87,6 +87,39 @@ pub(crate) fn object(raw: &RawValue) -> Result<Object<'_>> {
     }
     Ok(serde_json::from_str(raw.get())?)
 }
+/// The members of an object in document order, which `object` loses.
+pub(crate) fn ordered_object(raw: &RawValue) -> Result<Vec<(String, &RawValue)>> {
+    struct Members<'a>(Vec<(String, &'a RawValue)>);
+    impl<'de> serde::Deserialize<'de> for Members<'de> {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> std::result::Result<Self, D::Error> {
+            struct Visitor;
+            impl<'de> serde::de::Visitor<'de> for Visitor {
+                type Value = Members<'de>;
+                fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                    f.write_str("an object")
+                }
+                fn visit_map<A: serde::de::MapAccess<'de>>(
+                    self,
+                    mut map: A,
+                ) -> std::result::Result<Self::Value, A::Error> {
+                    let mut members: Vec<(String, &'de RawValue)> = Vec::new();
+                    while let Some(entry) = map.next_entry::<String, &'de RawValue>()? {
+                        members.retain(|(name, _)| *name != entry.0);
+                        members.push(entry);
+                    }
+                    Ok(Members(members))
+                }
+            }
+            deserializer.deserialize_map(Visitor)
+        }
+    }
+    if !raw.get().starts_with('{') {
+        return Err(error("expected object"));
+    }
+    Ok(serde_json::from_str::<Members>(raw.get())?.0)
+}
 pub(crate) fn array(raw: &RawValue) -> Result<Vec<&RawValue>> {
     Ok(serde_json::from_str(raw.get())?)
 }

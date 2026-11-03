@@ -103,6 +103,10 @@ pub struct Heightmap {
 }
 
 impl Heightmap {
+    /// The heap bytes of its packed heights.
+    pub fn heap_bytes(&self) -> usize {
+        self.data.heap_bytes()
+    }
     /// Bounded to the vanilla codec's positive, aligned vertical ranges.
     pub fn new(kind: HeightmapType, min_y: i32, height: i32) -> Result<Self, HeightmapError> {
         if !(-2032..=2031).contains(&min_y)

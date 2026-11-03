@@ -299,15 +299,20 @@ impl SectionCoder {
     /// The section's biome container (`PalettedContainerRO.write`'s), in
     /// network biome ids.
     fn biomes(&self, section: &Section) -> Paletted {
-        let values: Vec<i32> = (0..BIOMES)
-            .map(|j| {
-                let internal = section.biomes.get(j) as u16;
-                self.biome_ids
-                    .get(usize::from(internal))
-                    .copied()
-                    .unwrap_or(0)
-            })
-            .collect();
+        let net = |v: u32| {
+            self.biome_ids
+                .get(usize::from(v as u16))
+                .copied()
+                .unwrap_or(0)
+        };
+        if let Some(v) = section.biomes.uniform() {
+            return Paletted {
+                bits: 0,
+                palette: vec![net(v)],
+                data: Vec::new(),
+            };
+        }
+        let values: Vec<i32> = (0..BIOMES).map(|j| net(section.biomes.get(j))).collect();
         Paletted::from_values(&values, Strategy::Biomes, self.biome_bits)
     }
 }
@@ -315,7 +320,7 @@ impl SectionCoder {
 /// Sections kept before the ones no longer resident are dropped.
 const CACHE_SWEEP: usize = 1 << 15;
 
-/// Uncached sections below which a batch is encoded on the tick's thread
+/// Listed uncached section occurrences below which a batch is encoded on the tick's thread
 /// alone: waking the warm-up threads costs more than a few sections.
 const WARM_MIN: usize = 16;
 
@@ -634,7 +639,12 @@ impl ChunkEncoder {
         // One lock for the column: body_in asks for nine columns' sections.
         let mut cache = self.cache.lock().unwrap();
         for (i, s) in chunk.sections[self.sections.clone()].iter().enumerate() {
-            if self.entry(&mut cache, s).non_air {
+            let non_air = if s.blocks.bits() == 0 {
+                !self.is_air(s.blocks.get(0))
+            } else {
+                self.entry(&mut cache, s).non_air
+            };
+            if non_air {
                 bits.insert(i);
             }
         }
@@ -758,7 +768,7 @@ impl ChunkEncoder {
     }
 
     /// The work `warm` shares out: the heightmaps of the columns and the
-    /// sections not cached yet; none when there is too little to wake the
+    /// distinct sections not cached yet; none when there is too little to wake the
     /// warm-up threads for.
     fn job(&self, columns: &[&Chunk]) -> Option<Warm> {
         let stale: Vec<((i32, i32), Vec<Arc<Section>>)> = match &self.tables {
@@ -773,7 +783,7 @@ impl ChunkEncoder {
             }
             None => Vec::new(),
         };
-        let sections: Vec<Arc<Section>> = {
+        let mut sections: Vec<Arc<Section>> = {
             let cache = self.cache.lock().unwrap();
             columns
                 .iter()
@@ -789,6 +799,8 @@ impl ChunkEncoder {
         if sections.len() + stale.len() < WARM_MIN {
             return None;
         }
+        let mut seen = crate::fast_hash::FxHashSet::default();
+        sections.retain(|s| seen.insert(Arc::as_ptr(s)));
         let (min_y, height) = self.level();
         Some(Warm {
             coder: self.coder.clone(),
@@ -1592,6 +1604,110 @@ mod tests {
     }
 
     #[test]
+    fn uniform_and_mixed_biomes_keep_the_network_palette() {
+        let names = ["minecraft:plains".to_owned(), "minecraft:desert".to_owned()];
+        let encoder = ChunkEncoder::new(
+            [(Arc::<str>::from("minecraft:air"), false)],
+            &Builtin::default(),
+            &names,
+            &[names[1].clone(), names[0].clone()],
+        );
+        let mut section = Section::default();
+        assert_eq!(
+            encoder.coder.biomes(&section),
+            Paletted {
+                bits: 0,
+                palette: vec![1],
+                data: Vec::new()
+            }
+        );
+        section.biomes.set(13, 1);
+        let mut expected = [1; BIOMES];
+        expected[13] = 0;
+        assert_eq!(
+            encoder.coder.biomes(&section),
+            Paletted::from_values(&expected, Strategy::Biomes, 1)
+        );
+        section.biomes.set(13, 0);
+        assert_eq!(
+            encoder.coder.biomes(&section),
+            Paletted {
+                bits: 0,
+                palette: vec![1],
+                data: Vec::new()
+            }
+        );
+        section.biomes =
+            horizon_core::paletted::PalettedContainer::new(section.biomes.strategy(), 99);
+        assert_eq!(
+            encoder.coder.biomes(&section),
+            Paletted {
+                bits: 0,
+                palette: vec![0],
+                data: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn a_batch_encodes_each_shared_section_once() {
+        let encoder = encoder();
+        let air = Arc::new(Section::default());
+        let mut stone = Section::default();
+        stone.blocks = horizon_core::paletted::PalettedContainer::new(stone.blocks.strategy(), 1);
+        let stone = Arc::new(stone);
+        let mut edited = Chunk::empty(9, 9);
+        edited.set(3, MIN_Y + 40, 5, 2);
+        let mixed = edited.sections[2].clone();
+        let (mut a, mut b) = (Chunk::empty(0, 0), Chunk::empty(1, 0));
+        for (i, s) in a.sections.iter_mut().enumerate() {
+            *s = if i % 2 == 0 {
+                air.clone()
+            } else {
+                stone.clone()
+            };
+        }
+        for (i, s) in b.sections.iter_mut().enumerate() {
+            *s = if i % 3 == 0 {
+                stone.clone()
+            } else {
+                air.clone()
+            };
+        }
+        a.sections[7] = mixed.clone();
+        b.sections[5] = mixed.clone();
+        let job = encoder.job(&[&a, &b]).unwrap();
+        assert_eq!(job.sections.len(), 3);
+        job.run();
+        encoder.keep(&job);
+        for s in [&air, &stone, &mixed] {
+            let kept = encoder
+                .cached(s, |e| e.wire.clone())
+                .expect("kept by the job");
+            assert_eq!(&*kept.0, fresh(&encoder, s));
+        }
+        for c in [&a, &b] {
+            let expected: Vec<u8> = c.sections.iter().flat_map(|s| fresh(&encoder, s)).collect();
+            assert_eq!(encoder.encode(c, &HashMap::new()).chunk.buffer, expected);
+        }
+    }
+
+    #[test]
+    fn uniform_and_mixed_sections_report_the_same_occupancy() {
+        let encoder = encoder();
+        let mut chunk = Chunk::empty(0, 0);
+        for (i, state) in [(1, 1), (4, 2), (10, 99)] {
+            let section = Arc::make_mut(&mut chunk.sections[i]);
+            section.blocks =
+                horizon_core::paletted::PalettedContainer::new(section.blocks.strategy(), state);
+        }
+        chunk.set(1, MIN_Y + 7 * 16, 1, 1);
+        assert_eq!(encoder.occupied(&chunk), SectionMask::from_iter([1, 4, 7]));
+        chunk.set(1, MIN_Y + 7 * 16, 1, 0);
+        assert_eq!(encoder.occupied(&chunk), SectionMask::from_iter([1, 4]));
+    }
+
+    #[test]
     fn cached_sections_follow_edits() {
         let encoder = encoder();
         let mut chunk = Chunk::empty(0, 0);
@@ -1910,7 +2026,7 @@ mod tests {
         let mut cold = ChunkEncoder::new(states, &builtin, &[], &[]);
         cold.tables = alone.tables.clone();
         let job = cold.job(&chunks).unwrap();
-        assert_eq!((job.columns.len(), job.sections.len()), (16, 17 * SECTIONS));
+        assert_eq!((job.columns.len(), job.sections.len()), (16, 16 * SECTIONS));
         job.run();
         cold.keep(&job);
         assert_eq!(cold.heights.lock().unwrap().len(), 16);
@@ -1963,7 +2079,7 @@ mod tests {
 
     #[test]
     fn a_tall_column_sends_its_whole_height() {
-        let shape = LevelShape::new(-64, 2096, 2096, true).unwrap();
+        let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
         let mut chunk = Chunk::with_layout(0, 0, shape.column());
         chunk.set(3, 2000, 4, 1);
         let mut encoder = encoder();

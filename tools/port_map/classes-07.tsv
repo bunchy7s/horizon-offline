@@ -29,7 +29,8 @@ AbstractSpreadingStructurePlacement.legacyPillagerOutpostReducer	port	crates/hor
 AbstractSpreadingStructurePlacement.legacyProbabilityReducerWithDouble	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Legacy3 arm
 AbstractSpreadingStructurePlacement.probabilityReducer	port	crates/horizon-world/src/worldgen/structure/start.rs::reduce	Default arm
 ConcentricRingsStructurePlacement.isPlacementChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	ConcentricRings arm: chunk must be in the set's ring positions
-DimensionOriginStructurePlacement	missing		minor: dimension_origin placement decodes as Unsupported in start.rs, so such a structure never places; no bundled structure file in the repo uses it
+DimensionOriginStructurePlacement.isStructureChunk	port	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::structure_chunk	DimensionOrigin arm: the generator's origin chunk alone, and no frequency reduction or exclusion zone, since the type is no AbstractSpreadingStructurePlacement
+DimensionOriginStructurePlacement	home	crates/horizon-world/src/worldgen/structure/start.rs	the dimension_origin placement type; the origin is ChunkGenerator.getOrigin: chunk 0 0, or for a noise generator the chunk of the NoiseSpawnFinder column (generator.rs::Pipeline::spawn_column)
 RandomSpreadType.evaluate	inline	crates/horizon-world/src/worldgen/structure/start.rs::StructureRegistry::potential_chunk	spread closure: linear, or triangular as the mean of two draws
 StructurePlacements	skip:data		registers placement codecs; Horizon decodes placement type names in start.rs
 FeaturePoolElement.getBoundingBox	port	crates/horizon-world/src/worldgen/structure/jigsaw.rs::PoolElement::bounding_box	Feature arm, zero size

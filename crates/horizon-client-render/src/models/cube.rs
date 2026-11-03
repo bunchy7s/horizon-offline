@@ -31,6 +31,10 @@ pub fn cube_styles(faces: &[BakedFace]) -> Option<[CubeStyle; 6]> {
             || face.translucent
             || face.quad.tint_index != -1
             || face.quad.light_emission != 0
+            || face.quad.light != [0; 2]
+            || face.quad.color.is_some()
+            || face.quad.ambient_occlusion.is_some()
+            || face.quad.render_type.is_some()
         {
             return None;
         }

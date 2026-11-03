@@ -658,6 +658,10 @@ struct ServerState {
     stop: bool,
     autosave: bool,
     empty_ticks: i32,
+    /// The mutable `DedicatedServer.pauseWhenEmptySeconds` setting.
+    pause_when_empty_seconds: i32,
+    /// The mutable `DedicatedServer.playerIdleTimeout` setting, in minutes.
+    player_idle_timeout: i32,
     /// When the last passes of the loop ended, for the tick rate horizon-server shows.
     ticks: std::collections::VecDeque<Instant>,
     paused: bool,
@@ -676,6 +680,20 @@ struct ServerState {
     game_mode: i32,
     /// The mutable `force-gamemode` server property (`DedicatedServer.forceGameMode`).
     force_game_mode: bool,
+}
+
+/// `SaveAllCommand.saveAll`'s reply to its source: `commands.save.success` when
+/// the save went through, `commands.save.failed` (the `ERROR_FAILED` it throws)
+/// when it did not.
+fn save_all_reply(saved: bool) -> Text {
+    Text::translate(
+        if saved {
+            "commands.save.success"
+        } else {
+            "commands.save.failed"
+        },
+        &[],
+    )
 }
 
 /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
@@ -1052,6 +1070,8 @@ impl Game<'_> {
             stop: false,
             autosave: true,
             empty_ticks: 0,
+            pause_when_empty_seconds: props.pause_when_empty_seconds,
+            player_idle_timeout: props.player_idle_timeout,
             ticks: Default::default(),
             paused: false,
             broadcast_console: props.broadcast_console_to_ops,
@@ -1066,8 +1086,6 @@ impl Game<'_> {
             ),
             max_players: props.max_players.max(0) as usize,
         };
-        let pause_after = props.pause_when_empty_seconds * 20;
-        let idle_timeout = props.player_idle_timeout;
         let mut next = Instant::now();
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
@@ -1093,6 +1111,9 @@ impl Game<'_> {
                 break;
             }
             let players = self.lan.as_ref().map_or(0, |h| h.hub.guests.len());
+            // Vanilla reads pauseWhenEmptySeconds on every tick, so management changes take effect
+            // without restarting the server.
+            let pause_after = state.pause_when_empty_seconds.wrapping_mul(20);
             if pause_after > 0 {
                 // A `/pregen` task keeps the server busy as a player would:
                 // paused, nothing would post-process its chunks.
@@ -1109,7 +1130,7 @@ impl Game<'_> {
                     "INFO",
                     &format!(
                         "Server empty for {} seconds, pausing",
-                        props.pause_when_empty_seconds
+                        state.pause_when_empty_seconds
                     ),
                 );
                 self.save_game()?;
@@ -1153,8 +1174,8 @@ impl Game<'_> {
             {
                 host.hub.send_low_disk_space_warning();
             }
-            if idle_timeout > 0 {
-                self.kick_idle(idle_timeout);
+            if state.player_idle_timeout > 0 {
+                self.kick_idle(state.player_idle_timeout);
             }
             // MinecraftServer.tickServer records each tick's time, for /tick query (and the status).
             self.clock.record(tick_start.elapsed());
@@ -1422,10 +1443,14 @@ impl Game<'_> {
             }
             "save-all" => {
                 self.console_reply(Text::translate("commands.save.saving", &[]));
-                match self.save_game() {
-                    Ok(()) => self.console_reply(Text::translate("commands.save.success", &[])),
-                    Err(e) => log("ERROR", &format!("{e}")),
+                let saved = self.save_game();
+                if let Err(e) = &saved {
+                    // The reason the save did not go through is Horizon's own
+                    // detail, so it stays in the log; the source hears what
+                    // SaveAllCommand tells it (ERROR_FAILED).
+                    log("ERROR", &format!("{e}"));
                 }
+                self.console_reply(save_all_reply(saved.is_ok()));
             }
             "save-off" => {
                 if set_auto_save(state, false) {
@@ -1736,6 +1761,14 @@ impl Game<'_> {
                 for text in self.chat_capture.take().unwrap_or_default() {
                     self.console_reply(text);
                 }
+                // ServerPlayer.onEffectAdded and onEffectUpdated send an effect
+                // the command gave as it was given: vanilla's console runs after
+                // the players' tick (`DedicatedServer.tickConnection`), so the
+                // next tick is the first to count it down. A player's own
+                // commands sync theirs the same way (`run_guest_command`).
+                if let Some(h) = self.lan.as_mut() {
+                    h.hub.sync_all_effects();
+                }
             }
         }
     }
@@ -1834,6 +1867,12 @@ impl Game<'_> {
         }
     }
 
+    /// `DedicatedServer.setPlayerIdleTimeout`: update the live idle sweep and persist its minutes.
+    fn set_player_idle_timeout(&mut self, state: &mut ServerState, minutes: i32) {
+        state.player_idle_timeout = minutes;
+        self.store_property("player-idle-timeout", minutes.to_string());
+    }
+
     /// `DedicatedServer.setMaxPlayers`: the live login limit, and `max-players` in
     /// server.properties.
     fn set_max_players(&mut self, state: &mut ServerState, max_players: usize) {
@@ -1849,6 +1888,13 @@ impl Game<'_> {
     pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
         lists.lock().unwrap().enforce_whitelist = on;
         self.store_property("enforce-whitelist", on.to_string());
+    }
+
+    /// `DedicatedServer.setPauseWhenEmptySeconds`: the live pause timer, and
+    /// `pause-when-empty-seconds` in server.properties.
+    fn set_pause_when_empty_seconds(&mut self, state: &mut ServerState, seconds: i32) {
+        state.pause_when_empty_seconds = seconds;
+        self.store_property("pause-when-empty-seconds", seconds.to_string());
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.
@@ -2097,6 +2143,20 @@ mod tests {
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// `SaveAllCommand.saveAll`: a save that throws is the `ERROR_FAILED` the
+    /// source is told about, not a log line the caller never sees.
+    #[test]
+    fn a_failed_save_tells_the_source_that_it_failed() {
+        assert_eq!(
+            super::save_all_reply(true).translation_key(),
+            Some("commands.save.success")
+        );
+        assert_eq!(
+            super::save_all_reply(false).translation_key(),
+            Some("commands.save.failed")
+        );
+    }
 
     /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
     #[test]
