@@ -461,7 +461,9 @@ impl VecDelta {
         let mut out = base;
         for i in 0..3 {
             if delta[i] != 0 {
-                out[i] = ((base[i] * 4096.0).round() as i64 + i64::from(delta[i])) as f64 / 4096.0;
+                out[i] = (horizon_core::jmath::round(base[i] * 4096.0) + i64::from(delta[i]))
+                    as f64
+                    / 4096.0;
             }
         }
         out
@@ -2643,6 +2645,13 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
 mod tests {
     use super::*;
     use crate::{chunk::BlockEntityInfo, packets::round_trip, text::literal};
+
+    #[test]
+    fn vec_delta_quantizes_the_base_like_math_round() {
+        // Math.round(-2.5) is -2, so a delta of 1 lands on -1/4096, not -2/4096.
+        let out = VecDelta::apply([-2.5 / 4096.0, 0.0, 0.0], [1, 0, 0]);
+        assert_eq!(out[0], -1.0 / 4096.0);
+    }
 
     #[test]
     fn merchant_cost_predicate_is_a_typed_list_without_patch_counts() {
