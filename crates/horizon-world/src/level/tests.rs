@@ -63,6 +63,11 @@ pub(crate) struct TestLevel {
     pub fire_odds: HashMap<BlockStateId, (i32, i32)>,
     /// What `before_smoke_source` answers for a state.
     pub smoke_sources: HashMap<BlockStateId, bool>,
+    /// What `recheck_container_openers` answers at a position: the opener
+    /// count before and after the recount.
+    pub openers: HashMap<BlockPos, (i32, i32)>,
+    /// Every position whose container openers were recounted, in order.
+    pub opener_rechecks: Vec<BlockPos>,
 }
 impl TestLevel {
     fn new(b: &Behaviours) -> Self {
@@ -81,10 +86,16 @@ impl TestLevel {
             guarded: HashSet::new(),
             fire_odds: HashMap::new(),
             smoke_sources: HashMap::new(),
+            openers: HashMap::new(),
+            opener_rechecks: Vec::new(),
         }
     }
 }
 impl LevelAccess for TestLevel {
+    fn recheck_container_openers(&mut self, pos: BlockPos) -> Option<(i32, i32)> {
+        self.opener_rechecks.push(pos);
+        self.openers.get(&pos).copied()
+    }
     fn adjust_has_analog_output(&self, state: BlockStateId, vanilla: bool) -> bool {
         vanilla || self.analog_states.contains(&state)
     }
@@ -719,6 +730,97 @@ fn fences_connect_and_disconnect() {
     let air = w.b().air();
     w.set(c, air);
     assert_eq!(w.prop(a, "east"), "false");
+}
+
+#[test]
+fn a_barrel_recounts_its_openers_on_its_scheduled_tick() {
+    use horizon_core::ticks::TickPriority;
+    let mut w = world!();
+    let barrel = w.id("barrel", &[("facing", "north"), ("open", "true")]);
+    let pos = BlockPos::new(0, 1, 0);
+    w.put(pos, barrel);
+    let block = w.b().block(barrel);
+    // One scheduled tick of the barrel falls due.
+    let due = |w: &mut World| {
+        w.ticks
+            .schedule_block(w.level.time, pos, block, 1, TickPriority::Normal);
+        w.tick();
+    };
+    let sounds = |w: &World, name: &str| {
+        w.level
+            .events
+            .iter()
+            .filter(|e| matches!(e, LevelEvent::Sound { sound, .. } if &**sound == name))
+            .count()
+    };
+    let game_events = |w: &World, name: &str| {
+        w.level
+            .events
+            .iter()
+            .filter(|e| matches!(e, LevelEvent::GameEvent { event, .. } if *event == name))
+            .count()
+    };
+    // A player walked away while the menu was still counted open.
+    w.level.openers.insert(pos, (1, 0));
+    due(&mut w);
+    assert_eq!(
+        w.level.opener_rechecks,
+        [pos],
+        "BarrelBlock.tick asks its block entity to recheck the openers"
+    );
+    assert_eq!(
+        w.prop(pos, "open"),
+        "false",
+        "updateBlockState closes the barrel"
+    );
+    assert_eq!(sounds(&w, "minecraft:block.barrel.close"), 1);
+    let pitch = w
+        .level
+        .events
+        .iter()
+        .find_map(|e| match e {
+            LevelEvent::Sound {
+                sound,
+                volume,
+                pitch,
+                ..
+            } if &**sound == "minecraft:block.barrel.close" => Some((*volume, *pitch)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(pitch.0, 0.5);
+    assert!((0.9..1.0).contains(&pitch.1), "pitch {}", pitch.1);
+    assert_eq!(game_events(&w, "minecraft:container_close"), 1);
+    // A barrel's openerCountChanged is empty: no lid block event (a chest
+    // queues one here).
+    assert!(
+        w.ticks.block_events.is_empty(),
+        "a barrel broadcasts no block event"
+    );
+    // Someone opens it again: the recount finds them and the lid opens.
+    w.level.openers.insert(pos, (0, 1));
+    due(&mut w);
+    assert_eq!(w.prop(pos, "open"), "true");
+    assert_eq!(sounds(&w, "minecraft:block.barrel.open"), 1);
+    assert_eq!(game_events(&w, "minecraft:container_open"), 1);
+    // ContainerOpenersCounter.scheduleRecheck: the recheck repeats while the
+    // barrel is open, five ticks later.
+    let rechecks = w.level.opener_rechecks.len();
+    for _ in 0..5 {
+        w.tick();
+    }
+    assert_eq!(w.level.opener_rechecks.len(), rechecks + 1);
+    // Nobody has it open on the next recount: the chain stops there.
+    w.level.openers.insert(pos, (1, 0));
+    for _ in 0..5 {
+        w.tick();
+    }
+    let rechecks = w.level.opener_rechecks.len();
+    for _ in 0..10 {
+        w.tick();
+    }
+    assert_eq!(w.level.opener_rechecks.len(), rechecks);
+    assert_eq!(w.prop(pos, "open"), "false");
 }
 
 #[test]
@@ -1982,7 +2084,7 @@ fn a_moving_piston_without_a_block_entity_is_removed_by_a_click() {
     );
 }
 
-/// `MovingPistonBlock.destroy`: a moving piston that goes away takes the
+/// `MovingPistonBlock.destroy`: a moving piston a player breaks takes the
 /// extended piston base behind it with it; an unextended base stays.
 #[test]
 fn breaking_a_moving_piston_removes_its_extended_base() {
@@ -1994,8 +2096,13 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
     // The head at (1, 1, 0) faces east, so its base is at (0, 1, 0).
     w.put(BlockPos::new(0, 1, 0), extended);
     w.put(BlockPos::new(1, 1, 0), moving);
-    w.b()
-        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(1, 1, 0), false);
+    w.f.behaviours.player_destroy_block(
+        &mut w.level,
+        &mut w.ticks,
+        BlockPos::new(1, 1, 0),
+        false,
+        true,
+    );
     assert_eq!(
         w.get(BlockPos::new(0, 1, 0)),
         air,
@@ -2003,12 +2110,49 @@ fn breaking_a_moving_piston_removes_its_extended_base() {
     );
     w.put(BlockPos::new(5, 1, 0), retracted);
     w.put(BlockPos::new(6, 1, 0), moving);
-    w.b()
-        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(6, 1, 0), false);
+    w.f.behaviours.player_destroy_block(
+        &mut w.level,
+        &mut w.ticks,
+        BlockPos::new(6, 1, 0),
+        false,
+        true,
+    );
     assert_eq!(
         w.get(BlockPos::new(5, 1, 0)),
         retracted,
         "an unextended base is left alone"
+    );
+}
+
+/// `LevelChunk.setBlockState` over a moving piston only runs the block
+/// entity's `finalTick`: `MovingPistonBlock.destroy`, which removes the
+/// extended base, is `ServerPlayerGameMode.destroyBlock`'s alone. `/setblock`,
+/// `/fill` and `Level.destroyBlock` over the head leave a headless piston.
+#[test]
+fn replacing_a_moving_piston_leaves_its_extended_base() {
+    let mut w = world!();
+    let moving = w.id("moving_piston", &[("facing", "east"), ("type", "normal")]);
+    let extended = w.id("piston", &[("facing", "east"), ("extended", "true")]);
+    let air = w.id("air", &[]);
+    // /setblock ~ ~ ~ air on the head: the extended base stays.
+    w.put(BlockPos::new(0, 1, 0), extended);
+    w.put(BlockPos::new(1, 1, 0), moving);
+    w.set(BlockPos::new(1, 1, 0), air);
+    assert_eq!(w.get(BlockPos::new(1, 1, 0)), air);
+    assert_eq!(
+        w.get(BlockPos::new(0, 1, 0)),
+        extended,
+        "a setBlock over the head leaves a headless extended piston"
+    );
+    // Level.destroyBlock (explosions, decay) is not a player break either.
+    w.put(BlockPos::new(4, 1, 0), extended);
+    w.put(BlockPos::new(5, 1, 0), moving);
+    w.b()
+        .destroy_block(&mut w.level, &mut w.ticks, BlockPos::new(5, 1, 0), false);
+    assert_eq!(
+        w.get(BlockPos::new(4, 1, 0)),
+        extended,
+        "destroyBlock over the head leaves a headless extended piston"
     );
 }
 

@@ -646,13 +646,17 @@ fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
         };
         let namespace = ns.file_name().to_string_lossy().into_owned();
         for file in &folder.files {
-            if let Some(item) = file
-                .bytes()
-                .ok()
-                .and_then(|b| std::str::from_utf8(b).ok())
-                .and_then(|t| ClientItem::from_json(t).ok())
-            {
-                out.insert(format!("{namespace}:{}", file.name), item);
+            let Some(text) = file.bytes().ok().and_then(|b| std::str::from_utf8(b).ok()) else {
+                continue;
+            };
+            match ClientItem::from_json(text) {
+                Ok(item) => {
+                    out.insert(format!("{namespace}:{}", file.name), item);
+                }
+                Err(e) => log::warn!(
+                    "Horizon: item definition {namespace}:{} not loaded: {e}",
+                    file.name
+                ),
             }
         }
     }

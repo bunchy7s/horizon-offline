@@ -75,6 +75,10 @@ pub fn chicken_ai_step(m: &mut Mob, _w: &MobWorld, events: &mut Vec<MobEvent>) {
     if !m.on_ground && m.velocity.y < 0.0 {
         m.velocity.y *= 0.6;
     }
+    chicken_egg_step(m, events);
+}
+/// `Chicken.aiStep`: the server's egg timer runs even when NoAI skips goals.
+pub fn chicken_egg_step(m: &mut Mob, events: &mut Vec<MobEvent>) {
     if m.alive() && !m.is_baby() && !m.extra.jockey {
         m.extra.egg_time -= 1;
         if m.extra.egg_time <= 0 {

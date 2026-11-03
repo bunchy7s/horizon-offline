@@ -88,6 +88,30 @@ pub struct BlockProperties {
     pub sounds: Option<String>,
     /// Which states tick randomly, whatever the template does (`isRandomlyTicking`).
     pub random_ticks: Option<RandomTicks>,
+    /// How the block is drawn, whatever the template does (`BlockBehaviour.getRenderShape`).
+    pub render_shape: Option<RenderShape>,
+}
+
+/// Vanilla's `RenderShape`, by its constant's name: `MODEL` puts the block model in the chunk
+/// mesh, `ENTITYBLOCK_ANIMATED` leaves it out for a block whose parts are drawn every frame
+/// (its block entity's drawing), and `INVISIBLE` draws nothing.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RenderShape {
+    Model,
+    EntityblockAnimated,
+    Invisible,
+}
+
+impl RenderShape {
+    /// The constant's name, as the block tables write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            RenderShape::Model => "MODEL",
+            RenderShape::EntityblockAnimated => "ENTITYBLOCK_ANIMATED",
+            RenderShape::Invisible => "INVISIBLE",
+        }
+    }
 }
 
 /// Which of a block's states get random ticks (`BlockBehaviour.isRandomlyTicking(state)`), so a
@@ -117,12 +141,56 @@ impl RandomTicks {
     }
 }
 
-/// Per-state outline and collision boxes, selected by one state property.
+/// Boxes selected by one property (legacy) or an ordered tuple of properties.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BlockShapes {
+    #[serde(default)]
     pub property: String,
+    #[serde(default)]
+    pub properties: Vec<String>,
+    #[serde(default)]
     pub values: BTreeMap<String, Vec<[f64; 6]>>,
+    pub default: Option<Vec<[f64; 6]>>,
+}
+
+impl BlockShapes {
+    pub fn property_names(&self) -> Vec<&str> {
+        if self.property.is_empty() {
+            self.properties.iter().map(String::as_str).collect()
+        } else {
+            vec![self.property.as_str()]
+        }
+    }
+
+    fn check(&self) -> Result<(), String> {
+        let names = self.property_names();
+        if (!self.property.is_empty() && !self.properties.is_empty())
+            || names.iter().any(|name| !state_name(name))
+            || names.iter().collect::<BTreeSet<_>>().len() != names.len()
+            || (names.is_empty() && !self.values.is_empty())
+            || (self.values.is_empty() && self.default.is_none())
+        {
+            return Err("shapes needs distinct properties and values, or a default".into());
+        }
+        for key in self.values.keys() {
+            let values: Vec<_> = key.split(',').collect();
+            if values.len() != names.len() || values.iter().any(|value| !state_name(value)) {
+                return Err(format!("invalid shape key {key:?}: one value per property"));
+            }
+        }
+        for boxes in self.values.values().chain(self.default.iter()) {
+            if boxes.len() > 16
+                || boxes.iter().any(|bounds| {
+                    bounds.iter().any(|value| !value.is_finite())
+                        || (0..3).any(|axis| bounds[axis] > bounds[axis + 3])
+                })
+            {
+                return Err("shape needs at most 16 finite boxes with ordered bounds".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A state property a block declares on its own, beside its template's.
@@ -163,6 +231,7 @@ struct BlockFile {
     #[serde(default)]
     properties: BlockProperties,
     shapes: Option<BlockShapes>,
+    collision_shapes: Option<BlockShapes>,
     #[serde(default)]
     state_properties: BTreeMap<String, StateProperty>,
     #[serde(default)]
@@ -196,6 +265,7 @@ pub struct Block {
     pub template: String,
     pub properties: BlockProperties,
     pub shapes: Option<BlockShapes>,
+    pub collision_shapes: Option<BlockShapes>,
     /// State properties of its own, which its template does not have.
     pub state_properties: BTreeMap<String, StateProperty>,
     /// State properties overlaid on the template default.
@@ -611,12 +681,13 @@ impl Content {
             let own = namespace == id;
             let owned = own || manifest.namespaces.iter().any(|n| n == namespace);
             // Vanilla's own files stay vanilla's; a mod may only add to its
-            // tags, and to the convention tags mods share.
+            // tags and atlases, and to the convention tags mods share.
             let shared = matches!(namespace, "minecraft" | "c");
-            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/"));
+            let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
+            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
             if !allowed {
                 return Err(format!(
-                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces) or to vanilla and convention (c) tags"
+                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
                 ));
             }
             if !own && top == "data" && rest.starts_with("horizon/") {
@@ -673,6 +744,7 @@ impl Content {
                 template: file.template,
                 properties: file.properties,
                 shapes: file.shapes,
+                collision_shapes: file.collision_shapes,
                 state_properties: file.state_properties,
                 default_state: file.default_state,
                 item: file.item,
@@ -856,19 +928,8 @@ fn check_block(file: &Block) -> Result<(), String> {
             file.template
         ));
     }
-    if let Some(shapes) = &file.shapes {
-        if shapes.property.is_empty() || shapes.values.is_empty() {
-            return Err("shapes needs a property and values".into());
-        }
-        for boxes in shapes.values.values() {
-            if boxes.len() > 16
-                || boxes
-                    .iter()
-                    .any(|b| b.iter().any(|n| !n.is_finite()) || (0..3).any(|i| b[i] > b[i + 3]))
-            {
-                return Err("shape needs at most 16 finite boxes with ordered bounds".into());
-            }
-        }
+    for shapes in file.shapes.iter().chain(file.collision_shapes.iter()) {
+        shapes.check()?;
     }
     for (name, property) in &file.state_properties {
         if !state_name(name) {
@@ -1096,6 +1157,56 @@ capabilities = ["registries"]
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
+    #[test]
+    fn shape_tables_validate_tuples_defaults_and_collision() {
+        let content = hmod("shape-tuples", MANIFEST_TEXT, &[(
+            "data/ruby/horizon/block/a.json",
+            br#"{"template":"minecraft:stone","shapes":{"properties":["facing","count"],"values":{"north,2":[[0,0,0,1,0.5,1]]},"default":[[0,0,0,1,1,1]]},"collision_shapes":{"default":[]}}"#,
+        )]).unwrap();
+        let block = &content.blocks[0];
+        assert_eq!(
+            block.shapes.as_ref().unwrap().property_names(),
+            ["facing", "count"]
+        );
+        assert_eq!(
+            block.collision_shapes.as_ref().unwrap().default,
+            Some(vec![])
+        );
+        for value in [
+            r#"{"property":"axis","properties":["count"],"default":[]}"#,
+            r#"{"properties":["axis","axis"],"default":[]}"#,
+            r#"{"properties":["Axis"],"default":[]}"#,
+            r#"{"properties":["axis","count"],"values":{"x":[]}}"#,
+            r#"{"properties":["axis"],"values":{"":[]}}"#,
+            r#"{"values":{"x":[]},"default":[]}"#,
+            r#"{"default":[[1,0,0,0,1,1]]}"#,
+        ] {
+            let shapes: BlockShapes = serde_json::from_str(value).unwrap();
+            assert!(shapes.check().is_err(), "{value}");
+            let declaration =
+                format!(r#"{{"template":"minecraft:stone","collision_shapes":{value}}}"#);
+            assert!(
+                hmod(
+                    "bad-collision",
+                    MANIFEST_TEXT,
+                    &[("data/ruby/horizon/block/a.json", declaration.as_bytes(),)]
+                )
+                .is_err(),
+                "{value}"
+            );
+        }
+        let oversized = BlockShapes {
+            property: String::new(),
+            properties: vec![],
+            values: BTreeMap::new(),
+            default: Some(vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]; 17]),
+        };
+        assert!(oversized.check().is_err());
+        let mut nonfinite = oversized;
+        nonfinite.default = Some(vec![[f64::NAN; 6]]);
+        assert!(nonfinite.check().is_err());
+    }
+
     fn hmod(name: &str, manifest: &str, files: &[(&str, &[u8])]) -> Result<Content, String> {
         let dir = scratch(name);
         let path = dir.join("m.hmod");
@@ -1192,15 +1303,17 @@ capabilities = ["registries"]
             ("data/minecraft/tags/block/mineable/pickaxe.json", b"{}"),
             ("data/c/tags/item/gems/ruby.json", b"{}"),
             ("assets/ruby/textures/block/ruby_block.png", b"png"),
+            ("assets/minecraft/atlases/blocks.json", b"{}"),
         ];
         let content = hmod("ok", MANIFEST_TEXT, files).unwrap();
-        assert_eq!(content.files.len(), 6);
+        assert_eq!(content.files.len(), 7);
         assert_eq!(
             content.blocks,
             [Block {
                 id: "ruby:ruby_block".into(),
                 template: "minecraft:iron_block".into(),
                 shapes: None,
+                collision_shapes: None,
                 state_properties: BTreeMap::new(),
                 default_state: BTreeMap::new(),
                 properties: BlockProperties {
@@ -1465,6 +1578,28 @@ capabilities = ["registries"]
         ];
         let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
+    }
+
+    #[test]
+    fn blocks_choose_their_render_shape() {
+        let block = |shape: &str| {
+            let text = format!(
+                r#"{{"template": "minecraft:stone", "properties": {{"render_shape": {shape}}}}}"#
+            );
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/gear.json", text.as_bytes())];
+            hmod("render-shape", MANIFEST_TEXT, files)
+        };
+        let shape = |c: Result<Content, String>| c.unwrap().blocks[0].properties.render_shape;
+        assert_eq!(shape(block(r#""MODEL""#)), Some(RenderShape::Model));
+        assert_eq!(
+            shape(block(r#""ENTITYBLOCK_ANIMATED""#)),
+            Some(RenderShape::EntityblockAnimated)
+        );
+        assert_eq!(shape(block(r#""INVISIBLE""#)), Some(RenderShape::Invisible));
+        // Only vanilla's constants, as written there.
+        for bad in [r#""animated""#, r#""model""#, "1"] {
+            assert!(block(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

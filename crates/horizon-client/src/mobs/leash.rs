@@ -295,6 +295,10 @@ pub fn can_be_leashed(m: &Mob) -> bool {
         // (`isMobControlled`), which a mob alone cannot see.
         // shortcut: isMobControlled, when a mob can ride a zombie nautilus.
         S::Nautilus | S::ZombieNautilus => !super::nautilus::aggravated(m),
+        // SulfurCube.canBeLeashed: `hasBodyItem()`, so only a cube with a
+        // block in its body takes a lead. Its category is a monster's, which
+        // `Mob.canBeLeashed`'s `!(this instanceof Enemy)` rule would refuse.
+        S::SulfurCube => super::sulfur_cube::has_body(m),
         _ => !m.hostile() && !m.removed,
     }
 }
@@ -485,6 +489,10 @@ pub fn leash_offset(m: &Mob) -> [f64; 3] {
         // CopperGolem.getLeashOffset: 0.75 of the eye height, on the centre
         // rather than the default `bbWidth / 2` in front.
         [0.0, f64::from(0.75_f32 * m.eye_height() as f32), 0.0]
+    } else if m.species() == super::Species::SulfurCube {
+        // SulfurCube.getLeashOffset: half of `getBbHeight`, on the centre
+        // rather than the default `bbWidth / 2` in front.
+        [0.0, f64::from(m.height() / 2.0), 0.0]
     } else if m.species() == super::Species::Fox {
         // Fox.getLeashOffset: 0.55 of the eye height.
         [
@@ -836,5 +844,39 @@ mod tests {
         assert_eq!(k.position.x, 10.5);
         assert_eq!(k.position.y, 64.375);
         assert_eq!(k.center.y, 64.625);
+    }
+    /// `SulfurCube.canBeLeashed` is `hasBodyItem()`: only a cube with a block
+    /// in its body takes a lead. `SulfurCube.getLeashOffset` hangs the rope at
+    /// half of `getBbHeight`, on the cube's centre rather than the default
+    /// `bbWidth / 2` in front.
+    #[test]
+    fn a_sulfur_cube_is_leashed_by_its_block_and_hangs_at_its_middle() {
+        // `with_test_world` answers false when the prepared data is absent, and
+        // the edits are inside the closure, so a skip needs no early return.
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
+            let new = || {
+                Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types["minecraft:sulfur_cube"].clone()),
+                    horizon_core::geometry::Vec3::ZERO,
+                    0.0,
+                )
+            };
+            let empty = new();
+            let mut full = new();
+            full.extra.head = Some("minecraft:stone".into());
+            for m in [&empty, &full] {
+                let o = leash_offset(m);
+                let h = f64::from(m.height() / 2.0);
+                assert!(
+                    (o[1] - h).abs() < 1e-9,
+                    "half the box height: {} vs {h}",
+                    o[1]
+                );
+                assert_eq!((o[0], o[2]), (0.0, 0.0), "hangs on the centre");
+            }
+            assert!(!can_be_leashed(&empty), "a cube with no block in it");
+            assert!(can_be_leashed(&full), "a cube holding a block");
+        });
     }
 }
