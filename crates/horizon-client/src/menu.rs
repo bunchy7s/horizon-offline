@@ -324,6 +324,14 @@ pub struct Menu {
     /// a level) runs the rest of its `onTake` (the anvil's wear and level
     /// event 1030 or 1029, the smithing table's 1044).
     pub combined: bool,
+    /// The caller fires `AnvilCraftEvent.Pre` for a taken anvil result: its
+    /// `onTake` waits in `anvil_craft` for the caller to run `anvil_take`, or
+    /// to refuse the take with `anvil_cancel` (from an `anvil_undo` made
+    /// before the click).
+    pub anvil_hook: bool,
+    /// The anvil result taken while `anvil_hook` is set, as it was before
+    /// crafting.
+    pub anvil_craft: Option<AnvilCraft>,
     /// The enchanting table's item changed to an enchantable one: the caller
     /// (with a level) fills the costs and clues (`slotsChanged`'s
     /// `access.execute`).
@@ -347,6 +355,26 @@ pub struct Anvil {
     pub repair_count: u32,
     /// `onlyRenaming`.
     pub only_renaming: bool,
+}
+
+/// An anvil craft as `AnvilCraftEvent` reports it: the inputs and the result
+/// taken, before the crafting changed anything.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilCraft {
+    pub left: Option<ItemStack>,
+    pub right: Option<ItemStack>,
+    pub output: ItemStack,
+}
+
+/// An anvil menu before a click, for `Menu::anvil_cancel`: the anvil's three
+/// slots and cost, the player's slots and the cursor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnvilUndo {
+    inputs: Vec<Option<ItemStack>>,
+    result: Option<ItemStack>,
+    cost: i32,
+    player: Vec<Option<ItemStack>>,
+    carried: Option<ItemStack>,
 }
 
 /// `StonecutterMenu`'s state besides its slots and `selectedRecipeIndex`.
@@ -742,6 +770,8 @@ impl Menu {
             level_change: 0,
             anvil: Anvil::default(),
             combined: false,
+            anvil_hook: false,
+            anvil_craft: None,
             enchant_changed: false,
             enchant_button: None,
             may_build: true,
@@ -1594,8 +1624,33 @@ impl Menu {
         out
     }
 
+    /// The anvil menu as it is before a click that may take its result.
+    pub fn anvil_undo(&self) -> AnvilUndo {
+        AnvilUndo {
+            inputs: self.containers[MAIN].clone(),
+            result: self.containers[RESULT][0].clone(),
+            cost: self.data[0],
+            player: self.containers[PLAYER].clone(),
+            carried: self.carried.clone(),
+        }
+    }
+
+    /// Refuses a take that `anvil_hook` deferred (a cancelled
+    /// `AnvilCraftEvent.Pre`): the result goes back in its slot and the
+    /// inputs, cost, inventory and cursor are as `undo` held them, so nothing
+    /// the click did (cursor, shift-click, swap, drop) is left.
+    pub fn anvil_cancel(&mut self, undo: AnvilUndo) {
+        self.containers[MAIN] = undo.inputs;
+        self.containers[RESULT][0] = undo.result;
+        self.data[0] = undo.cost;
+        self.containers[PLAYER] = undo.player;
+        self.carried = undo.carried;
+        self.anvil_craft = None;
+        self.dropped.clear();
+    }
+
     /// `AnvilMenu.onTake`: the levels, the material used up, then the input.
-    fn anvil_take(&mut self, env: &Env) {
+    pub fn anvil_take(&mut self, env: &Env) {
         let cost = self.data[0];
         if !self.creative {
             // Player.giveExperienceLevels(-cost).
@@ -1680,6 +1735,14 @@ impl Menu {
             return;
         }
         if self.slots[s].role == Role::CombineResult && self.kind == Kind::Anvil {
+            if self.anvil_hook {
+                self.anvil_craft = Some(AnvilCraft {
+                    left: self.containers[MAIN][0].clone(),
+                    right: self.containers[MAIN][1].clone(),
+                    output: taken.clone(),
+                });
+                return;
+            }
             self.anvil_take(env);
             return;
         }
@@ -3477,8 +3540,13 @@ pub(crate) mod tests {
                         *max_stack = 7;
                     }
                 },
+                living_heal: |_, _, _| {},
                 living_breathe: |_, _, _, _, _| {},
+                living_drown: |_, _, _, _, _, _| {},
+                living_fall: |_, _, _, _, _| {},
+                living_jump: |_, _| {},
                 ingredient: |_, _, _| {},
+                ingredient_test: |_, _, _, _| {},
             });
         assert!(installed.is_ok());
         let kind = Kind::Mod(Box::leak(Box::new(crate::containers::ModMenuType {
@@ -3490,6 +3558,71 @@ pub(crate) mod tests {
         let menu = Menu::new(kind);
         let stack = ItemStack::new("minecraft:stone", 1);
         assert_eq!(menu.mod_slot(0, &stack), (false, 7));
+    }
+
+    /// A cancelled `AnvilCraftEvent.Pre` refuses the take: the result sits in
+    /// its slot, both inputs and the cost are as they were, and neither the
+    /// cursor nor the inventory holds the item (no dupe).
+    #[test]
+    fn a_cancelled_anvil_craft_leaves_the_menu_as_it_was() {
+        let root =
+            std::env::temp_dir().join(format!("horizon-anvil-cancel-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("data/minecraft/recipe")).unwrap();
+        let items = Items::for_tests(Default::default());
+        let recipes = Recipes::load(&root, &items, &PackOverlay::NONE).unwrap();
+        let brewing = Brewing::load(&root, &items, &PackOverlay::NONE);
+        let _ = std::fs::remove_dir_all(&root);
+        let (banners, station_recipes) = (Banners::default(), Default::default());
+        let (enchantments, names) = (Default::default(), Default::default());
+        let env = &Env {
+            items: &items,
+            recipes: &recipes,
+            brewing: &brewing,
+            banners: &banners,
+            station_recipes: &station_recipes,
+            enchantments: &enchantments,
+            names: &names,
+            trade: None,
+            maps: None,
+        };
+        // Both a pick-up onto the cursor and a shift-click into the inventory.
+        for input in [Input::Pickup, Input::QuickMove] {
+            let mut menu = Menu::new(Kind::Anvil);
+            menu.creative = false;
+            menu.levels = 10;
+            menu.anvil_hook = true;
+            menu.set_slot(env, 0, stack("iron_sword", 1));
+            menu.set_slot(env, 1, stack("iron_ingot", 2));
+            menu.set_slot(env, 2, stack("iron_sword", 1));
+            menu.data[0] = 3;
+            let before = (
+                menu.slot(0).cloned(),
+                menu.slot(1).cloned(),
+                menu.slot(2).cloned(),
+            );
+            let undo = menu.anvil_undo();
+            menu.click(env, 2, 0, input).unwrap();
+            // The take waits for the mods, and the click moved the result.
+            let craft = menu.anvil_craft.take().expect("the take is deferred");
+            assert_eq!(craft.output, before.2.clone().unwrap());
+            assert_eq!(menu.slot(2), None);
+            assert_eq!(menu.data[0], 3);
+            menu.anvil_craft = Some(craft);
+            menu.anvil_cancel(undo);
+            assert_eq!(
+                (
+                    menu.slot(0).cloned(),
+                    menu.slot(1).cloned(),
+                    menu.slot(2).cloned()
+                ),
+                before
+            );
+            assert_eq!(menu.data[0], 3);
+            assert_eq!(menu.level_change, 0);
+            assert_eq!(menu.carried, None);
+            assert!((0..36).all(|i| menu.player_item(i).is_none()));
+            assert!(menu.anvil_craft.is_none() && menu.dropped.is_empty());
+        }
     }
 
     /// A mod menu type: three slots, then a result (slot 3).

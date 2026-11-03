@@ -1011,7 +1011,7 @@ impl Mob {
         // Creeper.causeFallDamage: the fall swells the fuse, up to five ticks
         // short of exploding.
         if self.species() == super::Species::Creeper {
-            self.swell = (self.swell + (distance * 1.5) as i32).min(30 - 5);
+            self.swell = (self.swell + (distance * 1.5) as i32).min(self.max_swell - 5);
         }
         // AbstractHorse.causeFallDamage (llamas override it): a landing of more
         // than a block thuds, and the horse's fall makes no generic fall sound.
@@ -1029,10 +1029,28 @@ impl Mob {
         // AbstractHorse.causeFallDamage hurts the horse first and passes the fall
         // on to its riders only when it was hurt.
         let horse = super::equine::is_equine(self.species());
+        // `Block.fallOn` is told the fall as it was before the mods' changes.
+        let landed = distance;
+        let mut distance = distance;
+        let mut modifier = modifier;
+        if !horse {
+            let mut cancel = false;
+            crate::landing::native_living_fall(
+                self.id,
+                &self.kind.id,
+                &mut distance,
+                &mut modifier,
+                &mut cancel,
+            );
+            if cancel {
+                self.mod_block_fall(contact, landed, 0.0);
+                return false;
+            }
+        }
         // Entity.causeFallDamage: nothing happens to a fall immune entity, nor
         // to those on it.
         if self.kind.flags.fall_immune {
-            self.mod_block_fall(contact, distance, 0.0);
+            self.mod_block_fall(contact, landed, 0.0);
             return false;
         }
         let power = distance + 1.0e-6 - self.kind.safe_fall_distance;
@@ -1044,7 +1062,7 @@ impl Mob {
             super::Species::Goat => damage -= 10.0,
             _ => {}
         }
-        let damage = f64::from(self.mod_block_fall(contact, distance, damage as f32));
+        let damage = f64::from(self.mod_block_fall(contact, landed, damage as f32));
         // LivingEntity.causeFallDamage lets the riders fall first.
         if !horse {
             self.fall_to_passengers(distance, modifier, events);
@@ -1425,6 +1443,7 @@ impl Mob {
         self.needs_sync = true;
         if self.species() == super::Species::Rabbit {
             super::rabbit::jump(self, w);
+            crate::motion::native_living_jump(self.id, &self.kind.id);
             return;
         }
         if matches!(
@@ -1432,6 +1451,7 @@ impl Mob {
             super::Species::Slime | super::Species::MagmaCube | super::Species::SulfurCube
         ) {
             super::cube::jump(self);
+            crate::motion::native_living_jump(self.id, &self.kind.id);
             return;
         }
         let power = self.jump_power();
@@ -1444,6 +1464,7 @@ impl Mob {
                 self.velocity.z += f64::from(trig::cos(angle)) * 0.2;
             }
         }
+        crate::motion::native_living_jump(self.id, &self.kind.id);
     }
     pub fn jump_power(&self) -> f32 {
         self.kind.jump_strength as f32

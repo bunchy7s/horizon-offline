@@ -4,8 +4,13 @@ both food and blocks (sweet and glow berries, carrots, potatoes), for sweet
 berry bushes, for spawn eggs used on a monster spawner, for shears carving
 pumpkins or cropping a growing plant's head (kelp, weeping and twisting vines,
 cave vines) to its top age, for copper golem statues turned to their next pose,
-for blocks placed where mobs and armor stands stand, for respawn anchors and for
-beds in the Nether and the End.
+for blocks placed where mobs and armor stands stand, for respawn anchors, for
+beds in the Nether and the End, and for doors, trapdoors and fence gates, which a
+hand opens unless their material cannot be (`BlockSetType.canOpenByHand`).
+
+
+beds in the Nether and the End, and for dragon eggs, which a click moves somewhere
+else nearby (`DragonEggBlock.useWithoutItem`).
 
 Every case has a block at the origin, something above it, and a player three
 blocks south, survival or creative, hungry or full, sneaking or not, who
@@ -92,6 +97,7 @@ def respawn_case(rng, states, case):
 
 BED_COLORS = ['red', 'white', 'black', 'cyan', 'lime']
 FACINGS = {'north': (0, -1), 'south': (0, 1), 'west': (-1, 0), 'east': (1, 0)}
+OPPOSITE = {'north': 'south', 'south': 'north', 'west': 'east', 'east': 'west'}
 
 
 def bed_respawn_case(rng, states, case):
@@ -331,6 +337,116 @@ def jukebox_case(rng, states, case):
                         'creative': True, 'sneaking': False, 'food': 20}
 
 
+# Doors, trapdoors and fence gates of every material, and the ones whose `BlockSetType` cannot be
+# opened by hand (`DoorBlock.useWithoutItem`'s `type.canOpenByHand`).
+DOORS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar',
+         'bamboo', 'crimson', 'warped', 'copper', 'exposed_copper', 'weathered_copper', 'oxidized_copper',
+         'waxed_copper', 'iron']
+GATES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar',
+         'bamboo', 'crimson', 'warped']
+
+
+def openable_case(rng, states, case):
+    """A door, trapdoor or fence gate right-clicked by hand (`DoorBlock.useWithoutItem`,
+    `TrapDoorBlock.useWithoutItem`, `FenceGateBlock.useWithoutItem`): the ones whose
+    `BlockSetType.canOpenByHand` turn to their other `open` with their open or close sound and
+    `block_open`/`block_close`, a waterlogged trapdoor also schedules the water again, a fence gate
+    closed across the player turns to face them first (`player.getDirection`) and draws its sound's
+    pitch, and an iron one passes, so what the hand holds is placed against it instead."""
+    kind = rng.random()
+    facing = rng.choice(list(FACINGS))
+    if kind < 0.4:
+        material = rng.choice(DOORS)
+        props = {'facing': facing, 'half': 'lower', 'hinge': rng.choice(['left', 'right']),
+                 'open': rng.choice(['false', 'false', 'true']), 'powered': rng.choice(['false', 'true'])}
+        cells = [[0, 0, 0, states.get(material + '_door', **props)],
+                 [0, 1, 0, states.get(material + '_door', **{**props, 'half': 'upper'})]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up'])
+    elif kind < 0.75:
+        material = rng.choice(DOORS)
+        cells = [[0, 0, 0, states.get(material + '_trapdoor', facing=facing, half=rng.choice(['bottom', 'top']),
+                                      open=rng.choice(['false', 'false', 'true']),
+                                      powered=rng.choice(['false', 'true']),
+                                      waterlogged=rng.choice(['false', 'false', 'false', 'true']))]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up', 'down'])
+    else:
+        material = rng.choice(GATES)
+        cells = [[0, 0, 0, states.get(material + '_fence_gate', facing=facing,
+                                      open=rng.choice(['false', 'false', 'true']),
+                                      powered=rng.choice(['false', 'true']),
+                                      in_wall=rng.choice(['false', 'false', 'true']))]]
+        if rng.random() < 0.5:
+            cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks']))])
+        face = rng.choice([facing, OPPOSITE[facing], 'up', 'down'])
+    held = rng.choice(['-', '-', 'stone', 'oak_planks', 'stick', 'iron_ingot', 'oak_door', 'oak_fence_gate'])
+    case['use_item'] = {'item': '-' if held == '-' else d_plain(held, rng.choice([1, 16])),
+                        'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.25, 'food': 20,
+                        'yaw': rng.choice([0, 45, 90, 135, 180, -90, -135, -180, 270, 315, 30, 200]),
+                        'face': face}
+    case['cells'] = cells
+
+
+def dragon_egg_case(rng, states, case):
+    """A dragon egg clicked with anything, or an empty hand (`DragonEggBlock.useWithoutItem`, which
+    takes the click before the item is placed): `teleport` draws 16/8/16-wide offsets up to 1000
+    times and moves the egg to the first air block inside the build height that has a block under it,
+    sending level event 2015 with `BlockUtil.packDifferenceInPosition` of the move. A floor gives the
+    search somewhere to land; in a bare sky only the cell above the egg has a block under it, and a
+    block in that cell leaves the 1000 draws with nowhere to go and the egg where it was."""
+    cells = [[0, 0, 0, states.get('dragon_egg')]]
+    if rng.random() < 0.8:
+        # A floor for the egg to land on: it only moves to air with a block under it.
+        cells.append([0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'grass_block', 'netherrack', 'sand']))])
+        for dx in range(-2, 3):
+            for dz in range(-2, 3):
+                if (dx, dz) == (0, 0) or rng.random() < 0.15:
+                    continue
+                cells.append([dx, -1, dz, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'glass',
+                                                                 'snow_block', 'gravel']))])
+    if rng.random() < 0.3:
+        # Something above it, whose own block below is air, so the search never takes it.
+        cells.append([0, 1, 0, states.get(rng.choice(['stone', 'oak_slab', 'glass']))])
+    item = rng.choice(['-', '-', 'stick', 'stone', 'torch', 'dragon_egg'])
+    case['use_item'] = {'item': '-' if item == '-' else d_plain(item, rng.choice([1, 16])),
+                        'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15, 'food': 20}
+    case['cells'] = cells
+
+
+# A block placed from an item carrying `minecraft:block_state`: the block and the properties the
+# component sets, none of them the ones the click would have chosen. The last two name a property the
+# block has no such thing as, and no property at all, which `BlockItemStateProperties.apply` skips.
+STATED = [('oak_stairs', '{half:"top",facing:"east",shape:"outer_right"}'),
+          ('oak_slab', '{type:"top"}'),
+          ('oak_log', '{axis:"x"}'),
+          ('oak_trapdoor', '{half:"top",open:"true"}'),
+          ('hopper', '{enabled:"false"}'),
+          ('repeater', '{delay:"4",facing:"west",locked:"true"}'),
+          ('comparator', '{mode:"subtract",powered:"true"}'),
+          ('beehive', '{honey_level:"5"}'),
+          ('chest', '{facing:"east"}'),
+          ('composter', '{level:"6"}'),
+          ('oak_fence_gate', '{in_wall:"true",open:"true"}'),
+          ('oak_stairs', '{half:"sideways"}'),
+          ('stone', '{facing:"east"}'),
+          ('oak_stairs', '{}')]
+
+
+def block_state_case(rng, states, case):
+    """A block placed from an item that carries a `minecraft:block_state` component (Ctrl + Pick Block
+    of a turned stair, a half slab, a disabled hopper): `BlockItem.updateBlockStateFromTag` sets those
+    properties on the state `getStateForPlacement` chose, so the block ends up in the state the item
+    names. Ignoring the component leaves the state the click alone would have placed."""
+    case['cells'] = [[0, 0, 0, states.get(rng.choice(['stone', 'dirt', 'grass_block']))]]
+    block, props = rng.choice(STATED)
+    case['use_item'] = {'item': '{id:"minecraft:%s",count:1,components:{"minecraft:block_state":%s}}'
+                                % (block, props),
+                        'creative': rng.random() < 0.7, 'sneaking': rng.random() < 0.2, 'food': 20}
+
+
 def cases(facts, count, seed):
     rng = random.Random(seed)
     states = d.States(facts)
@@ -388,6 +504,24 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             jukebox_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.1:
+            openable_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.1:
+            dragon_egg_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.06:
+            block_state_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case

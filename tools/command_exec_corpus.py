@@ -801,6 +801,9 @@ def items_and_loot():
         cmd('/loot replace block 3 206 3 container.8 loot minecraft:blocks/cobblestone'),
         cmd('/loot replace entity @s hotbar.5 loot minecraft:blocks/glass'),
         cmd('/loot spawn 3 210 3 loot minecraft:blocks/stone'),
+        # NestedLootTable: the reward tables pick another table and roll it.
+        cmd('/loot spawn 3 210 3 loot minecraft:chests/trial_chambers/reward'),
+        cmd('/loot give @s loot minecraft:chests/trial_chambers/reward_ominous'),
         cmd('/loot give @s loot {pools:[{rolls:1,entries:[{type:"minecraft:item",name:"minecraft:apple",functions:[{type:"minecraft:set_count",count:4}]}]}]}'),
         cmd('/setblock 2 205 2 minecraft:stone'),
         cmd('/loot give @s mine 2 205 2'),
@@ -836,6 +839,31 @@ def items_and_loot():
 
 def world_misc():
     return [
+        # BlockInput.place calculates neighbour shapes before setting the block,
+        # then reapplies only properties explicitly supplied by the command.
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        cmd('/setblock 4 219 4 minecraft:gold_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=bell]'),
+        cmd('/setblock 4 219 4 minecraft:stone'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=flute,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block[note=7]'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum,note=7]'),
+        cmd('/setblock 4 220 4 minecraft:air'),
+        cmd('/setblock 4 220 4 minecraft:note_block strict'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=harp]'),
+        # Even an unchanged input state must be normalized before comparison.
+        cmd('/setblock 4 220 4 minecraft:note_block'),
+        cmd('/execute if block 4 220 4 minecraft:note_block[instrument=basedrum]'),
+        # An unsupported shape falling back to air retains the requested block.
+        cmd('/setblock 6 220 4 minecraft:poppy'),
+        cmd('/execute if block 6 220 4 minecraft:poppy'),
         cmd('/setblock 1 210 1 minecraft:stone keep'),
         cmd('/setblock 1 210 1 minecraft:dirt keep'),
         cmd('/setblock 1 210 1 minecraft:dirt destroy'),
@@ -1191,8 +1219,21 @@ def compute():
     ]
 
 
+def scoreboard_remainder_boundaries():
+    operations = setup('/scoreboard objectives add boundary dummy')
+    for dividend, divisor in [(2147483646, 2147483647), (7, -3), (-2147483648, -1)]:
+        operations += setup(f'/scoreboard players set left boundary {dividend}',
+                            f'/scoreboard players set right boundary {divisor}')
+        operations += [cmd('/scoreboard players operation left boundary %= right boundary'),
+                       cmd('/scoreboard players get left boundary'),
+                       cmd('/scoreboard players get right boundary')]
+    operations += setup('/scoreboard objectives remove boundary')
+    return operations
+
+
 def social():
     return [
+        *scoreboard_remainder_boundaries(),
         *setup('/scoreboard objectives add trig trigger', '/scoreboard objectives add plain dummy'),
         cmd('/trigger trig'),
         cmd('/scoreboard players enable @s trig'),
@@ -1673,6 +1714,152 @@ def summoned_potions():
     return ops
 
 
+def trial_spawner_passengers():
+    """Configured passengers must exist as entities with a vehicle (#7254)."""
+    ops = [*setup('/fill 1 219 1 13 219 8 stone',
+                  '/fill 1 220 1 13 224 8 air', '/gamerule spawn_mobs true')]
+    # Exercise namespace and position independently, plus the explicit control.
+    for i, (kind, pos) in enumerate([
+        ('chicken', ''), ('minecraft:chicken', ''),
+        ('chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+        ('minecraft:chicken', ',Pos:[4.5d,220.0d,6.5d]'),
+    ]):
+        parent, rider = f'trial_parent_{i}', f'trial_rider_{i}'
+        ops += setup(
+            '/setblock 4 220 4 trial_spawner[trial_spawner_state=active]'
+            '{normal_config:{spawn_range:3,total_mobs:1.0f,simultaneous_mobs:1.0f,'
+            'total_mobs_added_per_player:0.0f,simultaneous_mobs_added_per_player:0.0f,'
+            'ticks_between_spawn:1000},spawn_data:{entity:{id:"zombie",'
+            f'Tags:["{parent}"],Pos:[4.5d,220.0d,6.5d],NoAI:1b,'
+            f'Passengers:[{{id:"{kind}",NoAI:1b,Tags:["{rider}"]{pos}}}]'
+            '}},next_mob_spawns_at:0L}',
+            '/data modify block 4 220 4 registered_players append from entity @s UUID')
+        ops += [
+            {'op': 'tick', 'n': 5},
+            cmd(f'/execute if entity @e[tag={parent}]'),
+            cmd(f'/execute if entity @e[tag={rider}]'),
+            cmd(f'/execute as @e[tag={rider}] on vehicle if entity @s[tag={parent}]'),
+            cmd(f'/data get entity @e[tag={parent},limit=1] Passengers[0].Tags'),
+            *setup(f'/kill @e[tag={parent}]', f'/kill @e[tag={rider}]',
+                   '/setblock 4 220 4 air'),
+            # The killed pair lies dying for 20 ticks, and a dying mob still
+            # obstructs the next spawn (`Mob.checkSpawnObstruction`).
+            {'op': 'tick', 'n': 25},
+        ]
+    return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
+
+
+def bossbar_list_order():
+    """CustomBossEvents lists Java HashMap values, with no sorting (#7469)."""
+    ops = [
+        cmd('/bossbar add audit:test "Title"'),
+        cmd('/bossbar set audit:test name "Other"'),
+        cmd('/bossbar add audit:second "Second"'),
+        cmd('/bossbar list'),
+    ]
+    for i in range(11):
+        ops.append(cmd(f'/bossbar add audit:grow{i} "Extra {i}"'))
+    for i in range(11):
+        ops.append(cmd(f'/bossbar remove audit:grow{i}'))
+    ops += [
+        cmd('/bossbar list'),
+        cmd('/bossbar remove audit:test'),
+        cmd('/bossbar list'),
+        cmd('/bossbar add audit:test "Again"'),
+        cmd('/bossbar list'),
+        cmd('/bossbar remove audit:test'),
+        cmd('/bossbar remove audit:second'),
+        cmd('/bossbar list'),
+    ]
+    return ops
+
+
+def experience_level_boundaries():
+    """Exact zero retains progress/total; a negative result resets all three (#7515)."""
+    def observe():
+        return [cmd('/experience query @s levels'),
+                cmd('/experience query @s points'),
+                cmd('/data get entity @s XpLevel'),
+                cmd('/data get entity @s XpP 1000000'),
+                cmd('/data get entity @s XpTotal')]
+    ops = []
+    for start, delta in [(1, -1), (1, -2), (2, -1), (0, -1)]:
+        ops += setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                     '/experience add @s -2147483647 points', '/experience add @s 10 points',
+                     '/experience set @s 1 levels', '/experience set @s 3 points',
+                     f'/experience set @s {start} levels')
+        ops += observe()
+        ops.append(cmd(f'/experience add @s {delta} levels'))
+        ops += observe()
+    return ops + setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                       '/experience add @s -2147483647 points')
+
+
+def mob_max_health_bounds():
+    """Raw bases survive effective clamping without changing Health (#7413)."""
+    pig = '00000000-0000-0000-0000-000000000001'
+    attribute = f'/attribute {pig} minecraft:max_health'
+    ops = [*setup('/summon minecraft:pig 4 200 4 '
+                  '{UUID:[I;0,0,0,1],NoAI:1b,NoGravity:1b,PersistenceRequired:1b}')]
+    for base in (-1.75, 0, 20, 1025):
+        ops += [
+            cmd(f'{attribute} base set {base}'),
+            cmd(f'/data get entity {pig} Health'),
+            cmd(f'{attribute} get'),
+            cmd(f'{attribute} base get'),
+            cmd(f'{attribute} get 100'),
+            cmd(f'{attribute} base get 100'),
+        ]
+    ops += [
+        {'op': 'tick', 'n': 25},
+        cmd(f'/execute if entity {pig}'),
+        cmd(f'/data get entity {pig} Health'),
+        cmd(f'{attribute} base reset'),
+        cmd(f'{attribute} get'),
+        cmd(f'{attribute} base get'),
+        cmd(f'/data get entity {pig} Health'),
+        *setup(f'/kill {pig}'),
+    ]
+    return ops
+
+def forceload_query_order():
+    """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
+    return [
+        *setup('/forceload remove all'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add 32 0'),
+        cmd('/forceload query'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload add -16 0'),
+        cmd('/forceload add 0 -16'),
+        # Java 26.3: [0,-1], [2,0], [-1,0]. These replies say nothing
+        # about whether the force-loaded chunks have finished loading.
+        cmd('/forceload query'),
+        cmd('/forceload remove 32 0'),
+        cmd('/forceload query 32 0'),
+        cmd('/forceload remove all'),
+        cmd('/forceload query'),
+    ]
+
+
+def creeper_custom_fuse():
+    """Observe timed entity removal, rather than just echoed raw Fuse NBT (#7435)."""
+    ops = setup('/gamerule mob_griefing false')
+    for x, tag, fuse in [(4.5, 'fuse_short', ',Fuse:1s'),
+                         (14.5, 'fuse_default', ''), (24.5, 'fuse_long', ',Fuse:40s')]:
+        ops += setup(f'/summon minecraft:creeper {x} 220 4.5 '
+                     f'{{Tags:["{tag}"],NoAI:1b,NoGravity:1b,ignited:1b{fuse}}}')
+        ops.append(cmd(f'/data get entity @e[tag={tag},limit=1] Fuse'))
+    elapsed = 0
+    for tick in (1, 29, 30, 39, 40):
+        ops.append({'op': 'tick', 'n': tick - elapsed})
+        for tag in ('fuse_short', 'fuse_default', 'fuse_long'):
+            ops.append(cmd(f'/execute if entity @e[tag={tag}]'))
+        elapsed = tick
+    return ops + setup('/gamerule mob_griefing true')
+
+
 def groups():
     return [
         ('setup', group_setup()),
@@ -1680,13 +1867,19 @@ def groups():
         ('client commands', client_commands()),
         ('game state', game_state()),
         ('player state', player_state()),
+        ('experience level boundaries', experience_level_boundaries()),
         ('blocks and border', world_blocks()),
+        ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('mob max health bounds', mob_max_health_bounds()),
+        ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
         ('riding teleport', riding_teleport()),
         ('mob riding', mob_riding()),
+        ('trial spawner passengers', trial_spawner_passengers()),
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
+        ('bossbar list order', bossbar_list_order()),
         ('execute', execute()),
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),

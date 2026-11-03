@@ -17,6 +17,7 @@ use horizon_client::{
     entities::{Experience, ExperienceOrb, ItemEntity},
     hud::HudBatch,
     items::ItemStack,
+    lan::data::{BIOME_REGISTRY, client_biomes},
     menu::Input,
     mobs::{Mob, MobType, Who},
     motion::{MotionWorld, PlayerMotion},
@@ -42,6 +43,7 @@ use horizon_protocol::{
     text::{Language, plain},
 };
 use horizon_world::{
+    attachments::{Attachments, Holder},
     level::InteractionResult,
     nbt::Tag,
     registry::BlockStateId,
@@ -455,6 +457,8 @@ pub(super) struct Remote {
     pub quiet_commands: bool,
     /// The server announced it carries mod messages.
     pub mod_net: bool,
+    /// The synced attachments the server sent, by holder.
+    pub attachments: HashMap<Holder, Attachments>,
     /// The server samples far terrain for us, this far at most (`lod_net`).
     pub far_terrain: Option<horizon_client::lod_net::Offer>,
     pub(super) builtin: Arc<Builtin>,
@@ -829,8 +833,12 @@ impl Game<'_> {
         self.reset_tutorial();
         self.perf.world_opening();
         // A server's own biomes come over the connection; the last local
-        // world's packed table must not name its ids.
-        self.world_biomes = None;
+        // world's packed table must not name its ids. The window's own
+        // server thread keeps the one it just set.
+        if local.is_none() {
+            self.world_biomes = None;
+            self.world_biomes_base = None;
+        }
         let root = self.options.resources.clone();
         let builtin = builtin_registries(&root).ok_or("Resources are incomplete: registries.json is missing or invalid. Click \"Prepare again\" in the launcher (or run horizon-prepare), then try again.")?;
         let lang = Arc::new(horizon_client::net::load_language(&root));
@@ -895,7 +903,7 @@ impl Game<'_> {
         let player_type = super::perspective::player_type(&root);
         let mut streaming = Streaming::new(
             Arc::new(NoTerrain),
-            self.pack.context.clone(),
+            self.worker_context(),
             self.res.threads(),
         );
         streaming.remote = true;
@@ -981,6 +989,7 @@ impl Game<'_> {
             features: vec!["minecraft:vanilla".into()],
             quiet_commands: false,
             mod_net: false,
+            attachments: HashMap::new(),
             far_terrain: None,
             builtin,
             status: lang
@@ -1159,7 +1168,7 @@ impl Game<'_> {
         self.adv = Default::default();
         self.stats = Default::default();
         self.score.board = Default::default();
-        self.streaming = Streaming::new(Arc::new(NoTerrain), self.pack.context.clone(), 1);
+        self.streaming = Streaming::new(Arc::new(NoTerrain), self.worker_context(), 1);
         self.streaming.paused = true;
         self.world = World::new(self.res.facts().air, 0);
         self.player = None;
@@ -1887,6 +1896,7 @@ impl Game<'_> {
                     self.score.board = Default::default();
                     self.clear_waypoints();
                     if let Some(r) = self.remote.as_mut() {
+                        r.attachments.clear();
                         r.players.clear();
                         r.tab_players.clear();
                         r.listed.clear();
@@ -2025,9 +2035,26 @@ impl Game<'_> {
         }
     }
     fn set_registries(&mut self, registries: Arc<Dynamic>) {
+        // The server's biomes the game lacks (a world data pack's) join the
+        // game's table, from the data it sent: colours, meshing and the
+        // chunk format all go through that table. The window's own server
+        // thread set the world's table already.
+        if self.integrated.is_none() {
+            let table = registries
+                .registries
+                .get(BIOME_REGISTRY)
+                .and_then(|list| client_biomes(self.res.biomes(), list))
+                .map(Arc::new);
+            if table.is_some() || self.world_biomes.is_some() {
+                self.world_biomes_base = table.clone();
+                self.world_biomes = table;
+                let context = self.worker_context();
+                self.streaming.reload_resources(&mut self.world, context);
+            }
+        }
         let biomes: Vec<u16> = registries
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|list| {
                 list.iter()
                     .map(|(name, _)| world_biomes!(self).id(name))
@@ -2105,7 +2132,7 @@ impl Game<'_> {
             self.stop_sounds_for_new_level();
             let mut streaming = Streaming::new(
                 Arc::new(NoTerrain),
-                self.pack.context.clone(),
+                self.worker_context(),
                 self.res.threads(),
             );
             streaming.remote = true;
@@ -2184,19 +2211,6 @@ impl Game<'_> {
             (x - r.chunk_center.0).abs() <= range && (z - r.chunk_center.1).abs() <= range
         })
     }
-    /// A column the client no longer holds; far terrain keeps it as it was
-    /// last (`server_terrain`).
-    fn forget_remote_chunk(
-        &mut self,
-        x: i32,
-        z: i32,
-    ) -> Option<std::sync::Arc<horizon_client::chunk::Chunk>> {
-        let chunk = self.streaming.forget(&mut self.world, x, z)?;
-        if let Some(lod) = &mut self.lod {
-            lod.observe(chunk.clone(), self.res.facts());
-        }
-        Some(chunk)
-    }
     /// The columns a moved or resized storage no longer holds.
     fn drop_remote_chunks_out_of_range(&mut self) {
         let mut gone: horizon_client::fast_hash::FxHashSet<(i32, i32)> = self
@@ -2210,7 +2224,8 @@ impl Game<'_> {
     }
     /// Forgets the `gone` columns (and empties the set): their chunks (freed on a thread
     /// of their own when there are many), their sections in the renderer and their block
-    /// entities, each store once for all of them.
+    /// entities, each store once for all of them. Far terrain keeps them as they were last
+    /// (`server_terrain`).
     fn forget_remote_columns(
         &mut self,
         gone: &mut horizon_client::fast_hash::FxHashSet<(i32, i32)>,
@@ -2218,9 +2233,11 @@ impl Game<'_> {
         if gone.is_empty() {
             return;
         }
-        let mut freed = Vec::with_capacity(gone.len());
-        for &(x, z) in gone.iter() {
-            freed.extend(self.forget_remote_chunk(x, z));
+        let freed = self.streaming.forget_columns(&mut self.world, gone);
+        if let Some(lod) = &mut self.lod {
+            for chunk in &freed {
+                lod.observe(chunk.clone(), self.res.facts());
+            }
         }
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.remove_columns(gone.iter().copied());
@@ -2229,6 +2246,13 @@ impl Game<'_> {
         self.world
             .block_entities
             .retain(|k, _| !gone.contains(&(k.0 >> 4, k.2 >> 4)));
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.retain(|holder, _| match *holder {
+                Holder::Chunk([x, z]) => !gone.contains(&(x, z)),
+                Holder::BlockEntity([x, _, z]) => !gone.contains(&(x >> 4, z >> 4)),
+                _ => true,
+            });
+        }
         gone.clear();
     }
     /// `handleBlockEntityData`: the block entity at `pos`, when it is of the
@@ -2360,7 +2384,9 @@ impl Game<'_> {
         }
     }
     /// Keep the renderable block entities (chests, furnaces) in step with blocks.
-    /// `previous`: the block's state before, when it changed.
+    /// `previous`: the block's state before, when it changed. A column sent again has
+    /// none, and keeps its block entities' synced attachments: the server does not send
+    /// them again (`remote_chunk` drops those of block entities the column lost).
     pub(super) fn sync_block_entity(
         &mut self,
         pos: (i32, i32, i32),
@@ -2378,12 +2404,24 @@ impl Game<'_> {
                     e.id() == entity.id() && !(other_block && matches!(e, BlockEntity::Mod(_)))
                 });
                 if !same {
+                    if previous.is_some() {
+                        self.forget_block_entity_attachments(pos);
+                    }
                     self.world.block_entities.insert(pos, entity);
                 }
             }
             None => {
+                if previous.is_some() {
+                    self.forget_block_entity_attachments(pos);
+                }
                 self.world.block_entities.remove(&pos);
             }
+        }
+    }
+    /// The server's synced attachments of a block entity that goes with it.
+    fn forget_block_entity_attachments(&mut self, (x, y, z): (i32, i32, i32)) {
+        if let Some(r) = self.remote.as_mut() {
+            r.attachments.remove(&Holder::BlockEntity([x, y, z]));
         }
     }
     /// ClientLevel.setServerVerifiedBlockState: a block the client predicted keeps its
@@ -2984,6 +3022,10 @@ impl Game<'_> {
             C::CustomPayload(p) if p.channel == horizon_protocol::mod_net::CHANNEL => {
                 self.remote_native_net(&p.data);
             }
+            // The synced attachments of a holder the server shows the window.
+            C::CustomPayload(p) if p.channel == horizon_protocol::attachment_sync::CHANNEL => {
+                self.remote_attachment_sync(&p.data);
+            }
             // The server's recipes its native mods asked to send.
             C::CustomPayload(p) if p.channel == horizon_client::lan::recipes::CONTENT_CHANNEL => {
                 self.remote_recipe_content(&p.data);
@@ -3001,6 +3043,7 @@ impl Game<'_> {
                 // replaces ServerReconfigScreen.
                 if let Some(r) = self.remote.as_mut() {
                     r.reconfiguring = None;
+                    r.attachments.clear();
                 }
                 // handleLogin makes a new MultiPlayerGameMode (carried index 0) and a
                 // new LocalPlayer (slot 0, no effects, riding nothing: the server
@@ -3042,6 +3085,11 @@ impl Game<'_> {
                 // A new player, without effects (the server sends them
                 // again) and with no item in use.
                 self.potions.effects.clear();
+                // The server sends the level, chunks and entities again.
+                if let Some(r) = self.remote.as_mut() {
+                    r.attachments
+                        .retain(|holder, _| matches!(holder, Holder::Player(_)));
+                }
                 self.using = None;
                 self.end_mod_use();
                 // After a death (no KEEP_ENTITY_DATA) the new LocalPlayer
@@ -3283,9 +3331,12 @@ impl Game<'_> {
             C::RemoveEntities(p) => {
                 for id in p.ids {
                     if let Some(r) = self.remote.as_mut() {
-                        r.level_players.remove(&id);
+                        if let Some(uuid) = r.level_players.remove(&id) {
+                            r.attachments.remove(&Holder::Player(uuid));
+                        }
                         r.level_player_names.remove(&id);
                         r.level_player_textures.remove(&id);
+                        r.attachments.remove(&Holder::Entity(id as u32));
                     }
                     self.remove_entity(id);
                 }
@@ -4372,9 +4423,18 @@ impl Game<'_> {
             C::RecipeBookSettings(p) => self.remote_recipe_book_settings(p),
             C::PlaceGhostRecipe(p) => self.remote_ghost_recipe(p),
             C::MerchantOffers(p) => self.remote_merchant_offers(p),
-            C::ContainerClose(_) if self.remote_lectern_closed() => {}
             C::ContainerClose(_) => {
-                if self.screen == Screen::Inventory {
+                // `LocalPlayer.clientSideCloseContainer` sets the screen to
+                // null, including dialogs and WaitingForResponseScreen. This
+                // differs from clearDialog, which restores the parent screen.
+                let dialog = self.dialog_open();
+                if dialog {
+                    self.close_dialogs();
+                    self.ui.chat_screen = None;
+                    self.book = None;
+                    self.sign_edit = None;
+                }
+                if !self.remote_lectern_closed() && (self.screen == Screen::Inventory || dialog) {
                     self.remote_close_local();
                     self.screen = Screen::Playing;
                     self.capture(true);
@@ -4635,6 +4695,7 @@ impl Game<'_> {
                         r.chat_validators.remove(&u);
                         r.skin_textures.remove(&u);
                         r.listed.remove(&u);
+                        r.attachments.remove(&Holder::Player(u));
                     }
                 }
             }
@@ -5741,6 +5802,20 @@ impl Game<'_> {
         if self.integrated.is_none() && self.server_address().is_some() {
             keys.analog = None;
         }
+        let [mut strafe, mut forward] = keys.direction();
+        let original = [strafe, forward];
+        self.native_movement_input(&mut forward, &mut strafe, &mut keys.jump, &mut keys.shift);
+        if [strafe, forward] != original {
+            if forward != original[1] {
+                keys.forward = forward > 0.0;
+                keys.backward = forward < 0.0;
+            }
+            if strafe != original[0] {
+                keys.left = strafe > 0.0;
+                keys.right = strafe < 0.0;
+            }
+            keys.analog = Some([strafe, forward]);
+        }
         let input = u8::from(keys.forward)
             | u8::from(keys.backward) << 1
             | u8::from(keys.left) << 2
@@ -6321,7 +6396,12 @@ impl Game<'_> {
                         illager::cast_particles(m, &mut mob_fx);
                     }
                     S::Evoker => illager::cast_particles(m, &mut mob_fx),
-                    S::Wither => wither::client_smoke(m, &mut mob_fx),
+                    S::Wither => {
+                        wither::client_smoke(m, &mut mob_fx);
+                        // `getInvulnerableTicks() > 0`: the charge's cloud,
+                        // after the heads' smoke as in `aiStep`.
+                        wither::charging_particles(m, &mut mob_fx);
+                    }
                     _ => {}
                 }
             }
@@ -6510,6 +6590,7 @@ impl Game<'_> {
                     false,
                     &mut next_float,
                     border,
+                    &self.res.motion().fluids,
                 );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
@@ -7100,7 +7181,7 @@ impl Game<'_> {
         }
         // Resolve the crosshair once. A passing entity interaction keeps
         // that target and may only fall back to using the item itself.
-        let entity = self.entity_targeted();
+        let entity = self.remote_use_targets_entity();
         horizon_client::interaction_input::use_on_target(&mut RemoteUseWorld(self), entity);
     }
 
@@ -8044,14 +8125,14 @@ impl Game<'_> {
             // BundleItem.use: always starts; the server drops the contents.
             _ if bundle => true,
             // BowItem.use: with an arrow, or in creative.
-            "minecraft:bow" => self.creative || self.projectile_slot("minecraft:bow").is_some(),
+            "minecraft:bow" => self.get_projectile(held).is_some() || self.creative,
             // CrossbowItem.use: charging when not charged and with ammunition;
             // a charged one shoots on the server.
             "minecraft:crossbow" => {
                 if held.data().is_some_and(|d| !d.charged.is_empty()) {
                     return true;
                 }
-                self.creative || self.projectile_slot("minecraft:crossbow").is_some()
+                self.get_projectile(held).is_some()
             }
             // TridentItem.use: not about to break, Riptide only in water or rain.
             "minecraft:trident" => {
@@ -8138,7 +8219,7 @@ impl Game<'_> {
             }
             return;
         }
-        let off_target = if self.entity_targeted() {
+        let off_target = if self.remote_use_targets_entity() {
             self.remote_use_entity(Hand::Off)
         } else {
             self.remote_use_block(Hand::Off)
@@ -9043,6 +9124,10 @@ impl Game<'_> {
         self.remote_close_local();
     }
     fn remote_close_local(&mut self) {
+        // `Gui.setScreen` clears the focus of the screen it takes down: the
+        // container's keyboard focus must not outlive it (a Tab bound to the
+        // inventory moves the focus and closes the container in one press).
+        self.pad_clear_focus();
         self.recipe_ui.reset_screen();
         if let Some(r) = self.remote.as_mut() {
             r.menu = None;
@@ -9506,6 +9591,12 @@ impl Game<'_> {
         Some(r.glowing.contains(&(id as i32)))
     }
     /// The profile name of another player the server sent, by entity id.
+    /// The UUID of another player's entity in the level.
+    pub(super) fn remote_player_uuid(&self, id: u32) -> Option<u128> {
+        let r = self.remote.as_ref()?;
+        let uuid = *r.level_players.get(&(id as i32))?;
+        (uuid != r.profile).then_some(uuid)
+    }
     pub(super) fn remote_player_name(&self, id: u32) -> Option<&str> {
         let r = self.remote.as_ref()?;
         let uuid = r.level_players.get(&(id as i32))?;

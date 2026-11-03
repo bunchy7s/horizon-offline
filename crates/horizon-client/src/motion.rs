@@ -43,6 +43,12 @@ use std::{
     sync::Arc,
 };
 
+/// A living entity jumped (`LivingEvent.LivingJumpEvent`). 359.
+#[inline(never)]
+pub fn native_living_jump(entity: u32, kind: &str) {
+    crate::native_client_hooks::living_jump(entity, kind);
+}
+
 pub(crate) mod environment;
 mod fluids;
 pub use fluids::{
@@ -400,6 +406,8 @@ pub struct PlayerMotion {
     /// it travels on the server: `isLocalInstanceAuthoritative` is false, so
     /// its moves check no fall damage.
     pub server_copy: bool,
+    /// A speculative anticheat replay, whose native callbacks must not escape.
+    pub(crate) replaying: bool,
     /// The span of `events` a wall hit on the server's copy pushed (sound and
     /// damage): `server_travel` keeps them while it drops the simulated moves.
     pub wall_hit_events: Option<std::ops::Range<usize>>,
@@ -604,6 +612,7 @@ impl PlayerMotion {
             burn_from_stepping_immune: false,
             old_position: position,
             server_copy: false,
+            replaying: false,
             wall_hit_events: None,
             client_side: false,
             entity_id: 0,
@@ -1202,13 +1211,16 @@ impl MotionWorld<'_, '_, '_> {
     /// client's own keys, and the sprinting it said it had (its
     /// ServerboundPlayerCommandPacket comes before the tick's move).
     pub fn replayed_tick(&mut self, keys: crate::sprint::Keys, sprinting: bool) -> Result<()> {
-        self.local_tick(keys, |player, _| {
+        self.player.replaying = true;
+        let result = self.local_tick(keys, |player, _| {
             if player.sprinting == sprinting {
                 Ok(())
             } else {
                 player.set_sprinting(sprinting)
             }
-        })
+        });
+        self.player.replaying = false;
+        result
     }
     /// `LocalPlayer.aiStep` and the travel it ends with; `sprint` is the
     /// sprint phase.
@@ -1953,6 +1965,9 @@ impl MotionWorld<'_, '_, '_> {
     }
     pub fn jump_from_ground(&mut self) -> Result<()> {
         living_motion::jump_from_ground(self)?;
+        if !self.player.replaying {
+            native_living_jump(self.player.entity_id as u32, "minecraft:player");
+        }
         self.player
             .events
             .push(MotionEvent::Health(crate::health::HealthEvent::Statistic {
@@ -2043,6 +2058,15 @@ impl MotionWorld<'_, '_, '_> {
             }
         }
         Ok(())
+    }
+    /// `Entity.move(MoverType.SHULKER_BOX, movement)`: a shulker box lid pushed
+    /// the player. An ordinary move — the collision scan steps and reads the
+    /// ground flag — whose end writes the ground state
+    /// (`Entity.setOnGroundWithMovement`): a lid lifting the body off the
+    /// ground leaves it airborne, and the next tick's gravity lands it on the
+    /// lid again instead of the client holding it on a stale ground.
+    pub fn shulker_box_push(&mut self, movement: Vec3) -> Result<()> {
+        entity_move::move_entity(self, MoverType::ShulkerBox, movement)
     }
     /// `LocalPlayer.move`: the move, then `updateAutoJump` with the float
     /// horizontal displacement.

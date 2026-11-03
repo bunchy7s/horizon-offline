@@ -49,6 +49,33 @@ pub const SYNCHRONIZED: &[&str] = &[
     "minecraft:block_transformer",
     "minecraft:worldgen/block_state_provider",
 ];
+pub const BIOME_REGISTRY: &str = "minecraft:worldgen/biome";
+/// The table a client plays a server with: `known` and the biomes of the
+/// server's biome registry that it lacks, built from their data; None when
+/// there are none.
+pub fn client_biomes(
+    known: &crate::biome::Biomes,
+    registry: &[(String, Option<Tag>)],
+) -> Option<crate::biome::Biomes> {
+    let files: Vec<(&str, Value)> = registry
+        .iter()
+        .filter(|(name, _)| !known.contains(name))
+        .filter_map(|(name, data)| {
+            Some((
+                name.as_str(),
+                crate::scoreboard::tag_to_json(data.as_ref()?),
+            ))
+        })
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    log::info!(
+        "Horizon: the server has {} biomes the game lacks",
+        files.len()
+    );
+    Some(known.with_packs(files.iter().map(|(n, v)| (*n, v))))
+}
 /// KnownPack.vanilla("core") for this version.
 pub const CORE_PACK: (&str, &str, &str) = ("minecraft", "core", horizon_protocol::GAME_VERSION);
 
@@ -82,14 +109,7 @@ pub struct SyncData {
     pub advancements: super::advancements::ServerAdvancements,
 }
 
-/// A resource id with its default namespace filled in.
-fn qualified(id: &str) -> String {
-    if id.contains(':') {
-        id.to_owned()
-    } else {
-        format!("minecraft:{id}")
-    }
-}
+use crate::crafting::qualified;
 
 /// Every `*.json` under `dir`, as (path without extension relative to dir, value), sorted;
 /// a file that can't be read or doesn't parse is left out. Through `json_folder`: from the
@@ -202,6 +222,16 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
     ) -> Result<Self, String> {
+        Self::load_with(resources, overlay, None)
+    }
+
+    /// `load` with the open world's biomes: when its data packs added or
+    /// replaced some, the biome registry is that table's, in its order.
+    pub fn load_with(
+        resources: &Path,
+        overlay: &horizon_world::loot::PackOverlay,
+        biomes: Option<&crate::biome::Biomes>,
+    ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
         // recipe folder: held here, they share one read of it.
@@ -228,6 +258,22 @@ impl SyncData {
                 .collect();
             if PACK_REGISTRIES.contains(key) {
                 pack_entries(path, overlay, &mut entries);
+            }
+            if *key == BIOME_REGISTRY
+                && let Some(table) = biomes.filter(|b| b.has_packs())
+            {
+                // A pack's biome goes with its data: no client knows it.
+                let found: HashMap<_, _> = entries
+                    .drain(..)
+                    .map(|((ns, p), v, _)| (format!("{ns}:{p}"), v))
+                    .collect();
+                for name in table.registry_order() {
+                    let (ns, p) = name.split_once(':').unwrap_or(("minecraft", name));
+                    let pack = table.pack_file(name);
+                    let json = pack.or_else(|| found.get(name)).cloned();
+                    let json = json.unwrap_or_else(|| Value::Object(Default::default()));
+                    entries.push(((ns.to_owned(), p.to_owned()), json, pack.is_some()));
+                }
             }
             file_order(&mut entries);
             let mut e = Entries {

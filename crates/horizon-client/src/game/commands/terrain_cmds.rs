@@ -7,7 +7,7 @@ use horizon_client::{
     text::Text,
     worldborder::MAX_SIZE,
 };
-use horizon_core::random::RandomSource;
+use horizon_core::{position::ChunkPos, random::RandomSource};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
@@ -41,7 +41,8 @@ impl Game<'_> {
         match id {
             "forceload.query" if ctx.get("pos").is_none() => {
                 let mut forced: Vec<(i32, i32)> = self.streaming.forced.iter().copied().collect();
-                forced.sort_unstable();
+                // ForceLoadCommand sorts its LongStream before formatting chunks.
+                forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
                 if forced.is_empty() {
                     self.command_failure(Text::translate("commands.forceload.added.none", &[dim]));
                     return Ok(0);
@@ -276,7 +277,14 @@ impl Game<'_> {
         }
     }
     pub(in crate::game) fn tick_worldborder(&mut self) {
+        let remaining = self.border.remaining_ticks();
         self.border.tick();
+        if remaining > 0
+            && self.border.remaining_ticks() == 0
+            && (self.serving.is_some() || self.options.dedicated.is_some())
+        {
+            self.native_world_border_bounds_change_finish();
+        }
         self.player_border();
         self.border_damage();
     }
@@ -567,10 +575,11 @@ impl Game<'_> {
                 let p = self.block_pos_arg(ctx, "pos")?;
                 let state = self.world.block(p[0], p[1], p[2]);
                 let name = self.data_block_name(p);
-                let table = format!("minecraft:blocks/{}", name.trim_start_matches("minecraft:"));
-                if !world_items!(self).has_loot_table(&table) {
+                let Some(table) =
+                    world_items!(self).block_loot_table(self.pack.assets.registry, state)
+                else {
                     return Err(err("commands.drop.no_loot_table.block", &[&name]));
-                }
+                };
                 let tool = self.tool_stack(ctx)?;
                 let drops = match world_items!(self).loot_sequence(&table) {
                     Some(seq) => {
@@ -728,8 +737,9 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         for u in &used {
             let name = self.item_display_name(&u.item);
-            tracker.track(&holder(name), u.count as i32);
-            let _ = u;
+            // CommandResponseTracker.track(drop): one per stack, so the
+            // command returns how many stacks it used, not how many items.
+            tracker.track(&holder(name), 1);
         }
         let counts: Vec<u32> = used.iter().map(|u| u.count).collect();
         let (message, total) = tracker.message(

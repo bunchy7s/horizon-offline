@@ -15,8 +15,18 @@ mod cull;
 mod datapacks_page;
 mod dev_options;
 mod export_page;
+mod frame;
 mod game_tools;
 mod github_mods_page;
+mod glass;
+mod glass_home;
+mod glass_home_lists;
+mod glass_home_mods;
+mod glass_home_packs;
+mod glass_home_tabs;
+mod glass_instance;
+mod glass_instance_java;
+mod glass_ui;
 mod home;
 mod home_tabs;
 mod import_page;
@@ -42,6 +52,7 @@ mod partner;
 mod perf;
 mod plate;
 mod profile_heads;
+mod scene;
 mod screenshots_page;
 mod scrollbar;
 mod servers_page;
@@ -235,6 +246,10 @@ struct Launcher {
     language_menu: bool,
     /// The top bar's quick switch of who plays (`switch_page.rs`).
     account_menu: bool,
+    /// The glass sidebar's ⋮ menu (`frame.rs`).
+    row_menu: frame::RowMenu,
+    /// The glass look's colours for the player's accent (`horizon_theme::glass`).
+    look: horizon_theme::glass::Glass,
     /// Where the mouse went down to close a menu by pressing outside it, so that the
     /// same press, ending on the menu's own button, doesn't open it again.
     menu_closed_at: Option<Point<Pixels>>,
@@ -243,6 +258,8 @@ struct Launcher {
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
     settings: Settings,
+    /// The last failed settings write, kept across page changes until a save succeeds.
+    settings_save_error: Option<String>,
     /// The Discord, sponsor and website links: built in until links.json on main has been read.
     links: backend::Links,
     preparing: bool,
@@ -294,6 +311,8 @@ struct Launcher {
     friend_code: line_edit::LineEdit,
     friend_focused: bool,
     friend_focus: FocusHandle,
+    /// The window's width at the last frame: Home's head lays out by it, as the mockup's `xl`.
+    window_width: f32,
     joining: Option<String>,
     /// Where the next start goes at once: `--world <folder>` or `--server <address>`.
     quick_play: Option<(&'static str, String)>,
@@ -330,6 +349,20 @@ struct Launcher {
     download_seen: Option<(Instant, usize)>,
     /// The tab open under Home's hero (`home_tabs.rs`).
     home_tab: home_tabs::HomeTab,
+    /// Home's Play or folder menu, while open (glass look).
+    home_menu: glass_home::HomeMenu,
+    /// Whether the pointer is over Home's folder button, which then shows its ⋯.
+    folder_hovered: bool,
+    /// The list row under the pointer in Home's glass tabs (a world, a server): it shows its
+    /// actions then.
+    list_hover: Option<SharedString>,
+    /// A Home list row's ⋯ menu, while open, and whether its Delete… was clicked once.
+    list_menu: Option<(SharedString, bool)>,
+    /// The size of Home's tab strip, measured as it is laid out: the glass panel's plate cuts
+    /// its corner around it.
+    home_strip: std::rc::Rc<std::cell::Cell<Option<gpui::Size<Pixels>>>>,
+    /// When the running game was first seen running, for Home's "Playing for…".
+    client_since: Option<Instant>,
     /// The selected instance's mods, for Home's Mods tab (`instance_mods.rs`).
     instance_mods: instance_mods::InstanceMods,
     /// Modrinth projects' icon URLs (`instance_mods.rs`).
@@ -377,6 +410,9 @@ struct Launcher {
     side_servers: Vec<horizon_launcher::servers::Entry>,
     /// The pixel art made for this window (`art.rs`), and pictures downloaded by URL.
     sky: sky::Sky,
+    /// The pixel sunset of the new design (dark appearance): its own view, so a frame of it
+    /// alone redraws nothing else.
+    scene: gpui::Entity<scene::Scene>,
     /// When the sky next asks for a frame, and the timer that will draw it.
     sky_wake: Option<(Instant, gpui::Task<()>)>,
     /// The window's scale, as of its last frame, for art drawn outside `render`'s reach.
@@ -413,7 +449,7 @@ impl Launcher {
                 s.partner_seen_secs += 10;
                 if s.partner_seen_secs % 60 == 0 || s.partner_seen_secs >= partner::SEEN_BEFORE_HIDE
                 {
-                    s.save();
+                    this.save_settings();
                     cx.notify();
                 }
                 true
@@ -497,6 +533,8 @@ impl Launcher {
             hue_dragging: false,
             language_menu: false,
             account_menu: false,
+            row_menu: Default::default(),
+            look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
             background_error: None,
@@ -511,6 +549,7 @@ impl Launcher {
             proxy_focused: false,
             proxy_focus: cx.focus_handle(),
             settings,
+            settings_save_error: None,
             links: backend::Links::default(),
             preparing: false,
             prepare_log: VecDeque::new(),
@@ -542,6 +581,7 @@ impl Launcher {
             play_when_prepared: None,
             friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
             friend_focused: false,
+            window_width: 0.,
             friend_focus: cx.focus_handle(),
             joining: None,
             quick_play: None,
@@ -560,6 +600,12 @@ impl Launcher {
             prepare_started: None,
             download_seen: None,
             home_tab: home_tabs::HomeTab::from_env(),
+            home_menu: Default::default(),
+            folder_hovered: false,
+            list_hover: None,
+            list_menu: None,
+            home_strip: Default::default(),
+            client_since: None,
             instance_mods: Default::default(),
             project_icons: Default::default(),
             play_pressed: None,
@@ -591,6 +637,7 @@ impl Launcher {
             offline_name: offline_name(),
             side_servers: horizon_launcher::servers::list(),
             sky: sky::Sky::default(),
+            scene: cx.new(|_| scene::Scene::new()),
             sky_wake: None,
             scale: window.scale_factor(),
         };
@@ -621,10 +668,17 @@ impl Launcher {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
         }
-        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots.
-        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("new-instance") {
+        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots
+        // (`new-instance-horizon`, `new-instance-vanilla`: on those).
+        let kind = match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
+            Ok("new-instance") => Some(new_instance::NewKind::Modded),
+            Ok("new-instance-horizon") => Some(new_instance::NewKind::Horizon),
+            Ok("new-instance-vanilla") => Some(new_instance::NewKind::Vanilla),
+            _ => None,
+        };
+        if let Some(kind) = kind {
             this.open_instance_dialog(None);
-            this.pick_kind(new_instance::NewKind::Modded, cx);
+            this.pick_kind(kind, cx);
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
@@ -634,6 +688,53 @@ impl Launcher {
         telemetry::watch_playing(this.tx.clone());
         telemetry::watch_official(this.tx.clone());
         this
+    }
+
+    /// Keeps the current choices in memory if writing fails; every page offers the same retry.
+    fn save_settings(&mut self) -> bool {
+        self.settings_save_error = self.settings.save().err();
+        self.settings_save_error.is_none()
+    }
+
+    fn settings_save_notice(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let error = self.settings_save_error.as_ref()?;
+        let t = self.theme;
+        Some(
+            div()
+                .flex_none()
+                .px(px(theme::PAGE_GUTTER))
+                .py(px(12.))
+                .child(
+                    crate::plate::plate(&t.night)
+                        .flex()
+                        .items_center()
+                        .gap(px(16.))
+                        .p(px(16.))
+                        .child(
+                            div()
+                                .relative()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    shell::text(theme::night::UI, t.danger)
+                                        .child(tr("Settings were not saved.")),
+                                )
+                                .child(
+                                    shell::text(theme::night::CAPTION, t.ink_soft).child(trf(
+                                        "Your changes are still in this window. Retry to save them. {error}",
+                                        &[("error", error)],
+                                    )),
+                                ),
+                        )
+                        .child(
+                            button("settings-save-retry", "Retry", Kind::Secondary, &t)
+                                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                                    this.save_settings();
+                                    cx.notify();
+                                })),
+                        ),
+                ),
+        )
     }
 
     fn go(&mut self, page: Page) {
@@ -1030,12 +1131,14 @@ impl Launcher {
                             if as_update.is_none_or(|(_, select)| select) {
                                 self.settings.selected = Some(tag);
                             }
-                            self.settings.save();
-                            // After the save: the selected version is never pruned.
-                            let tx = self.tx.clone();
-                            std::thread::spawn(move || {
-                                let _ = tx.send(Msg::Pruned(backend::prune_old_versions()));
-                            });
+                            // Pruning reads settings from disk: protect the selection only once
+                            // it has been saved there. A failed save leaves all versions in place.
+                            if self.save_settings() {
+                                let tx = self.tx.clone();
+                                std::thread::spawn(move || {
+                                    let _ = tx.send(Msg::Pruned(backend::prune_old_versions()));
+                                });
+                            }
                         }
                         Err(e) => self.install_error = Some((tag, e)),
                     }
@@ -1043,8 +1146,12 @@ impl Launcher {
                 Msg::Removed(tag, result) => {
                     self.removing.retain(|t| *t != tag);
                     self.installed = backend::installed();
-                    self.settings.selected =
-                        selection_after_removal(&self.installed, Settings::load().selected);
+                    let selected = if self.settings_save_error.is_some() {
+                        self.settings.selected.take()
+                    } else {
+                        Settings::load().selected
+                    };
+                    self.settings.selected = selection_after_removal(&self.installed, selected);
                     if let Err(e) = result {
                         self.install_error = Some((tag, e));
                     }
@@ -1242,7 +1349,7 @@ impl Launcher {
                     self.client_error = None;
                     if !self.settings.owner_notice_seen {
                         self.settings.owner_notice_seen = true;
-                        self.settings.save();
+                        self.save_settings();
                     }
                 }
                 changed = true;
@@ -1642,7 +1749,7 @@ impl Launcher {
                 if let Some(path) = paths.pop() {
                     let _ = this.update(cx, |this, cx| {
                         this.settings.minecraft_dir = Some(path);
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     });
                 }
@@ -1674,18 +1781,32 @@ static HOVER: Mutex<HoverState> = Mutex::new(HoverState {
 });
 
 fn track_hover(el: Stateful<Div>, id: SharedString) -> Stateful<Div> {
-    el.on_hover(move |hovered, window, _| {
-        let mut state = HOVER.lock().unwrap();
-        let is_on = state.on.as_ref().is_some_and(|(h, _)| *h == id);
-        if *hovered && !is_on {
-            state.off = state.on.take();
-            state.on = Some((id.clone(), Instant::now()));
-        } else if !*hovered && is_on {
-            state.off = Some((id.clone(), Instant::now()));
-            state.on = None;
-        }
-        window.refresh();
-    })
+    el.on_hover(move |hovered, window, _| note_hover(&id, *hovered, window))
+}
+
+/// Whether `id` is the element [`hover_fade`] shows hovered now.
+fn hover_is(id: &SharedString) -> bool {
+    HOVER
+        .lock()
+        .unwrap()
+        .on
+        .as_ref()
+        .is_some_and(|(h, _)| h == id)
+}
+
+/// Records that `id` is now hovered or not, for [`hover_fade`]: an element whose own hover
+/// listener does more calls it.
+fn note_hover(id: &SharedString, hovered: bool, window: &mut Window) {
+    let mut state = HOVER.lock().unwrap();
+    let is_on = state.on.as_ref().is_some_and(|(h, _)| h == id);
+    if hovered && !is_on {
+        state.off = state.on.take();
+        state.on = Some((id.clone(), Instant::now()));
+    } else if !hovered && is_on {
+        state.off = Some((id.clone(), Instant::now()));
+        state.on = None;
+    }
+    window.refresh();
 }
 
 /// A layer under an element's content that fades `color` in while it is hovered. `bleed` lets
@@ -2615,7 +2736,7 @@ impl Launcher {
                 let hide = partner::hide_button("partner-hide", &t).on_click(cx.listener(
                     |this, _: &ClickEvent, _, cx| {
                         this.settings.partner_hidden = true;
-                        this.settings.save();
+                        this.save_settings();
                         cx.notify();
                     },
                 ));
@@ -2865,18 +2986,6 @@ impl Launcher {
         let version = java
             .as_ref()
             .map_or_else(|| backend::game_version(&tag), |j| j.minecraft.clone());
-        let hero = match &java {
-            // Its own game: the Minecraft version and the loader, never Horizon's.
-            Some(j) => {
-                let game = match &j.loader {
-                    Some(l) => format!("{version} · {} {}", l.kind.name(), l.version),
-                    None => version.clone(),
-                };
-                self.hero("", &game, true, cx)
-            }
-            None => self.hero(&tag, &version, prepared, cx),
-        };
-        let actions = self.home_actions(prepared || java.is_some(), java.is_some(), cx);
         let left = self.download_left();
         let steps = self.preparing.then(|| self.steps(&version, left));
 
@@ -2986,7 +3095,8 @@ impl Launcher {
         let mut rows = div()
             .flex()
             .flex_col()
-            .children(self.instance_row(1, cx))
+            // The glass look's sidebar ⋮ menu holds what the Instance row offers.
+            .children((!t.dark).then(|| self.instance_row(1, cx)).flatten())
             .children(self.export_panel(cx))
             .children(self.launch_panel(cx))
             .children(self.memory_row(cx));
@@ -3069,73 +3179,100 @@ impl Launcher {
             }
         }
 
-        // The banner: the hero and the Play row over the sky (`sky.rs`), or over the player's
-        // own picture under a veil of the page colour. It reaches the content's edges and the top
-        // bar.
-        let veil = |angle: f32, from: f32, to: f32, at: f32| {
+        // The glass look's head (the mockup's `HomeView`) replaces the banner; the preparation's
+        // steps stay right under it, where the player looks after pressing Play.
+        let banner = if t.dark {
             div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(gpui::linear_gradient(
-                    angle,
-                    gpui::linear_color_stop(t.page.opacity(from), 0.),
-                    gpui::linear_color_stop(t.page.opacity(to), at),
-                ))
-        };
-        let picture = self.home_background().map(|path| {
-            [
-                gpui::img(path)
+                .flex()
+                .flex_col()
+                .gap(px(24.))
+                .child(self.glass_home_head(&tag, prepared, cx))
+                .children(steps)
+        } else {
+            let hero = match &java {
+                // Its own game: the Minecraft version and the loader, never Horizon's.
+                Some(j) => {
+                    let game = match &j.loader {
+                        Some(l) => format!("{version} · {} {}", l.kind.name(), l.version),
+                        None => version.clone(),
+                    };
+                    self.hero("", &game, true, cx)
+                }
+                None => self.hero(&tag, &version, prepared, cx),
+            };
+            let actions = self.home_actions(prepared || java.is_some(), java.is_some(), cx);
+            // The banner: the hero and the Play row over the sky (`sky.rs`), or over the player's
+            // own picture under a veil of the page colour. It reaches the content's edges and the top
+            // bar.
+            let veil = |angle: f32, from: f32, to: f32, at: f32| {
+                div()
                     .absolute()
                     .top_0()
                     .left_0()
                     .size_full()
-                    .object_fit(gpui::ObjectFit::Cover)
-                    .into_any_element(),
-                veil(90., 0.82, 0., 0.62).into_any_element(),
-                veil(180., 0., 0.75, 1.).into_any_element(),
-            ]
-        });
-        let banner = div()
-            .relative()
-            .flex()
-            .flex_col()
-            .justify_end()
-            .min_h(px(340.))
-            .mx(px(-theme::PAGE_GUTTER))
-            .px(px(theme::PAGE_GUTTER))
-            .pb(px(28.))
-            .gap(px(24.))
-            .overflow_hidden()
-            .children(picture.into_iter().flatten())
-            .child(
-                div()
-                    .relative()
-                    .flex()
-                    .items_end()
-                    .gap(px(32.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(28.))
-                            .child(hero)
-                            .child(actions)
-                            // The preparation's steps right under Play, where the player looks
-                            // after pressing it, not below the fold (#666).
-                            .children(steps),
-                    )
-                    // Notes and friends are Horizon's.
-                    .children(java.is_none().then(|| self.home_card(&tag, cx))),
-            );
+                    .bg(gpui::linear_gradient(
+                        angle,
+                        gpui::linear_color_stop(t.page.opacity(from), 0.),
+                        gpui::linear_color_stop(t.page.opacity(to), at),
+                    ))
+            };
+            let picture = self.home_background().map(|path| {
+                [
+                    gpui::img(path)
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .into_any_element(),
+                    veil(90., 0.82, 0., 0.62).into_any_element(),
+                    veil(180., 0., 0.75, 1.).into_any_element(),
+                ]
+            });
+            div()
+                .relative()
+                .flex()
+                .flex_col()
+                .justify_end()
+                .min_h(px(340.))
+                .mx(px(-theme::PAGE_GUTTER))
+                .px(px(theme::PAGE_GUTTER))
+                .pb(px(28.))
+                .gap(px(24.))
+                .overflow_hidden()
+                .children(picture.into_iter().flatten())
+                .child(
+                    div()
+                        .relative()
+                        .flex()
+                        .items_end()
+                        .gap(px(32.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(28.))
+                                .child(hero)
+                                .child(actions)
+                                // The preparation's steps right under Play, where the player looks
+                                // after pressing it, not below the fold (#666).
+                                .children(steps),
+                        )
+                        // Notes and friends are Horizon's.
+                        .children(java.is_none().then(|| self.home_card(&tag, cx))),
+                )
+        };
         let mut page = div().flex().flex_col().gap(px(28.)).child(banner);
         if let Some(e) = self.prepare_error.clone() {
             page = page.child(notice(e, &t));
         }
-        page = page.child(self.home_tabs(rows, cx));
+        page = page.child(if t.dark {
+            self.glass_home_tabs(rows, cx)
+        } else {
+            self.home_tabs(rows, cx)
+        });
         if let Some(e) = self.client_error.clone() {
             page = page.child(notice(e, &t));
         }
@@ -3263,7 +3400,7 @@ impl Launcher {
         let toggle = switch("auto-install", self.settings.auto_install(), &t).on_click(
             cx.listener(|this, _: &ClickEvent, _, cx| {
                 this.settings.install_new_versions = Some(!this.settings.auto_install());
-                this.settings.save();
+                this.save_settings();
                 if this.settings.auto_install() {
                     this.install_update();
                 }
@@ -3273,14 +3410,14 @@ impl Launcher {
         let prune = switch("auto-prune", self.settings.auto_prune(), &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.prune_old_versions = Some(!this.settings.auto_prune());
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));
         let opening = switch("opening", !self.settings.skip_opening, &t).on_click(cx.listener(
             |this, _: &ClickEvent, _, cx| {
                 this.settings.skip_opening = !this.settings.skip_opening;
-                this.settings.save();
+                this.save_settings();
                 cx.notify();
             },
         ));
@@ -3289,7 +3426,7 @@ impl Launcher {
             cx.listener(|this, _: &ClickEvent, _, cx| {
                 let on = !this.settings.desktop_entry();
                 this.settings.desktop_entry = Some(on);
-                this.settings.save();
+                this.save_settings();
                 let _ = if on {
                     horizon_launcher::desktop::install(backend::exe_path()).map(|_| ())
                 } else {
@@ -3390,7 +3527,7 @@ impl Launcher {
                 move |choice, window, cx| {
                     let _ = this.update(cx, |this, cx| {
                         this.settings.appearance = choice;
-                        this.settings.save();
+                        this.save_settings();
                         titlebar::apply_appearance(window, choice);
                         this.theme = this.settings_theme(window);
                         cx.notify();
@@ -3655,7 +3792,7 @@ impl Launcher {
                     line_edit::Key::Escape => window.blur(cx),
                     line_edit::Key::Edited => {
                         this.settings.game_args = this.args_input.text().to_string();
-                        this.settings.save();
+                        this.save_settings();
                     }
                     _ => {}
                 }
@@ -3747,7 +3884,7 @@ impl Launcher {
     fn save_proxy(&mut self) {
         let value = self.proxy_input.text().trim().to_owned();
         self.settings.proxy = (!value.is_empty()).then_some(value);
-        self.settings.save();
+        self.save_settings();
         horizon_launcher::proxy::announce(self.settings.proxy.clone());
     }
 
@@ -4054,7 +4191,7 @@ impl Launcher {
                     button(format!("use-{tag}"), "Use", Kind::Ghost, &t).on_click(cx.listener(
                         move |this, _: &ClickEvent, _, cx| {
                             this.settings.selected = Some(t1.clone());
-                            this.settings.save();
+                            this.save_settings();
                             cx.notify();
                         },
                     )),
@@ -4629,6 +4766,7 @@ impl Render for Launcher {
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         let size = window.viewport_size();
+        self.window_width = f32::from(size.width);
         let content = match self.page {
             Page::Play => self.play_page(cx),
             Page::Versions => self.versions_page(cx),
@@ -4655,18 +4793,38 @@ impl Render for Launcher {
         if self.opening.is_none() && window.focused(cx).is_none() {
             window.focus(&self.root_focus, cx);
         }
-        let (sky, next) = self.sky.render(
-            &t.night,
-            (size.width.into(), size.height.into()),
-            window.scale_factor(),
-            window.is_window_active(),
-            Instant::now(),
-        );
-        if let Some(next) = next {
-            self.wake_sky(next, cx);
-        }
-        let topbar = self.topbar(cx);
-        let sidebar = self.sidebar(window, cx);
+        // Dark: the new design's scene; Light keeps the dawn sky until the design has a light
+        // look.
+        glass::begin_build(window);
+        let sky = if t.dark {
+            self.scene.clone().into_any_element()
+        } else {
+            let (sky, next) = self.sky.render(
+                &t.night,
+                (size.width.into(), size.height.into()),
+                window.scale_factor(),
+                window.is_window_active(),
+                Instant::now(),
+            );
+            if let Some(next) = next {
+                self.wake_sky(next, cx);
+            }
+            sky.into_any_element()
+        };
+        // Dark: the glass frame over the scene; Light keeps the night one over the dawn.
+        let (topbar, sidebar) = if t.dark {
+            (
+                self.glass_topbar(cx),
+                self.glass_sidebar(window, cx).into_any_element(),
+            )
+        } else {
+            (self.topbar(cx), self.sidebar(window, cx).into_any_element())
+        };
+        let row_menu = if t.dark {
+            self.row_menu(window, cx)
+        } else {
+            None
+        };
         let mut root = div()
             .id("root")
             .track_focus(&self.root_focus)
@@ -4693,6 +4851,11 @@ impl Render for Launcher {
                 cx.notify();
             }))
             .capture_any_mouse_down(|_, _, _| KEYBOARD.store(false, Ordering::Relaxed))
+            .on_mouse_move(cx.listener(|this, ev: &gpui::MouseMoveEvent, window, cx| {
+                let size = window.viewport_size();
+                this.scene
+                    .update(cx, |scene, cx| scene.point(ev.position, size, cx));
+            }))
             .relative()
             .flex()
             .flex_col()
@@ -4745,6 +4908,7 @@ impl Render for Launcher {
                             ),
                     ),
             );
+        root = root.children(row_menu);
         if self.page == Page::Servers {
             if let Some(dialog) = self.create_dialog(cx) {
                 root = root.child(dialog);
@@ -4831,6 +4995,7 @@ impl Render for Launcher {
             .bg(t.side)
             .child(sky)
             .children(titlebar::render(&t, window))
+            .children(self.settings_save_notice(cx))
             .child(root.flex_1().min_h_0())
             .children(titlebar::resize_handles(window))
     }
@@ -4968,6 +5133,11 @@ fn main() {
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_SEMIBOLD),
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_BOLD),
                     Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_DISPLAY_BOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_DISPLAY_SEMIBOLD),
+                    Cow::Borrowed(horizon_theme::fonts::BRICOLAGE_HEADING_SEMIBOLD),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_REGULAR),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_MEDIUM),
+                    Cow::Borrowed(horizon_theme::fonts::GEIST_SEMIBOLD),
                 ])
                 .expect("bundled fonts");
             cx.bind_keys(key_bindings());

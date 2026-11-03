@@ -13,7 +13,7 @@ pub(super) struct Shortcuts {
 }
 
 impl Launcher {
-    fn has_shortcut(&mut self, id: &str) -> bool {
+    pub(super) fn has_shortcut(&mut self, id: &str) -> bool {
         match &self.shortcuts.seen {
             Some((seen, has)) if seen == id => *has,
             _ => {
@@ -24,7 +24,7 @@ impl Launcher {
         }
     }
 
-    fn toggle_shortcut(&mut self, id: String, name: String) {
+    pub(super) fn toggle_shortcut(&mut self, id: String, name: String) {
         let has = self.has_shortcut(&id);
         let done = match has {
             false => shortcut::make(&backend::update_target(), &id, &name).map(|made| {

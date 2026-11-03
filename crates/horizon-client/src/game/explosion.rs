@@ -148,6 +148,13 @@ fn blast_direction(center: [f64; 3], origin: [f64; 3]) -> [f64; 3] {
     }
 }
 
+/// The blast as `native_explosion_knockback` tells it: its centre and the
+/// blocks it is about to break.
+struct ExplosionHookContext<'a> {
+    center: [f64; 3],
+    blocks: &'a [[i32; 3]],
+}
+
 /// An entity in the blast's reach: how far (as a share of the blast's
 /// diameter), how much of it the rays see, and the knockback.
 struct Hit {
@@ -156,28 +163,18 @@ struct Hit {
     push: Vec3,
 }
 
-/// A mob in a blast's reach: `hurtServer` when its team allows the damage
-/// (`hurtable`), then `pushFromExplosion` whatever that returned, so a mob
-/// that refuses the hit (invulnerable, in its hurt cooldown, a wither and an
-/// undead `cause`) is still pushed. `Entity.push` sets `needsSync`.
-fn hurt_and_push_mob(
+/// Apply blast damage when the mob's team and wither immunity allow it.
+fn hurt_mob(
     m: &mut horizon_client::mobs::Mob,
     hurtable: bool,
     cause: Option<horizon_client::mobs::Species>,
     (amount, source): (f32, horizon_client::mobs::Damage),
-    push: [f64; 3],
 ) {
     let shielded =
         cause.is_some_and(|c| horizon_client::mobs::wither::shielded_from(m.species(), c));
     if hurtable && !shielded {
         m.damage(amount, source);
     }
-    m.velocity = Vec3::new(
-        m.velocity.x + push[0],
-        m.velocity.y + push[1],
-        m.velocity.z + push[2],
-    );
-    m.needs_sync = true;
 }
 
 /// A blast's causing entity and its name (`Explosion.getIndirectSourceEntity`):
@@ -389,15 +386,16 @@ impl Game<'_> {
     ///
     /// `cause` is the blast's source as predicates see it, read before the
     /// guests' turns swap their own combat state in.
-    pub(super) fn explosion_hurt_player(
+    fn explosion_hurt_player(
         &mut self,
-        center: [f64; 3],
+        context: &ExplosionHookContext<'_>,
         radius: f32,
         damage_type: &str,
         exploding: Option<u32>,
         attacker: Option<&(u32, Text)>,
         cause: Option<&horizon_client::advancements::EntityView>,
     ) -> Option<[f64; 3]> {
+        let ExplosionHookContext { center, blocks } = *context;
         let diameter = f64::from(radius * 2.0);
         // Blast protection: `EXPLOSION_KNOCKBACK_RESISTANCE` (0.15 per level and
         // piece, so two Blast Protection IV pieces cancel it).
@@ -481,14 +479,19 @@ impl Game<'_> {
                         .indicate_damage(center[0] - feet[0], center[2] - feet[2], p.yaw);
                 }
             }
-            if !spectator && !(creative && flying) {
-                let push = [dir[0] * power, dir[1] * power, dir[2] * power];
+        }
+        if !spectator {
+            let mut push = [dir[0] * power, dir[1] * power, dir[2] * power];
+            self.native_explosion_knockback(self.dim.id(), center, blocks, None, &mut push);
+            if let Some(p) = self.player.as_mut() {
                 p.velocity = Vec3::new(
                     p.velocity.x + push[0],
                     p.velocity.y + push[1],
                     p.velocity.z + push[2],
                 );
-                pushed = (!p.health.sync_velocity).then_some(push);
+                if !(creative && flying) {
+                    pushed = (!p.health.sync_velocity).then_some(push);
+                }
             }
         }
         self.combat.forget_noted(outcome.canceled);
@@ -544,11 +547,12 @@ impl Game<'_> {
         radius: f32,
         damage_type: &str,
         interaction: BlockInteraction,
+        blocks: &[[i32; 3]],
     ) -> Vec<(u32, [f64; 3])> {
         if radius < 1.0e-5 {
             return Vec::new();
         }
-        self.explosion_hits_special(center, radius);
+        self.explosion_hits_special(center, radius, blocks);
         let diameter = f64::from(radius * 2.0);
         let damage = |dist: f64, exposure: f32| {
             let pow = (1.0 - dist) * f64::from(exposure);
@@ -568,8 +572,9 @@ impl Game<'_> {
         // same for all of them (`onExplosionHit(this.source)`).
         let attacker = self.blast_attacker();
         let blast_source = self.combat.explosion_cause.clone();
+        let context = ExplosionHookContext { center, blocks };
         let own = self.explosion_hurt_player(
-            center,
+            &context,
             radius,
             damage_type,
             exploding,
@@ -588,7 +593,7 @@ impl Game<'_> {
             for conn in guests {
                 let push = self.as_guest(&mut host, conn, |g| {
                     g.explosion_hurt_player(
-                        center,
+                        &context,
                         radius,
                         damage_type,
                         exploding,
@@ -623,7 +628,6 @@ impl Game<'_> {
             items_ignore: items_ignore_explosion(self.ui.rules.bool("mob_griefing"), interaction),
             spared: exploding.filter(|_| self.combat.explosion_source_named),
         };
-        let (items_before, orbs_before) = (self.dropped_ids(), self.orb_ids());
         let (items_len, orbs_len) = (self.dropped.len(), self.orbs.len());
         let (mut items_kept, mut orbs_kept) = (0, 0);
         let (mut boats_gone, mut carts_gone) = (0, 0);
@@ -642,6 +646,7 @@ impl Game<'_> {
             }) = hit
             {
                 let amount = damage(dist, exposure);
+                let entity = with_entity!(self, handle, e => e.id());
                 match handle {
                     EntityHandle::Mob(i) => {
                         let hurtable = teams_allow(self, self.mob_team(self.mobs[i].id));
@@ -663,49 +668,54 @@ impl Game<'_> {
                         // `EXPLOSION_KNOCKBACK_RESISTANCE`, not `KNOCKBACK_RESISTANCE`:
                         // its base is 0 for every mob type, so iron golems and
                         // ravagers are pushed.
-                        hurt_and_push_mob(
-                            m,
-                            hurtable,
-                            cause,
-                            (amount, source),
-                            [push.x, push.y, push.z],
-                        );
+                        hurt_mob(m, hurtable, cause, (amount, source));
                     }
                     // 5 health, destroyed by the explosion damage (nether stars resist).
                     EntityHandle::Item(i) => {
                         destroyed = &*self.dropped[i].stack.item != "minecraft:nether_star"
                             && amount >= 5.0;
-                        if !destroyed {
-                            self.dropped[i].push_from_explosion(push);
-                        }
                     }
                     // `ExperienceOrb.hurtServer` takes the damage off their 5 health.
                     EntityHandle::Orb(i) => {
                         destroyed = self.orbs[i].hurt(amount);
-                        if !destroyed {
-                            self.orbs[i].push_from_explosion(push);
-                        }
                     }
                     // `VehicleEntity.hurtServer` (explosions ignite TNT carts);
                     // a destroyed one is gone before the push.
                     EntityHandle::Cart(i) => {
-                        let (id, len) = (self.carts[i].id, self.carts.len());
+                        let len = self.carts.len();
                         self.hurt_cart(i, amount, false, true);
                         carts_gone += len - self.carts.len();
-                        if let Some(c) = self.carts.iter_mut().find(|c| c.id == id) {
-                            c.push_from_explosion(push);
-                        }
                     }
                     // `VehicleEntity.hurtServer`: damage * 10, broken past 40.
                     EntityHandle::Boat(i) => {
-                        let (id, len) = (self.boats[i].id, self.boats.len());
+                        let len = self.boats.len();
                         self.hurt_boat(i, amount, false);
                         boats_gone += len - self.boats.len();
-                        if let Some(b) = self.boats.iter_mut().find(|b| b.id == id) {
+                    }
+                    // `hurtServer` does nothing to the rest.
+                    _ => {}
+                }
+                let mut velocity = [push.x, push.y, push.z];
+                self.native_explosion_knockback(
+                    self.dim.id(),
+                    center,
+                    blocks,
+                    Some(entity),
+                    &mut velocity,
+                );
+                let push = Vec3::new(velocity[0], velocity[1], velocity[2]);
+                match handle {
+                    EntityHandle::Item(_) | EntityHandle::Orb(_) if destroyed => {}
+                    EntityHandle::Cart(_) => {
+                        if let Some(c) = self.carts.iter_mut().find(|c| c.id == entity) {
+                            c.push_from_explosion(push);
+                        }
+                    }
+                    EntityHandle::Boat(_) => {
+                        if let Some(b) = self.boats.iter_mut().find(|b| b.id == entity) {
                             b.push_from_explosion(push);
                         }
                     }
-                    // `hurtServer` does nothing to the rest; `pushFromExplosion` moves them.
                     other => with_entity_mut!(self, other, e => e.push_from_explosion(push)),
                 }
             }
@@ -723,8 +733,7 @@ impl Game<'_> {
         }
         self.dropped.drain(items_kept..items_len);
         self.orbs.drain(orbs_kept..orbs_len);
-        self.native_items_left_since(&items_before);
-        self.native_orbs_left_since(&orbs_before);
+        self.native_leaves_flush();
         // Frames, paintings, cushions and armour stands last: vanilla lists
         // the entities in reach before hurting any, so the items they drop
         // here are neither destroyed nor pushed by the same blast.
@@ -856,6 +865,9 @@ impl Game<'_> {
         damage_type: &str,
         resists: Option<([i32; 3], f32)>,
     ) -> Result<()> {
+        if self.serving.is_some() || self.options.dedicated.is_some() {
+            self.native_explosion_prime(center, radius);
+        }
         if let Some(p) = &self.player {
             let d = [
                 p.position.x - center[0],
@@ -871,7 +883,8 @@ impl Game<'_> {
         let mut targets = self.exploded_positions(center, radius, resists);
         let dimension = self.dim.id();
         self.native_explosion_detonate(dimension, center, &mut targets);
-        let pushed = self.explosion_hurt_entities(center, radius, damage_type, interaction);
+        let pushed =
+            self.explosion_hurt_entities(center, radius, damage_type, interaction, &targets);
         if interaction != BlockInteraction::Keep {
             // Util.shuffle(list, level.random)
             for i in (2..=targets.len()).rev() {
@@ -1161,7 +1174,7 @@ mod tests {
     fn a_mob_that_refuses_the_hit_is_still_pushed() {
         use horizon_client::mobs::{Damage, DamageKind, Mob, Species};
         let hit = (10.0, Damage::of(DamageKind::Explosion));
-        let push = [0.5, 0.25, -0.5];
+        let push = Vec3::new(0.5, 0.25, -0.5);
         let mob = |id, species| {
             let mut kind = (*zombie_type()).clone();
             kind.species = species;
@@ -1174,26 +1187,30 @@ mod tests {
         // An ordinary mob is hurt and pushed.
         let mut m = mob(1, Species::Zombie);
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, None, hit, push);
+        hurt_mob(&mut m, true, None, hit);
+        m.push_from_explosion(push);
         assert!(m.health < health);
         pushed(&m);
         // An invulnerable one refuses the hit, and is pushed all the same.
         let mut m = mob(2, Species::Zombie);
         m.invulnerable_flag = true;
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, None, hit, push);
+        hurt_mob(&mut m, true, None, hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A team mate of the exploding mob is not hurt, but pushed.
         let mut m = mob(3, Species::Zombie);
         let health = m.health;
-        hurt_and_push_mob(&mut m, false, None, hit, push);
+        hurt_mob(&mut m, false, None, hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
         // A wither shrugs off a blast an undead caused, and is pushed.
         let mut m = mob(4, Species::Wither);
         let health = m.health;
-        hurt_and_push_mob(&mut m, true, Some(Species::Skeleton), hit, push);
+        hurt_mob(&mut m, true, Some(Species::Skeleton), hit);
+        m.push_from_explosion(push);
         assert_eq!(m.health, health);
         pushed(&m);
     }

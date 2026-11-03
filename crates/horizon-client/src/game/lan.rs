@@ -8,7 +8,7 @@ use horizon_client::{
     lan::{
         self, Lan, NetConfig,
         chunks::ChunkEncoder,
-        data::SyncData,
+        data::{BIOME_REGISTRY, SyncData},
         entity::{EntityState, States},
         hub::{HostEvent, Hub, HubConfig, TickCtx},
         playerdata,
@@ -189,6 +189,9 @@ pub(super) struct LanHost {
     /// The entities the guests track, described again every tick
     /// (`lan_entities`) over last tick's states.
     pub(super) states: lan::entity::States,
+    /// The entity id counter when this tick's states were taken for guests
+    /// (`lan_note_joined`), None when no guest tracked them.
+    pub(super) states_next_entity: Option<u32>,
 }
 
 impl Game<'_> {
@@ -1250,12 +1253,20 @@ impl Game<'_> {
         } else {
             self.level.enabled_features.clone()
         };
-        if sync.features.iter().any(|f| !features.contains(f))
+        // A world whose packs change biomes sends its own biome registry.
+        let packed = self.world_biomes.clone().filter(|b| b.has_packs());
+        if packed.is_some()
+            || sync.features.iter().any(|f| !features.contains(f))
             || features.iter().any(|f| !sync.features.contains(f))
         {
-            // The shared resource preload has vanilla flags. Feature flags belong
-            // to this world, not to the cached resources or the next world opened.
-            let mut world_sync = SyncData::load(&self.options.resources, &self.pack_files())?;
+            // The shared resource preload has vanilla flags and vanilla biomes.
+            // Feature flags and biomes belong to this world, not to the cached
+            // resources or the next world opened.
+            let mut world_sync = SyncData::load_with(
+                &self.options.resources,
+                &self.pack_files(),
+                packed.as_deref(),
+            )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
         }
@@ -1271,7 +1282,7 @@ impl Game<'_> {
         let registry: Vec<String> = sync
             .dynamic
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|v| v.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_default();
         let mut encoder = ChunkEncoder::with_signs(
@@ -1301,6 +1312,7 @@ impl Game<'_> {
             .then(|| horizon_client::lod_net::Service::new(net.lod_distance, biome_names.clone()));
         let lan = Lan::start_with(sync.clone(), net)?;
         let mut hub = Hub::new(lan, sync, encoder, config);
+        hub.sync_attachments = !crate::mod_api::mods().is_empty();
         hub.flat_world = self.world_flat;
         hub.debug_world = self.world_debug;
         let port = hub.lan.port;
@@ -1325,6 +1337,7 @@ impl Game<'_> {
             native_commands: None,
             sleep_ignored: Default::default(),
             states: Default::default(),
+            states_next_entity: None,
         });
         self.audio.capture = Some(Vec::new());
         Ok(())
@@ -1690,15 +1703,17 @@ impl Game<'_> {
 
     /// The entities guests track: mobs, items and the rest (game/lan_entities.rs).
     /// `mob_players` is the guest each mob sees as its player (game/lan_mobs.rs).
+    /// Only the entities whose id is above `after` (0: all of them).
     fn lan_entities(
         &mut self,
         mob_players: &horizon_client::fast_hash::FxHashMap<u32, u32>,
         hub: &mut Hub,
         out: &mut States,
         drain_minecart_steps: bool,
+        after: u32,
     ) {
         out.clear();
-        for m in self.mobs.iter().filter(|m| !m.removed) {
+        for m in self.mobs.iter().filter(|m| !m.removed && m.id > after) {
             // The lead's holder: the player the mob sees, another mob or a
             // fence knot (game/lan_entities.rs).
             let player_entity = mob_players
@@ -1732,7 +1747,7 @@ impl Game<'_> {
             self.mob_attributes(m, &mut e.attributes);
             e.leash = leash;
         }
-        for d in &self.dropped {
+        for d in self.dropped.iter().filter(|d| d.id > after) {
             let stack = hub.stack(&Some(d.stack.clone()));
             let e = out.add(d.id as i32, entity_uuid(d.id), "minecraft:item");
             e.position = [d.position.x, d.position.y, d.position.z];
@@ -1751,7 +1766,7 @@ impl Game<'_> {
             }
             e.meta.push((8, serializer::ITEM_STACK, Value::Item(stack)));
         }
-        for o in &self.orbs {
+        for o in self.orbs.iter().filter(|o| o.id > after) {
             let e = out.add(o.id as i32, entity_uuid(o.id), "minecraft:experience_orb");
             e.position = [o.position.x, o.position.y, o.position.z];
             e.on_ground = o.on_ground;
@@ -1760,7 +1775,7 @@ impl Game<'_> {
             e.meta
                 .push((8, serializer::INT, Value::Int(o.value as i32)));
         }
-        self.lan_object_states(hub, out, drain_minecart_steps);
+        self.lan_object_states(hub, out, drain_minecart_steps, after);
     }
 
     /// Apply gameplay events produced while the hub handles guest packets.
@@ -1939,6 +1954,47 @@ impl Game<'_> {
                 HostEvent::Flight { conn, flying } => {
                     self.lan_flight_toggled(&mut host, conn, flying);
                 }
+                HostEvent::Sneak { conn, sneaking } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_toggle_sneak(uuid, &name, sneaking);
+                        });
+                    }
+                }
+                HostEvent::Kicked {
+                    conn,
+                    player,
+                    name,
+                    reason,
+                } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    // The same poll can have removed the guest (their `Left`): the mods hear the
+                    // kick anyway, without the guest's state swapped in.
+                    if host.hub.guest(conn).is_some() {
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_kicked(player, &name, &reason);
+                        });
+                    } else {
+                        self.native_player_kicked(player, &name, &reason);
+                    }
+                }
+                HostEvent::Input { conn, flags } => {
+                    if horizon_client::mod_api::mods().is_empty() {
+                        continue;
+                    }
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.as_guest(&mut host, conn, |game| {
+                            game.native_player_input(uuid, &name, flags);
+                        });
+                    }
+                }
                 HostEvent::MainHandChanged(conn, left) => {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());
@@ -1949,6 +2005,25 @@ impl Game<'_> {
                     if let Some(g) = host.hub.guest(conn) {
                         let (uuid, name) = (g.uuid, g.name.clone());
                         self.native_player_locale_change(uuid, &name, &locale);
+                    }
+                }
+                HostEvent::PlayerLoaded(conn) => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_client_loaded_world(uuid, &name);
+                    }
+                }
+                HostEvent::RecipeBookSettings {
+                    conn,
+                    book,
+                    open,
+                    filtering,
+                } => {
+                    if let Some(g) = host.hub.guest(conn) {
+                        let (uuid, name) = (g.uuid, g.name.clone());
+                        self.native_player_recipe_book_settings_change(
+                            uuid, &name, book, open, filtering,
+                        );
                     }
                 }
                 HostEvent::Packet(conn, packet) => {
@@ -2002,6 +2077,7 @@ impl Game<'_> {
                 self.ui.rules.bool("player_movement_check"),
                 self.ui.rules.bool("elytra_movement_check"),
             );
+            host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
             let pass = self.level_pass;
             let mut events = if pass.first {
                 host.hub.poll(&mut ctx)
@@ -2042,6 +2118,72 @@ impl Game<'_> {
         host.states = entities;
         self.level_pass.packets_drained = true;
         drop(holding);
+        self.lan = Some(host);
+    }
+
+    /// The entity id counter, once the entities Horizon keeps without one
+    /// have theirs, while guests track the level (None otherwise).
+    fn lan_ids_so_far(&mut self) -> Option<i32> {
+        if self.lan.as_ref().is_none_or(|h| h.hub.guests.is_empty()) {
+            return None;
+        }
+        self.lan_assign_ids();
+        Some(self.next_entity as i32)
+    }
+
+    /// ServerLevel.tick's ChunkMap.tick point, after the block ticks and
+    /// before the entities': what joined the level up to here (a falling
+    /// block, a dispensed arrow, the last tick's late joins) is paired and
+    /// first updated in this tick's pass (`Entities::synced`).
+    pub(super) fn lan_mark_synced(&mut self) {
+        if let Some(next) = self.lan_ids_so_far()
+            && let Some(host) = self.lan.as_mut()
+        {
+            host.hub.synced = vec![(i32::MIN, next)];
+        }
+    }
+
+    /// The start of a phase vanilla runs before ChunkMap.tick and Horizon
+    /// among the entities' ticks (ServerChunkCache.tickChunks' spawning and
+    /// thunder, the raids): the counter to give `lan_synced_since`.
+    pub(super) fn lan_synced_from(&mut self) -> Option<i32> {
+        self.lan_ids_so_far()
+    }
+
+    /// The end of such a phase: what joined during it is first updated in
+    /// this tick's pass too.
+    pub(super) fn lan_synced_since(&mut self, from: Option<i32>) {
+        if let Some(from) = from
+            && let Some(next) = self.lan_ids_so_far()
+            && next > from
+            && let Some(host) = self.lan.as_mut()
+        {
+            host.hub.synced.push((from, next));
+        }
+    }
+
+    /// The end of the level's tick: the entities added since its states were
+    /// taken for the guests (a falling block's drop, a spawner's mob, the
+    /// host's snowball) are noted as they joined, for the next tick's
+    /// tracking to pair them from (`Hub::note_joined`). Only they are
+    /// described (their ids are above the counter the states were taken at),
+    /// and nothing when the counter has not moved or no guest is in the level.
+    pub(super) fn lan_note_joined(&mut self) {
+        let Some(mut host) = self.lan.take() else {
+            return;
+        };
+        if let Some(next) = host.states_next_entity.take()
+            && host.hub.guests.iter().any(|g| host.hub.here(g))
+        {
+            self.lan_assign_ids();
+            if self.next_entity != next {
+                let mut states = States::default();
+                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, false, next);
+                self.lan_hook_states(&host.play, &host.hub, &mut states);
+                self.lan_entity_uuids(&mut states);
+                host.hub.note_joined(states.as_slice());
+            }
+        }
         self.lan = Some(host);
     }
 
@@ -2102,10 +2244,12 @@ impl Game<'_> {
                     .filter_map(|g| Some((g.vehicle?, g.entity_id)))
                     .collect();
                 self.lan_riding(&guests, &mut host.hub.riding);
-                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true);
+                self.lan_entities(&host.mob_players, &mut host.hub, &mut states, true, 0);
                 self.lan_hook_states(&host.play, &host.hub, &mut states);
                 self.lan_entity_uuids(&mut states);
+                host.states_next_entity = Some(self.next_entity);
             } else {
+                host.states_next_entity = None;
                 states.clear();
                 // Nobody can receive past movement. A returning viewer pairs
                 // from the cart's current position/rotation, as AddEntity does.
@@ -2184,6 +2328,7 @@ impl Game<'_> {
                 // (`tick_server`): the network is read once, before the first.
                 // Player packets may already have been drained before
                 // scheduled block ticks (`tick_lan_packets`).
+                host.hub.mods_loaded = !horizon_client::mod_api::mods().is_empty();
                 let pass = self.level_pass;
                 let mut events = if pass.first && !pass.packets_drained {
                     host.hub.poll(&mut ctx)
@@ -2273,6 +2418,7 @@ impl Game<'_> {
         self.lan_sync_border(&mut host);
         host.hub.anticheat_ping();
         drop(holding);
+        self.flush_attachment_sync(&mut host);
         self.flush_native_net(&mut host);
         self.flush_far_terrain(&mut host);
         lan::flush_all(host.hub.guests.iter().map(|g| &g.sender));
@@ -2347,7 +2493,7 @@ impl Game<'_> {
                 return;
             }
             // A dedicated server has no host player.
-            self.lan_entities(&host.mob_players, &mut host.hub, &mut theirs, false);
+            self.lan_entities(&host.mob_players, &mut host.hub, &mut theirs, false, 0);
             self.lan_hook_states(&host.play, &host.hub, &mut theirs);
             self.lan_entity_uuids(&mut theirs);
             theirs.as_slice()

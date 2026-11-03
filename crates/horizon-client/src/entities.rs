@@ -859,9 +859,11 @@ impl ExperienceOrb {
         server: bool,
         next_float: &mut dyn FnMut() -> f32,
         border: Option<&BorderGeometry>,
+        fluids: &crate::motion::FluidResources,
     ) -> bool {
         self.ticks += 1;
         self.previous = self.position;
+        self.update_fluids(world, fluids);
         let block = world.block(
             self.position.x.floor() as i32,
             self.position.y.floor() as i32,
@@ -1293,6 +1295,20 @@ pub struct ArmorStand {
     pub support: horizon_world::ground_support::GroundState,
 }
 impl ArmorStand {
+    /// `NameTagItem.interactLivingEntity`: a custom name handles the use;
+    /// only a living target changes. Stack consumption belongs to the caller.
+    pub fn name_with_tag(&mut self, stack: &ItemStack) -> bool {
+        if &*stack.item != "minecraft:name_tag" {
+            return false;
+        }
+        let Some(name) = stack.data().and_then(|data| data.custom_name.as_ref()) else {
+            return false;
+        };
+        if self.health > 0.0 {
+            self.custom_name = Some(crate::component::name_text(name));
+        }
+        true
+    }
     pub const SLOTS: [&'static str; 6] = ["mainhand", "offhand", "feet", "legs", "chest", "head"];
     /// The `Pose` compound's keys.
     pub const POSE_KEYS: [&'static str; 6] =
@@ -1483,6 +1499,7 @@ impl ArmorStand {
         facts: &BlockFacts,
         in_water: bool,
         push: &mut dyn FnMut(Aabb, &mut Vec3),
+        border: Option<&BorderGeometry>,
     ) {
         self.previous = self.position;
         if self.marker {
@@ -1519,7 +1536,20 @@ impl ArmorStand {
             1.0
         };
         let mut velocity = wanted;
-        if let Ok(moved) = scene.resolve(self.bounds(), wanted, 0.0, self.on_ground) {
+        // Entity.collide: the world border's walls stop the stand too.
+        let moved = SceneCollisions {
+            world: scene.world,
+            binding: scene.binding,
+            subject: scene.subject,
+        }
+        .resolve_in_border(
+            self.bounds(),
+            wanted,
+            0.0,
+            self.on_ground,
+            border.map(|b| (b, [self.position.x, self.position.z])),
+        );
+        if let Ok(moved) = moved {
             self.position = Vec3::new(
                 self.position.x + moved.x,
                 self.position.y + moved.y,
@@ -2012,7 +2042,16 @@ mod world_border_tests {
                 ticks: 0,
                 health: 5,
             };
-            orb.tick(&world, &facts, &collision, None, true, &mut || 0.0, border);
+            orb.tick(
+                &world,
+                &facts,
+                &collision,
+                None,
+                true,
+                &mut || 0.0,
+                border,
+                &fluids,
+            );
             for (what, east) in [
                 ("item", item.bounds().max_position().x),
                 ("orb", orb.bounds().max_position().x),
@@ -2681,6 +2720,30 @@ mod armor_stand_motion_tests {
     use super::*;
 
     #[test]
+    fn a_name_tag_names_a_live_stand_and_unnamed_tags_pass() {
+        let mut stand = ArmorStand::new(1, Vec3::ZERO, 0.0);
+        let mut tag = ItemStack::new("minecraft:name_tag", 4);
+        assert!(!stand.name_with_tag(&tag));
+        assert!(stand.custom_name.is_none());
+        let name = horizon_world::nbt::Tag::compound([
+            ("text", horizon_world::nbt::Tag::String("Bob".into())),
+            ("color", horizon_world::nbt::Tag::String("gold".into())),
+        ]);
+        tag.data_mut().custom_name = Some(name.clone());
+        assert!(stand.name_with_tag(&tag));
+        assert_eq!(stand.custom_name, Some(crate::component::name_text(&name)));
+        assert_eq!(stand.health, 20.0);
+        assert!(!stand.name_with_tag(&ItemStack::new("minecraft:name_tag", 3)));
+        stand.health = 0.0;
+        tag.data_mut().custom_name = Some(horizon_world::nbt::Tag::String("Other".into()));
+        assert!(
+            stand.name_with_tag(&tag),
+            "a dead target still handles the named tag"
+        );
+        assert_eq!(stand.custom_name, Some(crate::component::name_text(&name)));
+    }
+
+    #[test]
     fn a_new_stand_starts_with_matching_previous() {
         let at = Vec3::new(1.0, 2.0, 3.0);
         let stand = ArmorStand::new(1, at, 90.0);
@@ -2699,7 +2762,53 @@ mod armor_stand_motion_tests {
             binding: collision,
             subject: None,
         };
-        stand.tick(&mut scene, facts, false, &mut |_, _| {});
+        stand.tick(&mut scene, facts, false, &mut |_, _| {}, None);
+    }
+
+    /// `Entity.collectColliders` (#7080): the world border's wall stops an
+    /// armor stand as it stops the player. A border of size 10 around
+    /// (20, 20) has its east wall at x = 25; the stand starts at x = 24 on the
+    /// test scene's flat ground, moving 1.5 east.
+    #[test]
+    fn the_world_border_stops_an_armor_stand() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../.local/horizon-client")
+            .join(horizon_core::VANILLA_VERSION);
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let render = assets.reload(&root).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let world = World::test_scene(&assets, &render, 3).unwrap();
+        let border = BorderGeometry::new([20.0, 20.0], 10.0, 29_999_984).unwrap();
+        for bordered in [false, true] {
+            let mut stand = ArmorStand::new(1, Vec3::new(24.0, 4.0, 20.5), 0.0);
+            stand.on_ground = true;
+            stand.velocity = Vec3::new(1.5, 0.0, 0.0);
+            let mut scene = SceneCollisions {
+                world: &world,
+                binding: &collision,
+                subject: None,
+            };
+            stand.tick(
+                &mut scene,
+                &facts,
+                false,
+                &mut |_, _| {},
+                bordered.then_some(&border),
+            );
+            let east = stand.bounds().max_position().x;
+            if bordered {
+                assert!(
+                    (east - 25.0).abs() < 1.0e-7,
+                    "stops on the wall, got {east}"
+                );
+            } else {
+                assert!(east > 25.0, "no border: goes on, got {east}");
+            }
+        }
     }
 
     #[test]

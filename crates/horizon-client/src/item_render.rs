@@ -343,7 +343,7 @@ impl ItemRenderState {
                     rect: [r.u0, r.v0, r.u1, r.v1],
                     light,
                     overlay: u32::from(tier) << 16,
-                    item: 1,
+                    mode: SkinJob::ITEM,
                     ..Default::default()
                 });
                 frame.parts.push(SkinPart::item(m, colors));
@@ -646,13 +646,17 @@ fn load_definitions(root: &Path) -> BTreeMap<String, ClientItem> {
         };
         let namespace = ns.file_name().to_string_lossy().into_owned();
         for file in &folder.files {
-            if let Some(item) = file
-                .bytes()
-                .ok()
-                .and_then(|b| std::str::from_utf8(b).ok())
-                .and_then(|t| ClientItem::from_json(t).ok())
-            {
-                out.insert(format!("{namespace}:{}", file.name), item);
+            let Some(text) = file.bytes().ok().and_then(|b| std::str::from_utf8(b).ok()) else {
+                continue;
+            };
+            match ClientItem::from_json(text) {
+                Ok(item) => {
+                    out.insert(format!("{namespace}:{}", file.name), item);
+                }
+                Err(e) => log::warn!(
+                    "Horizon: item definition {namespace}:{} not loaded: {e}",
+                    file.name
+                ),
             }
         }
     }
@@ -1342,11 +1346,7 @@ mod tests {
                 };
                 state.submit(&r, &sprites, &NoHost, pose, &mut sink);
                 frame.clear_draws();
-                let mut skin = Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = Skin::new(&mut models, &mut frame);
                 if !state.submit_skinned(&r, &sprites, pose, (0x50_a0, lights, 1), &mut skin) {
                     assert!(frame.jobs.is_empty(), "{id}: left to the CPU after drawing");
                     left += 1;
@@ -1388,11 +1388,7 @@ mod tests {
             "torch",
         ] {
             frame.clear_draws();
-            let mut skin = Skin {
-                models: &mut models,
-                frame: &mut frame,
-                bounds: None,
-            };
+            let mut skin = Skin::new(&mut models, &mut frame);
             let state = resolve(&format!("minecraft:{id}"));
             assert!(
                 state.submit_skinned(&r, &sprites, pose, (0, None, 0), &mut skin),

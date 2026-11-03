@@ -352,7 +352,7 @@ impl Game<'_> {
     /// for a player who is off (who joins hidden), until a mod sets it again
     /// or the server stops. Works anywhere on a server, inside a player's
     /// hook too; false on a client and in a world nobody else can join.
-    /// API @API:hide_player@.
+    /// API 314.
     pub(super) fn native_hide_player(&mut self, uuid: u128, level: Option<u8>) -> bool {
         let Some(host) = &mut self.lan else {
             return false;
@@ -420,7 +420,7 @@ impl Game<'_> {
     /// `[discord] events` lists `announce`: `name` and `uuid` say who it is
     /// about (empty and 0 for no one), `message` is the line (`§` codes colour it).
     /// Only on a dedicated server; false elsewhere and for an empty message.
-    /// API @API:server_event@.
+    /// API 163.
     pub(super) fn native_server_event(&self, name: &str, uuid: u128, message: &str) -> bool {
         if self.options.dedicated.is_none() || message.trim().is_empty() {
             return false;

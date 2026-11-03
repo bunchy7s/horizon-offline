@@ -1,0 +1,18 @@
+{
+  "hooks": [
+    {
+      "name": "recipe_book_categories",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_recipe_book_categories",
+      "mod_api": { "contract": "listen" }
+    }
+  ],
+  "helpers": [
+    {
+      "name": "recipe_book_category",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_recipe_book_category",
+      "mod_api": {}
+    }
+  ],
+  "rust_summary": "validated category declarations for custom recipe types (`native_recipe_book_categories`, `native_recipe_book_category`); display and unlock integration follows separately.",
+  "doc_summary": "Declare a category id, custom recipe type and icon item with `native_recipe_book_categories`; read the validated mapping with `native_recipe_book_category`. This first slice does not add book tabs, displays or unlock synchronization. Bundles need hooks version @API:recipe_book_categories@."
+}

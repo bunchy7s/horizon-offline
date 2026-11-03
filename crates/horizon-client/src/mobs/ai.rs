@@ -12,7 +12,7 @@ use super::{
     undead,
 };
 use crate::blocks::Fluid;
-use crate::breathing::{Breath, apply, breathe};
+use crate::breathing::{Breath, breathe, drown};
 use horizon_core::{
     geometry::Vec3,
     random::{LegacyRandom, RandomSource},
@@ -636,6 +636,7 @@ pub fn tick(
         if m.species() == Species::Endermite {
             endermite_lifetime(m);
         }
+        ageable_step(m, w, level_random, events);
         // AbstractHorse.tick runs the stand counter down with or without AI.
         if super::equine::is_equine(m.species())
             && !super::camel::is_camel(m.species())
@@ -1040,14 +1041,14 @@ fn base_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
                 refill: if drowns { 0 } else { 4 },
             };
             let breath = breathe(m.id, &m.kind.id, vanilla);
-            let (air, drowned) = apply(m.air, 300, breath);
-            m.air = air;
-            if drowned {
+            if let Some(drowning) = drown(m.id, &m.kind.id, &mut m.air, breath, true) {
                 events.push(MobEvent::Drown {
                     mob: m.id,
                     at: [m.position.x, m.position.y, m.position.z],
                 });
-                m.damage(2.0, Damage::of(DamageKind::Drown));
+                if let Some(damage) = drowning.damage {
+                    m.damage(damage, Damage::of(DamageKind::Drown));
+                }
             }
         }
 
@@ -1263,6 +1264,68 @@ fn play_ambient(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 fn turtle_ambient_silent(m: &Mob) -> bool {
     m.fluids.in_water || !m.on_ground || m.is_baby()
 }
+/// `AgeableMob.aiStep` runs even when `Mob.serverAiStep` is disabled.
+fn ageable_step(
+    m: &mut Mob,
+    w: &MobWorld,
+    level_random: &mut LegacyRandom,
+    events: &mut Vec<MobEvent>,
+) {
+    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
+    // players are sent them), then the age.
+    if m.extra.forced_age_timer > 0 {
+        if m.extra.forced_age_timer % 4 == 0 {
+            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
+            let r = &mut m.random;
+            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
+            let y = m.position.y + h * r.next_double() + 0.5;
+            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
+            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
+            events.push(MobEvent::LevelParticles {
+                kind: "happy_villager",
+                at: [x, y, z],
+                spread: [0.0; 3],
+                speed: 0.0,
+                count: 1,
+            });
+        }
+        m.extra.forced_age_timer -= 1;
+    }
+    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
+    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
+    // a baby grows unless an age lock holds it; a breeding pause counts down.
+    if m.alive() && super::finalize::ageable(m.species()) {
+        if can_age_up(m) {
+            let (bw, bh, _) = m.dims();
+            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
+            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
+            // sulfur cube's size), which the age write used to skip.
+            let next = m.extra.age + 1;
+            super::finalize::set_age(m, next);
+            // setAge at the age boundary: refreshDimensions.
+            if m.extra.age >= 0 {
+                m.fudge_position_after_size_change(w, bw, bh);
+                if m.species() == Species::Villager {
+                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
+                }
+                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
+                if m.species() == Species::Turtle {
+                    events.push(MobEvent::GiftLoot {
+                        mob: m.id,
+                        table: "minecraft:gameplay/turtle_grow",
+                        at: [m.position.x, m.position.y, m.position.z],
+                    });
+                }
+            }
+        } else if m.extra.age > 0 {
+            m.extra.age -= 1;
+        }
+    }
+    if super::finalize::ageable(m.species()) {
+        make_age_locked_particle(m, events);
+    }
+}
+
 /// LivingEntity.aiStep (and Mob/AgeableMob/Animal additions).
 fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Parrot {
@@ -1337,59 +1400,7 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &
     if m.kind.flags.climber {
         m.climbing = m.horizontal_collision;
     }
-    // AgeableMob.aiStep: a forced age-up's particles (`sendParticles`, so the
-    // players are sent them), then the age.
-    if m.extra.forced_age_timer > 0 {
-        if m.extra.forced_age_timer % 4 == 0 {
-            let (w, h) = (f64::from(m.width()), f64::from(m.height()));
-            let r = &mut m.random;
-            let x = m.position.x + w * (2.0 * r.next_double() - 1.0);
-            let y = m.position.y + h * r.next_double() + 0.5;
-            let z = m.position.z + w * (2.0 * r.next_double() - 1.0);
-            // sendParticles(HAPPY_VILLAGER, x, y, z, 1, 0, 0, 0, 0): exactly there, at rest.
-            events.push(MobEvent::LevelParticles {
-                kind: "happy_villager",
-                at: [x, y, z],
-                spread: [0.0; 3],
-                speed: 0.0,
-                count: 1,
-            });
-        }
-        m.extra.forced_age_timer -= 1;
-    }
-    // AgeableMob.aiStep: an age counts only for its subclasses (a tadpole
-    // counts its own age up, a zombie's baby age never moves). `canAgeUp`:
-    // a baby grows unless an age lock holds it; a breeding pause counts down.
-    if m.alive() && super::finalize::ageable(m.species()) {
-        if can_age_up(m) {
-            let (bw, bh, _) = m.dims();
-            // AgeableMob.setAge(getAge() + 1): the crossing is where a species'
-            // ageBoundaryReached runs (a goat's and a hoglin's attack damage, a
-            // sulfur cube's size), which the age write used to skip.
-            let next = m.extra.age + 1;
-            super::finalize::set_age(m, next);
-            // setAge at the age boundary: refreshDimensions.
-            if m.extra.age >= 0 {
-                m.fudge_position_after_size_change(w, bw, bh);
-                if m.species() == Species::Villager {
-                    super::villager_brain::age_boundary_reached(m, w, level_random, events);
-                }
-                // Turtle.ageBoundaryReached: a grown turtle drops a scute.
-                if m.species() == Species::Turtle {
-                    events.push(MobEvent::GiftLoot {
-                        mob: m.id,
-                        table: "minecraft:gameplay/turtle_grow",
-                        at: [m.position.x, m.position.y, m.position.z],
-                    });
-                }
-            }
-        } else if m.extra.age > 0 {
-            m.extra.age -= 1;
-        }
-    }
-    if super::finalize::ageable(m.species()) {
-        make_age_locked_particle(m, events);
-    }
+    ageable_step(m, w, level_random, events);
     if m.alive() {
         // Animal.aiStep
         if m.extra.age != 0 {
@@ -2335,9 +2346,12 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
     let from = [m.position.x, m.position.y, m.position.z];
     let source = Damage::mob(m.id, from);
     let first_event = cx.events.len();
+    // `CaveSpider`, `Husk` and `WitherSkeleton.doHurtTarget` all test
+    // `target instanceof LivingEntity`, so the effect reaches a mob the hit
+    // lands on and not only the player.
     match m.species() {
         // CaveSpider.doHurtTarget: poison for 7 s on normal, 15 s on hard.
-        Species::CaveSpider if who == Who::Player && cx.w.difficulty.base >= 2 => {
+        Species::CaveSpider if cx.w.difficulty.base >= 2 => {
             cx.events.push(MobEvent::EffectPlayer {
                 effect: "minecraft:poison",
                 ticks: if cx.w.difficulty.base == 2 { 7 } else { 15 } * 20,
@@ -2346,7 +2360,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
         }
         // Husk.doHurtTarget: hunger for 140 ticks per whole point of the
         // local difficulty, only with an empty main hand.
-        Species::Husk if who == Who::Player && m.extra.main_hand.is_none() => {
+        Species::Husk if m.extra.main_hand.is_none() => {
             let ticks = 140 * cx.w.difficulty.effective as i32;
             if ticks > 0 {
                 cx.events.push(MobEvent::EffectPlayer {
@@ -2356,7 +2370,7 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
                 })
             }
         }
-        Species::WitherSkeleton if who == Who::Player => cx.events.push(MobEvent::EffectPlayer {
+        Species::WitherSkeleton => cx.events.push(MobEvent::EffectPlayer {
             effect: "minecraft:wither",
             ticks: 200,
             amplifier: 0,
@@ -2404,33 +2418,45 @@ pub fn do_hurt_target(m: &mut Mob, who: Who, cx: &mut Cx) {
             seconds: 2,
         });
     }
+    // The effect picked above goes with the hit: it applies only when the
+    // target takes damage (a shield-blocked hit gives none), for a mob as for
+    // the player, since those `doHurtTarget`s take any `LivingEntity`.
+    let effect = cx.events[first_event..]
+        .iter()
+        .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
+        .and_then(|k| match cx.events.remove(first_event + k) {
+            MobEvent::EffectPlayer {
+                effect,
+                ticks,
+                amplifier,
+            } => Some((effect, ticks, amplifier)),
+            _ => None,
+        });
     match who {
-        // The effect picked above goes with the hit: it applies only when
-        // the player takes damage (a shield-blocked hit gives none).
-        Who::Player => {
-            let effect = cx.events[first_event..]
-                .iter()
-                .position(|e| matches!(e, MobEvent::EffectPlayer { .. }))
-                .map(|k| cx.events.remove(first_event + k));
-            cx.events.push(match effect {
-                Some(MobEvent::EffectPlayer {
-                    effect,
-                    ticks,
-                    amplifier,
-                }) => MobEvent::AttackPlayerWithEffect {
-                    amount,
-                    from,
-                    effect,
-                    ticks,
-                    amplifier,
-                },
-                _ => MobEvent::AttackPlayer(amount, from),
-            });
-        }
-        Who::Mob(id) => cx.events.push(MobEvent::AttackMob {
-            target: id,
-            amount,
-            source,
+        Who::Player => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackPlayerWithEffect {
+                amount,
+                from,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackPlayer(amount, from),
+        }),
+        Who::Mob(id) => cx.events.push(match effect {
+            Some((effect, ticks, amplifier)) => MobEvent::AttackMobWithEffect {
+                target: id,
+                amount,
+                source,
+                effect,
+                ticks,
+                amplifier,
+            },
+            None => MobEvent::AttackMob {
+                target: id,
+                amount,
+                source,
+            },
         }),
     }
     // Mob.doHurtTarget ends with playAttackSound once the hit landed.
@@ -2597,7 +2623,7 @@ fn tick_effects(m: &mut Mob, mods: Option<&dyn super::ModEffectTicks>) {
             "minecraft:regeneration"
                 if count % interval(50) == 0 && !m.kind.flags.undead && m.alive() =>
             {
-                m.health = (m.health + 1.0).min(m.attrs.max_health);
+                m.heal(1.0);
             }
             id if horizon_client_core::potions::is_mod_effect(id) => {
                 // tickServer: one with no ticks left goes unasked.
@@ -2964,6 +2990,126 @@ mod poison_effect_tests {
         assert_eq!(pig.effective_gravity(), 0.01);
         pig.velocity.y = 0.5;
         assert_eq!(pig.effective_gravity(), full);
+    }
+}
+
+#[cfg(test)]
+mod hit_effect_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// The effects of a cave spider's bite, a bare-handed husk's blow and a
+    /// wither skeleton's hit go to the `LivingEntity` the hit landed on:
+    /// `doHurtTarget` tests `target instanceof LivingEntity`, not `Player`.
+    /// Biting a mob carries the effect with the hit — poison for 140 ticks on
+    /// normal, hunger for 140 (effective difficulty 1.5), wither for 200 —
+    /// where the mob is hit 2. Without the fix each of these is a plain
+    /// `AttackMob` and the mob keeps no effect at all (0 ticks).
+    #[test]
+    fn a_melee_effect_rides_the_hit_onto_a_mob() {
+        let cases = [
+            ("minecraft:cave_spider", "minecraft:poison", 140),
+            ("minecraft:husk", "minecraft:hunger", 140),
+            ("minecraft:wither_skeleton", "minecraft:wither", 200),
+        ];
+        let mut carried: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = Vec::new();
+        let mut strays: Vec<(&str, bool, bool)> = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            for (kind, _, _) in cases {
+                let mut m = Mob::new(
+                    1,
+                    Arc::new(types.types[kind].clone()),
+                    Vec3::new(0.5, 64.0, 0.5),
+                    0.0,
+                );
+                let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+                let mut cx = Cx {
+                    w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+                carried.push((
+                    kind,
+                    events.iter().find_map(|e| match e {
+                        MobEvent::AttackMobWithEffect {
+                            target,
+                            effect,
+                            ticks,
+                            amplifier,
+                            ..
+                        } => Some((*target, *effect, *ticks, *amplifier)),
+                        _ => None,
+                    }),
+                ));
+                strays.push((
+                    kind,
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::EffectPlayer { .. })),
+                    events
+                        .iter()
+                        .any(|e| matches!(e, MobEvent::AttackMob { .. })),
+                ));
+            }
+        });
+        if !ran {
+            return;
+        }
+        let expected: Vec<(&str, Option<(u32, &'static str, i32, i32)>)> = cases
+            .iter()
+            .map(|(kind, effect, ticks)| (*kind, Some((2, *effect, *ticks, 0))))
+            .collect();
+        assert_eq!(carried, expected);
+        for (kind, on_player, effectless) in strays {
+            assert!(!on_player, "{kind} left its effect on the player");
+            assert!(!effectless, "{kind} sent a second, effectless hit");
+        }
+    }
+
+    /// On easy the cave spider's poison timer is 0, so nothing rides the hit:
+    /// the mob it bites takes the damage alone (`AttackMob`, no effect).
+    #[test]
+    fn an_easy_cave_spiders_bite_carries_no_effect() {
+        let mut out: Option<Vec<String>> = None;
+        let ran = with_test_world(&[], |w, types| {
+            let mut easy = w.clone();
+            easy.difficulty = super::super::spawning::LocalDifficulty::new(1, 18000, 0, 0.0);
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types["minecraft:cave_spider"].clone()),
+                Vec3::new(0.5, 64.0, 0.5),
+                0.0,
+            );
+            let (mut lr, mut events) = (horizon_core::random::LegacyRandom::new(0), Vec::new());
+            let mut cx = Cx {
+                w: &easy,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            do_hurt_target(&mut m, Who::Mob(2), &mut cx);
+            out = Some(
+                events
+                    .iter()
+                    .filter(|e| {
+                        matches!(
+                            e,
+                            MobEvent::AttackMob { .. } | MobEvent::AttackMobWithEffect { .. }
+                        )
+                    })
+                    .map(|e| match e {
+                        MobEvent::AttackMob { target, .. } => format!("plain {target}"),
+                        MobEvent::AttackMobWithEffect { effect, .. } => format!("effect {effect}"),
+                        _ => unreachable!(),
+                    })
+                    .collect(),
+            );
+        });
+        if !ran {
+            return;
+        }
+        assert_eq!(out, Some(vec!["plain 2".to_owned()]));
     }
 }
 
@@ -3430,6 +3576,75 @@ mod fox_screech_tests {
 mod age_up_tests {
     use super::*;
     use std::sync::Arc;
+
+    /// Official Java 26.3: NoAI leaves both age clocks running. AgeLocked
+    /// holds a baby's age, but a positive breeding cooldown still expires.
+    #[test]
+    fn age_clocks_tick_with_no_ai_and_respect_baby_age_lock() {
+        let ran = crate::mobs::world::with_test_world(&[], |w, types| {
+            for species in ["pig", "cow", "horse", "turtle"] {
+                for no_ai in [true, false] {
+                    for locked in [false, true] {
+                        for age in [-2, 2] {
+                            let kind =
+                                Arc::new(types.types[&format!("minecraft:{species}")].clone());
+                            let mut m = Mob::new(1, kind, Vec3::new(4.0, 220.0, 4.0), 0.0);
+                            m.no_ai = no_ai;
+                            m.no_gravity = true;
+                            m.persistent = true;
+                            m.extra.age_locked = locked;
+                            super::super::finalize::set_age(&mut m, age);
+                            let (mut random, mut events) = (LegacyRandom::new(0), Vec::new());
+                            let expected = if age > 0 {
+                                [1, 0, 0, 0]
+                            } else if locked {
+                                [-2, -2, -2, -2]
+                            } else {
+                                [-1, 0, 0, 0]
+                            };
+                            for (elapsed, expected_age) in expected.into_iter().enumerate() {
+                                let previous_age = m.extra.age;
+                                let previous_position = m.position;
+                                tick(&mut m, w, &mut random, &mut events);
+                                assert_eq!(
+                                    m.extra.age,
+                                    expected_age,
+                                    "{species}: NoAI={no_ai}, AgeLocked={locked}, initial Age={age}, tick={}",
+                                    elapsed + 1
+                                );
+                                if no_ai {
+                                    assert_eq!(m.velocity, Vec3::ZERO);
+                                    // Growing dimensions can reposition the mob at adulthood.
+                                    if previous_age != -1 || expected_age != 0 {
+                                        assert_eq!(m.position, previous_position);
+                                    }
+                                }
+                            }
+                            if species == "turtle" && age < 0 && !locked {
+                                assert_eq!(
+                                    events
+                                        .iter()
+                                        .filter(|event| matches!(
+                                            event,
+                                            MobEvent::GiftLoot {
+                                                table: "minecraft:gameplay/turtle_grow",
+                                                ..
+                                            }
+                                        ))
+                                        .count(),
+                                    1,
+                                    "growing up drops one scute"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        if !ran {
+            eprintln!("age clock regression needs prepared vanilla resources");
+        }
+    }
 
     /// A baby goat `age` ticks from adulthood, from no vanilla data.
     fn baby_goat(age: i32) -> Mob {

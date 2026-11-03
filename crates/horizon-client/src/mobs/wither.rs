@@ -236,11 +236,29 @@ pub fn ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         let _ = powered;
     }
     if m.extra.counter > 0 {
-        for _ in 0..3 {
-            m.random.next_gaussian();
-            m.random.next_float();
-            m.random.next_gaussian();
-        }
+        charging_particles(m, events);
+    }
+}
+/// `WitherBoss.aiStep`'s entity-effect particles while the wither is still
+/// charging (`getInvulnerableTicks() > 0`): three a tick in the
+/// (0.7, 0.7, 0.9) colour, a gaussian away from the body on x and z and up to
+/// `3.3 * getScale()` above its feet on y, all from the wither's own random.
+pub fn charging_particles(m: &mut Mob, events: &mut Vec<MobEvent>) {
+    if m.extra.counter <= 0 {
+        return;
+    }
+    let spread = 3.3 * super::riders::scale(m);
+    for _ in 0..3 {
+        // `this.random`: a gaussian for x, a float for y, a gaussian for z.
+        let at = [
+            m.position.x + m.random.next_gaussian(),
+            m.position.y + f64::from(m.random.next_float()) * spread,
+            m.position.z + m.random.next_gaussian(),
+        ];
+        events.push(MobEvent::ParticleColored {
+            at,
+            color: [0.7, 0.7, 0.9],
+        });
     }
 }
 /// `WitherBoss.customServerAiStep`: charging, then the side heads' targets
@@ -278,7 +296,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
         }
         m.extra.counter = left;
         if m.age.is_multiple_of(10) {
-            m.health = (m.health + 10.0).min(m.attrs.max_health);
+            m.heal(10.0);
         }
         return;
     }
@@ -404,7 +422,7 @@ pub fn custom_server_ai_step(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
         }
     }
     if m.age.is_multiple_of(20) {
-        m.health = (m.health + 1.0).min(m.attrs.max_health);
+        m.heal(1.0);
     }
 }
 /// `WitherBoss.hurtServer` filter: not while charging, no arrows once
@@ -473,5 +491,64 @@ mod tests {
         assert!(shielded_from(Species::Wither, Species::Skeleton));
         assert!(!shielded_from(Species::Wither, Species::Creeper));
         assert!(!shielded_from(Species::Zombie, Species::Wither));
+    }
+    /// A spawning wither rolled the three particles of `aiStep`'s
+    /// `getInvulnerableTicks() > 0` block and dropped them on the floor: the
+    /// potion-coloured (`0.7, 0.7, 0.9`) cloud around it never appeared (#7486).
+    #[test]
+    fn a_charging_wither_sheds_three_potion_coloured_particles_a_tick() {
+        use crate::mobs::Species;
+        use crate::mobs::sensor_scan_tests::kind;
+        use std::sync::Arc;
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = "minecraft:wither".into();
+        k.species = Species::Wither;
+        let wither = |model_scale: f32| {
+            let mut m = Mob::new(1, kind.clone(), Vec3::new(4.0, 64.0, -2.0), 0.0);
+            m.extra.counter = INVULNERABLE;
+            m.extra.model_scale = model_scale;
+            m
+        };
+        for (model_scale, spread) in [(1.0_f32, 3.3_f64), (2.0, 6.6)] {
+            let mut m = wither(model_scale);
+            // The wither's own random, advanced the way vanilla's `aiStep`
+            // does it, for the expected offsets.
+            let mut probe = m.random.clone();
+            let mut events = Vec::new();
+            charging_particles(&mut m, &mut events);
+            let mut want = Vec::new();
+            for _ in 0..3 {
+                let (dx, dy, dz) = (
+                    probe.next_gaussian(),
+                    f64::from(probe.next_float()) * spread,
+                    probe.next_gaussian(),
+                );
+                want.push([4.0 + dx, 64.0 + dy, -2.0 + dz]);
+            }
+            let got: Vec<([f64; 3], [f32; 3])> = events
+                .iter()
+                .map(|e| match e {
+                    MobEvent::ParticleColored { at, color } => (*at, *color),
+                    other => panic!("not an entity-effect particle: {other:?}"),
+                })
+                .collect();
+            assert_eq!(got.len(), 3, "three a tick, as many as the heads' smoke");
+            for (at, color) in &got {
+                assert_eq!(*color, [0.7, 0.7, 0.9]);
+                // Measured against the body, gaussians on x and z and a float
+                // over [0, 3.3 * getScale()) on y.
+                assert!((0.0..spread).contains(&(at[1] - 64.0)), "{at:?}");
+            }
+            let flat: Vec<[f64; 3]> = got.iter().map(|(at, _)| *at).collect();
+            assert_eq!(flat, want, "scale {model_scale}");
+        }
+        // Once the charge ends (`getInvulnerableTicks` back to 0) the cloud
+        // stops: the block is guarded, not unconditional.
+        let mut m = wither(1.0);
+        m.extra.counter = 0;
+        let mut events = Vec::new();
+        charging_particles(&mut m, &mut events);
+        assert!(events.is_empty());
     }
 }

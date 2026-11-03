@@ -109,6 +109,9 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 max_stack,
             );
         },
+        living_heal: |entity, amount, cancel| {
+            crate::mod_api::dispatch_living_heal(crate::mod_api::mods(), entity, amount, cancel);
+        },
         living_breathe: |entity, kind, can_breathe, consume, refill| {
             crate::mod_api::dispatch_living_breathe(
                 crate::mod_api::mods(),
@@ -119,8 +122,41 @@ pub fn main_with(mods: crate::mod_api::Mods) {
                 refill,
             );
         },
+        living_drown: |entity, kind, is_drowning, damage_amount, bubble_count, cancel| {
+            crate::mod_api::dispatch_living_drown(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                is_drowning,
+                damage_amount,
+                bubble_count,
+                cancel,
+            );
+        },
+        living_fall: |entity, kind, distance, multiplier, cancel| {
+            crate::mod_api::dispatch_living_fall(
+                crate::mod_api::mods(),
+                entity,
+                kind,
+                distance,
+                multiplier,
+                cancel,
+            );
+        },
+        living_jump: |entity, kind| {
+            crate::mod_api::dispatch_living_jump(crate::mod_api::mods(), entity, kind);
+        },
         ingredient: |kind, data, items| {
             crate::mod_api::dispatch_ingredient(crate::mod_api::mods(), kind, data, items);
+        },
+        ingredient_test: |kind, data, stack, accept| {
+            crate::mod_api::dispatch_ingredient_test(
+                crate::mod_api::mods(),
+                kind,
+                data,
+                stack,
+                accept,
+            );
         },
     })
     .is_err()
