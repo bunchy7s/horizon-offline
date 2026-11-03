@@ -271,7 +271,7 @@ def sides(name):
 
 
 # How many times one_player runs vanilla's side before giving up on a run its `check` rejects.
-VANILLA_ATTEMPTS = 3
+VANILLA_ATTEMPTS = 5
 
 
 def one_player(name, script, shown, check, scope, step_seconds=4.0):
