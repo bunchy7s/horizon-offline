@@ -1241,7 +1241,8 @@ impl Screen {
                             // draws HIDDEN_ADDRESS_TEXT in the address's place.
                             let hidden;
                             let address = if hide_address {
-                                hidden = crate::lang::get_or("selectServer.hiddenAddress", "(Hidden)");
+                                hidden =
+                                    crate::lang::get_or("selectServer.hiddenAddress", "(Hidden)");
                                 &hidden
                             } else {
                                 &game.address
