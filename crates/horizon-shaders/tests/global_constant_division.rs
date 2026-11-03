@@ -355,3 +355,53 @@ fn array_length_uses_declaration_scope() {
         );
     }
 }
+
+#[test]
+fn sized_parameter_length_stays_constant_for_a_lowered_global_argument() {
+    for parameter in ["values", "audit"] {
+        let module = assert_terrain_translates(&format!(
+            "#version 330\nconst float audit[3] = float[3](-1.0 / 0.0, 0.25, 0.5);\n\
+             int query(const float {parameter}[3]) {{ return {parameter}.length(); }}\n\
+             void main() {{ gl_FragData[0] = vec4(float(query(audit)), audit[1], 0.0, 1.0); }}\n",
+        ));
+        assert!(
+            module.global_variables.iter().any(|(_, variable)| {
+                variable.name.as_deref() == Some("audit")
+                    && variable.space == naga::AddressSpace::Private
+            }),
+            "the caller must pass an actually lowered global array"
+        );
+        let (_, function) = module
+            .functions
+            .iter()
+            .find(|(_, function)| function.name.as_deref() == Some("query"))
+            .unwrap();
+        let mut value = function
+            .body
+            .iter()
+            .find_map(|statement| match statement {
+                naga::Statement::Return { value } => *value,
+                _ => None,
+            })
+            .expect("the parameter-length return");
+        let mut expressions = &function.expressions;
+        loop {
+            match expressions[value] {
+                naga::Expression::As { expr, .. } => value = expr,
+                naga::Expression::Constant(constant) => {
+                    value = module.constants[constant].init;
+                    expressions = &module.global_expressions;
+                }
+                _ => break,
+            }
+        }
+        assert!(
+            matches!(
+                expressions[value],
+                naga::Expression::Literal(naga::Literal::I32(3))
+            ),
+            "sized parameter {parameter} must return constant length 3: {:?}",
+            expressions[value]
+        );
+    }
+}
