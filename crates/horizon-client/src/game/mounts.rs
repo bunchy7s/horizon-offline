@@ -76,7 +76,7 @@ pub(super) fn dismounts_underwater(species: Species) -> bool {
 }
 
 impl Game<'_> {
-    fn mount_index(&self) -> Option<usize> {
+    pub(super) fn mount_index(&self) -> Option<usize> {
         let id = self.riding?;
         self.mobs.iter().position(|m| m.id == id)
     }
@@ -441,18 +441,10 @@ impl Game<'_> {
             }
             // The nautilus plays its dash sound itself.
             if equine::is_equine(m.species()) {
-                // playJumpSound: Donkey and Mule have their own; a skeleton
-                // horse in water splashes.
-                let sound = match m.species() {
-                    Species::Donkey => "minecraft:entity.donkey.jump",
-                    Species::Mule => "minecraft:entity.mule.jump",
-                    Species::SkeletonHorse if m.fluids.in_water => {
-                        "minecraft:entity.skeleton_horse.jump_water"
-                    }
-                    _ => "minecraft:entity.horse.jump",
-                };
+                // playJumpSound, which the server broadcasts for a guest.
+                let sound = format!("minecraft:{}", equine::jump_sound(m));
                 let at = m.center();
-                self.audio.play(sound, Some(at), 0.4, 1.0);
+                self.audio.play(&sound, Some(at), 0.4, 1.0);
             }
         }
         let m = &mut self.mobs[i];
@@ -930,6 +922,43 @@ fn strider_dismount_location(
     (Vec3::new(strider.position.x, top, strider.position.z), None)
 }
 
+/// `ServerGamePacketListenerImpl.handlePlayerCommand` START_RIDING_JUMP on the
+/// vehicle `m` (`PlayerRideableJumping`): `canJump()` and a scale above zero,
+/// then the vehicle's own `handleStartJump`. Returns the sound the server
+/// plays, with its volume — `AbstractHorse.playJumpSound` at 0.4, `Camel`'s
+/// dash at 1.0 — or None when the mount takes no such jump.
+///
+/// Nothing here moves the mount: the rider's client charges the bar and drives
+/// a saddled horse itself (`isLocalInstanceAuthoritative`), so the server's
+/// share is the rear, the dash flag and the sound the others hear.
+pub(super) fn start_riding_jump(
+    m: &mut horizon_client::mobs::Mob,
+    data: i32,
+) -> Option<(&'static str, f32)> {
+    // PlayerRideableJumping.canJump: AbstractHorse.isSaddled, and a camel that
+    // is not refusing to move keeps its own gate.
+    if data <= 0 || !m.extra.saddled {
+        return None;
+    }
+    if crate::mobs::camel::is_camel(m.species()) {
+        if crate::mobs::camel::refuse_to_move(m) {
+            return None;
+        }
+        // Camel.handleStartJump: the dash sound, the entity action and DASH.
+        crate::mobs::camel::set_dashing(m, true);
+        Some((crate::mobs::camel::voice(m, 3), 1.0))
+    } else if equine::is_equine(m.species()) {
+        // AbstractHorse.handleStartJump, which is onPlayerJump for the slide
+        // and the rear, then playJumpSound.
+        equine::on_player_jump(m);
+        Some((equine::jump_sound(m), 0.4))
+    } else {
+        // A nautilus dashes off `Rider::jump` on its next travel, which a
+        // guest's own tick has not filled: nothing to start here.
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -959,6 +988,112 @@ mod tests {
         for species in [Species::SkeletonHorse, Species::CamelHusk, Species::Cow] {
             assert!(!dismounts_underwater(species), "{species:?}");
         }
+    }
+
+    /// A mob of the prepared resources' type `kind` (None without them).
+    fn mob(kind: &str) -> Option<horizon_client::mobs::Mob> {
+        let root = std::env::var_os("HORIZON_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        let types = horizon_client::mobs::MobTypes::load(&root).ok()?;
+        let t = std::sync::Arc::new(types.types.get(kind)?.clone());
+        Some(horizon_client::mobs::Mob::new(
+            7,
+            t,
+            horizon_core::geometry::Vec3::new(1.5, 64.0, -2.5),
+            0.0,
+        ))
+    }
+
+    /// `handlePlayerCommand` START_RIDING_JUMP reaches the ridden vehicle's
+    /// `handleStartJump`: a saddled horse rears, slides on the rider's keys and
+    /// its jump sound is played at 0.4; a donkey and a mule have their own
+    /// sound; a camel dashes with its dash sound at 1.0. An unsaddled mount
+    /// (`canJump` false) or a scale of zero takes nothing.
+    #[test]
+    fn a_released_jump_bar_starts_the_mounts_own_jump() {
+        let Some(mut horse) = mob("minecraft:horse") else {
+            return;
+        };
+        // Unsaddled: AbstractHorse.canJump is isSaddled.
+        assert_eq!(start_riding_jump(&mut horse, 100), None);
+        assert_eq!(horse.extra.counter, 0, "no rear without a jump");
+        assert!(!horse.extra.stand_sliding);
+        horse.set_saddle(Some(horizon_client::items::ItemStack::new(
+            "minecraft:saddle",
+            1,
+        )));
+        // A scale of zero is not a jump (`data > 0`).
+        assert_eq!(start_riding_jump(&mut horse, 0), None);
+        assert_eq!(horse.extra.counter, 0);
+        assert_eq!(
+            start_riding_jump(&mut horse, 100),
+            Some(("entity.horse.jump", 0.4))
+        );
+        assert_eq!(
+            horse.extra.counter, 20,
+            "standIfPossible rears for 20 ticks"
+        );
+        assert!(horse.extra.stand_sliding, "onPlayerJump slides on the keys");
+        for (kind, sound) in [
+            ("minecraft:donkey", "entity.donkey.jump"),
+            ("minecraft:mule", "entity.mule.jump"),
+        ] {
+            let Some(mut m) = mob(kind) else {
+                continue;
+            };
+            m.set_saddle(Some(horizon_client::items::ItemStack::new(
+                "minecraft:saddle",
+                1,
+            )));
+            assert_eq!(start_riding_jump(&mut m, 55), Some((sound, 0.4)), "{kind}");
+        }
+        // A skeleton horse in water splashes instead.
+        let Some(mut skeleton) = mob("minecraft:skeleton_horse") else {
+            return;
+        };
+        skeleton.set_saddle(Some(horizon_client::items::ItemStack::new(
+            "minecraft:saddle",
+            1,
+        )));
+        skeleton.fluids.in_water = true;
+        assert_eq!(
+            start_riding_jump(&mut skeleton, 100),
+            Some(("entity.skeleton_horse.jump_water", 0.4))
+        );
+    }
+
+    /// `Camel.handleStartJump`: the dash sound, then DASH, which starts the
+    /// cooldown; a sitting camel refuses to move and cannot jump
+    /// (`Camel.canJump`).
+    #[test]
+    fn a_released_jump_bar_starts_a_camels_dash() {
+        let Some(mut camel) = mob("minecraft:camel") else {
+            return;
+        };
+        assert_eq!(start_riding_jump(&mut camel, 100), None, "no saddle");
+        camel.set_saddle(Some(horizon_client::items::ItemStack::new(
+            "minecraft:saddle",
+            1,
+        )));
+        assert_eq!(
+            start_riding_jump(&mut camel, 100),
+            Some(("entity.camel.dash", 1.0))
+        );
+        assert!(camel.extra.flag2, "Camel.setDashing(true)");
+        assert_eq!(
+            camel.extra.anim_ticks, 0,
+            "an age-0 camel starts no cooldown"
+        );
+        // Sitting out the ride: refuseToMove keeps the dash from starting.
+        camel.extra.camel_sitting = true;
+        camel.extra.flag2 = false;
+        assert_eq!(start_riding_jump(&mut camel, 100), None);
+        assert!(!camel.extra.flag2);
     }
 
     #[test]

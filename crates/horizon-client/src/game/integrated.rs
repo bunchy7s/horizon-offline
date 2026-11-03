@@ -405,6 +405,7 @@ impl Game<'_> {
             self.res.biomes(),
             &enabled_features,
         ));
+        self.world_biomes_base = self.world_biomes.clone();
         let (res, pack, settings) = (self.res.clone(), self.pack.clone(), self.settings.clone());
         let flags = Arc::new(Flags::default());
         flags

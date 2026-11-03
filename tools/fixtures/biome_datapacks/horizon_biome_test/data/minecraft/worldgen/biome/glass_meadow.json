@@ -1,0 +1,44 @@
+{
+  "attributes": {
+    "minecraft:gameplay/natural_mob_spawns": {
+      "argument": {
+        "spawn_costs": {},
+        "spawns_by_category": {
+          "creature": [
+            { "type": "minecraft:pig", "count": 4, "weight": 10 },
+            { "type": "minecraft:cow", "count": 4, "weight": 8 }
+          ],
+          "monster": [
+            { "type": "minecraft:zombie", "count": 4, "weight": 95 },
+            { "type": "minecraft:skeleton", "count": 4, "weight": 100 }
+          ]
+        }
+      },
+      "modifier": "overlay"
+    },
+    "minecraft:visual/fog_color": "#ffd0f0",
+    "minecraft:visual/sky_color": "#ff9ad5"
+  },
+  "carvers": ["minecraft:cave"],
+  "downfall": 0.8,
+  "effects": {
+    "foliage_color": "#ff40c0",
+    "grass_color": "#40e0ff",
+    "water_color": "#2ae0c8"
+  },
+  "features": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    ["minecraft:ore_dirt", "minecraft:ore_coal_upper"],
+    [],
+    [],
+    ["minecraft:trees_plains", "minecraft:flower_plains", "minecraft:patch_grass_plain"],
+    []
+  ],
+  "has_precipitation": true,
+  "temperature": 0.7
+}

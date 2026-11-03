@@ -1,0 +1,50 @@
+{
+  "hooks": [],
+  "helpers": [
+    {
+      "name": "entity_velocity",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_velocity",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_set_velocity",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_set_velocity",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_on_ground",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_on_ground",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_bounding_box",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_bounding_box",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_eye_height",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_eye_height",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_eye_position",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_eye_position",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_view_vector",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_view_vector",
+      "receiver": "entity"
+    },
+    {
+      "name": "entity_distance_to_sqr",
+      "target": "horizon_client::game::native_entity_motion::Game<'_>::native_entity_distance_to_sqr",
+      "receiver": "entity"
+    }
+  ],
+  "rust_summary": "an entity's velocity (and setting it), ground, box, eye height and position, view vector and distance through an `EntityRef`.",
+  "doc_summary": "`entity.velocity(host)`, `set_velocity`, `on_ground`, `bounding_box`, `eye_height`, `eye_position`, `view_vector` and `distance_to_sqr`. Bundles need \"hooks\": @API:entity_motion@.",
+  "comments": [
+    "crates/horizon-client/src/game/native_entity_motion.rs"
+  ]
+}

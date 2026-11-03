@@ -142,7 +142,8 @@ impl Game<'_> {
                 return false;
             }
         }
-        let stack = stack.filter(|s| s.count > 0);
+        // ItemStack.isEmpty: air or a zero count empties the slot, as `/item` does.
+        let stack = stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0);
         match self
             .slots_named(&Owner::Entity(t), slot_name(slot))
             .as_slice()
