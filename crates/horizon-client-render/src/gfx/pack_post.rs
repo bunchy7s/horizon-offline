@@ -3163,11 +3163,10 @@ impl PackPost {
         }
     }
 
-    /// After the frame's submission: the centre depth it copied starts its way back.
-    pub fn submitted(&mut self) {
-        if let Some(center) = &mut self.center_depth {
-            center.submitted();
-        }
+    /// The centre depth the frame copied: its readback, started by calling it right after the
+    /// frame's submission.
+    pub fn submitted(&mut self) -> Option<impl FnOnce() + Send + 'static> {
+        self.center_depth.as_mut()?.submitted()
     }
 
     /// Whether the pack draws entities or block entities itself.
