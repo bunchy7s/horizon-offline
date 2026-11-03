@@ -827,9 +827,13 @@ impl Game<'_> {
                 subject: None,
             };
             let mut tops: Vec<BlockPos> = Vec::new();
-            if let Some(step) =
-                a.tick_move(&mut scene, facts, in_water, Some(self.border.geometry()))
-            {
+            if let Some(step) = a.tick_move(
+                &mut scene,
+                facts,
+                &self.res.motion().climbing,
+                in_water,
+                Some(self.border.geometry()),
+            ) {
                 a.push_by_bubble_column_over(world, registry, facts, collision, |pos| {
                     tops.push(pos)
                 });
