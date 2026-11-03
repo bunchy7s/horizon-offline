@@ -160,7 +160,13 @@ impl Stage<'_> {
                 && let Some(groups) = self.type_dimensions(i, &structs)
             {
                 for &(open, close) in groups.iter().rev() {
-                    out.extend(self.tokens[open..=close].iter().copied());
+                    if (open + 1..close).all(|j| !significant(self.tokens[j])) {
+                        // type_dimensions only accepts an unsized outer dimension with
+                        // an initializer whose element count is known.
+                        write!(out, "[{}]", self.array_length(close).unwrap()).unwrap();
+                    } else {
+                        out.extend(self.tokens[open..=close].iter().copied());
+                    }
                 }
                 for pair in groups.windows(2) {
                     for &gap in &self.tokens[pair[0].1 + 1..pair[1].0] {
@@ -552,8 +558,11 @@ impl Stage<'_> {
                 }
             }
             let close = close?;
-            // `[]` keeps its own handling (the constructor's count).
-            if (open + 1..close).all(|j| !significant(self.tokens[j])) {
+            // An initializer can size the outer dimension. Include it in the reversal
+            // together with the explicit inner dimensions rather than reversing only them.
+            if (open + 1..close).all(|j| !significant(self.tokens[j]))
+                && !(groups.is_empty() && self.array_length(close).is_some())
+            {
                 return None;
             }
             groups.push((open, close));

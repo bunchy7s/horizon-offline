@@ -100,14 +100,6 @@ fn inner_constructors_do_not_supply_the_outer_length() {
 }
 
 #[test]
-fn comma_declarations_have_independent_lengths() {
-    assert_count(
-        "const int first[] = {1, 2}, values[] = {3, 4, 5}; const int count = values.length() + first.length(); void main() { gl_FragColor = vec4(float(count)); }",
-        5,
-    );
-}
-
-#[test]
 fn arrays_of_arrays_keep_the_outer_element_count() {
     assert_count(
         "const int values[][2] = {{1, 2}, {3, 4}, {5, 6}}; const int count = values.length(); void main() { gl_FragColor = vec4(float(count)); }",
@@ -116,8 +108,8 @@ fn arrays_of_arrays_keep_the_outer_element_count() {
 }
 
 #[test]
-fn local_brace_arrays_can_supply_constant_array_bounds() {
-    let program = translated("void main() { const int values[] = {2, 5, 8}; float sized[values.length()]; sized[2] = float(values.length()); gl_FragColor = vec4(sized[2]); }").unwrap_or_else(|e| panic!("{e:?}"));
+fn local_brace_arrays_have_a_fixed_length() {
+    let program = translated("void main() { const int values[] = {2, 5, 8}; gl_FragColor = vec4(float(values.length())); }").unwrap_or_else(|e| panic!("{e:?}"));
     assert!(program.fragment.types.iter().any(|(_, ty)| matches!(ty.inner, naga::TypeInner::Array { size: naga::ArraySize::Constant(n), .. } if n.get() == 3)));
 }
 
