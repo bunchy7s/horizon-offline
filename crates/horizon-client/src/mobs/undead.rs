@@ -1558,7 +1558,9 @@ mod wither_arrow_tests {
                 let arrow = events
                     .iter()
                     .find_map(|e| match e {
-                        MobEvent::Projectile(p) => p.arrow.as_ref(),
+                        MobEvent::Projectile(p) | MobEvent::BowShot { arrow: p, .. } => {
+                            p.arrow.as_ref()
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| panic!("{name} shot nothing"));
