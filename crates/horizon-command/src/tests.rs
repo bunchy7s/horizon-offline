@@ -791,7 +791,7 @@ fn the_dedicated_commands_complete_from_the_servers_lists() {
 fn only_a_dedicated_server_has_the_dedicated_commands() {
     // Commands.CommandSelection: an integrated server (single player, a LAN
     // world) registers no /op, /ban, /ban-ip, /banlist, /pardon, /pardon-ip,
-    // /deop or /whitelist, so /help and Tab don't offer them.
+    // /deop, /setidletimeout or /whitelist, so /help and Tab don't offer them.
     let dedicated = [
         "ban",
         "ban-ip",
@@ -800,6 +800,7 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
         "op",
         "pardon",
         "pardon-ip",
+        "setidletimeout",
         "whitelist",
     ];
     for dev in [false, true] {
@@ -878,4 +879,53 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
             }
         }
     }
+}
+#[test]
+fn a_dedicated_servers_admins_set_the_idle_timeout() {
+    // SetPlayerIdleTimeoutCommand.register: LEVEL_ADMINS, and
+    // IntegerArgumentType.integer(0) — zero turns the timeout off, and a
+    // negative count of minutes is out of range.
+    let server = vanilla::game_tree(false, false, true);
+    let integrated = vanilla::game_tree(false, false, false);
+    assert!(integrated.find("setidletimeout").is_none());
+    let at = |level: u8| Registries {
+        permission: level,
+        ..reg()
+    };
+    // Below LEVEL_ADMINS the node is not there at all.
+    for level in [0, 1, 2] {
+        let e = server
+            .parse("setidletimeout 5", &at(level))
+            .executable()
+            .unwrap_err();
+        assert_eq!(
+            e.message.plain(),
+            "command.unknown.command",
+            "level {level}"
+        );
+    }
+    // The minutes are required: an incomplete command.
+    let e = server
+        .parse("setidletimeout", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "command.unknown.command");
+    for line in ["setidletimeout 0", "setidletimeout 5"] {
+        assert_eq!(
+            server.parse(line, &at(3)).executable().unwrap().1,
+            "setidletimeout"
+        );
+    }
+    // IntegerArgumentType.integer(0): argument.integer.low for -1 below 0.
+    let e = server
+        .parse("setidletimeout -1", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.low");
+    // Past i32 the number itself is unreadable.
+    let e = server
+        .parse("setidletimeout 2147483648", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "parsing.int.invalid");
 }

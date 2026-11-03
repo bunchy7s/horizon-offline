@@ -91,6 +91,7 @@ pub const ORDER: &[(&str, &[&str])] = &[
             "op",
             "pardon",
             "pardon-ip",
+            "setidletimeout",
             "whitelist",
             "publish",
             "unpublish",
