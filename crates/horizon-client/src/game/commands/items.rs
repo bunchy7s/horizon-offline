@@ -285,9 +285,8 @@ impl Game<'_> {
                 let item = stack.as_ref().map(|s| s.item.clone());
                 // The worn armour stack goes with the id: a kept stack of the
                 // previous piece would otherwise still be what the mob wears.
-                let body = horizon_client::mobs::drops::head_is_body(m.species());
                 let worn = match *key {
-                    "head" if !body => Some(0),
+                    "head" => Some(0),
                     "chest" => Some(1),
                     "legs" => Some(2),
                     "feet" => Some(3),

@@ -2484,8 +2484,8 @@ a dimension.
 - `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
   `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
   Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
-  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
-  slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
+  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a player has no body
+  or saddle slot, while a mob has every slot, head and body apart; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
   body slot keep only the item, not the stack's count and components.
 - `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
   do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
