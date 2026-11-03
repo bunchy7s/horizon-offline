@@ -243,6 +243,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             health: 5,
@@ -341,6 +342,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let orb = ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             position: at,

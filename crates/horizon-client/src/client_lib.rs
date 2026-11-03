@@ -80,6 +80,7 @@ pub mod item_activation;
 pub mod item_render;
 pub mod item_sync;
 pub mod item_tooltip;
+pub mod join_seq;
 pub mod lan;
 pub mod landing;
 pub mod locator_bar;

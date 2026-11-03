@@ -35,6 +35,8 @@ pub(super) enum Status {
 }
 #[derive(Clone, Debug)]
 pub(super) struct Boat {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     pub id: u32,
     /// Wood type (`oak`, `bamboo` for the raft).
     pub wood: Arc<str>,
@@ -119,6 +121,7 @@ impl Boat {
 
     pub fn new(id: u32, wood: Arc<str>, position: Vec3, yaw: f32) -> Self {
         Self {
+            join: Default::default(),
             id,
             wood,
             position,
@@ -1632,3 +1635,4 @@ mod tests {
         assert_eq!(b.bubble_angle(0.5), 0.0);
     }
 }
+horizon_client::impl_joined!(Boat);

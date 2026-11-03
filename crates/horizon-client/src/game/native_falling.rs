@@ -93,6 +93,7 @@ impl Game<'_> {
         let at = Vec3::new(pos[0], pos[1], pos[2]);
         self.next_entity += 1;
         self.falling.push(FallingBlock {
+            join: Default::default(),
             id: self.next_entity,
             state,
             start_pos: cell,

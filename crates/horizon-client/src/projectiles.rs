@@ -194,6 +194,8 @@ fn potion_sprite(item: &str) -> &'static str {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projectile {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     /// The entity id a server tracks it by (0 until it is tracked).
     pub id: u32,
     pub kind: ProjectileKind,
@@ -355,6 +357,7 @@ impl Projectile {
             0.1
         };
         Self {
+            join: Default::default(),
             id: 0,
             kind,
             owner,
@@ -1495,3 +1498,4 @@ mod trail_tests {
         assert!(p.arrow_trail(true).is_empty());
     }
 }
+crate::impl_joined!(Projectile);

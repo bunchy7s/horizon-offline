@@ -471,6 +471,7 @@ impl Game<'_> {
                             // A summoned one has no UUID yet: `Entity` makes a random one.
                             let uuid = uuid.unwrap_or_else(|| self.uuid_for(self.next_entity));
                             self.falling.push(FallingBlock {
+                                join: Default::default(),
                                 id: self.next_entity,
                                 state,
                                 // DATA_START_POS is not persisted by vanilla.
@@ -533,6 +534,7 @@ impl Game<'_> {
                                 _ => 80,
                             };
                             self.tnts.push(super::tnt::PrimedTnt {
+                                join: Default::default(),
                                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
                                 id,
                                 position,

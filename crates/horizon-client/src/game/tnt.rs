@@ -15,6 +15,8 @@ use horizon_world::level::flags as level_flags;
 
 #[derive(Clone, Debug)]
 pub(super) struct PrimedTnt {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     /// The entity id a server tracks it by (0 until it is tracked).
     pub id: u32,
     pub position: Vec3,
@@ -216,6 +218,7 @@ impl Game<'_> {
         // An id from the entity counter at once, so a command can name it.
         self.next_entity += 1;
         self.tnts.push(PrimedTnt {
+            join: Default::default(),
             no_gravity: false,
             id: self.next_entity,
             position,
@@ -528,6 +531,7 @@ mod tests {
         use horizon_core::geometry::Direction;
         use horizon_world::piston_push::bounce_velocity;
         let mut tnt = PrimedTnt {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: Vec3::new(0.5, 1.0, 0.5),
@@ -568,6 +572,7 @@ mod tests {
         for bordered in [false, true] {
             let at = Vec3::new(24.0, 4.0, 20.5);
             let mut tnt = PrimedTnt {
+                join: Default::default(),
                 no_gravity: false,
                 id: 0,
                 position: at,
@@ -622,6 +627,7 @@ mod tests {
         world.set(21, 4, 20, flowing).unwrap();
         let at = Vec3::new(20.5, 4.0, 20.5);
         let mut tnt = PrimedTnt {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: at,
@@ -724,6 +730,7 @@ mod tests {
         // (Entity.handleOnInsideBubbleColumn / handleOnAboveBubbleColumn).
         let at = Vec3::new(20.5, 6.0, 20.5);
         let mut tnt = PrimedTnt {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: at,
@@ -802,6 +809,7 @@ mod tests {
         world.set(20, 2, 20, soul_sand).unwrap();
         let at = Vec3::new(20.5, 6.0, 20.5);
         let primed = || PrimedTnt {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: at,
@@ -838,3 +846,4 @@ mod tests {
         }
     }
 }
+horizon_client::impl_joined!(PrimedTnt);

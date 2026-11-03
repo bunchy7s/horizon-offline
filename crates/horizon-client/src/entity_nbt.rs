@@ -2131,6 +2131,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
     let stack = item_from_nbt(tag.get("Item")?)?;
     let position = position(tag)?;
     Some(ItemEntity {
+        join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
         health: number(tag.get("Health")).unwrap_or(5) as i32,
         fire_ticks: number(tag.get("Fire")).unwrap_or(0) as i32,
@@ -2234,6 +2235,7 @@ pub fn orbs_from_nbt(tag: &Tag) -> Vec<ExperienceOrb> {
     };
     let count = number(tag.get("Count")).unwrap_or(1).max(1) as u32;
     let orb = ExperienceOrb {
+        join: Default::default(),
         no_gravity: flag(tag, "NoGravity"),
         id: 0,
         position,
@@ -3680,6 +3682,7 @@ mod tests {
     #[test]
     fn item_entities_round_trip() {
         let e = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             health: 2,
             fire_ticks: 73,
@@ -3741,6 +3744,7 @@ mod tests {
     #[test]
     fn orbs_keep_their_count() {
         let o = ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             position: Vec3::new(1.0, 2.0, 3.0),
