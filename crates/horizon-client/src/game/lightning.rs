@@ -414,9 +414,12 @@ impl Game<'_> {
         if let Some(mut s) = registry.state(state).cloned() {
             s.properties.insert("powered".into(), "true".into());
             if let Some(powered) = registry.id(&s) {
-                // The rod's onPlace schedules the 8-tick unpowering.
                 let _ = self.level_set(p, powered);
                 self.with_level(|b, level, ticks| {
+                    // `level.scheduleTick(pos, this, 8)`: the unpowering. A rod struck
+                    // is the same block as before, so its placement does not schedule
+                    // it, and without this it stayed powered for good.
+                    b.schedule_tick(level, ticks, BlockPos::new(p[0], p[1], p[2]), 8);
                     if level.redstone_experiments {
                         b.lightning_rod_update_neighbors(
                             level,
