@@ -1824,6 +1824,125 @@ mod tests {
         assert_eq!(loaded.get_mut(&child_id).unwrap().get(&key), Ok(29));
     }
 
+    /// Entities as a save before every entity held attachments wrote them (a vanilla compound
+    /// with its `UUID`, and `horizon:attachments` where the mod set one), loaded and saved again:
+    /// each comes back on the entity with its UUID, and its attachments with it.
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn an_older_save_loads_its_entities_attachments_back_onto_them() {
+        use super::super::{Audio, Game, Options, Progress, Settings, load_resources};
+        let root = std::path::PathBuf::from(std::env::var_os("HORIZON_TEST_RESOURCES").unwrap());
+        let settings = Settings::default();
+        let loaded = load_resources(
+            root.clone(),
+            None,
+            &root,
+            &settings,
+            std::time::Instant::now(),
+            false,
+            true,
+            &Progress::new(),
+            &mut |_, _| unreachable!("no menu handoff"),
+        )
+        .unwrap();
+        let mut options = Options::parse(std::iter::empty()).unwrap().unwrap();
+        options.resources = root.clone();
+        options.execution_role = crate::game::execution_role::ExecutionRole::IntegratedServer;
+        let mut game = Game::new(
+            &loaded.resources,
+            loaded.pack,
+            loaded.gui.unwrap(),
+            options,
+            settings,
+            Audio::silent(&root),
+            None,
+        )
+        .unwrap();
+        use horizon_world::attachments::{AttachmentCodec, AttachmentError, AttachmentType};
+        static MARK: AttachmentType<i32> = AttachmentType {
+            namespace: "holdproof",
+            name: "mark",
+            default: || 0,
+            codec: Some(AttachmentCodec {
+                encode: |n: &i32| Ok([("n".into(), Tag::Int(*n))].into()),
+                decode: |c| match c.get(&"n".into()) {
+                    Some(Tag::Int(n)) => Ok(*n),
+                    _ => Err(AttachmentError::Decode),
+                },
+            }),
+            copy_on_death: false,
+            sync: false,
+        };
+        let mark = |n: i32| {
+            Tag::compound([(
+                "holdproof",
+                Tag::compound([(
+                    "mark",
+                    Tag::compound([("value", Tag::compound([("n", Tag::Int(n))]))]),
+                )]),
+            )])
+        };
+        let pos = |x: f64| Tag::List([x, 70.0, 3.0].map(|v| Tag::Double(v.to_bits())).to_vec());
+        let kinds = [
+            ("minecraft:zombie", vec![]),
+            ("minecraft:arrow", vec![("NoGravity", Tag::Byte(1))]),
+            ("minecraft:experience_orb", vec![("Value", Tag::Short(7))]),
+            (
+                "minecraft:falling_block",
+                vec![
+                    (
+                        "BlockState",
+                        Tag::compound([("Name", Tag::String("minecraft:sand".into()))]),
+                    ),
+                    ("NoGravity", Tag::Byte(1)),
+                    ("Time", Tag::Int(1)),
+                ],
+            ),
+            ("minecraft:snowball", vec![("NoGravity", Tag::Byte(1))]),
+        ];
+        let mut tags = Vec::new();
+        let mut uuids = Vec::new();
+        for (i, (kind, extra)) in kinds.iter().enumerate() {
+            let n = i as i32 + 1;
+            let uuid = [n, 2 * n, 3 * n, 4 * n];
+            uuids.push((*kind, uuid, 1000 + n));
+            let mut fields: Vec<(&str, Tag)> = vec![
+                ("id", Tag::String((*kind).into())),
+                ("Pos", pos(1.0 + i as f64)),
+                ("UUID", Tag::IntArray(uuid.to_vec())),
+                (ATTACHMENTS_KEY, mark(1000 + n)),
+            ];
+            fields.extend(extra.iter().cloned());
+            tags.push(Tag::compound(fields));
+        }
+        // The level is a server's, whose attachments a mod reaches.
+        game.options.dedicated = Some(Vec::new());
+        game.world.loaded_entities.push(((0, 0), tags));
+        game.spawn_loaded_entities();
+        let saved = game.entity_chunks(&HashSet::from([(0, 0)]), false);
+        let saved: Vec<&Tag> = saved.iter().flat_map(|(_, tags)| tags).collect();
+        for (kind, uuid, n) in uuids {
+            let id = game
+                .persist
+                .uuids
+                .iter()
+                .find(|(_, u)| **u == uuid)
+                .map(|(id, _)| *id);
+            let id = id.unwrap_or_else(|| panic!("{kind}: loaded without its UUID"));
+            let map = game.attachment_map_quiet(horizon_client::mod_api::Holder::Entity(id));
+            let map = map.unwrap_or_else(|e| panic!("{kind}: not a holder: {e:?}"));
+            assert_eq!(map.get(&MARK), Ok(n), "{kind}: attachments not loaded");
+            let tag = saved.iter().find(|t| entity_nbt::uuid(t) == Some(uuid));
+            let tag = tag.unwrap_or_else(|| panic!("{kind}: saved without its UUID"));
+            assert_eq!(
+                tag.get(ATTACHMENTS_KEY),
+                Some(&mark(n)),
+                "{kind}: attachments not saved back"
+            );
+            println!("{kind}: id {id}, UUID kept, attachments loaded and saved back");
+        }
+    }
+
     #[test]
     fn a_lone_rider_saves_the_horse() {
         let horse = 7;
