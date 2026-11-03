@@ -1,5 +1,5 @@
 //! One connection to a server of an older release: which state each direction is in, followed from the
-//! packets themselves, and every packet renumbered on its way through.
+//! packets themselves, and every packet renumbered and translated on its way through.
 //!
 //! The states change where vanilla's `Connection` switches its codecs: the handshake's intent picks status
 //! or login for both directions, `login_finished` and `login_acknowledged` move each direction to
@@ -7,7 +7,7 @@
 //! back to configuration.
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use super::ServerVersion;
+use super::{ServerVersion, translate};
 use crate::{
     Result, State,
     buf::{Reader, Writer},
@@ -62,7 +62,7 @@ impl Session {
         self.writing.store(to_u8(state), Ordering::Release);
     }
 
-    /// A packet the server sent, as the pinned version numbers it. `None` drops it: Horizon
+    /// A packet the server sent, as the pinned version numbers and lays it out. `None` drops it: Horizon
     /// knows no such packet.
     pub fn clientbound(&self, id: i32, payload: Vec<u8>) -> Result<Option<(i32, Vec<u8>)>> {
         let state = self.reading();
@@ -81,18 +81,32 @@ impl Session {
             }
             _ => {}
         }
-        Ok(Some((pinned, payload)))
+        // A packet the translation can't read goes on as it came, as an unknown packet would: Horizon's
+        // own reader then skips it or reports it, rather than the connection dropping here.
+        match translate::clientbound(self, state, pinned, &payload) {
+            Ok(Some((id, Some(translated)))) => Ok(Some((id, translated))),
+            Ok(Some((id, None))) => Ok(Some((id, payload))),
+            Ok(None) => Ok(None),
+            Err(e) => {
+                log::warn!(
+                    "Horizon: could not translate {} packet {pinned} ({state:?}): {e}",
+                    self.version.name()
+                );
+                Ok(Some((pinned, payload)))
+            }
+        }
     }
 
-    /// A packet body (VarInt id + payload) Horizon sends, as this server numbers it. `None`:
+    /// A packet body (VarInt id + payload) Horizon sends, as this server numbers and lays it out. `None`:
     /// the server has no such packet, so nothing is sent.
     pub fn serverbound(&self, body: &[u8]) -> Result<Option<Vec<u8>>> {
         let state = self.writing();
         let mut r = Reader::new(body);
         let id = r.varint()?;
+        let payload = r.rest();
         match (state, id) {
             (State::Handshake, ids::handshake::serverbound::INTENTION) => {
-                return self.intention(r.rest()).map(Some);
+                return self.intention(payload).map(Some);
             }
             (State::Login, ids::login::serverbound::LOGIN_ACKNOWLEDGED) => {
                 self.set_writing(State::Configuration)
@@ -105,7 +119,13 @@ impl Session {
             }
             _ => {}
         }
-        self.version.serverbound_body(state, body)
+        let Some((mapped, payload)) = translate::serverbound(self, state, id, payload)? else {
+            return Ok(None);
+        };
+        let mut w = Writer::new();
+        w.varint(mapped);
+        w.bytes(&payload);
+        Ok(Some(w.data))
     }
 
     /// The handshake states this server's protocol, and its intent moves both directions on.

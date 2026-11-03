@@ -332,3 +332,25 @@ fn scratch(name: &str) -> PathBuf {
     std::fs::create_dir_all(&root).unwrap();
     root
 }
+
+#[test]
+fn the_theme_worn_is_the_one_equipped_in_the_theme_slot() {
+    let (m, service) = serve(|_| {});
+    let session = sign_in(&m, &service);
+    let mut saved = Saved {
+        catalogue: Some(service.catalogue().unwrap()),
+        me: Some(service.me(&session).unwrap()),
+        pending: Vec::new(),
+    };
+    assert_eq!(saved.theme(), None);
+    let wear = |item: &str| Change::Equip {
+        slot: "theme".into(),
+        item: Some(item.into()),
+    };
+    saved.change(wear("dawn"));
+    let (sky, hue) = saved.theme().unwrap();
+    assert_eq!((sky[4], hue), (0xe2a0b0, 344.));
+    // A theme the catalogue doesn't hold (any more) leaves the player's own look.
+    saved.change(wear("dusk"));
+    assert_eq!(saved.theme(), None);
+}

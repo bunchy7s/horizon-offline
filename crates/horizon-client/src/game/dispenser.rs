@@ -975,9 +975,22 @@ impl Game<'_> {
         self.handle_mob_events(events)
     }
     /// A mob a bucket emptied: `setFromBucket` keeps it, then it calls out.
+    /// Fish and axolotls carry the flag itself (saved as `FromBucket`, read by
+    /// `requiresCustomPersistence`); the others stay persistent instead.
     pub(super) fn mob_placed(&mut self, id: u32) -> Result<()> {
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = true;
+            if matches!(
+                m.species(),
+                Species::Cod
+                    | Species::Salmon
+                    | Species::Pufferfish
+                    | Species::TropicalFish
+                    | Species::Axolotl
+            ) {
+                m.extra.from_bucket = true;
+            } else {
+                m.persistent = true;
+            }
         }
         self.mob_ambient(id)
     }

@@ -219,15 +219,18 @@ pub fn calculate_flapping(m: &mut Mob) {
     }
 }
 
-/// `Parrot.isFlapping` and `onFlap` (from `Entity.processFlappingMovement`,
-/// when a move ends in the air): a wing beat each half `flapSpeed` flown.
-pub fn process_flapping(m: &mut Mob, events: &mut Vec<MobEvent>) {
+/// `Parrot.isFlapping` and `Parrot.onFlap`: a wing beat each half
+/// `flapSpeed` flown. The caller emits the movement game event on a flap.
+pub fn process_flapping(m: &mut Mob, events: &mut Vec<MobEvent>) -> bool {
     if m.ai.steps.fly_dist > m.ai.steps.next_flap {
         if !m.silent {
             let at = [m.position.x, m.position.y, m.position.z];
             events.push(MobEvent::Sound("entity.parrot.fly", at, 0.15, 1.0));
         }
         m.ai.steps.next_flap = m.ai.steps.fly_dist + m.anim.flap_speed / 2.0;
+        true
+    } else {
+        false
     }
 }
 
@@ -349,15 +352,27 @@ mod tests {
         m.anim.flap_speed = 1.0;
         let mut events = Vec::new();
         m.ai.steps.fly_dist = 0.5;
-        process_flapping(&mut m, &mut events);
+        assert!(!process_flapping(&mut m, &mut events));
         assert!(events.is_empty(), "nextFlap starts at 1");
+        m.ai.steps.fly_dist = 1.0;
+        assert!(!process_flapping(&mut m, &mut events), "strict threshold");
         m.ai.steps.fly_dist = 1.2;
-        process_flapping(&mut m, &mut events);
+        assert!(process_flapping(&mut m, &mut events));
         assert!(matches!(
             events.as_slice(),
             [MobEvent::Sound("entity.parrot.fly", _, v, _)] if *v == 0.15
         ));
         assert!((m.ai.steps.next_flap - 1.7).abs() < 1.0e-6);
+        events.clear();
+        assert!(
+            !process_flapping(&mut m, &mut events),
+            "no second flap without moving"
+        );
+        m.silent = true;
+        m.ai.steps.fly_dist = 1.8;
+        assert!(process_flapping(&mut m, &mut events), "silent still flaps");
+        assert!(events.is_empty());
+        assert!((m.ai.steps.next_flap - 2.3).abs() < 1.0e-6);
     }
 
     /// `ServerPlayer.playShoulderEntityAmbientSound`: with a mob to imitate

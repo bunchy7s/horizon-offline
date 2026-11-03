@@ -86,7 +86,7 @@ IGNORED = {
     r'server_data\.state_updating_resumes_at)$':
         'block entity timers advance',
     r'^entity\.(Passengers\[\]\.)*(Age|Motion\[\]|Rotation\[\]|Pos\[\]|OnGround|HurtTime|Health|TimeInOverworld|fall_distance|'
-    r'wasOnGround|Fire|Air|DeathTime|Fuse|life|inGround|ticks_in_ground|Time)$': 'entity simulation advances',
+    r'wasOnGround|Fire|Air|DeathTime|Fuse|life|inGround|ticks_in_ground|Time|EggLayTime)$': 'entity simulation advances',
     r'^level\.dat\.Data\.(Time|LastPlayed)$': 'clock and wall time of the save',
     r'^level\.dat\.Data\.(ServerBrands.*|singleplayer_uuid)$': 'a client world names its brand and its player',
     r'^entity\.listener\.selector\.(event|tick)$': 'the warden listener holds the last vibration it heard; timing',
