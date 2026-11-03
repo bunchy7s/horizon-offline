@@ -484,6 +484,13 @@ impl Mob {
             let s = self.extra.size as f32;
             (w, h, e) = (w * s, h * s, e * s);
         }
+        // Shulker.getDefaultDimensions: the last scale, over everything
+        // above, is the lid opening upward on a shell attached to the floor.
+        if k.species == super::Species::Shulker
+            && let Some(s) = super::shulker::peek_height_scale(self)
+        {
+            (h, e) = (h * s, e * s);
+        }
         // Salmon.getDefaultDimensions: the variant's bounding box scale (small
         // 0.5, medium 1.0, large 1.5) over the whole fish box.
         if k.species == super::Species::Salmon {
