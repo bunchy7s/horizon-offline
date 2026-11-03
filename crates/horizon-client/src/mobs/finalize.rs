@@ -409,9 +409,11 @@ pub enum Attr {
     JumpStrength,
     Armor,
     BurningTime,
+    /// `Attributes.FLYING_SPEED`: what `FlyingMoveControl` flies at.
+    FlyingSpeed,
 }
 impl Attr {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::MaxHealth,
         Self::MovementSpeed,
         Self::FollowRange,
@@ -421,6 +423,7 @@ impl Attr {
         Self::JumpStrength,
         Self::Armor,
         Self::BurningTime,
+        Self::FlyingSpeed,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -433,6 +436,7 @@ impl Attr {
             Self::JumpStrength => "jump_strength",
             Self::Armor => "armor",
             Self::BurningTime => "burning_time",
+            Self::FlyingSpeed => "flying_speed",
         }
     }
     /// The attribute's registry id (`minecraft:` and its name), without
@@ -448,6 +452,7 @@ impl Attr {
             Self::JumpStrength => "minecraft:jump_strength",
             Self::Armor => "minecraft:armor",
             Self::BurningTime => "minecraft:burning_time",
+            Self::FlyingSpeed => "minecraft:flying_speed",
         }
     }
     /// `RangedAttribute` bounds.
@@ -460,7 +465,7 @@ impl Attr {
             Self::KnockbackResistance | Self::SpawnReinforcements => (0.0, 1.0),
             Self::JumpStrength => (0.0, 32.0),
             Self::Armor => (0.0, 30.0),
-            Self::BurningTime => (0.0, 1024.0),
+            Self::BurningTime | Self::FlyingSpeed => (0.0, 1024.0),
         }
     }
 }
@@ -496,7 +501,12 @@ pub fn base_value(m: &Mob, a: Attr) -> f64 {
         .as_ref()
         .and_then(|s| s.bases.iter().find(|(x, _)| *x == a).map(|(_, v)| *v))
         .or_else(|| default_value(m, a))
-        .unwrap_or(if a == Attr::BurningTime { 1.0 } else { 0.0 })
+        .unwrap_or(match a {
+            Attr::BurningTime => 1.0,
+            // The registry's default, as the type's `flying_speed` falls back to.
+            Attr::FlyingSpeed => 0.4,
+            _ => 0.0,
+        })
 }
 /// The transient modifiers of the mob's state (`SPEED_MODIFIER_BABY`).
 pub fn transient(m: &Mob, a: Attr) -> Option<(f64, Op)> {
@@ -594,7 +604,7 @@ fn refresh(m: &mut Mob, a: Attr) {
         Attr::KnockbackResistance => m.attrs.knockback_resistance = value(m, a),
         Attr::SpawnReinforcements => m.attrs.spawn_reinforcements = value(m, a),
         Attr::JumpStrength => m.attrs.jump_strength = value(m, a),
-        Attr::Armor | Attr::BurningTime => {}
+        Attr::Armor | Attr::BurningTime | Attr::FlyingSpeed => {}
     }
 }
 /// The value without the transient baby modifier (`speed_bonus` applies
