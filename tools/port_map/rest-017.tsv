@@ -3,7 +3,7 @@ DedicatedServer.setEnforceWhitelist	port	crates/horizon-client/src/game/dedicate
 DedicatedServer.setUsingWhitelist	port	crates/horizon-client/src/game/dedicated.rs::Game::console_whitelist	console whitelist on|off; store_property writes white-list back
 DedicatedServer.saveAllChunks	port	crates/horizon-client/src/game.rs::Game::save_game	gap: minor: no save notifications to the JSON-RPC management API
 DedicatedServer.sendLowDiskSpaceWarning	port	crates/horizon-client/src/lan/hub.rs::Hub::send_low_disk_space_warning	chunk_io reports the low disk space and the operators are told (game/dedicated.rs); a client shows the toast (game/remote.rs)
-DedicatedServer.setAllowFlight	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
+DedicatedServer.setAllowFlight	port	crates/horizon-client/src/game/dedicated/management.rs::Game::management	updates the live movement check and server.properties through management
 DedicatedServer.setDifficulty	port	crates/horizon-client/src/game/commands.rs::Game::cmd_difficulty	the /difficulty command; gap: minor: the new value is not written back to server.properties
 DedicatedServer.setViewDistance	skip:server		JSON-RPC management API only; view-distance is read at start
 DedicatedServer.setSimulationDistance	skip:server		JSON-RPC management API only; simulation-distance is read at start
@@ -26,6 +26,7 @@ DedicatedServer.setEntityBroadcastRangePercentage	skip:server		JSON-RPC manageme
 DedicatedServer.createTextFilterForPlayer	skip:service		external chat filter service; Horizon has no text filter
 DedicatedServer.setForceGameMode	port	crates/horizon-client/src/game/dedicated/management.rs::Game::management	stores force-gamemode, updates the host and applies the default mode to online players
 MinecraftServerSettingsServiceImpl.setForceGameMode	port	crates/horizon-server/src/management_methods.rs::Game::force_game_mode	forwards the live setting to the game and persists it in server.toml
+MinecraftServerSettingsServiceImpl.setAllowFlight	port	crates/horizon-server/src/management_methods.rs::Game::allow_flight	forwards the live setting to the game and persists properties.allow-flight in server.toml
 MinecraftServerSettingsServiceImpl.setUsingWhitelist	port	crates/horizon-server/src/management_methods.rs::Game::allowlist_setting	forwards the live setting to the game and persists server.whitelist in server.toml
 MinecraftServerSettingsServiceImpl.setEnforceWhitelist	port	crates/horizon-server/src/management_methods.rs::Game::allowlist_setting	forwards the live setting to the game and persists server.enforce_whitelist in server.toml
 MinecraftServerSettingsServiceImpl.setMaxPlayers	port	crates/horizon-server/src/management_methods.rs::Game::max_players	forwards the live limit to the game and persists server.max_players
