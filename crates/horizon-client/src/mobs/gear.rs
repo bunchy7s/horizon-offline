@@ -117,6 +117,8 @@ fn undead(s: Species) -> bool {
             | Species::Zoglin
             | Species::SkeletonHorse
             | Species::ZombieHorse
+            | Species::CamelHusk
+            | Species::ZombieNautilus
     )
 }
 fn arthropod(s: Species) -> bool {
@@ -254,6 +256,9 @@ mod tests {
         assert_eq!(damage_bonus(&l, Some(Species::Zombie)), 5.0);
         assert_eq!(damage_bonus(&l, Some(Species::Spider)), 2.5);
         assert_eq!(damage_bonus(&l, None), 0.0);
+        for s in [Species::CamelHusk, Species::ZombieNautilus] {
+            assert_eq!(damage_bonus(&l, Some(s)), 5.0);
+        }
     }
     #[test]
     fn protections_count_by_damage_kind() {

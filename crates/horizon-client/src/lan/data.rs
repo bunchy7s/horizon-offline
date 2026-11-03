@@ -49,6 +49,33 @@ pub const SYNCHRONIZED: &[&str] = &[
     "minecraft:block_transformer",
     "minecraft:worldgen/block_state_provider",
 ];
+pub const BIOME_REGISTRY: &str = "minecraft:worldgen/biome";
+/// The table a client plays a server with: `known` and the biomes of the
+/// server's biome registry that it lacks, built from their data; None when
+/// there are none.
+pub fn client_biomes(
+    known: &crate::biome::Biomes,
+    registry: &[(String, Option<Tag>)],
+) -> Option<crate::biome::Biomes> {
+    let files: Vec<(&str, Value)> = registry
+        .iter()
+        .filter(|(name, _)| !known.contains(name))
+        .filter_map(|(name, data)| {
+            Some((
+                name.as_str(),
+                crate::scoreboard::tag_to_json(data.as_ref()?),
+            ))
+        })
+        .collect();
+    if files.is_empty() {
+        return None;
+    }
+    log::info!(
+        "Horizon: the server has {} biomes the game lacks",
+        files.len()
+    );
+    Some(known.with_packs(files.iter().map(|(n, v)| (*n, v))))
+}
 /// KnownPack.vanilla("core") for this version.
 pub const CORE_PACK: (&str, &str, &str) = ("minecraft", "core", horizon_protocol::GAME_VERSION);
 
@@ -195,6 +222,16 @@ impl SyncData {
         resources: &Path,
         overlay: &horizon_world::loot::PackOverlay,
     ) -> Result<Self, String> {
+        Self::load_with(resources, overlay, None)
+    }
+
+    /// `load` with the open world's biomes: when its data packs added or
+    /// replaced some, the biome registry is that table's, in its order.
+    pub fn load_with(
+        resources: &Path,
+        overlay: &horizon_world::loot::PackOverlay,
+        biomes: Option<&crate::biome::Biomes>,
+    ) -> Result<Self, String> {
         use crate::spans::startup;
         // The recipe book, the recipe sync and the advancements read the
         // recipe folder: held here, they share one read of it.
@@ -221,6 +258,22 @@ impl SyncData {
                 .collect();
             if PACK_REGISTRIES.contains(key) {
                 pack_entries(path, overlay, &mut entries);
+            }
+            if *key == BIOME_REGISTRY
+                && let Some(table) = biomes.filter(|b| b.has_packs())
+            {
+                // A pack's biome goes with its data: no client knows it.
+                let found: HashMap<_, _> = entries
+                    .drain(..)
+                    .map(|((ns, p), v, _)| (format!("{ns}:{p}"), v))
+                    .collect();
+                for name in table.registry_order() {
+                    let (ns, p) = name.split_once(':').unwrap_or(("minecraft", name));
+                    let pack = table.pack_file(name);
+                    let json = pack.or_else(|| found.get(name)).cloned();
+                    let json = json.unwrap_or_else(|| Value::Object(Default::default()));
+                    entries.push(((ns.to_owned(), p.to_owned()), json, pack.is_some()));
+                }
             }
             file_order(&mut entries);
             let mut e = Entries {
@@ -558,6 +611,7 @@ fn changed_dimension_type(name: &str, json: &Value, levels: &LevelShapes) -> Opt
     json["height"] = shape.height.into();
     json["logical_height"] = shape.logical_height.into();
     json["has_skylight"] = shape.sky_light.into();
+    json["has_ceiling"] = shape.has_ceiling.into();
     Some(json)
 }
 
@@ -688,12 +742,13 @@ mod tests {
             changed_dimension_type("minecraft:overworld", &vanilla, &levels),
             None
         );
-        levels.overworld = crate::chunk::LevelShape::new(-64, 2096, 2096, true).unwrap();
+        levels.overworld = crate::chunk::LevelShape::new(-64, 2096, 2096, true, true).unwrap();
         let sent = changed_dimension_type("minecraft:overworld", &vanilla, &levels).unwrap();
         assert_eq!(
             (sent["min_y"].as_i64(), sent["height"].as_i64()),
             (Some(-64), Some(2096))
         );
+        assert_eq!(sent["has_ceiling"], true);
         assert_eq!(sent["ultrawarm"], false, "the rest of the type is kept");
         assert_eq!(
             changed_dimension_type("minecraft:the_nether", &vanilla, &levels),
