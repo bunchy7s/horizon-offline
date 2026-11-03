@@ -110,8 +110,7 @@ type Tile = Box<[(u8, u8); 256]>;
 /// once per intersecting tile rather than once per chunk of every ticket.
 struct Tiled(FxHashMap<(i32, i32), Tile>);
 impl Tiled {
-    /// Store the existing loading, simulation, forced and portal source
-    /// minima without changing their levels or radii.
+    /// The same levels as the grid, for tickets too far apart for one.
     fn new(s: &Sources) -> Self {
         let mut map = Self(FxHashMap::default());
         let (view, sim, reach) = reach(s);
@@ -128,7 +127,8 @@ impl Tiled {
             );
         }
         for &p in &s.portal {
-            map.add(p, PORTAL_RADIUS, PORTAL_LEVEL, 0, PORTAL_LEVEL);
+            // The radius-3 ring is level NONE and cannot lower a cell.
+            map.add(p, PORTAL_RADIUS - 1, PORTAL_LEVEL, 0, PORTAL_LEVEL);
         }
         map
     }
@@ -137,7 +137,7 @@ impl Tiled {
             .get(&(x >> 4, z >> 4))
             .map_or(NONE, |tile| tile[((z & 15) * 16 + (x & 15)) as usize])
     }
-    /// Lower each cell by the source level plus its Chebyshev distance;
+    /// Lower each cell to the minimum of its level and the source plus distance;
     /// loading stays flat within the view distance.
     fn add(&mut self, (px, pz): (i32, i32), r: i32, loading: i32, flat: i32, sim: i32) {
         let (x0, z0, x1, z1) = (px - r, pz - r, px + r, pz + r);
@@ -371,7 +371,7 @@ fn compute(s: &Sources) -> Map {
     }
 }
 
-/// The levels as a map, for tickets spread too far apart for a grid.
+/// The old per-chunk map: the reference the grid and tiles are tested against.
 #[cfg(test)]
 fn compute_sparse(s: &Sources) -> FxHashMap<(i32, i32), (u8, u8)> {
     let (view, player_sim, reach) = reach(s);
@@ -542,6 +542,7 @@ mod tests {
             10,
             10,
         );
+        assert!(matches!(**l.0.as_ref().unwrap(), Map::Tiled(_)));
         assert!(l.entity_ticking(100_010, -100_010) && !l.block_ticking(50_000, 0));
         assert!(l.entity_ticking(i32::MAX - 2, i32::MIN + 2));
     }
@@ -586,10 +587,20 @@ mod tests {
     #[test]
     #[ignore]
     fn levels_cost() {
-        for players in [1usize, 10, 25, 50] {
+        for (players, spacing, distance) in [
+            (1usize, 0, 10),
+            (10, 0, 10),
+            (25, 0, 10),
+            (50, 0, 10),
+            (100, 150, 10),
+            (100, 150, 32),
+        ] {
             // The benchmark's bots: most near spawn, a fifth flying outwards.
             let at: Vec<_> = (0..players)
                 .map(|i| {
+                    if spacing != 0 {
+                        return ((i % 10) as i32 * spacing, (i / 10) as i32 * spacing);
+                    }
                     let a = i as f64 * 2.399;
                     let d = if i % 5 == 0 { 30.0 } else { 3.0 };
                     ((a.cos() * d) as i32, (a.sin() * d) as i32)
@@ -599,10 +610,10 @@ mod tests {
                 players: at.clone(),
                 forced: Vec::new(),
                 portal: Vec::new(),
-                view_distance: 10,
-                simulation_distance: 10,
+                view_distance: distance,
+                simulation_distance: distance,
             };
-            let rounds = 200;
+            let rounds = 20;
             let t = std::time::Instant::now();
             for _ in 0..rounds {
                 std::hint::black_box(compute_sparse(std::hint::black_box(&s)));
@@ -612,9 +623,26 @@ mod tests {
             for _ in 0..rounds {
                 std::hint::black_box(compute(std::hint::black_box(&s)));
             }
-            let grid_build = t.elapsed().as_secs_f64() * 1e3 / rounds as f64;
+            let selected_build = t.elapsed().as_secs_f64() * 1e3 / rounds as f64;
+            let mut tickets = ChunkTickets::default();
+            tickets.update(Some(s.clone()));
+            let mut moved = s.clone();
+            let t = std::time::Instant::now();
+            for _ in 0..rounds {
+                moved.players[0].0 += 1;
+                tickets.update(Some(moved.clone()));
+                std::hint::black_box(tickets.levels());
+            }
+            let moving = t.elapsed().as_secs_f64() * 1e3 / rounds as f64;
+            println!("one player moving: {moving:.3} ms/update");
             // A tick's questions: every chunk within 12 of every player.
-            let (map, grid) = (Map::Sparse(compute_sparse(&s)), compute(&s));
+            let (map, selected) = (Map::Sparse(compute_sparse(&s)), compute(&s));
+            let tiled = Map::Tiled(Tiled::new(&s));
+            let t = std::time::Instant::now();
+            for _ in 0..rounds {
+                std::hint::black_box(Tiled::new(std::hint::black_box(&s)));
+            }
+            let tiled_build = t.elapsed().as_secs_f64() * 1e3 / rounds as f64;
             let ask = |m: &Map| {
                 let t = std::time::Instant::now();
                 let mut n = 0u32;
@@ -632,10 +660,11 @@ mod tests {
                 t.elapsed().as_secs_f64() * 1e3 / rounds as f64
             };
             println!(
-                "{players} players: build {map_build:.3} -> {grid_build:.3} ms, {} lookups {:.3} -> {:.3} ms",
+                "{players} players: spacing={spacing} distance={distance}: scalar/selected/tiled build {map_build:.3}/{selected_build:.3}/{tiled_build:.3} ms, {} lookups {:.3}/{:.3}/{:.3} ms",
                 players * 625,
                 ask(&map),
-                ask(&grid)
+                ask(&selected),
+                ask(&tiled)
             );
         }
     }
@@ -665,7 +694,7 @@ mod tiled_tests {
                     .chain([(16, -16)])
                     .collect(),
                 view_distance: [0, 2, 10, 32][case % 4],
-                simulation_distance: [32, 10, 2, 0][case % 4],
+                simulation_distance: [32, 10, 2, 0][(case / 4) % 4],
             };
             let expected = compute_sparse(&s);
             let tiled = Tiled::new(&s);
