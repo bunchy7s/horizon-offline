@@ -200,7 +200,8 @@ static RULE_SPECIES: std::sync::RwLock<Option<std::collections::HashSet<String>>
     std::sync::RwLock::new(None);
 
 /// Whether the species' models carry `blocks.<n>` rules, which read the block under the
-/// mob's feet each tick (the local and the remote tick keep `standing_on` fresh).
+/// mob's feet each tick (the window's remote tick keeps `standing_on` fresh; the server, which
+/// draws nothing, never looks).
 pub fn tracks_standing(id: &str) -> bool {
     RULE_SPECIES
         .read()
