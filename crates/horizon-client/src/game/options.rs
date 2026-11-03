@@ -372,6 +372,16 @@ impl Game<'_> {
                     let _ = std::fs::create_dir_all(&dir);
                     super::packs::open_folder(&dir);
                 }
+                // Horizon's own Add button: the screen picked a hit, the game
+                // owns the folder it lands in.
+                Event::DownloadPack(i) => {
+                    let dir = super::packs::packs_dir();
+                    if let Some(screen) = &mut self.ui.options.pack_screen
+                        && let Some(browser) = &mut screen.browser
+                    {
+                        browser.download(i, &dir, horizon_core::VANILLA_VERSION);
+                    }
+                }
                 Event::DataPacks(ids) => {
                     let resources = self.vanilla_root();
                     if let Some(title) = &mut self.title {

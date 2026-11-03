@@ -918,6 +918,30 @@ def items_and_loot():
     ]
 
 
+def aquatic_from_bucket():
+    """Saved bucket flags default false, except the always-true tadpole (#7763)."""
+    ops = []
+    case = 0
+    for kind in ('cod', 'salmon', 'pufferfish', 'tropical_fish', 'axolotl', 'tadpole'):
+        for value in (None, '0b', '1b'):
+            case += 1
+            tag = f'h108_{case}'
+            target = f'@e[type=minecraft:{kind},tag={tag},limit=1]'
+            bucket = '' if value is None else ',FromBucket:' + value
+            ops += setup(f'/summon minecraft:{kind} 10.5 220 10.5 '
+                         f'{{Tags:["{tag}"],NoAI:1b,NoGravity:1b,Silent:1b,'
+                         f'PersistenceRequired:1b{bucket}}}')
+            # Advance an entity tick before reading the saved field and
+            # checking that this isolated subject still exists.
+            ops += [{'op': 'tick', 'n': 1},
+                    cmd(f'/execute if entity {target}'),
+                    cmd(f'/data get entity {target} FromBucket')]
+            ops += setup(f'/kill {target}')
+    return ops
+
+
+
+
 def summoned_fangs_lifetime():
     ops = setup('/fill 0 199 0 15 199 15 stone',
                 '/fill 0 200 0 15 206 15 air')
@@ -2327,6 +2351,7 @@ def groups():
         ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('aquatic FromBucket', aquatic_from_bucket()),
         ('villager command names', villager_command_names()),
         ('item lifetime counters', item_lifetime_counters()),
 

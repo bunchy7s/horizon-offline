@@ -1108,6 +1108,7 @@ impl Game<'_> {
             "ban-ip" | "pardon-ip" => self.cmd_ip_bans(id, ctx),
             id if id.starts_with("banlist") => self.cmd_banlist(id),
             id if id.starts_with("whitelist.") => self.cmd_whitelist(id, ctx),
+            "setidletimeout" => self.cmd_setidle_timeout(ctx),
             "stop" => self.cmd_stop(),
             "save-all" => self.cmd_save_all(),
             "save-off" | "save-on" => self.cmd_auto_save(id == "save-on"),
