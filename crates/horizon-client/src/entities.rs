@@ -1829,6 +1829,7 @@ mod destroyed_bundle_environment_tests {
             ItemStack::new("minecraft:diamond", 1),
         ];
         let mut bundle = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -3048,6 +3049,7 @@ mod item_destroyed_tests {
             .map(|(id, count)| ItemStack::new(id, *count))
             .collect();
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
