@@ -882,8 +882,8 @@ use super::{
 };
 use horizon_assets::item_model::StackView;
 use horizon_client::mod_api::{
-    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    RecipeBookCategory, ServerTickPhase, WorldPhase,
+    self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext,
+    NativeNoteBlockChange, NativeServerPlayer, RecipeBookCategory, ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -1271,6 +1271,21 @@ impl GameLevel<'_> {
         cancel: &mut bool,
     ) {
         mod_api::dispatch_block_burn(self, mod_api::mods(), dimension, pos, cancel);
+    }
+
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
+    #[inline(always)]
+    pub(super) fn native_note_block_change(
+        &self,
+        context: &NativeNoteBlockChange<'_>,
+        new_note: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_note_block_change(self, mod_api::mods(), context, new_note, cancel);
     }
 
     /// On an authoritative server, a note block at `pos` is about to sound.

@@ -67,7 +67,7 @@ pub struct CuboidModel {
     pub display: Option<ItemTransforms>,
     /// NeoForge's `render_type`, without a `minecraft:` prefix.
     pub render_type: Option<String>,
-    /// A model's `visibility`: a composite child name to shown; absent is shown.
+    /// A model's `visibility`: an obj object or composite child name to shown; absent is shown.
     pub visibility: BTreeMap<String, bool>,
 }
 /// A custom model loader's payload; a model inherits its parent's loader unless it names its own.
@@ -78,6 +78,13 @@ pub enum Loader {
         children: Vec<(String, Arc<CuboidModel>)>,
         /// Child name to shown; a child absent from the map is shown.
         visibility: BTreeMap<String, bool>,
+    },
+    /// `neoforge:obj`: `model` and `mtl_override` are asset locations.
+    Obj {
+        model: String,
+        flip_v: bool,
+        shade_quads: Option<bool>,
+        mtl_override: Option<String>,
     },
     /// A loader this decoder does not know: it adds no geometry.
     Unknown(String),
@@ -320,6 +327,26 @@ impl Loader {
                 Ok(Self::Composite {
                     children,
                     visibility: visibility(obj)?,
+                })
+            }
+            "neoforge:obj" => {
+                let optional = |key: &str| {
+                    obj.get(key)
+                        .filter(|raw| raw.get() != "null")
+                        .map(|raw| primitive_string(raw))
+                        .transpose()
+                };
+                Ok(Self::Obj {
+                    model: identifier(&optional("model")?.ok_or_else(|| error("missing model"))?)?,
+                    flip_v: obj
+                        .get("flip_v")
+                        .map(|r| boolean(r))
+                        .transpose()?
+                        .unwrap_or(false),
+                    shade_quads: obj.get("shade_quads").map(|r| boolean(r)).transpose()?,
+                    mtl_override: optional("mtl_override")?
+                        .map(|name| identifier(&name))
+                        .transpose()?,
                 })
             }
             _ => Ok(Self::Unknown(name)),

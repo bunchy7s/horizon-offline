@@ -912,5 +912,13 @@
   "Play downloads the game from Mojang the first time, with the Java it needs.": "Jogar baixa o jogo da Mojang na primeira vez, com o Java de que ele precisa.",
   "Save changes": "Salvar alterações",
   "The big modpacks' home": "A casa dos grandes modpacks",
-  "{first} or {last}": "{first} ou {last}"
+  "{first} or {last}": "{first} ou {last}",
+  "Could not reach Horizon's cosmetics service. Check your internet connection.": "Não foi possível conectar ao serviço de cosméticos do Horizon. Verifique sua conexão com a internet.",
+  "Your Wardrobe session ended. Open the Wardrobe again.": "Sua sessão do Guarda-roupa terminou. Abra o Guarda-roupa de novo.",
+  "The founder set can't be claimed right now.": "O conjunto fundador não pode ser resgatado agora.",
+  "That item isn't in your Wardrobe.": "Esse item não está no seu Guarda-roupa.",
+  "Horizon's cosmetics service had a problem. Try again later.": "O serviço de cosméticos do Horizon teve um problema. Tente novamente mais tarde.",
+  "Mojang could not confirm your account. Sign in again and retry.": "A Mojang não conseguiu confirmar sua conta. Entre novamente e tente de novo.",
+  "Sign in with a Minecraft account first.": "Primeiro entre com uma conta do Minecraft.",
+  "Mojang's session server is not answering. Try again later.": "O servidor de sessões da Mojang não está respondendo. Tente novamente mais tarde."
 }

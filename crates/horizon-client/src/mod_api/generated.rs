@@ -4627,6 +4627,22 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A player is tuning a note block on the authoritative server, not in
+    /// client prediction. `context` gives its dimension, position, instrument
+    /// and old note; `new_note` starts as vanilla's cycled note. Set it to 0
+    /// through 24; an out-of-range value keeps vanilla's. Cancel to leave the
+    /// note unchanged and prevent playback. API @API:native_note_block_change@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `cancel`, and later mods are skipped.
+    fn note_block_change(
+        &self,
+        level: &dyn LevelHost,
+        event: &mut NoteBlockChangeEvent<'_>,
+    ) -> Flow {
+        let _ = level;
+        let _ = event;
+        Flow::Continue
+    }
     /// Possible natural spawns at a server position (NeoForge's
     /// `LevelEvent.PotentialSpawns`, `NaturalSpawner.mobsAt`). Mods may add or
     /// remove entries, or cancel to make the list empty.
@@ -14309,6 +14325,34 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::note_block_change`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct NoteBlockChangeEvent<'a> {
+    pub context: &'a NativeNoteBlockChange<'a>,
+    pub new_note: i32,
+}
+pub fn dispatch_note_block_change(
+    level: &dyn LevelHost,
+    mods: &[Box<dyn Hooks>],
+    context: &NativeNoteBlockChange<'_>,
+    new_note: &mut i32,
+    cancel: &mut bool,
+) {
+    if *cancel {
+        return;
+    }
+    let mut event = NoteBlockChangeEvent {
+        context,
+        new_note: *new_note,
+    };
+    for mod_hook in super::entered(mods, "note_block_change") {
+        if matches!(mod_hook.note_block_change(level, &mut event), Flow::Cancel) {
+            *cancel = true;
+            break;
+        }
+    }
+    *new_note = event.new_note;
 }
 /// What [`Hooks::potential_spawns`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

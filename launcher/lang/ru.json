@@ -912,5 +912,13 @@
   "Play downloads the game from Mojang the first time, with the Java it needs.": "При первом запуске игра скачивается у Mojang вместе с нужной Java.",
   "Save changes": "Сохранить изменения",
   "The big modpacks' home": "Дом больших сборок",
-  "{first} or {last}": "{first} или {last}"
+  "{first} or {last}": "{first} или {last}",
+  "Could not reach Horizon's cosmetics service. Check your internet connection.": "Не удалось связаться с сервисом косметики Horizon. Проверьте подключение к интернету.",
+  "Your Wardrobe session ended. Open the Wardrobe again.": "Сеанс гардероба завершён. Откройте гардероб снова.",
+  "The founder set can't be claimed right now.": "Набор основателя сейчас нельзя получить.",
+  "That item isn't in your Wardrobe.": "Этого предмета нет в вашем гардеробе.",
+  "Horizon's cosmetics service had a problem. Try again later.": "В сервисе косметики Horizon произошла ошибка. Попробуйте позже.",
+  "Mojang could not confirm your account. Sign in again and retry.": "Mojang не удалось подтвердить ваш аккаунт. Войдите снова и повторите попытку.",
+  "Sign in with a Minecraft account first.": "Сначала войдите с аккаунтом Minecraft.",
+  "Mojang's session server is not answering. Try again later.": "Сервер сессий Mojang не отвечает. Попробуйте позже."
 }

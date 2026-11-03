@@ -797,6 +797,39 @@ def end_portal_entities():
     ]
 
 
+def loot_set_damage():
+    """SetItemDamageFunction in /loot's items engine, including its RNG tail."""
+    import json
+    sequence = 'harness:loot_damage'
+    uniform = {'type': 'minecraft:uniform', 'min': 0.2, 'max': 0.8}
+    cases = [('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': n})
+             for n in (0, 0.5, -1, 1, 2)]
+    cases += [
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': 0.5}),
+        ('minecraft:iron_sword', [
+            {'type': 'minecraft:set_damage', 'damage': 0.5},
+            {'type': 'minecraft:set_damage', 'damage': 0.25, 'add': True}]),
+        ('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': uniform}),
+        # An ineligible item must leave the provider's random draw untouched.
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': uniform}),
+    ]
+    ops = setup('/setblock 2 220 2 minecraft:chest')
+    # Keep the inline fallback without a named sequence covered as well.
+    cases.append(('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': 0.5}))
+    for index, (item, modifier) in enumerate(cases):
+        table = {'random_sequence': sequence, 'pools': [{'rolls': 1, 'entries': [
+            {'type': 'minecraft:item', 'name': item, 'modifier': modifier}]}]}
+        if index == len(cases) - 1:
+            del table['random_sequence']
+        ops += setup(f'/random reset {sequence} 42 false true')
+        ops += [
+            cmd('/loot replace block 2 220 2 container.0 loot ' + json.dumps(table)),
+            cmd('/data get block 2 220 2 Items'),
+            cmd(f'/random value 0..1000000 {sequence}'),
+        ]
+    return ops + setup('/setblock 2 220 2 minecraft:air')
+
+
 def items_and_loot():
     return [
         *setup('/clear @s', '/gamemode survival'),
@@ -1828,6 +1861,50 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def villager_command_names():
+    ops = setup('/forceload add 0 0')
+    case = 0
+    for profession in ('none', 'nitwit', 'cleric', 'farmer', 'librarian'):
+        for named in (False, True):
+            case += 1
+            target = f'00000000-0000-0000-0000-0030{case:08x}'
+            custom = ',CustomName:{text:"Ada"}' if named else ''
+            ops += setup(f'/summon villager 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                         'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                         f'VillagerData:{{profession:"minecraft:{profession}",type:"minecraft:plains",level:1}}{custom}}}')
+            for path in ('VillagerData', 'Pos', 'Rotation'):
+                ops.append(cmd(f'/data get entity {target} {path}'))
+            changed = 'cleric' if profession == 'farmer' else 'farmer'
+            ops.append(cmd(f'/data merge entity {target} '
+                           f'{{VillagerData:{{profession:"minecraft:{changed}",type:"minecraft:plains",level:1}}}}'))
+            ops.append(cmd(f'/data get entity {target} VillagerData'))
+            ops += setup(f'/kill {target}')
+    for kind in ('zombie_villager', 'wandering_trader'):
+        case += 1
+        target = f'00000000-0000-0000-0000-0030{case:08x}'
+        ops += setup(f'/summon {kind} 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                     'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                     'VillagerData:{profession:"minecraft:cleric",type:"minecraft:plains",level:1}}')
+        for path in ('Pos', 'Rotation'):
+            ops.append(cmd(f'/data get entity {target} {path}'))
+        ops += setup(f'/kill {target}')
+    ops.append({'op': 'tick', 'n': 25})
+    return ops + setup('/forceload remove 0 0')
+
+
+def animal_signed_in_love():
+    ops = setup('/forceload add 0 0')
+    for case, value in enumerate(('-32769', '-32768', '-129', '-128', '-1',
+                                  '-1b', '-128b', '0', '1', '37'), 1):
+        target = f'00000000-0000-0000-0000-0038{case:08x}'
+        ops += setup(f'/summon pig 4 200 4 {{UUID:[I;0,0,56,{case}],'
+                     f'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,InLove:{value}}}')
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops.append(cmd(f'/data remove entity {target} InLove'))
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops += setup(f'/kill {target}')
+    return ops + setup('/forceload remove 0 0')
+
 
 def mob_fire_resistance_damage():
     ops = setup('/forceload add 0 0')
@@ -1853,11 +1930,6 @@ def mob_fire_resistance_damage():
         ops += setup(f'/kill {target}')
     ops.append({'op': 'tick', 'n': 25})
     return ops + setup('/forceload remove 0 0')
-
-
-
-
-
 
 
 def item_lifetime_counters():
@@ -2162,10 +2234,12 @@ def groups():
         ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('villager command names', villager_command_names()),
         ('item lifetime counters', item_lifetime_counters()),
 
 
 
+        ('animal signed InLove', animal_signed_in_love()),
         ('mob fire resistance damage', mob_fire_resistance_damage()),
 
 
@@ -2189,7 +2263,13 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+
+        ('loot set damage', loot_set_damage()),
+
+
+
         ('item NBT count bounds', item_nbt_count_bounds()),
+
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),
