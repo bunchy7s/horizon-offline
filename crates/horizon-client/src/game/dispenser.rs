@@ -228,24 +228,17 @@ fn equine(s: Species) -> bool {
             | Species::TraderLlama
     )
 }
-/// Mobs whose body slot Horizon keeps in `extra.head` (no helmet slot is drawn).
-pub(super) fn body_in_head(s: Species) -> bool {
-    equine(s)
-        || matches!(s, Species::Wolf | Species::HappyGhast | Species::SulfurCube)
-        || horizon_client::mobs::nautilus::is_nautilus(s)
-}
 /// What a mob holds in a slot.
 pub(super) fn mob_slot_item(m: &Mob, slot: Slot) -> Option<Arc<str>> {
     let x = &m.extra;
-    let body = body_in_head(m.species());
     match slot {
         Slot::MainHand => x.main_hand.clone(),
         Slot::OffHand => x.off_hand.clone(),
         Slot::Feet => x.feet.clone(),
         Slot::Legs => x.legs.clone(),
         Slot::Chest => x.chest.clone(),
-        Slot::Head => x.head.clone().filter(|_| !body),
-        Slot::Body => x.head.clone().filter(|_| body),
+        Slot::Head => x.head.clone(),
+        Slot::Body => x.body.clone(),
         Slot::Saddle => m.saddle_item().map(|s| s.item),
     }
 }
@@ -317,7 +310,8 @@ pub(super) fn mob_set_slot(m: &mut Mob, slot: Slot, stack: ItemStack) {
         Slot::Feet => x.feet = Some(item),
         Slot::Legs => x.legs = Some(item),
         Slot::Chest => x.chest = Some(item),
-        Slot::Head | Slot::Body => x.head = Some(item),
+        Slot::Head => x.head = Some(item),
+        Slot::Body => x.body = Some(item),
         Slot::Saddle => m.set_saddle(Some(stack)),
     }
 }
@@ -1858,6 +1852,7 @@ impl Game<'_> {
             &mut mob.extra.main_hand,
             &mut mob.extra.off_hand,
             &mut mob.extra.head,
+            &mut mob.extra.body,
             &mut mob.extra.chest,
             &mut mob.extra.legs,
             &mut mob.extra.feet,
@@ -1896,7 +1891,7 @@ impl Game<'_> {
                     // passenger attachment, and nothing is swallowed for 5 s.
                     let height = f64::from(m.height());
                     let id = m.id;
-                    if let Some(body) = self.mobs[i].extra.head.take() {
+                    if let Some(body) = self.mobs[i].extra.body.take() {
                         self.spawn_at_location(at, height, ItemStack::new(&body, 1));
                     }
                     // setItemSlot(BODY, EMPTY): an unequip.
@@ -2141,16 +2136,16 @@ impl Game<'_> {
             .collect();
         for i in cubes {
             let m = &self.mobs[i];
-            if m.is_baby() || m.extra.head.as_deref() == Some(&*stack.item) {
+            if m.is_baby() || m.extra.body.as_deref() == Some(&*stack.item) {
                 continue;
             }
             let (at, height) = (m.position, f64::from(m.height()));
             // The swallowed block comes out on top (the passenger attachment).
-            if let Some(old) = self.mobs[i].extra.head.take() {
+            if let Some(old) = self.mobs[i].extra.body.take() {
                 self.spawn_at_location(at, height, ItemStack::new(&old, 1));
             }
             let m = &mut self.mobs[i];
-            m.extra.head = Some(stack.item.clone());
+            m.extra.body = Some(stack.item.clone());
             m.persistent = true;
             let (at, id) = (m.position, m.id);
             // setItemSlot: a body item without `equippable` posts UNEQUIP.
