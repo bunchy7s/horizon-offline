@@ -75,6 +75,9 @@ Goat.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::breed	t
 Goat.customServerAiStep	inline	crates/horizon-client/src/mobs/ai.rs::generic	goals stand in for the brain: Float, Panic 2.0, Breed, Tempt, FollowParent, stroll and look (ai.rs generic) and the ram goal (goat.rs); the ram cooldown counts down in goat.rs::tick
 Goat.setYHeadRot	port	crates/horizon-client/src/mobs/control.rs::look_control_tick	the head is clamped to `getMaxHeadYRot` (15 degrees) from the body after every look update, walking or standing
 Goat.playEatingSound	port	crates/horizon-client/src/mobs/ai.rs::eating_sound	screaming or normal eat sound at 0.8 to 1.2 pitch
+Goat.getAmbientSound	port	crates/horizon-client/src/mobs/ai.rs::voice_sounds	screaming ambient event selected by IsScreamingGoat
+Goat.getHurtSound	port	crates/horizon-client/src/mobs/ai.rs::voice_sounds	screaming hurt event selected by IsScreamingGoat
+Goat.getDeathSound	port	crates/horizon-client/src/mobs/ai.rs::voice_sounds	screaming death event selected by IsScreamingGoat
 Goat.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: live spawns use spawning.rs::finalize, which has no goat arm: no screaming goats (2 percent), no one-horned goats (10 percent), and no starting ram cooldown, so a fresh goat can ram at once; Ctx::finalize only runs for structure mobs and the probe
 Goat.getDefaultDimensions	port	crates/horizon-client/src/mobs/living.rs::Mob::dims	baby box (0.45 x 0.65, eye 0.59375) from the species table; no long jump pose scale since there is no long jump
 Goat.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	IsScreamingGoat, HasLeftHorn, HasRightHorn
@@ -115,7 +118,7 @@ HappyGhast.setServerStillTimeout	inline	crates/horizon-client/src/mobs/happy_gha
 HappyGhast.registerGoals	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult goals: float, tempt (harness and food for a bare adult, food otherwise), float around within 16
 HappyGhast.adultGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	adult half: ghast move control, happy ghast look control, goals, brain stopped
 HappyGhast.babyGhastSetup	port	crates/horizon-client/src/mobs/happy_ghast.rs::setup	baby half: flying move control, baby flying navigation, no goals, timeout cleared
-HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/happy_ghast.rs::ensure_setup	reruns setup when the age sign changes
+HappyGhast.ageBoundaryReached	port	crates/horizon-client/src/mobs/finalize.rs::age_boundary_reached	reruns the setup (happy_ghast::ensure_setup) when the age sign changes, so a hatched ghastling flies its own goals before its first tick
 HappyGhast.createAttributes	skip:data		attributes come from entity-types.json
 HappyGhast.getAmbientSoundInterval	port	crates/horizon-client/src/mobs.rs::Mob::ambient_interval	six times as long while it carries a rider
 HappyGhast.canUseSlot	inline	crates/horizon-client/src/game/ghasts.rs::Game::interact_happy_ghast	a harness goes only on a living adult without one; shears take it off

@@ -13,7 +13,38 @@ pub struct ModelQuad {
     pub material: Material,
     pub tint_index: i32,
     pub shade_direction_override: Option<Direction>,
+    /// The face's or element's `light_emission`.
     pub light_emission: u8,
+    /// Least (block, sky) light the quad is drawn with: its emission, raised by `neoforge_data`.
+    pub light: [u8; 2],
+    /// `neoforge_data` colour (ARGB) multiplied into the quad's tint.
+    pub color: Option<i32>,
+    /// `neoforge_data` override of the model's ambient occlusion for this quad.
+    pub ambient_occlusion: Option<bool>,
+    pub render_type: Option<RenderType>,
+}
+
+/// NeoForge's `render_type` names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderType {
+    Solid,
+    Cutout,
+    CutoutMipped,
+    Translucent,
+    Tripwire,
+}
+impl RenderType {
+    /// Accepts a bare or `minecraft:` name; others (mods' own types) are `None`.
+    pub fn by_name(name: &str) -> Option<Self> {
+        match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "solid" => Some(Self::Solid),
+            "cutout" => Some(Self::Cutout),
+            "cutout_mipped" => Some(Self::CutoutMipped),
+            "translucent" => Some(Self::Translucent),
+            "tripwire" => Some(Self::Tripwire),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -186,6 +217,7 @@ fn bake_elements(
     skip_flat: bool,
 ) -> Result<Vec<ModelQuad>> {
     let mut output = Vec::new();
+    let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for element in model.elements() {
         let element = element
             .as_ref()
@@ -207,7 +239,13 @@ fn bake_elements(
                 force_translucent: false,
             });
             output.push(bake_face(
-                element, face, *direction, matrix, material, transform,
+                element,
+                face,
+                *direction,
+                matrix,
+                material,
+                transform,
+                render_type,
             )?);
         }
     }
@@ -230,6 +268,7 @@ pub fn bake_flat_face(
         rotation: None,
         shade_direction_override: None,
         light_emission: 0,
+        neoforge_data: None,
     };
     let face = Face {
         cull: None,
@@ -237,6 +276,8 @@ pub fn bake_flat_face(
         texture: String::new(),
         uv: Some(uv),
         rotation: 0,
+        light_emission: None,
+        neoforge_data: None,
     };
     bake_face(
         &element,
@@ -245,6 +286,7 @@ pub fn bake_flat_face(
         None,
         material,
         BlockModelTransform::new([0; 3], false),
+        None,
     )
 }
 fn bake_face(
@@ -254,6 +296,7 @@ fn bake_face(
     matrix: Option<ElementMatrix>,
     material: Material,
     transform: BlockModelTransform,
+    render_type: Option<RenderType>,
 ) -> Result<ModelQuad> {
     let mut positions = corners(element.from, element.to, direction).map(|v| v.map(|c| c / 16.0));
     if let (Some(rotation), Some(matrix)) = (&element.rotation, matrix) {
@@ -303,6 +346,11 @@ fn bake_face(
             uv.swap(index, found);
         }
     }
+    let data = face
+        .neoforge_data
+        .unwrap_or_default()
+        .over(element.neoforge_data.unwrap_or_default());
+    let light_emission = face.light_emission.unwrap_or(element.light_emission);
     Ok(ModelQuad {
         positions,
         uv,
@@ -311,6 +359,10 @@ fn bake_face(
         material,
         tint_index: face.tint_index,
         shade_direction_override: element.shade_direction_override,
-        light_emission: element.light_emission,
+        light_emission,
+        light: [data.block_light, data.sky_light].map(|l| l.unwrap_or(0).max(light_emission)),
+        color: data.color,
+        ambient_occlusion: data.ambient_occlusion,
+        render_type,
     })
 }
