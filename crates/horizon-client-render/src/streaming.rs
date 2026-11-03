@@ -345,6 +345,7 @@ struct Shared {
     /// Only workers use this pool; frames never wait for its lock. Retaining
     /// cleared buffers avoids racing the renderer for the process heap.
     meshes: Mutex<MeshPool>,
+    aborted: std::sync::atomic::AtomicBool,
 }
 #[derive(Default)]
 struct MeshPool {
@@ -780,6 +781,18 @@ struct Jobs<G: ChunkGenerator> {
 impl<G: ChunkGenerator> Source for Jobs<G> {
     fn next(&self) -> Option<Rank> {
         let queue = self.shared.queue.lock().unwrap();
+        if self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            for q in queue.iter() {
+                if matches!(q.job, Job::Save(..)) {
+                    return Some(Rank::new(Class::Urgent, q.priority));
+                }
+            }
+            return None;
+        }
         queue.peek().map(|q| {
             // Jobs without a column (saves, meshes to free) go first.
             let class = if q.at.is_none() {
@@ -794,6 +807,14 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
         let Some(job) = self.shared.queue.lock().unwrap().pop() else {
             return false;
         };
+        if self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && !matches!(job.job, Job::Save(..))
+        {
+            return true;
+        }
         let started = job_stats::enabled().then(|| {
             let kind = match &job.job {
                 Job::Generate(..) => 1,
@@ -975,6 +996,7 @@ impl Streaming {
             context: RwLock::new(context.clone()),
             done: Mailbox::default(),
             meshes: Mutex::new(MeshPool::default()),
+            aborted: std::sync::atomic::AtomicBool::new(false),
         });
         let light_tables = context.light.clone();
         let saves: Arc<dyn Saves> = generator.clone();
@@ -2187,6 +2209,30 @@ impl Streaming {
     fn near_finished(&self, x: i32, z: i32, reach: i32) -> bool {
         self.ranges().near_finished(x, z, reach)
     }
+    /// Abort unvisited background chunk generation, decoration, and meshing on world exit.
+    pub fn abort_generation(&mut self) {
+        self.shared
+            .aborted
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(mut queue) = self.shared.queue.lock() {
+            let mut saves = Vec::new();
+            for item in std::mem::take(&mut *queue).into_vec() {
+                if matches!(item.job, Job::Save(..)) {
+                    saves.push(item);
+                }
+            }
+            *queue = std::collections::BinaryHeap::from(saves);
+        }
+        self.generating.clear();
+        self.decorating = 0;
+        self.decorating_finals.clear();
+        self.finishing.clear();
+        self.viewing.clear();
+        self.waiting.clear();
+        self.meshing.clear();
+        self.lighting.clear();
+        self.jobs.notify_all();
+    }
     /// Save what generation holds outside the world: the proto chunks
     /// decoration wrote to. With `wait`, the decorations, columns and saves
     /// in flight are waited for first (their proto chunks are out in the
@@ -2201,10 +2247,13 @@ impl Streaming {
             return;
         }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while self.decorating > 0
-            || !self.finishing.is_empty()
-            || self.saving > 0
-            || !self.viewing.is_empty()
+        let aborted = self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed);
+        while (self.saving > 0)
+            || (!aborted
+                && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
         {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             match self.shared.done.recv_timeout(left) {
@@ -2253,10 +2302,13 @@ impl Streaming {
                 return false;
             }
         }
-        if self.decorating > 0
-            || !self.finishing.is_empty()
-            || self.saving > 0
-            || !self.viewing.is_empty()
+        let aborted = self
+            .shared
+            .aborted
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if (self.saving > 0)
+            || (!aborted
+                && (self.decorating > 0 || !self.finishing.is_empty() || !self.viewing.is_empty()))
         {
             return false;
         }
@@ -2798,6 +2850,7 @@ impl Ranges<'_> {
 }
 impl Drop for Streaming {
     fn drop(&mut self) {
+        self.abort_generation();
         // Saves in flight hold proto chunks nothing else would save.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while self.saving > 0 {
