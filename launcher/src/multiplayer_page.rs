@@ -13,11 +13,11 @@ use std::sync::Arc;
 pub(super) struct Multiplayer {
     /// The game folder the list is of, and the list as last read with each picture decoded.
     home: Option<PathBuf>,
-    list: Vec<(Server, Option<Arc<Image>>)>,
+    pub(super) list: Vec<(Server, Option<Arc<Image>>)>,
     fresh: bool,
-    adding: bool,
-    confirm_remove: Option<usize>,
-    error: Option<String>,
+    pub(super) adding: bool,
+    pub(super) confirm_remove: Option<usize>,
+    pub(super) error: Option<String>,
 }
 
 impl Multiplayer {
@@ -28,7 +28,7 @@ impl Multiplayer {
 }
 
 impl Launcher {
-    fn load_servers(&mut self, home: PathBuf) {
+    pub(super) fn load_servers(&mut self, home: PathBuf) {
         if self.multiplayer.home.as_ref() != Some(&home) {
             self.multiplayer = Multiplayer {
                 home: Some(home.clone()),
@@ -59,7 +59,10 @@ impl Launcher {
         self.multiplayer.fresh = true;
     }
 
-    fn edit_servers(&mut self, edit: impl FnOnce(&mut server_list::List) -> Result<(), String>) {
+    pub(super) fn edit_servers(
+        &mut self,
+        edit: impl FnOnce(&mut server_list::List) -> Result<(), String>,
+    ) {
         let Some(home) = self.multiplayer.home.clone() else {
             return;
         };

@@ -23,6 +23,15 @@ pub(super) struct Env<'a, 'g> {
     game: &'a Game<'g>,
 }
 impl ItemEnv for Env<'_, '_> {
+    fn item_model_property(&self, property: &str, stack: &StackView) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let mut value = false;
+        self.game
+            .native_item_model_property(property, stack, &mut value);
+        value
+    }
     fn enchantment_in_tag(&self, enchantment: &str, tag: &str) -> bool {
         self.game.stations().enchantments.in_tag(tag, enchantment)
     }
@@ -473,11 +482,7 @@ impl Game<'_> {
         let mut models = self.skin_models.borrow_mut();
         let mut frame = self.skin_frame.borrow_mut();
         let mark = frame.mark();
-        let mut skin = horizon_client::mobs::skin::Skin {
-            models: &mut models,
-            frame: &mut frame,
-            bounds: None,
-        };
+        let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
         for &pose in poses {
             if !self.skin_item(state, pose, light, lights, &mut skin) {
                 // Decided before any draw, the same for every pose.
