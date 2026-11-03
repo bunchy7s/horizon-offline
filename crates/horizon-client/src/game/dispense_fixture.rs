@@ -431,7 +431,16 @@ impl Game<'_> {
             out.push(self.fixture_describe(i, t));
         }
         let log = LOG.with(|log| log.borrow_mut().take()).unwrap_or_default();
+        // LevelEventHandler's lava fizz (1501): the client plays it from the
+        // level event, so it is not captured as a shared sound (#7652).
+        let fizzes: Vec<String> = log
+            .iter()
+            .filter_map(|line| line.strip_prefix("L 1501 "))
+            .filter_map(|rest| rest.split(' ').next())
+            .map(|pos| format!("S {pos} minecraft:block.lava.extinguish"))
+            .collect();
         out.extend(log);
+        out.extend(fizzes);
         for (sound, at, _, _) in self.audio.capture.take().unwrap_or_default() {
             out.push(format!("S {} {sound}", floor_pos(at)));
         }
