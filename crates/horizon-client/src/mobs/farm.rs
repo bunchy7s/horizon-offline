@@ -109,6 +109,16 @@ pub fn chicken_flap(m: &mut Mob) {
     a.flapping *= 0.9;
     a.flap += a.flapping * 2.0;
 }
+/// `Chicken.isFlapping` and `Chicken.onFlap`: movement crosses a strict
+/// distance threshold, then schedules the next wing beat without a sound.
+pub fn chicken_process_flapping(m: &mut Mob) -> bool {
+    if m.ai.steps.fly_dist > m.ai.steps.next_flap {
+        m.ai.steps.next_flap = m.ai.steps.fly_dist + m.anim.flap_speed / 2.0;
+        true
+    } else {
+        false
+    }
+}
 /// Farm animal climate from the biome tags (`spawns_warm/cold_variant_farm_animals`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Climate {
@@ -148,6 +158,23 @@ mod tests {
     /// `chicken_flap` reads only the ground flag: any mob type will do.
     fn chicken() -> Mob {
         Mob::new(1, crate::mobs::sensor_scan_tests::kind(), Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn chicken_flap_threshold_is_strict_and_advances_once() {
+        let mut m = chicken();
+        m.anim.flap_speed = 1.0;
+        m.ai.steps.fly_dist = 1.0;
+        assert!(!chicken_process_flapping(&mut m));
+        m.ai.steps.fly_dist = 1.2;
+        assert!(chicken_process_flapping(&mut m));
+        assert!((m.ai.steps.next_flap - 1.7).abs() < 1.0e-6);
+        assert!(!chicken_process_flapping(&mut m));
+        m.ai.steps.fly_dist = m.ai.steps.next_flap;
+        assert!(!chicken_process_flapping(&mut m));
+        m.ai.steps.fly_dist = 1.8;
+        assert!(chicken_process_flapping(&mut m));
+        assert!((m.ai.steps.next_flap - 2.3).abs() < 1.0e-6);
     }
 
     #[test]

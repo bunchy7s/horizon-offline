@@ -600,15 +600,15 @@ fn entity_spec(tags: &HashMap<String, HashSet<String>>, spec: &str) -> HashSet<S
         None => HashSet::from([spec.to_owned()]),
     }
 }
-/// The items with a `villager_food` component and their nutrition, from the
-/// last item registry loaded: what the mobs' villagers read, since a mob does
-/// not hold the registry (`None` until one is loaded).
+/// Every item of the last item registry loaded with its `villager_food`
+/// nutrition (0 without the component): what the mobs' villagers read, since
+/// a mob does not hold the registry (`None` until one is loaded).
 static VILLAGER_FOOD: std::sync::RwLock<Option<HashMap<Arc<str>, i32>>> =
     std::sync::RwLock::new(None);
 fn set_villager_food(items: &HashMap<Arc<str>, ItemInfo>) {
     let food = items
         .values()
-        .filter_map(|i| Some((i.id.clone(), i.villager_food?)))
+        .map(|i| (i.id.clone(), i.villager_food.unwrap_or(0)))
         .collect();
     *VILLAGER_FOOD
         .write()
@@ -616,12 +616,13 @@ fn set_villager_food(items: &HashMap<Arc<str>, ItemInfo>) {
 }
 /// `item`'s `villager_food` nutrition (`DataComponents.VILLAGER_FOOD`): its
 /// value in the loaded registry (0 for an item without the component), or
-/// `None` while no registry is loaded.
+/// `None` while no registry is loaded or the loaded one lacks the item (a
+/// test's content root without the vanilla items).
 pub fn villager_food(item: &str) -> Option<i32> {
     let food = VILLAGER_FOOD
         .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    food.as_ref().map(|f| f.get(item).copied().unwrap_or(0))
+    food.as_ref().and_then(|f| f.get(item).copied())
 }
 
 impl Items {

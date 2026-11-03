@@ -75,6 +75,8 @@ pub(super) struct Stage<'p> {
     pub(super) replaced: HashMap<usize, String>,
     /// Globals whose initializer runs in our `main` (`g = hz_init_g();`), in order.
     pub(super) inits: Vec<String>,
+    /// Authored global names; automatic core matrix inputs must not hide them.
+    pub(super) globals: BTreeSet<String>,
     /// Their captured array size constants and declarator ends: `.length()` stays type-only.
     pub(super) runtime_array_lengths: HashMap<String, (String, usize)>,
     pub(super) errors: Vec<Error>,
@@ -315,6 +317,7 @@ impl<'p> Stage<'p> {
             gbuffers: false,
             replaced: HashMap::new(),
             inits: Vec::new(),
+            globals: BTreeSet::new(),
             runtime_array_lengths: HashMap::new(),
             errors: Vec::new(),
         };
@@ -476,6 +479,51 @@ impl<'p> Stage<'p> {
         }
     }
 
+    /// Core names share the compatibility state for geometry, including shadow transforms.
+    /// Authored non-uniform globals (or uniforms of another type) keep their own meaning.
+    pub(super) fn core_matrix(&self, name: &str) -> Option<&'static str> {
+        let matrix = match name {
+            "projectionMatrix" => "hz_ProjectionMatrix",
+            "modelViewMatrix" => "hz_ModelViewMatrix",
+            _ => return None,
+        };
+        if !self.gbuffers
+            || (self.globals.contains(name)
+                && !self
+                    .uniforms
+                    .iter()
+                    .any(|(n, ty, _)| n == name && ty == "mat4"))
+        {
+            return None;
+        }
+        Some(matrix)
+    }
+
+    /// Remember names without interpreting their values. Commas inside constructors and array
+    /// suffixes do not introduce another declarator, nor do references in an initializer.
+    fn global_names(&mut self, words: &[usize], mut type_at: usize) {
+        while words
+            .get(type_at)
+            .is_some_and(|&i| self.tokens[i] == "const" || QUALIFIERS.contains(&self.tokens[i]))
+        {
+            type_at += 1;
+        }
+        let (mut depth, mut name) = (0i32, true);
+        for &i in words.iter().skip(type_at + 1) {
+            let token = self.tokens[i];
+            if depth == 0 && name && is_ident(token) {
+                self.globals.insert(token.to_owned());
+                name = false;
+            }
+            match token {
+                "(" | "[" | "{" => depth += 1,
+                ")" | "]" | "}" => depth -= 1,
+                "," if depth == 0 => name = true,
+                _ => {}
+            }
+        }
+    }
+
     /// A statement at global scope, tokens `from..to` (without its `;`, or before a `{`).
     pub(super) fn global(&mut self, from: usize, to: usize, body: bool) {
         let words: Vec<usize> = (from..to)
@@ -538,6 +586,7 @@ impl<'p> Stage<'p> {
             }
             k += 1;
         }
+        self.global_names(&words, k);
         let Some(storage) = storage else {
             return self.initializer(&words, to);
         };
@@ -916,6 +965,7 @@ impl<'p> Stage<'p> {
         let Some(&name) = open.checked_sub(1).and_then(|n| words.get(n)) else {
             return;
         };
+        self.globals.insert(self.tokens[name].to_owned());
         let mut params = Vec::new();
         let mut is_sampler = false;
         for &i in &words[open + 1..] {

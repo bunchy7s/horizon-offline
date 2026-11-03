@@ -417,6 +417,22 @@ impl Game<'_> {
         tag: Tag,
     ) -> std::result::Result<(), Tag> {
         match kind {
+            "minecraft:evoker_fangs" => {
+                if let Some(at) = entity_nbt::position(&tag) {
+                    self.next_entity += 1;
+                    let id = self.next_entity;
+                    let delay = horizon_client::save::number(tag.get("Warmup")).unwrap_or(0) as i32;
+                    let owner = self.loaded_fangs_owner(&tag);
+                    self.insert_fangs(
+                        id,
+                        [at.x, at.y, at.z],
+                        entity_nbt::rotation(&tag)[0],
+                        delay,
+                        owner,
+                    );
+                    self.remember(id, uuid, tag);
+                }
+            }
             "minecraft:ominous_item_spawner" => self.load_ominous_item_spawner(tag),
             "minecraft:ender_dragon" => self.load_dragon(tag, uuid),
             "minecraft:end_crystal" => self.load_crystal(tag, uuid),
@@ -1313,6 +1329,20 @@ impl Game<'_> {
                 out.entry(chunk_of(at)).or_default().push(tag);
             }
         }
+        for f in &self.fangs.list {
+            let at = Vec3::new(f.pos[0], f.pos[1], f.pos[2]);
+            if keys.contains(&chunk_of(at)) {
+                let uuid = self
+                    .persist
+                    .uuids
+                    .get(&f.id)
+                    .copied()
+                    .unwrap_or_else(random_uuid);
+                out.entry(chunk_of(at))
+                    .or_default()
+                    .push(self.fangs_to_nbt(f, uuid));
+            }
+        }
         for o in &self.others {
             if keys.contains(&chunk_of(o.position)) {
                 let uuid = self
@@ -1361,6 +1391,13 @@ impl Game<'_> {
                 let keep = !gone(c.position) || Some(c.id) == riding;
                 if !keep {
                     removed.push(c.id);
+                }
+                keep
+            });
+            self.fangs.list.retain(|f| {
+                let keep = !gone(Vec3::new(f.pos[0], f.pos[1], f.pos[2]));
+                if !keep {
+                    removed.push(f.id);
                 }
                 keep
             });

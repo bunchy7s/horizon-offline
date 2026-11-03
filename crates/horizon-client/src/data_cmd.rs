@@ -198,7 +198,7 @@ pub fn scaled_value(tag: &Tag, path: &NbtPath, scale: f64) -> Result<i32, Comman
 }
 /// The text `data get ... <scale>` prints for the scale (`%.2f`).
 pub fn scale_text(scale: f64) -> Text {
-    Text::literal(format!("{scale:.2}"))
+    Text::literal(crate::java_text::format_fixed(scale, 2))
 }
 
 #[cfg(test)]
@@ -311,5 +311,6 @@ mod tests {
             "commands.data.get.multiple"
         );
         assert_eq!(scale_text(1.0).plain(), "1.00");
+        assert_eq!(scale_text(0.125).plain(), "0.13");
     }
 }
