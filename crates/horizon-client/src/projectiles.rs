@@ -1325,6 +1325,7 @@ mod tests {
             water: false,
         });
         assert_eq!(p.fire_ticks, 0);
+    }
     #[test]
     fn throwables_in_water_leave_bubbles_behind_them() {
         let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 60.0, 0.5), None);
