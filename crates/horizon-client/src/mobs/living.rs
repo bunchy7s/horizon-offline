@@ -485,7 +485,7 @@ impl Mob {
             (w, h, e) = (w * s, h * s, e * s);
         }
         // Shulker.getDefaultDimensions: the last scale, over everything
-        // above, is the shell's lid opening under a block.
+        // above, is the lid opening upward on a shell attached to the floor.
         if k.species == super::Species::Shulker
             && let Some(s) = super::shulker::peek_height_scale(self)
         {
