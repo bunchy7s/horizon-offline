@@ -1805,11 +1805,7 @@ pub trait Hooks: Send + Sync {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
-    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
-    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
-    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
-    /// native mod is loaded. It runs
+    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -4537,6 +4533,20 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
         None
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    ///
+    /// Return `Flow::Cancel` to take it: this sets `canceled`, and later mods are skipped.
+    fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+        let _ = event;
+        Flow::Continue
     }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
@@ -7872,9 +7882,6 @@ pub struct LivingKnockbackEvent<'a> {
     pub damage_type: &'a str,
     pub causing: i32,
     pub direct: i32,
-    pub attacker: i32,
-    pub attacker_main: Option<&'a ItemStack>,
-    pub attacker_off: Option<&'a ItemStack>,
     pub strength: f64,
     pub x: f64,
     pub z: f64,
@@ -7886,9 +7893,6 @@ pub fn dispatch_living_knockback(
     damage_type: &str,
     causing: i32,
     direct: i32,
-    attacker: i32,
-    attacker_main: Option<&ItemStack>,
-    attacker_off: Option<&ItemStack>,
     strength: &mut f64,
     x: &mut f64,
     z: &mut f64,
@@ -7903,9 +7907,6 @@ pub fn dispatch_living_knockback(
         damage_type,
         causing,
         direct,
-        attacker,
-        attacker_main,
-        attacker_off,
         strength: *strength,
         x: *x,
         z: *z,
@@ -13929,6 +13930,53 @@ pub fn dispatch_item_container(
             break;
         }
     }
+}
+/// What [`Hooks::living_knockback_v2`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct LivingKnockbackV2Event<'a> {
+    pub entity: i32,
+    pub kind: &'a str,
+    pub attacker: i32,
+    pub attacker_main: Option<&'a ItemStack>,
+    pub attacker_off: Option<&'a ItemStack>,
+    pub strength: f64,
+    pub x: f64,
+    pub z: f64,
+}
+pub fn dispatch_living_knockback_v2(
+    mods: &[Box<dyn Hooks>],
+    entity: i32,
+    kind: &str,
+    attacker: i32,
+    attacker_main: Option<&ItemStack>,
+    attacker_off: Option<&ItemStack>,
+    strength: &mut f64,
+    x: &mut f64,
+    z: &mut f64,
+    canceled: &mut bool,
+) {
+    if *canceled {
+        return;
+    }
+    let mut event = LivingKnockbackV2Event {
+        entity,
+        kind,
+        attacker,
+        attacker_main,
+        attacker_off,
+        strength: *strength,
+        x: *x,
+        z: *z,
+    };
+    for mod_hook in super::entered(mods, "living_knockback_v2") {
+        if matches!(mod_hook.living_knockback_v2(&mut event), Flow::Cancel) {
+            *canceled = true;
+            break;
+        }
+    }
+    *strength = event.strength;
+    *x = event.x;
+    *z = event.z;
 }
 /// What [`Hooks::movement_input`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

@@ -7086,11 +7086,7 @@ impl Game<'_> {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
-    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
-    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
-    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
-    /// native mod is loaded. It runs
+    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -7100,9 +7096,6 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
         strength: &mut f64,
         x: &mut f64,
         z: &mut f64,
@@ -7115,6 +7108,35 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    pub(super) fn native_living_knockback_v2(
+        entity: i32,
+        kind: &str,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback_v2(
+            mod_api::mods(),
+            entity,
+            kind,
             attacker,
             attacker_main,
             attacker_off,
@@ -7238,7 +7260,7 @@ impl Game<'_> {
 impl Game<'_> {
     /// `health::knockback_from` that, while a native mod listens, also records what the attacker
     /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
+    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
         if mod_api::mods().is_empty() {
@@ -7292,6 +7314,13 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             }
         }
     };
+    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
+    #[allow(clippy::match_like_matches_macro)]
+    let stand = if let Hurting::ArmorStand(..) = &pushed {
+        true
+    } else {
+        false
+    };
     let (entity, kind, source) = hurt_server_args(pushed);
     let HurtSource {
         damage_type,
@@ -7299,22 +7328,33 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         direct,
     } = source;
     let mut canceled = false;
+    if !stand {
+        Game::native_living_knockback(
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
+        );
+    }
+    let mut canceled_v2 = false;
     let held = horizon_client::health::knockback_held();
-    Game::native_living_knockback(
+    Game::native_living_knockback_v2(
         entity,
         kind,
-        damage_type,
-        causing,
-        direct,
         attacker,
         held[0].as_ref(),
         held[1].as_ref(),
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,
-        &mut canceled,
+        &mut canceled_v2,
     );
-    canceled
+    canceled || canceled_v2
 }
 
 pub(super) fn block_contact(
