@@ -1733,7 +1733,8 @@ fn native_pack_option_rows(s: &Settings, i: usize, at: u8) -> Vec<Row> {
         PageItem::Option(o) if o < count => {
             let option = &pack.options[o];
             let value = crate::shader_pack_list::show_value(&option.kind, pack.values[o]);
-            let label = Text::literal(format!("{}: {value}", option.name));
+            let label =
+                Text::option_name_value(Text::literal(option.name.clone()), Text::literal(value));
             button(0.0, 0.0, width, label, Act::NativePackOption(i, o))
         }
         PageItem::Page(p) if p < pack.pages.len() => {
@@ -2033,8 +2034,11 @@ fn pairs(opts: &[Opt]) -> Vec<Row> {
 impl OptionsUi {
     /// A switch of `horizon-extras.txt` as the Extras page draws it: "Caption: On".
     fn extra_button(&self, s: &Settings, item: crate::extras::Item) -> Widget {
-        let label = format!("{}: {}", item.caption_text(), item.value(&s.extras));
-        button(0.0, 0.0, 150.0, Text::literal(label), Act::Extra(item))
+        let label = Text::option_name_value(
+            Text::literal(item.caption_text()),
+            Text::literal(item.value(&s.extras)),
+        );
+        button(0.0, 0.0, 150.0, label, Act::Extra(item))
     }
     fn settings_search_active(&self) -> bool {
         self.settings_search.focused
@@ -2353,7 +2357,11 @@ impl OptionsUi {
                 // Each section's switches two to a row, as vanilla's
                 // OptionsList.addSmall lays out an options screen.
                 let extra = |item: crate::extras::Item| {
-                    let value = format!("{}: {}", item.caption_text(), item.value(&s.extras));
+                    let value = Text::option_name_value(
+                        Text::literal(item.caption_text()),
+                        Text::literal(item.value(&s.extras)),
+                    )
+                    .plain();
                     let label = if item.key_name().is_some() && self.selected_key == item.key_name()
                     {
                         Text::literal(format!("> {value} <")).with_color(text::YELLOW)
@@ -2717,8 +2725,10 @@ impl OptionsUi {
                     .iter()
                     .enumerate()
                     .map(|(i, installed)| {
-                        let mut label = Text::literal(format!("{}: ", installed.title))
-                            .append(on_off(s.mods.is_on(i)));
+                        let mut label = Text::option_name_value(
+                            Text::literal(installed.title.clone()),
+                            on_off(s.mods.is_on(i)),
+                        );
                         if installed.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
                             label = label.append(tr("horizon.mods.not_built"));
                         } else if installed.problem.is_some() {
@@ -2780,8 +2790,10 @@ impl OptionsUi {
                             }
                             crate::shader_pack_list::Kind::Classic => String::new(),
                         };
-                        let label = Text::literal(format!("{}{kind}: ", pack.title))
-                            .append(on_off(s.horizon.shader_pack == pack.file));
+                        let label = Text::option_name_value(
+                            Text::literal(format!("{}{kind}", pack.title)),
+                            on_off(s.horizon.shader_pack == pack.file),
+                        );
                         Row::Buttons(button(0.0, 0.0, 310.0, label, Act::PickShaderPack(i)), None)
                     }))
                     .collect()
@@ -5105,12 +5117,13 @@ impl OptionsUi {
                     return events;
                 }
                 Some(FocusId::Lang(code)) => {
+                    // `LanguageSelectionList.Entry.keyPressed`: the selection
+                    // key (`isSelection`: Enter, Space, keypad Enter) selects
+                    // the row and finishes the screen at once (`onDone`), so
+                    // the language applies on that one press.
                     let mut events = vec![Event::ButtonClick];
-                    if self.language_choice.as_deref() == Some(code.as_str()) {
-                        events.extend(self.back(s));
-                    } else {
-                        self.language_choice = Some(code.clone());
-                    }
+                    self.language_choice = Some(code.clone());
+                    events.extend(self.back(s));
                     return events;
                 }
                 _ => {}
@@ -5526,6 +5539,34 @@ mod tests {
             vec![Event::ButtonClick]
         );
         assert!(ui.resource_error.is_none());
+    }
+
+    /// The Extras page joins caption and value with the language's `options.generic_value`
+    /// (26.3's templates), not an English ": " (#6072).
+    #[test]
+    fn extras_captions_use_the_languages_separator() {
+        struct Vanilla;
+        impl lang::ResourceSource for Vanilla {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                let generic = match path {
+                    "assets/minecraft/lang/fr_fr.json" => "%s : %s",
+                    "assets/minecraft/lang/zh_cn.json" => "%s：%s",
+                    _ => return None,
+                };
+                serde_json::to_vec(&serde_json::json!({ "options.generic_value": generic })).ok()
+            }
+        }
+        let s = Settings::default();
+        let ui = OptionsUi::default();
+        for (code, shown) in [("fr_fr", "Sans IA : Non"), ("zh_cn", "关闭 AI：关")] {
+            let (label, _) = lang::scoped(lang::Language::load(&[&Vanilla], code), || {
+                match ui.extra_button(&s, crate::extras::Item::NoAi).kind {
+                    WKind::Button { label, .. } => label.plain(),
+                    _ => String::new(),
+                }
+            });
+            assert_eq!(label, shown, "{code}");
+        }
     }
 
     /// The texts of an options page, as laid out in `code`'s language, and the keys it lacked.
@@ -6618,6 +6659,49 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    /// `LanguageSelectionList.Entry.keyPressed`: the selection key picks the
+    /// row's language and finishes the screen in one press (`onDone`), so the
+    /// page is gone after Enter and the language is already applied.
+    #[test]
+    fn the_selection_key_picks_a_language_and_finishes_the_page() {
+        use winit::keyboard::KeyCode;
+        let atlas = atlas();
+        let rows = languages();
+        let code = {
+            let s = Settings::default();
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            let (widgets, ..) = ui.layout(&s, 480.0, 320.0);
+            widgets
+                .iter()
+                .find_map(|wd| match &wd.kind {
+                    WKind::LanguageRow { code, .. } => Some(code.clone()),
+                    _ => None,
+                })
+                .expect("a language row")
+        };
+        for key in [KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space] {
+            let mut s = Settings::default();
+            assert_ne!(s.language, code, "the row starts unchosen");
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            ui.focus = Some(FocusId::Lang(code.clone()));
+            ui.focus_from_keyboard = true;
+            let events = ui.key(&mut s, &atlas, key, None);
+            assert_eq!(s.language, code, "{key:?} applies the row's language");
+            assert!(events.contains(&Event::Language(code.clone())), "{key:?}");
+            assert_eq!(ui.page(), Page::Main, "{key:?} finishes the language page");
+        }
     }
 
     #[test]

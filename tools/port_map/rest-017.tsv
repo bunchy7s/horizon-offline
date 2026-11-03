@@ -15,7 +15,8 @@ DedicatedServer.setSpawnProtectionRadius	skip:server		JSON-RPC management API on
 DedicatedServer.setRepliesToStatus	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setHidesOnlinePlayers	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.setOperatorUserPermissions	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
-DedicatedServer.setPlayerIdleTimeout	missing		no /setidletimeout in Horizon's command tree (command_order.rs lists the name, the dispatcher has no arm); player-idle-timeout is read once at start and the kick it drives is game/dedicated.rs's idle sweep
+DedicatedServer.setPlayerIdleTimeout	port	crates/horizon-client/src/game/dedicated.rs::Game::set_player_idle_timeout	updates the live idle sweep and player-idle-timeout via management; gap: minor: /setidletimeout remains unimplemented
+MinecraftServerSettingsServiceImpl.setPlayerIdleTimeout	port	crates/horizon-server/src/management_methods.rs::Game::player_idle_timeout	forwards the live idle timeout to the game and persists properties.player-idle-timeout in server.toml
 DedicatedServer.setStatusHeartbeatInterval	skip:server		JSON-RPC management API only (status heartbeat)
 DedicatedServer.setMotd	skip:server		JSON-RPC management API only (ServerSettingsService); Horizon has no such API
 DedicatedServer.enforceSecureProfile	inline	crates/horizon-client/src/game/dedicated.rs::Game::run_dedicated	gap: minor: services.canValidateProfileKeys() is not part of the check

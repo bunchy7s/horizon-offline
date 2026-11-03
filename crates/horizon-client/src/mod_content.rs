@@ -1277,6 +1277,9 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if let Some(shape) = p.render_shape {
+            row.set("render_shape", J::Str(shape.name().into()));
+        }
         if let Some(v) = p.hardness {
             row.set("hardness", J::f64(v as f64));
         }
@@ -2110,6 +2113,19 @@ fn merge_tag(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
+/// An atlas definition's JSON text with `more` sources after its own.
+fn merge_atlas(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
+    let mut doc = match text {
+        Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
+        None => J::Obj(vec![("sources".into(), J::Arr(Vec::new()))]),
+    };
+    let Some(J::Arr(sources)) = doc.get_mut("sources") else {
+        return Err(format!("{what}: no sources").into());
+    };
+    sources.extend(more.iter().cloned());
+    Ok(serde_json::to_string_pretty(&doc)?)
+}
+
 /// The block and item ids and tags a content root has, for tag entries.
 struct Known {
     blocks: std::collections::BTreeSet<String>,
@@ -2335,6 +2351,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
+    let mut atlases: BTreeMap<String, Vec<J>> = BTreeMap::new();
     for m in mods {
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
@@ -2351,6 +2368,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 let shared = !m.content.namespaces.iter().any(|n| n == ns);
                 let merge = tags.entry(file.clone()).or_default();
                 warnings.extend(merge.add(&m.id, file, replace, shared, values));
+            } else if file.starts_with("assets/minecraft/atlases/") && file.ends_with(".json") {
+                let doc: J = serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+                let Some(J::Arr(sources)) = doc.get("sources") else {
+                    return Err(format!("{}: {file}: no sources", m.id).into());
+                };
+                atlases
+                    .entry(file.clone())
+                    .or_default()
+                    .extend(sources.iter().cloned());
             } else if !file.starts_with(&declarations) {
                 overlay.write(file, &bytes)?;
                 if biomes::is_modifier(file) {
@@ -2374,6 +2400,14 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 }
             }
         }
+    }
+    // A reload appends every pack's sources for an atlas to the ones below it.
+    for (file, sources) in &atlases {
+        let vanilla = fs::read_to_string(base.join(file)).ok();
+        overlay.write(
+            file,
+            merge_atlas(vanilla.as_deref(), sources, file)?.as_bytes(),
+        )?;
     }
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such

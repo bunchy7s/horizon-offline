@@ -100,15 +100,28 @@ pub fn main() -> Result<()> {
         player.status.jump_boost = p["boost"].as_i64().map(|a| a as i32);
         player.auto_jump_enabled = p["enabled"].as_bool().unwrap();
         player.auto_jump_time = p["time"].as_i64().unwrap() as i32;
-        MotionWorld {
-            entities: &[],
-            player: &mut player,
-            scene: &mut scene,
-            assets: &assets,
-            collision_binding: &binding,
-            resources: &resources,
+        // canAutoJump, which is where the rider state is read: the movement world drives an
+        // unmounted player, so the case's flag goes to the predicate itself.
+        let ready = horizon_client::auto_jump::can_auto_jump(
+            player.auto_jump_enabled,
+            player.auto_jump_time,
+            player.ground.on_ground,
+            player.shift_key_down,
+            p["passenger"].as_bool().unwrap_or(false),
+            player.move_vector,
+            1.0,
+        );
+        if ready {
+            MotionWorld {
+                entities: &[],
+                player: &mut player,
+                scene: &mut scene,
+                assets: &assets,
+                collision_binding: &binding,
+                resources: &resources,
+            }
+            .update_auto_jump(fl(&c["xa"]), fl(&c["za"]))?;
         }
-        .update_auto_jump(fl(&c["xa"]), fl(&c["za"]))?;
         writeln!(out, "jump {}", player.auto_jump_time)?;
         for (x, y, z, state) in restore.into_iter().rev() {
             scene.set(x, y, z, state)?;
