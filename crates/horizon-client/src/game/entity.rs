@@ -74,6 +74,17 @@ pub(super) trait Entity: EntityRules {
         index: usize,
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)>;
+    /// Loads a saved entity whose type id is `kind` as this kind and joins it to
+    /// the world, or hands `tag` back when `kind` is not one this kind loads.
+    /// Required, so a new kind states how it loads: it cannot be saved and then
+    /// dropped silently on the way back in.
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag>;
 
     fn on_ground(&self) -> bool {
         false
@@ -500,7 +511,43 @@ macro_rules! save_entities_of_every_kind {
     };
 }
 
+macro_rules! load_lists {
+    (($game:expr, $kind:expr, $uuid:expr, $player:expr, $tag:expr)
+     $($kind_name:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {{
+        let mut tag = $tag;
+        $(match <$ty as $crate::game::entity::Entity>::load_nbt($game, $kind, $uuid, $player, tag) {
+            Ok(()) => return Ok(()),
+            Err(back) => tag = back,
+        })*
+        Err(tag)
+    }};
+}
+pub(crate) use load_lists;
+
+/// Loads a saved entity as the first kind in `entity_lists!` that claims its
+/// type id, through that kind's own `Entity::load_nbt`: one test per kind,
+/// static dispatch, nothing allocated (the compound moves through). Evaluates
+/// to `Err(tag)` when no kind claims it, and `return`s `Ok` from the caller
+/// otherwise. A kind added to the lists cannot be left out, since `load_nbt`
+/// has no default.
+macro_rules! load_entity_of_any_kind {
+    ($game:expr, $kind:expr, $uuid:expr, $player:expr, $tag:expr) => {
+        $crate::game::entity::entity_lists!(load_lists, $game, $kind, $uuid, $player, $tag)
+    };
+}
+
 impl Game<'_> {
+    /// Loads a saved entity as the first kind in `entity_lists!` that claims
+    /// its type id: `Err` hands the compound back when none does.
+    pub(super) fn load_listed(
+        &mut self,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        load_entity_of_any_kind!(self, kind, uuid, player_uuid, tag)
+    }
     /// The ids of the entities that are not on the walk of `entity_lists!`.
     pub(super) fn entity_ids_off_walk(&self) -> impl Iterator<Item = u32> + '_ {
         self.cushions
@@ -533,6 +580,19 @@ impl Entity for Mob {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_mob(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        _uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(game.res.mob_types().contains_key(kind)) {
+            return Err(tag);
+        }
+        game.load_mob(tag, None);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -622,6 +682,19 @@ impl Entity for ItemEntity {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_item(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:item") {
+            return Err(tag);
+        }
+        game.load_item(tag, uuid);
+        Ok(())
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.25, 0.25))
@@ -667,6 +740,19 @@ impl Entity for ExperienceOrb {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_orb(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:experience_orb") {
+            return Err(tag);
+        }
+        game.load_orb(tag, uuid);
+        Ok(())
+    }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
         Some((0.5, 0.5))
@@ -708,6 +794,21 @@ impl Entity for Boat {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_boat(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(super::boats::any_boat_wood(kind)
+            .is_some_and(|(wood, chest)| game.boat_models.has(wood, chest)))
+        {
+            return Err(tag);
+        }
+        game.load_boat(tag, uuid, kind);
+        Ok(())
     }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
@@ -754,6 +855,19 @@ impl Entity for Minecart {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_cart(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(super::minecarts::CartKind::from_id(kind).is_some()) {
+            return Err(tag);
+        }
+        game.load_cart(tag, uuid, kind);
+        Ok(())
     }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
@@ -813,6 +927,19 @@ impl Entity for ArmorStand {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_armor_stand(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:armor_stand") {
+            return Err(tag);
+        }
+        game.load_armor_stand(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
@@ -889,6 +1016,19 @@ impl Entity for PrimedTnt {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_tnt(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:tnt") {
+            return Err(tag);
+        }
+        game.load_tnt(tag, uuid);
+        Ok(())
+    }
     stored_motion!();
     /// `PrimedTnt` eye height: `0.98 * 0.85`.
     fn fluid_eye_y(&self) -> f64 {
@@ -933,6 +1073,19 @@ impl Entity for FallingBlock {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_falling(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:falling_block") {
+            return Err(tag);
+        }
+        game.load_falling(tag, uuid);
+        Ok(())
+    }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
         Some(Target::Falling(self.id))
@@ -952,6 +1105,31 @@ impl Entity for Projectile {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_projectile(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        match kind {
+            "minecraft:arrow" | "minecraft:spectral_arrow" => {
+                game.load_arrow(tag, uuid, player_uuid)
+            }
+            "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                game.load_spit_or_bullet(tag, player_uuid)
+            }
+            "minecraft:fireball"
+            | "minecraft:small_fireball"
+            | "minecraft:wind_charge"
+            | "minecraft:breeze_wind_charge" => game.load_fireball(tag, uuid, player_uuid),
+            id if horizon_client::entity_nbt::throwable_kind(id).is_some() => {
+                game.load_throwable(tag, uuid, player_uuid)
+            }
+            _ => return Err(tag),
+        }
+        Ok(())
     }
     stored_motion!();
     /// Arrows and the thrown items and fireballs a chunk saves.
@@ -1016,6 +1194,19 @@ impl Entity for Rocket {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_rocket(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:firework_rocket") {
+            return Err(tag);
+        }
+        game.load_rocket(tag, uuid, player_uuid);
+        Ok(())
+    }
     stored_motion!();
     /// A rocket that carries its owner stays.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -1050,6 +1241,19 @@ impl Entity for ThrownTrident {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_trident(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:trident") {
+            return Err(tag);
+        }
+        game.load_trident(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -1141,6 +1345,53 @@ mod no_gravity_stand_tests {
         stand.no_gravity = false;
         stand.marker = true;
         assert!(!stand.triggers_blocks());
+    }
+}
+
+#[cfg(test)]
+mod load_claim_tests {
+    /// `Mob` is first in `entity_lists!` and claims every id in `mob_types`;
+    /// the old load tried every other kind first. Both agree only while no
+    /// mob species shares an id with another kind, which this checks.
+    #[test]
+    fn no_mob_species_is_an_id_another_kind_loads() {
+        let others = [
+            "minecraft:item",
+            "minecraft:experience_orb",
+            "minecraft:arrow",
+            "minecraft:spectral_arrow",
+            "minecraft:llama_spit",
+            "minecraft:shulker_bullet",
+            "minecraft:fireball",
+            "minecraft:small_fireball",
+            "minecraft:wind_charge",
+            "minecraft:breeze_wind_charge",
+            "minecraft:falling_block",
+            "minecraft:trident",
+            "minecraft:firework_rocket",
+            "minecraft:tnt",
+            "minecraft:armor_stand",
+            "minecraft:ominous_item_spawner",
+            "minecraft:ender_dragon",
+            "minecraft:end_crystal",
+            "minecraft:item_frame",
+            "minecraft:glow_item_frame",
+            "minecraft:cushion",
+            "minecraft:painting",
+        ];
+        for def in horizon_client::mobs::species::ALL {
+            let id = format!("minecraft:{}", def.name);
+            assert!(!others.contains(&id.as_str()), "{id}");
+            assert!(
+                horizon_client::entity_nbt::throwable_kind(&id).is_none(),
+                "{id}"
+            );
+            assert!(super::super::boats::any_boat_wood(&id).is_none(), "{id}");
+            assert!(
+                super::super::minecarts::CartKind::from_id(&id).is_none(),
+                "{id}"
+            );
+        }
     }
 }
 
