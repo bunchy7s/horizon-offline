@@ -559,6 +559,24 @@ fn connect_tcp(
     Ok((c, host, port))
 }
 
+/// Whether joining servers of older releases is on (roadmap `older-servers`): off by default while the
+/// adapter is incomplete; `HORIZON_OLDER_SERVERS=1` turns it on.
+pub fn older_servers_enabled() -> bool {
+    std::env::var_os("HORIZON_OLDER_SERVERS").is_some_and(|v| v == "1")
+}
+
+/// The older release a server speaks, by its status ping, when Horizon can translate it; `None` for the
+/// pinned version, an unknown one, a failed ping, or with the feature off.
+fn older_server(address: &str) -> Option<horizon_protocol::adapter::ServerVersion> {
+    use horizon_protocol::adapter::ServerVersion;
+    if !older_servers_enabled() {
+        return None;
+    }
+    let (json, _) = ping(address, Duration::from_secs(5)).ok()?;
+    let protocol = i32::try_from(json["version"]["protocol"].as_i64()?).ok()?;
+    ServerVersion::from_protocol(protocol).filter(|v| *v != ServerVersion::Current)
+}
+
 /// `Connection.exceptionCaught`: a read that timed out ends with
 /// `disconnect.timeout`, any other failure with `disconnect.genericReason`
 /// ("Internal Exception: ..."); a stream the server closed ends with
@@ -619,8 +637,15 @@ fn run(
                 target
             }
         };
-        let (c, host, port) = connect_tcp(&host, port, address.starts_with(FRIEND), READ_TIMEOUT)
-            .map_err(Reason::plain)?;
+        let (mut c, host, port) =
+            connect_tcp(&host, port, address.starts_with(FRIEND), READ_TIMEOUT)
+                .map_err(Reason::plain)?;
+        if !address.starts_with(FRIEND)
+            && let Some(version) = older_server(address)
+        {
+            log::info!("Joining {address} as a {} server", version.name());
+            c.adapt(version);
+        }
         (host, port, c)
     };
     *shared_counters.lock().unwrap() = Some(c.reader.counters.clone());

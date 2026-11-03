@@ -1,7 +1,11 @@
 //! Speaking to servers of an older release: the first layer of the native protocol adapter (roadmap
 //! `older-servers`). Horizon's packets are 26.3's; a server on another protocol numbers them differently.
-//! This maps packet ids per connection state, both ways. It does not translate packet contents.
+//! This maps packet ids per connection state, both ways; a [`Session`] follows one connection's states
+//! and renumbers what goes through it. It does not translate packet contents yet.
+pub mod session;
 pub mod v26_2;
+
+pub use session::Session;
 
 use crate::{
     Direction, Result, State,
