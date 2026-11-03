@@ -63,6 +63,21 @@ pub(super) fn player_for(
             return Some(*conn);
         }
     }
+    // A mob on a player's lead follows and measures its rope against the
+    // player who holds it, not whoever is nearest or in survival mode.
+    if m.extra.leash == Some(horizon_client::mobs::leash::Holder::Player)
+        && let Some(holder) = m.extra.leash_player
+    {
+        if host.is_some_and(|v| v.alive && !v.spectator && v.uuid == holder) {
+            return None;
+        }
+        if let Some((conn, _)) = guests
+            .iter()
+            .find(|(_, v)| v.alive && !v.spectator && v.uuid == holder)
+        {
+            return Some(*conn);
+        }
+    }
     choose(m.position, targeting, host, guests, bound)
 }
 
