@@ -1038,9 +1038,14 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
         if !names.insert(name) {
             return Err(format!("duplicate helper {name}"));
         }
-        let native = format!("native_{name}");
         let target = helper["target"].as_str().ok_or("helper target missing")?;
-        let method = one_function(game.iter().map(|(_, method)| method), &native)?;
+        let (_, native) = target
+            .rsplit_once("::")
+            .ok_or("helper target missing method")?;
+        if !native.starts_with("native_") {
+            return Err(format!("invalid helper target {target}"));
+        }
+        let method = one_function(game.iter().map(|(_, method)| method), native)?;
         let (module, _) = game
             .iter()
             .find(|(_, other)| std::ptr::eq(other, method))
@@ -1382,6 +1387,57 @@ mod tests {
                 .unwrap_err()
                 .contains("object-safe")
         );
+    }
+
+    #[test]
+    fn helper_target_can_differ_from_its_name_and_share_a_hook_name() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target")
+            .join(format!("mod-api-helper-target-{}", std::process::id()));
+        let fragments = root.join("tools/native-hook-fragments");
+        std::fs::create_dir_all(fragments).unwrap();
+        for (path, source) in [
+            ("crates/horizon-client/src/mod_api.rs", ""),
+            (
+                "crates/horizon-client/src/game/native_hooks.rs",
+                "impl Game<'_> {
+                    fn native_block_entity(&self, id: u32) {
+                        mod_api::dispatch_block_entity(self, mod_api::mods(), id);
+                    }
+                    fn native_block_entity_ref(&self, id: u32) -> u32 { id }
+                }",
+            ),
+        ] {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, source).unwrap();
+        }
+        let catalog = serde_json::json!({
+            "hooks": [{
+                "name": "block_entity",
+                "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity",
+                "mod_api": {"contract": "listen"}
+            }],
+            "helpers": [{
+                "name": "block_entity",
+                "target": "horizon_client::game::native_hooks::Game<'_>::native_block_entity_ref"
+            }]
+        });
+        std::fs::write(root.join("native-hooks.json"), catalog.to_string()).unwrap();
+        let generated = super::sources(&root, super::FillMode::Require).unwrap();
+        let implementation = syn::parse_file(&generated.implementation).unwrap();
+        #[derive(Default)]
+        struct Calls(Vec<String>);
+        impl<'ast> syn::visit::Visit<'ast> for Calls {
+            fn visit_expr_method_call(&mut self, call: &'ast syn::ExprMethodCall) {
+                self.0.push(call.method.to_string());
+                syn::visit::visit_expr_method_call(self, call);
+            }
+        }
+        let mut calls = Calls::default();
+        syn::visit::Visit::visit_file(&mut calls, &implementation);
+        assert_eq!(calls.0, ["native_block_entity_ref"]);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
