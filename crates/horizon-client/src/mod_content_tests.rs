@@ -418,7 +418,8 @@ fn ruby_mod(dir: &Path) -> ContentMod {
         ),
         (
             "data/ruby/horizon/block/ruby_glass.json",
-            r#"{"template": "minecraft:glass", "item": false}"#,
+            r#"{"template": "minecraft:glass", "item": false,
+                "properties": {"render_shape": "ENTITYBLOCK_ANIMATED"}}"#,
         ),
         (
             "data/ruby/horizon/item/ruby.json",
@@ -558,6 +559,15 @@ fn content_root_loads_with_every_table() {
     assert!(independent_behaviours.random_tick_candidate(ruby));
     assert!(!independent_behaviours.is_randomly_ticking(iron));
     assert!(deferred_behaviours.is_randomly_ticking(ruby));
+    // `render_shape` leaves the glass's model out of the chunk mesh; the block keeps the template's.
+    assert_eq!(
+        facts.get(BlockStateId(n + 65)).render_shape,
+        crate::blocks::RenderShape::Animated
+    );
+    assert_eq!(
+        facts.get(ruby).render_shape,
+        crate::blocks::RenderShape::Model
+    );
     for state in [ruby, ruby_door, BlockStateId(n + 65)] {
         assert_eq!(shared_facts.get(state).hardness, facts.get(state).hardness);
         assert_eq!(

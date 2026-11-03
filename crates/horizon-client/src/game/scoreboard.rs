@@ -183,7 +183,8 @@ impl Game<'_> {
             | Target::Falling(id)
             | Target::Rocket(id)
             | Target::Trident(id)
-            | Target::Other(id) => Some(uuid_text(self.uuid_for(id))),
+            | Target::Other(id)
+            | Target::Cloud(id) => Some(uuid_text(self.uuid_for(id))),
             // It keeps its UUID with itself.
             Target::Spawner(id) => self
                 .ominous_spawners
@@ -228,7 +229,8 @@ impl Game<'_> {
             | Target::Dragon(id)
             | Target::Rocket(id)
             | Target::Trident(id)
-            | Target::Other(id) => self.persist.raw.get(&id),
+            | Target::Other(id)
+            | Target::Cloud(id) => self.persist.raw.get(&id),
             Target::Player => self.level.player_extra.as_ref(),
             // A server's player: the saved compound the guest's file is written from.
             Target::Guest(conn) => self.command_guest(conn).and_then(|g| g.saved.as_ref()),
@@ -323,12 +325,13 @@ impl Game<'_> {
                 let view = self.entity_view_of(t);
                 let origin = self.target_position(t).unwrap_or_default();
                 for (id, negated) in &s.predicates {
-                    let matches = self
-                        .fns
-                        .store
-                        .predicates
-                        .get(id)
-                        .is_some_and(|json| self.conditions_hold(json, Some(&view), origin));
+                    // EntitySelectorOptions rejects a missing registry entry
+                    // before applying the predicate's negation.
+                    let Some(json) = self.fns.store.predicates.get(id) else {
+                        ok = false;
+                        break;
+                    };
+                    let matches = self.conditions_hold(json, Some(&view), origin);
                     if matches == *negated {
                         ok = false;
                     }

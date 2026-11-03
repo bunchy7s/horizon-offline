@@ -14,12 +14,14 @@ pub const MIN_Y: i32 = -64;
 pub const HEIGHT: i32 = 384;
 pub const SECTIONS: usize = (HEIGHT / 16) as usize;
 
-/// A level's build range and skylight, from its dimension type (`min_y`,
-/// `height`, `logical_height`, `has_skylight`), as `LevelHeightAccessor` and
-/// `SerializableChunkData.write` read them.
+/// A level's build range, skylight and ceiling, from its dimension type
+/// (`min_y`, `height`, `logical_height`, `has_skylight`, `has_ceiling`), as
+/// `LevelHeightAccessor` and `SerializableChunkData.write` read them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LevelShape {
     pub sky_light: bool,
+    /// `DimensionType.hasCeiling`: weather, spawning and maps read it.
+    pub has_ceiling: bool,
     pub min_y: i32,
     pub height: i32,
     /// `DimensionType.logicalHeight`: how high portals and chorus fruit reach.
@@ -28,18 +30,21 @@ pub struct LevelShape {
 impl LevelShape {
     pub const OVERWORLD: Self = Self {
         sky_light: true,
+        has_ceiling: false,
         min_y: MIN_Y,
         height: HEIGHT,
         logical_height: HEIGHT,
     };
     pub const NETHER: Self = Self {
         sky_light: false,
+        has_ceiling: true,
         min_y: 0,
         height: 256,
         logical_height: 128,
     };
     pub const END: Self = Self {
         sky_light: true,
+        has_ceiling: false,
         min_y: 0,
         height: 256,
         logical_height: 256,
@@ -50,6 +55,7 @@ impl LevelShape {
         height: i32,
         logical_height: i32,
         sky_light: bool,
+        has_ceiling: bool,
     ) -> Result<Self, String> {
         ColumnLayout::new(min_y, height)?;
         if !(0..=height).contains(&logical_height) {
@@ -59,6 +65,7 @@ impl LevelShape {
         }
         Ok(Self {
             sky_light,
+            has_ceiling,
             min_y,
             height,
             logical_height,
@@ -1019,12 +1026,15 @@ mod tests {
         assert_eq!(tall.section_index(2032), None);
         assert_eq!(tall.section_y(130), 2016);
         assert_eq!(
-            LevelShape::new(-64, 384, 384, true),
+            LevelShape::new(-64, 384, 384, true, false),
             Ok(LevelShape::OVERWORLD)
         );
-        assert_eq!(LevelShape::new(0, 256, 128, false), Ok(LevelShape::NETHER));
-        assert!(LevelShape::new(0, 256, 257, true).is_err());
-        assert!(LevelShape::new(-60, 384, 384, true).is_err());
+        assert_eq!(
+            LevelShape::new(0, 256, 128, false, true),
+            Ok(LevelShape::NETHER)
+        );
+        assert!(LevelShape::new(0, 256, 257, true, false).is_err());
+        assert!(LevelShape::new(-60, 384, 384, true, false).is_err());
     }
 
     #[test]
@@ -1032,9 +1042,9 @@ mod tests {
         for shape in [LevelShape::OVERWORLD, LevelShape::NETHER, LevelShape::END] {
             assert_eq!(shape.column(), ColumnLayout::VANILLA, "{shape:?}");
         }
-        let tall = LevelShape::new(-64, 2096, 2096, true).unwrap();
+        let tall = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
         assert_eq!(tall.column(), ColumnLayout::new(-64, 2096).unwrap());
-        let deep = LevelShape::new(-512, 256, 256, false).unwrap();
+        let deep = LevelShape::new(-512, 256, 256, false, true).unwrap();
         assert_eq!(deep.column(), ColumnLayout::new(-512, 832).unwrap());
         assert!(LevelShape::NETHER.has_section(15) && !LevelShape::NETHER.has_section(16));
         assert!(!LevelShape::NETHER.has_section(-1));

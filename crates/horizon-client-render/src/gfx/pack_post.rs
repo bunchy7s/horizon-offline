@@ -25,6 +25,9 @@ use super::pack_uniforms::{self, FrameUniforms, PackInputs};
 
 const BUFFERS: usize = horizon_shaders::BUFFERS;
 
+#[cfg(test)]
+mod world_target_tests;
+
 /// The texture behind a pack sampler name.
 #[derive(Clone, Copy, PartialEq)]
 enum Source {
@@ -408,7 +411,7 @@ struct Targets {
     color: [Option<[wgpu::TextureView; 2]>; BUFFERS],
     depth: wgpu::TextureView,
     depth_texture: wgpu::Texture,
-    /// `depthtex1`, when a program after translucent terrain reads it.
+    /// Pre-translucent depth for `depthtex1`, also serving `depthtex2` without a shader hand.
     depth1: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// `depthtex2`, when a program after the hand reads it without the hand.
     depth2: Option<(wgpu::Texture, wgpu::TextureView)>,
@@ -518,7 +521,7 @@ pub struct PackPost {
     /// What draws the first-person hand (`gbuffers_hand` or its fallback), after the opaque
     /// world, and its vertices.
     hand: Option<(Pass, super::pack_hand::PackHand)>,
-    /// A program after translucent terrain reads `depthtex1`: it is copied before water.
+    /// The pre-translucent copy: `depthtex1`, or `depthtex2` without a shader hand.
     depth1: bool,
     /// A program after the hand reads `depthtex2`: it is copied before the hand.
     depth2: bool,
@@ -594,8 +597,8 @@ pub struct PackPost {
     blit_clears: Vec<usize>,
     /// Buffers cleared in passes of their own (more than the blit's eight attachments).
     other_clears: Vec<usize>,
-    /// The blit's bindings, for the world target of this size.
-    blit_group: Option<([u32; 2], wgpu::BindGroup)>,
+    /// Source views identify the world target, including replacements at the same size.
+    blit_group: Option<([wgpu::TextureView; 2], wgpu::BindGroup)>,
     /// Shows colortex0 when the pack has no `final` (OQ-5).
     copy: (wgpu::RenderPipeline, wgpu::BindGroupLayout),
     uniforms: FrameUniforms,
@@ -893,6 +896,14 @@ fn target(format: wgpu::TextureFormat) -> Option<wgpu::ColorTargetState> {
         blend: None,
         write_mask: wgpu::ColorWrites::ALL,
     })
+}
+
+/// Color-attachment cost includes component alignment, not only the copied texel size.
+fn attachment_bytes(bytes: u32, format: wgpu::TextureFormat) -> u32 {
+    let alignment = format
+        .target_component_alignment()
+        .expect("color attachment");
+    bytes.next_multiple_of(alignment) + format.target_pixel_byte_cost().expect("color attachment")
 }
 
 /// The viewport of `scale.<program>` (scale, offset x, offset y) on buffers of `size`, in whole
@@ -2165,20 +2176,20 @@ impl PackPost {
                 }
             }
         }
+        let reads_depth = |source| {
+            passes
+                .iter()
+                .filter(|p| matches!(p.group, Group::Deferred | Group::Composite | Group::Final))
+                .chain(&water)
+                .chain(weather.iter().take(1).flatten())
+                .flat_map(|p| std::iter::once(p).chain(&p.compute))
+                .any(|p| p.samplers.iter().any(|s| s.source == source))
+        };
+        let reads_depth2 = reads_depth(Source::Depth2);
+        // Without a shader hand, depth1 also serves depth2: both exclude only translucency.
         let depth1 = (water.is_some() || hand.is_some())
-            && passes
-                .iter()
-                .filter(|p| matches!(p.group, Group::Composite | Group::Final))
-                .chain(&water)
-                .chain(weather.iter().take(1).flatten())
-                .any(|p| p.samplers.iter().any(|s| s.source == Source::Depth1));
-        let depth2 = hand.is_some()
-            && passes
-                .iter()
-                .filter(|p| matches!(p.group, Group::Composite | Group::Final))
-                .chain(&water)
-                .chain(weather.iter().take(1).flatten())
-                .any(|p| p.samplers.iter().any(|s| s.source == Source::Depth2));
+            && (reads_depth(Source::Depth1) || (hand.is_none() && reads_depth2));
+        let depth2 = hand.is_some() && reads_depth2;
         let every_pass = || {
             (passes
                 .iter()
@@ -2216,8 +2227,8 @@ impl PackPost {
             ));
             t
         });
-        // A clear only matters when a program reads the buffer before one writes all of it
-        // (composite passes cover their whole target, terrain does not); the others are skipped.
+        // Any program can leave pixels untouched. Composite-style passes also write the
+        // alternate image, so their first write does not replace the main image's clear.
         let mut cleared = Vec::new();
         for b in 1..BUFFERS {
             let bit = 1u16 << b;
@@ -2234,10 +2245,7 @@ impl PackPost {
                 .chain(hand.iter().map(|h| &h.0))
                 .find(touched)
                 .map(|_| true)
-                .or_else(|| {
-                    let p = passes.iter().find(touched)?;
-                    Some(p.reads & bit != 0 || p.written & bit == 0)
-                });
+                .or_else(|| passes.iter().find(touched).map(|_| true));
             if clears[b].is_some() && first == Some(true) {
                 cleared.push(b);
             }
@@ -2250,16 +2258,33 @@ impl PackPost {
             || clouds.is_some()
             || weather.is_some()
             || hand.is_some()
-            || passes.iter().any(|p| {
-                p.samplers
-                    .iter()
-                    .any(|s| matches!(s.source, Source::Depth | Source::Depth1 | Source::Depth2))
-            });
+            || passes
+                .iter()
+                .flat_map(|p| std::iter::once(p).chain(&p.compute))
+                .any(|p| {
+                    p.samplers.iter().any(|s| {
+                        matches!(s.source, Source::Depth | Source::Depth1 | Source::Depth2)
+                    })
+                });
         // Buffers of a size of their own clear apart from the blit, which writes colortex0.
         let (mut cleared, mut other_clears): (Vec<usize>, Vec<usize>) =
             cleared.into_iter().partition(|&b| sizes[b].is_none());
-        let room = 8 - 1;
-        other_clears.extend(cleared.split_off(room.min(cleared.len())));
+        let limits = device.limits();
+        let max_attachments = (limits.max_color_attachments as usize).min(8);
+        let mut bytes = attachment_bytes(0, formats[0]);
+        let mut attachments = 1;
+        cleared.retain(|&b| {
+            let next = attachment_bytes(bytes, formats[b]);
+            if attachments < max_attachments && next <= limits.max_color_attachment_bytes_per_sample
+            {
+                attachments += 1;
+                bytes = next;
+                true
+            } else {
+                other_clears.push(b);
+                false
+            }
+        });
         let float = wgpu::TextureSampleType::Float { filterable: true };
         let blit_targets = std::iter::once(target(formats[0]));
         // Cleared by the pass's load operation; the shader writes nothing there.
@@ -2612,7 +2637,10 @@ impl PackPost {
                         Some(d)
                             if matches!(
                                 pass.group,
-                                Group::Composite | Group::Final | Group::Translucent
+                                Group::Deferred
+                                    | Group::Composite
+                                    | Group::Final
+                                    | Group::Translucent
                             ) =>
                         {
                             &d.1
@@ -2623,7 +2651,10 @@ impl PackPost {
                         Some(d)
                             if matches!(
                                 pass.group,
-                                Group::Composite | Group::Final | Group::Translucent
+                                Group::Deferred
+                                    | Group::Composite
+                                    | Group::Final
+                                    | Group::Translucent
                             ) =>
                         {
                             &d.1
@@ -2632,7 +2663,10 @@ impl PackPost {
                             Some(d)
                                 if matches!(
                                     pass.group,
-                                    Group::Composite | Group::Final | Group::Translucent
+                                    Group::Deferred
+                                        | Group::Composite
+                                        | Group::Final
+                                        | Group::Translucent
                                 ) =>
                             {
                                 &d.1
@@ -3035,6 +3069,7 @@ impl PackPost {
         spans: &[super::pack_draw::EntitySpan],
         crumbling: [f32; 4],
         rest: &mut Vec<super::Vertex>,
+        skin: Option<&super::entity_skin::SkinFrame>,
     ) {
         let shadow = self.shadow_casters();
         let Some(e) = &mut self.entities else {
@@ -3053,7 +3088,20 @@ impl PackPost {
             (crumbling, self.gui_size),
             shadow,
             rest,
+            skin,
         );
+    }
+
+    /// Every stage a posable subject can use must have a compiled fallback.
+    /// Special models, player and eye/tagged layers retain their CPU paths.
+    pub fn skins_entities(&self) -> bool {
+        self.entities
+            .as_ref()
+            .is_some_and(|e| e.passes[..3].iter().all(Option::is_some))
+    }
+
+    pub fn skin_target(&self) -> Option<&wgpu::Buffer> {
+        self.entities.as_ref().map(|e| e.geometry.skin_target())
     }
 
     /// Which entity runs the shadow pass draws: none without it.
@@ -3101,23 +3149,27 @@ impl PackPost {
         self.draw_terrain(device, queue, encoder, size, TerrainList::Solid, terrain);
         self.draw_entities(device, queue, encoder, size, false);
         self.draw_clouds(device, queue, encoder, size);
-        if let Some(t) = &self.targets {
-            if let Some((copy, _)) = &t.depth1 {
-                encoder.copy_texture_to_texture(
-                    t.depth_texture.as_image_copy(),
-                    copy.as_image_copy(),
-                    t.depth_texture.size(),
-                );
-            }
-            if let Some((copy, _)) = &t.depth2 {
-                encoder.copy_texture_to_texture(
-                    t.depth_texture.as_image_copy(),
-                    copy.as_image_copy(),
-                    t.depth_texture.size(),
-                );
-            }
+        // Only depth2 excludes the opaque first-person hand.
+        if let Some(t) = &self.targets
+            && let Some((copy, _)) = &t.depth2
+        {
+            encoder.copy_texture_to_texture(
+                t.depth_texture.as_image_copy(),
+                copy.as_image_copy(),
+                t.depth_texture.size(),
+            );
         }
         self.draw_hand(device, queue, encoder, size, frame);
+        // Depth1 includes that hand, but still precedes translucent terrain.
+        if let Some(t) = &self.targets
+            && let Some((copy, _)) = &t.depth1
+        {
+            encoder.copy_texture_to_texture(
+                t.depth_texture.as_image_copy(),
+                copy.as_image_copy(),
+                t.depth_texture.size(),
+            );
+        }
     }
 
     /// The first-person hand and held items, with `gbuffers_hand` at the hand's projection.
@@ -3651,9 +3703,9 @@ impl PackPost {
                 if attachments.len() <= l {
                     attachments.resize(l + 1, None);
                 }
-                // Overwritten whole.
+                // A shadowcomp shader can leave part of its destination untouched.
                 let ops = wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 };
                 attachments[l] = t.color(buffer, true).and_then(|v| attach(v, ops));
@@ -3892,11 +3944,21 @@ impl PackPost {
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             store: wgpu::StoreOp::Store,
         };
-        // Attachments of a pass share a size.
+        // Attachments share a size and stay within the device's count and byte limits.
+        let limits = device.limits();
+        let max_attachments = (limits.max_color_attachments as usize).min(8);
         let mut by_size: Vec<([u32; 2], Vec<usize>)> = Vec::new();
         for &b in &self.other_clears {
             let at = targets.sizes[b];
-            match by_size.iter_mut().find(|(s, l)| *s == at && l.len() < 8) {
+            match by_size.iter_mut().find(|(s, buffers)| {
+                let bytes = buffers
+                    .iter()
+                    .fold(0, |bytes, &b| attachment_bytes(bytes, self.formats[b]));
+                *s == at
+                    && buffers.len() < max_attachments
+                    && attachment_bytes(bytes, self.formats[b])
+                        <= limits.max_color_attachment_bytes_per_sample
+            }) {
                 Some((_, l)) => l.push(b),
                 None => by_size.push((at, vec![b])),
             }
@@ -3915,7 +3977,11 @@ impl PackPost {
         }
 
         // The world into colortex0 and depthtex0, flipped to GL's rows, and the clears.
-        if self.blit_group.as_ref().is_none_or(|g| g.0 != size) {
+        if self
+            .blit_group
+            .as_ref()
+            .is_none_or(|g| g.0[0] != *world || g.0[1] != *world_depth)
+        {
             let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Shader pack world"),
                 layout: &self.blit.1,
@@ -3930,7 +3996,7 @@ impl PackPost {
                     },
                 ],
             });
-            self.blit_group = Some((size, group));
+            self.blit_group = Some(([world.clone(), world_depth.clone()], group));
         }
         {
             let mut attachments = vec![attach(
@@ -3969,11 +4035,14 @@ impl PackPost {
         let mut passes = std::mem::take(&mut self.passes);
         let mut seen = (false, false);
         let mut shown = false;
+        // A water-only pack still needs the opaque phase to populate requested snapshots.
         let mut terrain_drawn = self.terrain.is_none()
             && self.sky.is_none()
             && !self.entities.as_ref().is_some_and(Entities::drawn)
             && self.clouds.is_none()
-            && self.hand.is_none();
+            && self.hand.is_none()
+            && !self.depth1
+            && !self.depth2;
         let late_entities = self.entities.as_ref().is_some_and(|e| {
             e.passes
                 .iter()
@@ -4036,8 +4105,9 @@ impl PackPost {
                     .map(|t| &t[usize::from(self.main & 1 << i == 0)])
             };
             let mut attachments: Vec<Option<wgpu::RenderPassColorAttachment>> = Vec::new();
-            // A scaled pass keeps what its buffers hold outside its viewport.
-            let ops = if pass.viewport.is_some() {
+            // Vertex coverage and fragment discard can leave alternate pixels untouched.
+            // The unused sink can still skip loading its old contents.
+            let ops = if !pass.sink || pass.viewport.is_some() {
                 wgpu::Operations {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
@@ -4131,6 +4201,10 @@ impl PackPost {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pack_post/depth_test.rs"]
+mod depth_test;
 
 #[cfg(test)]
 mod tests {
@@ -4488,3 +4562,6 @@ mod tests {
         assert!(source("shadowtex1HW", false, true, false) == Source::ShadowDepth(1, true));
     }
 }
+
+#[cfg(test)]
+mod destination_tests;

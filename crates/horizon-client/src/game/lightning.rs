@@ -65,9 +65,13 @@ impl Game<'_> {
     /// spawning chunk (within 128 blocks of a player) that is in entity
     /// ticking range.
     pub(super) fn tick_thunder(&mut self) {
-        // isRaining (rain level > 0.2) and isThundering (> 0.9, sky light, no ceiling).
+        // isRaining (rain level > 0.2) and isThundering (> 0.9) both need
+        // Level.canHaveWeather: sky light, no ceiling and not the End.
         let (rain, thunder) = self.world.weather.levels(1.0);
-        if rain <= 0.2 || thunder <= 0.9 || self.dim != super::Dim::Overworld || self.world_debug {
+        let weather = self.world.shape.sky_light
+            && !self.world.shape.has_ceiling
+            && self.dim != super::Dim::End;
+        if rain <= 0.2 || thunder <= 0.9 || !weather || self.world_debug {
             return;
         }
         let mut scratch = std::mem::take(&mut self.spawn_scratch);
@@ -414,9 +418,12 @@ impl Game<'_> {
         if let Some(mut s) = registry.state(state).cloned() {
             s.properties.insert("powered".into(), "true".into());
             if let Some(powered) = registry.id(&s) {
-                // The rod's onPlace schedules the 8-tick unpowering.
                 let _ = self.level_set(p, powered);
                 self.with_level(|b, level, ticks| {
+                    // `level.scheduleTick(pos, this, 8)`: the unpowering. A rod struck
+                    // is the same block as before, so its placement does not schedule
+                    // it, and without this it stayed powered for good.
+                    b.schedule_tick(level, ticks, BlockPos::new(p[0], p[1], p[2]), 8);
                     if level.redstone_experiments {
                         b.lightning_rod_update_neighbors(
                             level,

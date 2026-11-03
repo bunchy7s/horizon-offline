@@ -1277,6 +1277,9 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if let Some(shape) = p.render_shape {
+            row.set("render_shape", J::Str(shape.name().into()));
+        }
         if let Some(v) = p.hardness {
             row.set("hardness", J::f64(v as f64));
         }

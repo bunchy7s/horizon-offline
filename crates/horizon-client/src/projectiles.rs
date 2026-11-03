@@ -217,6 +217,9 @@ pub struct Projectile {
     pub stuck: bool,
     /// Whether the projectile has left its owner's box (Projectile.leftOwner).
     pub left_owner: bool,
+    /// Non-arrow Projectile.hasBeenShot, independent of entity age.
+    pub has_been_shot: bool,
+    shoot_event: Option<Vec3>,
     /// The shooter's bow enchantments (Power, Punch, Flame, Piercing).
     pub bonus: crate::mobs::gear::ArrowBonus,
     /// Arrows' `AbstractArrow` state (ticked by `arrows::tick`).
@@ -378,6 +381,8 @@ impl Projectile {
             age: 0,
             stuck: false,
             left_owner: false,
+            has_been_shot: false,
+            shoot_event: None,
             bonus: Default::default(),
             acceleration,
             needs_sync: false,
@@ -895,6 +900,15 @@ impl Projectile {
         self.tick_with(w, false)
     }
     fn tick_with(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
+        // LlamaSpit and ShulkerBullet call Projectile.tick before moving;
+        // ThrowableProjectile and AbstractHurtingProjectile call it afterwards.
+        let base_first = matches!(
+            self.kind,
+            ProjectileKind::LlamaSpit | ProjectileKind::ShulkerBullet { .. }
+        );
+        if base_first {
+            self.tick_shoot_event();
+        }
         let from = self.position;
         let result = self.tick_inner(w, impact);
         w.block_contacts(
@@ -904,7 +918,22 @@ impl Projectile {
             self.position,
             self.bounds(),
         );
+        if !base_first {
+            self.tick_shoot_event();
+        }
         result
+    }
+    /// The first-tick notification branch of vanilla's base projectile tick.
+    /// Arrows own this state in ArrowState and follow their separate tick path.
+    fn tick_shoot_event(&mut self) {
+        if self.arrow.is_none() && !self.has_been_shot {
+            self.has_been_shot = true;
+            self.shoot_event = Some(self.position);
+        }
+    }
+    /// Drain the first-tick event for dispatch in the owner's game context.
+    pub fn take_shoot_event(&mut self) -> Option<Vec3> {
+        self.shoot_event.take()
     }
     fn tick_inner(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
         // `Entity.setOldPosAndRot` (the previous position and rotation the
@@ -1110,6 +1139,31 @@ mod tests {
             &self.0
         }
     }
+    #[test]
+    fn first_tick_shoot_event_uses_base_tick_position_and_saved_flag() {
+        let w = Empty(vec![]);
+        for kind in [ProjectileKind::Snowball, ProjectileKind::LlamaSpit] {
+            let start = Vec3::new(0.0, 100.0, 0.0);
+            let mut p = Projectile::new(kind.clone(), start, None);
+            p.velocity = Vec3::new(1.0, 0.0, 0.0);
+            p.tick(&w);
+            let expected = if kind == ProjectileKind::LlamaSpit {
+                start
+            } else {
+                p.position
+            };
+            assert!(p.has_been_shot);
+            assert_eq!(p.take_shoot_event(), Some(expected));
+            assert_eq!(p.take_shoot_event(), None);
+            p.tick(&w);
+            assert_eq!(p.take_shoot_event(), None);
+            let mut saved = Projectile::new(kind, start, None);
+            saved.has_been_shot = true;
+            saved.tick(&w);
+            assert_eq!(saved.take_shoot_event(), None);
+        }
+    }
+
     #[test]
     fn snowball_falls_with_throwable_gravity_and_drag() {
         let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.0, 100.0, 0.0), None);

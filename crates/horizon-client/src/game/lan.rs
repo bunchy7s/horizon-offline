@@ -1427,10 +1427,11 @@ impl Game<'_> {
     ) {
         self.guest_attachments_into(guest);
         if guest.placed {
+            let _ = self.finish_player_autosaves(true);
             if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {
-                playerdata::save(guest, &self.world_root);
+                self.player_autosaves.save_after(guest, &self.world_root);
             }
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
@@ -2472,6 +2473,14 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
+            // Ready.spawn snaps the newcomer to the respawn data's yaw and
+            // pitch, which for a player without a bed or anchor is the world
+            // spawn's angle (`setworldspawn <pos> <rotation>`).
+            (g.yaw, g.pitch) = (
+                self.level.world_spawn_angle[0],
+                self.level.world_spawn_angle[1],
+            );
+            g.head_yaw = g.yaw;
             g.health = 20.0;
             g.food = 20;
             g.dimension = super::Dim::Overworld.id().to_owned();

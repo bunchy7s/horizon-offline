@@ -146,6 +146,7 @@ mod ime;
 mod initial_spawn;
 mod input_trace;
 mod integrated;
+mod interaction_shapes;
 mod interactions;
 mod item_draw;
 mod item_particles;
@@ -200,11 +201,14 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+mod native_block_sprites;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_data;
+mod native_entity_motion;
 mod native_entity_refs;
 mod native_explosions;
 mod native_falling;
@@ -213,7 +217,9 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_level_refs;
 mod native_lifecycle;
+mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mobs;
@@ -2507,6 +2513,8 @@ struct Game<'a> {
     message: Option<(String, Instant)>,
     save: Arc<SaveDir>,
     level: Level,
+    /// Must precede session_lock: dropping the writer drains writes while the world is locked.
+    player_autosaves: horizon_client::lan::playerdata::Autosaves,
     session_lock: Option<horizon_client::save::SessionLock>,
     audio: Audio,
     music: horizon_client::music::MusicManager,
@@ -3462,7 +3470,32 @@ impl Game<'_> {
                         best = Some((t0, normal));
                     }
                 }
-                if let Some((t, face)) = best {
+                if let Some((t, mut face)) = best {
+                    // `BlockGetter.clipWithInteractionOverride`: the hit stays at the
+                    // outline's point, with the face of the interaction shape when
+                    // the ray enters that first.
+                    let name = &*f.name;
+                    let facing = self
+                        .pack
+                        .assets
+                        .registry
+                        .state(state)
+                        .and_then(|s| s.properties.get("facing"))
+                        .map(String::as_str);
+                    let inside = interaction_shapes::boxes(name, facing);
+                    if !inside.is_empty() {
+                        let at = pos.map(f64::from);
+                        let world: Vec<[f64; 6]> = inside
+                            .iter()
+                            .map(|b| std::array::from_fn(|i| at[i % 3] + b[i]))
+                            .collect();
+                        if let Some((ti, normal)) =
+                            interaction_shapes::entry(origin, dir, &world, reach, face)
+                            && ti < t
+                        {
+                            face = normal;
+                        }
+                    }
                     return Some(Hit {
                         pos,
                         face,
@@ -3602,6 +3635,11 @@ impl Game<'_> {
         player.item_use_slows_sprint = item_use_slows_sprint;
         player.respiration = respiration;
         player.glider = glider;
+        // On someone else's server the glide flag is the server's
+        // (`DATA_SHARED_FLAGS_ID`, applied by the SetEntityData handler); the
+        // game's own integrated server has no such round trip, so the client
+        // keeps predicting the clear a tick after the landing glide.
+        player.server_owns_glide = self.integrated.is_none();
         let _ = player.set_sleeping(sleeping);
         player.leather_boots = leather_boots;
         player.freeze_immune = freeze_immune;
@@ -3872,7 +3910,7 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             age: 0,
-            pickup_delay,
+            pickup_delay: i64::from(pickup_delay),
             bob_offset: bob,
             ticks: 0,
             needs_sync: false,
@@ -3906,8 +3944,9 @@ impl Game<'_> {
         block_entity: Option<horizon_world::nbt::Tag>,
     ) -> horizon_world::loot::NativeLootPlace {
         let (rain, thunder) = self.world.weather.levels(1.0);
-        // Level.canHaveWeather: the Nether has a ceiling, the End is the End.
-        let weather = self.dim == Dim::Overworld;
+        // Level.canHaveWeather: sky light, no ceiling and not the End.
+        let weather =
+            self.world.shape.sky_light && !self.world.shape.has_ceiling && self.dim != Dim::End;
         horizon_world::loot::NativeLootPlace {
             origin: Some(origin),
             block_entity,
@@ -4103,13 +4142,14 @@ impl Game<'_> {
                 item.velocity.z.abs() + 1.0,
             );
             obstacles.near(item.bounds().inflate(reach), &mut nearby);
-            let alive = item.tick(
+            let alive = entity::tick_item(
+                item,
                 &self.world,
                 self.pack.assets.registry,
                 self.res.facts(),
                 self.collision,
-                no_physics,
                 &self.res.motion().fluids,
+                no_physics,
                 &nearby,
                 Some(self.border.geometry()),
             );
@@ -7384,6 +7424,7 @@ impl Game<'_> {
             self.world.weather.tick_levels();
             self.tick_weather_effects();
         }
+        let _ = self.finish_player_autosaves(false);
         // MinecraftServer.tickServer's countdown, then autoSave: three
         // hundred seconds of ticks at the rate the server runs at now.
         self.ticks_until_autosave -= 1;
@@ -10745,8 +10786,9 @@ impl Game<'_> {
         self.mark_translucent_entity(out.len(), "minecraft:entity_shadow");
         // A native shader pack's sun shadows already fall under the entities in the Overworld:
         // the round blob would be a second one. The Nether and the End have no sun to cast them.
-        let pack_shadows =
-            self.dim == Dim::Overworld && self.renderer.as_ref().is_some_and(|r| r.native_shadow());
+        let pack_shadows = self.renderer.as_ref().is_some_and(|r| {
+            r.pack_entity_shadows() || (self.dim == Dim::Overworld && r.native_shadow())
+        });
         let shadow_sprite = (self.settings.entity_shadows && !pack_shadows)
             .then(|| self.gui.atlas.sprites.get("misc/shadow").copied())
             .flatten();
@@ -11501,6 +11543,7 @@ impl Game<'_> {
     /// `Player.attack` on a mob: the damage, knockback, sweep, particles and
     /// sounds.
     pub(super) fn attack_mob(&mut self, index: usize) {
+        let _attacker = self.knockback_scope(self.player.as_ref().map_or(0, |p| p.entity_id));
         let target_kind = self.mobs[index].kind.id.clone();
         let target_kind = format!("minecraft:{}", target_kind.trim_start_matches("minecraft:"));
         let (amount, scale, crit, magic) = self.melee_damage(&target_kind, true);
@@ -15063,11 +15106,22 @@ impl Game<'_> {
         self.save_level(wait)?;
         self.save_parked_levels(wait)?;
         self.save_game_metadata()?;
+        let _ = self.finish_player_autosaves(wait);
         self.native_world_saved(wait);
         if dedicated {
             dedicated::events::record_server("saved", serde_json::json!({}));
         }
         Ok(())
+    }
+    fn finish_player_autosaves(&mut self, wait: bool) -> Result<bool> {
+        let saved = self.player_autosaves.completed(wait);
+        if !saved.is_empty() {
+            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
+            for player in saved {
+                self.native_player_save_to_file(player.uuid, &player.name, &directory);
+            }
+        }
+        self.player_autosaves.writes_finished()
     }
     fn save_game_metadata(&mut self) -> Result<()> {
         self.save_maps();
@@ -15082,6 +15136,8 @@ impl Game<'_> {
         self.save_schedule();
         self.save_warden_tracker();
         self.sync_level();
+        // Level::write can synchronously replace the integrated owner file.
+        let _ = self.finish_player_autosaves(true);
         let stored_owner = self.store_owner();
         write_level_for_role(
             &mut self.level,
@@ -15104,11 +15160,9 @@ impl Game<'_> {
             // The vehicle tree goes into a player's file when they leave
             // (`take_parent_vehicle`); here it stays in the chunk saves.
             let mut host = host;
-            let directory = horizon_client::lan::playerdata::directory(&self.world_root);
             for g in host.hub.guests.iter_mut().filter(|g| g.placed) {
                 self.guest_attachments_into(g);
-                horizon_client::lan::playerdata::save(g, &self.world_root);
-                self.native_player_save_to_file(g.uuid, &g.name, &directory);
+                self.player_autosaves.enqueue(g, &self.world_root);
             }
             self.lan = Some(host);
         }
@@ -18546,6 +18600,7 @@ impl<'a> Game<'a> {
             message: None,
             save,
             level,
+            player_autosaves: Default::default(),
             session_lock: None,
             audio,
             music: {
