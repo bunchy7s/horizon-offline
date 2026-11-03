@@ -459,6 +459,25 @@ fn bake(file: &PartFile, size: [f32; 2], names: &mut Vec<String>) -> Result<Part
     })
 }
 
+/// `box_faces` of a box given field by field.
+pub(crate) fn cube_faces(
+    origin: [f32; 3],
+    size: [f32; 3],
+    uv: [f32; 2],
+    inflate: f32,
+    mirror: bool,
+    texture: [f32; 2],
+) -> Vec<Face> {
+    let cube = CubeFile {
+        origin,
+        size,
+        uv,
+        inflate,
+        mirror,
+    };
+    box_faces(&cube, texture)
+}
+
 /// `ModelPart.Cube`: six faces with box UV, in vanilla's order (down, up,
 /// west, north, east, south), grown by `inflate`, mirrored in x on request.
 fn box_faces(cube: &CubeFile, [tw, th]: [f32; 2]) -> Vec<Face> {
