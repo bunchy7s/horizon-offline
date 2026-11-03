@@ -207,6 +207,7 @@ mod native_components;
 mod native_criteria;
 mod native_data_maps;
 mod native_entities;
+mod native_entity_data;
 mod native_entity_motion;
 mod native_entity_refs;
 mod native_explosions;
