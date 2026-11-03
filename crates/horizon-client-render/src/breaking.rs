@@ -136,6 +136,10 @@ mod tests {
                     tint_index: -1,
                     shade_direction_override: None,
                     light_emission: 0,
+                    light: [0; 2],
+                    color: None,
+                    ambient_occlusion: None,
+                    render_type: None,
                 },
             }],
         }

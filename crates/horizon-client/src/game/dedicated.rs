@@ -678,6 +678,20 @@ struct ServerState {
     force_game_mode: bool,
 }
 
+/// `SaveAllCommand.saveAll`'s reply to its source: `commands.save.success` when
+/// the save went through, `commands.save.failed` (the `ERROR_FAILED` it throws)
+/// when it did not.
+fn save_all_reply(saved: bool) -> Text {
+    Text::translate(
+        if saved {
+            "commands.save.success"
+        } else {
+            "commands.save.failed"
+        },
+        &[],
+    )
+}
+
 /// `MinecraftServer.isAutoSave`: all of Horizon's server levels share this save flag.
 fn auto_save(state: &ServerState) -> bool {
     state.autosave
@@ -1422,10 +1436,14 @@ impl Game<'_> {
             }
             "save-all" => {
                 self.console_reply(Text::translate("commands.save.saving", &[]));
-                match self.save_game() {
-                    Ok(()) => self.console_reply(Text::translate("commands.save.success", &[])),
-                    Err(e) => log("ERROR", &format!("{e}")),
+                let saved = self.save_game();
+                if let Err(e) = &saved {
+                    // The reason the save did not go through is Horizon's own
+                    // detail, so it stays in the log; the source hears what
+                    // SaveAllCommand tells it (ERROR_FAILED).
+                    log("ERROR", &format!("{e}"));
                 }
+                self.console_reply(save_all_reply(saved.is_ok()));
             }
             "save-off" => {
                 if set_auto_save(state, false) {
@@ -2105,6 +2123,20 @@ mod tests {
         process::{Command, Stdio},
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    /// `SaveAllCommand.saveAll`: a save that throws is the `ERROR_FAILED` the
+    /// source is told about, not a log line the caller never sees.
+    #[test]
+    fn a_failed_save_tells_the_source_that_it_failed() {
+        assert_eq!(
+            super::save_all_reply(true).translation_key(),
+            Some("commands.save.success")
+        );
+        assert_eq!(
+            super::save_all_reply(false).translation_key(),
+            Some("commands.save.failed")
+        );
+    }
 
     /// Vanilla's words, with how far behind the server is in milliseconds and in whole ticks.
     #[test]

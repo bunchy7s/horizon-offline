@@ -766,7 +766,18 @@ impl Game<'_> {
                             }
                         })
                         .map(|w| match w {
-                            horizon_client::mobs::Who::Player => Target::Player,
+                            horizon_client::mobs::Who::Player => {
+                                // LivingEntity.getLastHurtByMob is the player
+                                // who hit it, not whichever client is reading it.
+                                match self.last_hurt_by_player.get(&id) {
+                                    Some(Some(conn))
+                                        if attacker && self.lan_acting != Some(*conn) =>
+                                    {
+                                        Target::Guest(*conn)
+                                    }
+                                    _ => Target::Player,
+                                }
+                            }
                             horizon_client::mobs::Who::Mob(i) => Target::Mob(i),
                         })
                         .into_iter()

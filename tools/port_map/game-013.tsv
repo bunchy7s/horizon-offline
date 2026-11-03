@@ -90,7 +90,7 @@ PigVariants.bootstrap	skip:data		variant registry; the variants and their biome 
 PigVariants.register	skip:data		registry helper
 PolarBear.createAttributes	skip:data		attributes come from the entity type table
 PolarBear.checkPolarBearSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	S::PolarBear arm: ice-block rule in the alternate biomes, animal rule elsewhere
-PolarBear.getDefaultDimensions	missing		minor: the box of a rearing bear stays its normal height (vanilla grows it up to twice with the stand animation); Mob::dims has no polar bear arm
+PolarBear.getDefaultDimensions	port	crates/horizon-client/src/mobs/living.rs::Mob::awake_dims_in	the rear-up animation scales the box by (1, 1 + animation / 6), widening nothing, through polar_bear::stand_box_scale
 PolarBear.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	ageable group with chance 1.0 (the PolarBear and Ocelot arm)
 Rabbit.getJumpPower	port	crates/horizon-client/src/mobs/rabbit.rs::jump_scale	0.5 toward higher ground or a wall, 0.2 when slow, else 0.3, divided by 0.42 (jump_power adds the block factor and boost)
 Rabbit.getJumpCompletion	skip:other		only copied into the render state; the rabbit model plays the hop and idle keyframe animations instead
@@ -102,7 +102,7 @@ Rabbit.setLandingDelay	inline	crates/horizon-client/src/mobs/rabbit.rs::server_a
 Rabbit.createAttributes	skip:data		attributes come from the entity type table
 Rabbit.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	RabbitType; MoreCarrotTicks is kept at 0
 Rabbit.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	gap: minor: RabbitType (0 to 5 and 99) is read but MoreCarrotTicks is ignored
-Rabbit.playAttackSound	missing		minor: only the killer bunny plays it and Horizon has no killer bunny behaviour
+Rabbit.playAttackSound	port	crates/horizon-client/src/mobs/rabbit.rs::attack_sound	only the killer bunny: `entity.rabbit.attack` at volume 1 and a pitch drawn from its own random (not the baby voice pitch)
 Rabbit.getBreedOffspring	port	crates/horizon-client/src/game/creatures.rs::Game::breed	gap: minor: the baby always takes the first parent's coat; vanilla takes either parent's and one time in 20 rolls a biome coat
 Rabbit.setVariant	inline	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	gap: player: variant 99 (killer bunny, from /summon or a save) only changes the texture: no armour 8, no plus 5 attack, no melee or target goals, no Killer Bunny name
 Rabbit.get	skip:other		reads the variant as a data component for predicates; Horizon has no entity component view
