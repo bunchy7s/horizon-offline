@@ -183,6 +183,7 @@ struct Decode {
     key: String,
     file: PathBuf,
     channel: ChannelId,
+    looping: bool,
 }
 /// Give a channel waiting on its sound the decoded samples and start it, as
 /// the buffer future attaching and playing the source. A source stopped or
@@ -420,7 +421,7 @@ impl Backend for MixerBackend {
         let key = format!("{namespace}:{path}");
         let cached = self.cache.lock().ok().and_then(|mut c| c.get(&key));
         if let Some(samples) = cached {
-            attach(&self.mixer, channel, samples, false);
+            attach(&self.mixer, channel, samples, looping);
             return;
         }
         let decoder = self.decoder.get_or_insert_with(|| {
@@ -439,13 +440,18 @@ impl Backend for MixerBackend {
                             }
                             samples
                         });
-                        attach(&mixer, job.channel, samples, false);
+                        attach(&mixer, job.channel, samples, job.looping);
                     }
                 })
                 .expect("sound decoder thread");
             send
         });
-        let _ = decoder.send(Decode { key, file, channel });
+        let _ = decoder.send(Decode {
+            key,
+            file,
+            channel,
+            looping,
+        });
     }
     /// `alSourceStop`: any state becomes stopped, an initial source too (a
     /// sound still decoding then never starts).

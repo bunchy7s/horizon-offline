@@ -61,6 +61,11 @@ pub struct PackInputs {
     /// camera in world space, of length 100 (`endFlashIntensity`, `endFlashPosition`).
     pub end_flash: f32,
     pub end_flash_direction: Vec3,
+    /// The dimension type's `ambient_light` (`ambientLight`).
+    pub ambient_light: f32,
+    /// The player's cave mood, 0..1 (`BiomeAmbientSoundsHandler`'s moodiness):
+    /// `playerMood` and `constantMood`.
+    pub mood: f32,
 }
 
 /// The `cloudHeight` uniform. Vanilla reads `visual/cloud_height` only while the cloud color
@@ -256,6 +261,9 @@ pub const NAMES: &[&str] = &[
     "is_sprinting",
     "endFlashIntensity",
     "endFlashPosition",
+    "ambientLight",
+    "playerMood",
+    "constantMood",
     "centerDepthSmooth",
     "isRightHanded",
     "is_on_ground",
@@ -563,6 +571,9 @@ impl FrameUniforms {
                 "isElytraFlying" => Value::i(&[inputs.elytra_flying as i32]),
                 "cloudHeight" => Value::f(&[inputs.cloud_height]),
                 "cloudTime" => Value::f(&[inputs.cloud_time]),
+                "ambientLight" => Value::f(&[inputs.ambient_light]),
+                // Iris 1.11.7 gave both the same value in every scene measured.
+                "playerMood" | "constantMood" => Value::f(&[inputs.mood]),
                 // renderStage is NONE outside gbuffers draws.
                 _ => status_value(name, inputs).unwrap_or(Value::i(&[0])),
             }
@@ -1157,6 +1168,23 @@ mod initial_history_tests {
                 );
             }
         }
+    }
+
+    /// Iris 1.11.7 (probe pack): `ambientLight` is the dimension type's (0.1 in the Nether,
+    /// 0.25 in the End), and `playerMood` and `constantMood` both the cave mood.
+    #[test]
+    fn ambient_light_and_mood_come_from_the_inputs() {
+        let hud = HudBatch::new([800, 450]);
+        let mut u = FrameUniforms::default();
+        let input = PackInputs {
+            ambient_light: 0.25,
+            mood: 0.0235,
+            ..Default::default()
+        };
+        u.update(&frame(&hud), &input, [800, 450]);
+        assert_eq!(float(&u, "ambientLight")[0], 0.25);
+        assert_eq!(float(&u, "playerMood")[0], 0.0235);
+        assert_eq!(float(&u, "constantMood")[0], 0.0235);
     }
 
     fn frame(hud: &HudBatch) -> Frame<'_> {

@@ -567,6 +567,8 @@ pub struct GameInputs {
     pub hand: Option<GbuffersInputs>,
     /// Terrain read vertex by vertex, for a shadow program with a geometry stage.
     pub terrain_geometry: Option<crate::GeometryInputs>,
+    /// Entities and block entities read vertex by vertex, for the same.
+    pub entity_geometry: Option<crate::GeometryInputs>,
 }
 
 /// Loads the post-processing programs of `folder` and, for the geometry `inputs` describes, the
@@ -835,7 +837,7 @@ pub fn load_post(
         &mut loader,
         inputs.terrain.as_ref(),
         inputs.entities.as_ref(),
-        inputs.terrain_geometry.as_ref(),
+        [&inputs.terrain_geometry, &inputs.entity_geometry].map(Option::as_ref),
     );
     post.config = std::mem::take(&mut post.config).finish();
     post
@@ -843,12 +845,14 @@ pub fn load_post(
 
 /// Whether the shadow pass runs (2.5) and, when it does, its programs: `shadow_solid` and
 /// `shadow_cutout` are not used (2.4, Legacy); the game's solid and cutout terrain is one draw.
-/// `shadow_entities` and `shadow_block` read the entities' vertices (`entities`).
+/// `shadow_entities` and `shadow_block` read the entities' vertices (`entities`). A program
+/// with a geometry stage reads its vertices itself: `geometry` holds how, for terrain and for
+/// entities.
 fn load_shadow(
     loader: &mut Loader<'_>,
     terrain: Option<&GbuffersInputs>,
     entities: Option<&GbuffersInputs>,
-    geometry: Option<&crate::GeometryInputs>,
+    geometry: [Option<&crate::GeometryInputs>; 2],
 ) {
     let post = &*loader.post;
     let gbuffers = [
@@ -905,7 +909,8 @@ fn load_shadow(
                 };
                 let mut inputs = inputs.clone();
                 inputs.alpha_test = test;
-                loader.geometry = geometry.filter(|_| terrain).cloned().map(|mut g| {
+                let geometry = if terrain { geometry[0] } else { geometry[1] };
+                loader.geometry = geometry.cloned().map(|mut g| {
                     g.inputs.alpha_test = test;
                     g
                 });
@@ -961,7 +966,7 @@ struct Loader<'a> {
     switches: BTreeSet<String>,
     /// `macros` with the pack's options, for the program switches.
     options: Macros,
-    /// The game's terrain read vertex by vertex, while loading shadow programs of terrain.
+    /// The game's geometry read vertex by vertex, while loading shadow programs.
     geometry: Option<crate::GeometryInputs>,
     post: &'a mut Post,
 }
@@ -1028,7 +1033,7 @@ impl Loader<'_> {
         if self.pack.exists(&path("gsh")) {
             let Some(inputs) = self.geometry.clone() else {
                 self.post.notes.push(format!(
-                    "{name}: uses a geometry stage (supported for terrain's shadow only); skipped"
+                    "{name}: uses a geometry stage (supported for the shadow pass's terrain and entities only); skipped"
                 ));
                 return None;
             };
@@ -1700,7 +1705,7 @@ mod tests {
         let notes = post.notes.join("\n");
         assert!(
             notes.contains(
-                "composite4: uses a geometry stage (supported for terrain's shadow only)"
+                "composite4: uses a geometry stage (supported for the shadow pass's terrain and entities only)"
             ),
             "{notes}"
         );
@@ -1899,6 +1904,76 @@ mod tests {
         assert!(post.shadow.is_some() && post.shadow_water.is_none());
     }
 
+    /// A shadow program with a geometry stage draws terrain, entities and block entities, each
+    /// read vertex by vertex as the game says; a draw whose vertices can't be read so skips it.
+    #[test]
+    fn a_shadow_geometry_stage_draws_entities_and_block_entities() {
+        let reads = "#version 120\nuniform sampler2D shadowtex0;\nvarying vec2 uv;\n\
+                     void main() { gl_FragColor = texture2D(shadowtex0, uv); }\n";
+        let vsh = "#version 330\nout vec2 vUv;\nvoid main() { gl_Position = ftransform(); vUv = vec2(0.0); }\n";
+        let gsh = "#version 330\nlayout(triangles) in;\nlayout(triangle_strip, max_vertices = 3) out;\n\
+                   in vec2 vUv[];\nout vec2 gUv;\nvoid main() {\n    for (int i = 0; i < 3; i++) {\n        \
+                   gl_Position = gl_in[i].gl_Position;\n        gUv = vUv[i];\n        EmitVertex();\n    }\n    \
+                   EndPrimitive();\n}\n";
+        let fsh = "#version 330\nin vec2 gUv;\nlayout(location = 0) out vec4 c;\nvoid main() { c = vec4(gUv, 0.0, 1.0); }\n";
+        let files = [
+            ("shaders/composite.vsh", VSH),
+            ("shaders/composite.fsh", reads),
+            ("shaders/shadow.vsh", vsh),
+            ("shaders/shadow.gsh", gsh),
+            ("shaders/shadow.fsh", fsh),
+        ];
+        let pack = Pack::from_zip_bytes("t", zip(&files)).unwrap();
+        let game = crate::GbuffersInputs {
+            declarations: "layout(location = 0) in vec3 hz_v_pos;\n\
+                           layout(set = 1, binding = 0) readonly buffer V { uint v[]; };\n"
+                .into(),
+            body: "    hz_Vertex = vec4(hz_v_pos, 1.0);\n".into(),
+            ..Default::default()
+        };
+        let geometry = crate::GeometryInputs {
+            inputs: game.clone(),
+            pull: "        hz_v_pos = uintBitsToFloat(uvec3(v[hz_vertex_index], v[hz_vertex_index], v[hz_vertex_index]));\n"
+                .into(),
+            index: "uint(@)".into(),
+        };
+        let mut inputs = GameInputs {
+            terrain: Some(game.clone()),
+            entities: Some(game),
+            terrain_geometry: Some(geometry.clone()),
+            entity_geometry: Some(geometry),
+            ..Default::default()
+        };
+        let load = |inputs: &GameInputs| {
+            load_post(
+                &pack,
+                "",
+                &Properties::default(),
+                &Macros::standard(),
+                inputs,
+            )
+        };
+        let post = load(&inputs);
+        let triangles = |p: &Option<PostProgram>| p.as_ref().map(|p| p.geometry_triangles);
+        assert_eq!(
+            [&post.shadow, &post.shadow_entities, &post.shadow_block].map(triangles),
+            [Some(1); 3],
+            "{:?}",
+            post.notes
+        );
+        inputs.entity_geometry = None;
+        let post = load(&inputs);
+        assert!(post.shadow.is_some());
+        assert!(post.shadow_entities.is_none() && post.shadow_block.is_none());
+        assert!(
+            post.notes
+                .iter()
+                .any(|n| n.starts_with("shadow: uses a geometry stage")),
+            "{:?}",
+            post.notes
+        );
+    }
+
     /// Water falls back to the terrain chain and blends by default, as the sky does; entities
     /// and block entities fall back along theirs; `blend.*` overrides.
     /// `clouds=off` hides the game's clouds and drops the pack's own cloud program.
@@ -1950,6 +2025,7 @@ mod tests {
             lines: Some(inputs.clone()),
             hand: Some(inputs),
             terrain_geometry: None,
+            entity_geometry: None,
         };
         let post = load_post(&pack, "", &Properties::default(), &macros, &inputs);
         let (terrain, water) = (post.terrain.unwrap(), post.water.unwrap());

@@ -2519,6 +2519,7 @@ impl Game<'_> {
             // Its value (ExperienceOrb.DATA_VALUE) follows in SetEntityData.
             self.orbs.retain(|o| o.id != id as u32);
             self.orbs.push(ExperienceOrb {
+                join: Default::default(),
                 no_gravity: false,
                 id: id as u32,
                 position: at,
@@ -3763,9 +3764,6 @@ impl Game<'_> {
                     {
                         m.extra.charged = charged;
                     }
-                    // The body slot (6: horse armour, llama carpet, harness)
-                    // is kept in `head`, as Horizon's own mobs do.
-                    let body = horizon_client::mobs::drops::head_is_body(m.species());
                     for (slot, item, stack) in items {
                         let e = &mut m.extra;
                         match slot {
@@ -3790,14 +3788,14 @@ impl Game<'_> {
                                 e.chest = item;
                                 e.armor[1] = stack;
                             }
-                            5 if !body => {
+                            5 => {
                                 e.head = item;
                                 e.armor[0] = stack;
                             }
-                            6 if body => {
+                            6 => {
                                 // A wolf's armor shows its cracks.
                                 e.body_damage = stack.as_ref().map_or(0, |s| s.damage as i32);
-                                e.head = item;
+                                e.body = item;
                             }
                             7 => m.set_saddle(stack),
                             _ => {}
@@ -5393,6 +5391,7 @@ impl Game<'_> {
         let at = Vec3::new(p[0], p[1], p[2]);
         let bob_offset = self.world.random.next_float() * std::f32::consts::PI * 2.0;
         self.dropped.push(ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             health: 5,
             fire_ticks: 0,

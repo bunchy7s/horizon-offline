@@ -191,21 +191,28 @@ impl CenterDepth {
         slot.state.store(COPIED, Ordering::Release);
     }
 
-    /// After the frame's submission: start reading back what it copied.
-    pub fn submitted(&mut self) {
-        for slot in &self.slots {
-            if slot.state.load(Ordering::Acquire) != COPIED {
-                continue;
+    /// The readback of what the frame copied, to start by calling it right after the frame's
+    /// submission: on the submit thread when the frame goes there, as culling's readback.
+    pub fn submitted(&mut self) -> Option<impl FnOnce() + Send + 'static> {
+        let copied: Vec<_> = self
+            .slots
+            .iter()
+            .filter(|s| s.state.load(Ordering::Acquire) == COPIED)
+            .map(|s| {
+                s.state.store(PENDING, Ordering::Release);
+                (s.buffer.clone(), s.state.clone())
+            })
+            .collect();
+        (!copied.is_empty()).then_some(move || {
+            for (buffer, state) in copied {
+                buffer
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| {
+                        let next = if result.is_ok() { MAPPED } else { FREE };
+                        state.store(next, Ordering::Release);
+                    });
             }
-            slot.state.store(PENDING, Ordering::Release);
-            let state = slot.state.clone();
-            slot.buffer
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |result| {
-                    let next = if result.is_ok() { MAPPED } else { FREE };
-                    state.store(next, Ordering::Release);
-                });
-        }
+        })
     }
 
     /// The newest depth read back so far, `None` before the first arrives.
@@ -240,6 +247,70 @@ mod tests {
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env());
         let adapter = pollster::block_on(instance.request_adapter(&Default::default())).ok()?;
         pollster::block_on(adapter.request_device(&Default::default())).ok()
+    }
+
+    fn clear(encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, depth: f32) {
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(depth),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+    }
+
+    /// Frames that go to the submit thread start their readback there: the centre depth
+    /// follows the frames instead of keeping the first ones' depth.
+    #[test]
+    fn the_centre_depth_follows_frames_submitted_on_the_submit_thread() {
+        let Some((device, queue)) = test_device() else {
+            return;
+        };
+        let queue = super::super::submit::Queue::new(queue, true);
+        if !queue.threaded() {
+            return;
+        }
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: 4,
+                height: 4,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = depth.create_view(&Default::default());
+        let mut center = CenterDepth::new(&device);
+        let mut latest = None;
+        for frame in 1..=4 * SLOTS {
+            let value = frame as f32 / 16.0;
+            let mut encoder = device.create_command_encoder(&Default::default());
+            clear(&mut encoder, &view, value);
+            center.copy(&device, &mut encoder, &depth);
+            let after = center
+                .submitted()
+                .map(|f| Box::new(f) as super::super::submit::AfterSubmit);
+            let job = super::super::submit::Job {
+                encoder,
+                surface: None,
+                after,
+            };
+            assert!(queue.submit_later(job).is_ok());
+            queue.wait();
+            let _ = device.poll(wgpu::PollType::wait_indefinitely());
+            latest = center.collect(&device);
+            assert_eq!(latest, Some(value), "frame {frame}");
+        }
+        assert_eq!(latest, Some(0.75));
     }
 
     /// A depth texture cleared to a known depth comes back as that depth, a frame or more
@@ -280,7 +351,7 @@ mod tests {
         });
         center.copy(&device, &mut encoder, &depth);
         queue.submit([encoder.finish()]);
-        center.submitted();
+        center.submitted().expect("a copy to read back")();
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         assert_eq!(center.collect(&device), Some(0.375));
         // Its slot is free again: every slot can be used once more.
@@ -288,7 +359,7 @@ mod tests {
             let mut encoder = device.create_command_encoder(&Default::default());
             center.copy(&device, &mut encoder, &depth);
             queue.submit([encoder.finish()]);
-            center.submitted();
+            center.submitted().expect("a free slot")();
         }
         let _ = device.poll(wgpu::PollType::wait_indefinitely());
         assert_eq!(center.collect(&device), Some(0.375));

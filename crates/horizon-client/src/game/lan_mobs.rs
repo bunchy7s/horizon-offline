@@ -63,6 +63,21 @@ pub(super) fn player_for(
             return Some(*conn);
         }
     }
+    // A mob on a player's lead follows and measures its rope against the
+    // player who holds it, not whoever is nearest or in survival mode.
+    if m.extra.leash == Some(horizon_client::mobs::leash::Holder::Player)
+        && let Some(holder) = m.extra.leash_player
+    {
+        if host.is_some_and(|v| v.alive && !v.spectator && v.uuid == holder) {
+            return None;
+        }
+        if let Some((conn, _)) = guests
+            .iter()
+            .find(|(_, v)| v.alive && !v.spectator && v.uuid == holder)
+        {
+            return Some(*conn);
+        }
+    }
     choose(m.position, targeting, host, guests, bound)
 }
 
@@ -510,6 +525,25 @@ mod tests {
         // Without a target the nearest player wins.
         let guests = vec![(7, view(12.0, false))];
         assert_eq!(choose(MOB, false, Some(&host), &guests, Some(7)), None);
+    }
+
+    #[test]
+    fn a_leashed_mob_sees_its_holder_even_when_another_player_is_closer() {
+        let Some(mut cow) = mob_of("minecraft:cow") else {
+            return;
+        };
+        let mut holder = view(10.0, true);
+        holder.uuid = [1, 2, 3, 4];
+        let mut nearby = view(1.0, false);
+        nearby.uuid = [5, 6, 7, 8];
+        cow.extra.leash = Some(horizon_client::mobs::leash::Holder::Player);
+        cow.extra.leash_player = Some(holder.uuid);
+        let guests = vec![(7, holder.clone()), (8, nearby.clone())];
+        assert_eq!(player_for(&cow, None, &guests, None), Some(7));
+        assert_eq!(
+            player_for(&cow, Some(&holder), &vec![(8, nearby)], None),
+            None
+        );
     }
 
     /// The mob of the prepared resources' type `kind` (None without them).

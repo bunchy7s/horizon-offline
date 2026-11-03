@@ -116,9 +116,9 @@ impl Game<'_> {
     /// Puts `stack` (None: empties it) in equipment slot `slot`
     /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
     /// when the entity has no such slot: a player has no body or saddle
-    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
-    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
-    /// its main hand, as `/item` does. API @API:living_refs@.
+    /// slot, the dragon none. A mob has every slot, head and body apart
+    /// (`EntityEquipment`), as `/item` does; Horizon keeps no mob saddle here
+    /// yet. API @API:living_refs@.
     pub(super) fn native_living_set_equipment(
         &mut self,
         living: LivingRef,
@@ -128,20 +128,6 @@ impl Game<'_> {
         let Some(t) = self.native_living_target(living) else {
             return false;
         };
-        // A mob keeps one of its head and body slots: the body for a horse's
-        // armour or a llama's carpet, the head for the rest.
-        if let Target::Mob(id) = t {
-            let Some(m) = self.mobs.iter().find(|m| m.id == id) else {
-                return false;
-            };
-            let body = horizon_client::mobs::drops::head_is_body(m.species());
-            if matches!(
-                (slot, body),
-                (EquipmentSlot::Head, true) | (EquipmentSlot::Body, false)
-            ) {
-                return false;
-            }
-        }
         // ItemStack.isEmpty: air or a zero count empties the slot, as `/item` does.
         let stack = stack.filter(|s| &*s.item != "minecraft:air" && s.count > 0);
         match self

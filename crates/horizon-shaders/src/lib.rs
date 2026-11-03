@@ -34,7 +34,9 @@ mod screens;
 mod textures;
 mod translate;
 
-pub use biomes::{category as biome_category, precipitation as biome_precipitation};
+pub use biomes::{
+    category as biome_category, pack_id as biome_pack_id, precipitation as biome_precipitation,
+};
 pub use block_ids::BlockIds;
 pub use condition::eval_condition;
 pub use config::{BUFFERS, Buffer, Config, Format, Kind, Shadow, buffer_index, draw_buffers};

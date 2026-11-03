@@ -1478,9 +1478,9 @@ pub trait Host {
     /// Puts `stack` (None: empties it) in equipment slot `slot`
     /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
     /// when the entity has no such slot: a player has no body or saddle
-    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
-    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
-    /// its main hand, as `/item` does. API @API:living_refs@.
+    /// slot, the dragon none. A mob has every slot, head and body apart
+    /// (`EntityEquipment`), as `/item` does; Horizon keeps no mob saddle here
+    /// yet. API @API:living_refs@.
     fn living_set_equipment(
         &mut self,
         living: LivingRef,
@@ -1689,9 +1689,9 @@ impl LivingRef {
     /// Puts `stack` (None: empties it) in equipment slot `slot`
     /// (`LivingEntity.setItemSlot`), as `/item replace entity` does. False
     /// when the entity has no such slot: a player has no body or saddle
-    /// slot, a horse no head slot, a zombie no body slot, the dragon none.
-    /// Horizon keeps no mob saddle here yet, and a mob holds one item outside
-    /// its main hand, as `/item` does. API @API:living_refs@.
+    /// slot, the dragon none. A mob has every slot, head and body apart
+    /// (`EntityEquipment`), as `/item` does; Horizon keeps no mob saddle here
+    /// yet. API @API:living_refs@.
     pub fn set_equipment(
         self,
         host: &mut dyn Host,

@@ -1153,6 +1153,10 @@ mod school_tests {
         // The medium variant is the type's box, unchanged.
         m.extra.variant = 1;
         assert_eq!(m.dims(), (w, h, e));
+        // Salmon.Variant.DEFAULT: a salmon finalizeSpawn never sized is medium.
+        let mut k = kind();
+        Arc::make_mut(&mut k).species = Species::Salmon;
+        assert_eq!(Mob::new(2, k, Vec3::ZERO, 0.0).dims(), (w, h, e));
     }
     #[test]
     fn school_sizes() {

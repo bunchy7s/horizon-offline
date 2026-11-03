@@ -1026,7 +1026,7 @@ pub fn main() -> horizon_client::Result<()> {
                         m.persistent = true;
                     }
                     "ridden" => {
-                        m.extra.head = Some("minecraft:red_harness".into());
+                        m.extra.body = Some("minecraft:red_harness".into());
                         m.rider = Some(horizon_client::mobs::equine::Rider::default());
                     }
                     "noai" => m.no_ai = true,

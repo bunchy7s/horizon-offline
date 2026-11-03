@@ -1159,10 +1159,17 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    ![&m.extra.head, &m.extra.chest, &m.extra.legs, &m.extra.feet]
-        .into_iter()
-        .flatten()
-        .any(|item| immune.is_some_and(|t| t.contains(&**item)))
+    // A wolf's armor (its body slot) is `#freeze_immune_wearables`.
+    ![
+        &m.extra.body,
+        &m.extra.head,
+        &m.extra.chest,
+        &m.extra.legs,
+        &m.extra.feet,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|item| immune.is_some_and(|t| t.contains(&**item)))
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
@@ -1582,7 +1589,14 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// or without AI (`NoAI` only skips `serverAiStep`).
 fn burn_undead(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.kind.flags.burns_in_day && m.alive() && sun_burn_tick(m, w) {
-        if m.extra.head.is_some() {
+        // The head is the sun-protection slot, or the body for the species
+        // whose body item is their armour (a zombie horse's, a nautilus's).
+        let protected = if super::drops::body_slot_species(m.species()) {
+            m.extra.body.is_some()
+        } else {
+            m.extra.head.is_some()
+        };
+        if protected {
             events.push(MobEvent::SunProtectionWear { mob: m.id });
         } else {
             m.ignite_for_ticks(160);
@@ -3300,7 +3314,7 @@ mod same_vehicle_push_tests {
             );
             assert_eq!(worn.iter().flatten().count(), 2);
             let mut horse = mob("minecraft:horse");
-            horse.extra.head = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
+            horse.extra.body = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
             horse.set_saddle(Some(crate::items::ItemStack::new("minecraft:saddle", 1)));
             let gear = horse.equipment_stacks();
             assert_eq!(

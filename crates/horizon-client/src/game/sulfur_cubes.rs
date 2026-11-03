@@ -45,7 +45,7 @@ impl Game<'_> {
         light: u32,
         out: &mut Vec<Vertex>,
     ) {
-        let Some(item) = mob.extra.head.as_deref() else {
+        let Some(item) = mob.extra.body.as_deref() else {
             return;
         };
         if super::armor_stands::skull_kind(item).is_some() {
@@ -85,7 +85,7 @@ impl Game<'_> {
     /// Spit the swallowed block out on top (`EntityAttachment.PASSENGER`).
     fn eject_sulfur_block(&mut self, index: usize) {
         let m = &mut self.mobs[index];
-        let Some(item) = m.extra.head.take() else {
+        let Some(item) = m.extra.body.take() else {
             return;
         };
         let at = [
@@ -133,7 +133,7 @@ impl Game<'_> {
         }
         if item == "minecraft:shears" && sulfur_cube::has_body(m) {
             // shear: out comes the block, and nothing is swallowed for 5 s.
-            let sheared = self.mobs[index].extra.head.clone();
+            let sheared = self.mobs[index].extra.body.clone();
             self.eject_sulfur_block(index);
             self.mobs[index].extra.ints[3] = sulfur_cube::PICKUP_TIMER;
             self.sulfur_sound(index, "entity.sulfur_cube.eject");
@@ -151,11 +151,11 @@ impl Game<'_> {
         }
         if sulfur_cube::swallowable(m, item) {
             // equipItem: not the same block again; the old one comes out.
-            if m.extra.head.as_deref() == Some(item) {
+            if m.extra.body.as_deref() == Some(item) {
                 return false;
             }
             self.eject_sulfur_block(index);
-            self.mobs[index].extra.head = Some(item.into());
+            self.mobs[index].extra.body = Some(item.into());
             self.consume_held();
             self.sulfur_sound(index, "entity.sulfur_cube.absorb");
             return true;
@@ -264,7 +264,7 @@ impl Game<'_> {
                 self.remove_dropped(j);
             }
             let m = &mut self.mobs[i];
-            m.extra.head = Some(item);
+            m.extra.body = Some(item);
             m.extra.point = None;
             self.sulfur_sound(i, "entity.sulfur_cube.absorb");
             if thrown_by_player {

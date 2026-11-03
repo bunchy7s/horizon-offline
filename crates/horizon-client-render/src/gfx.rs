@@ -5775,6 +5775,7 @@ impl Renderer {
         horizon_shaders::GameInputs {
             terrain,
             terrain_geometry,
+            entity_geometry: Some(pack_entities::geometry_inputs()),
             sky: Some(pack_sky::inputs()),
             celestial: Some(pack_sky::celestial_inputs()),
             entities: Some(pack_entities::inputs()),
@@ -9294,12 +9295,23 @@ impl Renderer {
             && (surface_frame.is_none() || self.config.present_mode != wgpu::PresentMode::Fifo)
         {
             let offscreen = surface_frame.is_none();
-            // Culling reads its results back as soon as the frame is submitted, as here.
-            let after = self
-                .cull
-                .as_mut()
-                .and_then(|c| c.submitted())
-                .map(|f| Box::new(f) as submit::AfterSubmit);
+            // Culling and a shader pack's centre depth read back as soon as the frame is
+            // submitted, as here.
+            let cull = self.cull.as_mut().and_then(|c| c.submitted());
+            let center = match &mut self.pack_post {
+                Some((_, Some(post))) => post.submitted(),
+                _ => None,
+            };
+            let after = (cull.is_some() || center.is_some()).then(|| {
+                Box::new(move || {
+                    if let Some(read) = cull {
+                        read();
+                    }
+                    if let Some(read) = center {
+                        read();
+                    }
+                }) as submit::AfterSubmit
+            });
             let job = submit::Job {
                 encoder,
                 surface: surface_frame,
@@ -9342,8 +9354,10 @@ impl Renderer {
         if let Some(timer) = &mut self.own_timing {
             timer.submitted(&self.queue);
         }
-        if let Some((_, Some(post))) = &mut self.pack_post {
-            post.submitted();
+        if let Some((_, Some(post))) = &mut self.pack_post
+            && let Some(read) = post.submitted()
+        {
+            read();
         }
         let failed = checks.and_then(GpuChecks::pop);
         if let Some((request, buffer)) = readback {

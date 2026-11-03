@@ -243,9 +243,9 @@ impl Game<'_> {
         } else if item.ends_with("_horse_armor")
             && species == Species::Horse
             && tamed
-            && m.extra.head.is_none()
+            && m.extra.body.is_none()
         {
-            m.extra.head = Some(item.into());
+            m.extra.body = Some(item.into());
             Some("minecraft:entity.horse.armor")
         } else if item == "minecraft:chest"
             && matches!(species, Species::Donkey | Species::Mule)

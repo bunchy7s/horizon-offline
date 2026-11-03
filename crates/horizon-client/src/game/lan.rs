@@ -1722,7 +1722,14 @@ impl Game<'_> {
                 .and_then(|conn| hub.guest(*conn))
                 .map(|g| g.entity_id);
             let leash = m.extra.leash.and_then(|h| match h {
-                Holder::Player => player_entity,
+                Holder::Player => match m.extra.leash_player {
+                    Some(u) => hub
+                        .guests
+                        .iter()
+                        .find(|g| playerdata::uuid_ints(g.uuid) == u)
+                        .map(|g| g.entity_id),
+                    None => player_entity,
+                },
                 Holder::Mob(id) | Holder::Boat(id) => Some(id as i32),
                 Holder::Knot(p) => self.knot_ids.get(&p).map(|&id| id as i32),
             });
