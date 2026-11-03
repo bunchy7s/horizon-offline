@@ -1,0 +1,21 @@
+{
+  "hooks": [
+    {
+      "name": "item_container",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_item_container",
+      "neoforge": "Capabilities.Item.ITEM",
+      "mod_api": {
+        "contract": "replace",
+        "out": "slots"
+      }
+    }
+  ],
+  "helpers": [
+    {"name": "item_container_slots", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_slots", "mod_api": {}},
+    {"name": "item_container_insert", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_insert", "mod_api": {}},
+    {"name": "item_container_extract", "target": "horizon_client::game::native_item_container::Game<'_>::native_item_container_extract", "mod_api": {}}
+  ],
+  "rust_summary": "a mod item holding items (`native_item_container`), and the item container helpers in\n`native_item_container.rs`: `native_item_container_slots`, `native_item_container_insert`, `native_item_container_extract`.",
+  "doc_summary": "items held by items (`Capabilities.Item.ITEM`): backpacks, storage cells, toolboxes. `native_item_container(item, slots)` gives a mod item its slots (clamped to 1..=256). The contents live in the stack's `minecraft:container`, as a shulker box item keeps them, so they are saved and sent with the stack; an empty item carries nothing, so it stacks with a new one. `native_item_container_slots(stack)` reads one item of a stack, empty slots included; `native_item_container_insert(stack, item)` puts in as much of `item` as fits, topping up equal stacks first and then the first empty slots (`SimpleContainer.addItem`'s order), no slot past its limit (99, or the item's own when less), and never a shulker box (`Item.canFitInsideContainerItems`); `native_item_container_extract(stack, slot, max)` takes up to `max` from a slot. Both answer what moved and the single item it becomes, through an `ItemAccess` as NeoForge's handler acts; the stack given is not changed, so the caller shrinks it by one and hands out the result, or leaves the result unused to simulate. They work on any side. Bundles need \"hooks\": @API:item_container@.",
+  "comments": []
+}

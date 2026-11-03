@@ -1212,4 +1212,347 @@ pub trait Host {
         let _ = pos;
         unimplemented!("Host::block_collision")
     }
+    /// The entity `id` (the id events carry) as a handle for the `entity_*`
+    /// methods: None on a client, with no world open, or for no such entity
+    /// in the level in place or among the server's players. API
+    /// @API:entity_handles@.
+    fn entity(&self, id: u32) -> Option<EntityRef> {
+        let _ = id;
+        unimplemented!("Host::entity")
+    }
+    /// The level `dimension` (`minecraft:the_nether`) as a handle: None on a
+    /// client, with no world open, or for a dimension the server hasn't
+    /// loaded. API @API:entity_handles@.
+    fn level(&self, dimension: &str) -> Option<LevelRef> {
+        let _ = dimension;
+        unimplemented!("Host::level")
+    }
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    fn entity_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_position")
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    fn entity_block_position(&self, entity: EntityRef) -> Option<[i32; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_block_position")
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    fn entity_rotation(&self, entity: EntityRef) -> Option<[f32; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_rotation")
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    fn entity_kind(&self, entity: EntityRef) -> Option<String> {
+        let _ = entity;
+        unimplemented!("Host::entity_kind")
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    fn entity_uuid(&mut self, entity: EntityRef) -> Option<u128> {
+        let _ = entity;
+        unimplemented!("Host::entity_uuid")
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    fn entity_level(&self, entity: EntityRef) -> Option<LevelRef> {
+        let _ = entity;
+        unimplemented!("Host::entity_level")
+    }
+    /// The entity's velocity in blocks a tick (`Entity.getDeltaMovement`). A
+    /// player's is the move its client last reported (`getKnownMovement`); an
+    /// entity Horizon doesn't simulate (a display, a painting) has none, so
+    /// zero. API @API:entity_motion@.
+    fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_velocity")
+    }
+    /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
+    /// as they see the entity move. False for a player (its client moves
+    /// it), an entity Horizon doesn't simulate, or a value that isn't finite.
+    /// API @API:entity_motion@.
+    fn entity_set_velocity(&mut self, entity: EntityRef, velocity: [f64; 3]) -> bool {
+        let _ = entity;
+        let _ = velocity;
+        unimplemented!("Host::entity_set_velocity")
+    }
+    /// Whether the entity stands on a block (`Entity.onGround`). API
+    /// @API:entity_motion@.
+    fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
+        let _ = entity;
+        unimplemented!("Host::entity_on_ground")
+    }
+    /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
+    /// corner. None for the kinds whose box Horizon doesn't keep (displays,
+    /// markers, End crystals, the dragon). API @API:entity_motion@.
+    fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_bounding_box")
+    }
+    /// The height of the entity's eyes above its feet (`Entity.getEyeHeight`).
+    /// API @API:entity_motion@.
+    fn entity_eye_height(&self, entity: EntityRef) -> Option<f64> {
+        let _ = entity;
+        unimplemented!("Host::entity_eye_height")
+    }
+    /// Where the entity's eyes are (`Entity.getEyePosition`). API
+    /// @API:entity_motion@.
+    fn entity_eye_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_eye_position")
+    }
+    /// The unit vector the entity looks along (`Entity.getViewVector`, from
+    /// its pitch and yaw). API @API:entity_motion@.
+    fn entity_view_vector(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_view_vector")
+    }
+    /// The square of the distance from the entity's feet to `pos`
+    /// (`Entity.distanceToSqr`). API @API:entity_motion@.
+    fn entity_distance_to_sqr(&self, entity: EntityRef, pos: [f64; 3]) -> Option<f64> {
+        let _ = entity;
+        let _ = pos;
+        unimplemented!("Host::entity_distance_to_sqr")
+    }
+    /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
+    /// empty ones included, kept in its `minecraft:container`. None for an
+    /// item without slots, and for an empty stack.
+    fn item_container_slots(&self, stack: &ItemStack) -> Option<Vec<Option<ItemStack>>> {
+        let _ = stack;
+        unimplemented!("Host::item_container_slots")
+    }
+    /// `ResourceHandler.insert`: as much of `item` as fits into one item of
+    /// `stack`, topping up the slots that hold the same item and components
+    /// first, then the first empty ones (`SimpleContainer.addItem`'s order),
+    /// no slot past its limit (99, or the item's own when less). A shulker
+    /// box never goes in. The count that went in, and the single item it
+    /// becomes (the item itself when none did). The stack given is not
+    /// changed: shrink it by one and hand out the result, or leave the result
+    /// unused to simulate. None where the item has no slots.
+    fn item_container_insert(
+        &self,
+        stack: &ItemStack,
+        item: &ItemStack,
+    ) -> Option<(u32, ItemStack)> {
+        let _ = stack;
+        let _ = item;
+        unimplemented!("Host::item_container_insert")
+    }
+    /// `ResourceHandler.extract`: up to `max` out of slot `slot` of one item
+    /// of `stack`. What came out (none when the slot is empty or past the
+    /// item's slots), and the single item it becomes. The stack given is not
+    /// changed, as with `native_item_container_insert`. None where the item
+    /// has no slots.
+    fn item_container_extract(
+        &self,
+        stack: &ItemStack,
+        slot: usize,
+        max: u32,
+    ) -> Option<(Option<ItemStack>, ItemStack)> {
+        let _ = stack;
+        let _ = slot;
+        let _ = max;
+        unimplemented!("Host::item_container_extract")
+    }
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block_state")
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_block")
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        let _ = level;
+        let _ = pos;
+        let _ = key;
+        unimplemented!("Host::level_block_property")
+    }
+    /// Whether `pos` is inside the world's height and its chunk is loaded
+    /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        let _ = level;
+        let _ = pos;
+        unimplemented!("Host::level_is_loaded")
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        let _ = level;
+        unimplemented!("Host::level_height")
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_game_time")
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        let _ = level;
+        unimplemented!("Host::level_day_time")
+    }
+    /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
+    /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
+    /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,
+    /// its tint source and whether it is cut out, translucent or animated; its particle sprite; whether it is a plain
+    /// cube. None for a block the game does not know. The model is the state's first random variant. API
+    /// @API:native_block_sprites@.
+    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+        let _ = blocks;
+        unimplemented!("Host::block_sprites")
+    }
+    /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no
+    /// model uses. API @API:native_block_sprites@.
+    fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>> {
+        let _ = textures;
+        unimplemented!("Host::texture_sprites")
+    }
+    /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
+    /// sprite): ask `native_block_sprites` again then. API @API:native_block_sprites@.
+    fn block_sprites_version(&self) -> u64 {
+        unimplemented!("Host::block_sprites_version")
+    }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        let _ = kind;
+        unimplemented!("Host::recipe_book_category")
+    }
+}
+impl EntityRef {
+    /// The entity's position (`Entity.position`): its feet, the middle of
+    /// its box for a painting or an item frame. API @API:entity_handles@.
+    pub fn position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_position(self)
+    }
+    /// The block the entity's position is in (`Entity.blockPosition`). API
+    /// @API:entity_handles@.
+    pub fn block_position(self, host: &dyn Host) -> Option<[i32; 3]> {
+        host.entity_block_position(self)
+    }
+    /// The entity's yaw and pitch in degrees (`Entity.getYRot`, `getXRot`); 0
+    /// for the kinds that don't turn. API @API:entity_handles@.
+    pub fn rotation(self, host: &dyn Host) -> Option<[f32; 2]> {
+        host.entity_rotation(self)
+    }
+    /// The entity's type (`Entity.getType`): `minecraft:zombie`. API
+    /// @API:entity_handles@.
+    pub fn kind(self, host: &dyn Host) -> Option<String> {
+        host.entity_kind(self)
+    }
+    /// The entity's UUID (`Entity.getUUID`), the one it is saved with; an
+    /// entity that has none yet gets it now, as a new vanilla entity does.
+    /// API @API:entity_handles@.
+    pub fn uuid(self, host: &mut dyn Host) -> Option<u128> {
+        host.entity_uuid(self)
+    }
+    /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
+    pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
+        host.entity_level(self)
+    }
+    /// The entity's velocity in blocks a tick (`Entity.getDeltaMovement`). A
+    /// player's is the move its client last reported (`getKnownMovement`); an
+    /// entity Horizon doesn't simulate (a display, a painting) has none, so
+    /// zero. API @API:entity_motion@.
+    pub fn velocity(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_velocity(self)
+    }
+    /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
+    /// as they see the entity move. False for a player (its client moves
+    /// it), an entity Horizon doesn't simulate, or a value that isn't finite.
+    /// API @API:entity_motion@.
+    pub fn set_velocity(self, host: &mut dyn Host, velocity: [f64; 3]) -> bool {
+        host.entity_set_velocity(self, velocity)
+    }
+    /// Whether the entity stands on a block (`Entity.onGround`). API
+    /// @API:entity_motion@.
+    pub fn on_ground(self, host: &dyn Host) -> Option<bool> {
+        host.entity_on_ground(self)
+    }
+    /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
+    /// corner. None for the kinds whose box Horizon doesn't keep (displays,
+    /// markers, End crystals, the dragon). API @API:entity_motion@.
+    pub fn bounding_box(self, host: &dyn Host) -> Option<[[f64; 3]; 2]> {
+        host.entity_bounding_box(self)
+    }
+    /// The height of the entity's eyes above its feet (`Entity.getEyeHeight`).
+    /// API @API:entity_motion@.
+    pub fn eye_height(self, host: &dyn Host) -> Option<f64> {
+        host.entity_eye_height(self)
+    }
+    /// Where the entity's eyes are (`Entity.getEyePosition`). API
+    /// @API:entity_motion@.
+    pub fn eye_position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_eye_position(self)
+    }
+    /// The unit vector the entity looks along (`Entity.getViewVector`, from
+    /// its pitch and yaw). API @API:entity_motion@.
+    pub fn view_vector(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_view_vector(self)
+    }
+    /// The square of the distance from the entity's feet to `pos`
+    /// (`Entity.distanceToSqr`). API @API:entity_motion@.
+    pub fn distance_to_sqr(self, host: &dyn Host, pos: [f64; 3]) -> Option<f64> {
+        host.entity_distance_to_sqr(self, pos)
+    }
+}
+impl LevelRef {
+    /// The block state at `pos` (`Level.getBlockState`) as `/setblock` takes
+    /// it: `minecraft:oak_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]`.
+    /// None for a chunk that isn't loaded or a `y` outside the world. API
+    /// @API:level_reads@.
+    pub fn block_state(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block_state(self, pos)
+    }
+    /// The block at `pos` without its properties: `minecraft:oak_stairs`.
+    /// None as for `block_state`. API @API:level_reads@.
+    pub fn block(self, host: &dyn Host, pos: [i32; 3]) -> Option<String> {
+        host.level_block(self, pos)
+    }
+    /// Property `key` of the block state at `pos` (`BlockState.getValue`):
+    /// `east` for `facing`. None for a block without it, or as for
+    /// `block_state`. API @API:level_reads@.
+    pub fn block_property(self, host: &dyn Host, pos: [i32; 3], key: &str) -> Option<String> {
+        host.level_block_property(self, pos, key)
+    }
+    /// Whether `pos` is inside the world's height and its chunk is loaded
+    /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
+    /// read or write there finds the world. API @API:level_reads@.
+    pub fn is_loaded(self, host: &dyn Host, pos: [i32; 3]) -> bool {
+        host.level_is_loaded(self, pos)
+    }
+    /// The lowest block `y` and the height of the level
+    /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
+    pub fn height(self, host: &dyn Host) -> Option<(i32, i32)> {
+        host.level_height(self)
+    }
+    /// The ticks the server has run (`Level.getGameTime`), shared by every
+    /// level as in vanilla. API @API:level_reads@.
+    pub fn game_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_game_time(self)
+    }
+    /// The time of day in ticks (`Level.getOverworldClockTime`), shared by
+    /// every level; it keeps counting past 24000. API @API:level_reads@.
+    pub fn day_time(self, host: &dyn Host) -> Option<i64> {
+        host.level_day_time(self)
+    }
 }

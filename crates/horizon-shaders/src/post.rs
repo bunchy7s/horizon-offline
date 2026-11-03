@@ -226,6 +226,9 @@ pub struct PostProgram {
     /// A geometry stage folded into the vertex stage (`translate_geometry`): drawn non-indexed,
     /// six vertices per quad, with this many instances. 0 without one.
     pub geometry_triangles: u32,
+    /// `scale.<name>`: (scale, offset x, offset y), the part of its buffers a program draws, as
+    /// fractions of their size from GL's bottom-left corner; [1, 0, 0] (all of them) without.
+    pub scale: [f32; 3],
 }
 
 /// `size.buffer.<buffer>`: a size of its own, relative to the render size (floats) or in
@@ -400,6 +403,8 @@ pub struct Post {
     pub weather: Option<PostProgram>,
     /// What draws the first-person hand and held items.
     pub hand: Option<PostProgram>,
+    /// `clouds=off`: no clouds at all, neither the game's nor the pack's program for them.
+    pub clouds_off: bool,
     /// Some program reads a shadow buffer, or `shadow.enabled=true`: the shadow pass runs (2.5).
     pub shadow_pass: bool,
     /// When it runs: what draws solid and cutout terrain from the light (`shadow`), and
@@ -490,11 +495,48 @@ impl Post {
     }
 }
 
-/// The folder a dimension reads its programs from: `world<id>` when the pack has it, else the
-/// base folder `""` (1.2). `id` is the legacy number: 0 the Overworld, -1 the Nether, 1 the End.
+/// The folder for one of Minecraft's legacy dimension numbers. Named mappings use the
+/// corresponding Minecraft identifier; callers with an identifier should use
+/// [`dimension_folder_named`] instead.
 pub fn dimension_folder(pack: &Pack, id: i32) -> String {
-    let folder = format!("world{id}");
-    if pack.list("").iter().any(|f| f == &folder) || !pack.list(&folder).is_empty() {
+    let name = match id {
+        -1 => "minecraft:the_nether",
+        1 => "minecraft:the_end",
+        0 => "minecraft:overworld",
+        _ => "",
+    };
+    dimension_folder_named(pack, name, id)
+}
+
+/// Selects a dimension's program folder. `dimension.properties` mappings take precedence
+/// over legacy folders: explicit identifiers beat `*`, and an unmapped identifier uses the
+/// base folder. Without that file, preserve the `world<legacy_id>` selection.
+pub fn dimension_folder_named(pack: &Pack, id: &str, legacy_id: i32) -> String {
+    if let Some(text) = pack.read_text("dimension.properties") {
+        let mappings = Properties::parse(&text, &Macros::default());
+        let mut fallback = "";
+        for entry in &mappings.entries {
+            let Some(folder) = entry.key.strip_prefix("dimension.") else {
+                continue;
+            };
+            // A folder must stay inside shaders/, including on folder-backed packs.
+            let Some(path) = crate::pack::normalize(folder).filter(|p| !p.is_empty()) else {
+                continue;
+            };
+            for name in entry.value.split_whitespace() {
+                if name == "*" {
+                    fallback = folder;
+                } else if name == id
+                    || (!name.contains(':') && id.strip_prefix("minecraft:") == Some(name))
+                {
+                    return path;
+                }
+            }
+        }
+        return crate::pack::normalize(fallback).unwrap_or_default();
+    }
+    let folder = format!("world{legacy_id}");
+    if !pack.list(&folder).is_empty() {
         folder
     } else {
         String::new()
@@ -546,6 +588,7 @@ pub fn load_post(
         clouds: None,
         weather: None,
         hand: None,
+        clouds_off: false,
         shadow_pass: false,
         shadow: None,
         shadow_water: None,
@@ -757,7 +800,8 @@ pub fn load_post(
     loader.post.entities_translucent = entities_translucent;
     loader.post.particles = particles;
     loader.post.damaged_block = damaged_block;
-    loader.post.clouds = clouds;
+    loader.post.clouds_off = properties.get("clouds").is_some_and(|v| v.trim() == "off");
+    loader.post.clouds = clouds.filter(|_| !loader.post.clouds_off);
     loader.post.weather = weather;
     loader.post.hand = hand;
     let flag = |key: &str| properties.get(key).map(|v| v.trim() == "true");
@@ -951,6 +995,7 @@ impl Loader<'_> {
                 mipmaps: 0,
                 compute,
                 geometry_triangles: 0,
+                scale: FULL,
             });
         }
         if !enabled(
@@ -1031,6 +1076,7 @@ impl Loader<'_> {
         Some(PostProgram {
             buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
+            scale: scale(self.properties, &name, group),
             name,
             group,
             program: Some(program),
@@ -1130,6 +1176,7 @@ impl Loader<'_> {
         Some(PostProgram {
             buffer_blends: buffer_blends(self.properties, &name),
             flips: flips(self.properties, &name),
+            scale: scale(self.properties, &name, group),
             name,
             group,
             program: Some(program),
@@ -1270,6 +1317,29 @@ fn buffer_blends(properties: &Properties, program: &str) -> Vec<(u32, Option<Ble
         .collect()
 }
 
+/// A program drawing all of its buffers.
+const FULL: [f32; 3] = [1.0, 0.0, 0.0];
+
+/// `scale.<program>=<scale> [<offsetX> <offsetY>]` of a deferred or composite program (OptiFine's
+/// "Composite render scale"); prepare programs are treated the same, unverified. Iris 1.11.7
+/// applies the offsets too (a probe pack of our own, composite). A value that is not a scale in (0, 1] with offsets in [0, 1) draws all of them.
+fn scale(properties: &Properties, program: &str, group: Group) -> [f32; 3] {
+    if !matches!(group, Group::Prepare | Group::Deferred | Group::Composite) {
+        return FULL;
+    }
+    let Some(value) = properties.get(&format!("scale.{program}")) else {
+        return FULL;
+    };
+    let numbers: Option<Vec<f32>> = value.split_whitespace().map(|n| n.parse().ok()).collect();
+    let fraction = |s: f32| s > 0.0 && s <= 1.0;
+    let offset = |o: f32| (0.0..1.0).contains(&o);
+    match numbers.as_deref() {
+        Some(&[s]) if fraction(s) => [s, 0.0, 0.0],
+        Some(&[s, x, y]) if fraction(s) && offset(x) && offset(y) => [s, x, y],
+        _ => FULL,
+    }
+}
+
 /// `flip.<program>.<buffer>=<bool>` keys of one program.
 fn flips(properties: &Properties, program: &str) -> Vec<(u32, bool)> {
     let prefix = format!("flip.{program}.");
@@ -1291,6 +1361,115 @@ fn flips(properties: &Properties, program: &str) -> Vec<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn named_dimension_folder_reaches_the_program_loader() {
+        let pack = Pack::from_zip_bytes(
+            "original-dimension-control",
+            crate::pack::tests::zip(&[
+                (
+                    "shaders/dimension.properties",
+                    "dimension.netherShaders = minecraft:the_nether\n",
+                ),
+                (
+                    "shaders/final.vsh",
+                    "#version 120\nvoid main() { gl_Position = gl_Vertex; }",
+                ),
+                (
+                    "shaders/final.fsh",
+                    "#version 120\n/* DRAWBUFFERS:0 */\nvoid main() { gl_FragColor = vec4(0.0); }",
+                ),
+                (
+                    "shaders/netherShaders/final.vsh",
+                    "#version 120\nvoid main() { gl_Position = gl_Vertex; }",
+                ),
+                (
+                    "shaders/netherShaders/final.fsh",
+                    "#version 120\n/* DRAWBUFFERS:3 */\nvoid main() { gl_FragColor = vec4(1.0); }",
+                ),
+            ]),
+        )
+        .unwrap();
+        let folder = dimension_folder_named(&pack, "minecraft:the_nether", -1);
+        assert_eq!(folder, "netherShaders");
+        let post = load_post(
+            &pack,
+            &folder,
+            &Properties::default(),
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        assert!(post.notes.is_empty(), "{:?}", post.notes);
+        assert_eq!(post.programs.len(), 1);
+        assert_eq!(post.programs[0].buffers, [3]);
+    }
+
+    #[test]
+    fn named_dimensions_precede_wildcards_and_legacy_folders() {
+        for mappings in [
+            "dimension.other = *\ndimension.specific = the_nether example:moon\n",
+            "dimension.specific = the_nether example:moon\ndimension.other = *\n",
+        ] {
+            let pack = Pack::from_zip_bytes(
+                "t",
+                crate::pack::tests::zip(&[
+                    ("shaders/dimension.properties", mappings),
+                    ("shaders/world-1/final.fsh", "legacy"),
+                ]),
+            )
+            .unwrap();
+            assert_eq!(dimension_folder(&pack, -1), "specific");
+            assert_eq!(dimension_folder_named(&pack, "example:moon", 0), "specific");
+            assert_eq!(
+                dimension_folder_named(&pack, "example:the_nether", -1),
+                "other"
+            );
+            assert_eq!(dimension_folder(&pack, 1), "other");
+        }
+        let pack = Pack::from_zip_bytes(
+            "t",
+            crate::pack::tests::zip(&[
+                (
+                    "shaders/dimension.properties",
+                    "dimension.specific = the_end\ndimension.../../escape = *\n",
+                ),
+                ("shaders/world-1/final.fsh", "legacy"),
+            ]),
+        )
+        .unwrap();
+        assert_eq!(dimension_folder(&pack, -1), "");
+        assert_eq!(dimension_folder(&pack, 1), "specific");
+        let legacy = Pack::from_zip_bytes(
+            "t",
+            crate::pack::tests::zip(&[("shaders/world-1/final.fsh", "legacy")]),
+        )
+        .unwrap();
+        assert_eq!(dimension_folder(&legacy, -1), "world-1");
+        assert_eq!(dimension_folder(&legacy, 0), "");
+    }
+
+    #[test]
+    fn dimension_mapping_paths_and_unknown_legacy_ids() {
+        let mapped = |rules: &str| {
+            Pack::from_zip_bytes(
+                "t",
+                crate::pack::tests::zip(&[("shaders/dimension.properties", rules)]),
+            )
+            .unwrap()
+        };
+        let pack =
+            mapped("dimension.over = minecraft:overworld\ndimension.nested/./fallback = *\n");
+        assert_eq!(dimension_folder(&pack, 0), "over");
+        assert_eq!(dimension_folder(&pack, 2), "nested/fallback");
+        assert_eq!(
+            dimension_folder_named(&pack, "mod:moon", 2),
+            "nested/fallback"
+        );
+        let pack = mapped("dimension.over = overworld\ndimension.../escape = *\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+        let pack = mapped("dimension.over = overworld\n");
+        assert_eq!(dimension_folder(&pack, 2), "");
+    }
 
     #[test]
     fn image_dimensions_expand_default_and_chosen_options() {
@@ -1526,6 +1705,58 @@ mod tests {
     }
 
     #[test]
+    fn scale_keys_give_composite_style_programs_a_viewport() {
+        let names = [
+            "deferred",
+            "composite",
+            "composite1",
+            "composite2",
+            "composite3",
+            "final",
+        ];
+        let files: Vec<(String, &str)> = names
+            .iter()
+            .flat_map(|n| {
+                [
+                    (format!("shaders/{n}.vsh"), VSH),
+                    (format!("shaders/{n}.fsh"), FSH),
+                ]
+            })
+            .collect();
+        let files: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), *t)).collect();
+        let pack = Pack::from_zip_bytes("t", zip(&files)).unwrap();
+        let properties = Properties::parse(
+            "scale.deferred = 0.5\nscale.composite = 0.25 0.5 0.25\nscale.composite1 = 2\n\
+             scale.composite2 = 0.5 0.5\nscale.final = 0.5\n",
+            &Macros::default(),
+        );
+        let post = load_post(
+            &pack,
+            "",
+            &properties,
+            &Macros::standard(),
+            &GameInputs::default(),
+        );
+        let scales: Vec<(&str, [f32; 3])> = post
+            .programs
+            .iter()
+            .map(|p| (p.name.as_str(), p.scale))
+            .collect();
+        assert_eq!(
+            scales,
+            [
+                ("deferred", [0.5, 0.0, 0.0]),
+                ("composite", [0.25, 0.5, 0.25]),
+                // Not a scale, an offset missing, a program that draws the screen: all of it.
+                ("composite1", FULL),
+                ("composite2", FULL),
+                ("composite3", FULL),
+                ("final", FULL),
+            ]
+        );
+    }
+
+    #[test]
     fn image_declarations_get_their_format_once() {
         let csh = |decl: &str| {
             format!(
@@ -1652,6 +1883,35 @@ mod tests {
 
     /// Water falls back to the terrain chain and blends by default, as the sky does; entities
     /// and block entities fall back along theirs; `blend.*` overrides.
+    /// `clouds=off` hides the game's clouds and drops the pack's own cloud program.
+    #[test]
+    fn clouds_off_draws_no_clouds() {
+        let vsh = "#version 120\nvoid main() { gl_Position = ftransform(); }\n";
+        let fsh = "#version 120\nvoid main() { gl_FragColor = vec4(1.0); }\n";
+        let pack = Pack::from_zip_bytes(
+            "clouds.zip",
+            crate::pack::tests::zip(&[
+                ("shaders/gbuffers_clouds.vsh", vsh),
+                ("shaders/gbuffers_clouds.fsh", fsh),
+            ]),
+        )
+        .unwrap();
+        let macros = Macros::standard();
+        let inputs = GameInputs {
+            clouds: Some(crate::GbuffersInputs {
+                declarations: "layout(location = 0) in vec3 hz_v_pos;".into(),
+                body: "    hz_Vertex = vec4(hz_v_pos, 1.0);\n".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let on = load_post(&pack, "", &Properties::default(), &macros, &inputs);
+        assert!(on.clouds.is_some() && !on.clouds_off);
+        let off = Properties::parse("clouds = off\n", &macros);
+        let off = load_post(&pack, "", &off, &macros, &inputs);
+        assert!(off.clouds.is_none() && off.clouds_off);
+    }
+
     #[test]
     fn water_falls_back_to_terrain_and_blends() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packs/terrain-test");
