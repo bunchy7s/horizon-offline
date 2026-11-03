@@ -43,6 +43,9 @@ pub fn main() -> Result<()> {
             selected_tab_hovered: b[1].as_bool().unwrap(),
         });
         let mut clicks = Clicks::default();
+        // `keyPickItem.matchesMouse(event)`: the pick-item button is the middle
+        // one, and only a player with infinite materials clones with it.
+        let creative = c.get("creative").and_then(Value::as_bool).unwrap_or(false);
         for ev in c["events"].as_array().unwrap() {
             let name = ev[0].as_str().unwrap();
             let (x, y) = (ev[1].as_f64().unwrap(), ev[2].as_f64().unwrap());
@@ -60,10 +63,11 @@ pub fn main() -> Result<()> {
                 };
                 let shift = ev[4].as_i64().unwrap() & 3 != 0;
                 let carried_empty = !ev[5].as_bool().unwrap();
+                let pick = button == Button::Middle;
                 let click = if name == "press" {
-                    clicks.press(&target, button, carried_empty, shift, false)
+                    clicks.press(&target, button, carried_empty, shift, pick && creative)
                 } else {
-                    match clicks.release(&target, button, carried_empty, false, shift, false) {
+                    match clicks.release(&target, button, carried_empty, false, shift, pick) {
                         Release::Click(input) => Some(input),
                         Release::QuickCraft => panic!("no drags in these cases"),
                         Release::Nothing => None,

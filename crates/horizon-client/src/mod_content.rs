@@ -227,6 +227,12 @@ impl J {
             _ => None,
         }
     }
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            J::Str(s) => Some(s),
+            _ => None,
+        }
+    }
     /// Renames strings and, with `ids`, moves state ids, everywhere inside.
     fn rename(&mut self, r: &Rename, ids: bool) {
         match self {
@@ -1277,6 +1283,9 @@ impl<'a> Plan<'a> {
         if let Some(ticks) = &p.random_ticks {
             row.set("random_ticks", J::Bool(ticks.applies(combo)));
         }
+        if let Some(shape) = p.render_shape {
+            row.set("render_shape", J::Str(shape.name().into()));
+        }
         if let Some(v) = p.hardness {
             row.set("hardness", J::f64(v as f64));
         }
@@ -1940,6 +1949,7 @@ fn place_in_biomes(
     modifiers: &[biomes::Modifier],
     biome_tags: Option<J>,
     placed: Option<J>,
+    tags: &BTreeMap<String, TagMerge>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     let bundle = |doc: Option<J>, name: &str| -> Result<BTreeMap<String, String>> {
@@ -1970,7 +1980,47 @@ fn place_in_biomes(
     let biome_tags = bundle(biome_tags, BIOME_TAGS)?;
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
-    biomes::apply(
+    let entities_path = out_path(overlay, "entity-types.json");
+    let entity_categories: BTreeMap<String, String> = match entities_path.exists() {
+        true => match read_json(&entities_path)? {
+            J::Obj(entries) => entries
+                .into_iter()
+                .map(|(k, v)| {
+                    let cat = v
+                        .get("category")
+                        .and_then(J::as_str)
+                        .unwrap_or("misc")
+                        .to_owned();
+                    (k, cat)
+                })
+                .collect(),
+            _ => return Err("entity-types.json: not an object".into()),
+        },
+        false => BTreeMap::new(),
+    };
+    let entity_ids: BTreeSet<String> = entity_categories.keys().cloned().collect();
+    let mut entity_tags = BTreeMap::new();
+    let vanilla_entity_tags = base.join("data/minecraft/tags/entity_type");
+    if vanilla_entity_tags.is_dir() {
+        for file in &crate::json_folder::read(&vanilla_entity_tags)?.files {
+            let text = std::str::from_utf8(file.bytes()?)
+                .map_err(|e| format!("entity_type/{}: {e}", file.name))?;
+            entity_tags.insert(format!("minecraft:{}", file.name), text.to_owned());
+        }
+    }
+    for file in tags.keys() {
+        if let Some((ns, path)) = file
+            .strip_prefix("data/")
+            .and_then(|r| r.split_once("/tags/entity_type/"))
+            .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
+        {
+            entity_tags.insert(
+                format!("{ns}:{path}"),
+                fs::read_to_string(out_path(overlay, file))?,
+            );
+        }
+    }
+    let changed = biomes::apply(
         &mut doc,
         modifiers,
         &biomes::Registry {
@@ -1983,8 +2033,22 @@ fn place_in_biomes(
             ids: &placed,
             tags: &feature_tags,
         },
+        &biomes::Registry {
+            what: "entity type",
+            ids: &entity_ids,
+            tags: &entity_tags,
+        },
+        &entity_categories,
         warnings,
     )?;
+    for (id, text) in changed {
+        if let Some((ns, path)) = id.split_once(':') {
+            let file = format!("data/{ns}/worldgen/biome/{path}.json");
+            if out_path(overlay, &file).exists() {
+                overlay.write(&file, text.as_bytes())?;
+            }
+        }
+    }
     overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
 }
 
@@ -2107,6 +2171,19 @@ fn merge_tag(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
             values.push(v.clone());
         }
     }
+    Ok(serde_json::to_string_pretty(&doc)?)
+}
+
+/// An atlas definition's JSON text with `more` sources after its own.
+fn merge_atlas(text: Option<&str>, more: &[J], what: &str) -> Result<String> {
+    let mut doc = match text {
+        Some(t) => serde_json::from_str(t).map_err(|e| format!("{what}: {e}"))?,
+        None => J::Obj(vec![("sources".into(), J::Arr(Vec::new()))]),
+    };
+    let Some(J::Arr(sources)) = doc.get_mut("sources") else {
+        return Err(format!("{what}: no sources").into());
+    };
+    sources.extend(more.iter().cloned());
     Ok(serde_json::to_string_pretty(&doc)?)
 }
 
@@ -2335,6 +2412,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
     let mut worldgen: BTreeMap<&str, Vec<(String, String)>> = BTreeMap::new();
     let mut additions: BTreeMap<&str, Vec<Addition>> = BTreeMap::new();
     let mut modifiers = Vec::new();
+    let mut atlases: BTreeMap<String, Vec<J>> = BTreeMap::new();
     for m in mods {
         let declarations = format!("data/{}/horizon/", m.id);
         let mut reader = m.content.reader()?;
@@ -2351,6 +2429,15 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 let shared = !m.content.namespaces.iter().any(|n| n == ns);
                 let merge = tags.entry(file.clone()).or_default();
                 warnings.extend(merge.add(&m.id, file, replace, shared, values));
+            } else if file.starts_with("assets/minecraft/atlases/") && file.ends_with(".json") {
+                let doc: J = serde_json::from_slice(&bytes).map_err(|e| format!("{file}: {e}"))?;
+                let Some(J::Arr(sources)) = doc.get("sources") else {
+                    return Err(format!("{}: {file}: no sources", m.id).into());
+                };
+                atlases
+                    .entry(file.clone())
+                    .or_default()
+                    .extend(sources.iter().cloned());
             } else if !file.starts_with(&declarations) {
                 overlay.write(file, &bytes)?;
                 if biomes::is_modifier(file) {
@@ -2374,6 +2461,14 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
                 }
             }
         }
+    }
+    // A reload appends every pack's sources for an atlas to the ones below it.
+    for (file, sources) in &atlases {
+        let vanilla = fs::read_to_string(base.join(file)).ok();
+        overlay.write(
+            file,
+            merge_atlas(vanilla.as_deref(), sources, file)?.as_bytes(),
+        )?;
     }
     // A tag naming an id nobody registers fails as a whole in vanilla, and
     // carried-over mods name blocks left out or other mods' ids: such
@@ -2473,6 +2568,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             &modifiers,
             biome_tag_doc,
             placed_doc,
+            &tags,
             &mut warnings,
         )?;
     }

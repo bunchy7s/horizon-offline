@@ -22,6 +22,7 @@ Painting.applyImplicitComponent	inline	crates/horizon-client/src/game/paintings.
 Painting.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::painting_from_nbt	
 Painting.dropItem	port	crates/horizon-client/src/game/paintings.rs::Game::break_painting	gap: minor: the dropped painting item keeps no custom name
 PaintingVariants.register	skip:data		registry bootstrap; variants load from the data files in PaintingVariants::load
+FallingBlockEntity.tick	inline	crates/horizon-client/src/game/falling_damage.rs::Game::finish_falling_block	successful landing creates the block entity and loads carried TileEntityData over its saved defaults; movement and placement are in Game::fall_step and Behaviours::falling_block_landed
 FallingBlockEntity.callOnBrokenAfterFall	inline	crates/horizon-client/src/game/falling_damage.rs::Game::finish_falling_block	anvil 1029 and brushable 2001 events are here; gap: minor: no dripstone landing sound on a broken landing
 FallingBlockEntity.causeFallDamage	port	crates/horizon-client/src/game/falling_damage.rs::Game::falling_block_impact	impact damage and anvil wear run before block effects and portal handling
 FallingBlockEntity.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::falling_block_to_nbt	gap: minor: TileEntityData of the carried block is not written
@@ -119,7 +120,7 @@ Shulker.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::m
 Shulker.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	AttachFace, Peek and Color are written there
 Shulker.findNewAttachment	inline	crates/horizon-client/src/mobs/shulker.rs::tick	keeps its face or teleports in tick, through attachable and teleport
 Shulker.makeBoundingBox	port	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	
-Shulker.getDefaultDimensions	inline	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	gap: minor: the down-face height scale is not seen here
+Shulker.getDefaultDimensions	port	crates/horizon-client/src/mobs/shulker.rs::peek_height_scale	a shell on Direction.DOWN grows `(1, 1 + currentPeekAmount)` tall as its lid opens, applied last in Mob::awake_dims_in
 Shulker.startRiding	missing		no attach-face reset on boarding: `mobs/shulker.rs` sets `extra.variant3` from `Attachable` and the save only, so a shulker on a vehicle keeps the face it had
 Shulker.stopRiding	inline	crates/horizon-client/src/mobs/shulker.rs::tick	the body yaw is pinned to 0 on every tick (`shulker::tick`, and `client_tick` for a remote one), so a dismounted shulker shows no leftover body yaw without a reset of its own
 Shulker.move	missing		the `SHULKER_BOX` mover type has no counterpart: `shulker::teleport` runs from the tick and the bullet hit only, so a shulker box pushed by a piston never takes its shulker along
