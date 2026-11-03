@@ -2091,6 +2091,7 @@ impl Game<'_> {
             dimension.height,
             dimension.logical_height,
             dimension.has_skylight,
+            dimension.has_ceiling,
         )
         .unwrap_or_else(|_| super::Dim::from_id(&dimension.name).shape());
         // handleRespawn keeps the ClientLevel only for the same level key:

@@ -350,7 +350,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
         }
     }
     fn has_ceiling(&self) -> bool {
-        self.game.dim == Dim::Nether
+        self.w.world.shape.has_ceiling
     }
     fn mob_type(&self, entity: &str) -> Option<(Species, f32, f32, Category)> {
         let t = self.game.res.mob_types().get(entity)?;
