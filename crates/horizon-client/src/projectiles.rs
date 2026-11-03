@@ -217,6 +217,9 @@ pub struct Projectile {
     pub stuck: bool,
     /// Whether the projectile has left its owner's box (Projectile.leftOwner).
     pub left_owner: bool,
+    /// Non-arrow Projectile.hasBeenShot, independent of entity age.
+    pub has_been_shot: bool,
+    shoot_event: Option<Vec3>,
     /// The shooter's bow enchantments (Power, Punch, Flame, Piercing).
     pub bonus: crate::mobs::gear::ArrowBonus,
     /// Arrows' `AbstractArrow` state (ticked by `arrows::tick`).
@@ -232,6 +235,17 @@ pub struct Projectile {
     pub touching_water: bool,
     /// `Entity.noGravity` (`NoGravity` in its save): `getGravity` is 0.
     pub no_gravity: bool,
+    /// `Entity.remainingFireTicks`: a thrown projectile that flew through a
+    /// fire block burns for 160 ticks, with the flame drawn over it.
+    pub fire_ticks: i32,
+}
+/// `ThrownEnderpearl.isAllowedToTeleportOwner(owner, level)` for an owner in
+/// the pearl's own dimension: vanilla reaches
+/// `LivingEntity.isAlive() && !LivingEntity.isSleeping()` (bytecode 26-45) and
+/// returns false otherwise, so a pearl whose owner died or went to bed is
+/// discarded where it lands: no teleport, no 5 damage, no endermite roll.
+pub fn owner_can_take_pearl(alive: bool, sleeping: bool) -> bool {
+    alive && !sleeping
 }
 /// What a projectile struck this tick.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,6 +277,12 @@ pub trait ProjectileWorld {
     }
     /// `loadedAndEntityCanStandOn`: a sturdy top face.
     fn solid(&self, _p: [i32; 3]) -> bool {
+        false
+    }
+    /// The block at `p` is a `BaseFireBlock` (fire, soul fire) whose
+    /// `entityInside` ignites an entity in it for 160 ticks
+    /// (`BaseFireBlock.fireIgnite`).
+    fn ignites(&self, _p: [i32; 3]) -> bool {
         false
     }
 }
@@ -370,11 +390,14 @@ impl Projectile {
             age: 0,
             stuck: false,
             left_owner: false,
+            has_been_shot: false,
+            shoot_event: None,
             bonus: Default::default(),
             acceleration,
             needs_sync: false,
             touching_water: false,
             no_gravity: false,
+            fire_ticks: 0,
             arrow: kind_is_arrow.then(|| {
                 // Entity.random: seeded unpredictably, the position stands in.
                 Box::new(crate::arrows::ArrowState::new(
@@ -463,6 +486,70 @@ impl Projectile {
     pub fn is_arrow(&self) -> bool {
         matches!(self.kind, ProjectileKind::Arrow { .. })
     }
+    /// A `ThrowableProjectile`: snowballs, eggs, ender pearls, potions, a
+    /// content mod's thrown item and a llama's spit. They are the projectiles
+    /// that apply the effects of the blocks they fly through
+    /// (`ThrowableProjectile.tick` calls `applyEffectsFromBlocks`), which an
+    /// `AbstractHurtingProjectile` — a fireball, a wind charge, a skull — does
+    /// not.
+    pub fn is_thrown(&self) -> bool {
+        matches!(
+            self.kind,
+            ProjectileKind::Snowball
+                | ProjectileKind::Egg
+                | ProjectileKind::EnderPearl
+                | ProjectileKind::LlamaSpit
+                | ProjectileKind::Potion(..)
+                | ProjectileKind::Thrown(_)
+        )
+    }
+    /// `Entity.isOnFire`.
+    pub fn on_fire(&self) -> bool {
+        self.fire_ticks > 0
+    }
+    /// `Entity.igniteForTicks`: the longer fire wins.
+    pub fn ignite_for_ticks(&mut self, ticks: i32) {
+        if self.fire_ticks < ticks {
+            self.fire_ticks = ticks;
+        }
+    }
+    /// `Entity.clearFire`: it counts from below zero, which `on_fire` reads as out.
+    pub fn clear_fire(&mut self) {
+        self.fire_ticks = self.fire_ticks.min(0);
+    }
+    /// `ThrowableProjectile.tick`'s `applyEffectsFromBlocks` and the fire phase
+    /// of `Entity.baseTick`: a fire block the box is in ignites the projectile
+    /// for 160 ticks (`BaseFireBlock.fireIgnite`), water puts it out, and one
+    /// tick is counted down every tick.
+    fn fire_tick(&mut self, w: &impl ProjectileWorld) {
+        if !self.is_thrown() {
+            return;
+        }
+        if self.in_fire(w) {
+            self.ignite_for_ticks(160);
+        }
+        if w.in_water(self.bounds()) {
+            self.clear_fire();
+        } else if self.fire_ticks > 0 {
+            self.fire_ticks -= 1;
+        }
+    }
+    /// `Entity.checkInsideBlocks`: the blocks under the box, deflated by 1e-7
+    /// so a box sitting exactly on a block boundary is not inside it.
+    fn in_fire(&self, w: &impl ProjectileWorld) -> bool {
+        let b = self.bounds().deflate(Vec3::new(1.0e-7, 1.0e-7, 1.0e-7));
+        let (lo, hi) = (b.min_position(), b.max_position());
+        for x in (lo.x).floor() as i32..=(hi.x).floor() as i32 {
+            for y in (lo.y).floor() as i32..=(hi.y).floor() as i32 {
+                for z in (lo.z).floor() as i32..=(hi.z).floor() as i32 {
+                    if w.ignites([x, y, z]) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
     /// Whether it is a `SpectralArrow` (its own entity type): a spectral
     /// arrow's pickup item, or the glowing effect a dispenser shoots with.
     pub fn is_spectral_arrow(&self) -> bool {
@@ -502,6 +589,33 @@ impl Projectile {
                 | ProjectileKind::LargeFireball { .. }
                 | ProjectileKind::WitherSkull { .. }
         )
+    }
+    pub fn water_bubbles(&self) -> Option<([f64; 3], [f64; 3])> {
+        let throwable = matches!(
+            self.kind,
+            ProjectileKind::Snowball
+                | ProjectileKind::Egg
+                | ProjectileKind::EnderPearl
+                | ProjectileKind::Potion(..)
+                | ProjectileKind::ExperienceBottle
+                | ProjectileKind::Thrown(_)
+        );
+        if !throwable || !self.touching_water {
+            return None;
+        }
+        let v = Vec3::new(
+            self.velocity.x,
+            self.velocity.y - self.get_gravity(),
+            self.velocity.z,
+        );
+        Some((
+            [
+                self.position.x - v.x * 0.25,
+                self.position.y - v.y * 0.25,
+                self.position.z - v.z * 0.25,
+            ],
+            [v.x, v.y, v.z],
+        ))
     }
     /// Projectile.shoot: normalized direction plus triangular noise, times speed.
     pub fn shoot(
@@ -860,6 +974,15 @@ impl Projectile {
         self.tick_with(w, false)
     }
     fn tick_with(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
+        // LlamaSpit and ShulkerBullet call Projectile.tick before moving;
+        // ThrowableProjectile and AbstractHurtingProjectile call it afterwards.
+        let base_first = matches!(
+            self.kind,
+            ProjectileKind::LlamaSpit | ProjectileKind::ShulkerBullet { .. }
+        );
+        if base_first {
+            self.tick_shoot_event();
+        }
         let from = self.position;
         let result = self.tick_inner(w, impact);
         w.block_contacts(
@@ -869,7 +992,23 @@ impl Projectile {
             self.position,
             self.bounds(),
         );
+        self.fire_tick(w);
+        if !base_first {
+            self.tick_shoot_event();
+        }
         result
+    }
+    /// The first-tick notification branch of vanilla's base projectile tick.
+    /// Arrows own this state in ArrowState and follow their separate tick path.
+    fn tick_shoot_event(&mut self) {
+        if self.arrow.is_none() && !self.has_been_shot {
+            self.has_been_shot = true;
+            self.shoot_event = Some(self.position);
+        }
+    }
+    /// Drain the first-tick event for dispatch in the owner's game context.
+    pub fn take_shoot_event(&mut self) -> Option<Vec3> {
+        self.shoot_event.take()
     }
     fn tick_inner(&mut self, w: &impl ProjectileWorld, impact: bool) -> (bool, Hit) {
         // `Entity.setOldPosAndRot` (the previous position and rotation the
@@ -1076,6 +1215,31 @@ mod tests {
         }
     }
     #[test]
+    fn first_tick_shoot_event_uses_base_tick_position_and_saved_flag() {
+        let w = Empty(vec![]);
+        for kind in [ProjectileKind::Snowball, ProjectileKind::LlamaSpit] {
+            let start = Vec3::new(0.0, 100.0, 0.0);
+            let mut p = Projectile::new(kind.clone(), start, None);
+            p.velocity = Vec3::new(1.0, 0.0, 0.0);
+            p.tick(&w);
+            let expected = if kind == ProjectileKind::LlamaSpit {
+                start
+            } else {
+                p.position
+            };
+            assert!(p.has_been_shot);
+            assert_eq!(p.take_shoot_event(), Some(expected));
+            assert_eq!(p.take_shoot_event(), None);
+            p.tick(&w);
+            assert_eq!(p.take_shoot_event(), None);
+            let mut saved = Projectile::new(kind, start, None);
+            saved.has_been_shot = true;
+            saved.tick(&w);
+            assert_eq!(saved.take_shoot_event(), None);
+        }
+    }
+
+    #[test]
     fn snowball_falls_with_throwable_gravity_and_drag() {
         let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.0, 100.0, 0.0), None);
         p.velocity = Vec3::new(1.0, 0.0, 0.0);
@@ -1085,6 +1249,117 @@ mod tests {
         // `getAirDrag` is 0.99F, widened to double: 0.9900000095367432.
         assert!((p.velocity.y - (-0.03 * 0.99)).abs() < 1e-9);
         assert!((p.position.x - f64::from(0.99_f32)).abs() < 1e-9);
+    }
+    /// One fire block in the cell (0, 99, 0), open air around it: a throwable
+    /// inside that cell is set alight, and one that has left it burns down.
+    struct Fire {
+        targets: Vec<(Who, Aabb)>,
+        water: bool,
+    }
+    impl ProjectileWorld for Fire {
+        fn clip(&self, _: Vec3, _: Vec3) -> Option<(Vec3, [i32; 3], [i32; 3])> {
+            None
+        }
+        fn in_water(&self, _: Aabb) -> bool {
+            self.water
+        }
+        fn targets(&self) -> &[(Who, Aabb)] {
+            &self.targets
+        }
+        fn ignites(&self, p: [i32; 3]) -> bool {
+            p == [0, 99, 0]
+        }
+    }
+    /// `ThrowableProjectile.tick` calls `applyEffectsFromBlocks`, so a snowball
+    /// thrown through a fire block burns for `BaseFireBlock.fireIgnite`'s 160
+    /// ticks and is drawn with the flame (`Entity.displayFireAnimation`). The
+    /// port had no fire at all on a thrown projectile: `fire_ticks` stayed 0
+    /// however long it sat in the flames (#7456).
+    #[test]
+    fn a_snowball_in_a_fire_block_burns_and_the_fire_counts_down() {
+        let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.5, 0.5), None);
+        // Falling slowly: it stays inside (0, 99, 0) for this tick.
+        p.velocity = Vec3::ZERO;
+        let w = Fire {
+            targets: vec![],
+            water: false,
+        };
+        assert!(!p.on_fire());
+        p.tick(&w);
+        // Ignited for 160, then `Entity.baseTick`'s countdown for this tick.
+        assert_eq!(p.fire_ticks, 159);
+        assert!(p.on_fire());
+        // Out of the flames, the rest of the 160 ticks burn down.
+        let air = Empty(vec![]);
+        p.position = Vec3::new(0.5, 120.0, 0.5);
+        p.tick(&air);
+        assert_eq!(p.fire_ticks, 158);
+        for _ in 0..158 {
+            p.tick(&air);
+        }
+        assert_eq!(p.fire_ticks, 0, "the fire runs out");
+        assert!(!p.on_fire());
+        // Water puts it out at once: `Entity.baseTick`'s `isInWaterRainOrBubble`.
+        let mut wet = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 99.5, 0.5), None);
+        wet.velocity = Vec3::ZERO;
+        wet.tick(&w);
+        assert_eq!(wet.fire_ticks, 159);
+        wet.tick(&Fire {
+            targets: vec![],
+            water: true,
+        });
+        assert_eq!(wet.fire_ticks, 0, "water puts the snowball out");
+    }
+    /// A fireball is an `AbstractHurtingProjectile`: it does not apply the
+    /// effects of the blocks it flies through, so the fire block leaves it cold.
+    #[test]
+    fn a_fireball_is_not_ignited_by_a_fire_block() {
+        let mut p = Projectile::new(
+            ProjectileKind::SmallFireball,
+            Vec3::new(0.5, 99.5, 0.5),
+            None,
+        );
+        p.velocity = Vec3::ZERO;
+        p.tick(&Fire {
+            targets: vec![],
+            water: false,
+        });
+        assert_eq!(p.fire_ticks, 0);
+    }
+    #[test]
+    fn throwables_in_water_leave_bubbles_behind_them() {
+        let mut p = Projectile::new(ProjectileKind::Snowball, Vec3::new(0.5, 60.0, 0.5), None);
+        p.velocity = Vec3::new(1.0, 0.5, -2.0);
+        assert_eq!(p.water_bubbles(), None);
+        p.touching_water = true;
+        let (at, speed) = p.water_bubbles().expect("a snowball in water");
+        let expected_at = [0.25, 60.0 - 0.47 * 0.25, 1.0];
+        let expected_speed = [1.0, 0.47, -2.0];
+        for i in 0..3 {
+            assert!((at[i] - expected_at[i]).abs() < 1e-12, "{at:?}");
+            assert!((speed[i] - expected_speed[i]).abs() < 1e-12, "{speed:?}");
+        }
+        let mut bottle = Projectile::new(
+            ProjectileKind::ExperienceBottle,
+            Vec3::new(0.5, 60.0, 0.5),
+            None,
+        );
+        bottle.touching_water = true;
+        let (_, speed) = bottle.water_bubbles().expect("a bottle in water");
+        assert!((speed[1] + 0.07).abs() < 1e-12, "{speed:?}");
+        for kind in [
+            ProjectileKind::Arrow {
+                base_damage: 2.0,
+                critical: false,
+                effect: None,
+            },
+            ProjectileKind::SmallFireball,
+            ProjectileKind::LlamaSpit,
+        ] {
+            let mut other = Projectile::new(kind, Vec3::new(0.5, 60.0, 0.5), None);
+            other.touching_water = true;
+            assert_eq!(other.water_bubbles(), None);
+        }
     }
     /// A wall of blocks across x = 1.
     struct Wall(Vec<(Who, Aabb)>);
@@ -1493,5 +1768,20 @@ mod trail_tests {
         let mut p = arrow(true);
         p.stuck = true;
         assert!(p.arrow_trail(true).is_empty());
+    }
+}
+#[cfg(test)]
+mod pearl_owner_tests {
+    use super::*;
+
+    /// `ThrownEnderpearl.isAllowedToTeleportOwner` in the pearl's own
+    /// dimension: only a living, awake owner takes the pearl. Vanilla's
+    /// `onHit` discards the pearl (and skips the 5 damage) otherwise.
+    #[test]
+    fn a_dead_or_sleeping_owner_cannot_take_its_pearl() {
+        assert!(owner_can_take_pearl(true, false), "alive and awake");
+        assert!(!owner_can_take_pearl(false, false), "a dead owner");
+        assert!(!owner_can_take_pearl(true, true), "a sleeping owner");
+        assert!(!owner_can_take_pearl(false, true), "dead in bed");
     }
 }

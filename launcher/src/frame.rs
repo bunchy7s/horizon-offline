@@ -545,11 +545,19 @@ impl Launcher {
                 ),
             );
         }
+        // `min-w-0 xl:shrink-0`: under 1280 px the pages give way to the buttons on the right
+        // and scroll sideways, as the mockup's `Tabs` (`overflow-x-auto`).
+        let wide = self.window_width >= 1280.;
         let strip = crate::glass::plate(radius::LARGE)
             .p(px(4.))
             .min_w_0()
-            .flex_none()
-            .child(tabs.relative());
+            .when(wide, |d| d.flex_none())
+            .when(!wide, |d| d.flex_shrink(1.).overflow_hidden())
+            .child(
+                tabs.id("nav-pages")
+                    .relative()
+                    .when(!wide, |d| d.overflow_x_scroll()),
+            );
 
         let (name, how) = self.who_plays();
         let face = match self.accounts.player() {

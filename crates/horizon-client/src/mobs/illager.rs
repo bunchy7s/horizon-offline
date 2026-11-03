@@ -564,14 +564,21 @@ impl Goal for CrossbowAttack {
                     m.extra.using_item = 0;
                     m.extra.flag = false;
                     self.state = Crossbow::Charged;
+                    let weapon = m
+                        .extra
+                        .main_hand_stack()
+                        .cloned()
+                        .unwrap_or_else(|| ItemStack::new("minecraft:crossbow", 1));
                     set_crossbow_charged(m, true);
+                    // The attack delay is drawn before the sound's pitch, as before.
                     self.attack_delay = 20 + m.random.next_int_bound(20).unwrap_or(0);
-                    cx.events.push(MobEvent::Sound(
-                        "item.crossbow.loading_end",
-                        m.center(),
-                        1.0,
-                        1.0 / (m.random.next_float() * 0.5 + 1.0) + 0.2,
-                    ));
+                    let pitch = 1.0 / (m.random.next_float() * 0.5 + 1.0) + 0.2;
+                    cx.events.push(MobEvent::CrossbowLoad {
+                        mob: m.id,
+                        at: m.center(),
+                        pitch,
+                        weapon,
+                    });
                 }
             }
             Crossbow::Charged => {
@@ -594,6 +601,15 @@ impl Goal for CrossbowAttack {
 /// third of the way up the target, lifted by a fifth of the distance.
 fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
     let Some(t) = cx.w.target_info(who) else {
+        return;
+    };
+    // CrossbowItem.shootAll: only the charged projectile flies.
+    let Some(ammo) = m
+        .extra
+        .main_hand_stack()
+        .and_then(|s| s.data())
+        .and_then(|d| d.charged.first().cloned())
+    else {
         return;
     };
     let start = Vec3::new(m.position.x, m.eye_y() - 0.1, m.position.z);
@@ -620,7 +636,7 @@ fn shoot_crossbow(m: &mut Mob, who: Who, cx: &mut Cx) {
         1.6,
         (14 - i32::from(cx.w.difficulty.id) * 4) as f32,
     );
-    cx.events.push(MobEvent::Projectile(p));
+    cx.events.push(MobEvent::CrossbowShot { ammo, arrow: p });
     let pitch = 1.0 / (m.random.next_float() * 0.5 + 1.8) + 0.53;
     cx.events.push(MobEvent::Sound(
         "item.crossbow.shoot",

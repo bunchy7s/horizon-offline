@@ -95,6 +95,7 @@ pub const ORDER: &[(&str, &[&str])] = &[
             "save-off",
             "save-on",
             "stop",
+            "transfer",
             "whitelist",
             "publish",
             "unpublish",

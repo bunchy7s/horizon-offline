@@ -20,6 +20,12 @@ mod game_tools;
 mod github_mods_page;
 mod glass;
 mod glass_home;
+mod glass_home_lists;
+mod glass_home_mods;
+mod glass_home_packs;
+mod glass_home_tabs;
+mod glass_instance;
+mod glass_instance_java;
 mod glass_ui;
 mod home;
 mod home_tabs;
@@ -305,6 +311,8 @@ struct Launcher {
     friend_code: line_edit::LineEdit,
     friend_focused: bool,
     friend_focus: FocusHandle,
+    /// The window's width at the last frame: Home's head lays out by it, as the mockup's `xl`.
+    window_width: f32,
     joining: Option<String>,
     /// Where the next start goes at once: `--world <folder>` or `--server <address>`.
     quick_play: Option<(&'static str, String)>,
@@ -345,6 +353,14 @@ struct Launcher {
     home_menu: glass_home::HomeMenu,
     /// Whether the pointer is over Home's folder button, which then shows its ⋯.
     folder_hovered: bool,
+    /// The list row under the pointer in Home's glass tabs (a world, a server): it shows its
+    /// actions then.
+    list_hover: Option<SharedString>,
+    /// A Home list row's ⋯ menu, while open, and whether its Delete… was clicked once.
+    list_menu: Option<(SharedString, bool)>,
+    /// The size of Home's tab strip, measured as it is laid out: the glass panel's plate cuts
+    /// its corner around it.
+    home_strip: std::rc::Rc<std::cell::Cell<Option<gpui::Size<Pixels>>>>,
     /// When the running game was first seen running, for Home's "Playing for…".
     client_since: Option<Instant>,
     /// The selected instance's mods, for Home's Mods tab (`instance_mods.rs`).
@@ -565,6 +581,7 @@ impl Launcher {
             play_when_prepared: None,
             friend_code: line_edit::LineEdit::new(String::new(), 256, 32),
             friend_focused: false,
+            window_width: 0.,
             friend_focus: cx.focus_handle(),
             joining: None,
             quick_play: None,
@@ -585,6 +602,9 @@ impl Launcher {
             home_tab: home_tabs::HomeTab::from_env(),
             home_menu: Default::default(),
             folder_hovered: false,
+            list_hover: None,
+            list_menu: None,
+            home_strip: Default::default(),
             client_since: None,
             instance_mods: Default::default(),
             project_icons: Default::default(),
@@ -648,10 +668,17 @@ impl Launcher {
             this.preparing = true;
             this.play_when_prepared = this.selected().cloned();
         }
-        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots.
-        if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("new-instance") {
+        // `HORIZON_LAUNCHER_PAGE=new-instance`: the dialog open on Modded, for screenshots
+        // (`new-instance-horizon`, `new-instance-vanilla`: on those).
+        let kind = match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
+            Ok("new-instance") => Some(new_instance::NewKind::Modded),
+            Ok("new-instance-horizon") => Some(new_instance::NewKind::Horizon),
+            Ok("new-instance-vanilla") => Some(new_instance::NewKind::Vanilla),
+            _ => None,
+        };
+        if let Some(kind) = kind {
             this.open_instance_dialog(None);
-            this.pick_kind(new_instance::NewKind::Modded, cx);
+            this.pick_kind(kind, cx);
         }
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
@@ -1754,18 +1781,32 @@ static HOVER: Mutex<HoverState> = Mutex::new(HoverState {
 });
 
 fn track_hover(el: Stateful<Div>, id: SharedString) -> Stateful<Div> {
-    el.on_hover(move |hovered, window, _| {
-        let mut state = HOVER.lock().unwrap();
-        let is_on = state.on.as_ref().is_some_and(|(h, _)| *h == id);
-        if *hovered && !is_on {
-            state.off = state.on.take();
-            state.on = Some((id.clone(), Instant::now()));
-        } else if !*hovered && is_on {
-            state.off = Some((id.clone(), Instant::now()));
-            state.on = None;
-        }
-        window.refresh();
-    })
+    el.on_hover(move |hovered, window, _| note_hover(&id, *hovered, window))
+}
+
+/// Whether `id` is the element [`hover_fade`] shows hovered now.
+fn hover_is(id: &SharedString) -> bool {
+    HOVER
+        .lock()
+        .unwrap()
+        .on
+        .as_ref()
+        .is_some_and(|(h, _)| h == id)
+}
+
+/// Records that `id` is now hovered or not, for [`hover_fade`]: an element whose own hover
+/// listener does more calls it.
+fn note_hover(id: &SharedString, hovered: bool, window: &mut Window) {
+    let mut state = HOVER.lock().unwrap();
+    let is_on = state.on.as_ref().is_some_and(|(h, _)| h == id);
+    if hovered && !is_on {
+        state.off = state.on.take();
+        state.on = Some((id.clone(), Instant::now()));
+    } else if !hovered && is_on {
+        state.off = Some((id.clone(), Instant::now()));
+        state.on = None;
+    }
+    window.refresh();
 }
 
 /// A layer under an element's content that fades `color` in while it is hovered. `bleed` lets
@@ -3054,7 +3095,8 @@ impl Launcher {
         let mut rows = div()
             .flex()
             .flex_col()
-            .children(self.instance_row(1, cx))
+            // The glass look's sidebar ⋮ menu holds what the Instance row offers.
+            .children((!t.dark).then(|| self.instance_row(1, cx)).flatten())
             .children(self.export_panel(cx))
             .children(self.launch_panel(cx))
             .children(self.memory_row(cx));
@@ -3226,7 +3268,11 @@ impl Launcher {
         if let Some(e) = self.prepare_error.clone() {
             page = page.child(notice(e, &t));
         }
-        page = page.child(self.home_tabs(rows, cx));
+        page = page.child(if t.dark {
+            self.glass_home_tabs(rows, cx)
+        } else {
+            self.home_tabs(rows, cx)
+        });
         if let Some(e) = self.client_error.clone() {
             page = page.child(notice(e, &t));
         }
@@ -4720,6 +4766,7 @@ impl Render for Launcher {
         self.args_focused = self.args_focus.is_focused(window);
         self.proxy_focused = self.proxy_focus.is_focused(window);
         let size = window.viewport_size();
+        self.window_width = f32::from(size.width);
         let content = match self.page {
             Page::Play => self.play_page(cx),
             Page::Versions => self.versions_page(cx),

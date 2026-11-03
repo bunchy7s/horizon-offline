@@ -356,6 +356,16 @@ pub trait LevelAccess {
     fn allow_block_form(&self, _pos: BlockPos, _from: BlockStateId, _to: BlockStateId) -> bool {
         true
     }
+    /// Returns the new note, or None to cancel tuning.
+    fn note_block_change(
+        &self,
+        _pos: BlockPos,
+        _instrument: &str,
+        _old: i32,
+        new: i32,
+    ) -> Option<i32> {
+        Some(new)
+    }
     fn allow_note_play(&self, _pos: BlockPos, _instrument: &str, _note: i32) -> bool {
         true
     }
@@ -797,9 +807,10 @@ impl Behaviours {
         data::load_with_behaviour_json(registry, resources_dir, behaviour)
     }
 
-    /// Keep a snapshot of the resolved tables in `dir` (a game folder's
-    /// `.horizon-cache`), so later launches of the same build restore it instead
-    /// of resolving the resources again. Without it, [`Self::load`] never caches.
+    /// Keep snapshots of the resolved tables and the block-state registry in
+    /// `dir` (a game folder's `.horizon-cache`), so later launches of the same
+    /// build restore them instead of resolving the resources again. Without
+    /// it, [`Self::load`] and `data::load_registry` never cache.
     pub fn set_cache_dir(dir: std::path::PathBuf) {
         data::set_cache_dir(dir);
     }
@@ -1156,6 +1167,16 @@ impl Behaviours {
     ) {
         self.sim(level, ticks)
             .big_dripleaf_entity_inside(pos, on_ground, feet_y);
+    }
+    /// `BigDripleafBlock.onProjectileHit`: true when a projectile hit a leaf.
+    /// Unlike entityInside, this tilts powered leaves too.
+    pub fn big_dripleaf_projectile_hit<L: LevelAccess + ?Sized>(
+        &self,
+        level: &mut L,
+        ticks: &mut Ticks,
+        pos: BlockPos,
+    ) -> bool {
+        self.sim(level, ticks).big_dripleaf_projectile_hit(pos)
     }
     /// `BellBlock.onProjectileHit` for a projectile that hit `face` of the
     /// block at `pos` at height `hit_y`. False when the block is not a bell
