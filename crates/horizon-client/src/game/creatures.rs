@@ -942,6 +942,7 @@ impl Game<'_> {
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let guests = self.lan_guest_views();
         let players = self.level_players();
+        let nearest = super::natural_spawning::NearestPlayers::new(&players);
         let mut bindings = match self.lan.as_mut() {
             Some(host) if !guests.is_empty() => std::mem::take(&mut host.mob_players),
             _ => Default::default(),
@@ -1001,13 +1002,9 @@ impl Game<'_> {
                 // getCurrentDifficultyAt(blockPosition()): the mob's own chunk,
                 // not the local player's (a server thread has no player).
                 w.difficulty = self.local_difficulty([m.position.x, m.position.y, m.position.z]);
-                w.nearest_player = super::natural_spawning::nearest_player(
-                    &players,
-                    m.position.x,
-                    m.position.y,
-                    m.position.z,
-                )
-                .map(|p| p.position);
+                w.nearest_player = nearest
+                    .nearest(m.position.x, m.position.y, m.position.z)
+                    .map(|p| p.position);
                 let seen_guest = if guests.is_empty() {
                     None
                 } else {
@@ -6504,13 +6501,34 @@ impl Game<'_> {
             }));
         }
         let len = out.len();
-        self.cull_entity_vertices(out, entity_start);
+        let hidden = self.cull_entity_vertices(out, entity_start);
         if out.len() < len {
             if let Some((mark, _)) = skinned {
                 self.skin_frame.borrow_mut().truncate(mark);
             }
         } else if corners.is_some() {
+            if let Some((mark, _)) = skinned {
+                // Previous GPU-only entities can leave zero-length CPU spans at
+                // this same offset. Use this query's result, not their metadata.
+                if hidden {
+                    let mut skin = self.skin_frame.borrow_mut();
+                    let end = skin.vertices as usize;
+                    horizon_client::gfx::pack_draw::EntitySpan::hide(
+                        &mut skin.spans,
+                        mark.2 as usize,
+                        end,
+                    );
+                }
+            }
             out.truncate(len - 2);
+            // The temporary bounds are not real geometry. Keep the culling end marker
+            // at the true CPU end before the next entity appends a span there.
+            for span in self.entity_spans.borrow_mut().iter_mut().rev() {
+                if span.start as usize <= out.len() {
+                    break;
+                }
+                span.start = out.len() as u32;
+            }
         }
     }
 

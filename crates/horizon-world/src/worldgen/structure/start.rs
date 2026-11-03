@@ -130,6 +130,12 @@ enum Placement {
         count: i32,
         preferred: BTreeSet<BiomeId>,
     },
+    /// `DimensionOriginStructurePlacement.isStructureChunk`: the set's start
+    /// is the generator's origin chunk and no other
+    /// (`ChunkGenerator.getOrigin`, `NoiseBasedChunkGenerator`'s override
+    /// being the chunk of the NoiseSpawnFinder position). The type has no
+    /// salt, frequency reduction or exclusion zone: the chunk alone decides.
+    DimensionOrigin,
     Unsupported,
 }
 /// Concentric ring chunk positions by structure set name.
@@ -319,6 +325,11 @@ pub struct StructureRegistry {
     pub structures: Vec<StructureDef>,
     pub sets: Vec<StructureSet>,
     pub pools: Pools,
+    /// `ChunkGenerator.getOrigin`: the chunk a `minecraft:dimension_origin`
+    /// placement puts its start in. Vanilla's default origin (a generator
+    /// with no noise spawn target) is chunk 0 0, until the generator gives
+    /// its structure state the origin it has.
+    origin: ChunkPos,
 }
 impl StructureRegistry {
     pub fn new(
@@ -458,6 +469,7 @@ impl StructureRegistry {
                         triangular: p["spread_type"].as_str() == Some("triangular"),
                     }
                 }
+                "minecraft:dimension_origin" => Placement::DimensionOrigin,
                 "minecraft:concentric_rings" => Placement::ConcentricRings {
                     distance: p["distance"].as_i64().unwrap_or(0) as i32,
                     spread: p["spread"].as_i64().unwrap_or(0) as i32,
@@ -522,7 +534,23 @@ impl StructureRegistry {
             structures: defs,
             sets: out,
             pools: Pools::new(pools),
+            origin: ChunkPos::new(0, 0),
         })
+    }
+    /// `ChunkGenerator.getOrigin`: the dimension origin chunk.
+    pub fn dimension_origin(&self) -> ChunkPos {
+        self.origin
+    }
+    /// The origin the generator reports for this dimension.
+    pub fn set_dimension_origin(&mut self, origin: ChunkPos) {
+        self.origin = origin;
+    }
+    /// Whether a set is placed by the dimension's origin chunk alone, so the
+    /// generator has to work out where its origin is.
+    pub fn needs_dimension_origin(&self) -> bool {
+        self.sets
+            .iter()
+            .any(|set| matches!(set.placement, Placement::DimensionOrigin))
     }
     /// ChunkGeneratorStructureState.generatePositions: the ring positions of
     /// each concentric-ring set among `possible_sets` before their biome
@@ -616,7 +644,14 @@ impl StructureRegistry {
         rings: &Rings,
         zones: bool,
     ) -> bool {
+        // DimensionOriginStructurePlacement names the generator's origin
+        // chunk alone: it is no AbstractSpreadingStructurePlacement, so no
+        // frequency reduction and no exclusion zone can take that chunk away.
+        if matches!(set.placement, Placement::DimensionOrigin) {
+            return x == self.origin.x && z == self.origin.z;
+        }
         let placed = match set.placement {
+            Placement::DimensionOrigin => unreachable!("handled above"),
             Placement::RandomSpread {
                 spacing,
                 separation,
@@ -1591,6 +1626,68 @@ mod tests {
         assert!(try_registry(set(json!(-0.25))).is_err());
         assert!(try_registry(set(json!(1.0))).is_ok());
         assert!(try_registry(set(json!(0.0))).is_ok());
+    }
+
+    #[test]
+    fn dimension_origin_places_the_generators_origin_chunk_alone() {
+        let mut r = registry(
+            &[("t:s", json!({"type": "minecraft:igloo", "biomes": []}))],
+            &[(
+                "t:origin",
+                json!({"structures": [{"structure": "t:s", "weight": 1}],
+                    "placement": {"type": "minecraft:dimension_origin"}}),
+            )],
+        );
+        let set = |r: &StructureRegistry, name: &str| {
+            r.sets.iter().position(|set| set.name == name).unwrap()
+        };
+        let at = |r: &StructureRegistry, x: i32, z: i32| {
+            r.is_structure_chunk(&r.sets[set(r, "t:origin")], 0, x, z, &Rings::new())
+        };
+        // ChunkGenerator.getOrigin is chunk 0 0 until a generator says otherwise.
+        assert_eq!(r.dimension_origin(), ChunkPos::new(0, 0));
+        assert!(at(&r, 0, 0), "the origin chunk holds the start");
+        assert!(!at(&r, 1, 0));
+        assert!(!at(&r, 0, -1));
+        assert!(r.needs_dimension_origin());
+        r.set_dimension_origin(ChunkPos::new(-37, 12));
+        assert!(at(&r, -37, 12));
+        assert!(!at(&r, 0, 0), "the origin moved with the generator's");
+        assert!(!at(&r, -36, 12));
+        assert!(!at(&r, -37, 13));
+    }
+
+    #[test]
+    fn dimension_origin_ignores_a_frequency_and_an_exclusion_zone() {
+        // DimensionOriginStructurePlacement is no
+        // AbstractSpreadingStructurePlacement: the generator's origin chunk
+        // decides alone, with no frequency reduction and no exclusion zone.
+        let mut r = registry(
+            &[("t:s", json!({"type": "minecraft:igloo", "biomes": []}))],
+            &[
+                (
+                    "t:origin",
+                    json!({"structures": [{"structure": "t:s", "weight": 1}],
+                        "placement": {"type": "minecraft:dimension_origin",
+                            "frequency": 0.0,
+                            "exclusion_zone": {"other_set": "t:other", "chunk_count": 8}}}),
+                ),
+                (
+                    "t:other",
+                    json!({"structures": [{"structure": "t:s", "weight": 1}],
+                        "placement": {"type": "minecraft:random_spread", "spacing": 1,
+                            "separation": 0, "salt": 1}}),
+                ),
+            ],
+        );
+        let set = |r: &StructureRegistry, name: &str| {
+            r.sets.iter().position(|set| set.name == name).unwrap()
+        };
+        r.set_dimension_origin(ChunkPos::new(2, 2));
+        // The other set spreads over every chunk, so its zone covers the origin.
+        assert!(r.is_structure_chunk(&r.sets[set(&r, "t:other")], 0, 2, 2, &Rings::new()));
+        assert!(r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 2, 2, &Rings::new()));
+        assert!(!r.is_structure_chunk(&r.sets[set(&r, "t:origin")], 0, 3, 2, &Rings::new()));
     }
 
     #[test]

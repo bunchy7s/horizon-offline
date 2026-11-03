@@ -2424,6 +2424,15 @@ a dimension.
 - `entity.velocity(host)` (a player's is the move its client last reported), `set_velocity(host, v)` (not for players,
   whose client moves them), `on_ground`, `bounding_box` (lowest and highest corner), `eye_height`, `eye_position`,
   `view_vector` and `distance_to_sqr(host, pos)` read and move it.
+- `level.block_state(host, pos)` (`minecraft:oak_stairs[facing=east,…]`, as `/setblock` takes it), `block` (the name
+  alone), `block_property(host, pos, key)`, `is_loaded`, `height` (lowest `y` and height), `game_time` and `day_time`
+  read any level the server has loaded, not only the one in place. A block in a chunk that isn't loaded reads as `None`.
+- `host.living(entity)` gives a `LivingRef` for a mob, a player, an armor stand or the dragon (vanilla's
+  `LivingEntity`); `living.entity()` goes back. `living.equipment(host, EquipmentSlot::Head)` and `hand_item(host,
+  Hand::Main)` read its equipment (an empty slot reads as `None`); `set_equipment(host, slot, stack)` puts a stack in a
+  slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
+  slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
+  body slot keep only the item, not the stack's count and components.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
@@ -2662,9 +2671,10 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
-  entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
-  player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
-  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
+  entity atlas, the shared quad index buffer and the block sprite arrays ([block textures](#block-textures)). Not
+  called on the title screen's panorama. `motion` says which mob, player or dropped item each run of the entity quads
+  is, by its entity id, so a mod can match an entity's vertices with last frame's (a motion blur's own motion
+  vectors); `spans` only name the type.
 - `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
   entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
@@ -2676,6 +2686,37 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
   several mods can ask. It's asked as each frame is built, so keep it cheap.
+
+### Block textures
+
+`crates/horizon-client/src/game/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
+blocks in its own pass (flying debris as voxels, say) with the player's own block textures, resource packs included,
+as the terrain samples them. API @API:native_block_sprites@.
+
+- `WorldDrawn::block_sprites` (`BlockSpriteArrays`) holds the block sprite arrays as `D2Array` views: the terrain's
+  eight, a 1-layer stand-in past the ones in use, each with the mip levels the Mipmap Levels option leaves, animated
+  layers at the frame shown. Each texture is a whole square layer of `size` texels, its UVs 0 to 1 across it,
+  gamma-encoded as the world uses it. `split` layers go to an array (2048 on most GPUs, fewer where the GPU holds
+  fewer): every vanilla texture is usually in array 0. `nearest` samples texels sharp (nearest, repeating, the
+  nearest mip level), `filtered` is the terrain's own sampler.
+- `native_block_sprites(blocks)` says, for each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left
+  out take the default), what its model draws on each side, in `Direction` order (down, up, north, south, west,
+  east): its faces in the order drawn, each with its `sprite` (`array`, `layer`, `animated`, `cutout`), its `rect`
+  on the side and `inset` from the side's plane (a whole face is 0, 0, 1, 1 and 0), its `uv` map, its `tint` source
+  and whether it is `translucent`; the model's `particle` sprite; whether it is a plain `cube`. None for a block the
+  game doesn't know. A side's axes run along x then z for down and up, x then y for north and south, z then y for
+  west and east, from the block's corner nearest 0, 0, 0 (`block_sprites::side_axes`); the point (a, b) of a side
+  shows the sprite at `(uv[0], uv[1]) + a * (uv[2], uv[3]) + b * (uv[4], uv[5])`, rotations and mirrors included
+  (for a plain block's north side, `u = 1 - x, v = 1 - y`). A tinted face is multiplied by its source's colour:
+  `Grass`, `Foliage`, `DryFoliage` and `Water` are the biome's where the block is, `Fixed` a constant (spruce
+  leaves, redstone at its power). A grass block's side is two faces, the side and then its grey overlay tinted with
+  grass. The model is the state's first random variant; faces that don't lie flat on a side (a flower's crossed
+  planes) are left out, and the `particle` sprite stands for them. Fluids give their still texture on every side.
+- `native_texture_sprites(textures)`: a texture's sprite by name (`block/stone`), none for one no model uses.
+- `native_block_sprites_version()` changes each time the resources load (a resource pack turned on or off moves the
+  layers, and the arrays are new): ask again then.
+
+Look blocks up once and keep what you need (a few words a block for your own shader), not every frame.
 
 ### Menu slot rules
 
@@ -3029,10 +3070,14 @@ Ok::<(), AttachmentError>(())
 For mixin code, see [The typed API from mixin code](#the-typed-api-from-mixin-code).
 
 Use `Holder::Level`, `Holder::Chunk([x, z])`, `Holder::BlockEntity([x, y, z])`,
-`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover mobs, item
-entities, boats, minecarts, armor stands, cushions, item frames, paintings and the
-server's `OtherEntity` records; projectiles, orbs and other ID-less save paths are
-not covered. Player UUIDs cover online guests and the acting player. Mutable level
+`Holder::Entity(id)`, or `Holder::Player(uuid)`. Entity IDs cover every entity in
+the level apart from players: mobs, items, experience orbs, projectiles, tridents,
+falling blocks, primed TNT, fireworks, boats, minecarts, armor stands, cushions, item
+frames, paintings, End crystals, the ender dragon, ominous item spawners and the
+server's `OtherEntity` records. An entity keeps its UUID through saves, so its saved
+attachments load back with it; an orb saved with a `count` above one loads as several
+orbs, and only the first keeps the attachments. Player UUIDs cover online guests and
+the acting player. Mutable level
 hosts can access their level, loaded chunks and block entities; read-only level hosts
 cannot access attachments. Unserialized values disappear on unload or restart. A saved
 value is stored under `horizon:attachments`, then the mod namespace and attachment name,

@@ -628,6 +628,16 @@ pub fn tick(
     if m.alive() {
         super::spear_use::update_using_item(m, w, known_speed, events);
     }
+    // LivingEntity.tick: a sleeper whose bed is gone stands up before
+    // aiStep, with or without AI.
+    if super::villager::sleeping(m)
+        && super::villager::sleeping_pos(m)
+            .filter(|p| w.block_name(p[0], p[1], p[2]).ends_with("_bed"))
+            .is_none()
+    {
+        super::villager::stop_sleeping(m, w, events);
+        super::villager_brain::woken(m, w.game_time);
+    }
     if m.no_ai {
         // Mob.aiStep still runs without AI (only serverAiStep is skipped),
         // so undead still burn in daylight and the endermite's life keeps
@@ -3442,6 +3452,44 @@ mod ridden_tests {
         assert_eq!(held.position, Vec3::new(0.5, 64.0, 0.5));
         assert_eq!(held.velocity, Vec3::ZERO);
         assert_eq!(held.yaw, 90.0, "tickRidden still turns it");
+    }
+}
+
+#[cfg(test)]
+mod bed_wake_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+
+    /// `LivingEntity.tick` wakes a sleeper whose bed is gone before
+    /// `aiStep` — `Mob.no_ai` skips the step, not the check (#7875).
+    fn no_ai_sleeper() -> Option<Mob> {
+        let mut out = None;
+        with_test_world(&[], |w, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:villager"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            m.no_ai = true;
+            let mut events = Vec::new();
+            // The empty world is all air: the "bed" it lies in is gone.
+            assert!(super::super::villager::start_sleeping(
+                &mut m,
+                [0, 64, 0],
+                w,
+                &mut events
+            ));
+            let mut random = LegacyRandom::new(0);
+            tick(&mut m, w, &mut random, &mut events);
+            out = Some(m);
+        });
+        out
+    }
+
+    #[test]
+    fn a_sleeper_without_ai_still_stands_when_its_bed_is_gone() {
+        let Some(m) = no_ai_sleeper() else { return };
+        assert!(
+            !super::super::villager::sleeping(&m),
+            "a missing bed wakes a no-AI sleeper"
+        );
     }
 }
 

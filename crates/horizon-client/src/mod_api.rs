@@ -6,6 +6,7 @@
 use std::sync::{Arc, OnceLock};
 
 pub use crate::biome::BiomeColors;
+pub use crate::block_sprites::{BlockSprites, FaceSprite, SpriteRef};
 pub use crate::camera::{CameraEntity, FovPlayer};
 pub use crate::command::Suggestion;
 pub use crate::containers::{ModBlockEntity, ModContainer, ModEnergyBuffer, ModFluidTanks};
@@ -22,12 +23,14 @@ pub use crate::game::{
     NativePlayerRender, NativeShake,
 };
 pub use crate::gfx::native_render::{
-    RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent, wgpu,
+    BlockSpriteArrays, RenderHooks, RenderNeeds, RenderNeedsEvent, WorldDrawn, WorldDrawnEvent,
+    wgpu,
 };
 pub use crate::hud::HudBatch;
 pub use crate::hud_layout::{GuiDraw, HealthInputs};
 pub use crate::items::ItemStack;
 pub use crate::merchant::MerchantOffer;
+pub use crate::mesher::TintSource;
 pub use crate::music::{Music, MusicLayer};
 pub use crate::particles::{ParticleOptions, ParticleType};
 pub use crate::recipe_book::RecipeBookCategory;
@@ -39,6 +42,7 @@ pub use horizon_core::{
     random::{LegacyRandom, RandomSource},
 };
 pub use horizon_world::consumable::UseAnimation;
+pub use horizon_world::player_inventory::EquipmentSlot;
 pub use horizon_world::{
     attachments::{
         AttachmentCodec, AttachmentError, AttachmentHost, AttachmentType, Attachments, Holder,
@@ -385,6 +389,36 @@ impl EntityRef {
     /// The open of the world the handle belongs to.
     pub fn epoch(self) -> NativeWorldEpoch {
         self.epoch
+    }
+}
+
+/// A living entity of the open world: a mob, a player, an armor stand or the
+/// dragon (vanilla's `LivingEntity`). `host.living(entity)` makes one from an
+/// [`EntityRef`] of such an entity, and [`LivingRef::entity`] goes back, so the
+/// entity's methods work on it too. Stale handles read as `None`, as an
+/// `EntityRef`'s do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LivingRef(EntityRef);
+
+impl LivingRef {
+    /// Create a handle for the game.
+    #[doc(hidden)]
+    pub fn new(entity: EntityRef) -> Self {
+        Self(entity)
+    }
+    /// The same entity as an [`EntityRef`].
+    pub fn entity(self) -> EntityRef {
+        self.0
+    }
+    /// The entity's id (the network id events carry).
+    pub fn id(self) -> u32 {
+        self.0.id()
+    }
+}
+
+impl From<LivingRef> for EntityRef {
+    fn from(living: LivingRef) -> Self {
+        living.0
     }
 }
 

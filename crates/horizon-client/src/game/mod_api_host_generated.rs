@@ -561,6 +561,53 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn level_block_state(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        self.native_level_block_state(level, pos)
+    }
+    fn level_block(&self, level: LevelRef, pos: [i32; 3]) -> Option<String> {
+        self.native_level_block(level, pos)
+    }
+    fn level_block_property(&self, level: LevelRef, pos: [i32; 3], key: &str) -> Option<String> {
+        self.native_level_block_property(level, pos, key)
+    }
+    fn level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
+        self.native_level_is_loaded(level, pos)
+    }
+    fn level_height(&self, level: LevelRef) -> Option<(i32, i32)> {
+        self.native_level_height(level)
+    }
+    fn level_game_time(&self, level: LevelRef) -> Option<i64> {
+        self.native_level_game_time(level)
+    }
+    fn level_day_time(&self, level: LevelRef) -> Option<i64> {
+        self.native_level_day_time(level)
+    }
+    fn living(&self, entity: EntityRef) -> Option<LivingRef> {
+        self.native_living(entity)
+    }
+    fn living_equipment(&self, living: LivingRef, slot: EquipmentSlot) -> Option<ItemStack> {
+        self.native_living_equipment(living, slot)
+    }
+    fn living_hand_item(&self, living: LivingRef, hand: Hand) -> Option<ItemStack> {
+        self.native_living_hand_item(living, hand)
+    }
+    fn living_set_equipment(
+        &mut self,
+        living: LivingRef,
+        slot: EquipmentSlot,
+        stack: Option<ItemStack>,
+    ) -> bool {
+        self.native_living_set_equipment(living, slot, stack)
+    }
+    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+        self.native_block_sprites(blocks)
+    }
+    fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>> {
+        self.native_texture_sprites(textures)
+    }
+    fn block_sprites_version(&self) -> u64 {
+        self.native_block_sprites_version()
+    }
     fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
         self.native_recipe_book_category(kind)
     }

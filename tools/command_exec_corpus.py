@@ -1828,6 +1828,102 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def item_lifetime_counters():
+    target = '00000000-0000-0000-0000-000000000001'
+    ops = setup('/forceload add 0 0', f'/kill {target}')
+    for age in (-32768, -1, 0, 5998, 5999, 6000, 32767):
+        for delay in (-1, 0, 1, 2, 32767):
+            ops.append(cmd('/summon item 4.5 210 4.5 '
+                           '{UUID:[I;0,0,0,1],NoGravity:1b,Item:{id:"minecraft:stone",count:1}}'))
+            ops.append({'op': 'tick', 'n': 3})
+            ops.append(cmd(f'/data get entity {target} Age'))
+            ops += setup(f'/data merge entity {target} {{Age:{age}s,PickupDelay:{delay}s}}')
+            for step in range(4):
+                if step:
+                    ops.append({'op': 'tick', 'n': 1})
+                ops.append(cmd(f'/execute if entity {target}'))
+                ops.append(cmd(f'/data get entity {target} Age'))
+                ops.append(cmd(f'/data get entity {target} PickupDelay'))
+            ops += setup(f'/kill {target}')
+    return ops + setup('/forceload remove 0 0')
+
+
+def armor_stand_climbing():
+    ops = setup('/gamerule random_tick_speed 0', '/forceload add 0 0 31 31',
+                '/fill 0 198 0 31 199 31 stone',
+                '/fill 0 200 0 31 214 31 air', '/fill 10 200 9 10 212 11 stone')
+    for block, below in [
+            ('air', False), ('ladder[facing=west]', False),
+            ('vine[east=true]', False), ('twisting_vines_plant', False),
+            ('weeping_vines_plant', False),
+            ('oak_trapdoor[open=true,facing=west]', True),
+            ('oak_trapdoor[open=true,facing=east]', True)]:
+        ops += setup('/fill 9 200 10 9 213 10 air',
+                     f'/fill 9 200 10 9 210 10 {block}')
+        if block == 'weeping_vines_plant':
+            ops += setup('/fill 9 200 10 9 212 10 weeping_vines_plant',
+                         '/setblock 9 213 10 stone')
+        if below:
+            ops += setup('/setblock 9 209 10 ladder[facing=west]')
+        for x, motion in [(9.5, '[0.0d,0.0d,0.0d]'), (8.5, '[1.0d,0.0d,0.0d]'),
+                          (8.5, '[2.0d,0.0d,0.0d]')]:
+            y = 210 if x == 9.5 else 200
+            ops += setup(f'/summon armor_stand {x} {y} 10.5 {{Silent:1b,Tags:["climb"],Motion:{motion}}}')
+            previous = 0
+            for tick in (1, 2, 3, 5, 10, 20, 30, 40):
+                ops.append({'op': 'tick', 'n': tick - previous})
+                previous = tick
+                for path in ('Pos', 'Motion', 'OnGround', 'Health'):
+                    ops.append(cmd(f'/data get entity @e[tag=climb,limit=1] {path}'))
+            ops += setup('/kill @e[tag=climb]')
+    ops += setup('/fill 0 198 0 31 214 31 air', '/forceload remove 0 0 31 31',
+                 '/gamerule random_tick_speed 3')
+    return ops
+
+
+
+def creeper_cloud_selectors():
+    """Creeper clouds are command targets for their actual lifetime (#7438)."""
+    generated = '@e[type=minecraft:area_effect_cloud,tag=!direct]'
+    direct = '@e[type=minecraft:area_effect_cloud,tag=direct]'
+    creeper = ('/summon minecraft:creeper 4.5 220 4.5 '
+               '{NoAI:1b,NoGravity:1b,ignited:1b,Tags:["source"],'
+               'active_effects:[{id:"minecraft:speed",duration:1000,amplifier:1b}]}')
+    ops = [*setup('/gamerule mob_griefing false', creeper,
+                  '/summon minecraft:area_effect_cloud 14.5 220 4.5 '
+                  '{Tags:["direct"],Duration:300,Radius:2.5f}'),
+           cmd('/execute if entity @e[type=minecraft:creeper,tag=source]')]
+    # The default fuse is intentional: custom Fuse is a separate regression.
+    for ticks in (30, 10):
+        ops += [{'op': 'tick', 'n': ticks},
+                cmd(f'/execute if entity {generated}'),
+                cmd(f'/execute if entity {direct}')]
+    cloud = '@e[type=minecraft:area_effect_cloud,tag=!direct,limit=1]'
+    ops += [
+        cmd(f'/data get entity {cloud} Pos'),
+        cmd(f'/data get entity {cloud} Duration'),
+        cmd(f'/data get entity {cloud} WaitTime'),
+        cmd(f'/tag {generated} add generated'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,tag=generated]'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,nbt={Tags:["generated"],Duration:300}]'),
+        cmd('/scoreboard objectives add cloud_seen dummy'),
+        cmd(f'/execute as {generated} run scoreboard players set @s cloud_seen 7'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,scores={cloud_seen=7}]'),
+        # Past its maximum lifetime, the generated cloud must be gone.
+        {'op': 'tick', 'n': 330},
+        cmd(f'/execute if entity {generated}'),
+        # A second generated cloud exercises explicit removal independently.
+        *setup(creeper),
+        {'op': 'tick', 'n': 30},
+        cmd(f'/execute if entity {generated}'),
+        cmd(f'/kill {generated}'),
+        cmd(f'/execute if entity {generated}'),
+        *setup('/scoreboard objectives remove cloud_seen', '/kill @e[tag=direct]',
+               '/gamerule mob_griefing true'),
+    ]
+    return ops
+
+
 def mob_armor_damage():
     """Attribute commands must change runtime mob damage, not only getters (#7494)."""
     cases = [(armor, toughness, amount, 'cactus')
@@ -1850,6 +1946,7 @@ def mob_armor_damage():
                 cmd(f'/data get entity {target} Health 1000'),
                 *setup(f'/kill {target}')]
     return ops + [{'op': 'tick', 'n': 25}]
+
 
 
 def bossbar_list_order():
@@ -2033,7 +2130,16 @@ def groups():
         ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('item lifetime counters', item_lifetime_counters()),
+
+
+
+        ('armor stand climbing', armor_stand_climbing()),
+
+
+
         ('mob armor damage', mob_armor_damage()),
+
         ('mob max health bounds', mob_max_health_bounds()),
         ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
@@ -2067,4 +2173,5 @@ def groups():
         ('piglin pickups', piglin_pickups()),
         ('experience orb stuck', experience_orb_stuck()),
         ('summoned potions', summoned_potions()),
+        ('creeper cloud selectors', creeper_cloud_selectors()),
     ]

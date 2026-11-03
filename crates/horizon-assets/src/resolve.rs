@@ -8,11 +8,19 @@ use std::{
 pub const MISSING_MODEL: &str = "minecraft:builtin/missing";
 /// `ItemModelGenerator.GENERATED_ITEM_MODEL_ID`.
 pub const GENERATED_MODEL: &str = "minecraft:builtin/generated";
+/// Composite children nest through parents that may name the composite again.
+const MAX_LOADER_DEPTH: u8 = 8;
 
 /// Decoded models are immutable and their inherited geometry is shared.
 pub struct ModelLibrary {
     models: BTreeMap<String, Arc<CuboidModel>>,
     missing: Arc<CuboidModel>,
+}
+/// What a model's loader adds to its own elements.
+#[derive(Clone, Debug)]
+pub enum ResolvedLoader {
+    /// The shown children, resolved on their own, in order.
+    Composite(Vec<ResolvedCuboidModel>),
 }
 #[derive(Clone, Debug)]
 pub struct ResolvedCuboidModel {
@@ -26,8 +34,13 @@ pub struct ResolvedCuboidModel {
     pub render_type: Option<String>,
     geometry: Option<Arc<CuboidModel>>,
     generated: bool,
+    loader: Option<ResolvedLoader>,
 }
 impl ResolvedCuboidModel {
+    /// Geometry from a custom loader, baked after the elements.
+    pub fn loader(&self) -> Option<&ResolvedLoader> {
+        self.loader.as_ref()
+    }
     /// Whether the top geometry is `builtin/generated`'s layer extrusion
     /// (no model closer to the leaf has elements of its own).
     pub fn uses_item_generator(&self) -> bool {
@@ -68,6 +81,7 @@ impl ModelLibrary {
     fn item_generator_model() -> CuboidModel {
         CuboidModel {
             parent: None,
+            loader: None,
             ambient_occlusion: None,
             gui_light: Some(GuiLight::Front),
             textures: BTreeMap::from([(
@@ -77,6 +91,7 @@ impl ModelLibrary {
             elements: None,
             display: None,
             render_type: None,
+            visibility: BTreeMap::new(),
         }
     }
     pub fn new(models: BTreeMap<String, CuboidModel>) -> Result<Self> {
@@ -131,7 +146,7 @@ impl ModelLibrary {
     /// model; a cyclic chain is rejected, as native discovery excludes it.
     /// The returned model can outlive this library without copying its elements.
     pub fn resolve(&self, name: &str) -> Result<ResolvedCuboidModel> {
-        self.resolve_chain(name, None)
+        self.resolve_name(name, None)
     }
     /// Whether `name` and every parent it reaches are models of this library,
     /// with no cycle: `resolve` puts the missing model in for any other.
@@ -166,28 +181,40 @@ impl ModelLibrary {
         name: &str,
         child: &BTreeMap<String, TextureSlot>,
     ) -> Result<ResolvedCuboidModel> {
-        self.resolve_chain(name, Some(child))
+        self.resolve_name(name, Some(child))
     }
-    fn resolve_chain(
+    fn resolve_name(
         &self,
         name: &str,
         child: Option<&BTreeMap<String, TextureSlot>>,
     ) -> Result<ResolvedCuboidModel> {
-        let mut name = identifier(name)?;
+        let next = Some(identifier(name)?);
+        self.resolve_chain(Vec::new(), Vec::new(), next, &BTreeMap::new(), child, 0)
+    }
+    /// `chain` and `names` start with models that are not in the library (a
+    /// composite child); `next` is the parent to follow. `fallback` slots lose
+    /// to any slot the chain defines.
+    fn resolve_chain(
+        &self,
+        mut chain: Vec<Arc<CuboidModel>>,
+        mut names: Vec<String>,
+        mut next: Option<String>,
+        fallback: &BTreeMap<String, TextureSlot>,
+        child: Option<&BTreeMap<String, TextureSlot>>,
+        depth: u8,
+    ) -> Result<ResolvedCuboidModel> {
+        if depth > MAX_LOADER_DEPTH {
+            return Err(error("composite models nest too deeply"));
+        }
         let mut visited = BTreeSet::new();
-        let mut chain = Vec::new();
-        let mut names = Vec::new();
-        loop {
+        while let Some(name) = next.take() {
             if !visited.insert(name.clone()) {
                 return Err(error("cyclic model parent"));
             }
             let model = self.models.get(&name).unwrap_or(&self.missing);
-            chain.push(model);
-            names.push(name.clone());
-            match &model.parent {
-                Some(parent) => name = parent.clone(),
-                None => break,
-            }
+            chain.push(Arc::clone(model));
+            names.push(name);
+            next = model.parent.clone();
         }
         let ambient_occlusion = chain
             .iter()
@@ -198,10 +225,7 @@ impl ModelLibrary {
             .find_map(|m| m.gui_light)
             .unwrap_or(GuiLight::Side);
         let render_type = chain.iter().find_map(|m| m.render_type.clone());
-        let geometry = chain
-            .iter()
-            .find(|m| m.elements.is_some())
-            .map(|m| Arc::clone(m));
+        let geometry = chain.iter().find(|m| m.elements.is_some()).map(Arc::clone);
         let generated = chain
             .iter()
             .zip(&names)
@@ -220,13 +244,46 @@ impl ModelLibrary {
         };
         // Resolve aliases only after applying every child override. A reference
         // inherited from a parent binds to the child's final slot definition.
-        let mut slots = BTreeMap::new();
-        for model in chain.into_iter().rev() {
+        let mut slots: BTreeMap<String, &TextureSlot> =
+            fallback.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for model in chain.iter().rev() {
             slots.extend(model.textures.iter().map(|(k, v)| (k.clone(), v)));
         }
         if let Some(child) = child {
             slots.extend(child.iter().map(|(k, v)| (k.clone(), v)));
         }
+        let loader = match chain.iter().find_map(|m| m.loader.as_ref()) {
+            Some(Loader::Composite {
+                children,
+                visibility,
+            }) => {
+                let inherited: BTreeMap<String, TextureSlot> = slots
+                    .iter()
+                    .map(|(k, v)| (k.clone(), (*v).clone()))
+                    .collect();
+                // A model closer to the leaf overrides the loader's own map.
+                let mut visibility = visibility.clone();
+                for model in chain.iter().rev() {
+                    visibility.extend(model.visibility.iter().map(|(k, v)| (k.clone(), *v)));
+                }
+                let mut resolved = Vec::new();
+                for (child_name, child_model) in children {
+                    if visibility.get(child_name) == Some(&false) {
+                        continue;
+                    }
+                    resolved.push(self.resolve_chain(
+                        vec![Arc::clone(child_model)],
+                        vec![format!("{}#{child_name}", names[0])],
+                        child_model.parent.clone(),
+                        &inherited,
+                        None,
+                        depth + 1,
+                    )?);
+                }
+                Some(ResolvedLoader::Composite(resolved))
+            }
+            Some(Loader::Unknown(_)) | None => None,
+        };
         let mut textures = BTreeMap::<String, Material>::new();
         let mut unresolved_textures = BTreeSet::<String>::new();
         for start in slots.keys() {
@@ -271,10 +328,10 @@ impl ModelLibrary {
             render_type,
             geometry,
             generated,
+            loader,
         })
     }
 }
-
 /// The native missing-model cube uses slot names without a leading '#'.
 pub fn missing_model() -> CuboidModel {
     let faces = Direction::ALL
@@ -296,6 +353,7 @@ pub fn missing_model() -> CuboidModel {
         .collect();
     CuboidModel {
         parent: None,
+        loader: None,
         ambient_occlusion: None,
         gui_light: None,
         elements: Some(vec![Some(Element {
@@ -324,6 +382,7 @@ pub fn missing_model() -> CuboidModel {
                 }),
             ),
         ]),
+        visibility: BTreeMap::new(),
     }
 }
 
