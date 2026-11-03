@@ -797,6 +797,39 @@ def end_portal_entities():
     ]
 
 
+def loot_set_damage():
+    """SetItemDamageFunction in /loot's items engine, including its RNG tail."""
+    import json
+    sequence = 'harness:loot_damage'
+    uniform = {'type': 'minecraft:uniform', 'min': 0.2, 'max': 0.8}
+    cases = [('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': n})
+             for n in (0, 0.5, -1, 1, 2)]
+    cases += [
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': 0.5}),
+        ('minecraft:iron_sword', [
+            {'type': 'minecraft:set_damage', 'damage': 0.5},
+            {'type': 'minecraft:set_damage', 'damage': 0.25, 'add': True}]),
+        ('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': uniform}),
+        # An ineligible item must leave the provider's random draw untouched.
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': uniform}),
+    ]
+    ops = setup('/setblock 2 220 2 minecraft:chest')
+    # Keep the inline fallback without a named sequence covered as well.
+    cases.append(('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': 0.5}))
+    for index, (item, modifier) in enumerate(cases):
+        table = {'random_sequence': sequence, 'pools': [{'rolls': 1, 'entries': [
+            {'type': 'minecraft:item', 'name': item, 'modifier': modifier}]}]}
+        if index == len(cases) - 1:
+            del table['random_sequence']
+        ops += setup(f'/random reset {sequence} 42 false true')
+        ops += [
+            cmd('/loot replace block 2 220 2 container.0 loot ' + json.dumps(table)),
+            cmd('/data get block 2 220 2 Items'),
+            cmd(f'/random value 0..1000000 {sequence}'),
+        ]
+    return ops + setup('/setblock 2 220 2 minecraft:air')
+
+
 def items_and_loot():
     return [
         *setup('/clear @s', '/gamemode survival'),
@@ -2189,7 +2222,13 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+
+        ('loot set damage', loot_set_damage()),
+
+
+
         ('item NBT count bounds', item_nbt_count_bounds()),
+
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),
