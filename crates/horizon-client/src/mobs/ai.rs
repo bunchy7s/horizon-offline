@@ -424,12 +424,12 @@ pub fn register(m: &mut Mob) {
     }
 }
 /// Mob.tick additions that run before the entity tick (creeper fuse, puffing).
-fn pre_tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
+fn pre_tick(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.species() == Species::Wither && m.alive() {
         super::wither::steer(m);
     }
     if m.species() == Species::Breeze {
-        super::breeze::tick(m, events);
+        super::breeze::tick(m, w, events);
     }
     match family(m.species()) {
         Family::Hostile => {
@@ -593,7 +593,7 @@ pub fn tick(
     }
     drop_invalid_player_target(m, w);
     // Mob.tick pre-update hooks (Creeper.tick swells before super.tick).
-    pre_tick(m, events);
+    pre_tick(m, w, events);
     if m.removed {
         return false;
     }
