@@ -1,0 +1,16 @@
+{
+  "hooks": [
+    {
+      "name": "can_player_sleep",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_can_player_sleep",
+      "neoforge": "CanPlayerSleepEvent",
+      "side": "server",
+      "cancellable": false,
+      "mod_api": {
+        "contract": "listen"
+      }
+    }
+  ],
+  "rust_summary": "the problem that stops a player sleeping in a bed, changeable (`native_can_player_sleep`).",
+  "doc_summary": "the problem that stops a player sleeping, as NeoForge's `CanPlayerSleepEvent`: `native_can_player_sleep(player, name, pos, problem)` runs on the server once vanilla's checks have found their first problem (`too_far_away`, `obstructed`, `not_possible_now`, `not_safe`) or none. A mod may set `None` to let the player sleep or a name to refuse (`other_problem` refuses without a message). `native_player_bed_enter` still fires after it and may cancel. Bundles need \"hooks\": @API:can_player_sleep@."
+}

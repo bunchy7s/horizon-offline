@@ -2,7 +2,7 @@
 //! `/posteffect`, `/fetchprofile`, `/spectate`, `/publish`, `/unpublish`,
 //! `/waypoint`, `/debug`, `/jfr` and `/test`; on a dedicated server only,
 //! `/op`, `/deop`, `/ban`, `/ban-ip`, `/banlist`, `/pardon`, `/pardon-ip`,
-//! `/setidletimeout` and `/whitelist`.
+//! `/setidletimeout`, `/transfer` and `/whitelist`.
 use super::{
     Dispatcher, Suggests,
     args::ArgType,
@@ -247,6 +247,18 @@ pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
     d.suggests(t, Suggests::BannedIps);
     d.executes(t, "pardon-ip");
 
+    // SaveAllCommand (`flush` too), SaveOffCommand, SaveOnCommand, StopCommand
+    let save_all = d.literal(root, "save-all");
+    d.requires(save_all, OWNERS);
+    d.executes(save_all, "save-all");
+    let flush = d.literal(save_all, "flush");
+    d.executes(flush, "save-all");
+    for name in ["save-off", "save-on", "stop"] {
+        let n = d.literal(root, name);
+        d.requires(n, OWNERS);
+        d.executes(n, name);
+    }
+
     let ban = d.literal(root, "ban");
     d.requires(ban, ADMINS);
     let t = d.argument(ban, "targets", ArgType::GameProfile);
@@ -266,6 +278,16 @@ pub fn register_dedicated(d: &mut Dispatcher, root: usize) {
         },
     );
     d.executes(minutes, "setidletimeout");
+
+    // TransferCommand: <hostname> [<port> [<players>]], the port 1 to 65535.
+    let transfer = d.literal(root, "transfer");
+    d.requires(transfer, ADMINS);
+    let hostname = d.argument(transfer, "hostname", ArgType::Str);
+    d.executes(hostname, "transfer");
+    let port = d.argument(hostname, "port", ArgType::Integer { min: 1, max: 65535 });
+    d.executes(port, "transfer");
+    let players = d.argument(port, "players", PLAYERS);
+    d.executes(players, "transfer");
 
     // WhitelistCommand
     let whitelist = d.literal(root, "whitelist");

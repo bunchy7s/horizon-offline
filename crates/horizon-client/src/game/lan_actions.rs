@@ -2308,6 +2308,13 @@ impl Game<'_> {
                 });
             }
             S::PlayerCommand(p) if p.action == 6 => self.lan_start_gliding(host, conn),
+            // START_RIDING_JUMP: the mount's handleStartJump.
+            S::PlayerCommand(p) if p.action == 3 => {
+                self.lan_start_riding_jump(host, conn, p.data);
+            }
+            // STOP_RIDING_JUMP: AbstractHorse and Camel handleStopJump do
+            // nothing, and a nautilus' dash is not stopped this way.
+            S::PlayerCommand(p) if p.action == 4 => {}
             // ServerboundResourcePackPacket in play: the server has nothing to
             // do with it (a declined required pack is handled on the connection).
             S::ResourcePack(r) => {
@@ -3279,9 +3286,14 @@ impl Game<'_> {
             self.run_command(&c.command)
         };
         self.ui.registries.permission = level;
-        let lines = self.chat_capture.take().unwrap_or_default();
+        let mut lines = self.chat_capture.take().unwrap_or_default();
         let mut host = self.lan.take().expect("a command puts the hub back");
         self.leave_guest(&mut host, swap);
+        if std::mem::take(&mut self.save_after_guest_turn) {
+            self.lan = Some(host);
+            lines.push(self.save_all_reply());
+            host = self.lan.take().expect("saving puts the hub back");
+        }
         host.hub.sync_all_effects();
         if !c.integrated {
             // A teleport into another level happens before its feedback is sent.
@@ -3785,6 +3797,34 @@ impl Game<'_> {
     /// `ServerPlayer.die` for a guest whose health has run out: the death
     /// message, the loot and experience, the death screen.
     fn guest_die(&mut self, host: &mut LanHost, gi: usize, conn: u32) {
+        if host.hub.guests[gi].health <= 0.0
+            && !host.hub.guests[gi].dead
+            && !horizon_client::mod_api::mods().is_empty()
+        {
+            // LivingDeathEvent: a canceled death keeps the player at 1 health.
+            let (damage_type, attacker) =
+                match host.play.get(&conn).and_then(|p| p.death_cause.as_deref()) {
+                    Some("death.attack.genericKill") => ("minecraft:generic_kill", 0),
+                    _ => self
+                        .guest_combat
+                        .get(&conn)
+                        .and_then(|tracker| tracker.last_blow())
+                        .unwrap_or(("minecraft:generic", 0)),
+                };
+            let (damage_type, entity) = (damage_type.to_owned(), host.hub.guests[gi].entity_id);
+            let mut cancel = false;
+            self.native_living_death(
+                entity as u32,
+                "minecraft:player",
+                &damage_type,
+                attacker,
+                &mut cancel,
+            );
+            if cancel {
+                host.hub.guests[gi].health = 1.0;
+                return;
+            }
+        }
         if host.hub.guests[gi].health <= 0.0 && !host.hub.guests[gi].dead {
             self.guest_forget_digging(host, conn);
             // FishingHook.shouldStopFishing: its owner is dead.
@@ -3864,9 +3904,16 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
-            if let Some(eyes) = drops {
-                self.as_guest(host, conn, |game| game.drop_inventory(eyes));
-            }
+            // ServerPlayer.die: the drops, then the deathCount objectives, then
+            // the `deaths` statistic and the two timers it resets.
+            self.as_guest(host, conn, |game| {
+                if let Some(eyes) = drops {
+                    game.drop_inventory(eyes);
+                }
+                game.score_player_died();
+                game.award_custom_stat("deaths", 1);
+                game.stats.reset_death_timers();
+            });
             self.spawn_orbs(at, reward);
         }
     }
@@ -4418,6 +4465,35 @@ impl Game<'_> {
                 velocity: [v.x, v.y, v.z],
             }));
         }
+    }
+
+    /// ServerGamePacketListenerImpl.handlePlayerCommand START_RIDING_JUMP: the
+    /// vehicle the guest rides takes its own `handleStartJump` — a horse rears
+    /// and slides on the rider's keys, a camel dashes — and the sound vanilla's
+    /// server plays is broadcast to the players near the mount, the rider
+    /// included (their own client plays none).
+    fn lan_start_riding_jump(&mut self, host: &mut LanHost, conn: u32, data: i32) {
+        let Some(Some(index)) = self.as_guest(host, conn, |g| g.mount_index()) else {
+            return;
+        };
+        let m = &mut self.mobs[index];
+        let Some((sound, volume)) = crate::game::mounts::start_riding_jump(m, data) else {
+            return;
+        };
+        let at = m.center();
+        // LivingEntity.getSoundSource: a mob's sounds are in the neutral source.
+        let neutral = horizon_client::settings::SOUND_SOURCES
+            .iter()
+            .position(|s| *s == "neutral")
+            .unwrap_or(0) as i32;
+        host.hub.sound(
+            &format!("minecraft:{sound}"),
+            at,
+            volume,
+            1.0,
+            neutral,
+            None,
+        );
     }
 
     /// ServerGamePacketListenerImpl.handlePlayerCommand START_FALL_FLYING:

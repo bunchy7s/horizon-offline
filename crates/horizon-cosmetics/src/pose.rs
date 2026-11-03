@@ -21,7 +21,7 @@ pub fn pose_matrix(p: Pose) -> glam::Mat4 {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{Bone, Error, Item, MAX_VERTICES, Motion, Slot};
+    use crate::{Bone, Error, Item, MAX_VERTICES, Motion, Slot, Tag};
     use glam::{Mat4, Vec3};
 
     /// A `width`×`height` PNG, base64.
@@ -210,5 +210,46 @@ pub(crate) mod tests {
             );
         }
         assert!(Item::parse(hat(r#", "glow": true"#).as_bytes()).is_err());
+    }
+
+    /// A name tag: an 8×8 mark and a violet line, no parts.
+    fn name_tag(extra: &str) -> String {
+        format!(
+            r##"{{"format": 1, "id": "tag", "slot": "name_tag", "texture": {{"png": "{}"}},
+              "parts": [], "tag": {{"line": "#a98fFF"}}{extra}}}"##,
+            png(8, 8)
+        )
+    }
+
+    #[test]
+    fn a_name_tag_is_a_mark_and_a_line_without_a_model() {
+        let item = Item::parse(name_tag("").as_bytes()).unwrap();
+        assert_eq!(item.slot, Slot::NameTag);
+        assert_eq!(
+            item.tag,
+            Some(Tag {
+                line: [0xa9, 0x8f, 0xff]
+            })
+        );
+        assert_eq!(item.vertices, 0);
+        assert_eq!((item.texture.width, item.texture.height), (8, 8));
+        // A model item never has a line.
+        assert_eq!(Item::parse(hat("").as_bytes()).unwrap().tag, None);
+    }
+
+    #[test]
+    fn refuses_name_tags_with_a_model_or_a_big_mark() {
+        let cube =
+            r#"{"name": "box", "cubes": [{"origin": [0, 0, 0], "size": [1, 1, 1], "uv": [0, 0]}]}"#;
+        let boxed = name_tag("").replace(r#""parts": []"#, &format!(r#""parts": [{cube}]"#));
+        let wide = name_tag("").replace(&png(8, 8), &png(32, 32));
+        let oblong = name_tag("").replace(&png(8, 8), &png(16, 8));
+        let no_line = name_tag("").replace(r##", "tag": {"line": "#a98fFF"}"##, "");
+        let bad_line = name_tag("").replace("#a98fFF", "violet");
+        for file in [boxed, wide, oblong, no_line, bad_line] {
+            assert!(Item::parse(file.as_bytes()).is_err(), "{file}");
+        }
+        let hat_with_tag = hat(r##", "tag": {"line": "#ffffff"}"##);
+        assert!(Item::parse(hat_with_tag.as_bytes()).is_err());
     }
 }

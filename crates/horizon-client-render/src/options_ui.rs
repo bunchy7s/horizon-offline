@@ -125,25 +125,17 @@ impl Opt {
     pub(crate) fn available(self) -> bool {
         !matches!(
             self,
-            Opt::ChatDelay
-                // Stored, but there are no blocked players, signed chat or
-                // chat drafts yet.
-                | Opt::HideMatchedNames
+            // Stored, but there are no blocked players or signed chat yet.
+            Opt::HideMatchedNames
                 | Opt::OnlySecureChat
-                | Opt::SaveChatDrafts
                 // Saved, but no Horizon system reads them yet: no Realms, no
-                // friends list, no directional audio, no now-playing toast.
+                // friends list, no directional audio.
                 | Opt::RealmsNotifications
                 | Opt::InGameNotification
                 | Opt::SharePresence
                 | Opt::DirectionalAudio
-                | Opt::MusicToast
-                // Saved, but nothing in rendering reads them yet.
-                | Opt::ChunkFade
-                | Opt::ImprovedTransparency
+                // Saved, but nothing in rendering reads it yet.
                 | Opt::ChunkBuilder
-                // Saved, but the mouse doesn't read it yet.
-                | Opt::CtrlClickEmulatesRightClick
         )
     }
     fn file_key(self) -> Option<&'static str> {
@@ -1313,6 +1305,9 @@ enum Act {
     NativeKey(usize, usize),
     NativeButton(usize, usize),
     OpenModFolder,
+    /// Accessibility's "Accessibility Help" link
+    /// (`AccessibilityOptionsScreen.addFooter`'s openLinkButton).
+    AccessibilityHelp,
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
@@ -1429,6 +1424,9 @@ pub enum Event {
     /// Data Packs' Open Pack Folder: create the folder if needed and open it.
     OpenDataPackFolder(std::path::PathBuf),
     OpenModFolder,
+    /// Accessibility's Help link: confirm and open
+    /// `CommonLinks.ACCESSIBILITY_HELP` over the options screen.
+    AccessibilityHelp,
     /// The Shader Packs page opened: list `shaderpacks/` into `shader_packs`.
     ListShaderPacks,
     /// A shader pack was picked or turned off: save and apply it.
@@ -1733,7 +1731,8 @@ fn native_pack_option_rows(s: &Settings, i: usize, at: u8) -> Vec<Row> {
         PageItem::Option(o) if o < count => {
             let option = &pack.options[o];
             let value = crate::shader_pack_list::show_value(&option.kind, pack.values[o]);
-            let label = Text::literal(format!("{}: {value}", option.name));
+            let label =
+                Text::option_name_value(Text::literal(option.name.clone()), Text::literal(value));
             button(0.0, 0.0, width, label, Act::NativePackOption(i, o))
         }
         PageItem::Page(p) if p < pack.pages.len() => {
@@ -2033,8 +2032,11 @@ fn pairs(opts: &[Opt]) -> Vec<Row> {
 impl OptionsUi {
     /// A switch of `horizon-extras.txt` as the Extras page draws it: "Caption: On".
     fn extra_button(&self, s: &Settings, item: crate::extras::Item) -> Widget {
-        let label = format!("{}: {}", item.caption_text(), item.value(&s.extras));
-        button(0.0, 0.0, 150.0, Text::literal(label), Act::Extra(item))
+        let label = Text::option_name_value(
+            Text::literal(item.caption_text()),
+            Text::literal(item.value(&s.extras)),
+        );
+        button(0.0, 0.0, 150.0, label, Act::Extra(item))
     }
     fn settings_search_active(&self) -> bool {
         self.settings_search.focused
@@ -2353,7 +2355,11 @@ impl OptionsUi {
                 // Each section's switches two to a row, as vanilla's
                 // OptionsList.addSmall lays out an options screen.
                 let extra = |item: crate::extras::Item| {
-                    let value = format!("{}: {}", item.caption_text(), item.value(&s.extras));
+                    let value = Text::option_name_value(
+                        Text::literal(item.caption_text()),
+                        Text::literal(item.value(&s.extras)),
+                    )
+                    .plain();
                     let label = if item.key_name().is_some() && self.selected_key == item.key_name()
                     {
                         Text::literal(format!("> {value} <")).with_color(text::YELLOW)
@@ -2717,8 +2723,10 @@ impl OptionsUi {
                     .iter()
                     .enumerate()
                     .map(|(i, installed)| {
-                        let mut label = Text::literal(format!("{}: ", installed.title))
-                            .append(on_off(s.mods.is_on(i)));
+                        let mut label = Text::option_name_value(
+                            Text::literal(installed.title.clone()),
+                            on_off(s.mods.is_on(i)),
+                        );
                         if installed.problem.as_deref() == Some(crate::mod_list::NOT_BUILT) {
                             label = label.append(tr("horizon.mods.not_built"));
                         } else if installed.problem.is_some() {
@@ -2726,7 +2734,17 @@ impl OptionsUi {
                         } else if installed.dev {
                             label = label.append(tr("horizon.mods.dev"));
                         }
-                        let dead = installed.dev || installed.id.is_empty();
+                        // A content mod's set feeds the block-state tables the
+                        // open world's chunks were decoded with: changing it
+                        // mid-world remaps their ids (Forge/Fabric freeze the
+                        // registry before a world opens). A native mod toggles
+                        // live through `native_on`, so it stays available.
+                        let content = installed.native.is_none();
+                        if self.in_world && content {
+                            label = label.append(tr("horizon.mods.in_world"));
+                        }
+                        let dead =
+                            installed.dev || installed.id.is_empty() || self.in_world && content;
                         // Only native mods with actual settings need a second button.
                         if installed
                             .native
@@ -2780,8 +2798,10 @@ impl OptionsUi {
                             }
                             crate::shader_pack_list::Kind::Classic => String::new(),
                         };
-                        let label = Text::literal(format!("{}{kind}: ", pack.title))
-                            .append(on_off(s.horizon.shader_pack == pack.file));
+                        let label = Text::option_name_value(
+                            Text::literal(format!("{}{kind}", pack.title)),
+                            on_off(s.horizon.shader_pack == pack.file),
+                        );
                         Row::Buttons(button(0.0, 0.0, 310.0, label, Act::PickShaderPack(i)), None)
                     }))
                     .collect()
@@ -3331,6 +3351,9 @@ impl OptionsUi {
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
                 let folder = match page {
+                    Page::Accessibility => {
+                        Some(("options.accessibility.link", Act::AccessibilityHelp))
+                    }
                     Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
                     Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
                     Page::ShaderOptions => Some(("controls.reset", Act::ShaderReset)),
@@ -4126,6 +4149,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -5033,6 +5057,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -5105,12 +5130,13 @@ impl OptionsUi {
                     return events;
                 }
                 Some(FocusId::Lang(code)) => {
+                    // `LanguageSelectionList.Entry.keyPressed`: the selection
+                    // key (`isSelection`: Enter, Space, keypad Enter) selects
+                    // the row and finishes the screen at once (`onDone`), so
+                    // the language applies on that one press.
                     let mut events = vec![Event::ButtonClick];
-                    if self.language_choice.as_deref() == Some(code.as_str()) {
-                        events.extend(self.back(s));
-                    } else {
-                        self.language_choice = Some(code.clone());
-                    }
+                    self.language_choice = Some(code.clone());
+                    events.extend(self.back(s));
                     return events;
                 }
                 _ => {}
@@ -5265,6 +5291,16 @@ mod tests {
                 ..
             }
         )));
+        // `AccessibilityOptionsScreen.addFooter`: the "Accessibility Help"
+        // link button sits beside Done.
+        assert!(widgets.iter().any(|w| matches!(
+            w.kind,
+            WKind::Button {
+                act: Act::AccessibilityHelp,
+                active: true,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -5368,6 +5404,33 @@ mod tests {
             Opt::QuitShortcuts.tooltip_key(&s),
             "options.quitShortcuts.tooltip"
         );
+    }
+
+    /// The gating is for genuinely unread keys only: every option a system
+    /// already consumes must stay clickable.
+    #[test]
+    fn read_options_are_not_greyed_out() {
+        for opt in [
+            Opt::ChunkFade,
+            Opt::ImprovedTransparency,
+            Opt::ChatDelay,
+            Opt::SaveChatDrafts,
+            Opt::MusicToast,
+            Opt::CtrlClickEmulatesRightClick,
+        ] {
+            assert!(opt.available(), "{opt:?} is read and must be clickable");
+        }
+        for opt in [
+            Opt::HideMatchedNames,
+            Opt::OnlySecureChat,
+            Opt::RealmsNotifications,
+            Opt::InGameNotification,
+            Opt::SharePresence,
+            Opt::DirectionalAudio,
+            Opt::ChunkBuilder,
+        ] {
+            assert!(!opt.available(), "{opt:?} still has no reader");
+        }
     }
 
     #[test]
@@ -5526,6 +5589,34 @@ mod tests {
             vec![Event::ButtonClick]
         );
         assert!(ui.resource_error.is_none());
+    }
+
+    /// The Extras page joins caption and value with the language's `options.generic_value`
+    /// (26.3's templates), not an English ": " (#6072).
+    #[test]
+    fn extras_captions_use_the_languages_separator() {
+        struct Vanilla;
+        impl lang::ResourceSource for Vanilla {
+            fn read(&self, path: &str) -> Option<Vec<u8>> {
+                let generic = match path {
+                    "assets/minecraft/lang/fr_fr.json" => "%s : %s",
+                    "assets/minecraft/lang/zh_cn.json" => "%s：%s",
+                    _ => return None,
+                };
+                serde_json::to_vec(&serde_json::json!({ "options.generic_value": generic })).ok()
+            }
+        }
+        let s = Settings::default();
+        let ui = OptionsUi::default();
+        for (code, shown) in [("fr_fr", "Sans IA : Non"), ("zh_cn", "关闭 AI：关")] {
+            let (label, _) = lang::scoped(lang::Language::load(&[&Vanilla], code), || {
+                match ui.extra_button(&s, crate::extras::Item::NoAi).kind {
+                    WKind::Button { label, .. } => label.plain(),
+                    _ => String::new(),
+                }
+            });
+            assert_eq!(label, shown, "{code}");
+        }
     }
 
     /// The texts of an options page, as laid out in `code`'s language, and the keys it lacked.
@@ -6620,6 +6711,49 @@ mod tests {
         );
     }
 
+    /// `LanguageSelectionList.Entry.keyPressed`: the selection key picks the
+    /// row's language and finishes the screen in one press (`onDone`), so the
+    /// page is gone after Enter and the language is already applied.
+    #[test]
+    fn the_selection_key_picks_a_language_and_finishes_the_page() {
+        use winit::keyboard::KeyCode;
+        let atlas = atlas();
+        let rows = languages();
+        let code = {
+            let s = Settings::default();
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            let (widgets, ..) = ui.layout(&s, 480.0, 320.0);
+            widgets
+                .iter()
+                .find_map(|wd| match &wd.kind {
+                    WKind::LanguageRow { code, .. } => Some(code.clone()),
+                    _ => None,
+                })
+                .expect("a language row")
+        };
+        for key in [KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space] {
+            let mut s = Settings::default();
+            assert_ne!(s.language, code, "the row starts unchosen");
+            let mut ui = OptionsUi {
+                languages: rows.clone(),
+                ..Default::default()
+            };
+            ui.size = (480.0, 320.0);
+            ui.show(Page::Language);
+            ui.focus = Some(FocusId::Lang(code.clone()));
+            ui.focus_from_keyboard = true;
+            let events = ui.key(&mut s, &atlas, key, None);
+            assert_eq!(s.language, code, "{key:?} applies the row's language");
+            assert!(events.contains(&Event::Language(code.clone())), "{key:?}");
+            assert_eq!(ui.page(), Page::Main, "{key:?} finishes the language page");
+        }
+    }
+
     #[test]
     fn language_search_hint_does_not_overlap_the_focused_caret() {
         let atlas = atlas();
@@ -7033,6 +7167,46 @@ mod tests {
         assert!(events.contains(&Event::Language("de_de".into())));
         assert!(events.contains(&Event::Close));
         assert_eq!(s.language, "de_de");
+    }
+
+    /// A content mod's set builds the block-state tables an open world's
+    /// chunks were decoded with, so its toggle freezes in-world; a native
+    /// mod gates live through `native_on` and stays available.
+    #[test]
+    fn in_a_world_only_native_mod_toggles_stay_active() {
+        let mut s = Settings::default();
+        let installed =
+            |id: &str, native: Option<crate::mod_list::NativePage>| crate::mod_list::Installed {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native,
+            };
+        s.mods.installed = vec![
+            installed("content", None),
+            installed("native", Some(crate::mod_list::NativePage::default())),
+        ];
+        let mut ui = OptionsUi::default();
+        let toggles = |ui: &mut OptionsUi, s: &Settings| {
+            let (widgets, ..) = ui.layout(s, 427.0, 240.0);
+            widgets
+                .iter()
+                .filter_map(|w| match w.kind {
+                    WKind::Button {
+                        act: Act::ToggleMod(i),
+                        active,
+                        ..
+                    } => Some((i, active)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        ui.open_at(false, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, true), (1, true)]);
+        ui.open_at(true, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, false), (1, true)]);
     }
 
     #[test]
