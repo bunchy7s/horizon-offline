@@ -54,29 +54,18 @@ impl Launcher {
                     cx.notify();
                 }))
             }));
-        // The open tab's own buttons head its body, at the right.
-        let (actions, body): (Option<Div>, Option<AnyElement>) = match open {
-            HomeTab::Overview => (None, Some(self.glass_overview(rows, cx).into_any_element())),
-            HomeTab::Mods => (None, Some(self.glass_instance_mods(cx).into_any_element())),
-            HomeTab::Worlds => (
-                None,
-                self.glass_worlds(cx).map(IntoElement::into_any_element),
-            ),
-            HomeTab::Multiplayer => (
-                None,
-                self.glass_multiplayer(cx)
-                    .map(IntoElement::into_any_element),
-            ),
-            HomeTab::Packs => (
-                None,
-                self.glass_packs(cx).map(IntoElement::into_any_element),
-            ),
-            HomeTab::Screenshots => (
-                None,
-                self.glass_screenshots(cx)
-                    .map(IntoElement::into_any_element),
-            ),
-            HomeTab::Console => split(self.console_section(cx)),
+        let body: Option<AnyElement> = match open {
+            HomeTab::Overview => Some(self.glass_overview(rows, cx).into_any_element()),
+            HomeTab::Mods => Some(self.glass_instance_mods(cx).into_any_element()),
+            HomeTab::Worlds => self.glass_worlds(cx).map(IntoElement::into_any_element),
+            HomeTab::Multiplayer => self
+                .glass_multiplayer(cx)
+                .map(IntoElement::into_any_element),
+            HomeTab::Packs => self.glass_packs(cx).map(IntoElement::into_any_element),
+            HomeTab::Screenshots => self
+                .glass_screenshots(cx)
+                .map(IntoElement::into_any_element),
+            HomeTab::Console => self.glass_console(cx).map(IntoElement::into_any_element),
         };
         div()
             .relative()
@@ -94,7 +83,6 @@ impl Launcher {
                         .px(px(4.))
                         .pt(px(8.))
                         .pb(px(4.))
-                        .children(actions.map(|a| div().flex().justify_end().px(px(12.)).child(a)))
                         .children(body),
                 ),
             )
@@ -331,14 +319,6 @@ impl Launcher {
 /// A card's title (`CARD_TITLE`): 16 px semibold.
 fn card_title(label: impl Into<SharedString>) -> Div {
     ui::text(16., FontWeight::SEMIBOLD, ink::FULL).child(label.into())
-}
-
-/// A tab's buttons and body, as the panel takes them.
-fn split(tab: Option<(Div, impl IntoElement)>) -> (Option<Div>, Option<AnyElement>) {
-    match tab {
-        Some((actions, body)) => (Some(actions), Some(body.into_any_element())),
-        None => (None, None),
-    }
 }
 
 /// A release's changes by section ("### New", "### Fixed"), each line without its pull request

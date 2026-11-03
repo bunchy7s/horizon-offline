@@ -8,7 +8,7 @@ use horizon_client::{
     lan::{
         self, Lan, NetConfig,
         chunks::ChunkEncoder,
-        data::SyncData,
+        data::{BIOME_REGISTRY, SyncData},
         entity::{EntityState, States},
         hub::{HostEvent, Hub, HubConfig, TickCtx},
         playerdata,
@@ -1253,12 +1253,20 @@ impl Game<'_> {
         } else {
             self.level.enabled_features.clone()
         };
-        if sync.features.iter().any(|f| !features.contains(f))
+        // A world whose packs change biomes sends its own biome registry.
+        let packed = self.world_biomes.clone().filter(|b| b.has_packs());
+        if packed.is_some()
+            || sync.features.iter().any(|f| !features.contains(f))
             || features.iter().any(|f| !sync.features.contains(f))
         {
-            // The shared resource preload has vanilla flags. Feature flags belong
-            // to this world, not to the cached resources or the next world opened.
-            let mut world_sync = SyncData::load(&self.options.resources, &self.pack_files())?;
+            // The shared resource preload has vanilla flags and vanilla biomes.
+            // Feature flags and biomes belong to this world, not to the cached
+            // resources or the next world opened.
+            let mut world_sync = SyncData::load_with(
+                &self.options.resources,
+                &self.pack_files(),
+                packed.as_deref(),
+            )?;
             world_sync.features = features;
             sync = Arc::new(world_sync);
         }
@@ -1274,7 +1282,7 @@ impl Game<'_> {
         let registry: Vec<String> = sync
             .dynamic
             .registries
-            .get("minecraft:worldgen/biome")
+            .get(BIOME_REGISTRY)
             .map(|v| v.iter().map(|(n, _)| n.clone()).collect())
             .unwrap_or_default();
         let mut encoder = ChunkEncoder::with_signs(
@@ -2464,6 +2472,14 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
+            // Ready.spawn snaps the newcomer to the respawn data's yaw and
+            // pitch, which for a player without a bed or anchor is the world
+            // spawn's angle (`setworldspawn <pos> <rotation>`).
+            (g.yaw, g.pitch) = (
+                self.level.world_spawn_angle[0],
+                self.level.world_spawn_angle[1],
+            );
+            g.head_yaw = g.yaw;
             g.health = 20.0;
             g.food = 20;
             g.dimension = super::Dim::Overworld.id().to_owned();
@@ -2538,7 +2554,17 @@ impl Game<'_> {
                     // sound (2019, 2020).
                     let except = if matches!(
                         *id,
-                        2015 | 1503 | 1505 | 1029 | 1030 | 1045 | 1052 | 2019 | 2020 | 3000 | 3008
+                        2015 | 1501
+                            | 1503
+                            | 1505
+                            | 1029
+                            | 1030
+                            | 1045
+                            | 1052
+                            | 2019
+                            | 2020
+                            | 3000
+                            | 3008
                     ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
                     {
                         None

@@ -204,7 +204,11 @@ pub fn scale(
 ) -> (f32, [i32; 2]) {
     let scale = match option {
         -1 => gui_scale,
-        0 => crate::window::calculate_scale(framebuffer, 0, unicode) / 2,
+        // Half the automatic scale, rounded up: an odd scale has no exact
+        // half, and truncating it put the overlay at a third of the GUI
+        // scale instead of a half on a window whose automatic scale is odd
+        // (1280x720 is 3). Even scales are unchanged.
+        0 => (crate::window::calculate_scale(framebuffer, 0, unicode) + 1) / 2,
         n => crate::window::calculate_scale(framebuffer, n, unicode),
     };
     if scale < gui_scale && scale > 0 {
@@ -683,6 +687,14 @@ mod tests {
         assert_eq!(
             scale([1920, 1080], 4, 0, false, [480, 270]),
             (0.5, [960, 540])
+        );
+        // A window whose automatic scale is odd: 1280x720 is 3, whose half
+        // rounds to 2. Truncating gave 1, a third of the GUI scale, which is
+        // why a restored-down window drew the overlay smaller than a
+        // maximised one.
+        assert_eq!(
+            scale([1280, 720], 3, 0, false, [427, 240]),
+            (2.0 / 3.0, [640, 360])
         );
         // A GUI scale already at or under the debug scale is kept.
         assert_eq!(

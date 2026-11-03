@@ -381,4 +381,48 @@ mod tests {
         assert!(sample(&b, [0, 60, 0]) > 0.);
         assert!(TerrainKernel::new(0, 0, 1, 1).is_none());
     }
+
+    /// `Beardifier.BEARD_KERNEL`: the table vanilla's static initialiser fills
+    /// from `computeBeardContribution(xi - 12, yi - 12, zi - 12)`, stored at
+    /// `zi * 24 * 24 + xi * 24 + yi` — `e^(-(dx² + (dy + 0.5)² + dz²) / 16)` as
+    /// a `float`. 13824 values can't be read, so the ones below are pinned as
+    /// the bits they have in vanilla (that initialiser's formula run under
+    /// javac/java 21 and printed with `Float.floatToIntBits`), and `TABLE`
+    /// hashes every entry so a change to the exponent, the offset or the index
+    /// order fails here instead of in a world.
+    #[test]
+    fn the_beard_kernel_table_is_vanillas() {
+        let k = kernel();
+        // (index, float bits): the corner, the three axes' first steps, the
+        // centre (dy 0.5), an off-axis point and the far corner.
+        for (index, bits) in [
+            (0usize, 747_230_124u32),
+            (1, 763_905_896),
+            (25, 781_152_350),
+            (300, 956_222_450),
+            (3067, 966_315_629),
+            (7212, 1_065_093_109),
+            (13_823, 781_758_625),
+        ] {
+            assert_eq!(
+                k[index].to_bits(),
+                bits,
+                "kernel[{index}] is {} not {}",
+                k[index],
+                f32::from_bits(bits)
+            );
+        }
+        // The centre entry is the largest: every step away falls off.
+        assert_eq!(
+            (0..k.len()).max_by(|a, b| k[*a].total_cmp(&k[*b])),
+            Some(7212)
+        );
+        let mut hash = 1_125_899_906_842_597u64;
+        for value in k.iter() {
+            hash = hash
+                .wrapping_mul(31)
+                .wrapping_add(u64::from(value.to_bits()));
+        }
+        assert_eq!(hash, 0xb44d_13f8_c3d9_8c65);
+    }
 }
