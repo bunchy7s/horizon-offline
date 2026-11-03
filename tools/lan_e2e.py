@@ -1170,6 +1170,85 @@ LEVEL_STEPS = [('execute', level_execute), ('ticking', level_ticking), ('rejoin'
                ('guest_end', level_guest_end), ('reload', level_reload)]
 
 
+def check_player_armor_components(host, guest):
+    """LivingEntity.doHurtEquipment on a fully ticking LAN player (#7480)."""
+    slots = [('head', 'helmet'), ('chest', 'chestplate'),
+             ('legs', 'leggings'), ('feet', 'boots')]
+    cases, failures = {}, []
+
+    def server_ticks(ticks):
+        # Client frames can outrun the integrated server under load. Measure
+        # the authoritative clock so heal expiry and hurt cooldown really pass.
+        def clock():
+            reply = server_reply(guest, 'time query gametime', 'The game time is')
+            return int(re.search(r'The game time is (\d+)', reply).group(1))
+        start = clock()
+        deadline = time.monotonic() + 90
+        while clock() - start < ticks:
+            assert time.monotonic() < deadline, 'armor fixture server clock stalled'
+            guest.wait(5)
+
+    def health():
+        reply = server_reply(guest, 'data get entity @s Health', 'entity data')
+        return float(re.search(r'entity data: ([0-9.]+)f?\s*$', reply).group(1))
+
+    guest('command', command='gamemode survival')
+    server_reply(guest, 'gamerule natural_health_regeneration false', 'Game rule', 'false')
+    guest('command', command='fill ~-1 ~ ~-1 ~1 ~2 ~1 minecraft:air')
+    # This must be player-issued, and followed by real player ticks. The
+    # command-script oracle does not supply that tick/health setup.
+    guest('command', command='attribute @s minecraft:max_health base set 1000')
+    try:
+        for case, components, damage, present in [
+            ('normal', '', 1, True),
+            ('unbreakable', '[minecraft:unbreakable={}]', None, True),
+            ('custom_limit', '[minecraft:max_damage=10,minecraft:damage=9]', None, False),
+        ]:
+            for slot, item in slots:
+                guest('command', command=f'item replace entity @s armor.{slot} with '
+                      f'minecraft:diamond_{item}{components}')
+            guest('command', command='effect give @s minecraft:instant_health 1 10')
+            server_ticks(25)
+            healed = health()
+            assert healed == 1000, f'invalid armor fixture health: {case}: {healed}'
+            server_reply(guest, 'effect clear @s minecraft:instant_health', 'effect')
+            server_ticks(25)
+            assert health() == 1000, f'armor fixture lost health: {case}'
+            host('command', command=f'damage {GUEST_NAME} 4 minecraft:cactus')
+            server_ticks(2)
+            observed = {}
+            for slot, item in slots:
+                reply = server_reply(guest, 'data get entity @s '
+                                     f'equipment.{slot}.components."minecraft:damage"')
+                value = re.search(r'entity data: (-?\d+)\s*$', reply)
+                read_damage = int(value.group(1)) if value else None
+                exists = server_reply(guest, f'execute if items entity @s armor.{slot} '
+                                      f'minecraft:diamond_{item}')
+                observed[slot] = {'damage': read_damage, 'present': 'Test passed' in exists}
+            after_health = health()
+            cases[case] = {'health': after_health, 'equipment': observed}
+            want = {slot: {'damage': damage, 'present': present} for slot, _ in slots}
+            if observed != want:
+                failures.append(case)
+            if case != 'custom_limit' and not math.isclose(after_health, 999.04, abs_tol=0.002):
+                failures.append(f'{case}: armor reduction')
+    finally:
+        for slot, _ in slots:
+            guest('command', command=f'item replace entity @s armor.{slot} with minecraft:air')
+        guest('command', command='attribute @s minecraft:max_health base set 20')
+        guest('command', command='effect give @s minecraft:instant_health 1 10')
+        server_ticks(25)
+        server_reply(guest, 'effect clear @s minecraft:instant_health', 'effect')
+        server_reply(guest, 'gamerule natural_health_regeneration true', 'Game rule', 'true')
+    # Same-hit reduction ordering is recorded independently: a component fix
+    # must not silently claim to fix the deferred armor-wear health adapter.
+    order = {'actual_health': cases['custom_limit']['health'], 'vanilla_health': 996.0}
+    order['matches'] = math.isclose(order['actual_health'], order['vanilla_health'], abs_tol=0.002)
+    assert not failures, {'armor_component_failures': failures, 'cases': cases,
+                          'same_hit_armor_order': order}
+    return {'cases': cases, 'same_hit_armor_order': order}
+
+
 def check_damage(host, guest, out):
     guest('command', command='gamemode survival')
     guest.wait(10)
@@ -1196,7 +1275,9 @@ def check_damage(host, guest, out):
     hit = remote(guest)['health']
     applied = any('Applied' in line for line in said.get('chat', []))
     assert applied and hit < healed, f'/damage {GUEST_NAME} 4: health {healed} -> {hit} ({said})'
-    return {'before': before, 'after': after, 'water': water, 'damage_command': [healed, hit]}
+    armor = check_player_armor_components(host, guest)
+    return {'before': before, 'after': after, 'water': water, 'damage_command': [healed, hit],
+            'armor_components': armor}
 
 
 def first_hurt(guest, before, ticks):
