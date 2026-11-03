@@ -1491,6 +1491,18 @@ pub fn mob_from_nbt(
                 }
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
                 "minecraft:attack_knockback" => m.attrs.attack_knockback = v,
+                "minecraft:flying_speed"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::FlyingSpeed,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::FlyingSpeed,
+                        v,
+                    )
+                }
                 _ => {}
             }
         }
