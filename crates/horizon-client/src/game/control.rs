@@ -587,7 +587,7 @@ impl Game<'_> {
                     }
                 };
                 match arg(2)? {
-                    "down" => self.control_key_down(key)?,
+                    "down" => self.control_key_down(key, physical)?,
                     "up" => {
                         self.keys.remove(&key);
                         self.physical_keys.remove(&key);
@@ -595,10 +595,10 @@ impl Game<'_> {
                     // The system's auto-repeat while the key is held.
                     "repeat" => {
                         self.physical_keys.insert(physical);
-                        self.mapped_key(key, true, true)?;
+                        self.mapped_key(key, true, true, key)?;
                     }
                     "tap" => {
-                        self.control_key_down(key)?;
+                        self.control_key_down(key, physical)?;
                         self.keys.remove(&key);
                         self.physical_keys.remove(&physical);
                         self.debug_key(physical, horizon_client::debug_keys::KeyAction::Release);
@@ -1086,7 +1086,7 @@ impl Game<'_> {
         Ok(())
     }
 
-    fn control_key_down(&mut self, key: KeyCode) -> Result<()> {
+    fn control_key_down(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
         self.physical_keys.insert(key);
         // The window's shortcuts come before any screen, here too.
         if self.screenshot_shortcut(key, false) {
@@ -1108,7 +1108,7 @@ impl Game<'_> {
             return Ok(());
         }
         if self.keys.insert(key) {
-            self.key_pressed(key)?;
+            self.key_pressed(key, raw)?;
         }
         Ok(())
     }

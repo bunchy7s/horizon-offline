@@ -179,6 +179,21 @@ impl Game<'_> {
         }
     }
 
+    /// `PlayerXpEvent.XpChange` for a `Player.giveExperiencePoints` of `amount`
+    /// points: the amount to give, or `None` when a mod cancelled it.
+    pub(super) fn xp_change(&mut self, amount: i32) -> Option<i32> {
+        if horizon_client::mod_api::mods().is_empty() {
+            return Some(amount);
+        }
+        let (Some(player), Some(name)) = (self.lan_acting_uuid, self.lan_acting_name.clone())
+        else {
+            return Some(amount);
+        };
+        let (mut amount, mut cancel) = (amount, false);
+        self.native_player_xp_change(player, &name, &mut amount, &mut cancel);
+        (!cancel).then_some(amount)
+    }
+
     /// Commands.performCommand for a line without its slash.
     pub(super) fn run_command(&mut self, command: &str) -> bool {
         if self.client_mod_command(command) {
@@ -1093,6 +1108,9 @@ impl Game<'_> {
             "ban-ip" | "pardon-ip" => self.cmd_ip_bans(id, ctx),
             id if id.starts_with("banlist") => self.cmd_banlist(id),
             id if id.starts_with("whitelist.") => self.cmd_whitelist(id, ctx),
+            "stop" => self.cmd_stop(),
+            "save-all" => self.cmd_save_all(),
+            "save-off" | "save-on" => self.cmd_auto_save(id == "save-on"),
             "transfer" => self.cmd_transfer(ctx),
             "fetchprofile" => self.cmd_fetchprofile(ctx),
             "publish" => self.cmd_publish(ctx),
@@ -2191,6 +2209,8 @@ impl Game<'_> {
         self.feedback(message);
         Ok(targets.len() as i32)
     }
+    /// `SummonCommand.createEntity`: Peaceful admission uses the entity-type
+    /// policy for both forms, independently of the mob category.
     fn cmd_summon(&mut self, ctx: &Context) -> R<i32> {
         let Some(Arg::Resource(kind)) = ctx.get("entity").cloned() else {
             return Ok(0);
@@ -2212,18 +2232,12 @@ impl Game<'_> {
         {
             return Err(err("commands.summon.invalidPosition", &[]));
         }
+        if self.ui.difficulty == 0 && !horizon_client::mobs::finalize::allowed_in_peaceful(&kind) {
+            return Err(err("commands.summon.failed.peaceful", &[]));
+        }
         let short = kind.trim_start_matches("minecraft:").to_owned();
         if let Some(Arg::Str(nbt)) = ctx.get("nbt").cloned() {
             // With an NBT argument the entity is built from it, unfinalized.
-            if self.ui.difficulty == 0
-                && self
-                    .res
-                    .mob_types()
-                    .get(&kind)
-                    .is_some_and(|t| t.category == "monster")
-            {
-                return Err(err("commands.summon.failed.peaceful", &[]));
-            }
             let before = self.spawned_mark();
             let name = match self.summon_with_nbt(&kind, pos, &nbt)? {
                 Some(target) => self.target_name(target),
@@ -2238,10 +2252,7 @@ impl Game<'_> {
             return Ok(1);
         }
         let name;
-        if let Some(t) = self.res.mob_types().get(&kind).cloned() {
-            if self.ui.difficulty == 0 && t.category == "monster" {
-                return Err(err("commands.summon.failed.peaceful", &[]));
-            }
+        if self.res.mob_types().contains_key(&kind) {
             self.spawn_mob_spawned(&short, pos)
                 .ok_or_else(|| err("commands.summon.failed.uuid", &[]))?;
             name = Text::translate(&entity_name_key(&kind), &[]);
@@ -3055,7 +3066,7 @@ impl Game<'_> {
                 // boundary and emits the level-change hook itself.
                 self.give_levels(amount);
                 return true;
-            } else {
+            } else if let Some(amount) = self.xp_change(amount) {
                 self.give_points(amount);
             }
         } else if levels {

@@ -66,6 +66,13 @@ pub(super) struct Creatures {
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
     /// Wind bursts from a guest's turn, waiting for it to end (game/wind.rs).
     pub wind_bursts: Vec<super::wind::Burst>,
+    /// The wind charge whose burst is being handled, by entity id: which
+    /// entities have already ticked in vanilla's spawn-ordered tick list
+    /// (game/wind.rs).
+    pub wind_source: Option<u32>,
+    /// Wind pushes held until the entity's own tick has run, by entity id
+    /// (game/wind.rs `apply_late_wind_pushes`).
+    pub late_wind_pushes: Vec<(u32, crate::game::Vec3)>,
     /// The players a fishing hook can catch, taken as the hooks tick, and
     /// the pulls on them waiting for the hub (game/fishing.rs).
     pub hook_targets: Vec<super::fishing::HookTarget>,
@@ -635,6 +642,22 @@ impl Game<'_> {
         params: horizon_client::mobs::conversion::Params,
     ) -> Option<u32> {
         let t = self.res.mob_types().get(kind).cloned()?;
+        // LivingConversionEvent.Pre: the caller already marked the mob removed,
+        // so a canceled conversion puts it back as it was.
+        let mut cancel = false;
+        let from_kind = super::native_hooks::mob_kind(from);
+        self.native_living_conversion_pre(from.id, &from_kind, kind, &mut cancel);
+        if cancel {
+            match self.mobs.iter_mut().find(|m| m.id == from.id) {
+                Some(kept) => kept.removed = false,
+                None => {
+                    let mut kept = from.clone();
+                    kept.removed = false;
+                    self.mobs.push(kept);
+                }
+            }
+            return None;
+        }
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, from.position, from.yaw);
         horizon_client::mobs::conversion::single(from, &mut mob, params);
@@ -664,6 +687,7 @@ impl Game<'_> {
             .id
             .clone();
         self.native_entity_transform(from.id, &from.kind.id, id, &transformed_kind);
+        self.native_living_conversion_post(from.id, &from_kind, id, &transformed_kind);
         Some(id)
     }
     /// The `summon` command: spawn a mob in front of the player or at a position.
@@ -1199,8 +1223,43 @@ impl Game<'_> {
             self.particles.add(&options, [x, y, z], [xa, ya, za]);
         }
     }
+    /// `LivingDeathEvent` for a mob whose health ran out: whether a native
+    /// mod canceled the death. A canceled mob stays alive at 1 health.
+    fn mob_death_canceled(&mut self, m: &Mob) -> bool {
+        if horizon_client::mod_api::mods().is_empty() {
+            return false;
+        }
+        let (damage_type, attacker) = match m.last_damage {
+            Some((d, _)) => (source_damage_type(d), d.attacker),
+            None => ("minecraft:generic", None),
+        };
+        let attacker = match attacker {
+            Some(Who::Mob(id)) => id,
+            Some(Who::Player) => {
+                let conn = self.last_hurt_by_player.get(&m.id).copied().flatten();
+                let guests = self.lan.as_ref().map(|host| host.hub.guests.as_slice());
+                let guest = guests.and_then(|all| all.iter().find(|g| Some(g.conn) == conn));
+                guest.map_or(0, |g| g.entity_id as u32)
+            }
+            None => 0,
+        };
+        let kind = super::native_hooks::mob_kind(m);
+        let mut cancel = false;
+        self.native_living_death(m.id, &kind, damage_type, attacker, &mut cancel);
+        if cancel {
+            self.died.remove(&m.id);
+            if let Some(alive) = self.mobs.iter_mut().find(|o| o.id == m.id) {
+                alive.health = 1.0;
+                alive.death_time = 0;
+            }
+        }
+        cancel
+    }
     /// LivingEntity.die / dropAllDeathLoot.
     fn mob_died(&mut self, m: &Mob) {
+        if self.mob_death_canceled(m) {
+            return;
+        }
         // LivingEntity.die: a sleeper gets up, and its bed is free again.
         if let Some(bed) = horizon_client::mobs::villager::sleeping_pos(m) {
             self.wake_villager(m.id);
@@ -1297,7 +1356,12 @@ impl Game<'_> {
             // Slime.remove: split into 2-4 smaller slimes.
             let size = m.extra.size;
             if size > 1 {
-                let n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
+                let mut n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
+                let mut cancel = false;
+                let mut count = n as u32;
+                let kind = super::native_hooks::mob_kind(m);
+                self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
+                n = if cancel { 0 } else { count.min(64) as _ };
                 for k in 0..n {
                     let off = |kk: i32| (f64::from(kk % 2) - 0.5) * f64::from(size) / 4.0;
                     let at = [
@@ -1896,8 +1960,19 @@ impl Game<'_> {
                 MobEvent::SoundId(name, at, volume, pitch) => {
                     self.audio.play(&name, Some(at), volume, pitch)
                 }
-                // The sculk layer tracks the game's steps itself
-                // (`entity_motion_events`).
+                MobEvent::GameEvent {
+                    event, at, source, ..
+                } if event == "minecraft:flap"
+                    && self.mobs.iter().any(|m| {
+                        m.id == source && matches!(m.species(), Species::Chicken | Species::Parrot)
+                    }) =>
+                {
+                    let ctx = self.who_context(Some(Who::Mob(source)), None);
+                    self.post_game_event(event, at, ctx);
+                }
+                // The sculk layer tracks steps and bee/bat flaps itself
+                // (`entity_motion_events`, `tick_mob_sculk_events`). Birds
+                // above use their movement's flyDist/nextFlap threshold.
                 MobEvent::GameEvent { .. } => {}
                 MobEvent::AttackPlayer(amount, from) => {
                     self.mob_hits_player(amount, from, "minecraft:mob_attack");
@@ -3013,6 +3088,44 @@ impl Game<'_> {
         let Some(p) = self.mobs.iter().find(|m| m.id == parent).cloned() else {
             return;
         };
+        // BabyEntitySpawnEvent: not for an egg (turtle, frog, sniffer).
+        if !matches!(
+            p.species(),
+            Species::Turtle | Species::Frog | Species::Sniffer
+        ) && !horizon_client::mod_api::mods().is_empty()
+        {
+            let mule = matches!(
+                (
+                    p.species(),
+                    self.mobs
+                        .iter()
+                        .find(|m| m.id == partner)
+                        .map(|m| m.species())
+                ),
+                (Species::Horse, Some(Species::Donkey)) | (Species::Donkey, Some(Species::Horse))
+            );
+            let kind = if mule {
+                "minecraft:mule".to_owned()
+            } else {
+                super::native_hooks::mob_kind(&p)
+            };
+            let conn = self
+                .love_cause
+                .get(&parent)
+                .or(self.love_cause.get(&partner))
+                .copied();
+            let player = conn.and_then(|c| self.killer_uuid(c)).unwrap_or(0);
+            let mut cancel = false;
+            self.native_baby_entity_spawn(parent, partner, player, &kind, &mut cancel);
+            if cancel {
+                breeding_credit(&mut self.love_cause, parent, partner);
+                if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
+                    q.extra.age = 6000;
+                    q.extra.in_love = 0;
+                }
+                return;
+            }
+        }
         // Animal.finalizeSpawnChildFromBreeding: the player who fed the parent,
         // or else the one who fed the partner.
         if let Some(cause) = breeding_credit(&mut self.love_cause, parent, partner) {

@@ -139,3 +139,26 @@ players see it.
   under their hash. A change shows at once; the ones the service couldn't take (offline, or a
   failure on its side) are sent in order when it answers again, and a newer change of the same
   slot replaces a waiting one.
+
+## The Wardrobe page (`launcher/src/wardrobe_page.rs`)
+
+A top-bar page between Servers and Versions, shown only with the flag on, for the selected Microsoft
+account (signed out, it asks you to sign in):
+
+- **A row per slot** (head, back, shoulder pet, name tag, launcher theme) with what it wears,
+  "Nothing equipped" or "None owned yet"; **your player** in the middle, on your own skin, wearing
+  it, with your name tag style over the head (`horizon_cosmetics::preview`); **what you own for the
+  chosen slot**, "Nothing" first. Equipping shows at once.
+- **The founder set**: a line to claim it while its window is open, and once the window is closed,
+  that it was free until that day and isn't offered any more.
+- **Three switches**: *Show my cosmetics* (the account's, on the service: off, everyone sees you
+  without them), *Hide other players' cosmetics* and *Show other players' auras and trails* (off by
+  default). The last two are lines of the game's `horizon-extras.txt` (`horizon_cosmetics::prefs`:
+  `cosmeticsOthers` = `shown`, `name_tags` or `hidden`, `cosmeticsAuras`), the same ones the
+  game's settings change.
+- **States**: offline, the page keeps working from what's kept on disk and says how many changes
+  wait to sync; a service failure says what you wear still shows in the game, with *Try again* and
+  *Copy details* (host, status, time).
+- `HORIZON_LAUNCHER_PAGE=wardrobe` in a development build shows the page for a made-up account
+  wearing `HORIZON_COSMETICS_LOCAL`'s items; `HORIZON_WARDROBE_STATE=offline|failed|closed|empty`
+  shows that state.
