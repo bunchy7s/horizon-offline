@@ -323,6 +323,33 @@ def blocked_case(rng, states, case):
                         'sneaking': False, 'food': 20}
 
 
+BUTTONS = ['stone_button', 'oak_button', 'spruce_button', 'birch_button', 'jungle_button', 'acacia_button',
+           'cherry_button', 'dark_oak_button', 'mangrove_button', 'pale_oak_button', 'bamboo_button',
+           'crimson_button', 'warped_button', 'polished_blackstone_button']
+
+
+def switch_case(rng, states, case):
+    """A lever or a button clicked with an empty hand. `LeverBlock.useWithoutItem` always answers
+    SUCCESS and calls `pull`, which cycles `powered` both ways, writes it with `setBlockAndUpdate`,
+    updates the neighbours at the lever and at the block it hangs on, plays `block.lever.click` at
+    volume 0.3 with pitch 0.6 when the lever is now on and 0.5 when it is off, and sends
+    `block_activate` or `block_deactivate` (`LeverBlock.pull`, `LeverBlock.playSound`).
+    `ButtonBlock.useWithoutItem` answers CONSUME and touches nothing while the button is `powered`,
+    and otherwise `ButtonBlock.press`es it: `powered` on, the same neighbour updates, a release
+    scheduled `ticksToStayPressed` away (the block set type's own), the button type's own sound and
+    `block_activate`. Neither reads the held item, the hit or the game mode, so the case varies the
+    `face` and `facing` the block is attached by, every button type and `powered` either way."""
+    name = rng.choice(['lever'] * 2 + BUTTONS)
+    props = {'facing': rng.choice(['north', 'south', 'west', 'east']),
+             'face': rng.choice(['floor', 'wall', 'ceiling']),
+             'powered': rng.choice(['true', 'false'])}
+    cells = [[0, 0, 0, states.get(name, **props)],
+             [0, -1, 0, states.get(rng.choice(['stone', 'dirt', 'oak_planks', 'grass_block']))]]
+    case['use_item'] = {'item': '-', 'creative': rng.random() < 0.2, 'sneaking': rng.random() < 0.15,
+                        'food': 20, 'face': rng.choice(['up', 'up', 'north', 'south', 'west', 'east', 'down'])}
+    case['cells'] = cells
+
+
 def jukebox_case(rng, states, case):
     """A jukebox placed from a Creative pick that carries a record: the block entity takes the disc
     and `JukeboxBlock.setPlacedBy` sets `has_record`, so the model shows it and a right click pops it
@@ -498,6 +525,12 @@ def cases(facts, count, seed):
             continue
         if rng.random() < 0.08:
             crop_case(rng, states, case)
+            case['items'] = []
+            case['mode'] = 'dispense'
+            yield case
+            continue
+        if rng.random() < 0.08:
+            switch_case(rng, states, case)
             case['items'] = []
             case['mode'] = 'dispense'
             yield case
