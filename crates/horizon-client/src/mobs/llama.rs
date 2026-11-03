@@ -280,7 +280,7 @@ pub fn texture(m: &Mob) -> String {
 /// The carpet colour on the llama, if it wears one.
 pub(super) fn carpet(m: &Mob) -> Option<&str> {
     m.extra
-        .head
+        .body
         .as_deref()
         .and_then(|i| i.strip_prefix("minecraft:"))
         .and_then(|i| i.strip_suffix("_carpet"))

@@ -246,7 +246,7 @@ pub fn swallowable(m: &Mob, item: &str) -> bool {
     m.kind.tempt.iter().any(|t| t == item)
 }
 pub fn has_body(m: &Mob) -> bool {
-    m.extra.head.is_some()
+    m.extra.body.is_some()
 }
 
 #[cfg(test)]
@@ -266,7 +266,7 @@ mod knockback_sync_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.head = Some("minecraft:tnt".into());
+        m.extra.body = Some("minecraft:tnt".into());
         assert!(!m.needs_sync);
         m.damage(5.0, Damage::player([2.0, 0.0, 0.0]));
         assert!(m.velocity.x < 0.0, "velocity {:?}", m.velocity);
@@ -274,7 +274,7 @@ mod knockback_sync_tests {
     }
 }
 pub fn archetype(m: &Mob) -> Option<&'static Archetype> {
-    m.extra.head.as_deref().and_then(archetype_of)
+    m.extra.body.as_deref().and_then(archetype_of)
 }
 /// The archetype whose bounciness, friction and air drag attributes a
 /// sulfur cube's physics use (no other mob has those modifiers).
@@ -312,7 +312,7 @@ mod burning_arrow_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.head = head.map(Into::into);
+        m.extra.body = head.map(Into::into);
         m
     }
 
@@ -384,7 +384,7 @@ mod immune_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.head = head.map(Into::into);
+        m.extra.body = head.map(Into::into);
         m
     }
 
@@ -1098,7 +1098,7 @@ mod tnt_rule_tests {
         let mut kind = (*crate::mobs::sensor_scan_tests::kind()).clone();
         kind.species = Species::SulfurCube;
         let mut m = Mob::new(1, Arc::new(kind), Vec3::ZERO, 0.0);
-        m.extra.head = Some("minecraft:tnt".into());
+        m.extra.body = Some("minecraft:tnt".into());
         m
     }
 
@@ -1167,7 +1167,7 @@ mod fuse_anim_tests {
             HashSet::from(["minecraft:tnt".to_owned()]),
         )]));
         let mut m = cube();
-        m.extra.head = Some("minecraft:tnt".into());
+        m.extra.body = Some("minecraft:tnt".into());
         assert!(prime(&mut m, false));
         assert!(m.invulnerable_flag);
         let (health, fuse_left) = (m.health, fuse(&m));
@@ -1205,7 +1205,7 @@ mod fuse_anim_tests {
         assert_eq!(source.kind, DamageKind::Fireworks);
         assert!(!source.no_knockback());
         let mut m = cube();
-        m.extra.head = Some("minecraft:tnt".into());
+        m.extra.body = Some("minecraft:tnt".into());
         let health = m.health;
         m.damage(7.0, source);
         assert!((15..45).contains(&fuse(&m)), "fuse {}", fuse(&m));

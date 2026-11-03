@@ -637,7 +637,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                 ("wolf#main", "entity/wolf/wolf_collar")
             };
             // The armor, then the cracks of its damage (`Crackiness.WOLF_ARMOR`).
-            if !m.is_baby() && m.extra.head.as_deref() == Some("minecraft:wolf_armor") {
+            if !m.is_baby() && m.extra.body.as_deref() == Some("minecraft:wolf_armor") {
                 let left = (super::WOLF_ARMOR_DURABILITY - m.extra.body_damage) as f32
                     / super::WOLF_ARMOR_DURABILITY as f32;
                 push(
@@ -672,7 +672,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
         S::HappyGhast => {
             let harness = m
                 .extra
-                .head
+                .body
                 .as_deref()
                 .and_then(super::happy_ghast::harness_texture);
             if !m.is_baby()
@@ -748,7 +748,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
                     false,
                 );
             }
-            if let Some(armor) = m.extra.head.as_deref()
+            if let Some(armor) = m.extra.body.as_deref()
                 && let Some(material) = armor
                     .strip_prefix("minecraft:")
                     .and_then(|a| a.strip_suffix("_horse_armor"))
@@ -808,7 +808,7 @@ pub fn layers(m: &Mob, age: f32) -> Vec<Layer> {
         S::Nautilus | S::ZombieNautilus if !m.is_baby() => {
             if let Some(texture) = m
                 .extra
-                .head
+                .body
                 .as_deref()
                 .and_then(super::nautilus::armor_texture)
             {

@@ -936,7 +936,7 @@ mod tests {
             0.0,
         );
         mob.extra.tame = true;
-        mob.extra.head = Some("minecraft:wolf_armor".into());
+        mob.extra.body = Some("minecraft:wolf_armor".into());
         // Worn through: the high cracks.
         mob.extra.body_damage = WOLF_ARMOR_DURABILITY;
         let sprites = [
