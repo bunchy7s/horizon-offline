@@ -94,3 +94,10 @@ does the asking.
 - **Cost**: a player with nothing to wear adds one cache lookup; with no cosmetic in view the frame
   does no cosmetics work beyond that. The bench scene `stress_avatars` (300 mannequins, 20×15)
   measures the cost with `HORIZON_COSMETICS=1 HORIZON_COSMETICS_LOCAL=…` against the same run off.
+
+## A still picture (`horizon_cosmetics::preview`)
+
+The launcher shows items on the player's own skin without the game: `preview::render` draws the
+player model at rest (vanilla's `PlayerModel` boxes on a 64×64 skin, wide or slim arms, the outer
+layers included) and each item on its bone on the CPU, with a depth buffer and cutout alpha, seen
+from any angle.

@@ -141,9 +141,23 @@ impl<'a> Reader<'a> {
         &self.string[self.cursor..]
     }
     pub fn skip_whitespace(&mut self) {
-        while self.can_read() && self.peek().is_whitespace() {
+        while self.can_read() && Self::is_java_whitespace(self.peek()) {
             self.skip();
         }
+    }
+    pub fn is_java_whitespace(c: char) -> bool {
+        matches!(
+            c,
+            '\t'..='\r'
+                | '\u{1C}'..='\u{20}'
+                | '\u{1680}'
+                | '\u{2000}'..='\u{2006}'
+                | '\u{2008}'..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{205F}'
+                | '\u{3000}'
+        )
     }
     pub fn is_allowed_number(c: char) -> bool {
         c.is_ascii_digit() || c == '.' || c == '-'

@@ -323,12 +323,13 @@ impl Game<'_> {
                 let view = self.entity_view_of(t);
                 let origin = self.target_position(t).unwrap_or_default();
                 for (id, negated) in &s.predicates {
-                    let matches = self
-                        .fns
-                        .store
-                        .predicates
-                        .get(id)
-                        .is_some_and(|json| self.conditions_hold(json, Some(&view), origin));
+                    // EntitySelectorOptions rejects a missing registry entry
+                    // before applying the predicate's negation.
+                    let Some(json) = self.fns.store.predicates.get(id) else {
+                        ok = false;
+                        break;
+                    };
+                    let matches = self.conditions_hold(json, Some(&view), origin);
                     if matches == *negated {
                         ok = false;
                     }
@@ -454,6 +455,17 @@ impl Game<'_> {
                 board.for_all_objectives_with(criteria, &name, Some(&display), |_| value);
             }
         }
+    }
+    /// `ServerPlayer.die`: the acting player's `deathCount` objectives go up by one.
+    pub(super) fn score_player_died(&mut self) {
+        let display = self.player_display_comp();
+        let me = self.acting_player_name().to_owned();
+        self.score.board.for_all_objectives_with(
+            sb::CRITERIA_DEATH_COUNT,
+            &me,
+            Some(&display),
+            |v| v.wrapping_add(1),
+        );
     }
     /// `ServerPlayer.awardKillScore`: total kills and the team kill counts.
     pub(super) fn score_player_killed(&mut self, victim: Target) {

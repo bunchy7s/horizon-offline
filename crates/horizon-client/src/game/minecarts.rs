@@ -1601,7 +1601,8 @@ impl Game<'_> {
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| m.extra.mount == Some(id))
-                .map(|(j, m)| (j, riders::vehicle_attachment(m)))
+                // Minecart's box is 0.98 wide.
+                .map(|(j, m)| (j, riders::vehicle_attachment(m, 0.98)))
                 .collect();
             for (j, offset) in seats {
                 let m = &mut self.mobs[j];
