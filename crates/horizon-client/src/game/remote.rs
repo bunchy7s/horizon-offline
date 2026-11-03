@@ -2968,9 +2968,10 @@ impl Game<'_> {
 
     /// `ClientPacketListener.handleUpdateAttributes` for a mob, each value from
     /// `AttributeInstance.calculateValue`: its maximum health (the hearts drawn
-    /// over its mount), and a player's or mannequin's `minecraft:scale`, which
-    /// scales its model (`LivingEntityRenderState.scale`) as the local player's
-    /// does: NPC plugins make their fake players bigger with it.
+    /// over its mount), and its `minecraft:scale`, which sizes its box
+    /// (`LivingEntity.getDimensions`) and model (`LivingEntityRenderState.scale`)
+    /// as the local player's does: NPC plugins make their fake players bigger
+    /// with it, datapacks scale any mob.
     fn remote_mob_attributes(&mut self, id: i32, values: &[play::AttributeSnapshot]) {
         let catalog = &self.motion.attributes;
         let value = |name: &str| {

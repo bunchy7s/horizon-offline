@@ -1841,10 +1841,12 @@ pub fn despawn_check(m: &mut Mob, w: &MobWorld) -> bool {
 }
 /// `Mob.requiresCustomPersistence` and its overrides: a passenger or a leashed
 /// mob, a raider in a raid, an enderman carrying a block, a tame nautilus, a
-/// sulfur cube holding a block or let out of a bucket. The spawn caps do not
-/// count these mobs either (`NaturalSpawner.createState`).
+/// sulfur cube holding a block or let out of a bucket, a fish or axolotl
+/// let out of a bucket (`AbstractFish`/`Axolotl`: `|| fromBucket()`). The spawn
+/// caps do not count these mobs either (`NaturalSpawner.createState`).
 pub fn requires_custom_persistence(m: &Mob) -> bool {
     super::riders::keeps_alive(m)
+        || m.extra.from_bucket
         || m.extra.leash.is_some()
         || super::raider::state(m).is_some_and(|s| s.raid_id.is_some())
         || m.species() == Species::Enderman && m.extra.carried.is_some()
@@ -2004,6 +2006,23 @@ pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
             m.kind.sounds[0],
             "entity.shulker.hurt_closed",
             m.kind.sounds[2],
+        ],
+        // Creaking.getHurtSound: bound to a heart it sways, unbound it hands
+        // the blow to `Monster.getHurtSound`. `Monster`'s own sounds are the
+        // hostile pair, which the giant keeps too.
+        Species::Creaking => [
+            m.kind.sounds[0],
+            if super::creaking::heart_bound(m) {
+                "entity.creaking.sway"
+            } else {
+                "entity.hostile.hurt"
+            },
+            m.kind.sounds[2],
+        ],
+        Species::Giant => [
+            m.kind.sounds[0],
+            "entity.hostile.hurt",
+            "entity.hostile.death",
         ],
         // Turtle.getHurtSound and getDeathSound by age.
         Species::Turtle if m.is_baby() => [

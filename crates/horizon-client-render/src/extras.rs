@@ -60,6 +60,10 @@ impl Corner {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Extras {
+    /// The Select Resource Packs screen's Add button, which browses
+    /// Modrinth. Off by default: it is Horizon's own and the screen is
+    /// otherwise vanilla's (tools/test_pack_screen_parity.py).
+    pub pack_browser: bool,
     pub fullbright: bool,
     /// Held, dropped and burning light sources light their surroundings (`dynamic_light`).
     pub dynamic_lights: bool,
@@ -154,6 +158,7 @@ pub struct Extras {
 impl Default for Extras {
     fn default() -> Self {
         Self {
+            pack_browser: false,
             fullbright: false,
             dynamic_lights: false,
             zoom: false,
@@ -222,6 +227,7 @@ impl Extras {
                 _ => d,
             };
             match key.trim() {
+                "packBrowser" => e.pack_browser = flag(e.pack_browser),
                 "fullbright" => e.fullbright = flag(e.fullbright),
                 "dynamicLights" => e.dynamic_lights = flag(e.dynamic_lights),
                 "zoom" => e.zoom = flag(e.zoom),
@@ -300,7 +306,8 @@ impl Extras {
     }
     pub fn serialize(&self) -> String {
         format!(
-            "fullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\n",
+            "packBrowser:{}\nfullbright:{}\ndynamicLights:{}\nzoom:{}\nzoomKey:{}\nzoomLevel:{}\nzoomSmooth:{}\nzoomSensitivity:{}\nfps:{}\nfpsCorner:{}\nfpsLows:{}\nkeystrokes:{}\nkeystrokesCorner:{}\nkeystrokesCps:{}\nmovedToMods:{}\nminimap:{}\nminimapCorner:{}\nminimapSize:{}\nminimapShape:{}\nminimapZoom:{}\nminimapRotate:{}\nautoReconnect:{}\nuiSoundReserve:{}\nownNameTag:{}\nhideBlockParticles:{}\nmouseTweaks:{}\nmouseTweaksWheel:{}\nsort:{}\nsortKey:{}\nchatAnimation:{}\nchatIndicator:{}\n{}:{}\nagentControl:{}\nreproKeys:{}\ndiscordPresence:{}\nsplitscreen:{}\nsplitscreenTwo:{}\nsplitscreenThree:{}\nsplitscreenNames:{}\nwheelCyclesSettings:{}\nmusicOff:{}\nmusicPage:{}\ncosmeticsMine:{}\ncosmeticsOthers:{}\n",
+            bool_text(self.pack_browser),
             bool_text(self.fullbright),
             bool_text(self.dynamic_lights),
             bool_text(self.zoom),
@@ -496,6 +503,8 @@ pub enum Item {
     /// On the Splitscreen settings page.
     Splitscreen,
     WheelCyclesSettings,
+    /// The Select Resource Packs screen's Add button (Modrinth).
+    PackBrowser,
     /// Shown only while cosmetics are enabled (`horizon_cosmetics::enabled`).
     CosmeticsMine,
     CosmeticsOthers,
@@ -526,6 +535,7 @@ pub fn rows() -> Vec<Result<Item, &'static str>> {
         Ok(MusicPage),
         Err("horizon.extras.header.menus"),
         Ok(WheelCyclesSettings),
+        Ok(PackBrowser),
     ];
     if horizon_cosmetics::enabled() {
         rows.extend([
@@ -559,6 +569,7 @@ impl Item {
             Item::ChatAnimation => "horizon.extras.chat_animation",
             Item::ChatIndicator => "horizon.extras.chat_indicator",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings",
+            Item::PackBrowser => "horizon.extras.pack_browser",
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others",
         }
@@ -585,6 +596,7 @@ impl Item {
             Item::ChatAnimation => "horizon.extras.chat_animation.tooltip",
             Item::ChatIndicator => "horizon.extras.chat_indicator.tooltip",
             Item::WheelCyclesSettings => "horizon.extras.wheel_cycles_settings.tooltip",
+            Item::PackBrowser => "horizon.extras.pack_browser.tooltip",
             Item::CosmeticsMine => "horizon.extras.cosmetics_mine.tooltip",
             Item::CosmeticsOthers => "horizon.extras.cosmetics_others.tooltip",
         }
@@ -620,6 +632,7 @@ impl Item {
             Item::DiscordPresence => "Discord Rich Presence",
             Item::Splitscreen => "Splitscreen",
             Item::WheelCyclesSettings => "Scroll wheel changes settings",
+            Item::PackBrowser => "Resource pack browser",
             Item::CosmeticsMine => "My cosmetics",
             Item::CosmeticsOthers => "Other players' cosmetics",
         }
@@ -634,7 +647,8 @@ impl Item {
             ChatIndicator => ChatAnimation,
             Fullbright | DynamicLights | OwnNameTag | HideBlockParticles | MouseTweaks | Sort
             | AutoReconnect | NoAi | AgentControl | ReproKeys | DiscordPresence | Splitscreen
-            | ChatAnimation | WheelCyclesSettings | MusicPage | CosmeticsMine | CosmeticsOthers => {
+            | ChatAnimation | WheelCyclesSettings | MusicPage | PackBrowser | CosmeticsMine
+            | CosmeticsOthers => {
                 return None;
             }
         })
@@ -701,6 +715,9 @@ impl Item {
             Item::WheelCyclesSettings => {
                 "The scroll wheel over a button in the settings changes its value, as in vanilla. Off, the wheel only scrolls the list."
             }
+            Item::PackBrowser => {
+                "Select Resource Packs gets an Add button that searches Modrinth and installs a pack into your packs folder. Off, the game never contacts Modrinth."
+            }
         }
     }
     /// The frame-time cost the main switch of an extra shows.
@@ -718,7 +735,8 @@ impl Item {
             | Item::MouseTweaks
             | Item::Sort
             | Item::Splitscreen
-            | Item::WheelCyclesSettings => Some(Cost::None),
+            | Item::WheelCyclesSettings
+            | Item::PackBrowser => Some(Cost::None),
             Item::CosmeticsMine | Item::CosmeticsOthers => Some(Cost::Low),
             _ => None,
         }
@@ -744,6 +762,7 @@ impl Item {
             Item::DiscordPresence => e.discord_presence,
             Item::Splitscreen => e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings,
+            Item::PackBrowser => e.pack_browser,
             Item::CosmeticsMine => e.cosmetics_mine,
             Item::CosmeticsOthers => e.cosmetics_others,
             _ => return None,
@@ -781,6 +800,7 @@ impl Item {
             Item::DiscordPresence => e.discord_presence = !e.discord_presence,
             Item::Splitscreen => e.splitscreen = !e.splitscreen,
             Item::WheelCyclesSettings => e.wheel_cycles_settings = !e.wheel_cycles_settings,
+            Item::PackBrowser => e.pack_browser = !e.pack_browser,
             Item::CosmeticsMine => e.cosmetics_mine = !e.cosmetics_mine,
             Item::CosmeticsOthers => e.cosmetics_others = !e.cosmetics_others,
             Item::SortKey => {}
