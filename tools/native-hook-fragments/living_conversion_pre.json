@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_conversion_pre",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_conversion_pre",
+      "neoforge": "LivingConversionEvent.Pre",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a mob about to convert into another, cancellable (`native_living_conversion_pre`).",
+  "doc_summary": "a mob about to convert into another type, as NeoForge's `LivingConversionEvent.Pre`: `native_living_conversion_pre(entity, kind, outcome, cancel)` runs on the server before `Mob.convertTo` changes anything. Cancelling keeps the mob as it is. Bundles need \"hooks\": @API:living_conversion_pre@."
+}

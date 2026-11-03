@@ -435,7 +435,8 @@ impl Game<'_> {
 
     /// Use complete generated geometry so equipment, animation and custom
     /// models cannot stick out of an assumed collision-sized culling box.
-    pub(super) fn cull_entity_vertices(&self, vertices: &mut Vec<Vertex>, start: usize) {
+    /// Returns this entity's occlusion result, including retained shadow casters.
+    pub(super) fn cull_entity_vertices(&self, vertices: &mut Vec<Vertex>, start: usize) -> bool {
         if let Some(culler) = &self.entity_culler {
             let hidden = culler.hidden(vertices, start, |pos| self.occluder_ready(pos));
             // A shader pack's shadow pass still draws what the camera cannot see.
@@ -444,14 +445,14 @@ impl Game<'_> {
             {
                 vertices.truncate(start);
             }
-            return;
+            return hidden;
         }
 
         let Some(culler) = &self.async_entity_culler else {
-            return;
+            return false;
         };
         let Some(query) = culler.query(vertices, start) else {
-            return;
+            return false;
         };
         let hidden = self
             .async_entity_culler
@@ -464,6 +465,7 @@ impl Game<'_> {
         if let Some(culler) = &self.async_entity_culler {
             culler.queue(query);
         }
+        hidden
     }
 
     fn async_proof_is_current(&self, proof: &OcclusionProof) -> bool {

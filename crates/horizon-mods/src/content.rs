@@ -88,6 +88,30 @@ pub struct BlockProperties {
     pub sounds: Option<String>,
     /// Which states tick randomly, whatever the template does (`isRandomlyTicking`).
     pub random_ticks: Option<RandomTicks>,
+    /// How the block is drawn, whatever the template does (`BlockBehaviour.getRenderShape`).
+    pub render_shape: Option<RenderShape>,
+}
+
+/// Vanilla's `RenderShape`, by its constant's name: `MODEL` puts the block model in the chunk
+/// mesh, `ENTITYBLOCK_ANIMATED` leaves it out for a block whose parts are drawn every frame
+/// (its block entity's drawing), and `INVISIBLE` draws nothing.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RenderShape {
+    Model,
+    EntityblockAnimated,
+    Invisible,
+}
+
+impl RenderShape {
+    /// The constant's name, as the block tables write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            RenderShape::Model => "MODEL",
+            RenderShape::EntityblockAnimated => "ENTITYBLOCK_ANIMATED",
+            RenderShape::Invisible => "INVISIBLE",
+        }
+    }
 }
 
 /// Which of a block's states get random ticks (`BlockBehaviour.isRandomlyTicking(state)`), so a
@@ -657,12 +681,13 @@ impl Content {
             let own = namespace == id;
             let owned = own || manifest.namespaces.iter().any(|n| n == namespace);
             // Vanilla's own files stay vanilla's; a mod may only add to its
-            // tags, and to the convention tags mods share.
+            // tags and atlases, and to the convention tags mods share.
             let shared = matches!(namespace, "minecraft" | "c");
-            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/"));
+            let atlas = top == "assets" && namespace == "minecraft" && rest.starts_with("atlases/");
+            let allowed = owned || (top == "data" && shared && rest.starts_with("tags/")) || atlas;
             if !allowed {
                 return Err(format!(
-                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces) or to vanilla and convention (c) tags"
+                    "{name}: a mod adds files in its own namespaces ({top}/{id}/ and those listed in namespaces), to vanilla and convention (c) tags, or to vanilla's atlases"
                 ));
             }
             if !own && top == "data" && rest.starts_with("horizon/") {
@@ -1278,9 +1303,10 @@ capabilities = ["registries"]
             ("data/minecraft/tags/block/mineable/pickaxe.json", b"{}"),
             ("data/c/tags/item/gems/ruby.json", b"{}"),
             ("assets/ruby/textures/block/ruby_block.png", b"png"),
+            ("assets/minecraft/atlases/blocks.json", b"{}"),
         ];
         let content = hmod("ok", MANIFEST_TEXT, files).unwrap();
-        assert_eq!(content.files.len(), 6);
+        assert_eq!(content.files.len(), 7);
         assert_eq!(
             content.blocks,
             [Block {
@@ -1552,6 +1578,28 @@ capabilities = ["registries"]
         ];
         let e = hmod("type-shared", MANIFEST_TEXT, files).unwrap_err();
         assert!(e.contains("already throws another entity type"), "{e}");
+    }
+
+    #[test]
+    fn blocks_choose_their_render_shape() {
+        let block = |shape: &str| {
+            let text = format!(
+                r#"{{"template": "minecraft:stone", "properties": {{"render_shape": {shape}}}}}"#
+            );
+            let files: &[(&str, &[u8])] = &[("data/ruby/horizon/block/gear.json", text.as_bytes())];
+            hmod("render-shape", MANIFEST_TEXT, files)
+        };
+        let shape = |c: Result<Content, String>| c.unwrap().blocks[0].properties.render_shape;
+        assert_eq!(shape(block(r#""MODEL""#)), Some(RenderShape::Model));
+        assert_eq!(
+            shape(block(r#""ENTITYBLOCK_ANIMATED""#)),
+            Some(RenderShape::EntityblockAnimated)
+        );
+        assert_eq!(shape(block(r#""INVISIBLE""#)), Some(RenderShape::Invisible));
+        // Only vanilla's constants, as written there.
+        for bad in [r#""animated""#, r#""model""#, "1"] {
+            assert!(block(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

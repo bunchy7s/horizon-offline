@@ -53,13 +53,13 @@ pub(super) fn packed_coords(state: &Info, packed: u8) -> u32 {
 pub(super) fn max_coords(a: u32, b: u32) -> u32 {
     (a >> 4 & 15).max(b >> 4 & 15) << 4 | (a >> 20 & 15).max(b >> 20 & 15) << 20
 }
-/// `LightCoordsUtil.lightCoordsWithEmission` (a quad's element light emission).
-pub(super) fn with_emission(coords: u32, emission: u8) -> u32 {
-    if emission == 0 {
+/// `LightCoordsUtil.lightCoordsWithEmission` (a quad's element light emission), with
+/// NeoForge's separate block and sky minimums: `[emission; 2]` is vanilla's.
+pub(super) fn with_min(coords: u32, [block, sky]: [u8; 2]) -> u32 {
+    if block == 0 && sky == 0 {
         return coords;
     }
-    let e = u32::from(emission);
-    (coords >> 4 & 15).max(e) << 4 | (coords >> 20 & 15).max(e) << 20
+    (coords >> 4 & 15).max(u32::from(block)) << 4 | (coords >> 20 & 15).max(u32::from(sky)) << 20
 }
 /// `LightCoordsUtil.smoothBlend`: zero samples take the centre; samples without
 /// sky light borrow the centre's sky.
@@ -446,9 +446,15 @@ mod tests {
     }
     #[test]
     fn emission_raises_both_channels_and_drops_fractions() {
-        assert_eq!(with_emission(0x0087_0013, 0), 0x0087_0013);
-        assert_eq!(with_emission(0x0087_0013, 3), packed(3, 8));
+        assert_eq!(with_min(0x0087_0013, [0; 2]), 0x0087_0013);
+        assert_eq!(with_min(0x0087_0013, [3; 2]), packed(3, 8));
         assert_eq!(max_coords(packed(3, 9), packed(7, 2)), packed(7, 9));
+    }
+    #[test]
+    fn block_and_sky_minimums_raise_their_own_channel() {
+        assert_eq!(with_min(0x0087_0013, [15, 0]), packed(15, 8));
+        assert_eq!(with_min(0x0087_0013, [0, 15]), packed(1, 15));
+        assert_eq!(with_min(0x0087_0013, [15, 15]), packed(15, 15));
     }
     #[test]
     fn flat_light_reads_the_neighbour_a_face_looks_at() {

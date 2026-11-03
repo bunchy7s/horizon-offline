@@ -174,11 +174,18 @@ pub(super) const HEIGHT: f64 = 0.7_f32 as f64;
 fn display_offset(kind: CartKind) -> f64 {
     if kind == CartKind::Hopper { 1.0 } else { 6.0 }
 }
-/// `MinecartFurnace.calculateNewPushAlong`: the push turned onto the
-/// movement's direction, at the push's own length (3D, so it holds from tick
-/// to tick while the movement has a vertical part).
-/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`: the
-/// push the cart at `cart` loses (the entity gets a quarter of it back).
+/// Where the cart `id` is in `carts`: at `hint` (where it was a moment ago,
+/// the usual case while carts tick in order) or found by a scan. A world
+/// with hundreds of mineshaft chest carts asked this of every cart several
+/// times a tick.
+fn cart_at(carts: &[Minecart], id: u32, hint: usize) -> Option<usize> {
+    if carts.get(hint).is_some_and(|c| c.id == id) {
+        return Some(hint);
+    }
+    carts.iter().position(|c| c.id == id)
+}
+/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`:
+/// the push the cart loses (the entity gets a quarter of it back).
 fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
     let (xa, za) = (feet.x - cart.x, feet.z - cart.z);
     let dd = xa * xa + za * za;
@@ -190,6 +197,7 @@ fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
     let k = f64::from(0.1f32) * 0.5;
     Some((xa / d * pow * k, za / d * pow * k))
 }
+/// `MinecartFurnace.calculateNewPushAlong`: project the push onto movement.
 fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
     if push.horizontal_distance_squared() > 1.0e-4 && movement.horizontal_distance_squared() > 0.001
     {
@@ -1394,8 +1402,16 @@ impl Game<'_> {
                 pushers.push((Vec3::new(x, y, z), g.bounds()));
             }
         }
+        let cells =
+            horizon_client::mobs::seen_grid::SeenGrid::new(self.carts.iter().map(Minecart::bounds));
+        let mut near = Vec::new();
         for (feet, bb) in pushers {
-            for c in &mut self.carts {
+            if !cells.candidates(bb, &mut near) {
+                near.extend(0..self.carts.len() as u32);
+            }
+            for &k in &near {
+                let k = k as usize;
+                let c = &mut self.carts[k];
                 if !bb.intersects(c.bounds()) {
                     continue;
                 }
@@ -1412,13 +1428,13 @@ impl Game<'_> {
                 c.velocity.z -= za;
             }
         }
-        self.push_carts_from_mobs();
+        self.push_carts_from_mobs(&cells);
     }
     /// `AbstractMinecart.push(mob)` from each mob walking into a cart
     /// (`LivingEntity.pushEntities` -> `doPush`): the cart gets the push and
     /// the mob a quarter of it back (`Entity.push`, which needs the mob to be
     /// pushable and to carry no one). Bats push nothing (`Bat.pushEntities`).
-    fn push_carts_from_mobs(&mut self) {
+    fn push_carts_from_mobs(&mut self, cells: &horizon_client::mobs::seen_grid::SeenGrid) {
         let teams = self.mob_teams();
         // (mob index, feet, box)
         let pushers: Vec<(usize, Vec3, Aabb)> = self
@@ -1434,8 +1450,14 @@ impl Game<'_> {
             .map(|(j, m)| (j, m.position, m.bounds()))
             .collect();
         drop(teams);
+        let mut near = Vec::new();
         for (j, feet, bb) in pushers {
-            for c in &mut self.carts {
+            if !cells.candidates(bb, &mut near) {
+                near.extend(0..self.carts.len() as u32);
+            }
+            for &k in &near {
+                let k = k as usize;
+                let c = &mut self.carts[k];
                 // hasPassenger(mob): a mob in this cart never pushes it.
                 if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
                     continue;
@@ -1601,7 +1623,8 @@ impl Game<'_> {
                 .iter()
                 .enumerate()
                 .filter(|(_, m)| m.extra.mount == Some(id))
-                .map(|(j, m)| (j, riders::vehicle_attachment(m)))
+                // Minecart's box is 0.98 wide.
+                .map(|(j, m)| (j, riders::vehicle_attachment(m, 0.98)))
                 .collect();
             for (j, offset) in seats {
                 let m = &mut self.mobs[j];
@@ -1640,10 +1663,12 @@ impl Game<'_> {
         let ridden = self.guest_vehicles();
         // By id: an exploding cart can destroy or prime others mid-loop.
         let ids: Vec<u32> = self.carts.iter().map(|c| c.id).collect();
+        let mut hint = 0;
         for &id in &ids {
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let Some(i) = cart_at(&self.carts, id, hint) else {
                 continue;
             };
+            hint = i + 1;
             let p = self.carts[i].position;
             if Some(id) == self.riding
                 || ridden.contains(&id)
@@ -1655,7 +1680,7 @@ impl Game<'_> {
             if !self.native_tick_pre_one(&mut round, id, kind) {
                 continue;
             }
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let Some(i) = cart_at(&self.carts, id, i) else {
                 continue;
             };
             let mut c = self.carts[i].clone();
@@ -1663,7 +1688,7 @@ impl Game<'_> {
             if c.kind == CartKind::Hopper && c.enabled {
                 self.hopper_cart_suck(&mut c);
             }
-            let Some(i) = self.carts.iter().position(|c| c.id == id) else {
+            let Some(i) = cart_at(&self.carts, id, i) else {
                 self.native_tick_post_one(&round, id, kind);
                 continue;
             };
@@ -1682,11 +1707,13 @@ impl Game<'_> {
             self.native_tick_post_one(&round, id, kind);
         }
         // On the server for every cart, the ridden ones too.
+        let mut hint = 0;
         for id in ids {
             if round.canceled(id) {
                 continue;
             }
-            if let Some(i) = self.carts.iter().position(|c| c.id == id) {
+            if let Some(i) = cart_at(&self.carts, id, hint) {
+                hint = i + 1;
                 let p = self.carts[i].position;
                 if ticking(p.x.floor() as i32, p.z.floor() as i32) {
                     self.cart_lava_tick(id);
