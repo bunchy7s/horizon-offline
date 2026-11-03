@@ -176,7 +176,7 @@ fn the_system_language_is_the_first_one_the_launcher_has() {
         Language::pick(["pt-BR", "en-US"]),
         Language::PortugueseBrazil
     );
-    assert_eq!(Language::pick(["ko", "it-IT"]), Language::English);
+    assert_eq!(Language::pick(["ko", "it-IT"]), Language::Korean);
     assert_eq!(Language::pick(["uk-UA", "ru-RU"]), Language::Ukrainian);
     assert_eq!(Language::parse("uk_UA.UTF-8"), Some(Language::Ukrainian));
     assert_eq!(
