@@ -233,6 +233,14 @@ pub fn tick(m: &mut Mob, events: &mut Vec<MobEvent>) {
     }
 }
 /// Pufferfish.getScale by puff state (the dimensions scale with it).
+/// `Salmon.Variant.boundingBoxScale`: SMALL 0.5, MEDIUM 1.0, LARGE 1.5.
+pub fn salmon_scale(variant: u8) -> f32 {
+    match variant {
+        0 => 0.5,
+        2 => 1.5,
+        _ => 1.0,
+    }
+}
 pub fn puff_scale(state: i32) -> f64 {
     match state {
         0 => 0.5,
@@ -1111,6 +1119,40 @@ mod school_tests {
         k.id = "minecraft:cod".into();
         k.species = Species::Cod;
         Mob::new(id, kind, Vec3::ZERO, 0.0)
+    }
+    /// `Salmon.getDefaultDimensions` is `getSalmonScale()` applied to the whole
+    /// fish box: small 0.5, medium 1.0, large 1.5.
+    #[test]
+    fn a_salmon_box_follows_its_variant() {
+        let mut k = kind();
+        Arc::make_mut(&mut k).species = Species::Salmon;
+        let mut m = Mob::new(1, k, Vec3::ZERO, 0.0);
+        m.extra.variant = 1;
+        let (w, h, e) = m.dims();
+        let (bw, bh, be) = (w as f32, h as f32, e as f32);
+        m.extra.variant = 0;
+        assert_eq!(
+            m.dims(),
+            (
+                f64::from(bw * 0.5),
+                f64::from(bh * 0.5),
+                f64::from(be * 0.5)
+            ),
+            "a small salmon is half the medium box"
+        );
+        m.extra.variant = 2;
+        assert_eq!(
+            m.dims(),
+            (
+                f64::from(bw * 1.5),
+                f64::from(bh * 1.5),
+                f64::from(be * 1.5)
+            ),
+            "a large salmon is half again"
+        );
+        // The medium variant is the type's box, unchanged.
+        m.extra.variant = 1;
+        assert_eq!(m.dims(), (w, h, e));
     }
     #[test]
     fn school_sizes() {

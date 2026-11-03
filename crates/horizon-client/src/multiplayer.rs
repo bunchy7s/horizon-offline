@@ -258,7 +258,15 @@ fn ping_all(servers: &[ServerEntry], pings: &Pings, icons: &Icons, file: &Path) 
                             }
                         }
                         // OnlineServerEntry: SUCCESSFUL only for this game's protocol.
-                        if protocol == i64::from(horizon_protocol::PROTOCOL_VERSION) {
+                        let joinable = protocol == i64::from(horizon_protocol::PROTOCOL_VERSION)
+                            || (crate::net::older_servers_enabled()
+                                && i32::try_from(protocol)
+                                    .ok()
+                                    .and_then(
+                                        horizon_protocol::adapter::ServerVersion::from_protocol,
+                                    )
+                                    .is_some());
+                        if joinable {
                             Ping::Ok {
                                 motd,
                                 players,

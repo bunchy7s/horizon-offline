@@ -3,7 +3,7 @@
 
 #[cfg(not(any(feature = "system-allocator", feature = "alloc-census")))]
 #[global_allocator]
-static ALLOCATOR: horizon_threads::Allocator = horizon_threads::Allocator;
+static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 #[cfg(all(feature = "alloc-census", not(feature = "system-allocator")))]
 #[global_allocator]
 static ALLOCATOR: horizon_threads::CensusAllocator = horizon_threads::CensusAllocator;

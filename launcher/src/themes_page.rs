@@ -14,12 +14,15 @@ const STRIP: f32 = 120.;
 
 impl Launcher {
     /// The theme Settings ask for, under the window's own light or dark.
+    /// The player's look; a launcher theme worn in the Wardrobe brings its own sky and accent.
     pub(super) fn settings_theme(&self, window: &Window) -> Theme {
-        Theme::for_appearance(
-            self.settings.appearance,
-            self.settings.accent,
-            window.appearance(),
-        )
+        let worn = self.worn_theme();
+        let accent = worn.map_or(self.settings.accent, |(_, hue)| Accent::custom(hue));
+        let theme = Theme::for_appearance(self.settings.appearance, accent, window.appearance());
+        match worn {
+            Some((sky, _)) => theme.with_sky(sky),
+            None => theme,
+        }
     }
 
     /// The picture behind Home, if the player keeps one.

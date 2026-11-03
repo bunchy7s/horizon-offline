@@ -25,7 +25,9 @@ impl HolderSet {
             return Err(crate::Error::new("holder set larger than the packet"));
         }
         Ok(Self::Items(
-            (0..n).map(|_| r.varint()).collect::<Result<_>>()?,
+            (0..n)
+                .map(|_| r.varint().map(crate::adapter::ids::item))
+                .collect::<Result<_>>()?,
         ))
     }
     pub fn write(&self, w: &mut Writer) {
@@ -93,16 +95,19 @@ impl SlotDisplay {
             return Err(crate::Error::new("slot displays nest too deep"));
         }
         let inner = |r: &mut Reader| Self::read_at(r, depth + 1).map(Box::new);
-        Ok(match r.varint()? {
+        Ok(match crate::adapter::ids::slot_display(r.varint()?) {
             0 => Self::Empty,
             1 => Self::AnyFuel,
             2 => Self::WithAnyPotion(inner(r)?),
             3 => {
                 let source = inner(r)?;
-                Self::OnlyWithComponent(source, r.varint()?)
+                Self::OnlyWithComponent(source, crate::adapter::ids::component(r.varint()?))
             }
-            4 => Self::Item(r.varint()?),
+            4 => Self::Item(crate::adapter::ids::item(r.varint()?)),
             5 => Self::ItemStack(Template::read(r)?),
+            6 if crate::adapter::ids::quirks().tag_slot_display_is_id => {
+                Self::Tag(HolderSet::Tag(r.string(32767)?))
+            }
             6 => Self::Tag(HolderSet::read(r)?),
             7 => Self::Dyed {
                 dye: inner(r)?,
@@ -497,6 +502,23 @@ impl Codec<RecipeBookSettings> for RecipeBookSettings {
             w.bool(open);
             w.bool(filtering);
         }
+    }
+}
+
+/// ServerboundRecipeBookSeenRecipePacket: the `RecipeDisplayId` the player
+/// has looked at, so the server stops treating it as a new one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecipeBookSeenRecipe {
+    pub recipe: i32,
+}
+impl Codec<RecipeBookSeenRecipe> for RecipeBookSeenRecipe {
+    fn read(r: &mut Reader) -> Result<Self> {
+        Ok(Self {
+            recipe: r.varint()?,
+        })
+    }
+    fn write(v: &Self, w: &mut Writer) {
+        w.varint(v.recipe);
     }
 }
 

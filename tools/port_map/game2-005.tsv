@@ -92,6 +92,7 @@ Player.increaseScore	skip:other		the score is experience.total in Horizon (death
 Player.getWeaponItem	missing		the riptide spin attack keeps only `auto_spin_attack_ticks` and `auto_spin_attack_dmg`, not the stack it started with (`autoSpinAttackItemStack`), so there is no item to answer with mid-spin
 Player.destroyVanishingCursedItems	port	crates/horizon-client/src/game.rs::Game::drop_inventory	vanishing-curse stacks are removed from the death drops
 Player.hasCorrectToolForDrops	port	crates/horizon-client/src/game.rs::Game::tick_mining	the correct-tool test for harvest drops
+Player.canDropItems	inline	crates/horizon-client/src/lan/menu.rs::click	THROW is not acted on while the client has dropped items too fast
 Player.readAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::read_player	
 Player.addAdditionalSaveData	port	crates/horizon-client/src/save.rs::Level::player_tag	
 Player.hurtHelmet	inline	crates/horizon-client/src/game.rs::Game::hurt_armor	gap: minor: hurt_armor hits all four armour slots; the head-only hit from LivingEntity.hurt is not separated
@@ -133,8 +134,8 @@ StackedContents.RecipePicker.getVisitedIngredientIndex	skip:java		bitset index a
 StackedContents.RecipePicker.getVisitiedItemIndex	skip:java		bitset index arithmetic; plain bool vectors in Horizon
 StackedContents.RecipePicker.clearAllVisited	port	crates/horizon-client/src/menu/place.rs::Picker::clear_visited	
 StackedItemContents.getBiggestCraftableStack	port	crates/horizon-client/src/menu/place.rs::Stacked::try_pick_all	the largest craftable count, found by a bounded search
-EvokerFangs.readAdditionalSaveData	missing		fangs are not saved: `entity_nbt.rs` has no evoker fangs writer, so a save in mid-bite drops them
-EvokerFangs.addAdditionalSaveData	missing		no writer for the warmup delay or the owner either
+EvokerFangs.readAdditionalSaveData	port	crates/horizon-client/src/game/persist.rs::Game::spawn_loaded_entities	Warmup defaults to 0 and enters active fangs; gap: Owner resolution only finds already-loaded mobs
+EvokerFangs.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::evoker_fangs_to_nbt	live Warmup, known owner UUID, unresolved Owner retained from raw NBT
 EvokerFangs.getAnimationProgress	port	crates/horizon-client/src/game/fangs.rs::Game::fangs_geometry	the bite progress that positions the fang model
 EyeOfEnder.setItem	skip:ui		the item sprite a flying eye shows; Horizon draws the eye itself
 EyeOfEnder.shouldRenderAtSqrDistance	skip:ui		render distance culling only

@@ -2,6 +2,7 @@
 //! falling, `interactAt` equipment swaps by clicked height, the two-hit break
 //! of `hurtServer` (creative breaks at once), and `ArmorStandRenderer` with
 //! the default pose, the hit wobble and humanoid armor layers.
+use super::entity::Entity;
 use super::{Game, InteractTarget};
 use horizon_client::{
     Result,
@@ -547,11 +548,27 @@ impl Game<'_> {
             return false;
         }
         let held = self.held().cloned();
-        if held
-            .as_ref()
-            .is_some_and(|h| &*h.item == "minecraft:name_tag")
-        {
-            return false;
+        if let Some(stack) = held.as_ref().filter(|h| &*h.item == "minecraft:name_tag") {
+            let stand = &mut self.armor_stands[i];
+            let alive = stand.health > 0.0;
+            if !stand.name_with_tag(stack) {
+                return false;
+            }
+            let id = stand.id;
+            let name = stand.custom_name.as_ref().map(|name| name.plain());
+            if alive {
+                // NameTagItem shrinks the stack even with infinite materials.
+                let mut rest = stack.clone();
+                rest.count -= 1;
+                *self.held_mut() = (rest.count > 0).then_some(rest);
+                if let (Some(player), Some(player_name), Some(name)) =
+                    (self.lan_acting_uuid, self.lan_acting_name.clone(), name)
+                {
+                    self.native_player_name_entity(player, &player_name, id, &name);
+                }
+            }
+            self.swing_arm();
+            return true;
         }
         let a = &self.armor_stands[i];
         let slot = match &held {
@@ -797,7 +814,11 @@ impl Game<'_> {
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
-            let in_water = a.update_fluids(&self.world, &self.res.motion().fluids);
+            let (water_height, lava_height) =
+                a.push_by_fluid(&self.world, &self.res.motion().fluids);
+            let in_water = water_height > 0.0;
+            let medium =
+                horizon_client::entities::StandMedium::from_heights(water_height, lava_height);
             let (world, registry, facts, collision) = (
                 &self.world,
                 self.pack.assets.registry,
@@ -810,23 +831,19 @@ impl Game<'_> {
                 subject: None,
             };
             let mut tops: Vec<BlockPos> = Vec::new();
-            a.tick(
+            if let Some(step) = a.tick_move(
                 &mut scene,
                 facts,
+                &self.res.motion().climbing,
                 in_water,
-                &mut |bounds, velocity| {
-                    horizon_client::motion::bubble_column_push_over(
-                        world,
-                        registry,
-                        facts,
-                        collision,
-                        bounds,
-                        velocity,
-                        |pos| tops.push(pos),
-                    );
-                },
                 Some(self.border.geometry()),
-            );
+            ) {
+                // LivingEntity.aiStep: `travel` first, then the blocks' push.
+                a.tick_settle(medium, step);
+                a.push_by_bubble_column_over(world, registry, facts, collision, |pos| {
+                    tops.push(pos)
+                });
+            }
             for pos in tops {
                 self.bubble_column_particles(pos);
             }
@@ -975,11 +992,7 @@ impl Game<'_> {
                 let mut models = self.skin_models.borrow_mut();
                 let mut frame = self.skin_frame.borrow_mut();
                 let mark = frame.mark();
-                let mut skin = horizon_client::mobs::skin::Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
                 self.armor_stand_vertices(a, base, packed, Some(&mut skin), out);
                 Some((mark, skin.bounds))
             } else {

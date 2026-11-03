@@ -97,7 +97,7 @@ ThrownEnderpearl.getOwner	skip:other		owner is kept as a Who value and resolved 
 ThrownEnderpearl.findOwnerIncludingDeadPlayer	skip:other		owner lookup by UUID across dead players; Horizon keeps the owner id directly
 ThrownEnderpearl.onHitEntity	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	a mob hit takes zero damage; the pearl still lands
 ThrownEnderpearl.onHit	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	gap: minor: no 32 portal particles and no dimension change; the owner is teleported to where the pearl was, with 5 damage and a 5 percent endermite
-ThrownEnderpearl.isAllowedToTeleportOwner	missing		`game/creatures.rs` teleports the owner on a pearl's hit without asking whether they are dead or sleeping
+ThrownEnderpearl.isAllowedToTeleportOwner	port	crates/horizon-client/src/projectiles.rs::owner_can_take_pearl	the owner's `isAlive() && !isSleeping()`, read by `Game::projectile_hit`: a dead or sleeping owner is not teleported and takes no damage; the other-dimension branch (`canUsePortal(true)`) is not reached, a pearl's owner is in its own level
 ThrownEnderpearl.playSound	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	teleport sound at the landing point
 ThrownEnderpearl.teleport	port	crates/horizon-client/src/game/creatures.rs::Game::projectile_hit	moves the player to the pearl's previous position and clears velocity and fall distance
 ThrownEnderpearl.canTeleport	missing		no seen-credits test: a pearl whose owner came from the End teleports them back to the Overworld regardless

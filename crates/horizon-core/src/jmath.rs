@@ -17,6 +17,23 @@
 //! So these functions return what vanilla returns on the same machine, on
 //! Linux and on an Apple silicon Mac alike.
 
+/// `Math.round(float)`, bit for bit: exact (no `x + 0.5` in `f32`), ties toward
+/// positive infinity, saturating to the `int` range, NaN to 0.
+pub fn round_f32(a: f32) -> i32 {
+    let bits = a.to_bits() as i32;
+    let biased_exp = (bits & 0x7F80_0000) >> 23;
+    let shift = (22 + 127) - biased_exp;
+    if shift & -32 == 0 {
+        let mut r = bits & 0x007F_FFFF | 0x0080_0000;
+        if bits < 0 {
+            r = -r;
+        }
+        ((r >> shift) + 1) >> 1
+    } else {
+        a as i32
+    }
+}
+
 /// `Math.sin`.
 pub fn sin(x: f64) -> f64 {
     if cfg!(target_arch = "aarch64") {
@@ -112,6 +129,13 @@ pub fn acos(x: f64) -> f64 {
 /// `Math.hypot`.
 pub fn hypot(x: f64, y: f64) -> f64 {
     fdlibm::hypot(x, y)
+}
+
+/// `Math.round(double)`: the nearest `long`, ties toward positive infinity
+/// (so `-2.5` is `-2`), saturating, `NaN` is 0.
+pub fn round(x: f64) -> i64 {
+    let f = x.floor();
+    (if x - f >= 0.5 { f + 1.0 } else { f }) as i64
 }
 
 fn hi(x: f64) -> i32 {
@@ -526,7 +550,42 @@ pub mod aarch64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{aarch64, fdlibm};
+    use super::{aarch64, fdlibm, round_f32};
+
+    #[test]
+    fn round_f32_is_exact_like_java() {
+        for (x, expected) in [
+            (0.499_999_97, 0),
+            (0.5, 1),
+            (-0.5, 0),
+            (2.5, 3),
+            (-2.5, -2),
+            (1e10, i32::MAX),
+            (-1e10, i32::MIN),
+            (f32::NAN, 0),
+            (8_388_609.0, 8_388_609),
+        ] {
+            assert_eq!(round_f32(x), expected, "{x}");
+        }
+    }
+
+    #[test]
+    fn round_ties_toward_positive_infinity() {
+        for (x, want) in [
+            (-2.5, -2),
+            (2.5, 3),
+            (-0.5, 0),
+            (-1.5, -1),
+            (0.5, 1),
+            (-2.6, -3),
+            (0.49999999999999994, 0),
+            (f64::NAN, 0),
+            (f64::INFINITY, i64::MAX),
+            (f64::NEG_INFINITY, i64::MIN),
+        ] {
+            assert_eq!(super::round(x), want, "round({x})");
+        }
+    }
 
     fn check1(f: fn(f64) -> f64, (x, expected): (u64, u64)) {
         assert_eq!(f(f64::from_bits(x)).to_bits(), expected, "{x:x}");

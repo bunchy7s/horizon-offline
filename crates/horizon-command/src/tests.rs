@@ -339,6 +339,44 @@ fn entity_arguments_suggest_the_selected_entity() {
     }
 }
 #[test]
+fn whitespace_is_what_java_character_is_whitespace_says() {
+    let java: Vec<u32> = [
+        0x09..=0x0D,
+        0x1C..=0x20,
+        0x1680..=0x1680,
+        0x2000..=0x2006,
+        0x2008..=0x200A,
+        0x2028..=0x2029,
+        0x205F..=0x205F,
+        0x3000..=0x3000,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let ours: Vec<u32> = (0..=0x10FFFF)
+        .filter_map(char::from_u32)
+        .filter(|c| Reader::is_java_whitespace(*c))
+        .map(u32::from)
+        .collect();
+    assert_eq!(ours, java);
+
+    let mut r = Reader::new("\u{1F}\u{3000} x");
+    r.skip_whitespace();
+    assert_eq!(r.peek(), 'x');
+    for nbsp in ["\u{A0}", "\u{2007}", "\u{202F}", "\u{85}"] {
+        let text = format!("{nbsp}x");
+        let mut r = Reader::new(&text);
+        r.skip_whitespace();
+        assert_eq!(r.remaining(), text, "{:?} is not whitespace", nbsp);
+    }
+
+    let reg = reg();
+    let parse = |text: &str| selector::parse(&mut Reader::new(text), &reg, true).is_ok();
+    assert!(parse("@e[ type=minecraft:pig]"));
+    assert!(parse("@e[\u{1F}type=minecraft:pig]"));
+    assert!(!parse("@e[\u{A0}type=minecraft:pig]"));
+}
+#[test]
 fn a_uuid_selects_by_entity_uuid() {
     // EntitySelectorParser.parseNameOrUUID: a UUID sets entityUUID and
     // includesEntities, never playerName (which findEntities checks first).
@@ -791,7 +829,8 @@ fn the_dedicated_commands_complete_from_the_servers_lists() {
 fn only_a_dedicated_server_has_the_dedicated_commands() {
     // Commands.CommandSelection: an integrated server (single player, a LAN
     // world) registers no /op, /ban, /ban-ip, /banlist, /pardon, /pardon-ip,
-    // /deop or /whitelist, so /help and Tab don't offer them.
+    // /deop, /setidletimeout, /transfer, /whitelist, /save-all, /save-off, /save-on or /stop,
+    // so /help and Tab don't offer them.
     let dedicated = [
         "ban",
         "ban-ip",
@@ -800,6 +839,12 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
         "op",
         "pardon",
         "pardon-ip",
+        "save-all",
+        "save-off",
+        "save-on",
+        "setidletimeout",
+        "stop",
+        "transfer",
         "whitelist",
     ];
     for dev in [false, true] {
@@ -824,6 +869,58 @@ fn only_a_dedicated_server_has_the_dedicated_commands() {
     }
     assert!(vanilla::game_dispatcher().find("ban").is_none());
     assert!(vanilla::release_dispatcher().find("ban").is_none());
+}
+#[test]
+fn a_dedicated_servers_admins_send_players_to_another_server() {
+    // TransferCommand.register: LEVEL_ADMINS, `<hostname> [<port> [<players>]]`
+    // with IntegerArgumentType.integer(1, 65535) for the port.
+    let server = vanilla::game_tree(false, false, true);
+    assert!(
+        vanilla::game_tree(false, false, false)
+            .find("transfer")
+            .is_none()
+    );
+    let at = |level: u8| Registries {
+        permission: level,
+        ..reg()
+    };
+    for line in [
+        "transfer example.net",
+        "transfer example.net 25566",
+        "transfer example.net 25566 Alex",
+    ] {
+        assert_eq!(
+            server.parse(line, &at(3)).executable().unwrap().1,
+            "transfer",
+            "{line}"
+        );
+    }
+    // The hostname is required.
+    let e = server.parse("transfer", &at(3)).executable().unwrap_err();
+    assert_eq!(e.message.plain(), "command.unknown.command");
+    // Below LEVEL_ADMINS the node is not there at all.
+    for level in [0, 1, 2] {
+        let e = server
+            .parse("transfer example.net", &at(level))
+            .executable()
+            .unwrap_err();
+        assert_eq!(
+            e.message.plain(),
+            "command.unknown.command",
+            "level {level}"
+        );
+    }
+    // IntegerArgumentType.integer(1, 65535): port 0 is low, 65536 big.
+    let e = server
+        .parse("transfer example.net 0", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.low");
+    let e = server
+        .parse("transfer example.net 65536", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.big");
 }
 /// The root literals a player at `level` is offered (the chat's, client tree).
 fn root_commands(d: &Dispatcher, level: u8) -> Vec<String> {
@@ -878,4 +975,113 @@ fn a_dedicated_server_keeps_seed_and_version_for_game_masters() {
             }
         }
     }
+}
+#[test]
+fn a_dedicated_servers_admins_set_the_idle_timeout() {
+    // SetPlayerIdleTimeoutCommand.register: LEVEL_ADMINS, and
+    // IntegerArgumentType.integer(0) — zero turns the timeout off, and a
+    // negative count of minutes is out of range.
+    let server = vanilla::game_tree(false, false, true);
+    let integrated = vanilla::game_tree(false, false, false);
+    assert!(integrated.find("setidletimeout").is_none());
+    let at = |level: u8| Registries {
+        permission: level,
+        ..reg()
+    };
+    // Below LEVEL_ADMINS the node is not there at all.
+    for level in [0, 1, 2] {
+        let e = server
+            .parse("setidletimeout 5", &at(level))
+            .executable()
+            .unwrap_err();
+        assert_eq!(
+            e.message.plain(),
+            "command.unknown.command",
+            "level {level}"
+        );
+    }
+    // The minutes are required: an incomplete command.
+    let e = server
+        .parse("setidletimeout", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "command.unknown.command");
+    for line in ["setidletimeout 0", "setidletimeout 5"] {
+        assert_eq!(
+            server.parse(line, &at(3)).executable().unwrap().1,
+            "setidletimeout"
+        );
+    }
+    // IntegerArgumentType.integer(0): argument.integer.low for -1 below 0.
+    let e = server
+        .parse("setidletimeout -1", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "argument.integer.low");
+    // Past i32 the number itself is unreadable.
+    let e = server
+        .parse("setidletimeout 2147483648", &at(3))
+        .executable()
+        .unwrap_err();
+    assert_eq!(e.message.plain(), "parsing.int.invalid");
+}
+
+#[test]
+fn time_argument_rounds_like_math_round_float() {
+    let ticks = |input: &str| {
+        let reg = reg();
+        let parse = vanilla::dispatcher().parse(input, &reg);
+        let (ctx, _) = parse.executable().unwrap();
+        match ctx.args.iter().find(|a| a.name == "time").unwrap().value {
+            Arg::Int(t) => t,
+            ref other => panic!("{other:?}"),
+        }
+    };
+    // 0.49999997 + 0.5 rounds up to 1.0 in f32, but Math.round is exact.
+    assert_eq!(ticks("time set 0.49999997t"), 0);
+    assert_eq!(ticks("time set 0.5t"), 1);
+    assert_eq!(ticks("time add -2.5t"), -2);
+}
+
+#[test]
+fn a_dedicated_servers_owners_can_stop_and_save_it() {
+    // StopCommand, SaveAllCommand, SaveOffCommand and SaveOnCommand:
+    // Commands.hasPermission(LEVEL_OWNERS), an admin (3) gets none of them.
+    let server = vanilla::game_tree(false, false, true);
+    let at = |permission| Registries {
+        permission,
+        ..reg()
+    };
+    for (line, id) in [
+        ("stop", "stop"),
+        ("save-all", "save-all"),
+        ("save-all flush", "save-all"),
+        ("save-off", "save-off"),
+        ("save-on", "save-on"),
+    ] {
+        assert_eq!(
+            server.parse(line, &at(4)).executable().unwrap().1,
+            id,
+            "{line}"
+        );
+        assert!(server.parse(line, &at(3)).executable().is_err(), "{line}");
+    }
+}
+
+#[test]
+fn local_coordinate_missing_after_space_expects_a_coordinate() {
+    // LocalCoordinates.readDouble: nothing left to read is ERROR_EXPECTED_DOUBLE,
+    // with the cursor where it stopped; only a non-'^' character is "mixed".
+    let reg = reg();
+    let parse = |text: &str| {
+        let mut r = Reader::new(text);
+        let e = ArgType::Vec3 { center: true }
+            .parse(&mut r, &reg)
+            .map(|_| ())
+            .unwrap_err();
+        (e.key, e.cursor)
+    };
+    assert_eq!(parse("^1 "), ("argument.pos.missing.double".into(), 3));
+    assert_eq!(parse("^1 ^2 "), ("argument.pos.missing.double".into(), 6));
+    assert_eq!(parse("^1 ~"), ("argument.pos.mixed".into(), 0));
 }
