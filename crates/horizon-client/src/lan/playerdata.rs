@@ -370,8 +370,10 @@ mod tests {
     #[test]
     fn a_saved_rotation_beats_the_world_spawn_angle() {
         let mut g = guest();
-        let mut level = Level::default();
-        level.rotation = [-135.0, 30.0];
+        let level = Level {
+            rotation: [-135.0, 30.0],
+            ..Level::default()
+        };
         apply(&mut g, &level);
         assert_eq!((g.yaw, g.pitch, g.head_yaw), (-135.0, 30.0, -135.0));
     }
