@@ -4225,6 +4225,25 @@ impl Game<'_> {
             cancel,
         );
     }
+    /// A server player tries to sleep in the bed whose head is at `pos`
+    /// (NeoForge's `CanPlayerSleepEvent`, vanilla's `ServerPlayer.startSleepInBed`).
+    /// `problem` is what vanilla found, first problem only: `too_far_away`,
+    /// `obstructed`, `not_possible_now` (not night or thunder, the bed rule),
+    /// `not_safe` (monsters near), or `None`. A mod may set `None` to let the
+    /// player sleep anyway, or one of those names (`other_problem` refuses
+    /// without a message) to refuse. The spawn point is set before it fires,
+    /// as in vanilla, only when vanilla found no problem. After it,
+    /// `native_player_bed_enter` still fires and may cancel. Server-side.
+    /// API @API:can_player_sleep@.
+    pub(super) fn native_can_player_sleep(
+        &mut self,
+        player: u128,
+        name: &str,
+        pos: [i32; 3],
+        problem: &mut Option<String>,
+    ) {
+        mod_api::dispatch_can_player_sleep(self, mod_api::mods(), player, name, pos, problem);
+    }
     /// A server player is about to enter a bed after the sleep checks pass.
     /// Set `cancel` to keep them out. The player's state is swapped in, but
     /// helpers that look them up through `self.lan` may find nothing during a
@@ -4355,6 +4374,23 @@ impl Game<'_> {
     /// Server-side. 260.
     pub(super) fn native_player_exp_change(&mut self, player: u128, name: &str, amount: &mut i32) {
         mod_api::dispatch_player_exp_change(self, mod_api::mods(), player, name, amount);
+    }
+    /// A server player's experience points are about to change through
+    /// `Player.giveExperiencePoints` (NeoForge's `PlayerXpEvent.XpChange`): an
+    /// orb pickup after mending, an advancement reward, or `/xp add ... points`.
+    /// Change `amount` (in points) or set `cancel` to give nothing. An orb or
+    /// an advancement reward gives nothing for a negative amount. Experience
+    /// bottles and furnaces make orbs, so they come through the orb path.
+    /// `native_player_exp_change` is separate and still fires first for an orb
+    /// pickup. Server-side. API @API:player_xp_change@.
+    pub(super) fn native_player_xp_change(
+        &mut self,
+        player: u128,
+        name: &str,
+        amount: &mut i32,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_player_xp_change(self, mod_api::mods(), player, name, amount, cancel);
     }
     /// An item cooldown is about to start for a server player. `item` is the
     /// item id and `ticks` its duration. The player's state is not swapped in,
