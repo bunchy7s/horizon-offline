@@ -15,6 +15,34 @@ switch. The first install shows a trust notice, and every build waits behind a r
 after a review (its later releases are checked by machine); and they play in a game of their own, built for the
 instance they are installed in.
 
+## Conditional item model properties
+
+A client mod supplies its own namespaced `minecraft:condition` property by implementing
+`Hooks::item_model_property`. This hook is the registration: match your property name, answer
+through `value`, and leave other names untouched. The resolver calls it when choosing a branch,
+not when loading resources. It defaults to false without a provider and skips dispatch entirely
+when no trait mods are loaded. Vanilla properties do not enter the hook.
+
+```rust,ignore
+fn item_model_property(
+    &self,
+    _host: &dyn Host,
+    event: &mut ItemModelPropertyEvent<'_>,
+) {
+    if event.property == "example:charged" {
+        event.value = event.stack.patch.get("example:charged").and_then(Option::as_ref)
+            .and_then(serde_json::Value::as_bool) == Some(true);
+    }
+}
+```
+
+`Host`, `ItemModelPropertyEvent`, and `StackView` are exported by `horizon_client::mod_api`. The stack is borrowed,
+including for nested bundle items: `item`, `count`, explicit component `patch` (not merged
+defaults), and the runtime bundle selection. Listeners run in mod order; later answers win.
+Use `"property": "example:charged"` with both `on_true` and `on_false` in the item's
+`minecraft:condition` node. Custom special model renderers are not supplied by this hook.
+Bundles need `"hooks": @API:item_model_property@` once this pending hook is stamped.
+
 ## Item frame rendering
 
 `native_render_item_in_frame(entity_id, pos, stack, canceled)` runs before a visible item frame draws its item or map, including glow and invisible frames. Set `canceled` to hide the item without hiding the frame. Bundles need "hooks": @API:render_item_in_frame@.

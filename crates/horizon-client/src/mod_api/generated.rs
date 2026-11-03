@@ -4571,6 +4571,13 @@ pub trait Hooks: Send + Sync {
         let _ = event;
         None
     }
+    /// Client-side evaluation of a mod's namespaced conditional item model property.
+    /// Set value only for a property your mod owns; unhandled properties stay false.
+    /// The borrowed stack is the one being resolved, including nested bundle items.
+    fn item_model_property(&self, host: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+        let _ = host;
+        let _ = event;
+    }
     /// `LivingEntity.getProjectile(weapon)` (NeoForge's
     /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
     /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
@@ -14096,6 +14103,30 @@ pub fn dispatch_item_container(
             break;
         }
     }
+}
+/// What [`Hooks::item_model_property`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct ItemModelPropertyEvent<'a> {
+    pub property: &'a str,
+    pub stack: &'a StackView,
+    pub value: bool,
+}
+pub fn dispatch_item_model_property(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    property: &str,
+    stack: &StackView,
+    value: &mut bool,
+) {
+    let mut event = ItemModelPropertyEvent {
+        property,
+        stack,
+        value: *value,
+    };
+    for mod_hook in super::entered(mods, "item_model_property") {
+        mod_hook.item_model_property(host, &mut event);
+    }
+    *value = event.value;
 }
 /// What [`Hooks::living_get_projectile`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
