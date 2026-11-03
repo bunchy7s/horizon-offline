@@ -227,6 +227,12 @@ impl J {
             _ => None,
         }
     }
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            J::Str(s) => Some(s),
+            _ => None,
+        }
+    }
     /// Renames strings and, with `ids`, moves state ids, everywhere inside.
     fn rename(&mut self, r: &Rename, ids: bool) {
         match self {
@@ -1943,6 +1949,7 @@ fn place_in_biomes(
     modifiers: &[biomes::Modifier],
     biome_tags: Option<J>,
     placed: Option<J>,
+    tags: &BTreeMap<String, TagMerge>,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
     let bundle = |doc: Option<J>, name: &str| -> Result<BTreeMap<String, String>> {
@@ -1973,7 +1980,47 @@ fn place_in_biomes(
     let biome_tags = bundle(biome_tags, BIOME_TAGS)?;
     let placed: BTreeSet<String> = bundle(placed, PLACED_FEATURES)?.into_keys().collect();
     let feature_tags = bundle(None, FEATURE_TAGS)?;
-    biomes::apply(
+    let entities_path = out_path(overlay, "entity-types.json");
+    let entity_categories: BTreeMap<String, String> = match entities_path.exists() {
+        true => match read_json(&entities_path)? {
+            J::Obj(entries) => entries
+                .into_iter()
+                .map(|(k, v)| {
+                    let cat = v
+                        .get("category")
+                        .and_then(J::as_str)
+                        .unwrap_or("misc")
+                        .to_owned();
+                    (k, cat)
+                })
+                .collect(),
+            _ => return Err("entity-types.json: not an object".into()),
+        },
+        false => BTreeMap::new(),
+    };
+    let entity_ids: BTreeSet<String> = entity_categories.keys().cloned().collect();
+    let mut entity_tags = BTreeMap::new();
+    let vanilla_entity_tags = base.join("data/minecraft/tags/entity_type");
+    if vanilla_entity_tags.is_dir() {
+        for file in &crate::json_folder::read(&vanilla_entity_tags)?.files {
+            let text = std::str::from_utf8(file.bytes()?)
+                .map_err(|e| format!("entity_type/{}: {e}", file.name))?;
+            entity_tags.insert(format!("minecraft:{}", file.name), text.to_owned());
+        }
+    }
+    for file in tags.keys() {
+        if let Some((ns, path)) = file
+            .strip_prefix("data/")
+            .and_then(|r| r.split_once("/tags/entity_type/"))
+            .and_then(|(ns, p)| Some((ns, p.strip_suffix(".json")?)))
+        {
+            entity_tags.insert(
+                format!("{ns}:{path}"),
+                fs::read_to_string(out_path(overlay, file))?,
+            );
+        }
+    }
+    let changed = biomes::apply(
         &mut doc,
         modifiers,
         &biomes::Registry {
@@ -1986,8 +2033,22 @@ fn place_in_biomes(
             ids: &placed,
             tags: &feature_tags,
         },
+        &biomes::Registry {
+            what: "entity type",
+            ids: &entity_ids,
+            tags: &entity_tags,
+        },
+        &entity_categories,
         warnings,
     )?;
+    for (id, text) in changed {
+        if let Some((ns, path)) = id.split_once(':') {
+            let file = format!("data/{ns}/worldgen/biome/{path}.json");
+            if out_path(overlay, &file).exists() {
+                overlay.write(&file, text.as_bytes())?;
+            }
+        }
+    }
     overlay.write(BIOMES, &serde_json::to_vec(&doc)?)
 }
 
@@ -2507,6 +2568,7 @@ pub fn build(base: &Path, mods: &[ContentMod], out: &Path) -> Result<Vec<String>
             &modifiers,
             biome_tag_doc,
             placed_doc,
+            &tags,
             &mut warnings,
         )?;
     }
