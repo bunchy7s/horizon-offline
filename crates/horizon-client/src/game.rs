@@ -18228,18 +18228,13 @@ impl Game<'_> {
             );
             return;
         }
-        // A window the compositor hides gets no `RedrawRequested` at all, so
-        // polling would spin the loop with nothing to draw and pin a core.
-        // Once a requested frame fails to reach the swap chain, wait for the
-        // next event instead; a resize or occlusion change wakes the loop and
-        // the frame that follows sets the pace back to polling.
-        if self.frame_drawn {
-            event_loop.set_control_flow(ControlFlow::Poll);
-        } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
-        }
+        // Consume the last frame's result: a hidden compositor may stop sending
+        // redraws altogether, leaving a successful result stale indefinitely.
+        event_loop.set_control_flow(event_loop::redraw_flow(
+            &mut self.frame_drawn,
+            self.options.offscreen,
+            Instant::now(),
+        ));
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
