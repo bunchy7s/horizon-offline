@@ -73,6 +73,32 @@ pub fn clientbound(
         (State::Play, cb::RESPAWN) => respawn(payload)?,
         (State::Play, cb::LEVEL_CHUNK_WITH_LIGHT) => chunk(ids, payload)?,
         (State::Play, cb::LIGHT_UPDATE) => light_update(payload)?,
+        (State::Play, cb::UPDATE_ADVANCEMENTS) => advancements(ids, payload)?,
+        (State::Play, cb::LEVEL_PARTICLES) => particles(ids, payload)?,
+        (State::Play, cb::EXPLODE) => {
+            // 26.3 adds whether the blast's sound plays, last; 26.2 always played it.
+            let mut body = payload.to_vec();
+            body.push(1);
+            redecode(ids, id, &body)?
+        }
+        (State::Play, cb::MOVE_ENTITY_POS) => move_entity(payload, true, false)?,
+        (State::Play, cb::MOVE_ENTITY_POS_ROT) => move_entity(payload, true, true)?,
+        (State::Play, cb::MOVE_ENTITY_ROT) => move_entity(payload, false, true)?,
+        (State::Play, cb::ENTITY_POSITION_SYNC) => position_sync(payload)?,
+        (State::Play, cb::ANIMATE) => {
+            return animate(payload).map(|(id, body)| Some((id, Some(body))));
+        }
+        (State::Play, cb::ADD_ENTITY) => {
+            let mut p = decode_play(ids, id, payload)?;
+            if let play::Clientbound::AddEntity(e) = &mut p {
+                let falling_block = ids.entity_type.down(packet_ids_entity::FALLING_BLOCK);
+                if Some(e.kind) == falling_block {
+                    e.data = ids.block_state.up(e.data).unwrap_or(0);
+                }
+                e.kind = ids.entity_type.up(e.kind).unwrap_or(e.kind);
+            }
+            strip_id(p.encode())
+        }
         (State::Play, cb::BLOCK_ENTITY_DATA) => {
             let mut p = decode_play(ids, id, payload)?;
             if let play::Clientbound::BlockEntityData(b) = &mut p {
@@ -107,9 +133,39 @@ pub fn clientbound(
             }
             strip_id(p.encode())
         }
+        (State::Play, cb::UPDATE_ATTRIBUTES) => {
+            let mut p = decode_play(ids, id, payload)?;
+            if let play::Clientbound::UpdateAttributes(a) = &mut p {
+                // An attribute the pinned version lacks can't be: 26.3 only added some.
+                for v in &mut a.values {
+                    v.attribute = ids.attribute.up(v.attribute).unwrap_or(v.attribute);
+                }
+            }
+            strip_id(p.encode())
+        }
+        (
+            State::Play,
+            cb::SET_ENTITY_DATA
+            | cb::CONTAINER_SET_CONTENT
+            | cb::CONTAINER_SET_SLOT
+            | cb::SET_CURSOR_ITEM
+            | cb::SET_PLAYER_INVENTORY
+            | cb::SET_EQUIPMENT
+            | cb::MERCHANT_OFFERS
+            | cb::SOUND
+            | cb::SOUND_ENTITY
+            | cb::RECIPE_BOOK_ADD
+            | cb::PLACE_GHOST_RECIPE,
+        ) => redecode(ids, id, payload)?,
         _ => return Ok(Some((id, None))),
     };
     Ok(Some((id, Some(out))))
+}
+
+/// Pinned entity type ids the translation looks for.
+mod packet_ids_entity {
+    /// `minecraft:falling_block` in 26.3.
+    pub const FALLING_BLOCK: i32 = 52;
 }
 
 /// A serverbound packet with Horizon's `id`, as the older server numbers and lays it out: its id there and
@@ -126,9 +182,9 @@ pub fn serverbound(
             .serverbound_id(state, id)
             .map(|mapped| (mapped, payload)))
     };
-    if session.version.ids().is_none() {
+    let Some(ids) = session.version.ids() else {
         return renumbered(id, payload.to_vec());
-    }
+    };
     use packet_ids::play::serverbound as sb;
     match (state, id) {
         // 26.3 also states where the client was teleported to; 26.2 only the teleport's id.
@@ -158,6 +214,14 @@ pub fn serverbound(
             w.varint(0);
             Ok(Some((V26_2_SWING, w.data)))
         }
+        (State::Play, sb::SET_CREATIVE_MODE_SLOT | sb::CONTAINER_CLICK) => {
+            let p = play::Serverbound::decode(id, payload)?;
+            let payload = {
+                let _down = ids::renumbering(ids, Way::Down);
+                strip_id(p.encode())
+            };
+            renumbered(id, payload)
+        }
         _ => renumbered(id, payload.to_vec()),
     }
 }
@@ -169,6 +233,12 @@ const V26_2_SWING: i32 = 63;
 fn decode_play(ids: &'static Ids, id: i32, payload: &[u8]) -> Result<play::Clientbound> {
     let _up = ids::renumbering(ids, Way::Up);
     play::Clientbound::decode(id, payload)
+}
+
+/// The packet's payload once its registry ids are renumbered by decoding it.
+fn redecode(ids: &'static Ids, id: i32, payload: &[u8]) -> Result<Vec<u8>> {
+    let p = decode_play(ids, id, payload)?;
+    Ok(strip_id(p.encode()))
 }
 
 fn strip_id(body: Vec<u8>) -> Vec<u8> {
@@ -334,6 +404,170 @@ fn renumber_states(ids: &Ids, states: &Paletted, new_bits: u8) -> Paletted {
     Paletted::from_values(&values, Strategy::Blocks, new_bits)
 }
 
+/// 26.2 keeps an advancement's tab position in its display (two floats after the background); 26.3 sends
+/// it after the whole advancement, displayed or not. What follows the added advancements is unchanged.
+fn advancements(ids: &'static Ids, payload: &[u8]) -> Result<Vec<u8>> {
+    let mut r = Reader::new(payload);
+    let mut w = Writer::new();
+    w.bool(r.bool()?);
+    let n = r.count(r.remaining())?;
+    w.varint(n as i32);
+    for _ in 0..n {
+        w.string(&r.string(32767)?);
+        let parent = r.bool()?;
+        w.bool(parent);
+        if parent {
+            w.string(&r.string(32767)?);
+        }
+        let mut position = (0.0, 0.0);
+        let display = r.bool()?;
+        w.bool(display);
+        if display {
+            w.nbt(&r.nbt()?);
+            w.nbt(&r.nbt()?);
+            let icon = {
+                let _up = ids::renumbering(ids, Way::Up);
+                crate::item::Template::read(&mut r)?
+            };
+            crate::item::Template::write(&icon, &mut w);
+            w.varint(r.varint()?);
+            let flags = r.i32()?;
+            w.i32(flags);
+            if flags & 1 != 0 {
+                w.string(&r.string(32767)?);
+            }
+            position = (r.f32()?, r.f32()?);
+        }
+        let groups = r.count(r.remaining())?;
+        w.varint(groups as i32);
+        for _ in 0..groups {
+            let k = r.count(r.remaining())?;
+            w.varint(k as i32);
+            for _ in 0..k {
+                w.string(&r.string(32767)?);
+            }
+        }
+        w.bool(r.bool()?);
+        w.f32(position.0);
+        w.f32(position.1);
+    }
+    w.bytes(r.rest());
+    Ok(w.data)
+}
+
+/// 26.2: flags, position, spread, one max speed, an Int count, then the particle. 26.3 sends the particle
+/// first, a speed per axis, a VarInt count and how the spread is drawn (0, gaussian, as 26.2 did).
+fn particles(ids: &'static Ids, payload: &[u8]) -> Result<Vec<u8>> {
+    let mut r = Reader::new(payload);
+    let override_limiter = r.bool()?;
+    let always_show = r.bool()?;
+    let pos = [r.f64()?, r.f64()?, r.f64()?];
+    let dist = [r.f32()?, r.f32()?, r.f32()?];
+    let speed = r.f32()?;
+    let count = r.i32()?;
+    let particle = {
+        let _up = ids::renumbering(ids, Way::Up);
+        crate::entity_data::Particle::read(&mut r)?
+    };
+    let mut w = Writer::new();
+    play::LevelParticles::write(
+        &play::LevelParticles {
+            particle,
+            override_limiter,
+            always_show,
+            pos,
+            dist,
+            max_speed: [speed; 3],
+            count,
+            randomization: 0,
+        },
+        &mut w,
+    );
+    Ok(w.data)
+}
+
+/// 26.2 sends a move as three Short deltas (1/4096 of a block) then on-ground, and a turn as the two angles
+/// then on-ground; 26.3 packs on-ground with the delta's step count, and sends it before the angles.
+fn move_entity(payload: &[u8], pos: bool, rot: bool) -> Result<Vec<u8>> {
+    let mut r = Reader::new(payload);
+    let id = r.varint()?;
+    let delta = if pos {
+        Some(play::VecDelta::Linear([r.i16()?, r.i16()?, r.i16()?]))
+    } else {
+        None
+    };
+    let rotation = if rot { Some((r.i8()?, r.i8()?)) } else { None };
+    let on_ground = r.bool()?;
+    let m = play::MoveEntity {
+        id,
+        delta,
+        rotation,
+        on_ground,
+    };
+    let mut w = Writer::new();
+    match (pos, rot) {
+        (true, false) => play::MoveEntityPos::write(&play::MoveEntityPos(m), &mut w),
+        (true, true) => play::MoveEntityPosRot::write(&play::MoveEntityPosRot(m), &mut w),
+        _ => play::MoveEntityRot::write(&play::MoveEntityRot(m), &mut w),
+    }
+    Ok(w.data)
+}
+
+/// 26.2: the entity, PositionMoveRotation (position, motion, the two angles), on-ground. 26.3 sends where it
+/// goes as a path, then the angles; the motion is no longer sent.
+fn position_sync(payload: &[u8]) -> Result<Vec<u8>> {
+    let mut r = Reader::new(payload);
+    let id = r.varint()?;
+    let position = [r.f64()?, r.f64()?, r.f64()?];
+    let _motion = [r.f64()?, r.f64()?, r.f64()?];
+    let yaw = r.f32()?;
+    let pitch = r.f32()?;
+    let on_ground = r.bool()?;
+    let mut w = Writer::new();
+    play::EntityPositionSync::write(
+        &play::EntityPositionSync {
+            id,
+            path: play::PositionPath::Linear(position),
+            yaw,
+            pitch,
+            on_ground,
+        },
+        &mut w,
+    );
+    Ok(w.data)
+}
+
+/// 26.2's animate swings hands too (0 main, 3 off), which 26.3 sends as `swing_animation`; the others were
+/// renumbered (wake up 2 -> 0, critical hits 4, 5 -> 1, 2).
+fn animate(payload: &[u8]) -> Result<(i32, Vec<u8>)> {
+    let mut r = Reader::new(payload);
+    let id = r.varint()?;
+    let action = r.u8()?;
+    let mut w = Writer::new();
+    if action == 0 || action == 3 {
+        // A plain swing: SwingAnimationType WHACK over the default 6 ticks.
+        play::SwingAnimation::write(
+            &play::SwingAnimation {
+                id,
+                hand: i32::from(action == 3),
+                kind: 1,
+                duration: 6,
+            },
+            &mut w,
+        );
+        return Ok((packet_ids::play::clientbound::SWING_ANIMATION, w.data));
+    }
+    let action = match action {
+        2 => 0,
+        4 => 1,
+        5 => 2,
+        other => other,
+    };
+    w.varint(id);
+    w.u8(action);
+    Ok((packet_ids::play::clientbound::ANIMATE, w.data))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,6 +588,76 @@ mod tests {
         // oak_slab's first state, 13330 in 26.2, is 15177 in 26.3.
         assert_eq!(new.get(330), 15177);
         assert_eq!(new.get(0), ids.block_state.up(13000).unwrap());
+    }
+
+    #[test]
+    fn a_26_2_move_reads_as_26_3s() {
+        let mut w = Writer::new();
+        w.varint(7);
+        w.i16(4096);
+        w.i16(0);
+        w.i16(-2048);
+        w.bool(true);
+        let body = move_entity(&w.data, true, false).unwrap();
+        let p = play::Clientbound::decode(packet_ids::play::clientbound::MOVE_ENTITY_POS, &body)
+            .unwrap();
+        assert_eq!(
+            p,
+            play::Clientbound::MoveEntityPos(play::MoveEntityPos(play::MoveEntity {
+                id: 7,
+                delta: Some(play::VecDelta::Linear([4096, 0, -2048])),
+                rotation: None,
+                on_ground: true,
+            }))
+        );
+        let mut w = Writer::new();
+        w.varint(7);
+        w.i8(10);
+        w.i8(-20);
+        w.bool(false);
+        let body = move_entity(&w.data, false, true).unwrap();
+        let p = play::Clientbound::decode(packet_ids::play::clientbound::MOVE_ENTITY_ROT, &body)
+            .unwrap();
+        assert_eq!(
+            p,
+            play::Clientbound::MoveEntityRot(play::MoveEntityRot(play::MoveEntity {
+                id: 7,
+                delta: None,
+                rotation: Some((10, -20)),
+                on_ground: false,
+            }))
+        );
+    }
+
+    #[test]
+    fn a_26_2_swing_becomes_a_swing_animation() {
+        let (id, body) = animate(&[5, 3]).unwrap();
+        assert_eq!(id, packet_ids::play::clientbound::SWING_ANIMATION);
+        let p = play::Clientbound::decode(id, &body).unwrap();
+        assert_eq!(
+            p,
+            play::Clientbound::SwingAnimation(play::SwingAnimation {
+                id: 5,
+                hand: 1,
+                kind: 1,
+                duration: 6
+            })
+        );
+        assert_eq!(
+            animate(&[5, 4]).unwrap(),
+            (packet_ids::play::clientbound::ANIMATE, vec![5, 1])
+        );
+    }
+
+    #[test]
+    fn falling_blocks_are_known_in_both_numberings() {
+        let ids = ids();
+        assert_eq!(
+            ids.entity_type
+                .down(packet_ids_entity::FALLING_BLOCK)
+                .and_then(|o| ids.entity_type.up(o)),
+            Some(packet_ids_entity::FALLING_BLOCK)
+        );
     }
 
     #[test]
