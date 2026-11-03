@@ -1305,6 +1305,9 @@ enum Act {
     NativeKey(usize, usize),
     NativeButton(usize, usize),
     OpenModFolder,
+    /// Accessibility's "Accessibility Help" link
+    /// (`AccessibilityOptionsScreen.addFooter`'s openLinkButton).
+    AccessibilityHelp,
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
@@ -1421,6 +1424,9 @@ pub enum Event {
     /// Data Packs' Open Pack Folder: create the folder if needed and open it.
     OpenDataPackFolder(std::path::PathBuf),
     OpenModFolder,
+    /// Accessibility's Help link: confirm and open
+    /// `CommonLinks.ACCESSIBILITY_HELP` over the options screen.
+    AccessibilityHelp,
     /// The Shader Packs page opened: list `shaderpacks/` into `shader_packs`.
     ListShaderPacks,
     /// A shader pack was picked or turned off: save and apply it.
@@ -3345,6 +3351,9 @@ impl OptionsUi {
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
                 let folder = match page {
+                    Page::Accessibility => {
+                        Some(("options.accessibility.link", Act::AccessibilityHelp))
+                    }
                     Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
                     Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
                     Page::ShaderOptions => Some(("controls.reset", Act::ShaderReset)),
@@ -4140,6 +4149,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -5047,6 +5057,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -5276,6 +5287,16 @@ mod tests {
             w.kind,
             WKind::Button {
                 act: Act::Push(Page::Controls),
+                active: true,
+                ..
+            }
+        )));
+        // `AccessibilityOptionsScreen.addFooter`: the "Accessibility Help"
+        // link button sits beside Done.
+        assert!(widgets.iter().any(|w| matches!(
+            w.kind,
+            WKind::Button {
+                act: Act::AccessibilityHelp,
                 active: true,
                 ..
             }

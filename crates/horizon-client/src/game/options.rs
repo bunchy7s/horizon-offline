@@ -11,6 +11,9 @@ use horizon_client::{
 use serde_json::{Value, json};
 use winit::{event::MouseButton, keyboard::KeyCode, window::Fullscreen};
 
+/// `CommonLinks.ACCESSIBILITY_HELP`, the Accessibility page's footer link.
+pub(super) const ACCESSIBILITY_HELP_LINK: &str = "https://aka.ms/MinecraftJavaAccessibility";
+
 pub(super) const CONTROL_HELP: &[&str] = &[
     "options-get [KEY...]           options.txt values by key, with their type, range or choices",
     "options-set KEY VALUE          set an option (enums by name, keys as key.keyboard.w, lists as JSON), apply and save it",
@@ -405,6 +408,11 @@ impl Game<'_> {
                 Event::NativeSettings(i) => self.native_settings_refresh(i),
                 Event::NativeButton(i, b) => self.native_settings_event(i, b),
                 Event::Credits => self.open_win_screen(false, super::win::Finish::Options),
+                // AccessibilityOptionsScreen's link button: ConfirmLinkScreen
+                // back to the options screen.
+                Event::AccessibilityHelp => {
+                    self.confirm_trusted_link(ACCESSIBILITY_HELP_LINK, Screen::Options)
+                }
                 Event::Narrator => self.narrator_status_changed(),
             }
         }
