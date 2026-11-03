@@ -14323,6 +14323,13 @@ impl Game<'_> {
                 return;
             }
         }
+        // LivingEntity.startSleeping: the shape the bed gives the player to
+        // lie on (`getSleepHeight`). A straw bed's head answers with its
+        // foot's shape, and with no foot of its own there is none, so the
+        // player stays up as `startSleeping` returning false leaves them.
+        let Some(at) = self.sleeping_position(head) else {
+            return;
+        };
         self.stop_mining();
         self.left = false;
         self.right = false;
@@ -14331,11 +14338,6 @@ impl Game<'_> {
         self.sleep_timer = 0;
         // LivingEntity.startSleeping and ServerPlayer.startSleeping: setPosToBed
         // and connection.teleport.
-        let at = Vec3::new(
-            f64::from(head[0]) + 0.5,
-            f64::from(head[1]) + 0.5625 + 0.125,
-            f64::from(head[2]) + 0.5,
-        );
         if let Some(p) = self.player.as_mut() {
             p.position = at;
             p.velocity = Vec3::ZERO;
@@ -14401,13 +14403,12 @@ impl Game<'_> {
                 self.wake_up();
                 return;
             }
-            if let Some(p) = self.player.as_mut() {
-                p.position = Vec3::new(
-                    f64::from(head[0]) + 0.5,
-                    // setPosToBed: the bed's top (getSleepHeight) and 0.125 above it.
-                    f64::from(head[1]) + 0.5625 + 0.125,
-                    f64::from(head[2]) + 0.5,
-                );
+            // setPosToBed: the bed's top (`getSleepHeight`) and 0.125 above
+            // it. A sleeper whose bed no longer gives a shape to lie on stays
+            // where it is: vanilla only ever places a sleeper when it starts.
+            let at = self.sleeping_position(head);
+            if let (Some(p), Some(at)) = (self.player.as_mut(), at) {
+                p.position = at;
                 p.velocity = Vec3::ZERO;
                 p.pitch = 0.0;
             }
