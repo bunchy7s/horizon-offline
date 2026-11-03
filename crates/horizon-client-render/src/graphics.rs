@@ -245,7 +245,8 @@ impl GraphicsApi {
 /// What the frame limiter does in the last half millisecond before a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Pacing {
-    /// Sleep the whole wait: no CPU spent spinning, a little less precise.
+    /// Sleep the whole wait: no CPU spent spinning, a little less precise; frames
+    /// keep to a fixed grid of slots, so late wake-ups don't lower the frame rate.
     #[default]
     Efficient,
     /// Vanilla's `FramerateLimiter`: sleep, then spin until the deadline.
@@ -1230,10 +1231,12 @@ mod tests {
             assert_eq!(g.lod_distance_on(&discrete), distance);
         }
         assert!(
-            crate::graphics_ui::rows(crate::graphics_ui::Level::Simple)
-                .iter()
-                .any(|row| matches!(row, crate::graphics_ui::Row::Setting(s)
-                    if s.text.contains(&format!("{INTEGRATED_LOD_DISTANCE} chunks")))),
+            crate::graphics_ui::rows()
+                .into_iter()
+                .flat_map(|(_, groups)| groups.into_iter().flat_map(|(_, rows)| rows))
+                .any(|r| r
+                    .text
+                    .contains(&format!("{INTEGRATED_LOD_DISTANCE} chunks"))),
             "the LOD Distance description names the cap"
         );
     }
