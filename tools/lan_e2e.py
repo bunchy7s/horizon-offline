@@ -9541,11 +9541,13 @@ def check_leash_reload(host, guest, out):
     def cow(game):
         found = [m for m in game.raw('mobs', 32).get('near', []) if m['kind'] == 'minecraft:cow'
                  and abs(m['pos'][0] - at[0]) < 1.5 and abs(m['pos'][2] - at[2]) < 1.5]
-        assert found, f'{game.name} sees no cow at {at}'
+        assert len(found) == 1, f'{game.name} sees {len(found)} cows at {at}: {found}'
         return found[0]
 
     def nbt_ints(reply):
-        return ','.join(re.findall(r'-?\d+', reply.partition('[I;')[2].partition(']')[0]))
+        values = re.findall(r'-?\d+', reply.partition('[I;')[2].partition(']')[0])
+        assert len(values) == 4, f'not a UUID int array: {reply}'
+        return ','.join(values)
 
     def player_uuid():
         return nbt_ints(server_reply(host, 'data get entity @s UUID', '[I;'))
@@ -9563,7 +9565,8 @@ def check_leash_reload(host, guest, out):
     host('command', command=f'tp @s {x + 0.5} {y} {z + 0.5}')
     host('command', command='gamemode survival')
     host('command', command='clear @s')
-    host('command', command=f'summon minecraft:cow {at[0]} {y} {at[2]} {{NoAI:1b,Tags:["{tag}"]}}')
+    host('command', command=f'summon minecraft:cow {at[0]} {y} {at[2]} '
+         f'{{NoAI:1b,Tags:["{tag}"],UUID:[I;{offline_uuid_ints(tag)}]}}')
     host('command', command='item replace entity @s weapon.mainhand with minecraft:lead')
     host.wait(30)
     try:
@@ -9581,7 +9584,6 @@ def check_leash_reload(host, guest, out):
             'nbt_holder': cow_leash_uuid(),
         }
         assert tied_before['own'] == 'Player' and tied_before['other'], f'cow not tied before save: {tied_before}'
-        assert tied_before['nbt_holder'] == owner_uuid, f'wrong leash holder UUID before save: {tied_before}'
         host.shot(out, 'leash-reload-before')
 
         save_and_reopen(host, guest)
@@ -9607,12 +9609,19 @@ def check_leash_reload(host, guest, out):
         assert tied_reopened['own'] == 'Player' and tied_reopened['other'], (
             f'cow lost player leash after reopen: {tied_reopened}'
         )
-        assert tied_reopened['nbt_holder'] == owner_uuid, (
-            f'cow leash holder UUID changed after reopen: {tied_reopened}'
-        )
         host.shot(out, 'leash-reload-reopened')
 
+        # A closer player with an empty hand must not become the holder or untie it.
+        guest('command', command='clear @s')
+        guest('command', command=f'tp @s {at[0] + 1.0} {y} {at[2]}')
+        guest.raw('look-at', f'{at[0]:.2f}', f'{y + 0.7:.2f}', f'{at[2]:.2f}')
+        guest.raw('mouse', 'right', 'click')
+        host.wait(20)
+        bystander = {'own': cow(host)['leash'], 'other': cow(guest)['leash']}
+
         # Right-clicking with an empty hand after reopening must untie the cow (#6876).
+        hand = host('state').get('held') or {}
+        assert hand.get('item') in (None, 'minecraft:air'), f'hand not empty after reopen: {hand}'
         host.raw('look-at', f'{at[0]:.2f}', f'{y + 0.7:.2f}', f'{at[2]:.2f}')
         host.raw('mouse', 'right', 'click')
         host.wait(20)
@@ -9620,7 +9629,20 @@ def check_leash_reload(host, guest, out):
         assert untied_cow['health'] > 0, f'cow died when untied: {untied_cow}'
         assert cow_uuid() == before_cow_uuid, 'cow persistent UUID changed after untying'
         untied = {'own': untied_cow['leash'], 'other': cow(guest)['leash']}
+        # Keep every stage even when the regression fails, and attempt the actual
+        # post-reopen interaction before checking the serialized holder UUID.
+        evidence = {'player_uuid': before_player_uuid, 'cow_uuid': before_cow_uuid,
+                    'before': tied_before, 'reopened': tied_reopened,
+                    'bystander': bystander, 'untied': untied}
+        (out / 'leash-reload.json').write_text(json.dumps(evidence, indent=2) + '\n')
         assert untied == {'own': None, 'other': None}, f'cow still leashed after right-click on reopen: {untied}'
+        assert bystander['own'] == 'Player' and bystander['other'].startswith('Mob('), (
+            f'closer bystander took or removed the leash: {bystander}'
+        )
+        assert tied_before['nbt_holder'] == owner_uuid, f'wrong leash holder UUID before save: {tied_before}'
+        assert tied_reopened['nbt_holder'] == owner_uuid, (
+            f'cow leash holder UUID changed after reopen: {tied_reopened}'
+        )
         host.shot(out, 'leash-reload-untied')
     finally:
         host('command', command=f'kill @e[tag={tag}]')
@@ -9631,6 +9653,7 @@ def check_leash_reload(host, guest, out):
         'cow_uuid': before_cow_uuid,
         'before': tied_before,
         'reopened': tied_reopened,
+        'bystander': bystander,
         'untied': untied,
     }
 
