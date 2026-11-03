@@ -1224,6 +1224,25 @@ impl LevelAccess for GameLevel<'_> {
         }
         !cancel
     }
+    fn note_block_change(
+        &self,
+        pos: BlockPos,
+        instrument: &str,
+        old: i32,
+        mut new: i32,
+    ) -> Option<i32> {
+        let mut cancel = false;
+        if self.native_authoritative {
+            let context = horizon_client::mod_api::NativeNoteBlockChange {
+                dimension: self.dimension,
+                pos,
+                instrument,
+                old_note: old,
+            };
+            self.native_note_block_change(&context, &mut new, &mut cancel);
+        }
+        (!cancel).then_some(new)
+    }
     fn allow_note_play(&self, pos: BlockPos, instrument: &str, note: i32) -> bool {
         let mut cancel = false;
         if self.native_authoritative {
