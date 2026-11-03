@@ -23,6 +23,16 @@ fn slot_in_group(group: &str, slot: &str) -> bool {
         || (group == "armor" && matches!(slot, "feet" | "legs" | "chest" | "head" | "body"))
 }
 
+fn generic_attributes_into(
+    map: &horizon_world::attributes::entity::EntityAttributes,
+    out: &mut Vec<AttributeSnapshot>,
+) {
+    for s in generic_syncable(map) {
+        let (attribute, base) = (s.attribute, s.base);
+        *instance(out, attribute, base) = s;
+    }
+}
+
 impl Game<'_> {
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)` of a mob: its own value plus
     /// the modifiers of the items it wears or holds in matching slots.
@@ -53,6 +63,33 @@ impl Game<'_> {
             }
         }
         finalize::value_with(m, Attr::KnockbackResistance, &extra)
+    }
+
+    /// Each mob's `gear_knockback_resistance`, for the pushes that read the
+    /// mob (`Mob::knockback`, Punch, the mace's smash): worked out for the
+    /// mobs that wear or hold something, since the mob does not know items.
+    pub(super) fn refresh_gear_knockback_resistance(&mut self) {
+        let values: Vec<Option<f64>> = self
+            .mobs
+            .iter()
+            .map(|m| {
+                let e = &m.extra;
+                [
+                    &e.main_hand,
+                    &e.off_hand,
+                    &e.feet,
+                    &e.legs,
+                    &e.chest,
+                    &e.head,
+                ]
+                .iter()
+                .any(|s| s.is_some())
+                .then(|| self.mob_knockback_resistance(m))
+            })
+            .collect();
+        for (m, value) in self.mobs.iter_mut().zip(values) {
+            m.gear_knockback_resistance = value;
+        }
     }
 
     /// The registry id of a client-syncable attribute the entity type has
@@ -238,6 +275,9 @@ impl Game<'_> {
             out,
         );
         self.generic_attributes_of(Target::Mob(m.id), out);
+        if let Some(map) = m.extra.armor_attributes.as_deref() {
+            generic_attributes_into(map, out);
+        }
     }
 
     /// An armor stand's synced instances: movement speed (its first
@@ -310,12 +350,8 @@ impl Game<'_> {
     /// The instances `/attribute` created in an entity's generic map
     /// replace the ones derived from its state.
     fn generic_attributes_of(&self, t: Target, out: &mut Vec<AttributeSnapshot>) {
-        let Some(map) = self.cmds.attributes.get(&t) else {
-            return;
-        };
-        for s in generic_syncable(map) {
-            let (attribute, base) = (s.attribute, s.base);
-            *instance(out, attribute, base) = s;
+        if let Some(map) = self.cmds.attributes.get(&t) {
+            generic_attributes_into(map, out);
         }
     }
 }
