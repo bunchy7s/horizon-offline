@@ -402,9 +402,16 @@ fn split_url(url: &str) -> Option<(String, u16, String)> {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
-    let (host, port) = match hostport.rsplit_once(':') {
-        Some((h, p)) if !h.contains(']') || h.ends_with(']') => (h, p.parse().ok()?),
-        _ => (hostport, 80),
+    // `[v6]` or `[v6]:port`: the colons inside the brackets are not a port's.
+    let (host, port) = match hostport.rfind(']') {
+        Some(i) => match &hostport[i + 1..] {
+            "" => (&hostport[..=i], 80),
+            p => (&hostport[..=i], p.strip_prefix(':')?.parse().ok()?),
+        },
+        None => match hostport.rsplit_once(':') {
+            Some((h, p)) => (h, p.parse().ok()?),
+            None => (hostport, 80),
+        },
     };
     Some((
         host.trim_matches(|c| c == '[' || c == ']').to_owned(),
@@ -951,6 +958,14 @@ mod tests {
         assert_eq!(
             split_url("http://192.168.1.1:5000/a/b"),
             Some(("192.168.1.1".into(), 5000, "/a/b".into()))
+        );
+        assert_eq!(
+            split_url("http://[fe80::1]/rootDesc.xml"),
+            Some(("fe80::1".into(), 80, "/rootDesc.xml".into()))
+        );
+        assert_eq!(
+            split_url("http://[fe80::1]:5000/x"),
+            Some(("fe80::1".into(), 5000, "/x".into()))
         );
         assert_eq!(
             split_url("http://router/"),

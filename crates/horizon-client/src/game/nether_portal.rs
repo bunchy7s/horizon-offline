@@ -690,15 +690,14 @@ impl Game<'_> {
             },
         );
     }
-    /// `canUsePortal(false)` of a mob: alive, riding nothing, not asleep,
-    /// not carrying the player, and not a boss that never travels.
+    /// `canUsePortal(false)` of a mob: what the mob itself decides
+    /// (`mobs::mob_can_use_portal`), riding nothing, not asleep, and not
+    /// carrying the players this side does.
     pub(super) fn mob_can_use_portal(&self, m: &horizon_client::mobs::Mob) -> bool {
-        use horizon_client::mobs::Species;
-        m.alive()
+        horizon_client::mobs::mob_can_use_portal(m)
             && m.extra.mount.is_none()
             && self.riding != Some(m.id)
             && (!self.guest_rides(m.id) || self.carries_riders())
-            && m.species() != Species::Wither
     }
     /// `Entity.canUsePortal(false)` for a primed TNT: it carries no mob.
     pub(super) fn tnt_can_use_portal(&self, id: u32) -> bool {
