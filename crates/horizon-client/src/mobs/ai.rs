@@ -1395,6 +1395,8 @@ fn ai_step(m: &mut Mob, w: &MobWorld, level_random: &mut LegacyRandom, events: &
         // Mannequin.isEffectiveAi: an immovable one never travels.
         m.travel(w, input, events);
     }
+    // LivingEntity.aiStep: applyEffectsFromBlocks follows travel.
+    m.apply_effects_from_blocks(w, events);
     push_entities(m, w, events);
     // Spider.tick: climbing while pressed against a wall.
     if m.kind.flags.climber {
