@@ -216,7 +216,9 @@ mod native_inventories;
 mod native_item_container;
 mod native_item_energy;
 mod native_item_fluids;
+mod native_level_refs;
 mod native_lifecycle;
+mod native_living_refs;
 mod native_menus;
 mod native_mob_draw;
 mod native_mobs;
@@ -3907,7 +3909,7 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             age: 0,
-            pickup_delay,
+            pickup_delay: i64::from(pickup_delay),
             bob_offset: bob,
             ticks: 0,
             needs_sync: false,
