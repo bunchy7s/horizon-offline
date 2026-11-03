@@ -5,7 +5,9 @@
 //! lines (`ServerDebug`); on another server they show what vanilla shows
 //! there, nothing or `??`.
 use super::Game;
-use horizon_client::{debug_entries::ENTRIES, debug_overlay as overlay, debug_overlay::Displayer};
+use horizon_client::{
+    debug_entries::ENTRIES, debug_overlay as overlay, debug_overlay::Displayer, java_text,
+};
 use horizon_world::{
     heightmap::{HeightmapState, HeightmapType},
     worldgen::terrain::TerrainBlockStates,
@@ -125,7 +127,10 @@ impl Game<'_> {
                         let speed = self.known_player_movement();
                         d.group(
                             "position",
-                            [format!("Speed: {:.3} blocks/tick", speed.length())],
+                            [format!(
+                                "Speed: {} blocks/tick",
+                                java_text::format_fixed(speed.length(), 3)
+                            )],
                         );
                     }
                 }
