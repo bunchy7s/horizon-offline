@@ -942,6 +942,7 @@ impl Game<'_> {
         // With guests on, each mob sees its nearest player (game/lan_mobs.rs).
         let guests = self.lan_guest_views();
         let players = self.level_players();
+        let nearest = super::natural_spawning::NearestPlayers::new(&players);
         let mut bindings = match self.lan.as_mut() {
             Some(host) if !guests.is_empty() => std::mem::take(&mut host.mob_players),
             _ => Default::default(),
@@ -1001,13 +1002,9 @@ impl Game<'_> {
                 // getCurrentDifficultyAt(blockPosition()): the mob's own chunk,
                 // not the local player's (a server thread has no player).
                 w.difficulty = self.local_difficulty([m.position.x, m.position.y, m.position.z]);
-                w.nearest_player = super::natural_spawning::nearest_player(
-                    &players,
-                    m.position.x,
-                    m.position.y,
-                    m.position.z,
-                )
-                .map(|p| p.position);
+                w.nearest_player = nearest
+                    .nearest(m.position.x, m.position.y, m.position.z)
+                    .map(|p| p.position);
                 let seen_guest = if guests.is_empty() {
                     None
                 } else {
@@ -1798,8 +1795,11 @@ impl Game<'_> {
             let v = p.velocity;
             self.particles.llama_spit_burst(at, [v.x, v.y, v.z]);
         }
+        let arrow = p.arrow.is_some();
         self.add_projectile(p);
-        self.projectile_event("minecraft:projectile_shoot", owner, at);
+        if arrow {
+            self.projectile_event("minecraft:projectile_shoot", owner, at);
+        }
     }
     pub(super) fn handle_mob_events(&mut self, events: Vec<MobEvent>) -> Result<()> {
         for e in events {
@@ -3648,6 +3648,7 @@ impl Game<'_> {
         let mut hits = Vec::new();
         let mut deflections: Vec<[f64; 3]> = Vec::new();
         let mut arrow_events = Vec::new();
+        let mut shoot_events = Vec::new();
         let mut trails = Vec::new();
         let mut bubble_tops = Vec::new();
         let mut keep_flags = vec![true; projectiles.len()];
@@ -3801,6 +3802,9 @@ impl Game<'_> {
                 if shooter.is_some() {
                     p.owner = Some(Who::Player);
                 }
+                if let Some(at) = p.take_shoot_event() {
+                    shoot_events.push((p.owner, p.guest, [at.x, at.y, at.z]));
+                }
                 // AbstractHurtingProjectile.tick ends with createParticleTrail.
                 if super::remote_projectiles::has_smoke_trail(&p.kind) {
                     trails.push(p.position);
@@ -3900,6 +3904,26 @@ impl Game<'_> {
                 &mut hits,
                 &mut arrow_events,
             );
+        }
+        for (owner, guest, at) in shoot_events {
+            if let Some(conn) = guest.filter(|conn| self.lan_acting != Some(*conn)) {
+                let dispatched = if let Some(mut host) = self.lan.take() {
+                    let result = self.as_guest(&mut host, conn, |g| {
+                        g.projectile_event("minecraft:projectile_shoot", owner, at);
+                    });
+                    self.lan = Some(host);
+                    result.is_some()
+                } else {
+                    false
+                };
+                // An owner who left cannot resolve to the host. The event
+                // still occurs, with no resolved owner (Projectile.getOwner).
+                if !dispatched {
+                    self.projectile_event("minecraft:projectile_shoot", None, at);
+                }
+            } else {
+                self.projectile_event("minecraft:projectile_shoot", owner, at);
+            }
         }
         self.smoke_trails(trails);
         for pos in bubble_tops {
@@ -6156,7 +6180,6 @@ impl Game<'_> {
             on_ground,
         );
         self.add_projectile(proj);
-        self.player_projectile_shot();
         // ItemStack.use's applyAfterUseComponentSideEffects: the pearl's
         // second is the `use_cooldown` component, as for any thrown item.
         self.apply_use_cooldown(stack);
@@ -6478,13 +6501,34 @@ impl Game<'_> {
             }));
         }
         let len = out.len();
-        self.cull_entity_vertices(out, entity_start);
+        let hidden = self.cull_entity_vertices(out, entity_start);
         if out.len() < len {
             if let Some((mark, _)) = skinned {
                 self.skin_frame.borrow_mut().truncate(mark);
             }
         } else if corners.is_some() {
+            if let Some((mark, _)) = skinned {
+                // Previous GPU-only entities can leave zero-length CPU spans at
+                // this same offset. Use this query's result, not their metadata.
+                if hidden {
+                    let mut skin = self.skin_frame.borrow_mut();
+                    let end = skin.vertices as usize;
+                    horizon_client::gfx::pack_draw::EntitySpan::hide(
+                        &mut skin.spans,
+                        mark.2 as usize,
+                        end,
+                    );
+                }
+            }
             out.truncate(len - 2);
+            // The temporary bounds are not real geometry. Keep the culling end marker
+            // at the true CPU end before the next entity appends a span there.
+            for span in self.entity_spans.borrow_mut().iter_mut().rev() {
+                if span.start as usize <= out.len() {
+                    break;
+                }
+                span.start = out.len() as u32;
+            }
         }
     }
 

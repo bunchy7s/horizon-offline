@@ -873,7 +873,9 @@ mod tests {
 
     /// The same, under the id a server tracks it by.
     fn tracked(kind: ProjectileKind, id: u32) -> Projectile {
-        Projectile { id, ..thrown(kind) }
+        let mut p = thrown(kind);
+        p.id = id;
+        p
     }
 
     #[test]
