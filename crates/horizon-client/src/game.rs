@@ -5142,7 +5142,7 @@ impl Game<'_> {
                         };
                         if matches!(
                             id,
-                            1019 | 1021 | 1029 | 1030 | 1045 | 1052 | 1053 | 1054 | 1503
+                            1019 | 1021 | 1029 | 1030 | 1045 | 1052 | 1053 | 1054 | 1501 | 1503
                         ) {
                             // Clients play these sounds from their level events;
                             // capturing it also sends a duplicate sound packet.

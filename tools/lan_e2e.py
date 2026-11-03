@@ -163,8 +163,9 @@ address. The script then checks, from both sides, what a guest's game used to ge
 - thrown:    a splash potion and an eye of ender the host and the guest each throw fly on both
              sides (#1363, #1391);
 - sparks:    level events' particles on both sides: the host's and the guest's bone meal on wheat
-             (growth sparks), honeycomb on copper and an axe taking the wax off, and a spawner's
-             burst when it spawns (#1395, #1401, #1402);
+             (growth sparks), honeycomb on copper and an axe taking the wax off, a water bucket
+             poured beside lava (its smoke, and its hiss heard once on each side), and a spawner's
+             burst when it spawns (#1395, #1401, #1402, #7537);
 - fireball:  a fire charge a dispenser shoots onto stone lights a fire both sides see, and the fire
              goes out on its own within a minute (it ticks: FireBlock.tick on a floor that doesn't burn)
 
@@ -4697,8 +4698,21 @@ def check_sparks(host, guest, out):
             result[f'{label} wax off'] = sparked(player, other, ['wax_off'], lambda: click(0.5))
             block = player.raw('block', *at).get('block', '')
             result[f'{label} copper'] = block
+            player('command', command=f'fill {at[0]} {at[1] - 1} {at[2]} {at[0] + 1} {at[1] - 1} {at[2]} minecraft:stone')
+            player('command', command=f'fill {at[0]} {at[1]} {at[2]} {at[0] + 1} {at[1]} {at[2]} minecraft:lava')
+            player('command', command='item replace entity @s weapon.mainhand with minecraft:water_bucket')
+            player.wait(10)
+            hiss = 'minecraft:block.lava.extinguish'
+            hissed = {side: heard(g, hiss) for side, g in (('own', player), ('other', other))}
+            result[f'{label} lava'] = sparked(player, other, ['large_smoke'], lambda: click(0.1))
+            player.wait(10)
+            result[f'{label} hiss'] = {side: heard(g, hiss) - hissed[side]
+                                       for side, g in (('own', player), ('other', other))}
+            result[f'{label} obsidian'] = player.raw('block', at[0] + 1, at[1], at[2]).get('block', '')
         finally:
-            player('command', command=f'fill {at[0]} {at[1] - 1} {at[2]} {at[0]} {at[1]} {at[2]} minecraft:air')
+            player('command', command=f'fill {at[0] - 4} {at[1] - 3} {at[2] - 4} {at[0] + 5} {at[1] + 1} {at[2] + 4} '
+                                      'minecraft:air replace minecraft:water')
+            player('command', command=f'fill {at[0]} {at[1] - 1} {at[2]} {at[0] + 1} {at[1]} {at[2]} minecraft:air')
             player('command', command=f'setblock {at[0]} {at[1] - 1} {at[2]} minecraft:stone')
             player('command', command='clear @s')
     # A spawner beside the host, at night: its burst when the zombie comes.
@@ -4714,6 +4728,10 @@ def check_sparks(host, guest, out):
         host('command', command='time set day')
     wrong = {k: v for k, v in result.items() if isinstance(v, dict) and not all(n > 0 for n in v.values())}
     assert not wrong, f'no particles: {wrong}\n{result}'
+    hisses = {k: v for k, v in result.items() if k.endswith(' hiss') and set(v.values()) != {1}}
+    assert not hisses, f'the lava fizz is heard once on each side: {hisses}\n{result}'
+    obsidian = {k: v for k, v in result.items() if k.endswith(' obsidian') and v != 'minecraft:obsidian'}
+    assert not obsidian, f'the water turns the lava beside it to obsidian: {obsidian}\n{result}'
     return result
 
 
