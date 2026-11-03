@@ -292,6 +292,10 @@ impl BlockEntities {
             .filter(move |((cx, cz), _)| !far(*cx, x) && !far(*cz, z))
             .flat_map(|(_, set)| set)
     }
+    /// `LevelChunk.getBlockEntity`: the block entity at `pos`, if any.
+    pub fn get(&self, pos: &Pos) -> Option<&BlockEntity> {
+        self.map.get(pos)
+    }
     pub fn get_mut(&mut self, pos: &Pos) -> Option<&mut BlockEntity> {
         self.map.get_mut(pos)
     }

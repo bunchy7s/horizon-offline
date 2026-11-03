@@ -1,0 +1,17 @@
+{
+  "hooks": [
+    {
+      "name": "living_death",
+      "target": "horizon_client::game::native_hooks::Game<'_>::native_living_death",
+      "neoforge": "LivingDeathEvent",
+      "side": "server",
+      "cancellable": true,
+      "mod_api": {
+        "contract": "cancel",
+        "out": "cancel"
+      }
+    }
+  ],
+  "rust_summary": "a living entity about to die, cancellable (`native_living_death`).",
+  "doc_summary": "a living entity about to die, as NeoForge's `LivingDeathEvent`: `native_living_death(entity, kind, damage_type, attacker, cancel)` runs on the server when a mob's or a server player's health has run out, before the death runs (loot, experience, death message). Cancelling keeps the entity alive at 1 health. Bundles need \"hooks\": @API:living_death@."
+}

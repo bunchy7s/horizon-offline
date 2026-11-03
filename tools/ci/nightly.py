@@ -208,11 +208,11 @@ def build_set(main: Ref, prs: list[dict], left_out: list[str], today: str, force
 
 def green_base(repo: str, issue: str) -> Ref:
     """The main commit a nightly builds on: NIGHTLY_BASE, else main's newest commit where checks and parity-main
-    passed (what releases ship), so a merge that breaks main holds nightlies too."""
+    passed (what releases ship), so a merge that breaks main never reaches a nightly: it builds on the commit before."""
     sha = os.environ.get("NIGHTLY_BASE", "").strip() or train.green_main_head(parity=True)
     if not sha:
-        stop(repo, issue, "the build stopped: main's newest checks or parity-main run did not pass, so no commit of "
-                          "main is green to build on. The next build after they pass takes it.")
+        stop(repo, issue, "the build stopped: no recent commit of main passed both checks and parity-main, so "
+                          "none is green to build on. The next build after they pass takes it.")
     if not is_ancestor(sha, "refs/remotes/origin/main"):
         stop(repo, issue, f"the build stopped: {sha[:9]} is not on main.")
     sha = git("rev-parse", sha)

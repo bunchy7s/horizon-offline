@@ -411,7 +411,7 @@ struct Targets {
     color: [Option<[wgpu::TextureView; 2]>; BUFFERS],
     depth: wgpu::TextureView,
     depth_texture: wgpu::Texture,
-    /// `depthtex1`, when a program after translucent terrain reads it.
+    /// Pre-translucent depth for `depthtex1`, also serving `depthtex2` without a shader hand.
     depth1: Option<(wgpu::Texture, wgpu::TextureView)>,
     /// `depthtex2`, when a program after the hand reads it without the hand.
     depth2: Option<(wgpu::Texture, wgpu::TextureView)>,
@@ -444,6 +444,13 @@ pub(super) struct World<'a> {
     pub weather: bool,
     /// The game can hand its first-person hand to the pack.
     pub hand: bool,
+}
+
+/// This frame's block outline, when the pack draws it: the outline buffer (one instance per
+/// edge, pack_lines.rs) and the edges in it.
+pub(super) struct Lines {
+    pub edges: wgpu::Buffer,
+    pub count: u32,
 }
 
 /// This frame's clouds, when the pack draws them: their vertices, uniform, quad indices and
@@ -503,6 +510,9 @@ pub struct PackPost {
     entities: Option<Entities>,
     /// What draws the clouds, after entities, and this frame's clouds.
     clouds: Option<Pass>,
+    /// What draws the block outline (`gbuffers_line`, else `gbuffers_basic`), and this frame's.
+    lines: Option<Pass>,
+    line_draw: Option<Lines>,
     cloud_draw: Option<Clouds>,
     /// The pack has `gbuffers_clouds`, even one that writes nothing (a pack drawing its own
     /// clouds discards vanilla's), or `clouds=off`: the game's clouds are not drawn.
@@ -521,7 +531,7 @@ pub struct PackPost {
     /// What draws the first-person hand (`gbuffers_hand` or its fallback), after the opaque
     /// world, and its vertices.
     hand: Option<(Pass, super::pack_hand::PackHand)>,
-    /// A program after translucent terrain reads `depthtex1`: it is copied before water.
+    /// The pre-translucent copy: `depthtex1`, or `depthtex2` without a shader hand.
     depth1: bool,
     /// A program after the hand reads `depthtex2`: it is copied before the hand.
     depth2: bool,
@@ -2098,6 +2108,16 @@ impl PackPost {
             .clouds
             .zip(cloud_geometry.as_ref())
             .and_then(|(p, g)| build(p, Some(g)));
+        let line_buffers = [Some(super::pack_lines::layout())];
+        let line_geometry = Geometry {
+            buffers: &line_buffers,
+            table: None,
+            depth_write: false,
+            atlas: None,
+            ids: None,
+            cull: false,
+        };
+        let lines = post.lines.and_then(|p| build(p, Some(&line_geometry)));
         // Developers' aid: `HORIZON_SHADER_PACK_SKIP=composite,final` leaves programs out.
         let skip = std::env::var("HORIZON_SHADER_PACK_SKIP").unwrap_or_default();
         let passes: Vec<Pass> = post
@@ -2146,6 +2166,9 @@ impl PackPost {
             "translucent entities",
             "particles",
         ];
+        if let Some(l) = &lines {
+            notes.push(format!("the block outline draws with {}", l.name));
+        }
         if let Some(c) = &clouds {
             notes.push(format!("clouds draw with {}", c.name));
         }
@@ -2176,20 +2199,20 @@ impl PackPost {
                 }
             }
         }
+        let reads_depth = |source| {
+            passes
+                .iter()
+                .filter(|p| matches!(p.group, Group::Deferred | Group::Composite | Group::Final))
+                .chain(&water)
+                .chain(weather.iter().take(1).flatten())
+                .flat_map(|p| std::iter::once(p).chain(&p.compute))
+                .any(|p| p.samplers.iter().any(|s| s.source == source))
+        };
+        let reads_depth2 = reads_depth(Source::Depth2);
+        // Without a shader hand, depth1 also serves depth2: both exclude only translucency.
         let depth1 = (water.is_some() || hand.is_some())
-            && passes
-                .iter()
-                .filter(|p| matches!(p.group, Group::Composite | Group::Final))
-                .chain(&water)
-                .chain(weather.iter().take(1).flatten())
-                .any(|p| p.samplers.iter().any(|s| s.source == Source::Depth1));
-        let depth2 = hand.is_some()
-            && passes
-                .iter()
-                .filter(|p| matches!(p.group, Group::Composite | Group::Final))
-                .chain(&water)
-                .chain(weather.iter().take(1).flatten())
-                .any(|p| p.samplers.iter().any(|s| s.source == Source::Depth2));
+            && (reads_depth(Source::Depth1) || (hand.is_none() && reads_depth2));
+        let depth2 = hand.is_some() && reads_depth2;
         let every_pass = || {
             (passes
                 .iter()
@@ -2201,6 +2224,7 @@ impl PackPost {
             .chain(entities.iter().flat_map(|e| e.passes.iter().flatten()))
             .chain(entities.iter().flat_map(|e| e.shadow.iter().flatten()))
             .chain(&clouds)
+            .chain(&lines)
             .chain(weather.iter().flatten())
             .chain(hand.iter().map(|h| &h.0))
         };
@@ -2240,6 +2264,7 @@ impl PackPost {
                 .chain(&terrain)
                 .chain(entities.iter().flat_map(|e| e.passes.iter().flatten()))
                 .chain(&clouds)
+                .chain(&lines)
                 .chain(&water)
                 .chain(weather.iter().take(1).flatten())
                 .chain(hand.iter().map(|h| &h.0))
@@ -2256,13 +2281,17 @@ impl PackPost {
             || sky.is_some()
             || entities.as_ref().is_some_and(Entities::drawn)
             || clouds.is_some()
+            || lines.is_some()
             || weather.is_some()
             || hand.is_some()
-            || passes.iter().any(|p| {
-                p.samplers
-                    .iter()
-                    .any(|s| matches!(s.source, Source::Depth | Source::Depth1 | Source::Depth2))
-            });
+            || passes
+                .iter()
+                .flat_map(|p| std::iter::once(p).chain(&p.compute))
+                .any(|p| {
+                    p.samplers.iter().any(|s| {
+                        matches!(s.source, Source::Depth | Source::Depth1 | Source::Depth2)
+                    })
+                });
         // Buffers of a size of their own clear apart from the blit, which writes colortex0.
         let (mut cleared, mut other_clears): (Vec<usize>, Vec<usize>) =
             cleared.into_iter().partition(|&b| sizes[b].is_none());
@@ -2376,6 +2405,8 @@ impl PackPost {
             entities,
             clouds,
             cloud_draw: None,
+            lines,
+            line_draw: None,
             hides_clouds,
             hides_sky,
             hides_celestial,
@@ -2634,7 +2665,10 @@ impl PackPost {
                         Some(d)
                             if matches!(
                                 pass.group,
-                                Group::Composite | Group::Final | Group::Translucent
+                                Group::Deferred
+                                    | Group::Composite
+                                    | Group::Final
+                                    | Group::Translucent
                             ) =>
                         {
                             &d.1
@@ -2645,7 +2679,10 @@ impl PackPost {
                         Some(d)
                             if matches!(
                                 pass.group,
-                                Group::Composite | Group::Final | Group::Translucent
+                                Group::Deferred
+                                    | Group::Composite
+                                    | Group::Final
+                                    | Group::Translucent
                             ) =>
                         {
                             &d.1
@@ -2654,7 +2691,10 @@ impl PackPost {
                             Some(d)
                                 if matches!(
                                     pass.group,
-                                    Group::Composite | Group::Final | Group::Translucent
+                                    Group::Deferred
+                                        | Group::Composite
+                                        | Group::Final
+                                        | Group::Translucent
                                 ) =>
                             {
                                 &d.1
@@ -3057,6 +3097,7 @@ impl PackPost {
         spans: &[super::pack_draw::EntitySpan],
         crumbling: [f32; 4],
         rest: &mut Vec<super::Vertex>,
+        skin: Option<&super::entity_skin::SkinFrame>,
     ) {
         let shadow = self.shadow_casters();
         let Some(e) = &mut self.entities else {
@@ -3075,7 +3116,20 @@ impl PackPost {
             (crumbling, self.gui_size),
             shadow,
             rest,
+            skin,
         );
+    }
+
+    /// Every stage a posable subject can use must have a compiled fallback.
+    /// Special models, player and eye/tagged layers retain their CPU paths.
+    pub fn skins_entities(&self) -> bool {
+        self.entities
+            .as_ref()
+            .is_some_and(|e| e.passes[..3].iter().all(Option::is_some))
+    }
+
+    pub fn skin_target(&self) -> Option<&wgpu::Buffer> {
+        self.entities.as_ref().map(|e| e.geometry.skin_target())
     }
 
     /// Which entity runs the shadow pass draws: none without it.
@@ -3122,24 +3176,29 @@ impl PackPost {
         }
         self.draw_terrain(device, queue, encoder, size, TerrainList::Solid, terrain);
         self.draw_entities(device, queue, encoder, size, false);
+        self.draw_lines(device, queue, encoder, size);
         self.draw_clouds(device, queue, encoder, size);
-        if let Some(t) = &self.targets {
-            if let Some((copy, _)) = &t.depth1 {
-                encoder.copy_texture_to_texture(
-                    t.depth_texture.as_image_copy(),
-                    copy.as_image_copy(),
-                    t.depth_texture.size(),
-                );
-            }
-            if let Some((copy, _)) = &t.depth2 {
-                encoder.copy_texture_to_texture(
-                    t.depth_texture.as_image_copy(),
-                    copy.as_image_copy(),
-                    t.depth_texture.size(),
-                );
-            }
+        // Only depth2 excludes the opaque first-person hand.
+        if let Some(t) = &self.targets
+            && let Some((copy, _)) = &t.depth2
+        {
+            encoder.copy_texture_to_texture(
+                t.depth_texture.as_image_copy(),
+                copy.as_image_copy(),
+                t.depth_texture.size(),
+            );
         }
         self.draw_hand(device, queue, encoder, size, frame);
+        // Depth1 includes that hand, but still precedes translucent terrain.
+        if let Some(t) = &self.targets
+            && let Some((copy, _)) = &t.depth1
+        {
+            encoder.copy_texture_to_texture(
+                t.depth_texture.as_image_copy(),
+                copy.as_image_copy(),
+                t.depth_texture.size(),
+            );
+        }
     }
 
     /// The first-person hand and held items, with `gbuffers_hand` at the hand's projection.
@@ -3227,6 +3286,51 @@ impl PackPost {
         }
         self.mips_valid &= !pass.written;
         self.clouds = Some(pass);
+    }
+
+    /// The block outline `set_lines` gave for this frame, with the pack's lines program.
+    fn draw_lines(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        size: [u32; 2],
+    ) {
+        // The pass stays for later frames when this one has no outline.
+        let Some(lines) = self.line_draw.take() else {
+            return;
+        };
+        let Some(mut pass) = self.lines.take() else {
+            return;
+        };
+        let group = self.bind(device, queue, encoder, &mut pass, size);
+        {
+            let mut rp = self.begin(encoder, &pass);
+            rp.set_pipeline(pass.render());
+            rp.set_bind_group(0, &group, &[]);
+            if pass.buffers
+                && let Some(g) = &self.buffers.group
+            {
+                rp.set_bind_group(4, g, &[]);
+            }
+            if pass.draw {
+                self.draws.bind(&mut rp, "OUTLINE");
+            }
+            rp.set_vertex_buffer(0, lines.edges.slice(..));
+            rp.draw(0..6, 0..lines.count);
+        }
+        self.mips_valid &= !pass.written;
+        self.lines = Some(pass);
+    }
+
+    /// Whether the pack draws the block outline itself.
+    pub fn has_lines(&self) -> bool {
+        self.lines.is_some()
+    }
+
+    /// The block outline to draw this frame (`None`: none).
+    pub fn set_lines(&mut self, lines: Option<Lines>) {
+        self.line_draw = lines.filter(|l| l.count > 0);
     }
 
     /// Whether the pack draws the clouds itself (or hides them).
@@ -3419,6 +3523,7 @@ impl PackPost {
             .chain(sky)
             .chain(entities)
             .chain(&mut self.clouds)
+            .chain(&mut self.lines)
             .chain(self.weather.iter_mut().flatten())
             .chain(self.hand.iter_mut().map(|h| &mut h.0))
             .chain(&mut self.shadow_terrain)
@@ -4005,11 +4110,15 @@ impl PackPost {
         let mut passes = std::mem::take(&mut self.passes);
         let mut seen = (false, false);
         let mut shown = false;
+        // A water-only pack still needs the opaque phase to populate requested snapshots.
         let mut terrain_drawn = self.terrain.is_none()
             && self.sky.is_none()
             && !self.entities.as_ref().is_some_and(Entities::drawn)
             && self.clouds.is_none()
-            && self.hand.is_none();
+            && self.lines.is_none()
+            && self.hand.is_none()
+            && !self.depth1
+            && !self.depth2;
         let late_entities = self.entities.as_ref().is_some_and(|e| {
             e.passes
                 .iter()
@@ -4168,6 +4277,10 @@ impl PackPost {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "pack_post/depth_test.rs"]
+mod depth_test;
 
 #[cfg(test)]
 mod tests {

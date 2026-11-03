@@ -174,6 +174,8 @@ pub struct ConnReader {
     decrypt: Option<Cfb8>,
     pub threshold: Option<usize>,
     pub counters: Arc<Counters>,
+    /// Set for a server of an older release: what arrives is renumbered.
+    adapter: Option<Arc<crate::adapter::Session>>,
 }
 /// Closes a connection from another thread: a read or a write blocked on it fails.
 pub struct Closer(Stream);
@@ -188,6 +190,8 @@ pub struct ConnWriter {
     encrypt: Option<Cfb8>,
     pub threshold: Option<usize>,
     counters: Arc<Counters>,
+    /// Set for a server of an older release: what is sent is renumbered.
+    adapter: Option<Arc<crate::adapter::Session>>,
 }
 /// `InetAddress.getByName` under Java's default `java.net.preferIPv6Addresses=false`: IPv4
 /// addresses first, whatever order the system resolver gives (macOS lists IPv6 first). Vanilla
@@ -298,14 +302,24 @@ impl Connection {
                 decrypt: None,
                 threshold: None,
                 counters: counters.clone(),
+                adapter: None,
             },
             writer: ConnWriter {
                 stream: write,
                 encrypt: None,
                 threshold: None,
                 counters,
+                adapter: None,
             },
         })
+    }
+    /// Speak to a server of `version` from now on (before the handshake): packets are renumbered both
+    /// ways (crate::adapter). The pinned version needs nothing.
+    pub fn adapt(&mut self, version: crate::adapter::ServerVersion) {
+        let session = (version != crate::adapter::ServerVersion::Current)
+            .then(|| Arc::new(crate::adapter::Session::new(version)));
+        self.reader.adapter = session.clone();
+        self.writer.adapter = session;
     }
     /// `Connection.isMemoryConnection`: through a [`Pipe`] rather than a socket.
     pub fn is_memory(&self) -> bool {
@@ -354,7 +368,14 @@ impl ConnReader {
                     self.start = frame.end;
                     if let Some(packet) = self.packet(frame)? {
                         self.counters.received.fetch_add(1, Ordering::Relaxed);
-                        return Ok(packet);
+                        match &self.adapter {
+                            None => return Ok(packet),
+                            Some(a) => {
+                                if let Some(packet) = a.clientbound(packet.0, packet.1)? {
+                                    return Ok(packet);
+                                }
+                            }
+                        }
                     }
                     continue;
                 }
@@ -447,6 +468,12 @@ impl ConnWriter {
     }
     /// Send one packet body (VarInt id + payload).
     pub fn send(&mut self, body: &[u8]) -> Result<()> {
+        if let Some(a) = &self.adapter {
+            return match a.serverbound(body)? {
+                Some(body) => self.send_contents(&frame::contents(&body, self.threshold)?),
+                None => Ok(()),
+            };
+        }
         self.send_contents(&frame::contents(body, self.threshold)?)
     }
     /// Send a frame whose contents [`frame::contents`] made with this
