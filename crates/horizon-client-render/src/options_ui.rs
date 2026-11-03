@@ -125,25 +125,17 @@ impl Opt {
     pub(crate) fn available(self) -> bool {
         !matches!(
             self,
-            Opt::ChatDelay
-                // Stored, but there are no blocked players, signed chat or
-                // chat drafts yet.
-                | Opt::HideMatchedNames
+            // Stored, but there are no blocked players or signed chat yet.
+            Opt::HideMatchedNames
                 | Opt::OnlySecureChat
-                | Opt::SaveChatDrafts
                 // Saved, but no Horizon system reads them yet: no Realms, no
-                // friends list, no directional audio, no now-playing toast.
+                // friends list, no directional audio.
                 | Opt::RealmsNotifications
                 | Opt::InGameNotification
                 | Opt::SharePresence
                 | Opt::DirectionalAudio
-                | Opt::MusicToast
-                // Saved, but nothing in rendering reads them yet.
-                | Opt::ChunkFade
-                | Opt::ImprovedTransparency
+                // Saved, but nothing in rendering reads it yet.
                 | Opt::ChunkBuilder
-                // Saved, but the mouse doesn't read it yet.
-                | Opt::CtrlClickEmulatesRightClick
         )
     }
     fn file_key(self) -> Option<&'static str> {
@@ -1313,6 +1305,9 @@ enum Act {
     NativeKey(usize, usize),
     NativeButton(usize, usize),
     OpenModFolder,
+    /// Accessibility's "Accessibility Help" link
+    /// (`AccessibilityOptionsScreen.addFooter`'s openLinkButton).
+    AccessibilityHelp,
     /// Credits & Attribution's Credits button (WinScreen without the poem).
     Credits,
     CopyAgentDetails,
@@ -1410,6 +1405,9 @@ fn matches_focus(id: &FocusId, i: usize, wd: &Widget) -> bool {
 pub enum Event {
     /// An accepted button press or the release of a slider.
     ButtonClick,
+    /// Horizon's own: download the Modrinth hit at this index of the pack
+    /// screen's browser. The game owns the packs folder, not this screen.
+    DownloadPack(usize),
     /// Close the options screens (back to the pause menu or title).
     Close,
     /// Settings changed: apply and save them.
@@ -1429,6 +1427,9 @@ pub enum Event {
     /// Data Packs' Open Pack Folder: create the folder if needed and open it.
     OpenDataPackFolder(std::path::PathBuf),
     OpenModFolder,
+    /// Accessibility's Help link: confirm and open
+    /// `CommonLinks.ACCESSIBILITY_HELP` over the options screen.
+    AccessibilityHelp,
     /// The Shader Packs page opened: list `shaderpacks/` into `shader_packs`.
     ListShaderPacks,
     /// A shader pack was picked or turned off: save and apply it.
@@ -1525,6 +1526,8 @@ pub struct OptionsUi {
     language_choice: Option<String>,
     language_search: ui::EditBox,
     pub(crate) settings_search: ui::EditBox,
+    /// Horizon's `packBrowser` extra: the pack screen's Add button.
+    pub pack_browser: bool,
     /// Packs: the packs found and the selection the screen opens with.
     pub pack_infos: Vec<crate::pack_screen::PackInfo>,
     pub pack_selection: Vec<String>,
@@ -1603,6 +1606,7 @@ impl Default for OptionsUi {
             language_choice: None,
             language_search: search,
             settings_search,
+            pack_browser: false,
             pack_infos: Vec::new(),
             pack_selection: Vec::new(),
             pack_screen: None,
@@ -2736,7 +2740,17 @@ impl OptionsUi {
                         } else if installed.dev {
                             label = label.append(tr("horizon.mods.dev"));
                         }
-                        let dead = installed.dev || installed.id.is_empty();
+                        // A content mod's set feeds the block-state tables the
+                        // open world's chunks were decoded with: changing it
+                        // mid-world remaps their ids (Forge/Fabric freeze the
+                        // registry before a world opens). A native mod toggles
+                        // live through `native_on`, so it stays available.
+                        let content = installed.native.is_none();
+                        if self.in_world && content {
+                            label = label.append(tr("horizon.mods.in_world"));
+                        }
+                        let dead =
+                            installed.dev || installed.id.is_empty() || self.in_world && content;
                         // Only native mods with actual settings need a second button.
                         if installed
                             .native
@@ -3343,6 +3357,9 @@ impl OptionsUi {
                 content = y + self.scroll - top + 2.0;
                 out[list_start..].iter_mut().for_each(|w| w.list = true);
                 let folder = match page {
+                    Page::Accessibility => {
+                        Some(("options.accessibility.link", Act::AccessibilityHelp))
+                    }
                     Page::Mods => Some(("horizon.mods.open_folder", Act::OpenModFolder)),
                     Page::ShaderPacks => Some(("pack.openFolder", Act::OpenShaderPackFolder)),
                     Page::ShaderOptions => Some(("controls.reset", Act::ShaderReset)),
@@ -3920,6 +3937,9 @@ impl OptionsUi {
                     None => Event::OpenPackFolder,
                 }),
                 crate::pack_screen::Action::Done => events.extend(self.back(s)),
+                crate::pack_screen::Action::BrowsePick(i) => {
+                    events.push(Event::DownloadPack(i));
+                }
                 crate::pack_screen::Action::None => {}
             }
             return events;
@@ -4138,6 +4158,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -4473,6 +4494,7 @@ impl OptionsUi {
                     self.pack_infos.clone(),
                     &self.pack_selection,
                 );
+                screen.browsing_allowed = self.pack_browser;
                 screen.changed = std::mem::take(&mut self.pack_reselected);
                 self.pack_screen = Some(screen);
             }
@@ -5045,6 +5067,7 @@ impl OptionsUi {
                         }
                         Act::NativeButton(i, b) => events.push(Event::NativeButton(i, b)),
                         Act::OpenModFolder => events.push(Event::OpenModFolder),
+                        Act::AccessibilityHelp => events.push(Event::AccessibilityHelp),
                         Act::PickShaderPack(i) => {
                             if let Some(pack) = s.shader_packs.get(i) {
                                 s.horizon.shader_pack = if s.horizon.shader_pack == pack.file {
@@ -5278,6 +5301,16 @@ mod tests {
                 ..
             }
         )));
+        // `AccessibilityOptionsScreen.addFooter`: the "Accessibility Help"
+        // link button sits beside Done.
+        assert!(widgets.iter().any(|w| matches!(
+            w.kind,
+            WKind::Button {
+                act: Act::AccessibilityHelp,
+                active: true,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -5381,6 +5414,33 @@ mod tests {
             Opt::QuitShortcuts.tooltip_key(&s),
             "options.quitShortcuts.tooltip"
         );
+    }
+
+    /// The gating is for genuinely unread keys only: every option a system
+    /// already consumes must stay clickable.
+    #[test]
+    fn read_options_are_not_greyed_out() {
+        for opt in [
+            Opt::ChunkFade,
+            Opt::ImprovedTransparency,
+            Opt::ChatDelay,
+            Opt::SaveChatDrafts,
+            Opt::MusicToast,
+            Opt::CtrlClickEmulatesRightClick,
+        ] {
+            assert!(opt.available(), "{opt:?} is read and must be clickable");
+        }
+        for opt in [
+            Opt::HideMatchedNames,
+            Opt::OnlySecureChat,
+            Opt::RealmsNotifications,
+            Opt::InGameNotification,
+            Opt::SharePresence,
+            Opt::DirectionalAudio,
+            Opt::ChunkBuilder,
+        ] {
+            assert!(!opt.available(), "{opt:?} still has no reader");
+        }
     }
 
     #[test]
@@ -7117,6 +7177,46 @@ mod tests {
         assert!(events.contains(&Event::Language("de_de".into())));
         assert!(events.contains(&Event::Close));
         assert_eq!(s.language, "de_de");
+    }
+
+    /// A content mod's set builds the block-state tables an open world's
+    /// chunks were decoded with, so its toggle freezes in-world; a native
+    /// mod gates live through `native_on` and stays available.
+    #[test]
+    fn in_a_world_only_native_mod_toggles_stay_active() {
+        let mut s = Settings::default();
+        let installed =
+            |id: &str, native: Option<crate::mod_list::NativePage>| crate::mod_list::Installed {
+                id: id.into(),
+                title: id.into(),
+                description: String::new(),
+                problem: None,
+                dev: false,
+                native,
+            };
+        s.mods.installed = vec![
+            installed("content", None),
+            installed("native", Some(crate::mod_list::NativePage::default())),
+        ];
+        let mut ui = OptionsUi::default();
+        let toggles = |ui: &mut OptionsUi, s: &Settings| {
+            let (widgets, ..) = ui.layout(s, 427.0, 240.0);
+            widgets
+                .iter()
+                .filter_map(|w| match w.kind {
+                    WKind::Button {
+                        act: Act::ToggleMod(i),
+                        active,
+                        ..
+                    } => Some((i, active)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        ui.open_at(false, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, true), (1, true)]);
+        ui.open_at(true, Page::Mods);
+        assert_eq!(toggles(&mut ui, &s), [(0, false), (1, true)]);
     }
 
     #[test]

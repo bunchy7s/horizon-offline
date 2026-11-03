@@ -197,17 +197,23 @@ impl Stage<'_> {
                 && let Some(groups) = self.type_dimensions(i, &structs)
             {
                 for &(open, close) in groups.iter().rev() {
-                    let mut j = open;
-                    while j <= close {
-                        if let Some((length, end)) = array_length(j) {
-                            write!(out, "({length})").unwrap();
-                            for t in &self.tokens[j..=end] {
-                                out.extend(t.chars().filter(|&c| c == '\n'));
+                    if (open + 1..close).all(|j| !significant(self.tokens[j])) {
+                        // type_dimensions only accepts an unsized outer dimension with
+                        // an initializer whose element count is known.
+                        write!(out, "[{}]", self.array_length(close).unwrap()).unwrap();
+                    } else {
+                        let mut j = open;
+                        while j <= close {
+                            if let Some((length, end)) = array_length(j) {
+                                write!(out, "({length})").unwrap();
+                                for t in &self.tokens[j..=end] {
+                                    out.extend(t.chars().filter(|&c| c == '\n'));
+                                }
+                                j = end + 1;
+                            } else {
+                                out.push_str(self.tokens[j]);
+                                j += 1;
                             }
-                            j = end + 1;
-                        } else {
-                            out.push_str(self.tokens[j]);
-                            j += 1;
                         }
                     }
                 }
@@ -368,6 +374,7 @@ impl Stage<'_> {
             if sampler_ty.contains_key(t)
                 || params.contains_key(t)
                 || uniforms.get(t).is_some_and(|ty| ty == "bool")
+                || self.core_matrix(t).is_some()
                 || ((depth > 0 || !calls.is_empty()) && self.runtime_array_lengths.contains_key(t))
             {
                 let before = prev(i).map(|j| self.tokens[j]);
@@ -394,6 +401,10 @@ impl Stage<'_> {
             }
             if hidden.iter().any(|&(h, from, _)| h == t && i >= from) {
                 out.push_str(t);
+                continue;
+            }
+            if let Some(matrix) = self.core_matrix(t) {
+                out.push_str(matrix);
                 continue;
             }
             // A sampler named like a function (`texture(texture, uv)`) is the function when called.
@@ -664,8 +675,11 @@ impl Stage<'_> {
                 }
             }
             let close = close?;
-            // `[]` keeps its own handling (the constructor's count).
-            if (open + 1..close).all(|j| !significant(self.tokens[j])) {
+            // An initializer can size the outer dimension. Include it in the reversal
+            // together with the explicit inner dimensions rather than reversing only them.
+            if (open + 1..close).all(|j| !significant(self.tokens[j]))
+                && !(groups.is_empty() && self.array_length(close).is_some())
+            {
                 return None;
             }
             groups.push((open, close));
@@ -730,26 +744,37 @@ impl Stage<'_> {
     }
 
     /// The element count of an unsized array whose `[]` ends at `close`: the arguments of the
-    /// constructor that follows (`[] = T[](...)` or `[](...)`).
+    /// following constructor, or the top-level elements of its brace initializer (GLSL 4.40,
+    /// 4.1.11). Nested aggregate elements and a trailing initializer comma do not add elements.
     pub(super) fn array_length(&self, close: usize) -> Option<usize> {
         let mut j = close + 1;
         let mut seen_eq = false;
-        while let Some(&t) = self.tokens.get(j) {
-            match t {
-                "(" => break,
+        let end = loop {
+            match self.tokens.get(j).copied()? {
+                "(" => break ")",
+                "{" if seen_eq => break "}",
                 "=" if !seen_eq => seen_eq = true,
                 ";" | "," | ")" | "{" => return None,
                 _ => {}
             }
             j += 1;
-        }
-        let (mut depth, mut args, mut any) = (0, 1, false);
+        };
+        let (mut depth, mut args, mut any) = (0, 0, false);
         for &t in &self.tokens[j + 1..] {
             match t {
-                "(" | "[" | "{" => depth += 1,
-                ")" if depth == 0 => return any.then_some(args),
+                "(" | "[" | "{" => {
+                    depth += 1;
+                    any = true;
+                }
+                t if t == end && depth == 0 => {
+                    let count = args + usize::from(any);
+                    return (count > 0).then_some(count);
+                }
                 ")" | "]" | "}" => depth -= 1,
-                "," if depth == 0 => args += 1,
+                "," if depth == 0 => {
+                    args += 1;
+                    any = false;
+                }
                 _ if significant(t) => any = true,
                 _ => {}
             }

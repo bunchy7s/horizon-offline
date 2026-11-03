@@ -62,7 +62,7 @@ fn a_tall_column_streams_lights_and_meshes_to_its_top() {
     let Some(root) = resources() else {
         return;
     };
-    let shape = LevelShape::new(-64, 2096, 2096, true).unwrap();
+    let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
     let layout = shape.column();
     let assets = Arc::new(Assets::load(&root).unwrap());
     let render = Arc::new(assets.reload(&root).unwrap());

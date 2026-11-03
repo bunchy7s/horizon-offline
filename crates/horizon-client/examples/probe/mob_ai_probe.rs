@@ -1015,7 +1015,8 @@ pub fn main() -> horizon_client::Result<()> {
                 spec.yaw,
             );
             if spec.baby {
-                m.extra.age = -24000;
+                // AgeableMob.setBaby: the species' getBabyStartAge (a sniffer's is -48000).
+                m.extra.age = horizon_client::mobs::finalize::baby_start_age(m.species());
             }
             for flag in &spec.flags {
                 match flag.as_str() {
@@ -1025,7 +1026,7 @@ pub fn main() -> horizon_client::Result<()> {
                         m.persistent = true;
                     }
                     "ridden" => {
-                        m.extra.head = Some("minecraft:red_harness".into());
+                        m.extra.body = Some("minecraft:red_harness".into());
                         m.rider = Some(horizon_client::mobs::equine::Rider::default());
                     }
                     "noai" => m.no_ai = true,

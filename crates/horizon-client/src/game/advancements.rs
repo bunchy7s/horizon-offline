@@ -532,22 +532,18 @@ impl Game<'_> {
             i.as_ref().map(|id| item_view(&ItemStack::new(id, 1)))
         };
         let mut equipment: [Option<ItemView>; 7] = Default::default();
-        if !horizon_client::mobs::equine::is_equine(m.species()) {
-            equipment[0] = slot(&m.extra.main_hand);
-            equipment[1] = slot(&m.extra.off_hand);
-            equipment[2] = slot(&m.extra.head);
-            equipment[3] = slot(&m.extra.chest);
-            equipment[4] = slot(&m.extra.legs);
-            equipment[5] = slot(&m.extra.feet);
-        }
-        // A wolf's armor is its body slot, with its durability.
-        if m.species() == horizon_client::mobs::Species::Wolf {
-            equipment[6] = m.extra.head.as_ref().map(|id| {
-                let mut armor = ItemStack::new(id, 1);
-                armor.damage = m.extra.body_damage.max(0) as u32;
-                item_view(&armor)
-            });
-        }
+        equipment[0] = slot(&m.extra.main_hand);
+        equipment[1] = slot(&m.extra.off_hand);
+        equipment[2] = slot(&m.extra.head);
+        equipment[3] = slot(&m.extra.chest);
+        equipment[4] = slot(&m.extra.legs);
+        equipment[5] = slot(&m.extra.feet);
+        // The body slot (a wolf's armor, a horse's), with its durability.
+        equipment[6] = m.extra.body.as_ref().map(|id| {
+            let mut armor = ItemStack::new(id, 1);
+            armor.damage = m.extra.body_damage.max(0) as u32;
+            item_view(&armor)
+        });
         EntityView {
             kind: m.kind.id.clone(),
             position: [m.position.x, m.position.y, m.position.z],
@@ -746,7 +742,8 @@ impl Game<'_> {
         // AdvancementRewards.grant
         if a.rewards.experience > 0 {
             let old_level = self.experience.level;
-            self.experience.give(a.rewards.experience);
+            let points = self.xp_change(a.rewards.experience).map_or(0, |p| p.max(0));
+            self.experience.give(points);
             self.native_player_level_changed(old_level);
         }
         // ServerPlayer.awardRecipesByKey: the rewards that name a recipe.

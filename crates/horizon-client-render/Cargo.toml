@@ -43,6 +43,10 @@ miniz_oxide = "0.8"
 naga = { version = "30.0.1", features = ["wgsl-in", "glsl-in", "hlsl-out"] }
 half = "2"
 png = "0.18"
+# Project icons served by Modrinth are often WebP or JPEG rather than PNG, and
+# the pack browser showed nothing for those. Both are small pure-Rust decoders.
+image-webp = { version = "0.2", default-features = false }
+zune-jpeg = { version = "0.4", default-features = false, features = ["std"] }
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }
@@ -70,6 +74,9 @@ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
 audio = ["dep:cpal"]
 # Helpers horizon-client's tests build their fixtures with.
 test-support = []
+
+[build-dependencies]
+horizon-mod-api-gen = { path = "../horizon-mod-api-gen" }
 
 [lints]
 workspace = true

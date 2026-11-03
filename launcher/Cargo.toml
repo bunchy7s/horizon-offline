@@ -8,6 +8,8 @@ description = "Downloads, prepares and starts Horizon builds"
 [workspace]
 
 [dependencies]
+# The catalog and mod-owned trait injections share their generation rules.
+horizon-mod-api-gen = { path = "../crates/horizon-mod-api-gen" }
 # GPUI Fast (longbridge/gpui-fast): Zed's GPUI with retained views and cached scroll layers, under
 # its own name. wgpu renders on Linux, not blade (#3812).
 gpui = { package = "gpui-fast", version = "0.1.13" }
@@ -15,9 +17,8 @@ gpui_platform = { package = "gpui-fast-platform", version = "0.1.13", features =
 ureq = { version = "2", features = ["json", "tls"], default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Validate and render injected trait signatures before they reach rustc.
-syn = { version = "2", features = ["full", "visit-mut"] }
-quote = "1"
+# Validate trait injection bindings before passing them to the shared generator.
+syn = { version = "2", features = ["full"] }
 # Checks the client jar and the version file found in other launchers' folders (sources.rs).
 sha1 = "0.10"
 # The mod browser checks Modrinth's SHA-512 before a pack reaches the game folder (browser/download.rs).

@@ -63,6 +63,7 @@ class PrReadyTests(unittest.TestCase):
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-prepare/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-theme/src/lib.rs"))
         self.assertTrue(pr_ready.launcher_rust("crates/horizon-telemetry/src/lib.rs"))
+        self.assertTrue(pr_ready.launcher_rust("crates/horizon-mod-api-gen/src/injection.rs"))
         self.assertFalse(pr_ready.launcher_rust("launcher/links.json"))
         self.assertFalse(pr_ready.launcher_rust("launcher/README.md"))
         self.assertFalse(pr_ready.launcher_rust("crates/horizon-client/src/game.rs"))
@@ -107,14 +108,30 @@ class PrReadyTests(unittest.TestCase):
                          " --features horizon-mods/index")
         self.assertEqual(pr_ready.mod_features(None), MODS)
 
-    def test_mod_api_check_tracks_hook_inputs(self):
-        for path in ("xtask/src/mod_api.rs", "native-hooks.json",
-                     "crates/horizon-client/src/game/native_hooks.rs", "README.md"):
+    def test_mod_api_data_inputs_build_and_test_the_consuming_crates(self):
+        packages = {**PACKAGES, "horizon-client-render": "crates/horizon-client-render",
+                    "horizon-mod-api-gen": "crates/horizon-mod-api-gen"}
+        for path in ("native-hooks.json", "tools/native-hook-fragments/player.json"):
             with self.subTest(path=path), mock.patch.object(pr_ready, "affected_here", return_value=[]):
-                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, PACKAGES, LIBRARIES, DEPENDENCIES)
-                step = {step.name: step for step in steps}["mod API up to date"]
-                self.assertEqual(step.command, "cargo test --locked -p xtask mod_api")
-                self.assertEqual(step.skip, "native hooks untouched" if path == "README.md" else None)
+                steps = pr_ready.plan(args(quick=True), "origin/main", {path}, packages,
+                                      LIBRARIES | {"horizon-client-render", "horizon-mod-api-gen"}, DEPENDENCIES)
+                by_name = {step.name: step for step in steps}
+                self.assertIsNone(by_name["clippy"].skip)
+                self.assertIsNone(by_name["rustfmt"].skip)
+                tests = next(step for step in steps if step.name.startswith("tests:"))
+                self.assertIsNone(tests.skip)
+                self.assertEqual(tests.command, "cargo test --locked -p horizon-client -p horizon-client-render "
+                                               "-p horizon-mod-api-gen --tests")
+
+    def test_shared_generator_edits_run_launcher_checks(self):
+        with mock.patch.object(pr_ready, "affected_here", return_value=[]):
+            steps = pr_ready.plan(args(quick=True), "origin/main",
+                                  {"crates/horizon-mod-api-gen/src/injection.rs"},
+                                  {**PACKAGES, "horizon-mod-api-gen": "crates/horizon-mod-api-gen"},
+                                  LIBRARIES | {"horizon-mod-api-gen"}, DEPENDENCIES)
+        by_name = {step.name: step for step in steps}
+        for name in ("launcher rustfmt", "launcher clippy", "launcher tests"):
+            self.assertIsNone(by_name[name].skip)
 
     @unittest.skipUnless(POSIX_BASH, "needs a bash that is not WSL's")
     def test_the_launcher_fallback_asks_for_a_feature_the_launcher_has(self):

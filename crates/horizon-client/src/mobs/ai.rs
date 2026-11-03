@@ -628,6 +628,16 @@ pub fn tick(
     if m.alive() {
         super::spear_use::update_using_item(m, w, known_speed, events);
     }
+    // LivingEntity.tick: a sleeper whose bed is gone stands up before
+    // aiStep, with or without AI.
+    if super::villager::sleeping(m)
+        && super::villager::sleeping_pos(m)
+            .filter(|p| w.block_name(p[0], p[1], p[2]).ends_with("_bed"))
+            .is_none()
+    {
+        super::villager::stop_sleeping(m, w, events);
+        super::villager_brain::woken(m, w.game_time);
+    }
     if m.no_ai {
         // Mob.aiStep still runs without AI (only serverAiStep is skipped),
         // so undead still burn in daylight and the endermite's life keeps
@@ -636,16 +646,22 @@ pub fn tick(
         if m.species() == Species::Endermite {
             endermite_lifetime(m);
         }
+        // AbstractHorse.aiStep (it overrides LivingEntity.aiStep, which NoAI
+        // doesn't skip) and AbstractHorse.tick: a NoAI horse still swishes
+        // its tail before super.aiStep, then heals, grazes and runs its
+        // stand counter and animations.
+        let horse = super::equine::is_equine(m.species())
+            && !super::camel::is_camel(m.species())
+            && !super::llama::is_llama(m.species());
+        if horse {
+            super::equine::tail_tick(m);
+        }
         ageable_step(m, w, level_random, events);
         if m.species() == Species::Chicken {
             farm::chicken_egg_step(m, events);
         }
-        // AbstractHorse.tick runs the stand counter down with or without AI.
-        if super::equine::is_equine(m.species())
-            && !super::camel::is_camel(m.species())
-            && !super::llama::is_llama(m.species())
-        {
-            super::equine::stand_tick(m);
+        if horse {
+            super::equine::ai_step(m, w, events);
         }
     } else {
         ai_step(m, w, level_random, events);
@@ -1143,10 +1159,17 @@ fn can_freeze(m: &Mob, w: &MobWorld) -> bool {
     let immune = w
         .items
         .and_then(|i| i.item_tags.get("minecraft:freeze_immune_wearables"));
-    ![&m.extra.head, &m.extra.chest, &m.extra.legs, &m.extra.feet]
-        .into_iter()
-        .flatten()
-        .any(|item| immune.is_some_and(|t| t.contains(&**item)))
+    // A wolf's armor (its body slot) is `#freeze_immune_wearables`.
+    ![
+        &m.extra.body,
+        &m.extra.head,
+        &m.extra.chest,
+        &m.extra.legs,
+        &m.extra.feet,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|item| immune.is_some_and(|t| t.contains(&**item)))
 }
 /// `Mob.playAmbientSound` on demand: a spawn egg or a mob bucket just placed `m`.
 pub fn ambient_sound(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
@@ -1566,7 +1589,14 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
 /// or without AI (`NoAI` only skips `serverAiStep`).
 fn burn_undead(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     if m.kind.flags.burns_in_day && m.alive() && sun_burn_tick(m, w) {
-        if m.extra.head.is_some() {
+        // The head is the sun-protection slot, or the body for the species
+        // whose body item is their armour (a zombie horse's, a nautilus's).
+        let protected = if super::drops::body_slot_species(m.species()) {
+            m.extra.body.is_some()
+        } else {
+            m.extra.head.is_some()
+        };
+        if protected {
             events.push(MobEvent::SunProtectionWear { mob: m.id });
         } else {
             m.ignite_for_ticks(160);
@@ -1825,10 +1855,12 @@ pub fn despawn_check(m: &mut Mob, w: &MobWorld) -> bool {
 }
 /// `Mob.requiresCustomPersistence` and its overrides: a passenger or a leashed
 /// mob, a raider in a raid, an enderman carrying a block, a tame nautilus, a
-/// sulfur cube holding a block or let out of a bucket. The spawn caps do not
-/// count these mobs either (`NaturalSpawner.createState`).
+/// sulfur cube holding a block or let out of a bucket, a fish or axolotl
+/// let out of a bucket (`AbstractFish`/`Axolotl`: `|| fromBucket()`). The spawn
+/// caps do not count these mobs either (`NaturalSpawner.createState`).
 pub fn requires_custom_persistence(m: &Mob) -> bool {
     super::riders::keeps_alive(m)
+        || m.extra.from_bucket
         || m.extra.leash.is_some()
         || super::raider::state(m).is_some_and(|s| s.raid_id.is_some())
         || m.species() == Species::Enderman && m.extra.carried.is_some()
@@ -1988,6 +2020,23 @@ pub fn voice_sounds(m: &Mob) -> [&'static str; 3] {
             m.kind.sounds[0],
             "entity.shulker.hurt_closed",
             m.kind.sounds[2],
+        ],
+        // Creaking.getHurtSound: bound to a heart it sways, unbound it hands
+        // the blow to `Monster.getHurtSound`. `Monster`'s own sounds are the
+        // hostile pair, which the giant keeps too.
+        Species::Creaking => [
+            m.kind.sounds[0],
+            if super::creaking::heart_bound(m) {
+                "entity.creaking.sway"
+            } else {
+                "entity.hostile.hurt"
+            },
+            m.kind.sounds[2],
+        ],
+        Species::Giant => [
+            m.kind.sounds[0],
+            "entity.hostile.hurt",
+            "entity.hostile.death",
         ],
         // Turtle.getHurtSound and getDeathSound by age.
         Species::Turtle if m.is_baby() => [
@@ -3265,7 +3314,7 @@ mod same_vehicle_push_tests {
             );
             assert_eq!(worn.iter().flatten().count(), 2);
             let mut horse = mob("minecraft:horse");
-            horse.extra.head = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
+            horse.extra.body = Some(std::sync::Arc::from("minecraft:iron_horse_armor"));
             horse.set_saddle(Some(crate::items::ItemStack::new("minecraft:saddle", 1)));
             let gear = horse.equipment_stacks();
             assert_eq!(
@@ -3436,6 +3485,44 @@ mod ridden_tests {
         assert_eq!(held.position, Vec3::new(0.5, 64.0, 0.5));
         assert_eq!(held.velocity, Vec3::ZERO);
         assert_eq!(held.yaw, 90.0, "tickRidden still turns it");
+    }
+}
+
+#[cfg(test)]
+mod bed_wake_tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+
+    /// `LivingEntity.tick` wakes a sleeper whose bed is gone before
+    /// `aiStep` — `Mob.no_ai` skips the step, not the check (#7875).
+    fn no_ai_sleeper() -> Option<Mob> {
+        let mut out = None;
+        with_test_world(&[], |w, types| {
+            let kind = std::sync::Arc::new(types.types["minecraft:villager"].clone());
+            let mut m = Mob::new(1, kind, Vec3::new(0.5, 64.0, 0.5), 0.0);
+            m.no_ai = true;
+            let mut events = Vec::new();
+            // The empty world is all air: the "bed" it lies in is gone.
+            assert!(super::super::villager::start_sleeping(
+                &mut m,
+                [0, 64, 0],
+                w,
+                &mut events
+            ));
+            let mut random = LegacyRandom::new(0);
+            tick(&mut m, w, &mut random, &mut events);
+            out = Some(m);
+        });
+        out
+    }
+
+    #[test]
+    fn a_sleeper_without_ai_still_stands_when_its_bed_is_gone() {
+        let Some(m) = no_ai_sleeper() else { return };
+        assert!(
+            !super::super::villager::sleeping(&m),
+            "a missing bed wakes a no-AI sleeper"
+        );
     }
 }
 

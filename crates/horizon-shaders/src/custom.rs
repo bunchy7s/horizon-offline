@@ -613,7 +613,8 @@ mod tests {
         let builtin = |n: &str| match n {
             "cameraPosition" => Some(Val::vector(&[1.0, 64.0, 2.0])),
             "sunAngle" => Some(Val::scalar(0.125)),
-            "biome" => Some(Val::scalar(1.0)),
+            // Desert, as Iris numbers it.
+            "biome" => Some(Val::scalar(5.0)),
             "gbufferModelView" => {
                 let mut m = Val::scalar(0.0);
                 m.v[1] = 9.0; // column 0, row 1

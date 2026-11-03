@@ -66,15 +66,16 @@ pub fn update_entity_fluids(
     (water_height, lava_height)
 }
 impl ItemEntity {
+    /// `Entity.getEyeY` of an item (eye height 0.2125), where
+    /// `updateFluidHeightAndDoFluidPushing` reads the fluid.
+    pub fn fluid_eye_y(&self) -> f64 {
+        self.position.y + f64::from(0.2125f32)
+    }
+    /// The fluid push as the game runs it, for the unit tests.
+    #[cfg(test)]
     pub(super) fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> (f64, f64) {
-        update_entity_fluids(
-            self.bounds(),
-            self.position,
-            self.position.y + f64::from(0.2125f32),
-            &mut self.velocity,
-            world,
-            fluids,
-        )
+        let (bounds, at, eye) = (self.bounds(), self.position, self.fluid_eye_y());
+        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids)
     }
 }
 impl ExperienceOrb {
@@ -92,27 +93,25 @@ impl ExperienceOrb {
     }
 }
 impl ArmorStand {
-    /// `Entity.updateFluidHeightAndDoFluidPushing`: refreshes water and lava
-    /// immersion over the stand's deflated box and pushes its velocity by any
-    /// water or lava current. Returns whether the stand is in water (`isInWater`).
-    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> bool {
-        if self.marker {
-            return false;
-        }
+    /// `Entity.getEyeY` of a stand: its eye height by size.
+    pub fn fluid_eye_y(&self) -> f64 {
         let eye = if self.small {
             f64::from(0.9875f32 * 0.9)
         } else {
             f64::from(1.7775f32)
         };
-        let (water_height, _) = update_entity_fluids(
-            self.bounds(),
-            self.position,
-            self.position.y + eye,
-            &mut self.velocity,
-            world,
-            fluids,
-        );
-        water_height > 0.0
+        self.position.y + eye
+    }
+    /// The fluid push as the game runs it, for the unit tests: whether the
+    /// stand is in water (`isInWater`).
+    #[cfg(test)]
+    pub fn update_fluids(&mut self, world: &World, fluids: &FluidResources) -> bool {
+        use crate::entity_rules::EntityRules;
+        if !self.is_pushed_by_fluid() {
+            return false;
+        }
+        let (bounds, at, eye) = (self.bounds(), self.position, self.fluid_eye_y());
+        update_entity_fluids(bounds, at, eye, &mut self.velocity, world, fluids).0 > 0.0
     }
 }
 impl FluidMembership for EntityFluidWorld<'_> {
@@ -243,6 +242,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let item = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             health: 5,
@@ -341,6 +341,7 @@ mod tests {
         }
         let at = Vec3::new(20.5, 4.0, 20.5);
         let orb = ExperienceOrb {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             position: at,
@@ -480,7 +481,11 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        still.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        let empty = Default::default();
+        let climbing =
+            horizon_world::climbing::ClimbingRegistry::new(assets.registry, &empty, &empty, &empty)
+                .unwrap();
+        still.tick(&mut scene, &facts, &climbing, in_water, None);
         assert_eq!(still.position.x, at.x);
         assert_eq!(still.velocity.x, 0.0);
 
@@ -494,7 +499,7 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        marker.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        marker.tick(&mut scene, &facts, &climbing, in_water, None);
         assert_eq!(marker.position, at);
         assert_eq!(marker.velocity, Vec3::ZERO);
 
@@ -506,7 +511,7 @@ mod tests {
             binding: &collision,
             subject: None,
         };
-        carried.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+        carried.tick(&mut scene, &facts, &climbing, in_water, None);
         assert!((carried.position.x - (at.x + 0.014)).abs() < 1e-12);
         assert!((carried.velocity.x - 0.014 * f64::from(0.8f32)).abs() < 1e-12);
         for _ in 0..20 {
@@ -516,7 +521,7 @@ mod tests {
                 binding: &collision,
                 subject: None,
             };
-            carried.tick(&mut scene, &facts, in_water, &mut |_, _| {}, None);
+            carried.tick(&mut scene, &facts, &climbing, in_water, None);
         }
         assert!(carried.position.x > at.x + 0.5);
     }

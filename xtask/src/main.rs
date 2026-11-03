@@ -50,8 +50,7 @@ fn main() -> ExitCode {
         [task, engine, out] if task == "package-server" => {
             package_server(Path::new(engine), Path::new(out))
         }
-        [task] if task == "mod-api" => mod_api::run(false),
-        [task, check] if task == "mod-api" && check == "--check" => mod_api::run(true),
+        [task] if task == "mod-api" => mod_api::run(),
         [task] if task == "tokens" => tokens(),
         [task] if task == "icons" => icons(),
         _ => Err(USAGE.to_string()),

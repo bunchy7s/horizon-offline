@@ -18,6 +18,9 @@ horizon-chat-filter = { path = "../horizon-chat-filter" }
 horizon-bench = { path = "../horizon-bench" }
 # The log's local times, as the game prints them.
 chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+# The control API's token and the panel's login codes and sessions: the OS's random generator (already in the
+# lockfile through the relay).
+getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1.1"

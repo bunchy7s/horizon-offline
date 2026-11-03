@@ -513,15 +513,18 @@ impl Game<'_> {
                 let Some(Arg::Resource(table)) = ctx.get("loot_table").cloned() else {
                     return Ok(0);
                 };
-                // An inline table (ResourceOrIdArgument): no random sequence.
+                // An inline table (ResourceOrIdArgument) keeps its random sequence.
                 if table.starts_with('{') {
                     let (tag, _) = horizon_world::nbt::parse_snbt(&table)
                         .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
                     let json = horizon_client::scoreboard::tag_to_json(&tag);
-                    let drops = self
-                        .res
-                        .items()
-                        .inline_loot_table(&json, &mut self.world.random);
+                    let drops = match json["random_sequence"].as_str() {
+                        Some(sequence) => {
+                            let random = self.rand_sequences.get(sequence, self.level.seed);
+                            world_items!(self).inline_loot_table(&json, random)
+                        }
+                        None => world_items!(self).inline_loot_table(&json, &mut self.world.random),
+                    };
                     (drops, None)
                 } else {
                     if !self.items().has_loot_table(&table) {

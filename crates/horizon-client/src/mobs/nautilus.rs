@@ -561,7 +561,7 @@ pub fn anim(m: &Mob, s: &State, p: &mut Poses, animations: &HashMap<String, Anim
     if let Some(a) = animations.get("NautilusAnimation.SWIMMING") {
         a.apply_walk(s.pos + s.age / 5.0, s.speed + 0.2, 2.0, 3.0, p);
     }
-    if m.extra.head.is_some() {
+    if m.extra.body.is_some() {
         p.visible("corals", false);
     }
 }

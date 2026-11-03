@@ -29,6 +29,8 @@ enum RocketHit {
 }
 
 pub(super) struct Rocket {
+    /// When it joined its list (`horizon_client::join_seq`); set by the list.
+    pub(super) join: horizon_client::join_seq::JoinSeq,
     /// Its entity id: from the entity counter on the server, the server's on
     /// a client.
     pub id: u32,
@@ -62,6 +64,7 @@ impl Rocket {
         let item = ItemStack::new("minecraft:firework_rocket", 1);
         let (_, explosions) = fireworks_of(&item);
         Self {
+            join: Default::default(),
             id,
             position,
             previous: position,
@@ -111,6 +114,7 @@ impl Rocket {
             .unwrap_or_else(|| ItemStack::new("minecraft:firework_rocket", 1));
         let (_, explosions) = fireworks_of(&item);
         Self {
+            join: Default::default(),
             id: 0,
             position: r.position,
             previous: r.position,
@@ -227,6 +231,7 @@ impl Game<'_> {
         // Entity.<init>: the id comes from the one counter at construction.
         let id = self.take_entity_id();
         Rocket {
+            join: Default::default(),
             id,
             position: at,
             previous: at,
@@ -525,6 +530,11 @@ impl Game<'_> {
         self.native_firework_explode(r.id, at, r.explosions.len());
     }
     fn rocket_hurt_mobs(&mut self, hits: &[(u32, f32)], attacker: Option<Who>, at: [f64; 3]) {
+        let _attacker = self.knockback_scope(if attacker == Some(Who::Player) {
+            self.player.as_ref().map_or(0, |p| p.entity_id)
+        } else {
+            0
+        });
         for &(id, amount) in hits {
             if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
                 let hurt = m.damage(amount, Damage::fireworks(attacker, at));
@@ -734,3 +744,4 @@ mod tests {
         assert!(!super::use_on_passes(false));
     }
 }
+horizon_client::impl_joined!(Rocket);

@@ -15,6 +15,8 @@ use super::{
 };
 use horizon_client::entities::{ArmorStand, ExperienceOrb, ItemEntity};
 use horizon_client::entity_rules::EntityRules;
+use horizon_client::join_seq::JoinSeq;
+use horizon_client::join_seq::Joined as _;
 use horizon_client::mobs::{Mob, Species};
 use horizon_client::projectiles::Projectile;
 use horizon_core::geometry::{Aabb, Direction, Vec3};
@@ -57,6 +59,8 @@ pub(super) trait Entity: EntityRules {
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
+    /// `Entity.getDeltaMovement`.
+    fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
@@ -72,6 +76,17 @@ pub(super) trait Entity: EntityRules {
         index: usize,
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)>;
+    /// Loads a saved entity whose type id is `kind` as this kind and joins it to
+    /// the world, or hands `tag` back when `kind` is not one this kind loads.
+    /// Required, so a new kind states how it loads: it cannot be saved and then
+    /// dropped silently on the way back in.
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag>;
 
     fn on_ground(&self) -> bool {
         false
@@ -140,6 +155,11 @@ pub(super) trait Entity: EntityRules {
         let b = self.explosion_box();
         f64::from((b.max_position().y - b.min_position().y) as f32 * 0.85f32)
     }
+    /// Whether this kind ticks after the projectiles do (orbs, falling blocks,
+    /// primed TNT), where vanilla ticks every entity in the order it joined.
+    fn ticks_after_projectiles(&self) -> bool {
+        false
+    }
     /// `Entity.push` with the explosion's knockback.
     fn push_from_explosion(&mut self, push: Vec3) {
         let v = self.velocity_mut();
@@ -184,14 +204,27 @@ pub(super) trait Entity: EntityRules {
         facts: &horizon_client::blocks::BlockFacts,
         collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
     ) -> bool {
+        self.push_by_bubble_column_over(world, registry, facts, collision, |_| {})
+    }
+    /// [`Entity::push_by_bubble_column`], telling `surface` the position of
+    /// each column block it lies in (for the bubbles at the top).
+    fn push_by_bubble_column_over(
+        &mut self,
+        world: &horizon_client::world::World,
+        registry: &horizon_world::registry::BlockRegistry,
+        facts: &horizon_client::blocks::BlockFacts,
+        collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+        surface: impl FnMut(BlockPos),
+    ) -> bool {
         let bounds = self.bounds();
-        horizon_client::motion::bubble_column_push(
+        horizon_client::motion::bubble_column_push_over(
             world,
             registry,
             facts,
             collision,
             bounds,
             self.velocity_mut(),
+            surface,
         )
     }
     /// `Entity.getPistonPushReaction`.
@@ -250,10 +283,43 @@ macro_rules! stored_motion {
         fn position_mut(&mut self) -> &mut Vec3 {
             &mut self.position
         }
+        fn velocity(&self) -> Vec3 {
+            self.velocity
+        }
         fn velocity_mut(&mut self) -> &mut Vec3 {
             &mut self.velocity
         }
     };
+}
+
+/// One `ItemEntity.tick`, with the fluid push and the bubble column decided by
+/// the `Entity` defaults every kind shares: fluids, move, column, settle,
+/// fluids again. Returns false when the item should be removed.
+pub(super) fn tick_item(
+    item: &mut ItemEntity,
+    world: &horizon_client::world::World,
+    registry: &horizon_world::registry::BlockRegistry,
+    facts: &horizon_client::blocks::BlockFacts,
+    collision: &horizon_world::block_collision::BlockCollisionRegistry<'_>,
+    fluids: &horizon_client::motion::FluidResources,
+    no_physics: bool,
+    entity_boxes: &[Aabb],
+    border: Option<&horizon_core::geometry::border::BorderGeometry>,
+) -> bool {
+    let heights = item.push_by_fluid(world, fluids);
+    let step = item.tick_move(
+        world,
+        facts,
+        collision,
+        no_physics,
+        heights,
+        entity_boxes,
+        border,
+    );
+    item.push_by_bubble_column(world, registry, facts, collision);
+    let alive = item.tick_settle(world, facts, no_physics, step);
+    item.push_by_fluid(world, fluids);
+    alive
 }
 
 /// The game's lists of entities, in the order systems walk them. Hands them to
@@ -288,7 +354,7 @@ macro_rules! define_entity_handles {
         }
 
         /// One entity, by list and index.
-        #[derive(Clone, Copy, Hash, PartialEq, Eq)]
+        #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
         pub(super) enum EntityHandle {
             $($kind(usize),)*
         }
@@ -296,7 +362,43 @@ macro_rules! define_entity_handles {
         /// Every list moved out of `Game`, for [`for_each_entity_mut`]: the
         /// world stays readable while the entities change.
         pub(super) struct TakenEntities {
-            $(pub(super) $field: Vec<$ty>,)*
+            $(pub(super) $field: horizon_client::join_seq::JoinList<$ty>,)*
+        }
+
+
+        impl EntityLists<'_> {
+            /// Visits every entity once, in the order they joined, whatever the
+            /// kind: a merge of the lists, each already in join order, by a
+            /// cursor per list. Static dispatch and nothing allocated. Checked:
+            /// a list out of join order, or an entity that never joined, stops
+            /// the walk with the entity at fault.
+            #[allow(dead_code)] // read by the tick order slices that follow
+            pub(super) fn walk_in_join_order(
+                self,
+                visit: impl FnMut(EntityHandle, JoinSeq),
+            ) -> Result<(), JoinOrderError> {
+                let lens = [$(self.$field.len()),*];
+                merge_in_join_order(
+                    lens,
+                    |kind, i| {
+                        let mut at = 0;
+                        $(if kind == at {
+                            return self.$field[i].join_seq();
+                        } at += 1;)*
+                        let _ = at;
+                        unreachable!("kind {kind} is not a list")
+                    },
+                    |kind, i| {
+                        let mut at = 0;
+                        $(if kind == at {
+                            return EntityHandle::$kind(i);
+                        } at += 1;)*
+                        let _ = at;
+                        unreachable!("kind {kind} is not a list")
+                    },
+                    visit,
+                )
+            }
         }
 
         impl Game<'_> {
@@ -336,7 +438,59 @@ macro_rules! define_entity_handles {
 }
 pub(crate) use define_entity_handles;
 
+/// Why [`EntityLists::walk_in_join_order`] stopped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // read by the tick order slices that follow
+pub(super) enum JoinOrderError {
+    /// Never put in its list through the list's own `push`, so it has no
+    /// join number.
+    Unjoined(EntityHandle),
+    /// Joined before an entity the walk had already visited: its list is out
+    /// of join order.
+    OutOfOrder(EntityHandle),
+}
+
+/// The merge behind the join-order walk, over `N` lists: `lens` are their
+/// lengths, `seq(list, i)` the join number of entity `i` of a list, `handle`
+/// names it. Each step takes the lowest next number among the `N` cursors
+/// (a stack array; no allocation).
+#[allow(dead_code)] // read by the tick order slices that follow
+fn merge_in_join_order<const N: usize>(
+    lens: [usize; N],
+    seq: impl Fn(usize, usize) -> JoinSeq,
+    handle: impl Fn(usize, usize) -> EntityHandle,
+    mut visit: impl FnMut(EntityHandle, JoinSeq),
+) -> Result<(), JoinOrderError> {
+    let mut cursor = [0usize; N];
+    let mut last = JoinSeq::UNJOINED;
+    loop {
+        let mut best: Option<(usize, JoinSeq)> = None;
+        for list in 0..N {
+            if cursor[list] < lens[list] {
+                let s = seq(list, cursor[list]);
+                if !s.is_joined() {
+                    return Err(JoinOrderError::Unjoined(handle(list, cursor[list])));
+                }
+                if best.is_none_or(|(_, b)| s < b) {
+                    best = Some((list, s));
+                }
+            }
+        }
+        let Some((list, s)) = best else {
+            return Ok(());
+        };
+        let h = handle(list, cursor[list]);
+        if s <= last {
+            return Err(JoinOrderError::OutOfOrder(h));
+        }
+        last = s;
+        cursor[list] += 1;
+        visit(h, s);
+    }
+}
+
 entity_lists!(define_entity_handles,);
+horizon_client::impl_joined!(FallingBlock);
 
 macro_rules! entity_borrow {
     (shared, $place:expr) => {
@@ -435,7 +589,10 @@ macro_rules! save_lists {
      $($kind:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {
         $(for i in 0..$game$(.$list)+.len() {
             if let Some((key, tag)) = <$ty as $crate::game::entity::Entity>::save_nbt($game, i, $keys) {
-                $out.entry(key).or_default().push(tag);
+                $out.entry(key).or_default().push((
+                    $game$(.$list)+[i].join_seq(),
+                    tag,
+                ));
             }
         })*
     };
@@ -443,6 +600,7 @@ macro_rules! save_lists {
 pub(crate) use save_lists;
 
 /// Saves every entity of every list in `entity_lists!` into `$out` by chunk,
+/// each with its join number (`$out` maps a chunk to `(JoinSeq, Tag)` pairs),
 /// each through its own `Entity::save_nbt`: one loop per list, static dispatch,
 /// nothing allocated beyond the tags. A kind added to the lists cannot be left
 /// out, since `save_nbt` has no default.
@@ -452,14 +610,72 @@ macro_rules! save_entities_of_every_kind {
     };
 }
 
+macro_rules! load_lists {
+    (($game:expr, $kind:expr, $uuid:expr, $player:expr, $tag:expr)
+     $($kind_name:ident($ty:ty) $field:ident: $($list:ident).+,)*) => {{
+        let mut tag = $tag;
+        $(match <$ty as $crate::game::entity::Entity>::load_nbt($game, $kind, $uuid, $player, tag) {
+            Ok(()) => return Ok(()),
+            Err(back) => tag = back,
+        })*
+        Err(tag)
+    }};
+}
+pub(crate) use load_lists;
+
+/// Loads a saved entity as the first kind in `entity_lists!` that claims its
+/// type id, through that kind's own `Entity::load_nbt`: one test per kind,
+/// static dispatch, nothing allocated (the compound moves through). Evaluates
+/// to `Err(tag)` when no kind claims it, and `return`s `Ok` from the caller
+/// otherwise. A kind added to the lists cannot be left out, since `load_nbt`
+/// has no default.
+macro_rules! load_entity_of_any_kind {
+    ($game:expr, $kind:expr, $uuid:expr, $player:expr, $tag:expr) => {
+        $crate::game::entity::entity_lists!(load_lists, $game, $kind, $uuid, $player, $tag)
+    };
+}
+
 impl Game<'_> {
+    /// Loads a saved entity as the first kind in `entity_lists!` that claims
+    /// its type id: `Err` hands the compound back when none does.
+    pub(super) fn load_listed(
+        &mut self,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        load_entity_of_any_kind!(self, kind, uuid, player_uuid, tag)
+    }
+    /// The ids of the entities that are not on the walk of `entity_lists!`.
+    pub(super) fn entity_ids_off_walk(&self) -> impl Iterator<Item = u32> + '_ {
+        self.cushions
+            .iter()
+            .map(|e| e.id)
+            .chain(self.item_frames.iter().map(|e| e.id))
+            .chain(self.paintings.iter().map(|e| e.id))
+            .chain(self.others.iter().map(|e| e.id))
+            .chain(self.fangs.list.iter().map(|e| e.id))
+            .chain(self.crystals.iter().map(|e| e.id))
+            .chain(self.dragon.iter().map(|e| e.id))
+            .chain(self.ominous_spawners.iter().map(|e| e.id))
+    }
     /// Saves every entity of every kind that lies in `keys` into `out`, by chunk.
     pub(super) fn save_every_entity(
         &mut self,
         keys: &HashSet<ChunkKey>,
         out: &mut HashMap<ChunkKey, Vec<Tag>>,
     ) {
-        save_entities_of_every_kind!(self, keys, out);
+        // Saved by chunk in the order they joined, so a reload adds them in
+        // that order (a chunk's entity list is in insertion order in vanilla).
+        let mut staged: HashMap<ChunkKey, Vec<(JoinSeq, Tag)>> = HashMap::new();
+        save_entities_of_every_kind!(self, keys, staged);
+        for (key, mut tags) in staged {
+            tags.sort_by_key(|(seq, _)| *seq);
+            out.entry(key)
+                .or_default()
+                .extend(tags.into_iter().map(|(_, tag)| tag));
+        }
     }
 }
 
@@ -473,6 +689,19 @@ impl Entity for Mob {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_mob(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        _uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(game.res.mob_types().contains_key(kind)) {
+            return Err(tag);
+        }
+        game.load_mob(tag, None);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -549,6 +778,9 @@ impl Entity for Mob {
 }
 
 impl Entity for ItemEntity {
+    fn fluid_eye_y(&self) -> f64 {
+        ItemEntity::fluid_eye_y(self)
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:item".into()
     }
@@ -558,6 +790,19 @@ impl Entity for ItemEntity {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_item(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:item") {
+            return Err(tag);
+        }
+        game.load_item(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -594,6 +839,9 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:experience_orb".into()
     }
@@ -603,6 +851,19 @@ impl Entity for ExperienceOrb {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_orb(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:experience_orb") {
+            return Err(tag);
+        }
+        game.load_orb(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -645,6 +906,21 @@ impl Entity for Boat {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_boat(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(super::boats::any_boat_wood(kind)
+            .is_some_and(|(wood, chest)| game.boat_models.has(wood, chest)))
+        {
+            return Err(tag);
+        }
+        game.load_boat(tag, uuid, kind);
+        Ok(())
     }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
@@ -692,6 +968,19 @@ impl Entity for Minecart {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_cart(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(super::minecarts::CartKind::from_id(kind).is_some()) {
+            return Err(tag);
+        }
+        game.load_cart(tag, uuid, kind);
+        Ok(())
+    }
     stored_motion!();
     fn is_vehicle(&self) -> bool {
         true
@@ -738,6 +1027,9 @@ fn armor_stand_size(stand: &ArmorStand) -> (f64, f64) {
 }
 
 impl Entity for ArmorStand {
+    fn fluid_eye_y(&self) -> f64 {
+        ArmorStand::fluid_eye_y(self)
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:armor_stand".into()
     }
@@ -747,6 +1039,19 @@ impl Entity for ArmorStand {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_armor_stand(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:armor_stand") {
+            return Err(tag);
+        }
+        game.load_armor_stand(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
@@ -813,6 +1118,9 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:tnt".into()
     }
@@ -822,6 +1130,19 @@ impl Entity for PrimedTnt {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_tnt(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:tnt") {
+            return Err(tag);
+        }
+        game.load_tnt(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     /// `PrimedTnt` eye height: `0.98 * 0.85`.
@@ -857,6 +1178,9 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:falling_block".into()
     }
@@ -866,6 +1190,19 @@ impl Entity for FallingBlock {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_falling(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:falling_block") {
+            return Err(tag);
+        }
+        game.load_falling(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn selector_target(&self) -> Option<Target> {
@@ -886,6 +1223,31 @@ impl Entity for Projectile {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_projectile(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        match kind {
+            "minecraft:arrow" | "minecraft:spectral_arrow" => {
+                game.load_arrow(tag, uuid, player_uuid)
+            }
+            "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
+                game.load_spit_or_bullet(tag, player_uuid)
+            }
+            "minecraft:fireball"
+            | "minecraft:small_fireball"
+            | "minecraft:wind_charge"
+            | "minecraft:breeze_wind_charge" => game.load_fireball(tag, uuid, player_uuid),
+            id if horizon_client::entity_nbt::throwable_kind(id).is_some() => {
+                game.load_throwable(tag, uuid, player_uuid)
+            }
+            _ => return Err(tag),
+        }
+        Ok(())
     }
     stored_motion!();
     /// Arrows and the thrown items and fireballs a chunk saves.
@@ -950,6 +1312,19 @@ impl Entity for Rocket {
     ) -> Option<(ChunkKey, Tag)> {
         game.save_rocket(index, keys)
     }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:firework_rocket") {
+            return Err(tag);
+        }
+        game.load_rocket(tag, uuid, player_uuid);
+        Ok(())
+    }
     stored_motion!();
     /// A rocket that carries its owner stays.
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -984,6 +1359,19 @@ impl Entity for ThrownTrident {
         keys: &HashSet<ChunkKey>,
     ) -> Option<(ChunkKey, Tag)> {
         game.save_trident(index, keys)
+    }
+    fn load_nbt(
+        game: &mut Game<'_>,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        _player_uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> Result<(), Tag> {
+        if !(kind == "minecraft:trident") {
+            return Err(tag);
+        }
+        game.load_trident(tag, uuid);
+        Ok(())
     }
     stored_motion!();
     fn portal_size(&self) -> Option<(f32, f32)> {
@@ -1079,6 +1467,53 @@ mod no_gravity_stand_tests {
 }
 
 #[cfg(test)]
+mod load_claim_tests {
+    /// `Mob` is first in `entity_lists!` and claims every id in `mob_types`;
+    /// the old load tried every other kind first. Both agree only while no
+    /// mob species shares an id with another kind, which this checks.
+    #[test]
+    fn no_mob_species_is_an_id_another_kind_loads() {
+        let others = [
+            "minecraft:item",
+            "minecraft:experience_orb",
+            "minecraft:arrow",
+            "minecraft:spectral_arrow",
+            "minecraft:llama_spit",
+            "minecraft:shulker_bullet",
+            "minecraft:fireball",
+            "minecraft:small_fireball",
+            "minecraft:wind_charge",
+            "minecraft:breeze_wind_charge",
+            "minecraft:falling_block",
+            "minecraft:trident",
+            "minecraft:firework_rocket",
+            "minecraft:tnt",
+            "minecraft:armor_stand",
+            "minecraft:ominous_item_spawner",
+            "minecraft:ender_dragon",
+            "minecraft:end_crystal",
+            "minecraft:item_frame",
+            "minecraft:glow_item_frame",
+            "minecraft:cushion",
+            "minecraft:painting",
+        ];
+        for def in horizon_client::mobs::species::ALL {
+            let id = format!("minecraft:{}", def.name);
+            assert!(!others.contains(&id.as_str()), "{id}");
+            assert!(
+                horizon_client::entity_nbt::throwable_kind(&id).is_none(),
+                "{id}"
+            );
+            assert!(super::super::boats::any_boat_wood(&id).is_none(), "{id}");
+            assert!(
+                super::super::minecarts::CartKind::from_id(&id).is_none(),
+                "{id}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod trident_selector_tests {
     use super::Entity as _;
     use crate::game::{commands::Target, trident::ThrownTrident};
@@ -1090,5 +1525,138 @@ mod trident_selector_tests {
     fn a_thrown_trident_is_a_selector_target() {
         let t = ThrownTrident::remote(9, Vec3::new(0.5, 100.0, 0.5), 0.0, 0.0);
         assert_eq!(t.selector_target(), Some(Target::Trident(9)));
+    }
+}
+
+#[cfg(test)]
+mod join_order_tests {
+    use super::{EntityHandle, EntityLists, JoinOrderError};
+    use crate::game::{boats::Boat, fireworks::Rocket, trident::ThrownTrident};
+    use horizon_client::entities::ArmorStand;
+    use horizon_client::join_seq::JoinList;
+    use horizon_core::geometry::Vec3;
+
+    fn at() -> Vec3 {
+        Vec3::new(0.5, 100.0, 0.5)
+    }
+
+    struct Lists {
+        stands: JoinList<ArmorStand>,
+        tridents: JoinList<ThrownTrident>,
+        rockets: JoinList<Rocket>,
+        boats: JoinList<Boat>,
+    }
+
+    impl Lists {
+        fn view(&self) -> EntityLists<'_> {
+            EntityLists {
+                mobs: &[],
+                dropped: &[],
+                boats: &self.boats,
+                carts: &[],
+                armor_stands: &self.stands,
+                tnts: &[],
+                falling: &[],
+                orbs: &[],
+                projectiles: &[],
+                rockets: &self.rockets,
+                tridents: &self.tridents,
+            }
+        }
+        fn walk(&self) -> Result<Vec<EntityHandle>, JoinOrderError> {
+            let mut seen = Vec::new();
+            self.view().walk_in_join_order(|h, _| seen.push(h))?;
+            Ok(seen)
+        }
+    }
+
+    /// Joins five kinds' entities interleaved, the way a level gets them.
+    fn mixed() -> (Lists, Vec<EntityHandle>) {
+        let mut l = Lists {
+            stands: JoinList::default(),
+            tridents: JoinList::default(),
+            rockets: JoinList::default(),
+            boats: JoinList::default(),
+        };
+        l.trident(1);
+        l.rocket(2);
+        l.stand(3);
+        l.boat(4);
+        l.trident(5);
+        l.stand(6);
+        l.rocket(7);
+        let joined = vec![
+            EntityHandle::Trident(0),
+            EntityHandle::Rocket(0),
+            EntityHandle::ArmorStand(0),
+            EntityHandle::Boat(0),
+            EntityHandle::Trident(1),
+            EntityHandle::ArmorStand(1),
+            EntityHandle::Rocket(1),
+        ];
+        (l, joined)
+    }
+
+    impl Lists {
+        fn stand(&mut self, id: u32) {
+            self.stands.push(ArmorStand::new(id, at(), 0.0));
+        }
+        fn trident(&mut self, id: u32) {
+            self.tridents
+                .push(ThrownTrident::remote(id, at(), 0.0, 0.0));
+        }
+        fn rocket(&mut self, id: u32) {
+            self.rockets.push(Rocket::remote(id, at(), Vec3::ZERO));
+        }
+        fn boat(&mut self, id: u32) {
+            self.boats.push(Boat::new(id, "oak".into(), at(), 0.0));
+        }
+    }
+
+    /// The walk visits entities in the order they joined, not list by list.
+    #[test]
+    fn mixed_kinds_are_visited_in_join_order() {
+        let (lists, joined) = mixed();
+        assert_eq!(lists.walk().unwrap(), joined);
+        // Walked list by list they would come in another order.
+        assert_ne!(joined[0], EntityHandle::ArmorStand(0));
+    }
+
+    /// An entity taken out and put back (a tick takes its list) keeps its place.
+    #[test]
+    fn an_entity_put_back_keeps_its_join_number() {
+        let (mut lists, joined) = mixed();
+        let taken = std::mem::take(&mut lists.tridents);
+        let before: Vec<_> = taken
+            .iter()
+            .map(horizon_client::join_seq::Joined::join_seq)
+            .collect();
+        let mut back = JoinList::default();
+        for t in taken {
+            back.push(t);
+        }
+        lists.tridents = back;
+        let after: Vec<_> = lists
+            .tridents
+            .iter()
+            .map(horizon_client::join_seq::Joined::join_seq)
+            .collect();
+        assert_eq!(before, after);
+        assert_eq!(lists.walk().unwrap(), joined);
+    }
+
+    /// The walk is checked: a list out of join order, or an entity that never
+    /// went through the list's `push`, is reported and not walked past.
+    #[test]
+    fn the_walk_reports_a_list_out_of_order_and_an_entity_that_never_joined() {
+        let (mut lists, _) = mixed();
+        lists.tridents.swap(0, 1);
+        assert!(matches!(lists.walk(), Err(JoinOrderError::OutOfOrder(_))));
+        let (mut lists, _) = mixed();
+        Vec::push(&mut lists.stands, ArmorStand::new(9, at(), 0.0));
+        assert_eq!(
+            lists.walk(),
+            Err(JoinOrderError::Unjoined(EntityHandle::ArmorStand(2)))
+        );
     }
 }

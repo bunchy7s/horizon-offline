@@ -227,22 +227,23 @@ pub fn can_be_baby(s: Species) -> bool {
             | S::ZombifiedPiglin
     )
 }
-/// Whether the species keeps its body armour in `extra.head`.
-pub fn head_is_body(s: Species) -> bool {
+/// The species whose body item Horizon draws and handles as armour (and whose
+/// sun-protection slot is the body): the equines (a horse's armour, a llama's
+/// carpet, a camel's harness) and the wolf, happy ghast, nautilus and sulfur cube.
+pub fn body_slot_species(s: Species) -> bool {
     species::body_slot(s) || equine::is_equine(s)
 }
 
 /// The item a mob has in an `EquipmentSlot` (by name), with its enchantments.
 pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
-    let body = head_is_body(m.species());
     let (item, index) = match slot {
         "mainhand" => (m.extra.main_hand.as_deref(), Some(gear::MAIN)),
         "offhand" => (m.extra.off_hand.as_deref(), Some(gear::OFF)),
-        "head" if !body => (m.extra.head.as_deref(), Some(gear::HEAD)),
+        "head" => (m.extra.head.as_deref(), Some(gear::HEAD)),
         "chest" => (m.extra.chest.as_deref(), Some(gear::CHEST)),
         "legs" => (m.extra.legs.as_deref(), Some(gear::LEGS)),
         "feet" => (m.extra.feet.as_deref(), Some(gear::FEET)),
-        "body" if body => (m.extra.head.as_deref(), None),
+        "body" => (m.extra.body.as_deref(), None),
         "saddle" => {
             let saddle = m.saddle_item()?;
             let mut stack = loot_stack(&saddle.item, 1);
@@ -282,12 +283,12 @@ pub fn slot_item(m: &Mob, slot: &str) -> Option<LootStack> {
     Some(stack)
 }
 /// The `finalize` slot of a drop slot's name, for the slots a stack is kept in.
-fn slot_index(m: &Mob, slot: &str) -> Option<usize> {
+fn slot_index(slot: &str) -> Option<usize> {
     use super::finalize as f;
     Some(match slot {
         "mainhand" => f::MAINHAND,
         "offhand" => f::OFFHAND,
-        "head" if !head_is_body(m.species()) => f::HEAD,
+        "head" => f::HEAD,
         "chest" => f::CHEST,
         "legs" => f::LEGS,
         "feet" => f::FEET,
@@ -296,7 +297,7 @@ fn slot_index(m: &Mob, slot: &str) -> Option<usize> {
 }
 /// The whole stack the mob kept in `slot` (by name), when it kept one.
 fn stored_slot_stack(m: &Mob, slot: &str) -> Option<crate::items::ItemStack> {
-    super::finalize::stored_stack(m, slot_index(m, slot)?)
+    super::finalize::stored_stack(m, slot_index(slot)?)
 }
 /// The drop of what the mob has in `slot`, given its `stack` after the drop
 /// rolls: the whole stack the mob kept (with the rolled damage), else the loot stack.
@@ -311,7 +312,6 @@ fn slot_drop(m: &Mob, slot: &str, stack: LootStack) -> Drop {
 }
 /// `setItemSlot(slot, EMPTY)`.
 pub fn clear_slot(m: &mut Mob, slot: &str) {
-    let body = head_is_body(m.species());
     let index = match slot {
         "mainhand" => {
             m.extra.set_main_hand(None);
@@ -321,7 +321,7 @@ pub fn clear_slot(m: &mut Mob, slot: &str) {
             m.extra.off_hand = None;
             gear::OFF
         }
-        "head" if !body => {
+        "head" => {
             m.extra.head = None;
             gear::HEAD
         }
@@ -337,8 +337,8 @@ pub fn clear_slot(m: &mut Mob, slot: &str) {
             m.extra.feet = None;
             gear::FEET
         }
-        "body" if body => {
-            m.extra.head = None;
+        "body" => {
+            m.extra.body = None;
             m.extra.body_damage = 0;
             m.extra.body_extra = None;
             return;
@@ -378,7 +378,10 @@ pub fn drop_chance(m: &Mob, slot: &str) -> f32 {
         return chances[index];
     }
     match slot {
-        "saddle" | "body" => 2.0,
+        // A saddle or a body-slot species' worn armour (put on by `Equippable`)
+        // always drops; a body item elsewhere came from a command or a save.
+        "saddle" => 2.0,
+        "body" if body_slot_species(m.species()) => 2.0,
         "head" if is_raider(m.species()) && m.extra.head.as_deref() == Some(raider::BANNER) => 2.0,
         "mainhand" if m.species() == Species::Vex => 0.0,
         _ => DEFAULT_DROP_CHANCE,
@@ -739,5 +742,51 @@ mod death_loot_table_tests {
         assert_eq!(items(42, true), ["minecraft:diamond"]);
         // Without one, the type's table (a cow's beef and leather).
         assert!(items(0, false).iter().all(|i| i != "minecraft:diamond"));
+    }
+}
+#[cfg(test)]
+mod slot_tests {
+    use super::*;
+    use crate::mobs::sensor_scan_tests::kind;
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
+
+    fn mob(id: &str, species: Species) -> Mob {
+        let mut kind = kind();
+        let k = Arc::make_mut(&mut kind);
+        k.id = id.into();
+        k.species = species;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    /// A wolf's armor is the body slot, with the durability it lost; a
+    /// helmet beside it reads from the head slot.
+    #[test]
+    fn a_wolfs_slots_read_apart() {
+        let mut wolf = mob("minecraft:wolf", Species::Wolf);
+        wolf.extra.body = Some("minecraft:wolf_armor".into());
+        wolf.extra.body_damage = 9;
+        wolf.extra.head = Some("minecraft:iron_helmet".into());
+        let body = slot_item(&wolf, "body").unwrap();
+        let head = slot_item(&wolf, "head").unwrap();
+        assert_eq!(
+            (body.item.as_str(), body.damage),
+            ("minecraft:wolf_armor", 9)
+        );
+        assert_eq!(head.item, "minecraft:iron_helmet");
+        // The armor was put on by `Equippable`, so it always drops.
+        assert_eq!(drop_chance(&wolf, "body"), 2.0);
+    }
+
+    /// A body item nothing equipped (a `/item replace ... armor.body` on a
+    /// zombie) drops by the default chance, as vanilla's unequipped slot.
+    #[test]
+    fn a_zombies_body_item_drops_by_the_default_chance() {
+        let mut zombie = mob("minecraft:zombie", Species::Zombie);
+        zombie.extra.body = Some("minecraft:iron_helmet".into());
+        assert_eq!(drop_chance(&zombie, "body"), DEFAULT_DROP_CHANCE);
+        let body = slot_item(&zombie, "body").unwrap();
+        assert_eq!(body.item, "minecraft:iron_helmet");
+        assert!(slot_item(&zombie, "head").is_none());
     }
 }

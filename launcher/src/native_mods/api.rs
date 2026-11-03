@@ -12,7 +12,7 @@ pub(super) fn valid_id(id: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
 
-fn read(path: &Path) -> Result<toml::Table, String> {
+pub(super) fn read(path: &Path) -> Result<toml::Table, String> {
     let text = fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     text.parse().map_err(|e| format!("{}: {e}", path.display()))
 }
@@ -103,7 +103,7 @@ fn main_rs(ids: &[&str], named: bool) -> String {
 #![forbid(unsafe_code)]
 
 #[global_allocator]
-static ALLOCATOR: horizon_threads::Allocator = horizon_threads::Allocator;
+static ALLOCATOR: horizon_threads::Allocator = horizon_threads::ALLOCATOR;
 
 static MOD_API_LEVEL: [u8; horizon_mods::api_level::MARK.len()] = horizon_mods::api_level::MARK;
 
@@ -242,6 +242,12 @@ pub(super) fn stage(
             ("build".into(), "../horizon-client/build.rs".into()),
         ])),
     );
+    // This sibling package uses the client's build.rs, so its build dependencies apply too;
+    // relative paths still point to the same crates from crates/native-game.
+    let client = read(&stage.join("crates/horizon-client/Cargo.toml"))?;
+    if let Some(dependencies) = client.get("build-dependencies") {
+        manifest.insert("build-dependencies".into(), dependencies.clone());
+    }
     let windows = toml::Table::from_iter([(
         "build-dependencies".into(),
         toml::Value::Table(toml::Table::from_iter([(
@@ -345,6 +351,17 @@ mod tests {
     }
 
     #[test]
+    fn generated_main_uses_the_games_allocator() {
+        let game = include_str!("../../../crates/horizon-client/src/main.rs");
+        let allocator = game
+            .lines()
+            .find(|line| line.starts_with("static ALLOCATOR:"))
+            .unwrap();
+        let generated = main_rs(&[], false);
+        assert!(generated.lines().any(|line| line == allocator));
+    }
+
+    #[test]
     fn generated_main_keeps_mod_order() {
         let ids = ["base", "extra"];
         for count in 0..=2 {
@@ -372,8 +389,13 @@ mod tests {
         let dir = fixture("[mod]\nid = 'example'\nversion = '1'\n[api]\npath = 'engine'\n");
         let bundle = super::super::bundle(&dir, None).unwrap();
         let stage_dir = dir.join("workspace");
-        fs::create_dir_all(&stage_dir).unwrap();
+        fs::create_dir_all(stage_dir.join("crates/horizon-client")).unwrap();
         fs::write(stage_dir.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+        fs::write(
+            stage_dir.join("crates/horizon-client/Cargo.toml"),
+            "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n",
+        )
+        .unwrap();
         let resolution = super::super::dependencies::Resolution { order: vec![0] };
         assert!(stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap());
         let root = read(&stage_dir.join("Cargo.toml")).unwrap();
@@ -431,9 +453,15 @@ mod tests {
             "pub fn name_mods(ids: &'static [&'static str]) {}\n",
         )
         .unwrap();
+        fs::write(stage_dir.join("crates/horizon-client/Cargo.toml"), "[package]\nname = 'horizon-client'\nversion = '0.1.0'\n[build-dependencies]\nhorizon-mod-api-gen = { path = '../horizon-mod-api-gen' }\n").unwrap();
         let bundle = super::super::bundle(&dir, None).unwrap();
         stage(&stage_dir, &[bundle], &[vec![]], &resolution).unwrap();
         assert!(main().contains(r#"name_mods(&["example"]);"#));
+        let game = read(&stage_dir.join(GAME).join("Cargo.toml")).unwrap();
+        assert_eq!(
+            game["build-dependencies"]["horizon-mod-api-gen"]["path"].as_str(),
+            Some("../horizon-mod-api-gen")
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -22,7 +22,7 @@ struct Stored {
     /// The model's bounds in its parts' own space, per part: min and max of
     /// its own vertices (none: no polygons).
     bounds: Vec<Option<([f32; 3], [f32; 3])>>,
-    /// The model's render type culls back faces (the bat).
+    /// The model's render type culls back faces (the bat, the baby turtle).
     cull: bool,
 }
 
@@ -646,12 +646,13 @@ mod tests {
         assert!(taken[0].is_subset(&taken[1]));
     }
 
-    /// `BatModel` draws with `entityCutoutCull`: its zero-depth ears, wings and
-    /// feet put two quads in one place, and only culling tells them apart. The
-    /// bat's vertices ask for the shaded cull encoding, other mobs keep -127,
-    /// on both paths (the whole-mob test above holds them bit-equal).
+    /// `BatModel` and `BabyTurtleModel` draw with `entityCutoutCull`: their
+    /// zero-depth ears, wings, feet and legs put two quads in one place, and
+    /// only culling tells them apart. Their vertices ask for the shaded cull
+    /// encoding, other mobs keep -127, on both paths (the whole-mob test above
+    /// holds them bit-equal).
     #[test]
-    fn only_the_bat_asks_for_culled_back_faces() {
+    fn only_culled_render_types_ask_for_culled_back_faces() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../.local/horizon-client/26.3");
         if !root.join("entity-models.json").exists() {
@@ -659,12 +660,37 @@ mod tests {
             return;
         }
         let types = MobTypes::load(&root).unwrap();
-        for (id, w) in [
-            ("minecraft:bat", crate::mesher::SHADED_CULL_W),
-            ("minecraft:cow", -127),
-            ("minecraft:cat", -127),
-        ] {
-            let mut part = vec![&*types.types[id].model];
+        let turtle = &types.types["minecraft:turtle"];
+        let baby_turtle = turtle.layer("turtle_baby#main").expect("baby turtle model");
+        let cases: [(&str, &std::sync::Arc<crate::mobs::Part>, i8, u32); 5] = [
+            (
+                "minecraft:bat",
+                &types.types["minecraft:bat"].model,
+                crate::mesher::SHADED_CULL_W,
+                1,
+            ),
+            (
+                "minecraft:turtle_baby",
+                baby_turtle,
+                crate::mesher::SHADED_CULL_W,
+                1,
+            ),
+            ("minecraft:turtle", &turtle.model, -127, 0),
+            (
+                "minecraft:cow",
+                &types.types["minecraft:cow"].model,
+                -127,
+                0,
+            ),
+            (
+                "minecraft:cat",
+                &types.types["minecraft:cat"].model,
+                -127,
+                0,
+            ),
+        ];
+        for (id, model, w, _) in cases {
+            let mut part = vec![&**model];
             let mut seen = 0;
             while let Some(p) = part.pop() {
                 for poly in &p.polygons {
@@ -679,11 +705,11 @@ mod tests {
         // The GPU path flags the job, the CPU path the polygons.
         let mut models = SkinModels::default();
         let mut frame = SkinFrame::default();
-        for (id, cull) in [("minecraft:bat", 1), ("minecraft:cow", 0)] {
+        for (id, model, _, cull) in cases {
             models.begin(&mut frame, 0);
             let mut skin = Skin::new(&mut models, &mut frame);
             assert!(skin.draw(
-                &types.types[id].model,
+                model,
                 glam::Mat4::IDENTITY,
                 &Poses::default(),
                 Paint {

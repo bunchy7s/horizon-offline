@@ -7,7 +7,7 @@ use horizon_client::{
     assets::Assets,
     gfx::PreparedTextures,
     hud::HudAtlas,
-    lang,
+    lang, pack_browser,
     pack_screen::{self, Compat, PackInfo, Source as PackSource},
     packs::{self, Pack, Position},
     streaming::WorkerContext,
@@ -169,7 +169,9 @@ impl Game<'_> {
     /// (`PackSelectionScreen` makes its `PackSelectionModel` from them).
     pub(super) fn refresh_pack_lists(&mut self) {
         let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
+        let browsing = self.settings.extras.pack_browser;
         let o = &mut self.ui.options;
+        o.pack_browser = browsing;
         o.pack_infos = infos;
         o.pack_selection = self.settings.resource_packs.clone();
         o.pack_screen = None;
@@ -183,6 +185,41 @@ impl Game<'_> {
     /// a worker under the progress overlay (`LoadingOverlay` over
     /// `ReloadableResourceManager.createReload`'s background executor), so
     /// the window keeps drawing; `drive_pack_reload` applies it.
+    /// Horizon's pack browser: what its worker finished since the last
+    /// frame. A pack that landed becomes an entry in the available list.
+    pub(super) fn drive_pack_browser(&mut self) {
+        let Some(screen) = &mut self.ui.options.pack_screen else {
+            return;
+        };
+        let Some(browser) = &mut screen.browser else {
+            return;
+        };
+        let Some(message) = browser.poll() else {
+            return;
+        };
+        if let pack_browser::Message::Results(_) = &message {
+            // The rows draw their icons as they land.
+            browser.fetch_icons();
+        }
+        if let pack_browser::Message::Icon(id, png) = &message {
+            let key = pack_screen::icon_texture(id);
+            if let Some(icon) = pack_screen::load_fetched_icon(png) {
+                // Tracked, so closing the browser frees it again.
+                screen.keep_browser_icon(key, icon);
+            }
+            return;
+        }
+        if let pack_browser::Message::Downloaded(name) = message {
+            log::info!("Horizon: added the resource pack {name}");
+            // Rebuilding the screen would shut the list; keep it and only
+            // refresh what the lists read.
+            let selection = self.settings.resource_packs.clone();
+            let infos = pack_infos(&self.vanilla_root(), &self.server_packs.active);
+            self.ui.options.pack_infos = infos;
+            self.ui.options.pack_selection = selection;
+            self.ui.options.pack_screen = None;
+        }
+    }
     pub(super) fn reload_packs(&mut self) {
         // Pack reload updates tail-owned mob metadata. Keep menus responsive
         // until those resources exist, then apply the latest selection once.

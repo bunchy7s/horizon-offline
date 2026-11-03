@@ -938,7 +938,7 @@ pub fn ignite_for_wither_skeleton(m: &Mob, p: &mut Projectile) {
         a.ignite_for_seconds(100.0);
     }
 }
-/// Drowned.DrownedGoToWaterGoal (simplified to "head for water by day").
+/// Drowned.DrownedGoToWaterGoal.
 #[derive(Clone, Debug, Default)]
 pub struct DrownedGoToWater {
     wanted: [f64; 3],
@@ -948,6 +948,7 @@ impl Goal for DrownedGoToWater {
     fn flags(&self) -> u8 {
         MOVE
     }
+    /// `Drowned.DrownedGoToWaterGoal.canUse`.
     fn can_use(&mut self, m: &mut Mob, cx: &mut Cx) -> bool {
         if !cx.w.daylight || m.fluids.in_water {
             return false;
@@ -963,7 +964,9 @@ impl Goal for DrownedGoToWater {
                 by + 2 - m.random.next_int_bound(8).unwrap_or(0),
                 bz + m.random.next_int_bound(20).unwrap_or(0) - 10,
             ];
-            if cx.w.fluid(p[0], p[1], p[2]) == crate::blocks::Fluid::Water {
+            // getBlockState(pos).is(Blocks.WATER): kelp, seagrass and
+            // waterlogged blocks hold water but are not the water block.
+            if cx.w.block_name(p[0], p[1], p[2]) == "minecraft:water" {
                 self.wanted = [
                     f64::from(p[0]) + 0.5,
                     f64::from(p[1]),
@@ -1430,6 +1433,59 @@ mod creative_target_tests {
         });
     }
 }
+
+#[cfg(test)]
+mod go_to_water_tests {
+    use super::*;
+    use crate::mobs::world::with_built_test_world;
+    use std::sync::Arc;
+
+    /// `DrownedGoToWaterGoal.getWaterPos` takes only `Blocks.WATER` blocks:
+    /// an area of kelp (which holds water too) gives it nowhere to go.
+    #[test]
+    fn a_drowned_goes_to_water_blocks_not_kelp() {
+        for (block, expect) in [("minecraft:kelp", false), ("minecraft:water", true)] {
+            let build =
+                |world: &mut crate::world::World,
+                 registry: &horizon_world::registry::BlockRegistry| {
+                    for cx in -2..2 {
+                        for cz in -2..2 {
+                            world
+                                .chunks
+                                .insert((cx, cz), Arc::new(crate::chunk::Chunk::empty(cx, cz)));
+                        }
+                    }
+                    let state = registry.default_state(block).unwrap();
+                    for x in -12..12 {
+                        for z in -12..12 {
+                            for y in 58..=66 {
+                                world.set(x, y, z, state).unwrap();
+                            }
+                        }
+                    }
+                    let stone = registry.default_state("minecraft:stone").unwrap();
+                    world.set(0, 63, 0, stone).unwrap();
+                };
+            let ran = with_built_test_world(&[], build, |w, types| {
+                let mut kind = types.types["minecraft:drowned"].clone();
+                kind.species = Species::Drowned;
+                let mut m = Mob::new(1, Arc::new(kind), Vec3::new(0.5, 64.0, 0.5), 0.0);
+                assert!(w.fluid(3, 64, 3) == crate::blocks::Fluid::Water, "{block}");
+                let mut goal = DrownedGoToWater::default();
+                let mut events = Vec::new();
+                let mut lr = horizon_core::random::LegacyRandom::new(0);
+                let mut cx = Cx {
+                    w,
+                    lr: &mut lr,
+                    events: &mut events,
+                };
+                assert_eq!(goal.can_use(&mut m, &mut cx), expect, "{block}");
+            });
+            let _ = ran;
+        }
+    }
+}
+
 #[cfg(test)]
 mod wither_arrow_tests {
     use super::*;
@@ -1502,7 +1558,9 @@ mod wither_arrow_tests {
                 let arrow = events
                     .iter()
                     .find_map(|e| match e {
-                        MobEvent::Projectile(p) => p.arrow.as_ref(),
+                        MobEvent::Projectile(p) | MobEvent::BowShot { arrow: p, .. } => {
+                            p.arrow.as_ref()
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| panic!("{name} shot nothing"));

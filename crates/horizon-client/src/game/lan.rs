@@ -1427,10 +1427,11 @@ impl Game<'_> {
     ) {
         self.guest_attachments_into(guest);
         if guest.placed {
+            let _ = self.finish_player_autosaves(true);
             if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {
-                playerdata::save(guest, &self.world_root);
+                self.player_autosaves.save_after(guest, &self.world_root);
             }
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
@@ -1721,7 +1722,14 @@ impl Game<'_> {
                 .and_then(|conn| hub.guest(*conn))
                 .map(|g| g.entity_id);
             let leash = m.extra.leash.and_then(|h| match h {
-                Holder::Player => player_entity,
+                Holder::Player => match m.extra.leash_player {
+                    Some(u) => hub
+                        .guests
+                        .iter()
+                        .find(|g| playerdata::uuid_ints(g.uuid) == u)
+                        .map(|g| g.entity_id),
+                    None => player_entity,
+                },
                 Holder::Mob(id) | Holder::Boat(id) => Some(id as i32),
                 Holder::Knot(p) => self.knot_ids.get(&p).map(|&id| id as i32),
             });
@@ -2231,6 +2239,9 @@ impl Game<'_> {
         // drops remain absent from the snapshot until the following tick.
         if !paused {
             self.tick_guests(&mut host);
+            // The vehicles the guests just moved enter their portals now.
+            let ridden: Vec<u32> = host.hub.guests.iter().filter_map(|g| g.vehicle).collect();
+            self.find_ridden_vehicle_portals(&ridden);
         }
         {
             let has_guests = !host.hub.guests.is_empty();
@@ -2457,6 +2468,9 @@ impl Game<'_> {
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
+        // PrepareSpawnTask: with no saved rotation the player faces the world
+        // spawn's angle (`/setworldspawn ... <angle>`).
+        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
         }

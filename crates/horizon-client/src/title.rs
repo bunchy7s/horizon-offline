@@ -2406,7 +2406,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         cursor: (f32, f32),
         hide_splash: bool,
     ) {
-        self.draw_with_items(atlas, None, batch, cursor, hide_splash);
+        self.draw_with_items(atlas, None, batch, cursor, hide_splash, false);
     }
     /// [`Title::draw`] with the item models, which draw the item icons of the
     /// Superflat screens the way `GuiGraphics.renderItem` does.
@@ -2417,6 +2417,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         batch: &mut HudBatch,
         cursor: (f32, f32),
         hide_splash: bool,
+        hide_server_address: bool,
     ) {
         let (w, h) = (batch.width.ceil(), batch.height.ceil());
         if let Some(rules) = self.rules.borrow_mut().as_mut() {
@@ -3116,6 +3117,7 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                 &mut self.caret.borrow_mut(),
                 self.started,
                 cursor,
+                hide_server_address,
             ),
         }
         for b in self.buttons(w, h) {
