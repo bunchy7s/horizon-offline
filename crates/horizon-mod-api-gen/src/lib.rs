@@ -1146,6 +1146,8 @@ enum FillMode {
 
 mod build;
 pub use build::{generate, inject};
+mod injection;
+pub use injection::{TraitContract, TraitInjection};
 #[cfg(test)]
 mod injection_tests;
 

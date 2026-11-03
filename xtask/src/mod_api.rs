@@ -7,7 +7,3 @@ pub fn run() -> Result<(), String> {
         .ok_or("run xtask from within the Horizon checkout")?;
     horizon_mod_api_gen::fill_hooks(root)
 }
-
-#[cfg(test)]
-#[path = "mod_api_tests.rs"]
-mod dispatch_tests;

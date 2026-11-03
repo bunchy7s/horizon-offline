@@ -2700,7 +2700,6 @@ dependencies = [
  "oo7",
  "proc-macro2",
  "pulldown-cmark",
- "quote",
  "raw-window-handle",
  "security-framework 3.7.0",
  "semver",

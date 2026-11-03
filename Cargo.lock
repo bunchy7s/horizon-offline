@@ -1586,6 +1586,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "horizon-mod-api-gen-tests"
+version = "0.1.0"
+dependencies = [
+ "horizon-mod-api-gen",
+ "serde_json",
+]
+
+[[package]]
 name = "horizon-mods"
 version = "0.1.0"
 dependencies = [
@@ -5165,7 +5173,6 @@ version = "0.1.0"
 dependencies = [
  "horizon-mod-api-gen",
  "horizon-theme",
- "serde_json",
 ]
 
 [[package]]
