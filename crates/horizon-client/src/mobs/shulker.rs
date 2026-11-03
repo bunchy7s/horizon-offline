@@ -27,8 +27,9 @@ pub const NO_COLOR: u8 = 16;
 /// `Direction.DOWN`'s 3D data value.
 const DOWN: u8 = 0;
 
-/// `Shulker.getDefaultDimensions`: a shell hanging from the block above
-/// grows `1 + currentPeekAmount` tall as its lid opens there. Width is
+/// `Shulker.getDefaultDimensions`: a shell attached to the block below it
+/// (attach face `DOWN`, its lid opening upward) grows `1 + currentPeekAmount`
+/// tall as the lid opens. Width is
 /// untouched, and so is every other attach face.
 pub fn peek_height_scale(m: &Mob) -> Option<f32> {
     let peek = m.anim.v[PEEK];
@@ -670,7 +671,7 @@ mod tests {
     }
 
     #[test]
-    fn an_open_shell_hanging_below_a_block_stands_taller() {
+    fn an_open_shell_on_the_floor_stands_taller() {
         // Shulker.getDefaultDimensions: a shell on Direction.DOWN (attach
         // face 0) with currentPeekAmount p is `scale(1, 1 + p)` of its
         // 1 x 1 x 0.5 box — the width is untouched, the height and the eyes
@@ -693,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_shell_hanging_below_a_block_grows() {
+    fn only_a_shell_on_the_floor_grows() {
         // Every other attach face keeps the plain 1 x 1 x 0.5 box, however
         // far the lid opens.
         for face in [1u8, 2, 3, 4, 5] {
@@ -710,7 +711,7 @@ mod tests {
                 "a shell on face {face} stays 1 x 1: {w} x {h} x {e}"
             );
         }
-        // A closed one under a block does not grow either.
+        // A closed one on the floor does not grow either.
         let mut m = shulker();
         m.extra.variant3 = DOWN;
         let (_, h, _) = m.dims();

@@ -406,6 +406,16 @@ impl Game<'_> {
                 }
                 Ok(Some(json!({ "ok": true, "sides": r.section_sides() })))
             }
+            "gpu-culling" => {
+                let r = self.renderer.as_mut().ok_or("no renderer")?;
+                match words.get(1).copied() {
+                    None => {}
+                    Some("on") => r.set_gpu_culling(true)?,
+                    Some("off") => r.set_gpu_culling(false)?,
+                    Some(other) => return Err(format!("unknown GPU culling mode {other}").into()),
+                }
+                Ok(Some(json!({ "ok": true, "gpu_culling": r.gpu_culling() })))
+            }
             "sculk" => Ok(Some(self.sculk_command(&words)?)),
             "hello" => Ok(Some(hello())),
             "status" => Ok(Some(self.control_status())),
@@ -577,7 +587,7 @@ impl Game<'_> {
                     }
                 };
                 match arg(2)? {
-                    "down" => self.control_key_down(key)?,
+                    "down" => self.control_key_down(key, physical)?,
                     "up" => {
                         self.keys.remove(&key);
                         self.physical_keys.remove(&key);
@@ -585,10 +595,10 @@ impl Game<'_> {
                     // The system's auto-repeat while the key is held.
                     "repeat" => {
                         self.physical_keys.insert(physical);
-                        self.mapped_key(key, true, true)?;
+                        self.mapped_key(key, true, true, key)?;
                     }
                     "tap" => {
-                        self.control_key_down(key)?;
+                        self.control_key_down(key, physical)?;
                         self.keys.remove(&key);
                         self.physical_keys.remove(&physical);
                         self.debug_key(physical, horizon_client::debug_keys::KeyAction::Release);
@@ -1076,7 +1086,7 @@ impl Game<'_> {
         Ok(())
     }
 
-    fn control_key_down(&mut self, key: KeyCode) -> Result<()> {
+    fn control_key_down(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
         self.physical_keys.insert(key);
         // The window's shortcuts come before any screen, here too.
         if self.screenshot_shortcut(key, false) {
@@ -1098,7 +1108,7 @@ impl Game<'_> {
             return Ok(());
         }
         if self.keys.insert(key) {
-            self.key_pressed(key)?;
+            self.key_pressed(key, raw)?;
         }
         Ok(())
     }
@@ -1225,6 +1235,8 @@ impl Game<'_> {
                 "section_draws": r.section_draws,
                 "section_draw_calls": r.section_draw_calls,
                 "culled_sections": r.culled_sections(),
+                "gpu_culling": r.gpu_culling(),
+                "gpu_frame": r.gpu_frame(),
                 "uploaded_bytes": r.uploaded_bytes,
                 "resident_sections": r.resident_sections(),
                 "arena_bytes": arena_bytes,

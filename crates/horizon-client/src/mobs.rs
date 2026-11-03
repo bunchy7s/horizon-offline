@@ -435,10 +435,28 @@ pub struct MobTypes {
 }
 impl MobTypes {
     pub fn load(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, true)
+    }
+
+    /// The dedicated server needs entity facts and AI, but never their render
+    /// geometry. Keep one empty part for the fields shared with the client
+    /// rather than parsing and retaining every entity-model layer.
+    pub fn load_for_server(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, false)
+    }
+
+    fn load_with_models(root: &Path, models_needed: bool) -> crate::Result<Self> {
         let bytes = fs::read(root.join("entity-types.json"))?;
         let types: Value = serde_json::from_slice(&bytes)?;
         let exact = exact_attributes(&bytes);
-        let models: Value = serde_json::from_slice(&fs::read(root.join("entity-models.json"))?)?;
+        let models = models_needed
+            .then(|| -> crate::Result<Value> {
+                Ok(serde_json::from_slice(&fs::read(
+                    root.join("entity-models.json"),
+                )?)?)
+            })
+            .transpose()?;
+        let empty_model = Arc::new(Part::parse("root", &Value::Null));
         let item_tags =
             crate::items::load_tags(root, "item", &horizon_world::loot::PackOverlay::NONE)
                 .unwrap_or_default();
@@ -461,13 +479,14 @@ impl MobTypes {
                 continue;
             }
             let model_key = format!("minecraft:{}", def.model);
-            let Some(model) = models.get(&model_key) else {
+            let model = models.as_ref().and_then(|models| models.get(&model_key));
+            if models_needed && model.is_none() {
                 continue;
-            };
+            }
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models.as_object() {
+            if let Some(all) = models.as_ref().and_then(Value::as_object) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
@@ -512,14 +531,19 @@ impl MobTypes {
                     max_head_y_rot: def.max_head_y_rot(),
                     ambient_interval: def.ambient_interval(),
                     flags,
-                    model: Arc::new({
-                        let mut part = Part::parse("root", model);
-                        // BatModel: `RenderTypes::entityCutoutCull`.
-                        if def.name == "bat" {
-                            part.set_cull_back();
-                        }
-                        part
-                    }),
+                    model: model.map_or_else(
+                        || empty_model.clone(),
+                        |model| {
+                            Arc::new({
+                                let mut part = Part::parse("root", model);
+                                // BatModel: `RenderTypes::entityCutoutCull`.
+                                if def.name == "bat" {
+                                    part.set_cull_back();
+                                }
+                                part
+                            })
+                        },
+                    ),
                     layers,
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
@@ -1204,6 +1228,9 @@ pub struct Mob {
     /// `Entity.mainSupportingBlockPos`: the block it stood on after its last
     /// move.
     pub supporting: Option<[i32; 3]>,
+    /// The block under the mob's feet by name (`minecraft:grass_block`), kept for the
+    /// packs' random-model rules (`rule_index`); `None` without rules or off the ground.
+    pub standing_on: Option<String>,
     /// `NoAI`: no goals and no movement.
     pub no_ai: bool,
     /// `Silent`.
@@ -2118,6 +2145,24 @@ impl Seen {
     }
 }
 impl Mob {
+    /// The name used by command replies: CustomName takes precedence over the type.
+    pub fn command_name(&self) -> crate::text::Text {
+        if let Some(name) = &self.custom_name {
+            return crate::text::Text::literal(name);
+        }
+        // Villager.getTypeName returns its registered profession's name.
+        if self.species() == Species::Villager {
+            let professions = &render::PROFESSIONS;
+            let profession = professions[self.extra.variant2 as usize % professions.len()];
+            return crate::text::Text::translate(
+                &format!("entity.minecraft.villager.{profession}"),
+                &[],
+            );
+        }
+        let id = crate::command::args::normalize(&self.kind.id);
+        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+    }
+
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
@@ -2679,6 +2724,7 @@ impl Mob {
             first_tick: true,
             no_gravity: false,
             supporting: None,
+            standing_on: None,
             no_ai: false,
             silent: false,
             invulnerable_flag: false,
@@ -2849,6 +2895,13 @@ impl Mob {
     pub fn damage(&mut self, amount: f32, source: Damage) -> bool {
         self.damage_with(amount, source, None)
     }
+    /// `LivingEntity.isInvulnerableTo` and dead or removed: only #bypasses_invulnerability gets
+    /// past the flag. The guard every damage hook runs after (`LivingIncomingDamageEvent`).
+    pub fn refuses_damage(&self, source: &Damage) -> bool {
+        !self.alive()
+            || self.removed
+            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
+    }
     /// `damage` by a source with a weapon: `armor_effectiveness` runs the
     /// weapon's armor-effectiveness enchantments (breach) over the armor fraction.
     pub fn damage_with(
@@ -2869,11 +2922,7 @@ impl Mob {
             // about, so `Player.attack` goes on with its extra knockback and its aftermath.
             return sulfur_cube::immune_to(&source);
         }
-        // LivingEntity.isInvulnerableTo: only #bypasses_invulnerability gets past it.
-        if !self.alive()
-            || self.removed
-            || (self.invulnerable_flag && !source.kind.bypasses_invulnerability())
-        {
+        if self.refuses_damage(&source) {
             return false;
         }
         // Ghast.isReflectedFireball: a fireball a player turned back is
@@ -2886,6 +2935,12 @@ impl Mob {
         }
         if !ai::accepts_damage(self, &source, amount) {
             return false;
+        }
+        // LivingEntity.hurtServer refuses fire before hooks and damage processing.
+        if source.is_fire() && self.has_effect("minecraft:fire_resistance") {
+            // Ghast.hurtServer reports success for a reflected fireball even
+            // when LivingEntity refuses its health damage.
+            return reflected;
         }
         // IronGolem.hurtServer: the crack level before the damage, compared after.
         let crackiness = (self.species() == Species::IronGolem).then(|| golem::crackiness(self));
@@ -4388,6 +4443,101 @@ mod held_stack_tests {
         extra.take_main_hand();
         assert!(extra.main_hand.is_none());
         assert!(extra.main_hand_stack().is_none());
+    }
+}
+
+#[cfg(test)]
+mod fire_resistance_damage_tests {
+    use super::*;
+
+    fn pig() -> Mob {
+        let mut kind = super::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:pig".into();
+        def.species = Species::Pig;
+        Mob::new(1, kind, Vec3::ZERO, 0.0)
+    }
+
+    #[test]
+    fn fire_resistance_rejects_fire_before_health_and_hurt_cooldown() {
+        for kind in [
+            DamageKind::Campfire,
+            DamageKind::Fireball,
+            DamageKind::HotFloor,
+            DamageKind::InFire,
+            DamageKind::Lava,
+            DamageKind::OnFire,
+            DamageKind::SulfurCubeHot,
+        ] {
+            let mut mob = pig();
+            mob.add_effect("minecraft:fire_resistance", -1, 0);
+            assert!(!mob.damage(1.0, Damage::of(kind)), "{kind:?}");
+            assert_eq!(mob.health, 10.0, "{kind:?}");
+            assert_eq!(
+                (mob.hurt_time, mob.invulnerable, mob.last_hurt),
+                (0, 0, 0.0)
+            );
+            assert!(mob.last_damage.is_none());
+            assert!(mob.outbox.is_empty());
+            // A refused fire hit must not prevent the next ordinary hit.
+            assert!(mob.damage(1.0, Damage::of(DamageKind::Cactus)));
+            assert_eq!(mob.health, 9.0);
+
+            let mut bare = pig();
+            assert!(bare.damage(1.0, Damage::of(kind)));
+            assert_eq!(bare.health, 9.0);
+            assert!(
+                !bare.damage(1.0, Damage::of(kind)),
+                "equal hit during cooldown"
+            );
+            assert!(
+                bare.damage(2.0, Damage::of(kind)),
+                "stronger hit during cooldown"
+            );
+            assert_eq!(bare.health, 8.0);
+
+            let mut resistant = pig();
+            resistant.add_effect("minecraft:resistance", -1, 0);
+            assert!(resistant.damage(1.0, Damage::of(kind)));
+            assert_eq!(resistant.health, 9.2);
+
+            let mut invulnerable = pig();
+            invulnerable.invulnerable_flag = true;
+            assert!(!invulnerable.damage(1.0, Damage::of(kind)));
+            assert_eq!(invulnerable.health, 10.0);
+        }
+    }
+
+    #[test]
+    fn species_hurt_callbacks_still_run_before_the_living_fire_guard() {
+        let mut mob = pig();
+        let kind = Arc::make_mut(&mut mob.kind);
+        kind.id = "minecraft:bat".into();
+        kind.species = Species::Bat;
+        bat::set_resting(&mut mob, true);
+        mob.add_effect("minecraft:fire_resistance", -1, 0);
+        assert!(!mob.damage(1.0, Damage::of(DamageKind::InFire)));
+        assert!(!bat::resting(&mob));
+        assert_eq!(mob.health, 10.0);
+        assert_eq!(mob.invulnerable, 0);
+    }
+
+    #[test]
+    fn reflected_ghast_fireball_still_reports_success_when_fire_resistance_refuses_health_damage() {
+        let mut mob = pig();
+        let kind = Arc::make_mut(&mut mob.kind);
+        kind.id = "minecraft:ghast".into();
+        kind.species = Species::Ghast;
+        kind.flags.fire_immune = true;
+        mob.add_effect("minecraft:fire_resistance", -1, 0);
+        let source = Damage {
+            kind: DamageKind::Fireball,
+            attacker: Some(Who::Player),
+            from: None,
+        };
+        assert!(mob.damage(1.0, source));
+        assert_eq!(mob.health, 10.0);
+        assert_eq!(mob.invulnerable, 0);
     }
 }
 

@@ -385,309 +385,16 @@ impl Game<'_> {
                         .anon
                         .insert(anon_key(&kind, at), (at, tag.clone()));
                 }
-                match kind.as_str() {
-                    "minecraft:item" => {
-                        self.next_entity += 1;
-                        let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
-                        if let Some(e) =
-                            entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob)
-                        {
-                            self.remember(e.id, uuid, tag);
-                            self.dropped.push(e);
-                        }
-                    }
-                    "minecraft:experience_orb" => {
-                        for (i, mut orb) in entity_nbt::orbs_from_nbt(&tag).into_iter().enumerate()
-                        {
-                            self.next_entity += 1;
-                            orb.id = self.next_entity;
-                            let id = orb.id;
-                            // Horizon splits a saved `count` into orbs: the first is the saved one.
-                            if i == 0 {
-                                self.remember_uuid(id, uuid, &tag);
-                            }
-                            // An orb that came through a portal keeps its cooldown.
-                            self.restore_portal_cooldown(id, &tag);
-                            self.orbs.push(orb);
-                            self.remember_tags(id, &tag);
-                        }
-                    }
-                    "minecraft:arrow" | "minecraft:spectral_arrow" => {
-                        if let Some((mut p, in_block)) = entity_nbt::arrow_from_nbt(
-                            &tag,
-                            player_uuid,
-                            super::dispenser::tipped_effect,
-                        ) {
-                            if let Some(a) = p.arrow.as_mut() {
-                                a.last_state = in_block.and_then(|t| self.state_from_nbt(&t));
-                            }
-                            self.claim_owner(&mut p);
-                            // An arrow that came through a portal keeps its
-                            // cooldown: it does not go straight back through.
-                            self.next_entity += 1;
-                            p.id = self.next_entity;
-                            self.restore_portal_cooldown(p.id, &tag);
-                            self.remember_tags(p.id, &tag);
-                            self.remember_uuid(p.id, uuid, &tag);
-                            self.add_projectile(p);
-                        }
-                    }
-                    "minecraft:fireball"
-                    | "minecraft:small_fireball"
-                    | "minecraft:wind_charge"
-                    | "minecraft:breeze_wind_charge" => {
-                        if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
-                            self.claim_owner(&mut p);
-                            // A projectile that came through a portal keeps its cooldown.
-                            self.next_entity += 1;
-                            p.id = self.next_entity;
-                            self.restore_portal_cooldown(p.id, &tag);
-                            self.remember_uuid(p.id, uuid, &tag);
-                            self.add_projectile(p);
-                            self.remember_last_projectile_tags(&tag);
-                        }
-                    }
-                    "minecraft:llama_spit" | "minecraft:shulker_bullet" => {
-                        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid)
-                        {
-                            self.claim_owner(&mut p);
-                            self.next_entity += 1;
-                            p.id = self.next_entity;
-                            self.restore_portal_cooldown(p.id, &tag);
-                            self.add_projectile(p);
-                            self.remember_last_projectile_tags(&tag);
-                        }
-                    }
-                    id if entity_nbt::throwable_kind(id).is_some() => {
-                        if let Some(mut p) = entity_nbt::throwable_from_nbt(&tag, player_uuid) {
-                            self.claim_owner(&mut p);
-                            // A projectile that came through a portal keeps its cooldown.
-                            self.next_entity += 1;
-                            p.id = self.next_entity;
-                            self.restore_portal_cooldown(p.id, &tag);
-                            self.remember_uuid(p.id, uuid, &tag);
-                            self.add_projectile(p);
-                            self.remember_last_projectile_tags(&tag);
-                        }
-                    }
-                    "minecraft:falling_block" => {
-                        if let Some((state, position, velocity, age, fall_distance)) =
-                            entity_nbt::falling_block_from_nbt(&tag)
-                            && let Some(state) = self.state_from_nbt(&state)
-                        {
-                            let (no_gravity, drop_item) = entity_nbt::falling_block_flags(&tag);
-                            self.next_entity += 1;
-                            // A summoned one has no UUID yet: `Entity` makes a random one.
-                            self.remember_uuid(self.next_entity, uuid, &tag);
-                            let uuid = self.uuid_for(self.next_entity);
-                            self.falling.push(FallingBlock {
-                                id: self.next_entity,
-                                state,
-                                // DATA_START_POS is not persisted by vanilla.
-                                start_pos: horizon_core::position::BlockPos::default(),
-                                position,
-                                previous: position,
-                                velocity,
-                                age,
-                                no_gravity,
-                                portal: horizon_client::nether_portal::PortalState {
-                                    cooldown: horizon_client::save::number(
-                                        tag.get("PortalCooldown"),
-                                    )
-                                    .unwrap_or(0)
-                                        as i32,
-                                    process: None,
-                                },
-                                drop_item,
-                                fall_distance,
-                                stuck: Vec3::ZERO,
-                                damage: horizon_client::falling_block::Damage::from_nbt(
-                                    &tag,
-                                    self.res.facts().get(state).name.ends_with("anvil"),
-                                ),
-                                saved: Some(Box::new((uuid, tag.clone()))),
-                            });
-                        }
-                    }
-                    "minecraft:trident" => {
-                        if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
-                            let mut t = super::trident::ThrownTrident::from_nbt(n);
-                            t.id = self.take_entity_id();
-                            // One that came through a portal keeps its cooldown.
-                            let id = t.id;
-                            self.tridents.push(t);
-                            self.remember(id, uuid, tag);
-                        }
-                    }
-                    "minecraft:firework_rocket" => {
-                        if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
-                            let id = self.take_entity_id();
-                            let mut rocket = super::fireworks::Rocket::from_nbt(r);
-                            rocket.id = id;
-                            // One that came through a portal keeps its cooldown.
-                            self.restore_portal_cooldown(id, &tag);
-                            self.rockets.push(rocket);
-                            self.remember(id, uuid, tag);
-                        }
-                    }
-                    // PrimedTnt.readAdditionalSaveData: its fuse (80 when absent) and motion.
-                    // Its Passengers ride it (EntityType.loadEntityRecursive forces them on).
-                    "minecraft:tnt" => {
-                        let mut tag = tag;
-                        let riders = self.take_mob_passengers(&mut tag);
-                        if let Some(position) = entity_nbt::position(&tag) {
-                            self.next_entity += 1;
-                            let id = self.next_entity;
-                            let fuse = match tag.get("fuse") {
-                                Some(Tag::Short(f)) => i32::from(*f),
-                                _ => 80,
-                            };
-                            self.tnts.push(super::tnt::PrimedTnt {
-                                no_gravity: entity_nbt::flag(&tag, "NoGravity"),
-                                id,
-                                position,
-                                previous: position,
-                                velocity: entity_nbt::motion(&tag),
-                                fuse,
-                                on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
-                                owner: None,
-                                guest: None,
-                                // PrimedTnt.readAdditionalSaveData: 4 by default,
-                                // kept to 0..128.
-                                power: entity_nbt::tnt_power(&tag),
-                            });
-                            // `Entity.load`: the `PortalCooldown` of one that just came through.
-                            self.remember(id, uuid, tag);
-                            for rider in riders {
-                                self.load_mob(rider, Some(id));
-                            }
-                        }
-                    }
-                    k if super::boats::any_boat_wood(k)
-                        .is_some_and(|(wood, chest)| self.boat_models.has(wood, chest)) =>
-                    {
-                        if let Some((position, velocity, yaw)) = entity_nbt::boat_from_nbt(&tag) {
-                            let mut tag = tag;
-                            let riders = self.take_mob_passengers(&mut tag);
-                            self.next_entity += 1;
-                            let id = self.next_entity;
-                            let (wood, chest) =
-                                super::boats::any_boat_wood(k).unwrap_or(("oak", false));
-                            let mut b = super::boats::Boat::new(
-                                id,
-                                std::sync::Arc::from(wood),
-                                position,
-                                yaw,
-                            );
-                            b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
-                            if chest {
-                                b = b.with_chest();
-                                b.items = horizon_client::save::decode_items(
-                                    tag.get("Items"),
-                                    super::boats::CHEST_SLOTS,
-                                );
-                            }
-                            b.velocity = velocity;
-                            // AbstractBoat.readAdditionalSaveData: the lead's holder.
-                            b.leash_pending =
-                                horizon_client::mobs::leash::pending_from_nbt(tag.get("leash"));
-                            self.remember(id, uuid, tag);
-                            self.boats.push(b);
-                            for rider in riders {
-                                self.load_mob(rider, Some(id));
-                            }
-                        }
-                    }
-                    k if super::minecarts::CartKind::from_id(k).is_some() => {
-                        let kind = super::minecarts::CartKind::from_id(k).unwrap();
-                        let mut tag = tag;
-                        let riders = self.take_mob_passengers(&mut tag);
-                        let id = self.next_entity + 1;
-                        if let Some(mut c) = super::minecarts::Minecart::from_nbt(&tag, id, kind) {
-                            self.roll_cart_loot(&mut c, &tag);
-                            self.next_entity = id;
-                            self.remember(id, uuid, tag);
-                            self.carts.push(c);
-                            for rider in riders {
-                                self.load_mob(rider, Some(id));
-                            }
-                        }
-                    }
-                    "minecraft:ominous_item_spawner" => self.load_ominous_item_spawner(tag),
-                    "minecraft:ender_dragon" => {
-                        let seed = self.world.random.next_long();
-                        if self.dragon.is_none()
-                            && let Some(mut d) = super::dragon::Dragon::from_nbt(&tag, seed)
-                        {
-                            // EnderDragon's constructor takes its id and its
-                            // parts' from the entity counter.
-                            d.id = self.next_entity + 1;
-                            self.next_entity += 9;
-                            self.remember_tags(d.id, &tag);
-                            self.remember_uuid(d.id, uuid, &tag);
-                            self.dragon = Some(d);
-                        }
-                    }
-                    "minecraft:end_crystal" => {
-                        let time = self.world.random.next_int_bound(100_000).unwrap_or(0);
-                        if let Some(mut c) = super::dragon::Crystal::from_nbt(&tag, time) {
-                            // EndCrystal's constructor takes an id from the
-                            // entity counter.
-                            self.next_entity += 1;
-                            c.id = self.next_entity;
-                            self.remember_tags(c.id, &tag);
-                            self.remember_uuid(c.id, uuid, &tag);
-                            self.crystals.push(c);
-                        }
-                    }
-                    "minecraft:armor_stand" => {
-                        self.next_entity += 1;
-                        if let Some(a) = entity_nbt::armor_stand_from_nbt(&tag, self.next_entity) {
-                            self.remember(a.id, uuid, tag);
-                            self.armor_stands.push(a);
-                        }
-                    }
-                    "minecraft:item_frame" | "minecraft:glow_item_frame" => {
-                        self.next_entity += 1;
-                        if let Some(f) = entity_nbt::item_frame_from_nbt(&tag, self.next_entity) {
-                            self.remember(f.id, uuid, tag);
-                            self.item_frames.push(f);
-                        }
-                    }
-                    "minecraft:cushion" => {
-                        self.next_entity += 1;
-                        if let Some(c) = entity_nbt::cushion_from_nbt(&tag, self.next_entity) {
-                            self.remember(c.id, uuid, tag);
-                            self.cushions.push(c);
-                        }
-                    }
-                    "minecraft:painting" => {
-                        if let Some((pos, facing, variant)) = entity_nbt::painting_from_nbt(&tag)
-                            && let Some(v) = self.painting_variants.get(&variant).cloned()
-                        {
-                            self.next_entity += 1;
-                            let id = self.next_entity;
-                            self.remember(id, uuid, tag);
-                            self.paintings.push(horizon_client::entities::Painting {
-                                id,
-                                pos,
-                                facing,
-                                variant: v.id,
-                                width: v.width,
-                                height: v.height,
-                                check_interval: 0,
-                            });
-                        } else {
-                            self.persist.unknown.entry(key).or_default().push(tag);
-                        }
-                    }
-                    _ if self.res.mob_types().contains_key(&kind) => {
-                        self.load_mob(tag, None);
-                    }
-                    _ if !kind.is_empty() && entity_nbt::position(&tag).is_some() => {
+                // Kinds outside `entity_lists!` first, then the listed kinds
+                // (`Entity::load_nbt`), then whatever else is a compound.
+                if let Err(tag) = self.load_unlisted(key, &kind, uuid, tag)
+                    && let Err(tag) = self.load_listed(&kind, uuid, player_uuid, tag)
+                {
+                    if !kind.is_empty() && entity_nbt::position(&tag).is_some() {
                         self.load_other(tag, &kind);
+                    } else {
+                        self.persist.unknown.entry(key).or_default().push(tag);
                     }
-                    _ => self.persist.unknown.entry(key).or_default().push(tag),
                 }
                 // PersistentEntitySectionManager.addEntity: every kind that
                 // just joined tells the mods; a moved one does not join.
@@ -698,6 +405,351 @@ impl Game<'_> {
                 }
             }
             self.native_entities_load(self.dim.id(), [key.0, key.1], count);
+        }
+    }
+    /// The kinds `entity_lists!` does not hold: `Err` hands the compound back
+    /// when `kind` is not one of them.
+    fn load_unlisted(
+        &mut self,
+        key: ChunkKey,
+        kind: &str,
+        uuid: Option<[i32; 4]>,
+        tag: Tag,
+    ) -> std::result::Result<(), Tag> {
+        match kind {
+            "minecraft:ominous_item_spawner" => self.load_ominous_item_spawner(tag),
+            "minecraft:ender_dragon" => self.load_dragon(tag, uuid),
+            "minecraft:end_crystal" => self.load_crystal(tag, uuid),
+            "minecraft:item_frame" | "minecraft:glow_item_frame" => self.load_item_frame(tag, uuid),
+            "minecraft:cushion" => self.load_cushion(tag, uuid),
+            "minecraft:painting" => self.load_painting(tag, uuid, key),
+            _ => return Err(tag),
+        }
+        Ok(())
+    }
+    /// A saved dropped item.
+    pub(super) fn load_item(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        self.next_entity += 1;
+        let bob = self.world.random.next_float() * std::f32::consts::PI * 2.0;
+        if let Some(e) = entity_nbt::item_entity_from_nbt(&tag, self.next_entity, bob) {
+            self.remember(e.id, uuid, tag);
+            self.dropped.push(e);
+        }
+    }
+
+    /// A saved experience orb (or the orbs it stands for).
+    pub(super) fn load_orb(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        for (i, mut orb) in entity_nbt::orbs_from_nbt(&tag).into_iter().enumerate() {
+            self.next_entity += 1;
+            orb.id = self.next_entity;
+            let id = orb.id;
+            // Horizon splits a saved `count` into orbs: the first is the saved one.
+            if i == 0 {
+                self.remember_uuid(id, uuid, &tag);
+            }
+            // An orb that came through a portal keeps its cooldown.
+            self.restore_portal_cooldown(id, &tag);
+            self.orbs.push(orb);
+            self.remember_tags(id, &tag);
+        }
+    }
+
+    /// A saved arrow or spectral arrow.
+    pub(super) fn load_arrow(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
+        if let Some((mut p, in_block)) =
+            entity_nbt::arrow_from_nbt(&tag, player_uuid, super::dispenser::tipped_effect)
+        {
+            if let Some(a) = p.arrow.as_mut() {
+                a.last_state = in_block.and_then(|t| self.state_from_nbt(&t));
+            }
+            self.claim_owner(&mut p);
+            // An arrow that came through a portal keeps its
+            // cooldown: it does not go straight back through.
+            self.next_entity += 1;
+            p.id = self.next_entity;
+            self.restore_portal_cooldown(p.id, &tag);
+            self.remember_tags(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.add_projectile(p);
+        }
+    }
+
+    /// A saved llama spit or shulker bullet.
+    pub(super) fn load_spit_or_bullet(&mut self, tag: Tag, player_uuid: Option<[i32; 4]>) {
+        if let Some(mut p) = entity_nbt::spit_or_bullet_from_nbt(&tag, player_uuid) {
+            self.claim_owner(&mut p);
+            self.next_entity += 1;
+            p.id = self.next_entity;
+            self.restore_portal_cooldown(p.id, &tag);
+            self.add_projectile(p);
+            self.remember_last_projectile_tags(&tag);
+        }
+    }
+    /// A saved fireball or wind charge.
+    pub(super) fn load_fireball(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
+        if let Some(mut p) = entity_nbt::fireball_from_nbt(&tag, player_uuid) {
+            self.claim_owner(&mut p);
+            // A projectile that came through a portal keeps its cooldown.
+            self.next_entity += 1;
+            p.id = self.next_entity;
+            self.restore_portal_cooldown(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.add_projectile(p);
+            self.remember_last_projectile_tags(&tag);
+        }
+    }
+
+    /// A saved thrown item.
+    pub(super) fn load_throwable(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
+        if let Some(mut p) = entity_nbt::throwable_from_nbt(&tag, player_uuid) {
+            self.claim_owner(&mut p);
+            // A projectile that came through a portal keeps its cooldown.
+            self.next_entity += 1;
+            p.id = self.next_entity;
+            self.restore_portal_cooldown(p.id, &tag);
+            self.remember_uuid(p.id, uuid, &tag);
+            self.add_projectile(p);
+            self.remember_last_projectile_tags(&tag);
+        }
+    }
+
+    /// A saved falling block.
+    pub(super) fn load_falling(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        if let Some((state, position, velocity, age, fall_distance)) =
+            entity_nbt::falling_block_from_nbt(&tag)
+            && let Some(state) = self.state_from_nbt(&state)
+        {
+            let (no_gravity, drop_item) = entity_nbt::falling_block_flags(&tag);
+            self.next_entity += 1;
+            // A summoned one has no UUID yet: `Entity` makes a random one.
+            self.remember_uuid(self.next_entity, uuid, &tag);
+            let uuid = self.uuid_for(self.next_entity);
+            self.falling.push(FallingBlock {
+                id: self.next_entity,
+                state,
+                // DATA_START_POS is not persisted by vanilla.
+                start_pos: horizon_core::position::BlockPos::default(),
+                position,
+                previous: position,
+                velocity,
+                age,
+                no_gravity,
+                portal: horizon_client::nether_portal::PortalState {
+                    cooldown: horizon_client::save::number(tag.get("PortalCooldown")).unwrap_or(0)
+                        as i32,
+                    process: None,
+                },
+                drop_item,
+                fall_distance,
+                stuck: Vec3::ZERO,
+                damage: horizon_client::falling_block::Damage::from_nbt(
+                    &tag,
+                    self.res.facts().get(state).name.ends_with("anvil"),
+                ),
+                saved: Some(Box::new((uuid, tag.clone()))),
+            });
+        }
+    }
+
+    /// A saved thrown trident.
+    pub(super) fn load_trident(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        if let Some(n) = entity_nbt::trident_from_nbt(&tag) {
+            let mut t = super::trident::ThrownTrident::from_nbt(n);
+            t.id = self.take_entity_id();
+            // One that came through a portal keeps its cooldown.
+            let id = t.id;
+            self.tridents.push(t);
+            self.remember(id, uuid, tag);
+        }
+    }
+
+    /// A saved firework rocket.
+    pub(super) fn load_rocket(
+        &mut self,
+        tag: Tag,
+        uuid: Option<[i32; 4]>,
+        player_uuid: Option<[i32; 4]>,
+    ) {
+        if let Some(r) = entity_nbt::firework_rocket_from_nbt(&tag, player_uuid) {
+            let id = self.take_entity_id();
+            let mut rocket = super::fireworks::Rocket::from_nbt(r);
+            rocket.id = id;
+            // One that came through a portal keeps its cooldown.
+            self.restore_portal_cooldown(id, &tag);
+            self.rockets.push(rocket);
+            self.remember(id, uuid, tag);
+        }
+    }
+
+    /// A saved primed TNT.
+    // PrimedTnt.readAdditionalSaveData: its fuse (80 when absent) and motion.
+    // Its Passengers ride it (EntityType.loadEntityRecursive forces them on).
+    pub(super) fn load_tnt(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        let mut tag = tag;
+        let riders = self.take_mob_passengers(&mut tag);
+        if let Some(position) = entity_nbt::position(&tag) {
+            self.next_entity += 1;
+            let id = self.next_entity;
+            let fuse = match tag.get("fuse") {
+                Some(Tag::Short(f)) => i32::from(*f),
+                _ => 80,
+            };
+            self.tnts.push(super::tnt::PrimedTnt {
+                no_gravity: entity_nbt::flag(&tag, "NoGravity"),
+                id,
+                position,
+                previous: position,
+                velocity: entity_nbt::motion(&tag),
+                fuse,
+                on_ground: matches!(tag.get("OnGround"), Some(Tag::Byte(1))),
+                owner: None,
+                guest: None,
+                // PrimedTnt.readAdditionalSaveData: 4 by default,
+                // kept to 0..128.
+                power: entity_nbt::tnt_power(&tag),
+            });
+            // `Entity.load`: the `PortalCooldown` of one that just came through.
+            self.remember(id, uuid, tag);
+            for rider in riders {
+                self.load_mob(rider, Some(id));
+            }
+        }
+    }
+
+    /// A saved boat.
+    pub(super) fn load_boat(&mut self, tag: Tag, uuid: Option<[i32; 4]>, k: &str) {
+        if let Some((position, velocity, yaw)) = entity_nbt::boat_from_nbt(&tag) {
+            let mut tag = tag;
+            let riders = self.take_mob_passengers(&mut tag);
+            self.next_entity += 1;
+            let id = self.next_entity;
+            let (wood, chest) = super::boats::any_boat_wood(k).unwrap_or(("oak", false));
+            let mut b = super::boats::Boat::new(id, std::sync::Arc::from(wood), position, yaw);
+            b.no_gravity = entity_nbt::flag(&tag, "NoGravity");
+            if chest {
+                b = b.with_chest();
+                b.items =
+                    horizon_client::save::decode_items(tag.get("Items"), super::boats::CHEST_SLOTS);
+            }
+            b.velocity = velocity;
+            // AbstractBoat.readAdditionalSaveData: the lead's holder.
+            b.leash_pending = horizon_client::mobs::leash::pending_from_nbt(tag.get("leash"));
+            self.remember(id, uuid, tag);
+            self.boats.push(b);
+            for rider in riders {
+                self.load_mob(rider, Some(id));
+            }
+        }
+    }
+
+    /// A saved minecart.
+    pub(super) fn load_cart(&mut self, tag: Tag, uuid: Option<[i32; 4]>, k: &str) {
+        let kind = super::minecarts::CartKind::from_id(k).unwrap();
+        let mut tag = tag;
+        let riders = self.take_mob_passengers(&mut tag);
+        let id = self.next_entity + 1;
+        if let Some(mut c) = super::minecarts::Minecart::from_nbt(&tag, id, kind) {
+            self.roll_cart_loot(&mut c, &tag);
+            self.next_entity = id;
+            self.remember(id, uuid, tag);
+            self.carts.push(c);
+            for rider in riders {
+                self.load_mob(rider, Some(id));
+            }
+        }
+    }
+
+    /// A saved armor stand.
+    pub(super) fn load_armor_stand(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        self.next_entity += 1;
+        if let Some(a) = entity_nbt::armor_stand_from_nbt(&tag, self.next_entity) {
+            self.remember(a.id, uuid, tag);
+            self.armor_stands.push(a);
+        }
+    }
+
+    /// The saved ender dragon.
+    pub(super) fn load_dragon(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        let seed = self.world.random.next_long();
+        if self.dragon.is_none()
+            && let Some(mut d) = super::dragon::Dragon::from_nbt(&tag, seed)
+        {
+            // EnderDragon's constructor takes its id and its
+            // parts' from the entity counter.
+            d.id = self.next_entity + 1;
+            self.next_entity += 9;
+            self.remember_tags(d.id, &tag);
+            self.remember_uuid(d.id, uuid, &tag);
+            self.dragon = Some(d);
+        }
+    }
+
+    /// A saved end crystal.
+    pub(super) fn load_crystal(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        let time = self.world.random.next_int_bound(100_000).unwrap_or(0);
+        if let Some(mut c) = super::dragon::Crystal::from_nbt(&tag, time) {
+            // EndCrystal's constructor takes an id from the
+            // entity counter.
+            self.next_entity += 1;
+            c.id = self.next_entity;
+            self.remember_tags(c.id, &tag);
+            self.remember_uuid(c.id, uuid, &tag);
+            self.crystals.push(c);
+        }
+    }
+
+    /// A saved item frame.
+    pub(super) fn load_item_frame(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        self.next_entity += 1;
+        if let Some(f) = entity_nbt::item_frame_from_nbt(&tag, self.next_entity) {
+            self.remember(f.id, uuid, tag);
+            self.item_frames.push(f);
+        }
+    }
+
+    /// A saved cushion.
+    pub(super) fn load_cushion(&mut self, tag: Tag, uuid: Option<[i32; 4]>) {
+        self.next_entity += 1;
+        if let Some(c) = entity_nbt::cushion_from_nbt(&tag, self.next_entity) {
+            self.remember(c.id, uuid, tag);
+            self.cushions.push(c);
+        }
+    }
+
+    /// A saved painting, or its compound when its variant is unknown.
+    pub(super) fn load_painting(&mut self, tag: Tag, uuid: Option<[i32; 4]>, key: ChunkKey) {
+        if let Some((pos, facing, variant)) = entity_nbt::painting_from_nbt(&tag)
+            && let Some(v) = self.painting_variants.get(&variant).cloned()
+        {
+            self.next_entity += 1;
+            let id = self.next_entity;
+            self.remember(id, uuid, tag);
+            self.paintings.push(horizon_client::entities::Painting {
+                id,
+                pos,
+                facing,
+                variant: v.id,
+                width: v.width,
+                height: v.height,
+                check_interval: 0,
+            });
+        } else {
+            self.persist.unknown.entry(key).or_default().push(tag);
         }
     }
     /// A saved mob and, under `Passengers`, the mobs riding it.

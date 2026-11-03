@@ -105,7 +105,8 @@ pub struct ItemEntity {
     pub velocity: Vec3,
     pub on_ground: bool,
     pub age: i32,
-    pub pickup_delay: u32,
+    /// Signed NBT counter; widened to retain the legacy internal u32::MAX sentinel.
+    pub pickup_delay: i64,
     pub bob_offset: f32,
     /// `Entity.tickCount`: ticks since the item entered the level, which
     /// paces `ItemEntity.mergeWithNeighbours`.
@@ -296,11 +297,13 @@ impl ItemEntity {
         if self.health > 0 {
             return None;
         }
-        // `ItemStack.onDestroyed` runs the item's own arm. A bundle's
-        // (`BundleItem.onDestroyed`) empties its `bundle_contents` and hands
-        // them back; only a bundle holds that component, so the component is
-        // the dispatch (a mod's own bundle carries one too).
-        Some(crate::bundle::destroyed(&mut self.stack))
+        // `ItemStack.onDestroyed` runs the item's own arm, and the component
+        // the stack holds is the dispatch: a bundle's (`BundleItem.onDestroyed`)
+        // `bundle_contents` and a container item's (`BlockItem.onDestroyed`)
+        // `container`, which a mod's own item carries in the same way.
+        let mut spilled = crate::bundle::destroyed(&mut self.stack);
+        spilled.extend(crate::item_data::destroyed_container(&mut self.stack));
+        Some(spilled)
     }
     /// `ItemEntity.tick` on a server: an item whose box is inside a block
     /// (one placed where it lay) has no physics this tick
@@ -345,7 +348,7 @@ impl ItemEntity {
     ) -> ItemStep {
         self.ticks += 1;
         self.previous = self.position;
-        if self.pickup_delay > 0 && self.pickup_delay != u32::MAX {
+        if self.pickup_delay > 0 && !self.has_infinite_pickup_delay() {
             self.pickup_delay -= 1;
         }
         let old_velocity = self.velocity;
@@ -631,10 +634,13 @@ impl ItemEntity {
             Vec3::new(v.x, new_delta_y(-0.05), v.z)
         };
     }
+    fn has_infinite_pickup_delay(&self) -> bool {
+        self.pickup_delay == i64::from(i16::MAX) || self.pickup_delay == i64::from(u32::MAX)
+    }
     /// `ItemEntity.isMergable` at `age`: a stack below its size whose pickup
     /// delay isn't infinite, before its lifetime ends.
     fn mergeable(&self, age: i32, max_stack: u32) -> bool {
-        self.pickup_delay != u32::MAX
+        !self.has_infinite_pickup_delay()
             && age != i16::MIN as i32
             && age < 6000
             && self.stack.count < max_stack
@@ -1376,8 +1382,60 @@ pub struct ArmorStand {
     /// `Entity.mainSupportingBlockPos` after the last move.
     pub support: horizon_world::ground_support::GroundState,
 }
+/// The fluid a stand travels in (`LivingEntity.travelInFluid`: water first,
+/// then lava), from the heights `Entity::push_by_fluid` measured.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum StandMedium {
+    Air,
+    Water,
+    /// `shallow`: `isInShallowFluid(LAVA)`, the lava is no deeper than
+    /// `getFluidJumpThreshold` (0.4 for a stand, whose eyes are above 0.4).
+    Lava {
+        shallow: bool,
+    },
+}
+impl StandMedium {
+    pub fn from_heights(water_height: f64, lava_height: f64) -> Self {
+        if water_height > 0.0 {
+            Self::Water
+        } else if lava_height > 0.0 {
+            Self::Lava {
+                shallow: lava_height <= 0.4,
+            }
+        } else {
+            Self::Air
+        }
+    }
+}
+/// Armor stands share LivingEntity's block/tag and trapdoor climb predicate.
+struct StandClimbing<'a> {
+    world: &'a World,
+    position: BlockPos,
+}
+impl horizon_world::climbing::ClimbingWorld for StandClimbing<'_> {
+    type Error = std::convert::Infallible;
+    fn is_spectator(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+    fn is_fall_flying(&mut self) -> Result<bool, Self::Error> {
+        Ok(false)
+    }
+    fn block_position(&mut self) -> Result<BlockPos, Self::Error> {
+        Ok(self.position)
+    }
+    fn in_block_state(&mut self) -> Result<horizon_world::registry::BlockStateId, Self::Error> {
+        self.block_state(self.position)
+    }
+    fn block_state(
+        &mut self,
+        p: BlockPos,
+    ) -> Result<horizon_world::registry::BlockStateId, Self::Error> {
+        Ok(self.world.block(p.x, p.y, p.z))
+    }
+    fn set_last_climbable_position(&mut self, _: BlockPos) {}
+}
 /// What a stand's travel carries from [`ArmorStand::tick_move`] to
-/// [`ArmorStand::tick_settle`], across the game's bubble-column push.
+/// [`ArmorStand::tick_settle`].
 #[derive(Clone, Copy)]
 pub struct StandStep {
     falling: bool,
@@ -1390,11 +1448,17 @@ impl ArmorStand {
         &mut self,
         scene: &mut crate::collisions::SceneCollisions,
         facts: &BlockFacts,
+        climbing: &horizon_world::climbing::ClimbingRegistry<'_>,
         in_water: bool,
         border: Option<&BorderGeometry>,
     ) {
-        if let Some(step) = self.tick_move(scene, facts, in_water, border) {
-            self.tick_settle(in_water, step);
+        if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border) {
+            let medium = if in_water {
+                StandMedium::Water
+            } else {
+                StandMedium::Air
+            };
+            self.tick_settle(medium, step);
         }
     }
 }
@@ -1606,6 +1670,7 @@ impl ArmorStand {
         &mut self,
         scene: &mut crate::collisions::SceneCollisions,
         facts: &BlockFacts,
+        climbing: &horizon_world::climbing::ClimbingRegistry<'_>,
         in_water: bool,
         border: Option<&BorderGeometry>,
     ) -> Option<StandStep> {
@@ -1621,7 +1686,7 @@ impl ArmorStand {
                     ..Default::default()
                 });
         let v = self.velocity;
-        let wanted = Vec3::new(
+        let mut wanted = Vec3::new(
             if v.x.abs() < 0.003 { 0.0 } else { v.x },
             if v.y.abs() < 0.003 { 0.0 } else { v.y },
             if v.z.abs() < 0.003 { 0.0 } else { v.z },
@@ -1644,7 +1709,28 @@ impl ArmorStand {
         } else {
             1.0
         };
+        let on_climbable = |position| {
+            horizon_world::climbing::on_climbable(
+                &mut StandClimbing {
+                    world: scene.world,
+                    position: BlockPos::containing(position),
+                },
+                climbing,
+            )
+            .unwrap_or(false)
+        };
+        if !in_water && on_climbable(self.position) {
+            self.enchantment_fall_distance = 0.0;
+            // LivingEntity.handleOnClimbable; suppressing slide is Player-only.
+            let limit = f64::from(0.15f32);
+            wanted.x = wanted.x.clamp(-limit, limit);
+            wanted.z = wanted.z.clamp(-limit, limit);
+            if !wanted.y.is_nan() {
+                wanted.y = wanted.y.max(-limit);
+            }
+        }
         let mut velocity = wanted;
+        let mut horizontal_collision = false;
         // Entity.collide: the world border's walls stop the stand too.
         let moved = SceneCollisions {
             world: scene.world,
@@ -1684,25 +1770,51 @@ impl ArmorStand {
                         )
                     });
             if (wanted.x - moved.x).abs() >= f64::from(1.0e-5_f32) {
+                horizontal_collision = true;
                 velocity.x = 0.0;
             }
             if moved.y != wanted.y {
                 velocity.y = 0.0;
             }
             if (wanted.z - moved.z).abs() >= f64::from(1.0e-5_f32) {
+                horizontal_collision = true;
                 velocity.z = 0.0;
             }
+        }
+        if !in_water && horizontal_collision && on_climbable(self.position) {
+            velocity.y = 0.2;
         }
         self.velocity = velocity;
         Some(StandStep { falling, friction })
     }
-    /// The rest of the stand's travel after the bubble column's push: the
-    /// water slowdown or the air drag and gravity.
-    pub fn tick_settle(&mut self, in_water: bool, step: StandStep) {
+    /// The rest of the stand's travel: the water slowdown, the lava slowdown
+    /// and sink, or the air drag and gravity. The blocks' push (a bubble
+    /// column) comes after this, as `LivingEntity.aiStep` applies the block
+    /// effects after `travel`.
+    pub fn tick_settle(&mut self, medium: StandMedium, step: StandStep) {
         use crate::entity_rules::EntityRules;
         let StandStep { falling, friction } = step;
         let velocity = self.velocity;
-        self.velocity = if in_water {
+        let gravity = self.get_gravity();
+        self.velocity = if let StandMedium::Lava { shallow } = medium {
+            // travelInLava: halve it (a shallow lava also slows the fall by
+            // 0.8 with `getFluidFallingAdjustedMovement`), then sink by
+            // gravity / 4.
+            let (x, y, z) = if shallow {
+                let y = velocity.y * f64::from(0.8f32);
+                let sink = gravity / 16.0;
+                let adjusted = if falling && (y - 0.005).abs() >= 0.003 && (y - sink).abs() < 0.003
+                {
+                    -0.003
+                } else {
+                    y - sink
+                };
+                (velocity.x * 0.5, adjusted, velocity.z * 0.5)
+            } else {
+                (velocity.x * 0.5, velocity.y * 0.5, velocity.z * 0.5)
+            };
+            Vec3::new(x, y - gravity / 4.0, z)
+        } else if medium == StandMedium::Water {
             // travelInWater: slowDown 0.8, then `getFluidFallingAdjustedMovement`
             // with gravity / 16 (the stand is falling while its fall is not
             // already nearly stopped).
@@ -2135,12 +2247,14 @@ mod merge_tests {
 
     #[test]
     fn unmergeable_items_are_skipped() {
-        let mut items = [
-            item("minecraft:sand", 1, 0.5, 1),
-            item("minecraft:sand", 1, 0.5, 1),
-        ];
-        items[1].pickup_delay = u32::MAX;
-        assert_eq!(merge(&mut items, 0), [Some(1), Some(1)]);
+        for delay in [i64::from(i16::MAX), i64::from(u32::MAX)] {
+            let mut items = [
+                item("minecraft:sand", 1, 0.5, 1),
+                item("minecraft:sand", 1, 0.5, 1),
+            ];
+            items[1].pickup_delay = delay;
+            assert_eq!(merge(&mut items, 0), [Some(1), Some(1)]);
+        }
         // At age 6000 the other item's lifetime is over; this one's tick
         // started at 5999, so it may still merge into a live item.
         let mut items = [
@@ -2958,7 +3072,109 @@ mod armor_stand_motion_tests {
             binding: collision,
             subject: None,
         };
-        stand.tick(&mut scene, facts, false, None);
+        let empty = Default::default();
+        let climbing = horizon_world::climbing::ClimbingRegistry::new(
+            collision.registry(),
+            &empty,
+            &empty,
+            &empty,
+        )
+        .unwrap();
+        stand.tick(&mut scene, facts, &climbing, false, None);
+    }
+
+    #[test]
+    fn climbing_uses_actual_blocks_and_post_collision_position() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let facts = BlockFacts::load(&root, assets.registry).unwrap();
+        let collision = crate::collisions::load(&root, assets.registry).unwrap();
+        let motion = crate::motion::MotionResources::load(&root, &assets).unwrap();
+        let registry = assets.registry;
+        let state = |name, properties: &[(&str, &str)]| {
+            let mut state = registry
+                .state(registry.default_state(name).unwrap())
+                .unwrap()
+                .clone();
+            for (key, value) in properties {
+                state.properties.insert((*key).into(), (*value).into());
+            }
+            registry.id(&state).unwrap()
+        };
+        let new_world = || {
+            let mut world = World::new(registry.default_state("minecraft:air").unwrap(), 3);
+            world.chunks.insert(
+                (1, 1),
+                std::sync::Arc::new(crate::chunk::Chunk::empty(1, 1)),
+            );
+            world
+        };
+        for (name, properties, ladder_below, climbable) in [
+            ("minecraft:air", vec![], false, false),
+            ("minecraft:ladder", vec![("facing", "west")], false, true),
+            ("minecraft:vine", vec![("east", "true")], false, true),
+            ("minecraft:twisting_vines_plant", vec![], false, true),
+            ("minecraft:weeping_vines_plant", vec![], false, true),
+            (
+                "minecraft:oak_trapdoor",
+                vec![("open", "true"), ("facing", "west")],
+                true,
+                true,
+            ),
+            (
+                "minecraft:oak_trapdoor",
+                vec![("open", "true"), ("facing", "east")],
+                true,
+                false,
+            ),
+        ] {
+            let mut world = new_world();
+            world.set(20, 10, 20, state(name, &properties)).unwrap();
+            if ladder_below {
+                world
+                    .set(20, 9, 20, state("minecraft:ladder", &[("facing", "west")]))
+                    .unwrap();
+            }
+            let mut stand = ArmorStand::new(1, Vec3::new(20.5, 10.0, 20.5), 0.0);
+            stand.velocity.y = -0.5;
+            let mut scene = SceneCollisions {
+                world: &world,
+                binding: &collision,
+                subject: None,
+            };
+            stand.tick(&mut scene, &facts, &motion.climbing, false, None);
+            let fall = if climbable { f64::from(0.15f32) } else { 0.5 };
+            assert!(
+                (stand.position.y - (10.0 - fall)).abs() < 1e-9,
+                "{name} {properties:?}"
+            );
+        }
+        // A wall collision inside a ladder lifts before gravity and drag.
+        let mut world = new_world();
+        world
+            .set(20, 10, 20, state("minecraft:ladder", &[("facing", "west")]))
+            .unwrap();
+        for y in 10..13 {
+            world.set(21, y, 20, state("minecraft:stone", &[])).unwrap();
+        }
+        let mut stand = ArmorStand::new(1, Vec3::new(20.74, 10.0, 20.5), 0.0);
+        stand.velocity = Vec3::new(1.0, 0.0, 0.0);
+        let mut scene = SceneCollisions {
+            world: &world,
+            binding: &collision,
+            subject: None,
+        };
+        stand.tick(&mut scene, &facts, &motion.climbing, false, None);
+        assert!((stand.velocity.y - (0.2 - 0.08) * f64::from(0.98f32)).abs() < 1e-9);
     }
 
     /// `Entity.collectColliders` (#7080): the world border's wall stops an
@@ -2988,7 +3204,21 @@ mod armor_stand_motion_tests {
                 binding: &collision,
                 subject: None,
             };
-            stand.tick(&mut scene, &facts, false, bordered.then_some(&border));
+            let empty = Default::default();
+            let climbing = horizon_world::climbing::ClimbingRegistry::new(
+                collision.registry(),
+                &empty,
+                &empty,
+                &empty,
+            )
+            .unwrap();
+            stand.tick(
+                &mut scene,
+                &facts,
+                &climbing,
+                false,
+                bordered.then_some(&border),
+            );
             let east = stand.bounds().max_position().x;
             if bordered {
                 assert!(
@@ -2999,6 +3229,50 @@ mod armor_stand_motion_tests {
                 assert!(east > 25.0, "no border: goes on, got {east}");
             }
         }
+    }
+
+    #[test]
+    fn a_stand_in_lava_halves_its_motion_and_sinks_by_a_quarter_of_gravity() {
+        // LivingEntity.travelInLava, measured on the real server: a stand at
+        // rest in deep lava has Motion.y -0.02, then -0.03, then -0.035.
+        let step = StandStep {
+            falling: true,
+            friction: 1.0,
+        };
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            stand.tick_settle(StandMedium::Lava { shallow: false }, step);
+            seen.push(stand.velocity.y);
+        }
+        for (got, want) in seen.iter().zip([-0.02, -0.03, -0.035]) {
+            assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
+        }
+        // Shallow lava also applies the 0.8 and the gravity / 16 sink.
+        let mut shallow = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        shallow.velocity = Vec3::new(0.2, -0.1, 0.0);
+        shallow.tick_settle(StandMedium::Lava { shallow: true }, step);
+        assert!((shallow.velocity.x - 0.1).abs() < 1e-12);
+        let want = -0.1 * f64::from(0.8f32) - 0.08 / 16.0 - 0.08 / 4.0;
+        assert!((shallow.velocity.y - want).abs() < 1e-12);
+        // Air is unchanged: gravity, then the 0.98 drag.
+        let mut air = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        air.tick_settle(StandMedium::Air, step);
+        assert!((air.velocity.y + 0.0784).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lava_depth_picks_the_shallow_or_deep_travel() {
+        assert_eq!(StandMedium::from_heights(0.0, 0.0), StandMedium::Air);
+        assert_eq!(StandMedium::from_heights(0.3, 1.0), StandMedium::Water);
+        assert_eq!(
+            StandMedium::from_heights(0.0, 0.4),
+            StandMedium::Lava { shallow: true }
+        );
+        assert_eq!(
+            StandMedium::from_heights(0.0, 1.975),
+            StandMedium::Lava { shallow: false }
+        );
     }
 
     #[test]
@@ -3180,5 +3454,34 @@ mod item_destroyed_tests {
         // nothing never reports any.
         assert_eq!(bundle.hurt(1), Some(Vec::new()));
         assert_eq!(item("minecraft:stone", &[]).hurt(5), Some(Vec::new()));
+    }
+
+    /// `BlockItem.onDestroyed`: the same death path spills a container item's
+    /// `container` — a shulker box's stacks — in slot order, and the box keeps
+    /// no slot filled.
+    #[test]
+    fn a_destroyed_shulker_box_spills_its_container() {
+        let mut box_item = item("minecraft:shulker_box", &[]);
+        box_item.stack.data_mut().container = vec![
+            (20, ItemStack::new("minecraft:diamond", 4)),
+            (0, ItemStack::new("minecraft:oak_log", 8)),
+            (3, ItemStack::new("minecraft:cobblestone", 64)),
+        ];
+        let spent = box_item.hurt(5).expect("the hit that destroys it");
+        assert_eq!(
+            spent
+                .iter()
+                .map(|s| (&*s.item, s.count))
+                .collect::<Vec<_>>(),
+            [
+                ("minecraft:oak_log", 8),
+                ("minecraft:cobblestone", 64),
+                ("minecraft:diamond", 4),
+            ]
+        );
+        assert!(
+            box_item.stack.data().is_none_or(|d| d.container.is_empty()),
+            "the destroyed box keeps no slot filled"
+        );
     }
 }

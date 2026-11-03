@@ -1382,8 +1382,7 @@ impl ArgType {
                         reader,
                     ));
                 };
-                // Math.round(float): floor(x + 0.5).
-                let ticks = (v * m as f32 + 0.5).floor() as i32;
+                let ticks = horizon_core::jmath::round_f32(v * m as f32);
                 if ticks < *min {
                     return Err(CommandError::tr_at(
                         "argument.time.tick_count_too_low",
