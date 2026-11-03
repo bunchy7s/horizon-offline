@@ -271,6 +271,11 @@ process: on a clean launch this build commits 1.1 to 1.2 GB before a world is op
 the game's resources), so a budget under about 1.4 GB leaves too little to run, exactly as `-Xmx` too
 low throws `OutOfMemoryError`.
 
+What "committed" means depends on the system. On Windows it is the process's commit charge, the
+figure Task Manager shows, the graphics driver's pages included. On Linux and macOS there is no such
+figure: it is what the game's allocator (mimalloc) committed, so the driver's and the GPU's own memory
+are outside the budget there.
+
 ### Discord Rich Presence
 
 While Discord runs on the same computer, the player's Discord profile shows
