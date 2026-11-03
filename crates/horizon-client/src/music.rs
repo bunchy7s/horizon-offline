@@ -596,9 +596,10 @@ impl MusicManager {
             }
             return false;
         };
-        // The manager resolved the sound itself; `resolve` keeps it (`getOrResolve`).
+        // The manager resolved the sound itself; `resolve` keeps it.
         instance.sound = Some(sound);
         instance.event = Some(None);
+        instance.chosen = true;
         // "Play now" takes the manager's slot: the track already playing stops
         // (a situation's own track is replaced by `set_current` below).
         if only.is_some()
