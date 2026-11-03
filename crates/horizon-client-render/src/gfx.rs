@@ -4424,6 +4424,18 @@ impl Renderer {
         ((c.entities && !c.only_player) || c.blocks, c.entities)
     }
 
+    /// A standard pack replaces mobs' vanilla blob shadows only when its compiled
+    /// shadow path actually draws entities other than the player.
+    pub fn pack_entity_shadows(&self) -> bool {
+        self.pack_post
+            .as_ref()
+            .and_then(|(_, post)| post.as_ref())
+            .is_some_and(|post| {
+                let casters = post.shadow_casters();
+                casters.entities && !casters.only_player
+            })
+    }
+
     pub fn has_section(&self, key: SectionKey) -> bool {
         self.sections.contains(key)
     }
