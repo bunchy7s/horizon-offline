@@ -3512,6 +3512,72 @@ mod tests {
     }
 
     #[test]
+    fn loaded_villager_command_names_follow_profession_and_custom_name() {
+        use crate::mobs::Species;
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        let def = Arc::make_mut(&mut kind);
+        def.id = "minecraft:villager".into();
+        def.species = Species::Villager;
+        let types = [("minecraft:villager".into(), kind)].into();
+        for (profession, key) in [
+            ("none", "entity.minecraft.villager.none"),
+            ("nitwit", "entity.minecraft.villager.nitwit"),
+            ("cleric", "entity.minecraft.villager.cleric"),
+            ("farmer", "entity.minecraft.villager.farmer"),
+            ("librarian", "entity.minecraft.villager.librarian"),
+        ] {
+            let data = Tag::compound([
+                ("profession", string(&format!("minecraft:{profession}"))),
+                ("type", string("minecraft:plains")),
+                ("level", Tag::Int(1)),
+            ]);
+            let mut tag = Tag::compound([
+                ("id", string("minecraft:villager")),
+                ("Pos", doubles(&[4.5, 220.0, 4.5])),
+                ("NoAI", Tag::Byte(1)),
+                ("VillagerData", data.clone()),
+            ]);
+            let mob = mob_from_nbt(&tag, &types, 7, None).unwrap();
+            assert_eq!(villager_data(&mob), data);
+            assert_eq!(mob.command_name().translation_key(), Some(key));
+            put(&mut tag, "CustomName", string("Ada"));
+            let named = mob_from_nbt(&tag, &types, 8, None).unwrap();
+            assert_eq!(
+                named.command_name().component(),
+                crate::text::Text::literal("Ada").component()
+            );
+        }
+    }
+
+    #[test]
+    fn other_mob_command_names_keep_their_type_and_custom_name() {
+        use crate::mobs::Species;
+        for (id, species, key) in [
+            (
+                "minecraft:zombie_villager",
+                Species::ZombieVillager,
+                "entity.minecraft.zombie_villager",
+            ),
+            (
+                "minecraft:wandering_trader",
+                Species::WanderingTrader,
+                "entity.minecraft.wandering_trader",
+            ),
+            ("audit:helper", Species::Pig, "entity.audit.helper"),
+        ] {
+            let mut kind = crate::mobs::sensor_scan_tests::kind();
+            let def = Arc::make_mut(&mut kind);
+            def.id = id.into();
+            def.species = species;
+            let mut mob = Mob::new(1, kind, Vec3::ZERO, 0.0);
+            mob.extra.variant2 = 4;
+            assert_eq!(mob.command_name().translation_key(), Some(key));
+            mob.custom_name = Some("Ada".into());
+            assert_eq!(mob.command_name().plain(), "Ada");
+        }
+    }
+
+    #[test]
     fn mob_loading_accepts_default_namespace_and_preserves_custom_namespaces() {
         let cow = crate::mobs::sensor_scan_tests::kind();
         let types = [
