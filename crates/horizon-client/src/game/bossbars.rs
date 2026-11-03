@@ -15,15 +15,70 @@ use horizon_client::{
 };
 use horizon_core::random::RandomSource;
 use horizon_protocol::packets::play::{self, BossAction, Clientbound as C};
-use horizon_world::nbt::Tag;
+use horizon_world::{identifier::Identifier, java_hash_map::JavaHashMap, nbt::Tag};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Default)]
 pub(super) struct BossState {
     pub bars: BossBars,
+    /// CustomBossEvents' default HashMap order, used only by the list reply.
+    listing: JavaHashMap<Identifier, usize>,
     loaded: bool,
     /// What each viewer was last sent, so a change becomes one packet.
     sent: HashMap<u128, HashMap<u128, Offer>>,
+}
+
+impl BossState {
+    fn add_bar(&mut self, id: &str, name: Comp) -> bool {
+        if !self.bars.add(id, name) {
+            return false;
+        }
+        if let Ok(key) = Identifier::parse(id) {
+            self.listing.put(key, self.bars.bars.len() - 1);
+        }
+        true
+    }
+
+    fn remove_bar(&mut self, id: &str) {
+        self.bars.remove(id);
+        if let Ok(key) = Identifier::parse(id) {
+            self.listing.remove(&key);
+        }
+        // Vec removal shifts indices. Replacing existing map values keeps
+        // its table and bucket chains intact, unlike reconstructing the map.
+        for (index, bar) in self.bars.bars.iter().enumerate() {
+            if let Ok(key) = Identifier::parse(&bar.id) {
+                self.listing.put(key, index);
+            }
+        }
+    }
+
+    fn rebuild_listing(&mut self) {
+        self.listing = JavaHashMap::default();
+        for (index, bar) in self.bars.bars.iter().enumerate() {
+            if let Ok(key) = Identifier::parse(&bar.id) {
+                self.listing.put(key, index);
+            }
+        }
+    }
+
+    fn listed_bars(&self) -> Vec<&bossbar::BossBar> {
+        let mut bars: Vec<_> = self
+            .listing
+            .entries()
+            .filter_map(|(_, index)| self.bars.bars.get(*index))
+            .collect();
+        // The existing permissive loader can retain invalid legacy IDs.
+        // Preserve those entries rather than dropping them from the reply.
+        if bars.len() != self.bars.bars.len() {
+            for bar in &self.bars.bars {
+                if !bars.iter().any(|listed| listed.id == bar.id) {
+                    bars.push(bar);
+                }
+            }
+        }
+        bars
+    }
 }
 
 fn num(n: impl std::fmt::Display) -> Text {
@@ -45,6 +100,7 @@ impl Game<'_> {
         {
             self.bosses.bars = BossBars::unpack(data);
         }
+        self.bosses.rebuild_listing();
         self.ui.registries.bossbars = self.bosses.bars.ids();
     }
     pub(super) fn save_bossbars(&self) {
@@ -107,7 +163,7 @@ impl Game<'_> {
                     return Err(err("commands.bossbar.create.failed", &[&bar]));
                 }
                 let name = self.component_json(ctx, "name")?;
-                self.bosses.bars.add(&bar, name);
+                self.bosses.add_bar(&bar, name);
                 if let Some(b) = self.bosses.bars.get_mut(&bar) {
                     // CustomBossEvents.create: Mth.createInsecureUUID(level.random).
                     b.uuid = insecure_uuid(&mut self.world.random);
@@ -124,9 +180,8 @@ impl Game<'_> {
             "bossbar.list" => {
                 let names: Vec<Text> = self
                     .bosses
-                    .bars
-                    .bars
-                    .iter()
+                    .listed_bars()
+                    .into_iter()
                     .map(horizon_client::bossbar::BossBar::display_name)
                     .collect();
                 let n = names.len();
@@ -154,7 +209,7 @@ impl Game<'_> {
         match id {
             "bossbar.remove" => {
                 let s = shown(self);
-                self.bosses.bars.remove(&bar);
+                self.bosses.remove_bar(&bar);
                 self.feedback(Text::translate("commands.bossbar.remove.success", &[s]));
                 Ok(self.bosses.bars.bars.len() as i32)
             }
@@ -676,4 +731,63 @@ struct Offer {
     music: bool,
     fog: bool,
     scope: Scope,
+}
+
+#[cfg(test)]
+mod listing_tests {
+    use super::*;
+
+    fn ids(state: &BossState) -> Vec<&str> {
+        state
+            .listed_bars()
+            .into_iter()
+            .map(|bar| bar.id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn bossbar_listing_uses_identifier_hash_order_and_current_names() {
+        let mut state = BossState::default();
+        state.add_bar("audit:test", sb::literal("Title"));
+        state.bars.get_mut("audit:test").unwrap().name = sb::literal("Other");
+        state.add_bar("audit:second", sb::literal("Second"));
+        assert_eq!(ids(&state), ["audit:second", "audit:test"]);
+        let names: Vec<_> = state
+            .listed_bars()
+            .into_iter()
+            .map(|b| b.name.clone())
+            .collect();
+        assert_eq!(names, [sb::literal("Second"), sb::literal("Other")]);
+    }
+
+    #[test]
+    fn bossbar_listing_retains_resize_history_after_removals() {
+        let mut state = BossState::default();
+        state.add_bar("audit:test", sb::literal("Title"));
+        state.add_bar("audit:second", sb::literal("Second"));
+        for i in 0..11 {
+            state.add_bar(&format!("audit:bar{i}"), sb::literal("Extra"));
+        }
+        for i in 0..11 {
+            state.remove_bar(&format!("audit:bar{i}"));
+        }
+        // After the 13th put, HashMap keeps its 32-slot table. These keys
+        // occupy buckets 11 and 24, rather than buckets 11 and 8 at size 16.
+        assert_eq!(ids(&state), ["audit:test", "audit:second"]);
+        state.remove_bar("audit:test");
+        state.remove_bar("audit:second");
+        assert!(ids(&state).is_empty());
+        state.add_bar("audit:test", sb::literal("Again"));
+        state.add_bar("audit:second", sb::literal("Second"));
+        assert_eq!(ids(&state), ["audit:test", "audit:second"]);
+    }
+
+    #[test]
+    fn bossbar_listing_rebuilds_for_the_loaded_store() {
+        let mut state = BossState::default();
+        state.bars.add("audit:test", sb::literal("Title"));
+        state.bars.add("audit:second", sb::literal("Second"));
+        state.rebuild_listing();
+        assert_eq!(ids(&state), ["audit:second", "audit:test"]);
+    }
 }

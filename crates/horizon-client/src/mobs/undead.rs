@@ -905,7 +905,20 @@ pub fn perform_ranged_attack(m: &mut Mob, who: Who, cx: &mut Cx, power: f32) {
         1.6,
         (14 - id * 4) as f32,
     );
-    cx.events.push(MobEvent::Projectile(p));
+    cx.events.push(MobEvent::BowShot {
+        mob: m.id,
+        // ProjectileUtil.getWeaponHoldingHand(this, Items.BOW).
+        weapon: if m.extra.using_off_hand {
+            m.extra
+                .off_hand
+                .as_ref()
+                .map(|item| crate::items::ItemStack::new(item, 1))
+        } else {
+            m.extra.main_hand_stack().cloned()
+        }
+        .unwrap_or_else(|| crate::items::ItemStack::new("minecraft:bow", 1)),
+        arrow: p,
+    });
     let pitch = 1.0 / (m.random.next_float() * 0.4 + 0.8);
     cx.events.push(MobEvent::Sound(
         "entity.skeleton.shoot",

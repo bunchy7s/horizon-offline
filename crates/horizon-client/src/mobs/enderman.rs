@@ -679,7 +679,12 @@ mod tests {
         ] {
             let mut m = enderman();
             m.extra.carried = registry.default_state(block);
-            let (out, _) = drops::die(&mut m, &death(true), &mut sequences);
+            let (out, _) = drops::die(
+                &mut m,
+                &death(true),
+                &mut sequences,
+                &mut horizon_core::random::LegacyRandom::new(0),
+            );
             let dropped: Vec<String> = out
                 .into_iter()
                 .flat_map(|d| match d {
@@ -699,7 +704,12 @@ mod tests {
         // doMobLoot off: no dropCustomDeathLoot, so no block either.
         let mut m = enderman();
         m.extra.carried = registry.default_state("minecraft:grass_block");
-        let (out, _) = drops::die(&mut m, &death(false), &mut sequences);
+        let (out, _) = drops::die(
+            &mut m,
+            &death(false),
+            &mut sequences,
+            &mut horizon_core::random::LegacyRandom::new(0),
+        );
         assert!(
             !out.iter()
                 .any(|d| matches!(d, drops::Drop::CarriedBlock(_))),

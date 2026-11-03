@@ -434,6 +434,25 @@ impl Biomes {
         }
         changed.then_some(out)
     }
+
+    /// This table (the biome files') with its colours passed through `f`, when
+    /// they differ from `current`'s: what a refresh of a table already
+    /// coloured by `f` once must not compound.
+    pub fn recolored_from(
+        &self,
+        current: &Self,
+        f: impl FnMut(&str, &mut BiomeColors),
+    ) -> Option<Self> {
+        let out = self.with_colors(f).unwrap_or_else(|| self.clone());
+        let tints = |b: &BiomeInfo| (b.grass, b.foliage, b.dry_foliage, b.water);
+        let same = out.list.len() == current.list.len()
+            && out
+                .list
+                .iter()
+                .zip(&current.list)
+                .all(|(a, b)| tints(a) == tints(b));
+        (!same).then_some(out)
+    }
 }
 
 /// A 24-bit colour as sRGB components in 0..1.
