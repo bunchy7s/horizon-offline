@@ -379,6 +379,15 @@ impl StructureState {
             .any(|(_, search)| search.may_land_near(chunk.x, chunk.z, self.zone_reach));
         if near { self.rings(context) } else { &NONE }
     }
+    /// `StructureRegistry::needs_dimension_origin`: whether any set is placed
+    /// by the dimension's origin chunk alone.
+    pub(super) fn needs_dimension_origin(&self) -> bool {
+        self.registry.needs_dimension_origin()
+    }
+    /// `ChunkGenerator.getOrigin` for this dimension's structure state.
+    pub(super) fn set_dimension_origin(&mut self, origin: ChunkPos) {
+        self.registry.set_dimension_origin(origin);
+    }
     /// Drop the cached starts, so that later chunks build fresh pieces (the
     /// pieces keep per-start placement state such as a shipwreck's height).
     pub(super) fn forget_starts(&self) {

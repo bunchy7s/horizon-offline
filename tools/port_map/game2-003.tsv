@@ -43,7 +43,7 @@ Breeze.makeBrain	port	crates/horizon-client/src/mobs/monster_brain.rs::init	bree
 Breeze.onSyncedDataUpdated	port	crates/horizon-client/src/mobs/breeze.rs::ai_step	client pose change restarts the matching animation
 Breeze.resetAnimations	inline	crates/horizon-client/src/mobs/breeze.rs::ai_step	the stop calls of the pose-change branch
 Breeze.emitJumpTrailParticles	missing		`mobs/breeze.rs` has no particle call (only `dangerous_block`), so no block dust follows a long jump
-Breeze.emitGroundParticles	port	crates/horizon-client/src/mobs/breeze.rs::emit_ground_particles	the block it stands in (else the one it stands on) crumbled at the centre of its box and its feet; twenty crumbs while inhaling, one while standing, shooting or sliding; none as a passenger or over a block that draws nothing
+Breeze.emitGroundParticles	port	crates/horizon-client/src/mobs/breeze.rs::emit_ground_particles	the block it stands in (else the one it stands on) crumbled at the centre of its box and its feet; twenty crumbs while sliding, one while standing, shooting or inhaling; none as a passenger or over a block that draws nothing
 Breeze.playWhirlSound	port	crates/horizon-client/src/mobs/breeze.rs::tick	whirl sound on a random clock, as a local sound
 Breeze.deflection	port	crates/horizon-client/src/game/creatures.rs::Game::tick_projectiles	breeze turns projectiles back, except wind charges
 Breeze.getHurtBy	port	crates/horizon-client/src/mobs/monster_brain.rs::hurt_by_entity	the living source of the last hurt

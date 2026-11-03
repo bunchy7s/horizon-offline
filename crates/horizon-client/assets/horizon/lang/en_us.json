@@ -79,6 +79,7 @@
   "horizon.mods.not_built": " (Not built)",
   "horizon.mods.dev": " (Dev)",
   "horizon.mods.settings": "Settings",
+  "horizon.mods.in_world": " (leave the world to change)",
   "horizon.mods.open_folder": "Open Mod Folder",
   "horizon.shader_packs.empty": "No shader packs: put them in the shaderpacks folder",
   "horizon.shader_packs.kind_horizon": " (Horizon)",

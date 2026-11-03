@@ -1,5 +1,10 @@
 //! Cuboid geometry in block units, including blockstate rotation and UV locking.
-use crate::{json::*, model::*, resolve::ResolvedCuboidModel};
+use crate::{
+    json::*,
+    model::*,
+    obj::{MtlTexture, ObjFace, ObjModel},
+    resolve::{ResolvedCuboidModel, ResolvedLoader},
+};
 mod transform;
 pub use transform::BlockModelTransform;
 
@@ -22,6 +27,8 @@ pub struct ModelQuad {
     /// `neoforge_data` override of the model's ambient occlusion for this quad.
     pub ambient_occlusion: Option<bool>,
     pub render_type: Option<RenderType>,
+    /// False for a loader quad that takes no directional shading.
+    pub shade: bool,
 }
 
 /// NeoForge's `render_type` names.
@@ -217,6 +224,16 @@ fn bake_elements(
     skip_flat: bool,
 ) -> Result<Vec<ModelQuad>> {
     let mut output = Vec::new();
+    bake_into(model, transform, skip_flat, &mut output)?;
+    Ok(output)
+}
+/// The elements, then what the model's loader adds.
+fn bake_into(
+    model: &ResolvedCuboidModel,
+    transform: BlockModelTransform,
+    skip_flat: bool,
+    output: &mut Vec<ModelQuad>,
+) -> Result<()> {
     let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for element in model.elements() {
         let element = element
@@ -249,7 +266,98 @@ fn bake_elements(
             )?);
         }
     }
-    Ok(output)
+    match model.loader() {
+        Some(ResolvedLoader::Composite(children)) => {
+            for child in children {
+                bake_into(child, transform, skip_flat, output)?;
+            }
+        }
+        Some(ResolvedLoader::Obj {
+            model: Some(obj),
+            flip_v,
+            shade,
+            hidden,
+        }) => bake_obj(model, obj, *flip_v, *shade, hidden, transform, output)?,
+        Some(ResolvedLoader::Obj { model: None, .. }) | None => {}
+    }
+    Ok(())
+}
+/// Obj faces are unculled quads in block units; the blockstate transform moves them whole.
+fn bake_obj(
+    model: &ResolvedCuboidModel,
+    obj: &ObjModel,
+    flip_v: bool,
+    shade: bool,
+    hidden: &std::collections::BTreeSet<String>,
+    transform: BlockModelTransform,
+    output: &mut Vec<ModelQuad>,
+) -> Result<()> {
+    let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
+    for face in obj.faces.iter().filter(|f| !hidden.contains(&f.object)) {
+        let slot = match obj.materials.get(&face.material) {
+            Some(MtlTexture::Sprite(sprite)) => {
+                output.push(obj_quad(
+                    face,
+                    Material {
+                        sprite: identifier(sprite)?,
+                        force_translucent: false,
+                    },
+                    flip_v,
+                    shade,
+                    render_type,
+                    transform,
+                ));
+                continue;
+            }
+            Some(MtlTexture::Slot(slot)) => slot,
+            None => &face.material,
+        };
+        let material = if slot.is_empty() {
+            None
+        } else {
+            model.material(slot)?
+        };
+        let material = material.cloned().unwrap_or(Material {
+            sprite: "minecraft:missingno".to_owned(),
+            force_translucent: false,
+        });
+        output.push(obj_quad(
+            face,
+            material,
+            flip_v,
+            shade,
+            render_type,
+            transform,
+        ));
+    }
+    Ok(())
+}
+fn obj_quad(
+    face: &ObjFace,
+    material: Material,
+    flip_v: bool,
+    shade: bool,
+    render_type: Option<RenderType>,
+    transform: BlockModelTransform,
+) -> ModelQuad {
+    let positions = face.vertices.map(|v| transform.position(v.position));
+    ModelQuad {
+        positions,
+        uv: face
+            .vertices
+            .map(|v| [v.uv[0], if flip_v { 1.0 - v.uv[1] } else { v.uv[1] }]),
+        facing: facing(&positions).unwrap_or(Direction::Up),
+        cull: None,
+        material,
+        tint_index: -1,
+        shade_direction_override: None,
+        light_emission: 0,
+        light: [0; 2],
+        color: None,
+        ambient_occlusion: None,
+        render_type,
+        shade,
+    }
 }
 /// `FaceBakery.bakeQuad` for a quad with explicit corners and unit-atlas UVs
 /// (`uv` in 0..16 texels), as `ItemModelGenerator` builds its layers.
@@ -364,5 +472,191 @@ fn bake_face(
         color: data.color,
         ambient_occlusion: data.ambient_occlusion,
         render_type,
+        shade: true,
     })
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::*;
+    use crate::resolve::{AssetReader, ModelLibrary};
+    use std::{collections::BTreeMap, sync::Arc};
+
+    struct Files(BTreeMap<&'static str, &'static str>);
+    impl AssetReader for Files {
+        fn read_text(&self, location: &str) -> Option<String> {
+            self.0.get(location).map(|text| (*text).to_owned())
+        }
+    }
+
+    fn library(models: &[(&str, &str)], files: &[(&'static str, &'static str)]) -> ModelLibrary {
+        let models = models
+            .iter()
+            .map(|(name, json)| ((*name).to_owned(), CuboidModel::from_json(json).unwrap()))
+            .collect();
+        ModelLibrary::new(models)
+            .unwrap()
+            .with_assets(Arc::new(Files(files.iter().copied().collect())))
+    }
+    fn bake(library: &ModelLibrary, name: &str) -> Vec<ModelQuad> {
+        bake_block_model(
+            &library.resolve(name).unwrap(),
+            BlockModelTransform::new([0; 3], false),
+        )
+        .unwrap()
+    }
+    fn sprites(quads: &[ModelQuad]) -> Vec<&str> {
+        quads.iter().map(|q| q.material.sprite.as_str()).collect()
+    }
+    const CUBE: &str =
+        r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#all"}}}]}"##;
+    const COMPOSITE: &str = r#"{"loader":"neoforge:composite","textures":{"all":"block/shared"},
+        "children":{"zeta":{"parent":"t:cube","textures":{"all":"block/own"}},"alpha":{"parent":"t:cube"}}}"#;
+
+    #[test]
+    fn composite_bakes_children_in_document_order_with_slot_fallback() {
+        let library = library(&[("t:cube", CUBE), ("t:comp", COMPOSITE)], &[]);
+        let quads = bake(&library, "t:comp");
+        assert_eq!(
+            sprites(&quads),
+            ["minecraft:block/own", "minecraft:block/shared"]
+        );
+    }
+    #[test]
+    fn composite_visibility_hides_a_child() {
+        let hidden =
+            COMPOSITE.replace(r#""children""#, r#""visibility":{"zeta":false},"children""#);
+        let library = library(&[("t:cube", CUBE), ("t:comp", &hidden)], &[]);
+        assert_eq!(
+            sprites(&bake(&library, "t:comp")),
+            ["minecraft:block/shared"]
+        );
+    }
+    #[test]
+    fn an_inheriting_model_overrides_which_children_are_visible() {
+        let hidden =
+            COMPOSITE.replace(r#""children""#, r#""visibility":{"zeta":false},"children""#);
+        let shown = r#"{"parent":"t:hidden","visibility":{"zeta":true,"alpha":false}}"#;
+        let library = library(
+            &[("t:cube", CUBE), ("t:hidden", &hidden), ("t:shown", shown)],
+            &[],
+        );
+        assert_eq!(sprites(&bake(&library, "t:shown")), ["minecraft:block/own"]);
+    }
+    #[test]
+    fn loader_is_inherited_by_parent_after_own_elements() {
+        let derived = r##"{"parent":"t:comp","textures":{"all":"block/derived"},
+            "elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"down":{"texture":"#all"}}}]}"##;
+        let library = library(
+            &[
+                ("t:cube", CUBE),
+                ("t:comp", COMPOSITE),
+                ("t:derived", derived),
+            ],
+            &[],
+        );
+        let quads = bake(&library, "t:derived");
+        assert_eq!(quads[0].facing, Direction::Down);
+        assert_eq!(
+            sprites(&quads),
+            [
+                "minecraft:block/derived",
+                "minecraft:block/own",
+                "minecraft:block/derived"
+            ]
+        );
+    }
+    #[test]
+    fn own_loader_wins_and_unknown_loader_adds_nothing() {
+        let other = r#"{"parent":"t:comp","loader":"somemod:thing"}"#;
+        let library = library(
+            &[("t:cube", CUBE), ("t:comp", COMPOSITE), ("t:other", other)],
+            &[],
+        );
+        assert!(bake(&library, "t:other").is_empty());
+    }
+    #[test]
+    fn composites_that_nest_through_themselves_are_an_error() {
+        let looping = r#"{"loader":"neoforge:composite","children":{"a":{"parent":"t:loop"}}}"#;
+        let library = library(&[("t:loop", looping)], &[]);
+        assert!(library.resolve("t:loop").is_err());
+    }
+
+    const OBJ: &str = "mtllib m.mtl\nv 0 0 0\nv 1 0 0\nv 1 0 1\nv 0 0 1\nv 0 1 0\n\
+        vt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\n\
+        usemtl top\nf 1/1 4/4 3/3 2/2\nusemtl side\nf 1/1 2/2 5/4\nusemtl bare\nf 1/1 2/2 5/4\n";
+    const MTL: &str = "newmtl top\nmap_Kd #lid\nnewmtl side\nmap_Kd #wall\nnewmtl bare\nKd 1 1 1\n";
+    const OBJ_FILES: [(&str, &str); 2] = [("t:models/x.obj", OBJ), ("t:models/m.mtl", MTL)];
+    const OBJ_MODEL: &str = r#"{"loader":"neoforge:obj","model":"t:models/x.obj","flip_v":true,
+        "textures":{"lid":"block/lid","wall":"block/wall"}}"#;
+
+    #[test]
+    fn obj_faces_become_quads_with_materials_and_flipped_v() {
+        let flat = OBJ_MODEL.replace(r#""flip_v":true,"#, "");
+        let library = library(&[("t:o", OBJ_MODEL), ("t:flat", &flat)], &OBJ_FILES);
+        let quads = bake(&library, "t:o");
+        assert_eq!(
+            sprites(&quads),
+            [
+                "minecraft:block/lid",
+                "minecraft:block/wall",
+                "minecraft:missingno"
+            ]
+        );
+        assert_eq!(quads[0].facing, Direction::Up);
+        assert_eq!(quads[1].facing, Direction::South);
+        assert_eq!(quads[0].positions[1], [0.0, 0.0, 1.0]);
+        assert_eq!(quads[0].uv[0], [0.0, 1.0]);
+        assert_eq!(quads[0].uv[2], [1.0, 0.0]);
+        // A triangle repeats its last vertex.
+        assert_eq!(quads[1].positions[3], quads[1].positions[2]);
+        assert_eq!(quads[1].uv[3], quads[1].uv[2]);
+        assert!(quads.iter().all(|q| q.cull.is_none() && q.shade));
+        assert_eq!(bake(&library, "t:flat")[0].uv[0], [0.0, 0.0]);
+    }
+    #[test]
+    fn obj_shade_quads_false_and_mtl_override() {
+        let unshaded = r#"{"loader":"neoforge:obj","model":"t:models/x.obj","shade_quads":false,
+            "mtl_override":"t:models/o.mtl","textures":{"s":"block/s"}}"#;
+        let files = [
+            ("t:models/x.obj", OBJ),
+            ("t:models/o.mtl", "newmtl top\nmap_Kd #s\n"),
+        ];
+        let library = library(&[("t:u", unshaded)], &files);
+        let quads = bake(&library, "t:u");
+        assert!(quads.iter().all(|q| !q.shade));
+        assert_eq!(quads[0].material.sprite, "minecraft:block/s");
+    }
+    #[test]
+    fn missing_or_broken_obj_bakes_nothing() {
+        let missing = library(&[("t:o", OBJ_MODEL)], &[]);
+        assert!(bake(&missing, "t:o").is_empty());
+        let broken = library(
+            &[("t:o", OBJ_MODEL)],
+            &[("t:models/x.obj", "v 0 0 0\nf 1 2 3\n")],
+        );
+        assert!(bake(&broken, "t:o").is_empty());
+    }
+    #[test]
+    fn obj_visibility_skips_the_objects_a_model_hides() {
+        let two = "v 0 0 0\nv 1 0 0\nv 1 0 1\nv 0 0 1\no a\nusemtl m\nf 1 2 3 4\no b\nf 4 3 2 1\n";
+        let files = [("t:models/two.obj", two)];
+        let base =
+            r#"{"loader":"neoforge:obj","model":"t:models/two.obj","textures":{"m":"block/m"}}"#;
+        let hiding = r#"{"parent":"t:base","visibility":{"b":false}}"#;
+        let restoring = r#"{"parent":"t:hiding","visibility":{"b":true}}"#;
+        let library = library(
+            &[
+                ("t:base", base),
+                ("t:hiding", hiding),
+                ("t:restoring", restoring),
+            ],
+            &files,
+        );
+        assert_eq!(bake(&library, "t:base").len(), 2);
+        let quads = bake(&library, "t:hiding");
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].facing, Direction::Down);
+        assert_eq!(bake(&library, "t:restoring").len(), 2);
+    }
 }
