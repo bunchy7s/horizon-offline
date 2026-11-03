@@ -238,6 +238,23 @@ impl Launcher {
         .detach();
     }
 
+    /// The launcher theme the selected account wears (its sky and accent hue), from the outfit
+    /// kept on disk; None with cosmetics off.
+    pub(super) fn worn_theme(&self) -> Option<([u32; 6], f32)> {
+        if !horizon_cosmetics::enabled() {
+            return None;
+        }
+        let kept;
+        let saved = match &self.wardrobe {
+            Some(w) => &w.saved,
+            None => {
+                kept = Saved::load(&dir(), &self.wardrobe_account()?.uuid);
+                &kept
+            }
+        };
+        saved.theme()
+    }
+
     /// The account the page is for: the selected one, if it signed in with Microsoft.
     fn wardrobe_account(&self) -> Option<account::Account> {
         match self.accounts.player() {
@@ -282,6 +299,7 @@ impl Launcher {
             (_, None) => None,
         };
         w.toast = said.map(|s| (s, Instant::now()));
+        self.restyle = true;
     }
 
     /// Wear `item` in `slot` (None: nothing there), or turn Show my cosmetics on or off: at once
@@ -311,6 +329,10 @@ impl Launcher {
         w.saved.change(change);
         let _ = w.saved.save(&dir(), &w.uuid);
         w.seen = None;
+        self.restyle = true;
+        let Some(w) = self.wardrobe.as_mut() else {
+            return;
+        };
         let Some(session) = w.session.clone().filter(|s| s.live()) else {
             // Offline, or the session ended: it waits, and the next visit sends it.
             w.toast = Some((
@@ -380,7 +402,8 @@ impl Launcher {
     /// `HORIZON_LAUNCHER_PAGE=wardrobe` in a development build: the page for a made-up account
     /// that owns the items of `HORIZON_COSMETICS_LOCAL` and wears the first of each slot, for
     /// screenshots. Nothing is asked of Mojang or the service, and nothing is saved.
-    /// `HORIZON_WARDROBE_STATE=offline|failed|closed|empty` shows that state instead.
+    /// `HORIZON_WARDROBE_STATE=offline|failed|closed|empty` shows that state instead, `theme` wears
+    /// First Light.
     pub(super) fn wardrobe_preview(&mut self) {
         use horizon_launcher::wardrobe::{Claim, Entry, Me};
         let Some(dir) = std::env::var_os("HORIZON_COSMETICS_LOCAL") else {
@@ -406,7 +429,25 @@ impl Launcher {
                 .entry(slot(i).to_owned())
                 .or_insert_with(|| i.id.clone());
         }
-        let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+        let mut ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
+        // A launcher theme to wear: the design brief's First Light.
+        let dawn = Entry {
+            id: "first_light".into(),
+            hash: String::new(),
+            slot: "theme".into(),
+            names: [("en_us".to_owned(), "First Light".to_owned())].into(),
+            theme: Some(horizon_launcher::wardrobe::Theme {
+                sky: [
+                    "#0b1030", "#1d2a63", "#3d4c94", "#7f78c0", "#e2a0b0", "#ffd6a0",
+                ]
+                .map(String::from),
+                accent_hue: 246.,
+            }),
+        };
+        ids.push(dawn.id.clone());
+        if state == "theme" {
+            equipped.insert("theme".to_owned(), dawn.id.clone());
+        }
         let claim = Claim {
             state: if state == "closed" {
                 ClaimState::Closed
@@ -429,6 +470,7 @@ impl Launcher {
                     names: [("en_us".to_owned(), title_case(&i.id))].into(),
                     theme: None,
                 })
+                .chain([dawn])
                 .collect(),
             claim: claim.clone(),
         };
@@ -483,6 +525,7 @@ impl Launcher {
             toast: None,
         });
         self.wardrobe_reload = false;
+        self.restyle = true;
     }
 
     /// The account's skin wearing what it wears now, baked once per change.

@@ -273,6 +273,8 @@ struct Launcher {
     wardrobe: Option<wardrobe_page::Wardrobe>,
     /// Ask the service again on the next draw of the Wardrobe (set by each visit).
     wardrobe_reload: bool,
+    /// Work the look out again on the next frame (a launcher theme put on or taken off).
+    restyle: bool,
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
     settings: Settings,
@@ -557,6 +559,7 @@ impl Launcher {
             skin: None,
             wardrobe: None,
             wardrobe_reload: false,
+            restyle: horizon_cosmetics::enabled(),
             background_error: None,
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
@@ -4779,6 +4782,9 @@ impl Render for Launcher {
                 .bg(t.side)
                 .children(titlebar::render(&t, window))
                 .child(specimen::render(&t));
+        }
+        if std::mem::take(&mut self.restyle) {
+            self.theme = self.settings_theme(window);
         }
         self.scale = window.scale_factor();
         self.perf.frame();
