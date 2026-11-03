@@ -189,7 +189,15 @@ fn local(host: &str) -> bool {
         || host.ends_with(".localhost")
         || host == "::1"
         || host == "0.0.0.0"
-        || host.starts_with("127.")
+        || is_loopback_v4(&host)
+}
+
+/// A dotted IPv4 address in `127.0.0.0/8`; a DNS name that merely starts with `127.` is not one.
+fn is_loopback_v4(host: &str) -> bool {
+    host.starts_with("127.")
+        && host
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether `host` is in `NO_PROXY`: `*`, `host`, `.domain`, `*.domain` and `host:port` entries.
@@ -204,8 +212,15 @@ fn excluded(host: &str, no_proxy: &str) -> bool {
                 return true;
             }
             let entry = entry.trim_start_matches('*').trim_start_matches('.');
+            // A port follows the last colon of a bracketed entry, or of a host with no colon
+            // before it; an unbracketed IPv6 literal keeps its colons.
             let entry = match entry.rfind(':') {
-                Some(at) if !entry[at..].contains(']') => &entry[..at],
+                Some(at)
+                    if !entry[at..].contains(']')
+                        && (entry[..at].ends_with(']') || !entry[..at].contains(':')) =>
+                {
+                    &entry[..at]
+                }
                 _ => entry,
             };
             let entry = bare(entry);
@@ -323,7 +338,13 @@ mod tests {
         ] {
             assert!(local(host), "{host}");
         }
-        for host in ["playhorizon.dev", "api.minecraftservices.com", "10.0.0.1"] {
+        for host in [
+            "playhorizon.dev",
+            "api.minecraftservices.com",
+            "10.0.0.1",
+            "127.example.com",
+            "127.0.0.1.example.com",
+        ] {
             assert!(!local(host), "{host}");
         }
     }
@@ -345,6 +366,16 @@ mod tests {
         assert!(!excluded("modrinth.com", " .corp.example , mojang.com "));
         assert!(!excluded("edge.forgecdn.net", "modrinth.com"));
         assert!(!excluded("modrinth.com", ""));
+    }
+
+    /// A bare IPv6 entry keeps its colons: cut at the last one it would never match the host in
+    /// its brackets, and the download would go through the proxy after all.
+    #[test]
+    fn no_proxy_keeps_a_bare_ipv6_entry_whole() {
+        assert!(excluded("[2001:db8::1]", "2001:db8::1"));
+        assert!(excluded("[2001:db8::1]", "[2001:db8::1]"));
+        assert!(excluded("[2001:db8::1]", "[2001:db8::1]:8080"));
+        assert!(!excluded("[2001:db8::1]", "2001:db8::2"));
     }
 
     #[test]

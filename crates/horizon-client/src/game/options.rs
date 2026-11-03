@@ -336,6 +336,9 @@ impl Game<'_> {
                 // The AI Agent page's repro buttons (game/repro.rs).
                 Event::ToggleRecording => self.toggle_recording_key(),
                 Event::ExportRepro => self.export_repro_key(),
+                // The Music page: the situations' tracks, and playing one now.
+                Event::ListMusicTracks => self.ui.options.music_groups = self.music_groups(),
+                Event::PlayMusicTrack(event, track) => self.play_music_track(&event, &track),
                 Event::Close if self.ui.options.resource_error.is_some() => {}
                 Event::Close => {
                     self.settings.save(&Self::options_path());
