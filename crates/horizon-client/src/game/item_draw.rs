@@ -473,11 +473,7 @@ impl Game<'_> {
         let mut models = self.skin_models.borrow_mut();
         let mut frame = self.skin_frame.borrow_mut();
         let mark = frame.mark();
-        let mut skin = horizon_client::mobs::skin::Skin {
-            models: &mut models,
-            frame: &mut frame,
-            bounds: None,
-        };
+        let mut skin = horizon_client::mobs::skin::Skin::new(&mut models, &mut frame);
         for &pose in poses {
             if !self.skin_item(state, pose, light, lights, &mut skin) {
                 // Decided before any draw, the same for every pose.

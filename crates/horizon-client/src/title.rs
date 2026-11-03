@@ -258,6 +258,9 @@ pub enum Alert {
     Incompatible,
     /// `selectWorld.recreate.error.title`.
     Recreate,
+    /// `symlink_warning.title.world`
+    /// (`NoticeWithLinkScreen.createWorldSymlinkWarningScreen`).
+    Symlink,
 }
 #[derive(Clone, Debug)]
 pub enum Mode {
@@ -1306,6 +1309,23 @@ impl Title {
         if world.locked {
             return Action::None;
         }
+        // `LevelStorageSource.validateAndCreateAccess`: a world folder holding
+        // a symbolic link is refused before an access is made over it, and
+        // `WorldOpenFlows.createWorldAccess` puts the symlink warning where
+        // the world would have gone.
+        if world_management::symlinks(&self.saves, &world.folder)
+            .is_ok_and(|links| !links.is_empty())
+        {
+            self.mode = Mode::Error {
+                message: lang::get_or(
+                    "symlink_warning.message.world",
+                    "You are trying to open a world whose folder holds links to other files. That can be a risk to the rest of your files, so the world stays closed.",
+                ),
+                return_to: Box::new(self.mode.clone()),
+                alert: Some(Alert::Symlink),
+            };
+            return Action::None;
+        }
         if crate::save::SessionLock::acquire(&self.saves.join(&world.folder)).is_err() {
             self.toast = Some((
                 crate::toasts::Slide::default(),
@@ -2311,6 +2331,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     Some(Alert::Recreate) => {
                         get("selectWorld.recreate.error.title", "An error occurred!")
                     }
+                    Some(Alert::Symlink) => get(
+                        "symlink_warning.title.world",
+                        "The world folder contains links",
+                    ),
                     None => get("selectWorld.access_failure", "Failed to access world"),
                 };
                 ScreenInfo::new("world_error", join(&[&title, message]))
@@ -2964,6 +2988,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                             "An error occurred!",
                             u32::MAX,
                         ),
+                        Alert::Symlink => (
+                            "symlink_warning.title.world",
+                            "The world folder contains links",
+                            u32::MAX,
+                        ),
                     };
                     (70.0, 90.0, key, fallback, color)
                 } else {
@@ -3275,6 +3304,30 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
         let next = create_world::next_tab_index(options.tab, key, shift)?;
         Some(self.select_create_tab(next.min(create_world::tab_count() - 1)))
     }
+    /// `AbstractSelectionList.mouseClicked`: the row under the pointer takes
+    /// a click of any button (`ObjectSelectionList.Entry.mouseClicked` accepts
+    /// them all), so a middle click selects a world and its Play, Edit and
+    /// Delete buttons hear of it (`WorldSelectionList.setSelected`), without
+    /// opening it. Only the left button joins, through [`Self::click`].
+    pub fn select_world_at(&mut self, x: f32, y: f32, size: (f32, f32)) -> bool {
+        let index = {
+            let Mode::Select { worlds, .. } = &self.mode else {
+                return false;
+            };
+            let Some((row, _)) = self.world_row_at(worlds, (x, y), size) else {
+                return false;
+            };
+            let Some((index, _)) = self.visible_worlds(worlds).nth(row) else {
+                return false;
+            };
+            index
+        };
+        if let Mode::Select { selected, .. } = &mut self.mode {
+            *selected = Some(index);
+        }
+        true
+    }
+
     /// The action and whether to play `AbstractWidget.playButtonClickSound`.
     /// Navigation buttons can return `Action::None` while still sounding.
     pub fn click(&mut self, x: f32, y: f32, size: (f32, f32)) -> (Action, bool) {

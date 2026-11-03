@@ -159,6 +159,7 @@ impl Observer for DirtyObserver<'_> {
         Ok(())
     }
 }
+#[derive(Clone, Debug)]
 pub struct EntityAttributes {
     catalog: Arc<Catalog>,
     bases: Arc<[Option<f64>]>,

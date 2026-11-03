@@ -101,7 +101,7 @@ def argument_parser(description):
     parser.add_argument('--seed', type=int, default=1)
     parser.add_argument('--only', help='substring of the block name under test')
     parser.add_argument('--show', type=int, default=1, help='examples printed per block')
-    parser.add_argument('--events', action='store_true', help='compare side-effect logs too (default: states, ticks, rng and events)')
+    parser.add_argument('--events', action='store_true', help='deprecated; side-effect logs are always compared')
     parser.add_argument('--ignore', default='', help='comma separated line prefixes to ignore when comparing (e.g. S,G)')
     return parser
 
@@ -119,7 +119,7 @@ def run(command, **kwargs):
 
 
 def execute(name, cases, args, facts, origin_of=None):
-    """Run `cases` on both sides; print a report and return the number of differing cases."""
+    """Run both sides; return failing cases, counting mismatches and oracle errors."""
     lock, jars, libraries = base.verify_artifacts()
     resources = lab.LOCAL / 'horizon-client' / lock['minecraft']['version']
     work = lab.LOCAL / name
@@ -159,7 +159,7 @@ def execute(name, cases, args, facts, origin_of=None):
     skipped = sum(len(v) for v in errors.values())
     print(f'{len(cases) - total - skipped}/{len(cases) - skipped} cases match ({skipped} oracle errors)')
     (work / 'differences.json').write_text(json.dumps({k: [[c, a, b] for c, a, b in v[:5]] for k, v in groups.items()}))
-    return total
+    return total + skipped
 
 
 def split_cases(text, ignore):

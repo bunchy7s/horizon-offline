@@ -21,13 +21,34 @@ fn components(stack: &ItemStack) -> Compound {
     }
 }
 
-/// `BlockState.getCloneItemStack`'s item: a stem's seed (`StemBlock` and
-/// `AttachedStemBlock` override it; a stem has no block item), else the
-/// block's own item.
+/// `BlockState.getCloneItemStack`'s item: the block's own item, unless the
+/// block overrides it. A block with no item of its own still has one to pick:
+/// a stem's seeds, a crop's seed item, a vine's harvest.
 fn clone_item<'a>(name: &str, block_item: &'a str) -> &'a str {
     match name {
+        // StemBlock and AttachedStemBlock: the seeds it grew from.
         "minecraft:pumpkin_stem" | "minecraft:attached_pumpkin_stem" => "minecraft:pumpkin_seeds",
         "minecraft:melon_stem" | "minecraft:attached_melon_stem" => "minecraft:melon_seeds",
+        // CropBlock.getCloneItemStack: new ItemStack(getBaseSeedId()).
+        "minecraft:wheat" => "minecraft:wheat_seeds",
+        "minecraft:carrots" => "minecraft:carrot",
+        "minecraft:potatoes" => "minecraft:potato",
+        "minecraft:beetroots" => "minecraft:beetroot_seeds",
+        "minecraft:torchflower_crop" => "minecraft:torchflower_seeds",
+        // BambooSaplingBlock, SweetBerryBushBlock and the two cave vine
+        // blocks: new ItemStack(their harvest item).
+        "minecraft:bamboo_sapling" => "minecraft:bamboo",
+        "minecraft:sweet_berry_bush" => "minecraft:sweet_berries",
+        "minecraft:cave_vines" | "minecraft:cave_vines_plant" => "minecraft:glow_berries",
+        // BigDripleafStemBlock: new ItemStack(Blocks.BIG_DRIPLEAF).
+        "minecraft:big_dripleaf_stem" => "minecraft:big_dripleaf",
+        // GrowingPlantBodyBlock: new ItemStack(getHeadBlock()), the block that
+        // carries the item.
+        "minecraft:kelp_plant" => "minecraft:kelp",
+        "minecraft:twisting_vines_plant" => "minecraft:twisting_vines",
+        "minecraft:weeping_vines_plant" => "minecraft:weeping_vines",
+        // CandleCakeBlock: new ItemStack(Blocks.CAKE), for every colour.
+        _ if name.ends_with("_candle_cake") => "minecraft:cake",
         _ => block_item,
     }
 }
@@ -273,6 +294,41 @@ mod tests {
         assert_eq!(
             clone_item("minecraft:stone", "minecraft:stone"),
             "minecraft:stone"
+        );
+    }
+    /// The blocks whose `getCloneItemStack` override returns something other
+    /// than their own item: a crop's seed item, a sapling's bamboo, a cave
+    /// vine's glow berries, a stem block's head. Each of them has no item of
+    /// its own, so pick block gave nothing before; a block with an item is
+    /// still untouched.
+    #[test]
+    fn blocks_without_an_item_pick_as_their_harvest() {
+        for (block, item) in [
+            ("minecraft:wheat", "minecraft:wheat_seeds"),
+            ("minecraft:carrots", "minecraft:carrot"),
+            ("minecraft:potatoes", "minecraft:potato"),
+            ("minecraft:beetroots", "minecraft:beetroot_seeds"),
+            ("minecraft:torchflower_crop", "minecraft:torchflower_seeds"),
+            ("minecraft:bamboo_sapling", "minecraft:bamboo"),
+            ("minecraft:sweet_berry_bush", "minecraft:sweet_berries"),
+            ("minecraft:cave_vines", "minecraft:glow_berries"),
+            ("minecraft:cave_vines_plant", "minecraft:glow_berries"),
+            ("minecraft:big_dripleaf_stem", "minecraft:big_dripleaf"),
+            ("minecraft:kelp_plant", "minecraft:kelp"),
+            ("minecraft:twisting_vines_plant", "minecraft:twisting_vines"),
+            ("minecraft:weeping_vines_plant", "minecraft:weeping_vines"),
+            ("minecraft:white_candle_cake", "minecraft:cake"),
+            ("minecraft:light_blue_candle_cake", "minecraft:cake"),
+        ] {
+            assert_eq!(clone_item(block, "minecraft:air"), item, "{block}");
+        }
+        assert_eq!(
+            clone_item("minecraft:sweet_berries", "minecraft:sweet_berries"),
+            "minecraft:sweet_berries"
+        );
+        assert_eq!(
+            clone_item("minecraft:cake", "minecraft:cake"),
+            "minecraft:cake"
         );
     }
 }
