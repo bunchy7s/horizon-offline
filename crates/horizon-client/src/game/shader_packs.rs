@@ -496,6 +496,9 @@ impl Game<'_> {
         self.push_span(start, "ENTITIES", id);
         if let Some(last) = self.entity_spans.borrow_mut().last_mut() {
             last.translucent = translucent;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.translucent = translucent;
+            }
         }
     }
 
@@ -529,6 +532,9 @@ impl Game<'_> {
             .emission;
         if let Some(last) = self.entity_spans.borrow_mut().last_mut() {
             last.emissive = emission > 0;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.emissive = emission > 0;
+            }
         }
     }
 
@@ -541,6 +547,10 @@ impl Game<'_> {
         {
             last.player = true;
             last.hidden = hidden;
+            if let Some(gpu) = self.skin_frame.borrow_mut().spans.last_mut() {
+                gpu.player = true;
+                gpu.hidden = hidden;
+            }
         }
     }
 
@@ -565,6 +575,17 @@ impl Game<'_> {
             id,
             ..Default::default()
         };
+        if self.pack_ids.is_some() && self.skinning() {
+            let mut skin = self.skin_frame.borrow_mut();
+            let gpu = EntitySpan {
+                start: skin.vertices,
+                ..span
+            };
+            match skin.spans.last_mut() {
+                Some(last) if last.start == gpu.start => *last = gpu,
+                _ => skin.spans.push(gpu),
+            }
+        }
         // A span that drew nothing gives way to the next.
         match spans.last_mut() {
             Some(last) if last.start == span.start => *last = span,
