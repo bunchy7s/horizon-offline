@@ -1498,6 +1498,7 @@ name = "horizon-command"
 version = "0.1.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-protocol",
  "horizon-world",
 ]
@@ -1695,6 +1696,7 @@ dependencies = [
  "ab_glyph",
  "base64",
  "chrono",
+ "getrandom 0.3.4",
  "horizon-anticheat",
  "horizon-bench",
  "horizon-chat-filter",

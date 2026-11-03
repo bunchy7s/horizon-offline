@@ -814,7 +814,11 @@ impl Game<'_> {
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
-            let in_water = a.push_by_fluid(&self.world, &self.res.motion().fluids).0 > 0.0;
+            let (water_height, lava_height) =
+                a.push_by_fluid(&self.world, &self.res.motion().fluids);
+            let in_water = water_height > 0.0;
+            let medium =
+                horizon_client::entities::StandMedium::from_heights(water_height, lava_height);
             let (world, registry, facts, collision) = (
                 &self.world,
                 self.pack.assets.registry,
@@ -834,10 +838,11 @@ impl Game<'_> {
                 in_water,
                 Some(self.border.geometry()),
             ) {
+                // LivingEntity.aiStep: `travel` first, then the blocks' push.
+                a.tick_settle(medium, step);
                 a.push_by_bubble_column_over(world, registry, facts, collision, |pos| {
                     tops.push(pos)
                 });
-                a.tick_settle(in_water, step);
             }
             for pos in tops {
                 self.bubble_column_particles(pos);

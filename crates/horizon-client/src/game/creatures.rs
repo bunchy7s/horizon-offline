@@ -66,6 +66,13 @@ pub(super) struct Creatures {
     pub tick_buffer: Vec<(u32, super::native_ticks::TickKind)>,
     /// Wind bursts from a guest's turn, waiting for it to end (game/wind.rs).
     pub wind_bursts: Vec<super::wind::Burst>,
+    /// The wind charge whose burst is being handled, by entity id: which
+    /// entities have already ticked in vanilla's spawn-ordered tick list
+    /// (game/wind.rs).
+    pub wind_source: Option<u32>,
+    /// Wind pushes held until the entity's own tick has run, by entity id
+    /// (game/wind.rs `apply_late_wind_pushes`).
+    pub late_wind_pushes: Vec<(u32, crate::game::Vec3)>,
     /// The players a fishing hook can catch, taken as the hooks tick, and
     /// the pulls on them waiting for the hub (game/fishing.rs).
     pub hook_targets: Vec<super::fishing::HookTarget>,
@@ -1349,7 +1356,12 @@ impl Game<'_> {
             // Slime.remove: split into 2-4 smaller slimes.
             let size = m.extra.size;
             if size > 1 {
-                let n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
+                let mut n = 2 + self.world.random.next_int_bound(3).unwrap_or(0);
+                let mut cancel = false;
+                let mut count = n as u32;
+                let kind = super::native_hooks::mob_kind(m);
+                self.native_mob_split(m.id, &kind, size, size / 2, &mut count, &mut cancel);
+                n = if cancel { 0 } else { count.min(64) as _ };
                 for k in 0..n {
                     let off = |kk: i32| (f64::from(kk % 2) - 0.5) * f64::from(size) / 4.0;
                     let at = [
@@ -3065,6 +3077,44 @@ impl Game<'_> {
         let Some(p) = self.mobs.iter().find(|m| m.id == parent).cloned() else {
             return;
         };
+        // BabyEntitySpawnEvent: not for an egg (turtle, frog, sniffer).
+        if !matches!(
+            p.species(),
+            Species::Turtle | Species::Frog | Species::Sniffer
+        ) && !horizon_client::mod_api::mods().is_empty()
+        {
+            let mule = matches!(
+                (
+                    p.species(),
+                    self.mobs
+                        .iter()
+                        .find(|m| m.id == partner)
+                        .map(|m| m.species())
+                ),
+                (Species::Horse, Some(Species::Donkey)) | (Species::Donkey, Some(Species::Horse))
+            );
+            let kind = if mule {
+                "minecraft:mule".to_owned()
+            } else {
+                super::native_hooks::mob_kind(&p)
+            };
+            let conn = self
+                .love_cause
+                .get(&parent)
+                .or(self.love_cause.get(&partner))
+                .copied();
+            let player = conn.and_then(|c| self.killer_uuid(c)).unwrap_or(0);
+            let mut cancel = false;
+            self.native_baby_entity_spawn(parent, partner, player, &kind, &mut cancel);
+            if cancel {
+                breeding_credit(&mut self.love_cause, parent, partner);
+                if let Some(q) = self.mobs.iter_mut().find(|m| m.id == partner) {
+                    q.extra.age = 6000;
+                    q.extra.in_love = 0;
+                }
+                return;
+            }
+        }
         // Animal.finalizeSpawnChildFromBreeding: the player who fed the parent,
         // or else the one who fed the partner.
         if let Some(cause) = breeding_credit(&mut self.love_cause, parent, partner) {

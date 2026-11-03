@@ -1382,6 +1382,31 @@ pub struct ArmorStand {
     /// `Entity.mainSupportingBlockPos` after the last move.
     pub support: horizon_world::ground_support::GroundState,
 }
+/// The fluid a stand travels in (`LivingEntity.travelInFluid`: water first,
+/// then lava), from the heights `Entity::push_by_fluid` measured.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum StandMedium {
+    Air,
+    Water,
+    /// `shallow`: `isInShallowFluid(LAVA)`, the lava is no deeper than
+    /// `getFluidJumpThreshold` (0.4 for a stand, whose eyes are above 0.4).
+    Lava {
+        shallow: bool,
+    },
+}
+impl StandMedium {
+    pub fn from_heights(water_height: f64, lava_height: f64) -> Self {
+        if water_height > 0.0 {
+            Self::Water
+        } else if lava_height > 0.0 {
+            Self::Lava {
+                shallow: lava_height <= 0.4,
+            }
+        } else {
+            Self::Air
+        }
+    }
+}
 /// Armor stands share LivingEntity's block/tag and trapdoor climb predicate.
 struct StandClimbing<'a> {
     world: &'a World,
@@ -1410,7 +1435,7 @@ impl horizon_world::climbing::ClimbingWorld for StandClimbing<'_> {
     fn set_last_climbable_position(&mut self, _: BlockPos) {}
 }
 /// What a stand's travel carries from [`ArmorStand::tick_move`] to
-/// [`ArmorStand::tick_settle`], across the game's bubble-column push.
+/// [`ArmorStand::tick_settle`].
 #[derive(Clone, Copy)]
 pub struct StandStep {
     falling: bool,
@@ -1428,7 +1453,12 @@ impl ArmorStand {
         border: Option<&BorderGeometry>,
     ) {
         if let Some(step) = self.tick_move(scene, facts, climbing, in_water, border) {
-            self.tick_settle(in_water, step);
+            let medium = if in_water {
+                StandMedium::Water
+            } else {
+                StandMedium::Air
+            };
+            self.tick_settle(medium, step);
         }
     }
 }
@@ -1757,13 +1787,34 @@ impl ArmorStand {
         self.velocity = velocity;
         Some(StandStep { falling, friction })
     }
-    /// The rest of the stand's travel after the bubble column's push: the
-    /// water slowdown or the air drag and gravity.
-    pub fn tick_settle(&mut self, in_water: bool, step: StandStep) {
+    /// The rest of the stand's travel: the water slowdown, the lava slowdown
+    /// and sink, or the air drag and gravity. The blocks' push (a bubble
+    /// column) comes after this, as `LivingEntity.aiStep` applies the block
+    /// effects after `travel`.
+    pub fn tick_settle(&mut self, medium: StandMedium, step: StandStep) {
         use crate::entity_rules::EntityRules;
         let StandStep { falling, friction } = step;
         let velocity = self.velocity;
-        self.velocity = if in_water {
+        let gravity = self.get_gravity();
+        self.velocity = if let StandMedium::Lava { shallow } = medium {
+            // travelInLava: halve it (a shallow lava also slows the fall by
+            // 0.8 with `getFluidFallingAdjustedMovement`), then sink by
+            // gravity / 4.
+            let (x, y, z) = if shallow {
+                let y = velocity.y * f64::from(0.8f32);
+                let sink = gravity / 16.0;
+                let adjusted = if falling && (y - 0.005).abs() >= 0.003 && (y - sink).abs() < 0.003
+                {
+                    -0.003
+                } else {
+                    y - sink
+                };
+                (velocity.x * 0.5, adjusted, velocity.z * 0.5)
+            } else {
+                (velocity.x * 0.5, velocity.y * 0.5, velocity.z * 0.5)
+            };
+            Vec3::new(x, y - gravity / 4.0, z)
+        } else if medium == StandMedium::Water {
             // travelInWater: slowDown 0.8, then `getFluidFallingAdjustedMovement`
             // with gravity / 16 (the stand is falling while its fall is not
             // already nearly stopped).
@@ -3178,6 +3229,50 @@ mod armor_stand_motion_tests {
                 assert!(east > 25.0, "no border: goes on, got {east}");
             }
         }
+    }
+
+    #[test]
+    fn a_stand_in_lava_halves_its_motion_and_sinks_by_a_quarter_of_gravity() {
+        // LivingEntity.travelInLava, measured on the real server: a stand at
+        // rest in deep lava has Motion.y -0.02, then -0.03, then -0.035.
+        let step = StandStep {
+            falling: true,
+            friction: 1.0,
+        };
+        let mut stand = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            stand.tick_settle(StandMedium::Lava { shallow: false }, step);
+            seen.push(stand.velocity.y);
+        }
+        for (got, want) in seen.iter().zip([-0.02, -0.03, -0.035]) {
+            assert!((got - want).abs() < 1e-12, "got {got}, want {want}");
+        }
+        // Shallow lava also applies the 0.8 and the gravity / 16 sink.
+        let mut shallow = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        shallow.velocity = Vec3::new(0.2, -0.1, 0.0);
+        shallow.tick_settle(StandMedium::Lava { shallow: true }, step);
+        assert!((shallow.velocity.x - 0.1).abs() < 1e-12);
+        let want = -0.1 * f64::from(0.8f32) - 0.08 / 16.0 - 0.08 / 4.0;
+        assert!((shallow.velocity.y - want).abs() < 1e-12);
+        // Air is unchanged: gravity, then the 0.98 drag.
+        let mut air = ArmorStand::new(1, Vec3::new(0.5, 100.0, 0.5), 0.0);
+        air.tick_settle(StandMedium::Air, step);
+        assert!((air.velocity.y + 0.0784).abs() < 1e-6);
+    }
+
+    #[test]
+    fn lava_depth_picks_the_shallow_or_deep_travel() {
+        assert_eq!(StandMedium::from_heights(0.0, 0.0), StandMedium::Air);
+        assert_eq!(StandMedium::from_heights(0.3, 1.0), StandMedium::Water);
+        assert_eq!(
+            StandMedium::from_heights(0.0, 0.4),
+            StandMedium::Lava { shallow: true }
+        );
+        assert_eq!(
+            StandMedium::from_heights(0.0, 1.975),
+            StandMedium::Lava { shallow: false }
+        );
     }
 
     #[test]
