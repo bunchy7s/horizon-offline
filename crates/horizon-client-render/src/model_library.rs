@@ -21,7 +21,15 @@ struct RootAssets(PathBuf);
 impl AssetReader for RootAssets {
     fn read_text(&self, location: &str) -> Option<String> {
         let (namespace, path) = location.split_once(':')?;
-        if path.split('/').any(|part| part == ".." || part.is_empty()) {
+        // Only a resource location's characters, and no `.`/`..` step: an
+        // .obj's `mtllib` names its .mtl as raw text, so it must not reach a
+        // file outside the content root (`../..:x` as a namespace would).
+        let valid = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit() || b"_.-".contains(&c);
+        if !namespace.bytes().all(valid)
+            || matches!(namespace, "" | "." | "..")
+            || !path.bytes().all(|c| valid(c) || c == b'/')
+            || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+        {
             return None;
         }
         horizon_core::prepared_files::read_to_string(
@@ -262,5 +270,32 @@ mod tests {
         );
         assert!(parsed.into_item_library().is_err());
         Ok(())
+    }
+
+    /// An .obj's `mtllib` is raw text: no namespace or path step reaches a
+    /// file outside the content root.
+    #[test]
+    fn root_assets_stay_inside_the_content_root() {
+        let root = std::env::temp_dir().join(format!("horizon-root-assets-{}", std::process::id()));
+        let inside = root.join("content");
+        fs::create_dir_all(inside.join("assets/m/models")).unwrap();
+        fs::write(inside.join("assets/m/models/a.mtl"), "newmtl a").unwrap();
+        fs::write(root.join("secret.mtl"), "newmtl secret").unwrap();
+        let assets = RootAssets(inside);
+        assert_eq!(
+            assets.read_text("m:models/a.mtl").as_deref(),
+            Some("newmtl a")
+        );
+        for escape in [
+            "../..:secret.mtl",
+            "..:../secret.mtl",
+            "m:../../../secret.mtl",
+            "m:models/./a.mtl",
+            "M:models/a.mtl",
+            ":models/a.mtl",
+        ] {
+            assert_eq!(assets.read_text(escape), None, "{escape}");
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 }
