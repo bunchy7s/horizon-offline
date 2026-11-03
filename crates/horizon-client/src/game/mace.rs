@@ -384,13 +384,8 @@ impl Game<'_> {
         for m in self.mobs.iter_mut().filter(|m| {
             target != Spared::Mob(m.id) && m.alive() && !m.removed && !ally_of_player(m, player)
         }) {
-            smash_push(
-                center,
-                heavy,
-                m.position,
-                &mut m.velocity,
-                m.attrs.knockback_resistance,
-            );
+            let resistance = m.knockback_resistance();
+            smash_push(center, heavy, m.position, &mut m.velocity, resistance);
         }
         for s in self
             .armor_stands

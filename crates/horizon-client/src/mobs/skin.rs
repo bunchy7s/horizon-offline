@@ -44,10 +44,11 @@ pub struct SkinModels {
     /// Item models, the same way (`item_render::ItemRenderState::submit_skinned`).
     items: FxHashMap<usize, (Arc<BakedItemModel>, Option<StoredItem>)>,
     vertices: u32,
-    /// Whether the eyes render type's layers (spiders', endermen's...) are posed
-    /// here too, as [`SkinJob::FLAT`] draws (`gfx::Renderer::skins_eyes`); set
-    /// each frame.
-    pub eyes: bool,
+    /// Whether the layers improved transparency would draw in its stages are
+    /// posed here too (`gfx::Renderer::skins_tagged`; set each frame): the eyes
+    /// render type's (spiders', endermen's...) as [`SkinJob::FLAT`] draws, and
+    /// `entityTranslucent` layers (a horse's markings, a slime's outer cube).
+    pub tagged: bool,
 }
 
 /// A stored item model: its quads' vertices in order, by runs of quads that
@@ -288,9 +289,29 @@ pub struct Skin<'a> {
     pub frame: &'a mut SkinFrame,
     /// Camera-relative bounds of what this mob drew here (for culling).
     pub bounds: Option<(glam::Vec3, glam::Vec3)>,
+    /// The last walk, for a draw that repeats it.
+    last: Option<Walked>,
 }
 
-impl Skin<'_> {
+/// One walk of [`Skin::draw`]: what it drew, and the jobs it pushed.
+struct Walked {
+    model: usize,
+    base: glam::Mat4,
+    poses: u64,
+    jobs: std::ops::Range<usize>,
+}
+
+impl<'a> Skin<'a> {
+    /// One entity's draws into `frame`.
+    pub fn new(models: &'a mut SkinModels, frame: &'a mut SkinFrame) -> Self {
+        Self {
+            models,
+            frame,
+            bounds: None,
+            last: None,
+        }
+    }
+
     /// Grows the bounds of what this entity drew here by `lo..hi` posed by `m`.
     pub fn grow_bounds(&mut self, m: glam::Mat4, (lo, hi): (glam::Vec3, glam::Vec3)) {
         let center = m.transform_point3((lo + hi) * 0.5);
@@ -318,9 +339,30 @@ impl Skin<'_> {
         poses: &Poses,
         paint: Paint,
     ) -> bool {
+        let key = Arc::as_ptr(model) as usize;
+        // A draw that repeats the last walk (a villager's type, profession and
+        // level over its body, a spider's eyes): the same model, matrix and
+        // poses give the same part matrices and parts left out, so its jobs
+        // are the last ones' over the same parts, with this paint.
+        if let Some(last) = &self.last
+            && last.model == key
+            && last.base == base
+            && last.poses == poses.version()
+        {
+            for i in last.jobs.clone() {
+                let job = self.frame.jobs[i];
+                self.frame.jobs.push(SkinJob {
+                    dst: self.frame.vertices,
+                    ..paint.job(job.first, job.count, job.part, job.cull)
+                });
+                self.frame.vertices += job.count;
+            }
+            return true;
+        }
         let Some(stored) = self.models.entry(model, self.frame) else {
             return false;
         };
+        let jobs = self.frame.jobs.len();
         let first_part = self.frame.parts.len() as u32;
         self.frame.parts.resize(
             self.frame.parts.len() + stored.parts.len(),
@@ -338,7 +380,37 @@ impl Skin<'_> {
             index: 0,
         };
         walk.part(model, base, ModelNormals::new(base));
+        // The walk's first job never extends an earlier draw's: those have
+        // other parts.
+        self.last = Some(Walked {
+            model: key,
+            base,
+            poses: poses.version(),
+            jobs: jobs..self.frame.jobs.len(),
+        });
         true
+    }
+}
+
+impl Paint {
+    /// A job drawing `count` stored vertices from `first`, posed by the parts
+    /// from `part`, in this paint (`dst` left 0).
+    fn job(self, first: u32, count: u32, part: u32, cull: u32) -> SkinJob {
+        SkinJob {
+            first,
+            count,
+            part,
+            dst: 0,
+            rect: self.uv,
+            scroll: self.scroll,
+            color: self.color,
+            light: self.light,
+            overlay: self.overlay,
+            glint: u32::from(self.overlay == super::render::ARMOR_GLINT),
+            mode: SkinJob::MODEL,
+            cull,
+            spare: 0,
+        }
     }
 }
 
@@ -416,19 +488,13 @@ impl Walk<'_> {
             job.count += stored.count;
         } else {
             self.jobs.push(SkinJob {
-                first,
-                count: stored.count,
-                part: self.first_part,
                 dst: *self.vertices,
-                rect: paint.uv,
-                scroll: paint.scroll,
-                color: paint.color,
-                light: paint.light,
-                overlay: paint.overlay,
-                glint: u32::from(paint.overlay == super::render::ARMOR_GLINT),
-                mode: SkinJob::MODEL,
-                cull: u32::from(self.stored.cull),
-                spare: 0,
+                ..paint.job(
+                    first,
+                    stored.count,
+                    self.first_part,
+                    u32::from(self.stored.cull),
+                )
             });
         }
         *self.vertices += stored.count;
@@ -446,7 +512,8 @@ mod tests {
     /// the bit and in the same order, for each mob it takes; the mobs it
     /// leaves to the CPU draw exactly as before. Twice: with the eyes render
     /// type's layers left to the CPU (improved transparency on), then posed
-    /// too (`SkinModels::eyes`). Needs the prepared resources.
+    /// too with a horse's markings and a slime's outer cube (`SkinModels::tagged`).
+    /// Needs the prepared resources.
     #[test]
     fn posed_on_the_gpu_every_mob_draws_what_the_cpu_draws() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -487,7 +554,7 @@ mod tests {
         let (mut posed, mut kept) = (0, 0);
         let mut ids: Vec<_> = types.types.keys().cloned().collect();
         ids.sort();
-        // The mobs posed at least once, without and with the eyes layers.
+        // The mobs posed at least once, without and with the tagged layers.
         let mut taken = [std::collections::BTreeSet::new(), Default::default()];
         for eyes in [false, true] {
             for (n, id) in ids.iter().enumerate() {
@@ -499,16 +566,25 @@ mod tests {
                     m.age = age;
                     m.limb_speed = 0.6;
                     m.limb_position = age as f32 * 0.37;
+                    // A farmer: its type, profession and level layers repeat
+                    // the body's draw (`Skin::draw` reuses its walk).
+                    if matches!(
+                        id.as_str(),
+                        "minecraft:villager" | "minecraft:zombie_villager"
+                    ) {
+                        m.extra.variant2 = 5;
+                        m.extra.variant3 = 3;
+                    }
+                    // White field markings (`entityTranslucent`).
+                    if id == "minecraft:horse" {
+                        m.extra.variant2 = 2;
+                    }
                     let mut cpu = Vec::new();
                     render::render_with(&m, 0.4, camera, &atlas, 0x50a0, &data, &[], &mut cpu);
                     models.begin(&mut frame, store.len() as u32);
-                    models.eyes = eyes;
+                    models.tagged = eyes;
                     let mut gpu = Vec::new();
-                    let mut skin = Skin {
-                        models: &mut models,
-                        frame: &mut frame,
-                        bounds: None,
-                    };
+                    let mut skin = Skin::new(&mut models, &mut frame);
                     render::render_skinned(
                         &m, 0.4, camera, &atlas, 0x50a0, &data, &mut gpu, &mut skin,
                     );
@@ -555,15 +631,17 @@ mod tests {
         eprintln!("posed on the GPU: {posed} mob draws; kept on the CPU: {kept}");
         assert!(posed > 2 * 3 * 40, "only {posed} draws took the GPU path");
         let added: Vec<_> = taken[1].difference(&taken[0]).copied().collect();
-        eprintln!("posed only with the eyes layers: {added:?}");
+        eprintln!("posed only with the tagged layers: {added:?}");
         for id in [
             "minecraft:spider",
             "minecraft:cave_spider",
             "minecraft:enderman",
             "minecraft:phantom",
             "minecraft:copper_golem",
+            "minecraft:horse",
+            "minecraft:slime",
         ] {
-            assert!(added.contains(&id), "{id} not posed with its eyes");
+            assert!(added.contains(&id), "{id} not posed with its tagged layers");
         }
         assert!(taken[0].is_subset(&taken[1]));
     }
@@ -603,11 +681,7 @@ mod tests {
         let mut frame = SkinFrame::default();
         for (id, cull) in [("minecraft:bat", 1), ("minecraft:cow", 0)] {
             models.begin(&mut frame, 0);
-            let mut skin = Skin {
-                models: &mut models,
-                frame: &mut frame,
-                bounds: None,
-            };
+            let mut skin = Skin::new(&mut models, &mut frame);
             assert!(skin.draw(
                 &types.types[id].model,
                 glam::Mat4::IDENTITY,
@@ -680,11 +754,7 @@ mod tests {
                 );
                 models.begin(&mut frame, store.len() as u32);
                 let mut gpu = Vec::new();
-                let mut skin = Skin {
-                    models: &mut models,
-                    frame: &mut frame,
-                    bounds: None,
-                };
+                let mut skin = Skin::new(&mut models, &mut frame);
                 let paint = (uv, 0.0, 0xff80_c0ff, 0x70a0, overlay);
                 render::put(
                     &mut Some(&mut skin),

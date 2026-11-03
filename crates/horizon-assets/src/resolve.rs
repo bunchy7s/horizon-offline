@@ -8,11 +8,19 @@ use std::{
 pub const MISSING_MODEL: &str = "minecraft:builtin/missing";
 /// `ItemModelGenerator.GENERATED_ITEM_MODEL_ID`.
 pub const GENERATED_MODEL: &str = "minecraft:builtin/generated";
+/// Composite children nest through parents that may name the composite again.
+const MAX_LOADER_DEPTH: u8 = 8;
 
 /// Decoded models are immutable and their inherited geometry is shared.
 pub struct ModelLibrary {
     models: BTreeMap<String, Arc<CuboidModel>>,
     missing: Arc<CuboidModel>,
+}
+/// What a model's loader adds to its own elements.
+#[derive(Clone, Debug)]
+pub enum ResolvedLoader {
+    /// The shown children, resolved on their own, in order.
+    Composite(Vec<ResolvedCuboidModel>),
 }
 #[derive(Clone, Debug)]
 pub struct ResolvedCuboidModel {
@@ -22,10 +30,17 @@ pub struct ResolvedCuboidModel {
     pub textures: BTreeMap<String, Material>,
     /// Cyclic and dangling aliases are absent from `textures`.
     pub unresolved_textures: BTreeSet<String>,
+    /// NeoForge's `render_type`; the leaf-most model that sets one wins.
+    pub render_type: Option<String>,
     geometry: Option<Arc<CuboidModel>>,
     generated: bool,
+    loader: Option<ResolvedLoader>,
 }
 impl ResolvedCuboidModel {
+    /// Geometry from a custom loader, baked after the elements.
+    pub fn loader(&self) -> Option<&ResolvedLoader> {
+        self.loader.as_ref()
+    }
     /// Whether the top geometry is `builtin/generated`'s layer extrusion
     /// (no model closer to the leaf has elements of its own).
     pub fn uses_item_generator(&self) -> bool {
@@ -66,6 +81,7 @@ impl ModelLibrary {
     fn item_generator_model() -> CuboidModel {
         CuboidModel {
             parent: None,
+            loader: None,
             ambient_occlusion: None,
             gui_light: Some(GuiLight::Front),
             textures: BTreeMap::from([(
@@ -74,6 +90,8 @@ impl ModelLibrary {
             )]),
             elements: None,
             display: None,
+            render_type: None,
+            visibility: BTreeMap::new(),
         }
     }
     pub fn new(models: BTreeMap<String, CuboidModel>) -> Result<Self> {
@@ -128,7 +146,7 @@ impl ModelLibrary {
     /// model; a cyclic chain is rejected, as native discovery excludes it.
     /// The returned model can outlive this library without copying its elements.
     pub fn resolve(&self, name: &str) -> Result<ResolvedCuboidModel> {
-        self.resolve_chain(name, None)
+        self.resolve_name(name, None)
     }
     /// Whether `name` and every parent it reaches are models of this library,
     /// with no cycle: `resolve` puts the missing model in for any other.
@@ -163,28 +181,40 @@ impl ModelLibrary {
         name: &str,
         child: &BTreeMap<String, TextureSlot>,
     ) -> Result<ResolvedCuboidModel> {
-        self.resolve_chain(name, Some(child))
+        self.resolve_name(name, Some(child))
     }
-    fn resolve_chain(
+    fn resolve_name(
         &self,
         name: &str,
         child: Option<&BTreeMap<String, TextureSlot>>,
     ) -> Result<ResolvedCuboidModel> {
-        let mut name = identifier(name)?;
+        let next = Some(identifier(name)?);
+        self.resolve_chain(Vec::new(), Vec::new(), next, &BTreeMap::new(), child, 0)
+    }
+    /// `chain` and `names` start with models that are not in the library (a
+    /// composite child); `next` is the parent to follow. `fallback` slots lose
+    /// to any slot the chain defines.
+    fn resolve_chain(
+        &self,
+        mut chain: Vec<Arc<CuboidModel>>,
+        mut names: Vec<String>,
+        mut next: Option<String>,
+        fallback: &BTreeMap<String, TextureSlot>,
+        child: Option<&BTreeMap<String, TextureSlot>>,
+        depth: u8,
+    ) -> Result<ResolvedCuboidModel> {
+        if depth > MAX_LOADER_DEPTH {
+            return Err(error("composite models nest too deeply"));
+        }
         let mut visited = BTreeSet::new();
-        let mut chain = Vec::new();
-        let mut names = Vec::new();
-        loop {
+        while let Some(name) = next.take() {
             if !visited.insert(name.clone()) {
                 return Err(error("cyclic model parent"));
             }
             let model = self.models.get(&name).unwrap_or(&self.missing);
-            chain.push(model);
-            names.push(name.clone());
-            match &model.parent {
-                Some(parent) => name = parent.clone(),
-                None => break,
-            }
+            chain.push(Arc::clone(model));
+            names.push(name);
+            next = model.parent.clone();
         }
         let ambient_occlusion = chain
             .iter()
@@ -194,10 +224,8 @@ impl ModelLibrary {
             .iter()
             .find_map(|m| m.gui_light)
             .unwrap_or(GuiLight::Side);
-        let geometry = chain
-            .iter()
-            .find(|m| m.elements.is_some())
-            .map(|m| Arc::clone(m));
+        let render_type = chain.iter().find_map(|m| m.render_type.clone());
+        let geometry = chain.iter().find(|m| m.elements.is_some()).map(Arc::clone);
         let generated = chain
             .iter()
             .zip(&names)
@@ -216,13 +244,46 @@ impl ModelLibrary {
         };
         // Resolve aliases only after applying every child override. A reference
         // inherited from a parent binds to the child's final slot definition.
-        let mut slots = BTreeMap::new();
-        for model in chain.into_iter().rev() {
+        let mut slots: BTreeMap<String, &TextureSlot> =
+            fallback.iter().map(|(k, v)| (k.clone(), v)).collect();
+        for model in chain.iter().rev() {
             slots.extend(model.textures.iter().map(|(k, v)| (k.clone(), v)));
         }
         if let Some(child) = child {
             slots.extend(child.iter().map(|(k, v)| (k.clone(), v)));
         }
+        let loader = match chain.iter().find_map(|m| m.loader.as_ref()) {
+            Some(Loader::Composite {
+                children,
+                visibility,
+            }) => {
+                let inherited: BTreeMap<String, TextureSlot> = slots
+                    .iter()
+                    .map(|(k, v)| (k.clone(), (*v).clone()))
+                    .collect();
+                // A model closer to the leaf overrides the loader's own map.
+                let mut visibility = visibility.clone();
+                for model in chain.iter().rev() {
+                    visibility.extend(model.visibility.iter().map(|(k, v)| (k.clone(), *v)));
+                }
+                let mut resolved = Vec::new();
+                for (child_name, child_model) in children {
+                    if visibility.get(child_name) == Some(&false) {
+                        continue;
+                    }
+                    resolved.push(self.resolve_chain(
+                        vec![Arc::clone(child_model)],
+                        vec![format!("{}#{child_name}", names[0])],
+                        child_model.parent.clone(),
+                        &inherited,
+                        None,
+                        depth + 1,
+                    )?);
+                }
+                Some(ResolvedLoader::Composite(resolved))
+            }
+            Some(Loader::Unknown(_)) | None => None,
+        };
         let mut textures = BTreeMap::<String, Material>::new();
         let mut unresolved_textures = BTreeSet::<String>::new();
         for start in slots.keys() {
@@ -264,12 +325,13 @@ impl ModelLibrary {
             display,
             textures,
             unresolved_textures,
+            render_type,
             geometry,
             generated,
+            loader,
         })
     }
 }
-
 /// The native missing-model cube uses slot names without a leading '#'.
 pub fn missing_model() -> CuboidModel {
     let faces = Direction::ALL
@@ -283,12 +345,15 @@ pub fn missing_model() -> CuboidModel {
                     texture: "missingno".to_owned(),
                     uv: Some([0.0, 0.0, 16.0, 16.0]),
                     rotation: 0,
+                    light_emission: None,
+                    neoforge_data: None,
                 }),
             )
         })
         .collect();
     CuboidModel {
         parent: None,
+        loader: None,
         ambient_occlusion: None,
         gui_light: None,
         elements: Some(vec![Some(Element {
@@ -298,10 +363,12 @@ pub fn missing_model() -> CuboidModel {
             rotation: None,
             shade_direction_override: None,
             light_emission: 0,
+            neoforge_data: None,
         })]),
         display: Some(ItemTransforms {
             contexts: std::array::from_fn(|_| DisplayTransform::Inherit),
         }),
+        render_type: None,
         textures: BTreeMap::from([
             (
                 "particle".to_owned(),
@@ -315,6 +382,7 @@ pub fn missing_model() -> CuboidModel {
                 }),
             ),
         ]),
+        visibility: BTreeMap::new(),
     }
 }
 
@@ -567,5 +635,97 @@ mod tests {
         assert!(!library.resolves("item/orphan"));
         assert!(!library.resolves("item/a"));
         assert!(!library.resolves("Item/Stick"));
+    }
+    const LIGHTS: &str = r##"{"textures":{"a":"block/a"},"render_type":"minecraft:cutout","elements":[
+        {"from":[0,0,0],"to":[16,16,16],"light_emission":4,"neoforge_data":{"block_light":9,"color":-65536,"ambient_occlusion":false},
+         "faces":{"north":{"texture":"#a","neoforge_data":{"block_light":2,"sky_light":15,"unknown":1}},
+                  "south":{"texture":"#a","light_emission":11},
+                  "up":{"texture":"#a"}}}]}"##;
+    #[test]
+    fn neoforge_data_of_a_face_overrides_its_element_key_by_key() {
+        use crate::bake::bake_block_model;
+        let library = library(&[("block/lights", LIGHTS)]);
+        let model = library.resolve("block/lights").unwrap();
+        let quads =
+            bake_block_model(&model, crate::bake::BlockModelTransform::new([0; 3], false)).unwrap();
+        let by = |d| quads.iter().find(|q| q.facing == d).unwrap();
+        let north = by(Direction::North);
+        assert_eq!(north.light, [4, 15]);
+        assert_eq!(north.color, Some(-65536));
+        assert_eq!(north.ambient_occlusion, Some(false));
+        assert_eq!(by(Direction::South).light, [11, 11]);
+        assert_eq!(by(Direction::South).light_emission, 11);
+        assert_eq!(by(Direction::Up).light, [9, 4]);
+        assert!(
+            quads
+                .iter()
+                .all(|q| q.render_type == Some(crate::bake::RenderType::Cutout))
+        );
+    }
+    #[test]
+    fn vanilla_models_bake_without_extra_face_data() {
+        use crate::bake::bake_block_model;
+        let library = library(&[(
+            "block/plain",
+            r##"{"textures":{"a":"block/a"},"elements":[{"from":[0,0,0],"to":[16,16,16],"light_emission":6,"faces":{"up":{"texture":"#a"}}}]}"##,
+        )]);
+        let model = library.resolve("block/plain").unwrap();
+        let quad = &bake_block_model(&model, crate::bake::BlockModelTransform::new([0; 3], false))
+            .unwrap()[0];
+        assert_eq!((quad.light, quad.light_emission), ([6, 6], 6));
+        assert_eq!(
+            (quad.color, quad.ambient_occlusion, quad.render_type),
+            (None, None, None)
+        );
+    }
+    #[test]
+    fn render_type_comes_from_the_leaf_most_model_and_loses_its_prefix() {
+        let library = library(&[
+            ("block/base", r#"{"render_type":"translucent"}"#),
+            ("block/mid", r#"{"parent":"block/base"}"#),
+            (
+                "block/leaf",
+                r#"{"parent":"block/mid","render_type":"minecraft:cutout_mipped"}"#,
+            ),
+            ("block/bare", r#"{"parent":"block/mid"}"#),
+        ]);
+        let render = |name| library.resolve(name).unwrap().render_type;
+        assert_eq!(render("block/leaf").as_deref(), Some("cutout_mipped"));
+        assert_eq!(render("block/bare").as_deref(), Some("translucent"));
+        assert_eq!(render("block/absent"), None);
+        assert_eq!(
+            crate::bake::RenderType::by_name("minecraft:tripwire"),
+            Some(crate::bake::RenderType::Tripwire)
+        );
+        assert_eq!(crate::bake::RenderType::by_name("mod:glow"), None);
+    }
+    #[test]
+    fn neoforge_data_colour_and_legacy_emission_spellings() {
+        let model = CuboidModel::from_json(
+            r##"{"elements":[{"from":[0,0,0],"to":[1,1,1],"faces":{
+                "up":{"texture":"#a","neoforge_data":{"color":"#80FF0000","light_emission":7}},
+                "down":{"texture":"#a","neoforge_data":{"color":4294967295,"block_light":99}}}}]}"##,
+        )
+        .unwrap();
+        let elements = model.elements.unwrap();
+        let faces = &elements[0].as_ref().unwrap().faces;
+        let up = faces[&Direction::Up]
+            .as_ref()
+            .unwrap()
+            .neoforge_data
+            .unwrap();
+        assert_eq!(
+            (up.color, up.block_light, up.sky_light),
+            (Some(0x80FF0000u32 as i32), Some(7), Some(7))
+        );
+        let down = faces[&Direction::Down]
+            .as_ref()
+            .unwrap()
+            .neoforge_data
+            .unwrap();
+        assert_eq!(
+            (down.color, down.block_light, down.sky_light),
+            (Some(-1), Some(15), None)
+        );
     }
 }

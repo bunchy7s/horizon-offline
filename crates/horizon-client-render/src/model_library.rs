@@ -105,9 +105,7 @@ impl ParsedModels {
                     }
                 }
             };
-            if let Some(parent) = &model.parent {
-                pending.push(parent.clone());
-            }
+            pending.extend(model.referenced_models());
             models.insert(name, model);
         }
         Ok(ModelLibrary::from_shared(models)?)

@@ -7,6 +7,7 @@ use super::Game;
 use horizon_client::chunk::ColumnCensus;
 use horizon_client::fast_hash::FxHashSet;
 use horizon_client::world::World;
+use horizon_threads::capped;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -154,6 +155,11 @@ impl Game<'_> {
                 "resident_mb": horizon_threads::memory_limit::resident_bytes().map(mb),
                 "allocator_commit_mb": mb(commit),
                 "allocator_peak_commit_mb": mb(peak_commit),
+                // Bytes the game asked for, against the hard ceiling if one is set.
+                "held_mb": mb(capped::live_bytes()),
+                "held_peak_mb": mb(capped::peak_bytes()),
+                "hard_limit_mb": capped::limit().map(mb),
+                "refused_allocations": capped::refused(),
             },
             "render_distance": self.streaming.radius,
             "client_columns": census_json(&client),
