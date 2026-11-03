@@ -298,7 +298,11 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 2] = [("entity", "EntityRef"), ("level", "LevelRef")];
+const HANDLES: [(&str, &str); 3] = [
+    ("entity", "EntityRef"),
+    ("living", "LivingRef"),
+    ("level", "LevelRef"),
+];
 
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on
 /// `Host` is also `EntityRef::position(self, host)`, which calls it. The
@@ -1120,6 +1124,9 @@ mod tests {
     use std::time::Duration;
 
     struct ItemStack;
+    struct StackView {
+        count: i32,
+    }
     struct BlockEntityDraw(Vec<u32>);
     #[allow(dead_code)]
     mod stubs {
@@ -1144,6 +1151,7 @@ mod tests {
         pub(super) struct Compound;
         pub(super) type NativeDispensed = (Option<super::ItemStack>, i32);
         pub(super) struct NativeLootDrops<'a>(pub &'a ());
+        pub(super) struct NativeNoteBlockChange<'a>(pub &'a ());
         pub(super) struct NativeScreenView<'a>(pub &'a ());
         pub(super) struct Corners;
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1151,6 +1159,7 @@ mod tests {
         pub(super) struct Suggestion;
         pub(super) struct HudBatch;
         pub(super) struct BiomeColors;
+        pub(super) struct SpawnEntry;
         pub(super) struct UseAnimation;
         #[derive(Clone, Copy)]
         pub(super) struct Hand;
@@ -1172,6 +1181,7 @@ mod tests {
         pub(super) struct LootStack;
         pub(super) struct NativeLootContext<'a>(pub &'a ());
         pub(super) struct NativeDataMapType;
+        pub(super) struct RecipeBookCategory;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
@@ -1921,7 +1931,84 @@ mod tests {
     }
 
     #[test]
+    fn item_model_property_dispatches_borrowed_stack_and_preserves_unhandled_answers() {
+        struct Property;
+        impl Hooks for Property {
+            fn item_model_property(&self, _: &dyn Host, event: &mut ItemModelPropertyEvent<'_>) {
+                if event.property == "example:charged" {
+                    event.value = event.stack.count > 1;
+                }
+            }
+        }
+        let mods: Vec<Box<dyn Hooks>> = vec![Box::new(Property)];
+        let host = TestHost;
+        let mut value = false;
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "other:property",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(value);
+        dispatch_item_model_property(
+            &host,
+            &mods,
+            "example:charged",
+            &StackView { count: 1 },
+            &mut value,
+        );
+        assert!(!value);
+        dispatch_item_model_property(
+            &host,
+            &[],
+            "example:charged",
+            &StackView { count: 2 },
+            &mut value,
+        );
+        assert!(!value);
+    }
+
+    #[test]
     fn dispatch_contracts() {
+        struct Weapon;
+        impl Hooks for Weapon {
+            fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
+                assert_eq!(
+                    (event.entity, event.kind, event.attacker),
+                    (12, "minecraft:armor_stand", 7)
+                );
+                assert!(event.attacker_main.is_none() && event.attacker_off.is_none());
+                assert_eq!(event.strength, 0.4);
+                event.strength *= 2.0;
+                event.x = -event.x;
+                Flow::Cancel
+            }
+        }
+        let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
+        let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
+        dispatch_living_knockback_v2(
+            &weapon_mods,
+            12,
+            "minecraft:armor_stand",
+            7,
+            None,
+            None,
+            &mut strength,
+            &mut x,
+            &mut z,
+            &mut canceled,
+        );
+        assert_eq!((strength, x, z), (0.8, -1.0, 0.0));
+        assert!(canceled);
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mods: Vec<Box<dyn Hooks>> = (1..=2)
             .map(|id| {

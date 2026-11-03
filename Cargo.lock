@@ -1267,6 +1267,7 @@ name = "horizon-assets"
 version = "0.1.0"
 dependencies = [
  "horizon-core",
+ "log",
  "png",
  "serde",
  "serde_json",
@@ -1319,6 +1320,7 @@ dependencies = [
  "horizon-client-render",
  "horizon-command",
  "horizon-core",
+ "horizon-cosmetics",
  "horizon-dualsense",
  "horizon-friends",
  "horizon-hdr",
@@ -1451,6 +1453,7 @@ dependencies = [
  "horizon-client-input",
  "horizon-command",
  "horizon-core",
+ "horizon-cosmetics",
  "horizon-hdr",
  "horizon-items",
  "horizon-narrator",
@@ -1487,6 +1490,7 @@ name = "horizon-command"
 version = "0.1.0"
 dependencies = [
  "horizon-client-core",
+ "horizon-core",
  "horizon-protocol",
  "horizon-world",
 ]

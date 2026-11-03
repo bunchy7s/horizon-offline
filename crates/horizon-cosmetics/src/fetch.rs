@@ -3,6 +3,9 @@
 //! cached on disk by their hash. The work runs on a thread of its own; the
 //! frame only reads the cache, and a service that doesn't answer leaves the
 //! last answers in place and is asked again later, less and less often.
+//! The last answers are also kept on disk (`worn.json`, beside the item
+//! files), so a game started while the service is down still shows what
+//! players last wore.
 //!
 //! Protocol (JSON over HTTPS):
 //! - `POST /v1/worn` `{"players": ["<uuid hex>", …]}` (at most `BATCH`) answers
@@ -112,7 +115,11 @@ impl Cosmetics {
             clock,
         });
         let inner = shared.clone();
-        let worker: Box<dyn FnMut() + Send> = Box::new(move || work(&inner, &transport, &cache));
+        let mut saved = None;
+        let worker: Box<dyn FnMut() + Send> = Box::new(move || {
+            let saved = saved.get_or_insert_with(|| Saved::load(&cache));
+            work(&inner, &transport, &cache, saved);
+        });
         Self {
             shared,
             worker: Some(worker),
@@ -192,15 +199,57 @@ struct Answer {
     players: HashMap<String, Vec<ItemRef>>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 struct ItemRef {
     id: String,
     hash: String,
 }
 
+/// The last answers on disk: what each player wore whose items all read.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct Saved {
+    players: HashMap<String, Vec<ItemRef>>,
+}
+
+impl Saved {
+    const FILE: &str = "worn.json";
+
+    fn load(cache: &Option<PathBuf>) -> Self {
+        cache
+            .as_ref()
+            .and_then(|d| std::fs::read(d.join(Self::FILE)).ok())
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn save(&self, cache: &Option<PathBuf>) {
+        let Some(dir) = cache else { return };
+        let (Ok(text), Ok(())) = (serde_json::to_vec(self), std::fs::create_dir_all(dir)) else {
+            return;
+        };
+        let part = dir.join("worn.part");
+        if std::fs::write(&part, text).is_ok() {
+            let _ = std::fs::rename(&part, dir.join(Self::FILE));
+        }
+    }
+}
+
+/// No service: items are read from memory or the disk cache only.
+struct Offline;
+
+impl Transport for Offline {
+    fn post(&self, _: &str, _: &[u8]) -> Result<Vec<u8>, String> {
+        Err("offline".into())
+    }
+    fn get(&self, _: &str) -> Result<Vec<u8>, String> {
+        Err("offline".into())
+    }
+}
+
 /// One round: asks for up to `BATCH` pending players, then reads the items
-/// they wear (memory, disk, then the service).
-fn work(shared: &Shared, transport: &dyn Transport, cache: &Option<PathBuf>) {
+/// they wear (memory, disk, then the service). When the service doesn't
+/// answer, players not known yet get what `saved` says they last wore.
+fn work(shared: &Shared, transport: &dyn Transport, cache: &Option<PathBuf>, saved: &mut Saved) {
     let batch: Vec<u128> = {
         let mut s = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !ready(&s, (shared.clock)()) {
@@ -221,7 +270,17 @@ fn work(shared: &Shared, transport: &dyn Transport, cache: &Option<PathBuf>) {
     let answer = match answer {
         Ok(a) => a,
         Err(_) => {
+            let restored = restore(shared, cache, saved, &batch);
             let mut s = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = (shared.clock)();
+            for (uuid, worn) in restored {
+                // Shown until the service answers: asked again with the others.
+                s.players.entry(uuid).or_insert(Entry {
+                    worn: Some(worn),
+                    expires: now,
+                    seen: now,
+                });
+            }
             s.failures += 1;
             let wait = BACKOFF.0 * 2u32.saturating_pow(s.failures - 1).min(64);
             s.retry_at = Some((shared.clock)() + wait.min(BACKOFF.1));
@@ -232,22 +291,41 @@ fn work(shared: &Shared, transport: &dyn Transport, cache: &Option<PathBuf>) {
     let mut worn: HashMap<u128, Worn> = HashMap::new();
     // Players with an item the service didn't send: asked again soon.
     let mut short = HashSet::new();
-    for (uuid, refs) in answer.players {
-        let Ok(uuid) = u128::from_str_radix(&uuid, 16) else {
+    let mut changed = false;
+    for (hex, refs) in answer.players {
+        let Ok(uuid) = u128::from_str_radix(&hex, 16) else {
             continue;
         };
         let mut items = Vec::new();
+        let mut kept = Vec::new();
         for r in &refs {
             match item(shared, transport, cache, r) {
-                Ok(Some(i)) => items.push(i),
+                Ok(Some(i)) => {
+                    items.push(i);
+                    kept.push(r.clone());
+                }
                 Ok(None) => {}
                 Err(()) => {
                     short.insert(uuid);
                 }
             }
         }
+        if !short.contains(&uuid) && saved.players.get(&hex) != Some(&kept) {
+            changed = true;
+            if kept.is_empty() {
+                saved.players.remove(&hex);
+            } else {
+                saved.players.insert(hex, kept);
+            }
+        }
         if !items.is_empty() {
             worn.insert(uuid, items.into());
+        }
+    }
+    // Answered without anything: wears nothing now.
+    for uuid in &batch {
+        if !worn.contains_key(uuid) && !short.contains(uuid) {
+            changed |= saved.players.remove(&format!("{uuid:032x}")).is_some();
         }
     }
     let now = (shared.clock)();
@@ -277,6 +355,48 @@ fn work(shared: &Shared, transport: &dyn Transport, cache: &Option<PathBuf>) {
         let cut = seen[s.players.len() - REMEMBERED];
         s.players.retain(|_, e| e.seen >= cut);
     }
+    if saved.players.len() > REMEMBERED {
+        saved.players.retain(|hex, _| {
+            u128::from_str_radix(hex, 16).is_ok_and(|u| s.players.contains_key(&u))
+        });
+        changed = true;
+    }
+    drop(s);
+    if changed {
+        saved.save(cache);
+    }
+}
+
+/// What the players of `batch` not known yet last wore, by `saved` and the
+/// item files on disk.
+fn restore(
+    shared: &Shared,
+    cache: &Option<PathBuf>,
+    saved: &Saved,
+    batch: &[u128],
+) -> Vec<(u128, Worn)> {
+    let unknown: Vec<u128> = {
+        let s = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
+        batch
+            .iter()
+            .copied()
+            .filter(|u| !s.players.contains_key(u))
+            .collect()
+    };
+    let mut restored = Vec::new();
+    for uuid in unknown {
+        let Some(refs) = saved.players.get(&format!("{uuid:032x}")) else {
+            continue;
+        };
+        let items: Vec<Arc<Item>> = refs
+            .iter()
+            .filter_map(|r| item(shared, &Offline, cache, r).ok().flatten())
+            .collect();
+        if !items.is_empty() {
+            restored.push((uuid, items.into()));
+        }
+    }
+    restored
 }
 
 /// An item file: from memory, the disk cache, else the service (then kept
@@ -393,6 +513,74 @@ impl Transport for Http {
 
     fn get(&self, path: &str) -> Result<Vec<u8>, String> {
         Self::read(self.agent.get(&format!("{}{path}", self.base)).call())
+    }
+}
+
+/// Item files in a folder instead of the service (`HORIZON_COSMETICS_LOCAL`): every player asked
+/// for wears the first item of each slot found there, by file name. For artists and the bench.
+pub struct Local {
+    dir: PathBuf,
+}
+
+impl Local {
+    pub fn new(dir: PathBuf) -> Self {
+        Self { dir }
+    }
+
+    /// The first item file of each slot, by file name.
+    fn worn(&self) -> Vec<String> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&self.dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .collect();
+        files.sort();
+        let mut slots = Vec::new();
+        let mut ids = Vec::new();
+        for file in files {
+            if let Some(item) = std::fs::read(&file).ok().and_then(|b| Item::parse(&b).ok())
+                && !slots.contains(&item.slot)
+                && file.file_stem().is_some_and(|s| *s == *item.id)
+            {
+                slots.push(item.slot);
+                ids.push(item.id);
+            }
+        }
+        ids
+    }
+}
+
+impl Transport for Local {
+    fn post(&self, _: &str, body: &[u8]) -> Result<Vec<u8>, String> {
+        #[derive(serde::Deserialize)]
+        struct Asked {
+            players: Vec<String>,
+        }
+        let asked: Asked = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+        let refs: Vec<_> = self
+            .worn()
+            .into_iter()
+            .map(|id| serde_json::json!({"id": id, "hash": "local"}))
+            .collect();
+        let players: serde_json::Map<String, serde_json::Value> = asked
+            .players
+            .into_iter()
+            .map(|p| (p, serde_json::Value::Array(refs.clone())))
+            .collect();
+        Ok(serde_json::json!({"ttl": 60, "players": players})
+            .to_string()
+            .into_bytes())
+    }
+
+    fn get(&self, path: &str) -> Result<Vec<u8>, String> {
+        let id = path
+            .trim_start_matches("/v1/items/")
+            .split('?')
+            .next()
+            .unwrap_or_default();
+        std::fs::read(self.dir.join(format!("{id}.json"))).map_err(|e| e.to_string())
     }
 }
 

@@ -60,7 +60,8 @@ def player(rng, x, y, z, yaw):
                 move=[lab.fbits(v) for v in rng.choice([(0.0, 1.0), (0.0, 1.0), (1.0, 0.0), (-1.0, 0.0), (0.70710677, 0.70710677),
                                                      (0.0, -1.0), (0.0, 0.0), (0.3, 0.3)])],
                 width=lab.fbits(w), height=lab.fbits(h), boost=rng.choice([None] * 6 + [0, 1, 4, 255]),
-                enabled=rng.random() < 0.93, time=rng.choice([0] * 12 + [1, -3, 2]))
+                enabled=rng.random() < 0.93, time=rng.choice([0] * 12 + [1, -3, 2]),
+                passenger=rng.random() < 0.2)
 
 
 def cases(rng):
@@ -79,6 +80,15 @@ def cases(rng):
                     p.update(ground=True, shift=False, enabled=True, time=0, boost=None, move=[lab.fbits(0.0), lab.fbits(1.0)],
                              width=lab.fbits(0.6), height=lab.fbits(1.8), xr=lab.fbits(0.0))
                     yield dict(blocks=blocks, player=p, xa=lab.fbits(dx * step), za=lab.fbits(dz * step))
+    # Riding something: canAutoJump refuses whatever the rest of the state says, so a step the
+    # same walk jumps from on foot is never jumped here.
+    for name, props in BLOCKS:
+        for step in (0.215, 0.1):
+            blocks = [[ox, oy, oz, 'minecraft:' + name, props]]
+            p = player(rng, ox + 0.5, float(oy), oz - 0.6, 0.0)
+            p.update(passenger=True, ground=True, shift=False, enabled=True, time=0, boost=None,
+                     move=[lab.fbits(0.0), lab.fbits(1.0)], width=lab.fbits(0.6), height=lab.fbits(1.8), xr=lab.fbits(0.0))
+            yield dict(blocks=blocks, player=p, xa=lab.fbits(0.0), za=lab.fbits(step))
     # Ceilings above the player and above the step.
     for ceiling in range(2, 6):
         for step_height in (0, 1):
@@ -144,7 +154,9 @@ def main():
               'real block states placed; collisions through CollisionGetter.getCollisions/BlockCollisions with the '
               'player\'s EntityCollisionContext and real collision shapes, jump boost from a real MobEffectInstance. '
               'Rust runs MotionWorld::update_auto_jump over the client\'s loaded resources, collision registry and '
-              'block-collision scan. Entity collisions (none in the scene) and the riding/minecart paths are not exercised.'))
+              'block-collision scan. Riders are compared through canAutoJump with the case\'s passenger flag (the movement '
+              'world drives an unmounted player); entity collisions (none in the scene), the minecart paths and '
+              'vehicle movement are not exercised.'))
     print(f'{len(fixtures):,} auto-jump cases ({jumps:,} jumps) match the pinned client: {report}', flush=True)
 
 

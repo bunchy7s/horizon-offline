@@ -258,6 +258,9 @@ pub enum Alert {
     Incompatible,
     /// `selectWorld.recreate.error.title`.
     Recreate,
+    /// `symlink_warning.title.world`
+    /// (`NoticeWithLinkScreen.createWorldSymlinkWarningScreen`).
+    Symlink,
 }
 #[derive(Clone, Debug)]
 pub enum Mode {
@@ -1306,6 +1309,23 @@ impl Title {
         if world.locked {
             return Action::None;
         }
+        // `LevelStorageSource.validateAndCreateAccess`: a world folder holding
+        // a symbolic link is refused before an access is made over it, and
+        // `WorldOpenFlows.createWorldAccess` puts the symlink warning where
+        // the world would have gone.
+        if world_management::symlinks(&self.saves, &world.folder)
+            .is_ok_and(|links| !links.is_empty())
+        {
+            self.mode = Mode::Error {
+                message: lang::get_or(
+                    "symlink_warning.message.world",
+                    "You are trying to open a world whose folder holds links to other files. That can be a risk to the rest of your files, so the world stays closed.",
+                ),
+                return_to: Box::new(self.mode.clone()),
+                alert: Some(Alert::Symlink),
+            };
+            return Action::None;
+        }
         if crate::save::SessionLock::acquire(&self.saves.join(&world.folder)).is_err() {
             self.toast = Some((
                 crate::toasts::Slide::default(),
@@ -2311,6 +2331,10 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                     Some(Alert::Recreate) => {
                         get("selectWorld.recreate.error.title", "An error occurred!")
                     }
+                    Some(Alert::Symlink) => get(
+                        "symlink_warning.title.world",
+                        "The world folder contains links",
+                    ),
                     None => get("selectWorld.access_failure", "Failed to access world"),
                 };
                 ScreenInfo::new("world_error", join(&[&title, message]))
@@ -2962,6 +2986,11 @@ Would you like to enable the Narrator or visit the Accessibility Settings?",
                         Alert::Recreate => (
                             "selectWorld.recreate.error.title",
                             "An error occurred!",
+                            u32::MAX,
+                        ),
+                        Alert::Symlink => (
+                            "symlink_warning.title.world",
+                            "The world folder contains links",
                             u32::MAX,
                         ),
                     };

@@ -483,6 +483,17 @@ fn visibility_rows(open: &[u16; 256]) -> u64 {
 mod particle_tests;
 #[cfg(test)]
 mod visibility_tests;
+/// A face's tint source as the game colours it (`BlockColors.createDefault`), for drawing a block
+/// elsewhere ([`crate::block_sprites`]): the biome's grass, foliage, dry foliage or water colour
+/// where the block is, or a fixed colour (0xRRGGBB).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TintSource {
+    Grass,
+    Foliage,
+    DryFoliage,
+    Water,
+    Fixed(u32),
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tint {
     None,
@@ -801,6 +812,29 @@ impl MeshTables {
             Tint::Stem(age) => stem_color(age),
         })
     }
+    /// What tint source `index` (a face's `tintindex`) of `state` colours a face with in the
+    /// world, for drawing the block elsewhere ([`crate::block_sprites`]): `None` for an untinted
+    /// face. Grass blocks, tall grass and sugar cane are `Grass`; redstone and stems are their
+    /// colour at the state's power and age.
+    pub fn tint_source(&self, state: BlockStateId, index: i32) -> Option<TintSource> {
+        let info = self.info.get(state.0 as usize)?;
+        if index < 0 || index >= i32::from(info.tint_count) {
+            return None;
+        }
+        Some(match info.tints[index as usize] {
+            Tint::None => return None,
+            Tint::Grass | Tint::GrassBlock | Tint::TallGrassUpper | Tint::SugarCane => {
+                TintSource::Grass
+            }
+            Tint::Foliage => TintSource::Foliage,
+            Tint::DryFoliage => TintSource::DryFoliage,
+            Tint::Water => TintSource::Water,
+            Tint::LilyPad => TintSource::Fixed(0x20_8030),
+            Tint::Constant(c) => TintSource::Fixed(c),
+            Tint::Redstone(p) => TintSource::Fixed(redstone_color(p)),
+            Tint::Stem(age) => TintSource::Fixed(stem_color(age)),
+        })
+    }
     /// `TerrainParticle`'s colour: tint source 0's `colorAsTerrainParticle`,
     /// which is the in-world (biome-blended) colour except on grass blocks,
     /// whose dirt crumbs stay untinted. `None` when the state has no source.
@@ -871,7 +905,7 @@ impl MeshTables {
             Some(own) => lighting::packed_coords(own, packed),
             None => u32::from(packed & 15) << 4 | u32::from(packed >> 4) << 20,
         };
-        lighting::with_emission(coords, quad.light_emission)
+        lighting::with_min(coords, quad.light)
     }
     /// `BlockState.getOffset` for blocks with a random model offset.
     pub fn offset(&self, state: BlockStateId, x: i32, z: i32) -> Option<[f64; 3]> {
@@ -1584,9 +1618,14 @@ impl Mesher<'_> {
         let q = &face.quad;
         // A quad's own light (a model's glowing part) may raise the tier; whether it
         // shines all over stays the block's.
-        let tier = (state.tier & !WHOLE).max(hdr_tier("", q.light_emission)) | state.tier & WHOLE;
+        let tier = (state.tier & !WHOLE).max(hdr_tier("", q.light[0])) | state.tier & WHOLE;
+        // A quad's `neoforge_data` ambient occlusion replaces the model's; glowing blocks stay flat.
+        let ao = match q.ambient_occlusion {
+            Some(on) => on && self.smooth_lighting && state.emission == 0,
+            None => ao,
+        };
         let shade_face = q.shade_direction_override.unwrap_or(q.facing);
-        let directional = if self.shader_pack_lighting {
+        let directional = if self.shader_pack_lighting || !q.shade {
             1.0
         } else {
             lighting::cardinal(self.nether_shading, shade_face)
@@ -1610,6 +1649,14 @@ impl Mesher<'_> {
             ([lighting::gray(directional); 4], [coords; 4], [1.0f32; 4])
         };
         let tint = Self::tint(state, q.tint_index, tints, pos);
+        let tint = match q.color {
+            Some(c) => {
+                let t = tint.unwrap_or(0xFF_FFFF);
+                let channel = |s: u32| (t >> s & 255) * (c as u32 >> s & 255) / 255;
+                Some(channel(16) << 16 | channel(8) << 8 | channel(0))
+            }
+            None => tint,
+        };
         // Fusion's and then OptiFine's connected textures: another sprite, or one per quarter,
         // and the overlays drawn over it (a few per face at most; more are dropped).
         let (fusion, connected) = (&self.render.fusion, &self.render.connected);
@@ -1683,7 +1730,7 @@ impl Mesher<'_> {
                         uv[i],
                         0,
                         color,
-                        pack_coords(lighting::with_emission(coords[i], q.light_emission)),
+                        pack_coords(lighting::with_min(coords[i], q.light)),
                     ),
                     uv[i],
                 )
@@ -1717,7 +1764,7 @@ impl Mesher<'_> {
                 opaque,
             } => TileLayer::Layer {
                 layer,
-                translucent: translucent || q.material.force_translucent,
+                translucent: translucent || q.render_type.is_none() && q.material.force_translucent,
                 opaque,
             },
             TileLayer::Skip | TileLayer::Default => own,

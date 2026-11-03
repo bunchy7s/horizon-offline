@@ -17,6 +17,8 @@ pub const MAX_PARTS: usize = 16;
 /// How far (pixels, 1/16 block) any vertex may reach from the bone's pivot
 /// at rest, animations included: an item stays near its wearer.
 pub const MAX_REACH: f32 = 24.0;
+/// The largest side of a name tag's mark (square, drawn before the name).
+pub const MAX_MARK: u32 = 16;
 
 /// Where an item is worn: one item per slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
@@ -25,12 +27,16 @@ pub enum Slot {
     Head,
     Back,
     Shoulder,
+    /// A name tag style: no model, a square mark drawn before the player's
+    /// name and a line under it (`Item::tag`).
+    NameTag,
 }
 
 /// The part of the player model an item follows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Bone {
+    #[default]
     Head,
     Body,
     LeftArm,
@@ -113,6 +119,13 @@ pub struct Texture {
     pub rgba: Vec<u8>,
 }
 
+/// A name tag style: the line drawn under the name, RGB. The mark is the
+/// item's texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tag {
+    pub line: [u8; 3],
+}
+
 /// A checked item. `root` is named `cosmetic` and holds the attachment as
 /// its pose; the item's own parts are its children.
 #[derive(Clone, Debug, PartialEq)]
@@ -124,6 +137,8 @@ pub struct Item {
     pub texture: Texture,
     pub animations: Vec<Animation>,
     pub vertices: usize,
+    /// A name tag's line (`Slot::NameTag` only; it has no parts).
+    pub tag: Option<Tag>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -162,6 +177,7 @@ struct ItemFile {
     format: u32,
     id: String,
     slot: Slot,
+    #[serde(default)]
     bone: Bone,
     #[serde(default)]
     attach: AttachFile,
@@ -169,6 +185,21 @@ struct ItemFile {
     parts: Vec<PartFile>,
     #[serde(default)]
     animations: Vec<Animation>,
+    #[serde(default)]
+    tag: Option<TagFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TagFile {
+    line: String,
+}
+
+/// `#rrggbb`.
+fn colour(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#').filter(|h| h.len() == 6)?;
+    let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 #[derive(Deserialize)]
@@ -259,6 +290,23 @@ impl Item {
             return Err(invalid("the id is 1 to 64 of a-z, 0-9 and _"));
         }
         let texture = decode_png(&file.texture.png)?;
+        let tag = match (file.slot, &file.tag) {
+            (Slot::NameTag, Some(t)) => {
+                if !file.parts.is_empty() || !file.animations.is_empty() {
+                    return Err(invalid("a name tag has no parts or animations"));
+                }
+                if texture.width != texture.height || texture.width > MAX_MARK {
+                    return Err(Error::Texture(format!(
+                        "a name tag's mark is square, at most {MAX_MARK}x{MAX_MARK}"
+                    )));
+                }
+                let line = colour(&t.line).ok_or_else(|| invalid("tag.line is #rrggbb"))?;
+                Some(Tag { line })
+            }
+            (Slot::NameTag, None) => return Err(invalid("a name tag needs its tag")),
+            (_, Some(_)) => return Err(invalid("only a name tag has a tag")),
+            (_, None) => None,
+        };
         let a = &file.attach;
         finite(&a.offset, "attach.offset")?;
         finite(&a.rotation, "attach.rotation")?;
@@ -325,6 +373,7 @@ impl Item {
             texture,
             animations: file.animations,
             vertices,
+            tag,
         };
         let reach = item.reach();
         if reach > MAX_REACH {
@@ -457,6 +506,25 @@ fn bake(file: &PartFile, size: [f32; 2], names: &mut Vec<String>) -> Result<Part
         faces,
         children,
     })
+}
+
+/// `box_faces` of a box given field by field.
+pub(crate) fn cube_faces(
+    origin: [f32; 3],
+    size: [f32; 3],
+    uv: [f32; 2],
+    inflate: f32,
+    mirror: bool,
+    texture: [f32; 2],
+) -> Vec<Face> {
+    let cube = CubeFile {
+        origin,
+        size,
+        uv,
+        inflate,
+        mirror,
+    };
+    box_faces(&cube, texture)
 }
 
 /// `ModelPart.Cube`: six faces with box UV, in vanilla's order (down, up,

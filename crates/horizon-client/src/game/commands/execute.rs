@@ -148,7 +148,7 @@ impl Game<'_> {
             _ => [0.0; 2],
         }
     }
-    pub(super) fn target_eye_height(&self, t: Target) -> f64 {
+    pub(in crate::game) fn target_eye_height(&self, t: Target) -> f64 {
         match t {
             Target::Player => self
                 .player
@@ -766,7 +766,18 @@ impl Game<'_> {
                             }
                         })
                         .map(|w| match w {
-                            horizon_client::mobs::Who::Player => Target::Player,
+                            horizon_client::mobs::Who::Player => {
+                                // LivingEntity.getLastHurtByMob is the player
+                                // who hit it, not whichever client is reading it.
+                                match self.last_hurt_by_player.get(&id) {
+                                    Some(Some(conn))
+                                        if attacker && self.lan_acting != Some(*conn) =>
+                                    {
+                                        Target::Guest(*conn)
+                                    }
+                                    _ => Target::Player,
+                                }
+                            }
                             horizon_client::mobs::Who::Mob(i) => Target::Mob(i),
                         })
                         .into_iter()
