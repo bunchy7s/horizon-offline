@@ -138,8 +138,27 @@ const START_SHARDS: usize = 64;
 /// (`references`) and the server thread reads the starts of the chunks its
 /// mobs and players are in; with one lock for all, the server thread waited
 /// on the workers.
+///
+/// Each shard keeps two generations: a full one becomes the old one, and a
+/// start found in the old one moves back to the new. The starts still in use
+/// (the chunks around every player, which natural spawning asks about each
+/// tick) stay, where clearing a full shard threw them away and players spread
+/// far apart had their villages' jigsaws built again and again.
 struct StartCache {
-    shards: Box<[RwLock<HashMap<(i32, i32), Starts>>]>,
+    shards: Box<[RwLock<StartShard>]>,
+}
+#[derive(Default)]
+struct StartShard {
+    new: HashMap<(i32, i32), Starts>,
+    old: HashMap<(i32, i32), Starts>,
+}
+impl StartShard {
+    /// Room for one more in the new generation.
+    fn make_room(&mut self) {
+        if self.new.len() >= START_CACHE_LIMIT / START_SHARDS {
+            self.old = std::mem::take(&mut self.new);
+        }
+    }
 }
 impl StartCache {
     fn new() -> Self {
@@ -147,37 +166,67 @@ impl StartCache {
             shards: (0..START_SHARDS).map(|_| RwLock::default()).collect(),
         }
     }
-    fn shard(&self, key: (i32, i32)) -> &RwLock<HashMap<(i32, i32), Starts>> {
+    fn shard(&self, key: (i32, i32)) -> &RwLock<StartShard> {
         &self.shards[shard_of(key, START_SHARDS)]
     }
     fn get(&self, key: (i32, i32)) -> Option<Starts> {
-        self.shard(key).read().unwrap().get(&key).cloned()
+        let shard = self.shard(key);
+        {
+            let read = shard.read().unwrap();
+            if let Some(found) = read.new.get(&key) {
+                return Some(found.clone());
+            }
+            if !read.old.contains_key(&key) {
+                return None;
+            }
+        }
+        let mut write = shard.write().unwrap();
+        if let Some(found) = write.new.get(&key) {
+            return Some(found.clone());
+        }
+        let found = write.old.remove(&key)?;
+        write.make_room();
+        write.new.insert(key, found.clone());
+        Some(found)
     }
     /// Keeps `starts` unless another thread built the same chunk's first:
     /// everyone keeps the first, so placement state on its pieces is shared.
     fn insert_first(&self, key: (i32, i32), starts: Starts) -> Starts {
         let mut shard = self.shard(key).write().unwrap();
-        if shard.len() >= START_CACHE_LIMIT / START_SHARDS {
-            shard.clear();
-        }
-        shard.entry(key).or_insert(starts).clone()
+        let first = shard.new.remove(&key).or_else(|| shard.old.remove(&key));
+        shard.make_room();
+        shard
+            .new
+            .entry(key)
+            .or_insert(first.unwrap_or(starts))
+            .clone()
     }
     /// Chunks cached, and how many of them hold a start.
     fn census(&self) -> (usize, usize) {
         let mut census = (0, 0);
         for shard in &self.shards {
             let shard = shard.read().unwrap();
-            census.0 += shard.len();
-            census.1 += shard.values().filter(|s| !s.is_empty()).count();
+            census.0 += shard.new.len() + shard.old.len();
+            census.1 += shard
+                .new
+                .values()
+                .chain(shard.old.values())
+                .filter(|s| !s.is_empty())
+                .count();
         }
         census
     }
     fn replace(&self, key: (i32, i32), starts: Starts) {
-        self.shard(key).write().unwrap().insert(key, starts);
+        let mut shard = self.shard(key).write().unwrap();
+        shard.old.remove(&key);
+        if !shard.new.contains_key(&key) {
+            shard.make_room();
+        }
+        shard.new.insert(key, starts);
     }
     fn clear(&self) {
         for shard in &self.shards {
-            shard.write().unwrap().clear();
+            *shard.write().unwrap() = StartShard::default();
         }
     }
 }
@@ -329,6 +378,15 @@ impl StructureState {
             .iter()
             .any(|(_, search)| search.may_land_near(chunk.x, chunk.z, self.zone_reach));
         if near { self.rings(context) } else { &NONE }
+    }
+    /// `StructureRegistry::needs_dimension_origin`: whether any set is placed
+    /// by the dimension's origin chunk alone.
+    pub(super) fn needs_dimension_origin(&self) -> bool {
+        self.registry.needs_dimension_origin()
+    }
+    /// `ChunkGenerator.getOrigin` for this dimension's structure state.
+    pub(super) fn set_dimension_origin(&mut self, origin: ChunkPos) {
+        self.registry.set_dimension_origin(origin);
     }
     /// Drop the cached starts, so that later chunks build fresh pieces (the
     /// pieces keep per-start placement state such as a shipwreck's height).
@@ -764,6 +822,61 @@ mod tests {
         }
         cache.clear();
         assert!(cache.get((3, -4)).is_none());
+    }
+
+    /// A full shard forgets the starts nobody asked for since it last filled,
+    /// and keeps the ones still asked for (a player's surroundings).
+    #[test]
+    fn start_cache_keeps_the_starts_still_asked_for() {
+        let cache = StartCache::new();
+        let hot: Starts = Arc::new(Vec::new());
+        let cold: Starts = Arc::new(Vec::new());
+        let shard = shard_of((0, 0), START_SHARDS);
+        let mut same_shard = (1..)
+            .map(|x| (x, 0))
+            .filter(|&k| shard_of(k, START_SHARDS) == shard);
+        let cold_key = same_shard.next().unwrap();
+        cache.insert_first((0, 0), hot.clone());
+        cache.insert_first(cold_key, cold);
+        // Three shards' worth of other chunks, with the hot one asked for now and then.
+        for (i, key) in same_shard
+            .take(3 * START_CACHE_LIMIT / START_SHARDS)
+            .enumerate()
+        {
+            cache.insert_first(key, Arc::new(Vec::new()));
+            if i % 100 == 0 {
+                assert!(Arc::ptr_eq(&cache.get((0, 0)).unwrap(), &hot));
+            }
+        }
+        assert!(Arc::ptr_eq(&cache.get((0, 0)).unwrap(), &hot));
+        assert!(cache.get(cold_key).is_none());
+    }
+
+    #[test]
+    fn start_cache_counts_both_generations_and_replaces_old_starts() {
+        let cache = StartCache::new();
+        let key = (3, -4);
+        let first: Starts = Arc::new(Vec::new());
+        cache.insert_first(key, first.clone());
+        {
+            let mut shard = cache.shard(key).write().unwrap();
+            shard.old = std::mem::take(&mut shard.new);
+        }
+        cache.insert_first((99, 100), Arc::new(Vec::new()));
+        assert_eq!(cache.census(), (2, 0));
+        assert!(Arc::ptr_eq(
+            &cache.insert_first(key, Arc::new(Vec::new())),
+            &first
+        ));
+        {
+            let mut shard = cache.shard(key).write().unwrap();
+            let value = shard.new.remove(&key).unwrap();
+            shard.old.insert(key, value);
+        }
+        let replacement: Starts = Arc::new(Vec::new());
+        cache.replace(key, replacement.clone());
+        assert!(Arc::ptr_eq(&cache.get(key).unwrap(), &replacement));
+        assert_eq!(cache.census(), (2, 0));
     }
 
     /// A ring search ends where `may_land_near` allows: on its ring chunk

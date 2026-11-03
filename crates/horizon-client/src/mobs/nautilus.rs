@@ -503,14 +503,16 @@ impl Goal for Charge {
         let factor = (self.speed as f32 * m.movement_speed() as f32).clamp(0.2, 2.0) + boost;
         let power = f64::from(factor * 2.0);
         if power > 0.0 {
-            let yaw = m.yaw.to_radians();
-            cx.events.push(MobEvent::Push {
+            // `causeExtraKnockback`: `LivingEntity.knockback` on the target, away
+            // from (sin(yaw), -cos(yaw)): its resistance, the halving of its own
+            // motion, the lift on the ground and the knockback hook all apply.
+            let yaw = f64::from(m.yaw * (std::f32::consts::PI / 180.0));
+            cx.events.push(MobEvent::Knockback {
                 target: who,
-                velocity: [
-                    -f64::from(yaw.sin()) * power,
-                    0.0,
-                    f64::from(yaw.cos()) * power,
-                ],
+                power,
+                x: f64::from(horizon_core::geometry::trig::sin(yaw)),
+                z: -f64::from(horizon_core::geometry::trig::cos(yaw)),
+                source: super::Damage::mob(m.id, from),
             });
             m.velocity = Vec3::new(m.velocity.x * 0.6, m.velocity.y, m.velocity.z * 0.6);
         }
@@ -624,5 +626,58 @@ pub fn from_nbt(m: &mut Mob, tag: &horizon_world::nbt::Tag) {
         .and_then(|b| b.get("value"))
     {
         m.extra.counter = *v;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mobs::world::with_test_world;
+    use std::sync::Arc;
+
+    /// `ChargeAttack.dealKnockBack` is `causeExtraKnockback`: `LivingEntity.knockback`
+    /// on the target, away from (sin(yaw), -cos(yaw)), not a raw push of its motion.
+    #[test]
+    fn a_charge_knocks_its_target_back_along_its_facing() {
+        let mut events = Vec::new();
+        let ran = with_test_world(&[], |w, types| {
+            let mut w = w.clone();
+            let at = Vec3::new(0.5, 64.0, 0.5);
+            w.player = Some(crate::mobs::world::test_player(at));
+            let mut m = Mob::new(
+                1,
+                Arc::new(types.types["minecraft:nautilus"].clone()),
+                Vec3::new(0.5, 64.0, 0.2),
+                0.0,
+            );
+            m.ai.target = Some(Who::Player);
+            let mut goal = Charge::new(0.5);
+            let mut lr = horizon_core::random::LegacyRandom::new(1);
+            let mut cx = Cx {
+                w: &w,
+                lr: &mut lr,
+                events: &mut events,
+            };
+            goal.tick(&mut m, &mut cx);
+        });
+        if !ran {
+            return;
+        }
+        let knock = events.iter().find_map(|e| match e {
+            MobEvent::Knockback {
+                target,
+                power,
+                x,
+                z,
+                ..
+            } => Some((*target, *power, *x, *z)),
+            _ => None,
+        });
+        let (target, power, x, z) = knock.expect("the charge knocks its target back");
+        assert_eq!(target, Who::Player);
+        assert!(power > 0.0);
+        // It turns to the target, which is straight ahead at +z (yaw 0): sin = 0, -cos = -1.
+        assert!(x.abs() < 1e-3 && (z + 1.0).abs() < 1e-3, "{x} {z}");
+        assert!(!events.iter().any(|e| matches!(e, MobEvent::Push { .. })));
     }
 }

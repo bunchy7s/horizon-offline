@@ -20,6 +20,16 @@ fn display_context_names_round_trip() {
 }
 
 #[test]
+fn a_mods_tint_source_is_untinted_and_an_unknown_vanilla_one_fails() {
+    let tint = |json: &str| TintSource::decode(&serde_json::from_str(json).unwrap());
+    assert_eq!(
+        tint(r#"{"type":"ae2:storage_cell_state"}"#).unwrap(),
+        TintSource::Constant(-1)
+    );
+    assert!(tint(r#"{"type":"minecraft:nonsense"}"#).is_err());
+}
+
+#[test]
 fn custom_condition_is_evaluated_per_stack_at_branch_selection() {
     struct Env;
     impl ItemEnv for Env {

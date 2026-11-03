@@ -3552,12 +3552,16 @@ pub trait Hooks: Send + Sync {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     fn player_save_to_file(&self, host: &mut dyn Host, event: &mut PlayerSaveToFileEvent<'_>) {
         let _ = host;
         let _ = event;
@@ -4542,6 +4546,15 @@ pub trait Hooks: Send + Sync {
         let _ = host;
         let _ = event;
     }
+    /// A mod's own ingredient kind, matching a concrete stack at craft time:
+    /// the ingredient's `test` calls here with the kind, its JSON and the
+    /// stack being matched, `accept` already true (the load-time list named
+    /// the item). Set `accept` to false to refuse the stack — its components
+    /// are the usual reason. The hook may be called many times a craft; the
+    /// answer must be the same for the same stack. API @API:ingredient_test@.
+    fn ingredient_test(&self, event: &mut IngredientTestEvent<'_>) {
+        let _ = event;
+    }
     /// Item `item` (`mod_id:name`) holds items (`Capabilities.Item.ITEM`): set
     /// `slots` when the item is yours, for a backpack, a storage cell or a
     /// toolbox. Clamped to 1..=256, `ItemContainerContents`' limit; 0 leaves
@@ -4579,6 +4592,14 @@ pub trait Hooks: Send + Sync {
     }
     /// Local player movement input, after reading it and before applying it.
     fn movement_input(&self, host: &dyn Host, event: &mut MovementInputEvent) {
+        let _ = host;
+        let _ = event;
+    }
+    /// Declare categories for custom recipe types, with registered item icons.
+    /// Asked lazily once per recipe table by `native_recipe_book_category`.
+    /// Invalid declarations are logged and skipped; the first valid category
+    /// owns its id and type. This does not yet add tabs or book displays.
+    fn recipe_book_categories(&self, host: &dyn Host, event: &mut RecipeBookCategoriesEvent<'_>) {
         let _ = host;
         let _ = event;
     }
@@ -14003,6 +14024,32 @@ pub fn dispatch_explosion_knockback(
         mod_hook.explosion_knockback(host, &mut event);
     }
 }
+/// What [`Hooks::ingredient_test`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct IngredientTestEvent<'a> {
+    pub kind: &'a str,
+    pub data: &'a serde_json::Map<String, Value>,
+    pub stack: &'a ItemStack,
+    pub accept: bool,
+}
+pub fn dispatch_ingredient_test(
+    mods: &[Box<dyn Hooks>],
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    let mut event = IngredientTestEvent {
+        kind,
+        data,
+        stack,
+        accept: *accept,
+    };
+    for mod_hook in super::entered(mods, "ingredient_test") {
+        mod_hook.ingredient_test(&mut event);
+    }
+    *accept = event.accept;
+}
 /// What [`Hooks::item_container`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]
 pub struct ItemContainerEvent<'a> {
@@ -14110,6 +14157,21 @@ pub fn dispatch_movement_input(
     *strafe = event.strafe;
     *jump = event.jump;
     *sneak = event.sneak;
+}
+/// What [`Hooks::recipe_book_categories`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
+#[non_exhaustive]
+pub struct RecipeBookCategoriesEvent<'a> {
+    pub categories: &'a mut Vec<RecipeBookCategory>,
+}
+pub fn dispatch_recipe_book_categories(
+    host: &dyn Host,
+    mods: &[Box<dyn Hooks>],
+    categories: &mut Vec<RecipeBookCategory>,
+) {
+    let mut event = RecipeBookCategoriesEvent { categories };
+    for mod_hook in super::entered(mods, "recipe_book_categories") {
+        mod_hook.recipe_book_categories(host, &mut event);
+    }
 }
 /// What [`Hooks::render_hand_pose`] is told. Fields may be added: the struct is `#[non_exhaustive]`.
 #[non_exhaustive]

@@ -298,7 +298,11 @@ fn host_method(
 }
 
 /// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 2] = [("entity", "EntityRef"), ("level", "LevelRef")];
+const HANDLES: [(&str, &str); 3] = [
+    ("entity", "EntityRef"),
+    ("living", "LivingRef"),
+    ("level", "LevelRef"),
+];
 
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on
 /// `Host` is also `EntityRef::position(self, host)`, which calls it. The
@@ -1175,6 +1179,7 @@ mod tests {
         pub(super) struct LootStack;
         pub(super) struct NativeLootContext<'a>(pub &'a ());
         pub(super) struct NativeDataMapType;
+        pub(super) struct RecipeBookCategory;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());

@@ -1,0 +1,6 @@
+{
+  "hooks": [{"name": "ingredient_test", "target": "horizon_client_lib::crafting::native_ingredient_test", "mod_api": {"contract": "listen"}}],
+  "rust_summary": "a mod's own ingredient kind matching a concrete stack\n(`native_ingredient_test`, which the ingredient's test calls with the kind,\nits JSON, the stack and the verdict — the load-time list already named\nthe item).",
+  "doc_summary": "a mod's own ingredient kind matching a concrete stack at craft time. The ingredient's test calls native_ingredient_test(kind, data, stack, accept) with the kind and JSON the load-time hook saw, the stack being matched and the verdict, already true (the load-time list named the item). Set accept to false to refuse the stack - its components are the usual reason (ICustomIngredient.test). The hook may be called many times a craft; the answer must be the same for the same stack. Bundles that use it need \"hooks\": @API:ingredient_test@.",
+  "comments": ["crates/horizon-client/src/crafting.rs"]
+}
