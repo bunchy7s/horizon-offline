@@ -130,6 +130,24 @@ impl Stage<'_> {
             .filter(|&(_, &t)| t == "struct")
             .filter_map(|(i, _)| next(i).map(|j| self.tokens[j]))
             .collect();
+        // GLSL 1.20's user functions hide all built-ins with the same name (8).
+        let mut own_size = Vec::new();
+        let mut declaration_depth = 0usize;
+        for (i, &t) in self.tokens.iter().enumerate() {
+            match t {
+                "{" => declaration_depth += 1,
+                "}" => declaration_depth = declaration_depth.saturating_sub(1),
+                "textureSize1D" | "textureSize2D" | "textureSize3D"
+                    if declaration_depth == 0
+                        && next(i).is_some_and(|j| self.tokens[j] == "(")
+                        && prev(i)
+                            .is_some_and(|j| is_ident(self.tokens[j]) || self.tokens[j] == "]") =>
+                {
+                    own_size.push(t);
+                }
+                _ => {}
+            }
+        }
         for (i, &t) in self.tokens.iter().enumerate() {
             if i < skip_until {
                 continue;
@@ -374,6 +392,38 @@ impl Stage<'_> {
                 write!(out, "(hz_bool_{t} != 0)").unwrap();
                 continue;
             }
+            // EXT_gpu_shader4's size names keep their dimension-specific signatures. Resolve
+            // only a known sampler, leaving user functions and mismatched dimensions to naga.
+            let size_sampler = match t {
+                "textureSize1D" => Some("sampler1D"),
+                "textureSize2D" => Some("sampler2D"),
+                "textureSize3D" => Some("sampler3D"),
+                _ => None,
+            };
+            let legacy_size_call = size_sampler.is_some_and(|expected| {
+                if !called || own_size.contains(&t) {
+                    return false;
+                }
+                let mut argument = next(i).and_then(next);
+                while let Some(j) = argument.filter(|&j| self.tokens[j] == "(") {
+                    argument = next(j);
+                }
+                let Some(argument) = argument else {
+                    return false;
+                };
+                let name = self.tokens[argument];
+                if hidden
+                    .iter()
+                    .any(|&(h, from, _)| h == name && argument >= from)
+                {
+                    return false;
+                }
+                params
+                    .get(name)
+                    .map(String::as_str)
+                    .or_else(|| sampler_ty.get(name).copied())
+                    .is_some_and(|ty| ty.strip_prefix(['i', 'u']).unwrap_or(ty) == expected)
+            });
             let replaced: Option<String> = match t {
                 "main" if depth == 0 && called => Some("hz_main".into()),
                 // GLSL's `modf`, which naga's frontend lacks.
@@ -398,6 +448,9 @@ impl Stage<'_> {
                 // GL_EXT_gpu_shader4's names (Bliss).
                 "texelFetch1D" | "texelFetch2D" | "texelFetch3D" if called => {
                     Some("texelFetch".into())
+                }
+                "textureSize1D" | "textureSize2D" | "textureSize3D" if legacy_size_call => {
+                    Some("textureSize".into())
                 }
                 "texture2DProj" if called => Some("textureProj".into()),
                 "texture2DGrad" | "texture2DGradARB" if called => Some("textureGrad".into()),
