@@ -270,6 +270,10 @@ def sides(name):
     return lock, build, vanilla_server, horizon_server, client
 
 
+# How many times one_player runs vanilla's side before giving up on a run its `check` rejects.
+VANILLA_ATTEMPTS = 5
+
+
 def one_player(name, script, shown, check, scope, step_seconds=4.0):
     """A harness of one player, Alice: on each server she joins, then runs `script`, a list of (step, client
     actions) that each last `step_seconds` of the server's time (20 ticks a second). The lines `shown(transcript)` keeps must match vanilla's exactly, and
@@ -308,7 +312,17 @@ def one_player(name, script, shown, check, scope, step_seconds=4.0):
         return out.read_text(encoding='utf-8').splitlines()
 
     world = generate_world(vanilla_server, build)
-    vanilla_all = run('vanilla', vanilla_server, world)
+    # Vanilla's run is the specification only when `check` accepts it. On a loaded machine a real-time step can
+    # miss its moment (a bobber that lands before the armor stand is there), so a run it rejects is made again,
+    # up to VANILLA_ATTEMPTS times, before Horizon's is compared with it; Horizon's run is never retried.
+    for attempt in range(1, VANILLA_ATTEMPTS + 1):
+        vanilla_all = run('vanilla', vanilla_server, world)
+        why = check(shown(vanilla_all), vanilla_all)
+        if why is None:
+            break
+        print(f'{name}: vanilla run {attempt} of {VANILLA_ATTEMPTS} is no proof ({why})', flush=True)
+    else:
+        raise AssertionError(f'{why}: the script did not run on vanilla in {VANILLA_ATTEMPTS} runs (see {build})')
     horizon_all = run('horizon', horizon_server, world)
     errors = [l for l in vanilla_all + horizon_all if ' error ' in f' {l} ' or 'disconnected' in l]
     vanilla, horizon = shown(vanilla_all), shown(horizon_all)
@@ -317,8 +331,6 @@ def one_player(name, script, shown, check, scope, step_seconds=4.0):
         diff = '\n'.join(difflib.unified_diff(vanilla, horizon, 'vanilla', 'horizon', n=1, lineterm=''))
         raise AssertionError(f'{len(errors)} errors, transcripts differ (see {build}/vanilla.txt and horizon.txt):\n'
                              + '\n'.join(errors[:10]) + '\n' + diff[:6000])
-    if (why := check(vanilla, vanilla_all)) is not None:
-        raise AssertionError(f'{why}: the script did not run (see {build})')
     lab.write_json(build / 'report.json', dict(
         schema=1, minecraft=lock['minecraft']['version'], platform=platform.platform(),
         java=subprocess.check_output(['java', '--version'], text=True).splitlines()[0],

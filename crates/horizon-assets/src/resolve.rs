@@ -1,8 +1,12 @@
 //! Cuboid parent inheritance and texture-slot resolution.
-use crate::{json::*, model::*};
+use crate::{
+    json::*,
+    model::*,
+    obj::{ObjModel, parse_mtl, parse_obj},
+};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 pub const MISSING_MODEL: &str = "minecraft:builtin/missing";
@@ -11,16 +15,31 @@ pub const GENERATED_MODEL: &str = "minecraft:builtin/generated";
 /// Composite children nest through parents that may name the composite again.
 const MAX_LOADER_DEPTH: u8 = 8;
 
+/// Reads asset files that models point at (`namespace:path` is `assets/namespace/path`).
+pub trait AssetReader: Send + Sync {
+    fn read_text(&self, location: &str) -> Option<String>;
+}
 /// Decoded models are immutable and their inherited geometry is shared.
 pub struct ModelLibrary {
     models: BTreeMap<String, Arc<CuboidModel>>,
     missing: Arc<CuboidModel>,
+    assets: Option<Arc<dyn AssetReader>>,
+    /// Keyed by obj and mtl override; `None` is a file that failed, already warned about.
+    objs: Mutex<BTreeMap<(String, Option<String>), Option<Arc<ObjModel>>>>,
 }
 /// What a model's loader adds to its own elements.
 #[derive(Clone, Debug)]
 pub enum ResolvedLoader {
     /// The shown children, resolved on their own, in order.
     Composite(Vec<ResolvedCuboidModel>),
+    Obj {
+        /// `None` when the file failed to load.
+        model: Option<Arc<ObjModel>>,
+        flip_v: bool,
+        shade: bool,
+        /// Objects the model chain's `visibility` hides.
+        hidden: BTreeSet<String>,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct ResolvedCuboidModel {
@@ -118,7 +137,14 @@ impl ModelLibrary {
         Ok(Self {
             models: decoded,
             missing,
+            assets: None,
+            objs: Mutex::default(),
         })
+    }
+    /// Where `neoforge:obj` models find their files.
+    pub fn with_assets(mut self, assets: Arc<dyn AssetReader>) -> Self {
+        self.assets = Some(assets);
+        self
     }
     /// This library plus `extra` models; an `extra` model replaces a
     /// same-named one, but not the built-in missing and generated models.
@@ -140,6 +166,8 @@ impl ModelLibrary {
         Ok(Self {
             models,
             missing: Arc::clone(&self.missing),
+            assets: self.assets.clone(),
+            objs: Mutex::default(),
         })
     }
     /// Follow the complete parent chain. A missing resource uses the built-in
@@ -282,6 +310,28 @@ impl ModelLibrary {
                 }
                 Some(ResolvedLoader::Composite(resolved))
             }
+            Some(Loader::Obj {
+                model,
+                flip_v,
+                shade_quads,
+                mtl_override,
+            }) => {
+                // Leaf wins: a model closer to the leaf overrides its parents' entries.
+                let mut visibility = BTreeMap::new();
+                for model in chain.iter().rev() {
+                    visibility.extend(model.visibility.iter().map(|(k, v)| (k.clone(), *v)));
+                }
+                Some(ResolvedLoader::Obj {
+                    model: self.load_obj(&names[0], model, mtl_override.as_deref()),
+                    flip_v: *flip_v,
+                    shade: shade_quads.unwrap_or(true),
+                    hidden: visibility
+                        .into_iter()
+                        .filter(|(_, shown)| !shown)
+                        .map(|(name, _)| name)
+                        .collect(),
+                })
+            }
             Some(Loader::Unknown(_)) | None => None,
         };
         let mut textures = BTreeMap::<String, Material>::new();
@@ -329,6 +379,54 @@ impl ModelLibrary {
             geometry,
             generated,
             loader,
+        })
+    }
+    /// Parse an obj and its materials once; a failure warns once and yields no geometry.
+    fn load_obj(&self, label: &str, model: &str, mtl: Option<&str>) -> Option<Arc<ObjModel>> {
+        let key = (model.to_owned(), mtl.map(str::to_owned));
+        let mut cache = self.objs.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = cache.get(&key) {
+            return found.clone();
+        }
+        let loaded = self.read_obj(model, mtl);
+        if let Err(message) = &loaded {
+            log::warn!("Horizon: obj model {label} ({model}): {message}");
+        }
+        let loaded = loaded.ok().map(Arc::new);
+        cache.insert(key, loaded.clone());
+        loaded
+    }
+    fn read_obj(&self, model: &str, mtl: Option<&str>) -> std::result::Result<ObjModel, String> {
+        let assets = self.assets.as_ref().ok_or("no asset source")?;
+        let text = assets.read_text(model).ok_or("file not found")?;
+        let parsed = parse_obj(&text)?;
+        let mtl = match (mtl, &parsed.mtllib) {
+            (Some(location), _) => Some(location.to_owned()),
+            (None, Some(file)) if file.contains(':') => Some(file.clone()),
+            (None, Some(file)) => {
+                let (namespace, path) = model.split_once(':').unwrap_or(("minecraft", model));
+                let directory = path.rsplit_once('/').map_or("", |(dir, _)| dir);
+                Some(if directory.is_empty() {
+                    format!("{namespace}:{file}")
+                } else {
+                    format!("{namespace}:{directory}/{file}")
+                })
+            }
+            (None, None) => None,
+        };
+        let materials = match mtl {
+            Some(location) => match assets.read_text(&location) {
+                Some(text) => parse_mtl(&text),
+                None => {
+                    log::warn!("Horizon: obj material file {location} not found");
+                    BTreeMap::new()
+                }
+            },
+            None => BTreeMap::new(),
+        };
+        Ok(ObjModel {
+            faces: parsed.faces,
+            materials,
         })
     }
 }

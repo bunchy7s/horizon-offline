@@ -975,9 +975,22 @@ impl Game<'_> {
         self.handle_mob_events(events)
     }
     /// A mob a bucket emptied: `setFromBucket` keeps it, then it calls out.
+    /// Fish and axolotls carry the flag itself (saved as `FromBucket`, read by
+    /// `requiresCustomPersistence`); the others stay persistent instead.
     pub(super) fn mob_placed(&mut self, id: u32) -> Result<()> {
         if let Some(m) = self.mobs.iter_mut().find(|m| m.id == id) {
-            m.persistent = true;
+            if matches!(
+                m.species(),
+                Species::Cod
+                    | Species::Salmon
+                    | Species::Pufferfish
+                    | Species::TropicalFish
+                    | Species::Axolotl
+            ) {
+                m.extra.from_bucket = true;
+            } else {
+                m.persistent = true;
+            }
         }
         self.mob_ambient(id)
     }
@@ -1814,6 +1827,16 @@ impl Game<'_> {
     /// is discarded.
     pub(super) fn convert_mob(&mut self, index: usize, kind: &str) -> Option<u32> {
         let t = self.res.mob_types().get(kind).cloned()?;
+        let (old_id, old_kind) = (
+            self.mobs[index].id,
+            super::native_hooks::mob_kind(&self.mobs[index]),
+        );
+        // LivingConversionEvent.Pre: a canceled conversion leaves the mob.
+        let mut cancel = false;
+        self.native_living_conversion_pre(old_id, &old_kind, kind, &mut cancel);
+        if cancel {
+            return None;
+        }
         let old = &self.mobs[index];
         self.next_entity += 1;
         let mut mob = Mob::new(self.next_entity, t, old.position, old.yaw);
@@ -1845,6 +1868,8 @@ impl Game<'_> {
         self.mobs[index].removed = true;
         self.mobs.push(mob);
         self.native_mobs_joined(self.mobs.len() - 1, false);
+        self.native_entity_transform(old_id, &old_kind, id, kind);
+        self.native_living_conversion_post(old_id, &old_kind, id, kind);
         Some(id)
     }
     /// `ShearsDispenseItemBehavior.tryShearEntity`: the first live, ready
@@ -1964,20 +1989,22 @@ impl Game<'_> {
                     self.audio
                         .play("minecraft:entity.mooshroom.shear", sound_at, 1.0, 1.0);
                     // convertTo(COW): the cow takes its place, then the mushrooms drop.
-                    self.convert_mob(i, "minecraft:cow");
-                    self.mooshroom_shear_puff([at.x, at.y, at.z], height);
-                    let drops = self.sequence_loot(
-                        "minecraft:shearing/mooshroom",
-                        &format!("minecraft:shearing/mooshroom/{variant}"),
-                        Some(&shears),
-                    );
-                    for stack in drops {
-                        for _ in 0..stack.count {
-                            let one = ItemStack {
-                                count: 1,
-                                ..stack.clone()
-                            };
-                            self.spawn_at_location(at, height, one);
+                    // A canceled conversion (LivingConversionEvent.Pre) drops nothing.
+                    if self.convert_mob(i, "minecraft:cow").is_some() {
+                        self.mooshroom_shear_puff([at.x, at.y, at.z], height);
+                        let drops = self.sequence_loot(
+                            "minecraft:shearing/mooshroom",
+                            &format!("minecraft:shearing/mooshroom/{variant}"),
+                            Some(&shears),
+                        );
+                        for stack in drops {
+                            for _ in 0..stack.count {
+                                let one = ItemStack {
+                                    count: 1,
+                                    ..stack.clone()
+                                };
+                                self.spawn_at_location(at, height, one);
+                            }
                         }
                     }
                 }

@@ -37,6 +37,30 @@ fn name(n: &str) -> Tag {
 }
 
 #[test]
+fn active_worlds_cannot_be_backed_up_copied_or_deleted() {
+    let home = scratch("active-lock");
+    let dir = world(&home, "Active", vec![("LevelName", name("Active"))]);
+    let w = find(&home, "Active").unwrap();
+    let game = fs::File::options()
+        .write(true)
+        .open(dir.join(LOCK))
+        .unwrap();
+    game.try_lock().unwrap();
+
+    assert!(backup(&home, &w).is_err());
+    assert!(copy(&w).is_err());
+    assert!(delete(&w).is_err());
+    assert!(!home.join("backups").exists());
+    assert!(!home.join("saves/Active (1)").exists());
+    assert_eq!(fs::read(dir.join("region/r.0.0.mca")).unwrap(), [7u8; 1000]);
+
+    drop(game);
+    assert!(backup(&home, &w).unwrap().is_file());
+    assert!(copy(&w).unwrap().path.is_dir());
+    fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
 fn lists_what_each_world_is() {
     let home = scratch("list");
     let survival = world(

@@ -2,12 +2,25 @@
 //! `ModelPart` draws: quads in model pixels on vanilla's axes (y down), UVs a fraction of the
 //! texture.
 //!
-//! The files place parts the way Blockbench's OptiFine export writes them: `invertAxis` names the
-//! axes that point the other way from vanilla's (`"xy"` in practice), a part's own
-//! `translate` is minus its pivot and its boxes and submodels sit where the model has them (the
-//! ground at y 0), while a submodel's `translate` is its pivot in its parent's frame and its
-//! boxes are relative to that pivot. A part keeps the pivot of the vanilla part it replaces
-//! (OptiDocs, "Limitations: pivot points"), so a part's `translate` only shifts its content.
+//! The files place parts the way Blockbench's OptiFine export writes them, and the way EMF (and
+//! OptiFine) build them: `invertAxis` names the axes that point the other way from vanilla's
+//! (`"xy"` in practice), and **every** bone — a part or a submodel — sits at its own
+//! `translate` (negated on the inverted axes), its boxes at the coordinates the file gives
+//! (mirrored on them), its submodels below it at their own translates. A part keeps the pivot
+//! of the vanilla part it replaces (OptiDocs, "Limitations: pivot points"): its bone rides as
+//! a child of the vanilla part, `translate` away from its pivot, and an export that writes the
+//! part's boxes where the model has them (the ground at y 0) has `translate` at minus the
+//! part's pivot, so they land back around it.
+//!
+//! The bones' poses are what the pack's animations write: `sub.ty` replaces the pose the bone
+//! starts at, which is its `translate` alone — never `translate` plus whatever its parent
+//! carries. Folding a parent's translate into a child's pivot places the geometry the same at
+//! rest, but every animation write then moves it by the folded amount: Fresh Animations parks
+//! a cow's `head2` at `ty = -20` under a `body` part whose translate is 14, and the head would
+//! fly 14 pixels off the body the moment the pack's first frame runs. EMF's
+//! `EMFModelPartCustom` (the part's x, y, z are its `translate`) with `EMFPartData.prepare`
+//! (the translate negated per inverted axis, the rotate negated about its own inverted axis
+//! only, `scale` per bone, `attachments` offsets flipped) is the reference.
 
 use super::json::{Json, get};
 use crate::paths;
@@ -25,11 +38,18 @@ pub struct Quad {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Bone {
     pub id: Option<String>,
-    /// `ModelPart` x, y, z: the pivot in the parent's frame, vanilla pixels. Zero for a part,
-    /// which keeps its vanilla part's pivot.
+    /// `ModelPart` x, y, z: the pivot in the parent's frame, vanilla pixels. A part's bone
+    /// hangs at its `translate` below the vanilla part's own pivot; a submodel's at its own
+    /// `translate` below its parent bone.
     pub pivot: [f32; 3],
     /// `ModelPart` xRot, yRot, zRot in radians, on vanilla's axes.
     pub rotation: [f32; 3],
+    /// `ModelPart` xScale, yScale, zScale: `scale`, a number for all three axes or an array of
+    /// three (EMF's own field is a number; an array is wider than it, not narrower).
+    pub scale: [f32; 3],
+    /// The `attachments` this declaring bone carries: an item anchor's name and its offset,
+    /// flipped on this bone's inverted axes (EMF's `EMFPartData.getAttachments`).
+    pub attachments: Vec<(String, [f32; 3])>,
     pub quads: Vec<Quad>,
     pub children: Vec<Bone>,
 }
@@ -234,7 +254,7 @@ pub fn parse_jem(
             continue;
         };
         bake.left -= cost;
-        let bone = bone(&layers, size, true, &mut bake);
+        let bone = bone(&layers, size, &mut bake);
         let emptied = bake.cut && !has_quads(&bone);
         bake.cut |= earlier;
         if emptied {
@@ -376,11 +396,12 @@ fn size2(v: Option<&Json>, bake: &mut Bake) -> Option<[f32; 2]> {
     nums::<2>(v, bake).filter(|s| s[0] > 0.0 && s[1] > 0.0)
 }
 
-/// Bakes a part model definition. `top`: a part (its `translate` shifts its content) rather
-/// than a submodel (its `translate` is its pivot). The bone costs one of `bake.left`, which
-/// the caller makes sure is left, as it pays for the walk of its keys; its strings, boxes and
-/// submodels what [`Bake`] says.
-fn bone(def: &(impl Def + ?Sized), size: [f32; 2], top: bool, bake: &mut Bake) -> Bone {
+/// Bakes a part model definition, a part or a submodel the same way: the bone sits at its own
+/// `translate` (negated on the inverted axes), its boxes at the file's coordinates mirrored on
+/// them, its submodels at their own translates below it — the poses the pack's animation
+/// writes replace. The bone costs one of `bake.left`, which the caller makes sure is left, as
+/// it pays for the walk of its keys; its strings, boxes and submodels what [`Bake`] says.
+fn bone(def: &(impl Def + ?Sized), size: [f32; 2], bake: &mut Bake) -> Bone {
     bake.left -= 1;
     bake.unread |= def.key("texture").is_some() || def.key("sprites").is_some();
     let axes = string(def.key("invertAxis"), bake).unwrap_or("");
@@ -390,19 +411,43 @@ fn bone(def: &(impl Def + ?Sized), size: [f32; 2], top: bool, bake: &mut Bake) -
     let mirror = string(def.key("mirrorTexture"), bake).unwrap_or("");
     let translate = nums::<3>(def.key("translate"), bake).unwrap_or_default();
     let translate: [f32; 3] = std::array::from_fn(|i| sign(i) * translate[i]);
-    // A rotation seen through flipped axes: about a flipped axis it turns the other way, and an
-    // odd number of flips (a mirror) turns every rotation around.
-    let det = sign(0) * sign(1) * sign(2);
+    // A rotation seen through flipped axes: about a flipped axis it turns the other way, and
+    // that is all — EMF negates per axis, and an odd number of flips is not a mirror to turn
+    // every rotation around.
     let rotate = nums::<3>(def.key("rotate"), bake).unwrap_or_default();
-    let (pivot, offset) = if top {
-        ([0.0; 3], translate)
-    } else {
-        (translate, [0.0; 3])
+    // `scale`: a number for all three axes, or an array of three.
+    let scale = match def.key("scale") {
+        Some(Json::Num(s)) => {
+            let s = *s as f32;
+            [if s.is_finite() { s } else { 1.0 }; 3]
+        }
+        Some(Json::Arr(a)) if a.len() >= 3 => {
+            std::array::from_fn(|i| num(a.get(i), bake).unwrap_or(1.0))
+        }
+        _ => [1.0; 3],
     };
+    // `attachments`: the item anchors this declaring bone carries (`right_handheld_item`,
+    // `fox_item`...), each offset flipped on the inverted axes, as EMF's part data does —
+    // the file's frame is y up, the baked tree's y down.
+    let attachments = def
+        .key("attachments")
+        .and_then(Json::as_object)
+        .map(|pairs| {
+            pairs
+                .iter()
+                .filter_map(|(name, v)| {
+                    let at = nums::<3>(Some(v), bake)?;
+                    Some((name.clone(), std::array::from_fn(|i| sign(i) * at[i])))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let mut out = Bone {
         id: string(def.key("id"), bake).map(str::to_owned),
-        pivot,
-        rotation: std::array::from_fn(|i| det * sign(i) * rotate[i].to_radians()),
+        pivot: translate,
+        rotation: std::array::from_fn(|i| sign(i) * rotate[i].to_radians()),
+        scale,
+        attachments,
         ..Bone::default()
     };
     let shape = Shape {
@@ -410,7 +455,6 @@ fn bone(def: &(impl Def + ?Sized), size: [f32; 2], top: bool, bake: &mut Bake) -
         mirror_u: mirror.contains('u'),
         mirror_v: mirror.contains('v'),
         size,
-        offset,
     };
     for b in items(def.key("boxes")) {
         if bake.left == 0 {
@@ -455,9 +499,7 @@ fn bone(def: &(impl Def + ?Sized), size: [f32; 2], top: bool, bake: &mut Bake) -
             break;
         }
         bake.left -= sub.len();
-        let mut child = bone(sub, size, false, bake);
-        child.pivot = std::array::from_fn(|i| child.pivot[i] + offset[i]);
-        out.children.push(child);
+        out.children.push(bone(sub, size, bake));
     }
     out
 }
@@ -467,17 +509,19 @@ struct Shape {
     mirror_u: bool,
     mirror_v: bool,
     size: [f32; 2],
-    offset: [f32; 3],
 }
 
 /// A box's faces in `ModelPart.Cube`'s order of corners, keyed by the per-face UV name for the
-/// files' frame (Blockbench's: up is vanilla's -y, east vanilla's -x, north -z).
+/// files' frame (up is vanilla's -y, north -z). `uvWest` is the min-x face and `uvEast` the
+/// max-x one, as in `ModelPart.Cube` and EMF (whose west face takes the middle row's first
+/// strip, its east the third): packs name the sides by the model's own frame, and Fresh
+/// Animations draws 54 models' side art through these two keys.
 const FACES: [(&str, &str, [usize; 4], [f32; 3]); 6] = [
     ("uvUp", "", [5, 4, 0, 1], [0.0, -1.0, 0.0]),
     ("uvDown", "", [2, 3, 7, 6], [0.0, 1.0, 0.0]),
-    ("uvEast", "uvRight", [0, 4, 7, 3], [-1.0, 0.0, 0.0]),
+    ("uvWest", "uvLeft", [0, 4, 7, 3], [-1.0, 0.0, 0.0]),
     ("uvNorth", "uvFront", [1, 0, 3, 2], [0.0, 0.0, -1.0]),
-    ("uvWest", "uvLeft", [5, 1, 2, 6], [1.0, 0.0, 0.0]),
+    ("uvEast", "uvRight", [5, 1, 2, 6], [1.0, 0.0, 0.0]),
     ("uvSouth", "uvBack", [4, 5, 6, 7], [0.0, 0.0, 1.0]),
 ];
 /// `ModelPart.Cube`'s corners: which of x, y, z take the box's max.
@@ -515,16 +559,18 @@ impl Shape {
                 -(c[i] + dims[i])
             } else {
                 c[i]
-            } + self.offset[i];
+            };
             lo[i] = min - grow[i];
             hi[i] = min + dims[i] + grow[i];
         }
         let boxed = nums::<2>(get(b, "textureOffset"), bake);
         // A box-UV box mirrored in u is `ModelPart.Cube` with `mirror`: its x sides trade
-        // places, and each face winds the other way to keep facing out. Per-face UVs mirror
-        // each face's rectangle instead.
+        // places, and each face winds the other way to keep facing out. `mirrorTexture` is
+        // ignored on a box that names its own face rects — EMF hands its custom-UV cube no
+        // mirror flags ("it seems optifine ignores these flags on custom uv's") — so Fresh
+        // Animations' flat eye quads on mirrored parts stay where the pack drew them.
         let box_mirror = boxed.is_some() && self.mirror_u;
-        let face_mirror_u = boxed.is_none() && self.mirror_u;
+        let box_mirror_v = boxed.is_some() && self.mirror_v;
         if box_mirror {
             std::mem::swap(&mut lo[0], &mut hi[0]);
         }
@@ -542,10 +588,7 @@ impl Shape {
             let Some(mut r) = rect else {
                 continue;
             };
-            if face_mirror_u {
-                r.swap(0, 2);
-            }
-            if self.mirror_v {
+            if box_mirror_v {
                 r.swap(1, 3);
             }
             let [u1, v1, u2, v2] = r;
@@ -621,12 +664,25 @@ mod tests {
     #[test]
     fn parts_land_where_vanilla_has_them_relative_to_their_pivots() {
         let model = parse(ZOMBIE);
+        // The bone hangs at its translate (minus the part's pivot, the file's y up against
+        // vanilla's y down) and the box at the file's coordinates mirrored, the two landing
+        // the geometry back around the vanilla pivot.
         let head = &model.parts[0].bone;
-        assert_eq!(head.pivot, [0.0; 3]);
-        // The face, at the head's front (-z), with the skin's face square (8, 8)-(16, 16).
+        assert_eq!(head.pivot, [0.0, 24.0, 0.0]);
+        // The face, at the head's front (-z), with the skin's face square (8, 8)-(16, 16):
+        // 8 pixels above the pivot, as vanilla has it.
         let north = face(head, [0.0, 0.0, -1.0]);
+        let net = |q: &Quad| {
+            q.vertices.map(|v| {
+                [
+                    v[0] + head.pivot[0],
+                    v[1] + head.pivot[1],
+                    v[2] + head.pivot[2],
+                ]
+            })
+        };
         assert_eq!(
-            positions(north),
+            net(north),
             [
                 [4.0, -8.0, -4.0],
                 [-4.0, -8.0, -4.0],
@@ -636,14 +692,15 @@ mod tests {
         );
         let uv = north.vertices.map(|v| [v[3] * 64.0, v[4] * 64.0]);
         assert_eq!(uv, [[16.0, 8.0], [8.0, 8.0], [8.0, 16.0], [16.0, 16.0]]);
-        // The leg's box spans x -2..2 and y 0..12 around the vanilla pivot.
+        // The leg's box spans x -2..2 and y 0..12 around the vanilla pivot: the bone at its
+        // translate and the box mirrored below it, summed here as they draw.
         let leg = &model.parts[1].bone;
         let mut lo = [f32::MAX; 3];
         let mut hi = [f32::MIN; 3];
         for v in leg.quads.iter().flat_map(|q| q.vertices) {
             for a in 0..3 {
-                lo[a] = lo[a].min(v[a]);
-                hi[a] = hi[a].max(v[a]);
+                lo[a] = lo[a].min(v[a] + leg.pivot[a]);
+                hi[a] = hi[a].max(v[a] + leg.pivot[a]);
             }
         }
         let close = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5);
@@ -720,9 +777,12 @@ mod tests {
                     "boxes": [{"coordinates": [-1, 0, -1, 2, 2, 2], "textureOffset": [0, 0]}],
                     "submodels": [{"id": "feather", "invertAxis": "xy", "translate": [0, 2, 0]}]}]}]}"#,
         );
+        // The part's bone at its translate, the submodel's at its own, alone: what a
+        // `brim.ty` write replaces, whatever the parent carries.
+        assert_eq!(model.parts[0].bone.pivot, [0.0, 24.0, 0.0]);
         let brim = &model.parts[0].bone.children[0];
         assert_eq!(brim.id.as_deref(), Some("brim"));
-        assert_eq!(brim.pivot, [0.0, 0.0, 0.0]);
+        assert_eq!(brim.pivot, [0.0, -24.0, 0.0]);
         let r = std::f32::consts::FRAC_PI_2;
         assert_eq!(brim.rotation, [-r, 0.0, r / 2.0]);
         let ys: Vec<f32> = brim
@@ -761,22 +821,34 @@ mod tests {
             .remove(0)
             .bone
         };
-        assert_eq!(
-            bounds(&part("xyz")),
-            ([-3.0, -5.0, -7.0], [-2.0, -4.0, -6.0])
-        );
-        assert_eq!(bounds(&part("")), ([2.0, 4.0, 6.0], [3.0, 5.0, 7.0]));
-        // Degrees to radians; a flipped axis turns the other way, and a mirror (odd flips)
-        // turns them all around.
+        // The geometry lands where it did: the bone at its translate, the box below it, the
+        // translate never doubled in. The bones' poses are their own translates.
+        let net = |b: &Bone| {
+            let mut lo = [f32::MAX; 3];
+            let mut hi = [f32::MIN; 3];
+            for v in b.quads.iter().flat_map(|q| q.vertices) {
+                for a in 0..3 {
+                    lo[a] = lo[a].min(v[a] + b.pivot[a]);
+                    hi[a] = hi[a].max(v[a] + b.pivot[a]);
+                }
+            }
+            (lo, hi)
+        };
+        assert_eq!(net(&part("xyz")), ([-3.0, -5.0, -7.0], [-2.0, -4.0, -6.0]));
+        assert_eq!(net(&part("")), ([2.0, 4.0, 6.0], [3.0, 5.0, 7.0]));
+        assert_eq!(part("").pivot, [1.0, 2.0, 3.0]);
+        assert_eq!(part("xyz").pivot, [-1.0, -2.0, -3.0]);
+        // Degrees to radians; a flipped axis turns the other way, and only that axis: an odd
+        // number of flips is not a mirror (EMF negates each axis on its own).
         let deg = |r: [f32; 3]| r.map(|a| (a.to_degrees() * 1000.0).round() / 1000.0);
         assert_eq!(deg(part("").rotation), [30.0, 60.0, 90.0]);
         assert_eq!(deg(part("xy").rotation), [-30.0, -60.0, 90.0]);
-        assert_eq!(deg(part("xyz").rotation), [30.0, 60.0, 90.0]);
-        assert_eq!(deg(part("x").rotation), [30.0, -60.0, -90.0]);
+        assert_eq!(deg(part("xyz").rotation), [-30.0, -60.0, -90.0]);
+        assert_eq!(deg(part("x").rotation), [-30.0, 60.0, 90.0]);
     }
 
     #[test]
-    fn per_face_uvs_by_name_and_mirrored() {
+    fn per_face_uvs_by_name_and_mirrored_boxes_keep_their_rects() {
         let face_of = |key: &str, mirror: &str| {
             let model = parse(&format!(
                 r#"{{"models": [{{"part": "body", "textureSize": [16, 16], "mirrorTexture": "{mirror}",
@@ -786,29 +858,25 @@ mod tests {
             assert_eq!(quads.len(), 1, "{key}");
             quads[0].clone()
         };
-        // `uvRight` is `uvEast`: vanilla's -x side.
-        let east = face_of("uvRight", "");
-        assert_eq!(east.normal, [-1.0, 0.0, 0.0]);
-        assert_eq!(
-            positions(&east),
-            [
-                [0.0, 0.0, 0.0],
-                [0.0, 0.0, 2.0],
-                [0.0, 2.0, 2.0],
-                [0.0, 2.0, 0.0]
-            ]
-        );
+        // `uvEast` is the max-x face and `uvWest` the min-x one, as `ModelPart.Cube` and
+        // EMF name them: Fresh Animations draws its side art by these names.
+        let east = face_of("uvEast", "");
+        assert_eq!(east.normal, [1.0, 0.0, 0.0]);
+        assert!(east.vertices.iter().all(|v| v[0] == 2.0));
         assert_eq!(
             uvs(&east, 16.0, 16.0),
             [[2.0, 0.0], [0.0, 0.0], [0.0, 2.0], [2.0, 2.0]]
         );
+        // `uvRight` is `uvEast`'s other name; `mirrorTexture` is ignored on a box that
+        // names its own face rects (EMF hands its custom-UV cube no mirror flags), so the
+        // mirrored variant keeps the pack's rect.
         assert_eq!(
             uvs(&face_of("uvRight", "uv"), 16.0, 16.0),
-            [[0.0, 2.0], [2.0, 2.0], [2.0, 0.0], [0.0, 0.0]]
+            [[2.0, 0.0], [0.0, 0.0], [0.0, 2.0], [2.0, 2.0]]
         );
-        let west = face_of("uvLeft", "");
-        assert_eq!(west.normal, [1.0, 0.0, 0.0]);
-        assert!(west.vertices.iter().all(|v| v[0] == 2.0));
+        let west = face_of("uvWest", "");
+        assert_eq!(west.normal, [-1.0, 0.0, 0.0]);
+        assert!(west.vertices.iter().all(|v| v[0] == 0.0));
     }
 
     #[test]
@@ -833,7 +901,7 @@ mod tests {
                 "submodel": {"boxes": [{"coordinates": [0, 0, 0, 1, 1, 1], "uvUp": [0, 0, 1, 1]}]}}]}"#,
         );
         let child = &model.parts[0].bone.children[0];
-        assert_eq!(child.pivot, [0.0, 24.0, 0.0]);
+        assert_eq!(child.pivot, [0.0, 0.0, 0.0]);
         let max_u = child.quads[0]
             .vertices
             .iter()
@@ -1218,6 +1286,70 @@ mod tests {
             (head.scale, head.attach, head.bone.quads.len()),
             (2.0, true, 6)
         );
+    }
+
+    #[test]
+    fn a_submodels_pose_is_its_own_translate_whatever_the_parent_carries() {
+        // Fresh Animations parks a cow's `head2` at `head2.ty = -20` under a `body` part
+        // whose translate is 14: every bone's pose is its own translate alone, or each
+        // animation write moves the geometry by the parent's amount and the head flies off
+        // the body on the pack's first frame.
+        let model = parse(
+            r#"{"models": [{"part": "body", "invertAxis": "xy", "translate": [0, -14, -1],
+                "submodels": [{"id": "head2", "invertAxis": "xy", "translate": [0, 20, -8],
+                    "boxes": [{"coordinates": [-4, 14, -4, 8, 8, 8], "textureOffset": [0, 0]}],
+                    "submodels": [{"id": "snout", "invertAxis": "xy", "translate": [0, -2, -6]}]}]}]}"#,
+        );
+        let body = &model.parts[0].bone;
+        assert_eq!(body.pivot, [0.0, 14.0, -1.0]);
+        let head = &body.children[0];
+        assert_eq!(head.pivot, [0.0, -20.0, -8.0]);
+        assert_eq!(head.children[0].pivot, [0.0, 2.0, -6.0]);
+        // The chain of pivots lands the head where the model has it: 6 up and 9 forward of
+        // the vanilla body's pivot, the box hanging 22..14 below the head's own pivot.
+        assert_eq!(
+            [
+                body.pivot[0] + head.pivot[0],
+                body.pivot[1] + head.pivot[1],
+                body.pivot[2] + head.pivot[2]
+            ],
+            [0.0, -6.0, -9.0]
+        );
+        let lo = head
+            .quads
+            .iter()
+            .flat_map(|q| q.vertices)
+            .map(|v| v[1])
+            .fold(f32::MAX, f32::min);
+        let hi = head
+            .quads
+            .iter()
+            .flat_map(|q| q.vertices)
+            .map(|v| v[1])
+            .fold(f32::MIN, f32::max);
+        assert!(
+            (lo - -22.0).abs() < 1e-5 && (hi - -14.0).abs() < 1e-5,
+            "{lo} {hi}"
+        );
+    }
+
+    #[test]
+    fn bones_carry_scale_and_attachments() {
+        let model = parse(
+            r#"{"models": [{"part": "head", "invertAxis": "xy", "scale": 1.5,
+                "attachments": {"right_handheld_item": [1, -2, 3]},
+                "submodels": [{"id": "arm", "invertAxis": "xyz", "scale": [1, 2, 4],
+                    "attachments": {"fox_item": [0, 6, -1]}}]}]}"#,
+        );
+        assert_eq!(model.parts[0].bone.scale, [1.5; 3]);
+        // The offsets flip on the declaring bone's inverted axes.
+        assert_eq!(
+            model.parts[0].bone.attachments,
+            [("right_handheld_item".to_owned(), [-1.0, 2.0, 3.0])]
+        );
+        let arm = &model.parts[0].bone.children[0];
+        assert_eq!(arm.scale, [1.0, 2.0, 4.0]);
+        assert_eq!(arm.attachments, [("fox_item".to_owned(), [0.0, -6.0, 1.0])]);
     }
 
     #[test]

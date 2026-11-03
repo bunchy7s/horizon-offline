@@ -153,6 +153,11 @@ pub(super) trait Entity: EntityRules {
         let b = self.explosion_box();
         f64::from((b.max_position().y - b.min_position().y) as f32 * 0.85f32)
     }
+    /// Whether this kind ticks after the projectiles do (orbs, falling blocks,
+    /// primed TNT), where vanilla ticks every entity in the order it joined.
+    fn ticks_after_projectiles(&self) -> bool {
+        false
+    }
     /// `Entity.push` with the explosion's knockback.
     fn push_from_explosion(&mut self, push: Vec3) {
         let v = self.velocity_mut();
@@ -556,6 +561,7 @@ impl Game<'_> {
             .chain(self.item_frames.iter().map(|e| e.id))
             .chain(self.paintings.iter().map(|e| e.id))
             .chain(self.others.iter().map(|e| e.id))
+            .chain(self.fangs.list.iter().map(|e| e.id))
             .chain(self.crystals.iter().map(|e| e.id))
             .chain(self.dragon.iter().map(|e| e.id))
             .chain(self.ominous_spawners.iter().map(|e| e.id))
@@ -730,6 +736,9 @@ impl Entity for ItemEntity {
 }
 
 impl Entity for ExperienceOrb {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:experience_orb".into()
     }
@@ -1006,6 +1015,9 @@ impl Entity for ArmorStand {
 }
 
 impl Entity for PrimedTnt {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:tnt".into()
     }
@@ -1063,6 +1075,9 @@ impl Entity for PrimedTnt {
 }
 
 impl Entity for FallingBlock {
+    fn ticks_after_projectiles(&self) -> bool {
+        true
+    }
     fn native_type(&self) -> Cow<'static, str> {
         "minecraft:falling_block".into()
     }

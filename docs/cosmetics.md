@@ -86,6 +86,9 @@ does the asking.
   hash (they never change for one); a file past the limits is left out and not asked for again.
 - **Offline**: a request that fails leaves every answer as it was, and the next one waits 15 s, then
   30 s, doubling up to 10 minutes. A player whose item didn't arrive is asked for again after 15 s.
+- **Across restarts**: the last answers are kept beside the item files (`worn.json`: each player's item
+  ids and hashes, written only when an answer changes them). They are read only when the service doesn't
+  answer, so a game started while it is down still shows what players last wore, until it answers.
 
 ## In the game
 
@@ -111,3 +114,54 @@ The launcher shows items on the player's own skin without the game: `preview::re
 player model at rest (vanilla's `PlayerModel` boxes on a 64×64 skin, wide or slim arms, the outer
 layers included) and each item on its bone on the CPU, with a depth buffer and cutout alpha, seen
 from any angle.
+
+## The Wardrobe's account check (`launcher/src/wardrobe.rs`)
+
+The launcher talks to the same service for the player's own items: the catalogue, what the account
+owns, claiming the founder set while its window is open, what each slot wears and whether other
+players see it.
+
+- **Who the player is**: the service hands out a one-time server id (`POST /v1/auth/start`), the
+  launcher tells Mojang's session server that the account joins it
+  (`account::session::join_server`, the call a client makes before joining an online-mode server),
+  and the service asks Mojang (`hasJoined`) before it answers `POST /v1/auth/finish` with a
+  session of its own. The Minecraft token goes to Mojang only; the service never sees it.
+- **Then**: `GET /v1/me`, `POST /v1/claim`, `PUT /v1/equipped {"slot", "item"}` and
+  `PUT /v1/visible {"visible"}` ("Show my cosmetics": off, `/v1/worn` leaves the player out) with
+  that session (`Authorization: Bearer`), kept in memory for the time the service gave, less a
+  minute.
+- **The founder set** is free and can be claimed only between the window's start and end; after
+  that it is retired for good and never offered again. Players who claimed it keep it.
+- **Launcher themes** (`"slot": "theme"`) have no item file: the catalogue carries their six sky
+  stops and accent hue, and the game never asks for them.
+- **Offline**: the last catalogue and answer, and the changes not sent yet, are kept per account
+  in the launcher's data folder (`wardrobe/<uuid>.json`; never a session or token), item files
+  under their hash. A change shows at once; the ones the service couldn't take (offline, or a
+  failure on its side) are sent in order when it answers again, and a newer change of the same
+  slot replaces a waiting one.
+
+## The Wardrobe page (`launcher/src/wardrobe_page.rs`)
+
+A top-bar page between Servers and Versions, shown only with the flag on, for the selected Microsoft
+account (signed out, it asks you to sign in):
+
+- **A row per slot** (head, back, shoulder pet, name tag, launcher theme) with what it wears,
+  "Nothing equipped" or "None owned yet"; **your player** in the middle, on your own skin, wearing
+  it, with your name tag style over the head (`horizon_cosmetics::preview`); **what you own for the
+  chosen slot**, "Nothing" first. Equipping shows at once.
+- **The founder set**: a line to claim it while its window is open, and once the window is closed,
+  that it was free until that day and isn't offered any more.
+- **Three switches**: *Show my cosmetics* (the account's, on the service: off, everyone sees you
+  without them), *Hide other players' cosmetics* and *Show other players' auras and trails* (off by
+  default). The last two are lines of the game's `horizon-extras.txt` (`horizon_cosmetics::prefs`:
+  `cosmeticsOthers` = `shown`, `name_tags` or `hidden`, `cosmeticsAuras`), the same ones the
+  game's settings change.
+- **States**: offline, the page keeps working from what's kept on disk and says how many changes
+  wait to sync; a service failure says what you wear still shows in the game, with *Try again* and
+  *Copy details* (host, status, time).
+- **A launcher theme** worn (First Light) replaces the sky's six stops and the accent's hue
+  (`Saved::theme`, `Theme::with_sky`), from the outfit kept on disk, so it holds offline too. Taking
+  it off brings the player's own look back.
+- `HORIZON_LAUNCHER_PAGE=wardrobe` in a development build shows the page for a made-up account
+  wearing `HORIZON_COSMETICS_LOCAL`'s items; `HORIZON_WARDROBE_STATE=offline|failed|closed|empty`
+  shows that state, `theme` wears First Light.

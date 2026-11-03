@@ -528,7 +528,7 @@ impl Game<'_> {
                 if all {
                     self.physical_keys.insert(KeyCode::ControlLeft);
                 }
-                let result = self.key_pressed(KeyCode::KeyQ);
+                let result = self.key_pressed(KeyCode::KeyQ, KeyCode::KeyQ);
                 if all && !ctrl {
                     self.physical_keys.remove(&KeyCode::ControlLeft);
                 }

@@ -535,6 +535,14 @@ impl Loading {
                     let _ = std::fs::create_dir_all(&dir);
                     packs::open_folder(&dir);
                 }
+                Event::DownloadPack(i) => {
+                    let dir = packs::packs_dir();
+                    if let Some(screen) = &mut self.menu.options.pack_screen
+                        && let Some(browser) = &mut screen.browser
+                    {
+                        browser.download(i, &dir, horizon_core::VANILLA_VERSION);
+                    }
+                }
                 Event::DataPacks(ids) => {
                     let resources = self.vanilla_root.clone();
                     if let Some(title) = &mut self.menu.title {
@@ -596,6 +604,11 @@ impl Loading {
                     self.settings.narrator(),
                     &mut self.menu.narrator_toast,
                 ),
+                // The startup menu has no screen stack for ConfirmLinkScreen;
+                // the link opens directly, as the menu's other links do.
+                Event::AccessibilityHelp => {
+                    super::packs::open_uri(super::options::ACCESSIBILITY_HELP_LINK)
+                }
                 // Mods' settings pages open only in a running game.
                 Event::NativeSettings(_) | Event::NativeButton(..) => {}
                 // The startup menu runs before the game opens a control socket,
