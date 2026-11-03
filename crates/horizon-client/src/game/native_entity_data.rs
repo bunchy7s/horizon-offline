@@ -49,7 +49,7 @@ impl Game<'_> {
         Some(self.tags_of(self.native_entity_target(entity)?))
     }
     /// Adds tag `tag` (`Entity.addTag`): false when it has it already, holds
-    /// 1024, or the handle is stale. API @API:entity_data@.
+    /// 1024, its kind can't store tags yet, or the handle is stale. API @API:entity_data@.
     pub(super) fn native_entity_add_tag(&mut self, entity: EntityRef, tag: &str) -> bool {
         let Some(t) = self.native_entity_target(entity) else {
             return false;
@@ -59,8 +59,9 @@ impl Game<'_> {
             return false;
         }
         tags.push(tag.to_owned());
-        self.set_entity_tags(t, &tags);
-        true
+        // False, not a silent no-op, for kinds whose tags aren't stored yet
+        // (ominous item spawners, falling blocks, rockets).
+        self.set_entity_tags(t, &tags)
     }
     /// Removes tag `tag` (`Entity.removeTag`): false when it didn't have it.
     /// API @API:entity_data@.
@@ -71,11 +72,7 @@ impl Game<'_> {
         let mut tags = self.tags_of(t);
         let before = tags.len();
         tags.retain(|x| x != tag);
-        if tags.len() == before {
-            return false;
-        }
-        self.set_entity_tags(t, &tags);
-        true
+        tags.len() != before && self.set_entity_tags(t, &tags)
     }
     /// The entity's name as plain text (`Entity.getName`): its custom name,
     /// a player's name, else its type's name. API @API:entity_data@.

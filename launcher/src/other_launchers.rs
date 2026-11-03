@@ -478,7 +478,7 @@ pub fn copy_game(found: &Found, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The loader `found` runs, when Horizon installs it (Fabric, Quilt): at the same version.
+/// The loader `found` runs, at the same version, when Horizon installs it ([`loaders::Kind`]).
 pub fn loader(found: &Found) -> Option<loaders::Loader> {
     let l = found.loader.as_ref()?;
     Some(loaders::Loader {

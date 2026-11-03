@@ -929,6 +929,20 @@ impl Hub {
         }
     }
 
+    /// `TransferCommand.transfer`: the guest's client is handed to another
+    /// server (`ClientboundTransferPacket`, the play state's `Transfer`); the
+    /// client closes the connection and logs in there. Nothing disconnects the
+    /// player here: as in vanilla, the close comes from the client.
+    pub fn transfer(&self, conn: u32, host: &str, port: i32) {
+        self.send_to(
+            conn,
+            &C::Transfer(horizon_protocol::packets::configuration::Transfer {
+                host: host.to_owned(),
+                port,
+            }),
+        );
+    }
+
     /// Whether a player of `permission` sees the player `uuid`: not one a
     /// native mod hid from players below a higher level.
     pub fn sees(&self, permission: u8, uuid: u128) -> bool {
@@ -3083,7 +3097,15 @@ impl Hub {
         // ServerPlayer.tick: tickClientLoadTimeout.
         g.load_timeout = g.load_timeout.saturating_sub(1);
         let mut budget = PACKETS_PER_TICK;
+        // An action the game runs after this pass has a move queued behind it: the
+        // move waits for the next tick, but the arm swing the client sent right after
+        // the action is still handled with it, as vanilla handles both in this tick
+        // (the swing starts the attack strength again, #7817).
+        let mut held = false;
         while budget > 0 {
+            if held && !matches!(self.guests[i].inbox.front(), Some((S::Punch(_), _))) {
+                break;
+            }
             let Some((packet, bytes)) = self.guests[i].inbox.pop_front() else {
                 break;
             };
@@ -3102,6 +3124,7 @@ impl Hub {
                 | S::ChunkBatchReceived(_)
                 | S::ClientInformation(_)
                 | S::RecipeBookChangeSettings(_)
+                | S::RecipeBookSeenRecipe(_)
                 | S::ClientTickEnd(_)
                 | S::KeepAlive(_)
                 | S::Pong(_) => false,
@@ -3207,9 +3230,7 @@ impl Hub {
                 S::Attack(p) => {
                     if !self.anticheat_attack(i, p.id, events) {
                         events.push(HostEvent::Packet(conn, Box::new(S::Attack(p))));
-                        if self.move_queued(i) {
-                            break;
-                        }
+                        held = self.move_queued(i);
                     }
                 }
                 S::Punch(p) => {
@@ -3224,6 +3245,19 @@ impl Hub {
                     }
                     g.position_this_tick = false;
                     self.anticheat_tick_end(i, events);
+                }
+                // ServerGamePacketListenerImpl.handleRecipeBookSeenRecipePacket:
+                // the display the player looked at stops being a new one, so
+                // the next `RecipeBookAdd` it is sent does not animate.
+                S::RecipeBookSeenRecipe(p) => {
+                    let seen = self
+                        .sync
+                        .advancements
+                        .recipe_of_display(p.recipe)
+                        .map(str::to_owned);
+                    if let Some(id) = seen {
+                        self.guests[i].recipe_book.remove_highlight(&id);
+                    }
                 }
                 // ServerGamePacketListenerImpl.handleRecipeBookChangeSettingsPacket.
                 S::RecipeBookChangeSettings(p) => {
@@ -3301,6 +3335,11 @@ impl Hub {
                 // OPEN_INVENTORY (the ridden mount's inventory) and
                 // START_FALL_FLYING (checked against the guest's chest slot
                 // and effects) are the game's.
+                // START_RIDING_JUMP and STOP_RIDING_JUMP: the vehicle's
+                // PlayerRideableJumping (handleStartJump / handleStopJump).
+                S::PlayerCommand(p) if matches!(p.action, 3 | 4) => {
+                    events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
+                }
                 S::PlayerCommand(p) if matches!(p.action, 5 | 6) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerCommand(p))));
                 }
@@ -3325,22 +3364,16 @@ impl Hub {
                 // game's, run after this pass. A move queued behind it is checked
                 // against the block the player just broke and falls through, so it
                 // would be sent back; it waits for the next tick, when the block is
-                // gone, as vanilla handles the packets in order. So does everything
-                // queued before that move: the arm swing (Punch) comes between the dig
-                // and the move.
+                // gone, as vanilla handles the packets in order.
                 S::PlayerAction(p) if p.action <= 3 => {
                     events.push(HostEvent::Packet(conn, Box::new(S::PlayerAction(p))));
-                    if self.move_queued(i) {
-                        break;
-                    }
+                    held = self.move_queued(i);
                 }
                 // handleUseItem uses the player's position and known movement now:
                 // a later move must not overtake a throw before the game runs it.
                 S::UseItem(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::UseItem(p))));
-                    if self.move_queued(i) {
-                        break;
-                    }
+                    held = self.move_queued(i);
                 }
                 // handleUseItemOn is the game's too, and BlockItem.canPlace checks
                 // the player's box where they clicked from (Level.isUnobstructed), as
@@ -3350,17 +3383,13 @@ impl Hub {
                 // placer's client plays (BlockItem.place's playSound(player, ...)).
                 S::UseItemOn(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::UseItemOn(p))));
-                    if self.move_queued(i) {
-                        break;
-                    }
+                    held = self.move_queued(i);
                 }
                 // handleInteract is the game's too, like handleAttack above: a move queued
                 // behind it waits for the next tick.
                 S::Interact(p) => {
                     events.push(HostEvent::Packet(conn, Box::new(S::Interact(p))));
-                    if self.move_queued(i) {
-                        break;
-                    }
+                    held = self.move_queued(i);
                 }
                 // ContainerInput's codec (ByIdMap, OutOfBoundsStrategy.ZERO) reads an
                 // unknown click type as PICKUP.
@@ -4270,6 +4299,50 @@ mod tests {
         (hub, rx)
     }
 
+    /// `handlePlayerCommand` START_RIDING_JUMP (3) and STOP_RIDING_JUMP (4): the
+    /// hub used to drop both, so a guest's released jump bar never reached the
+    /// mount they ride, and neither did the horse's rear or its jump sound.
+    #[test]
+    fn a_guests_riding_jump_reaches_the_game() {
+        let (mut hub, _rx) = hub_with_a_guest();
+        // hasClientLoaded: the handlers ignore a player's actions until then.
+        hub.guests[0].load_timeout = 0;
+        let mut world = crate::world::World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 100;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        for action in [3, 4] {
+            hub.guests[0].inbox.push_back((
+                S::PlayerCommand(play::PlayerCommand {
+                    id: 1,
+                    action,
+                    data: 75,
+                }),
+                4,
+            ));
+            hub.guests[0].inbox_bytes += 4;
+            let events = hub.tick(&mut ctx);
+            let reached = events.iter().any(|event| {
+                matches!(event, HostEvent::Packet(1, packet) if matches!(&**packet, S::PlayerCommand(c) if c.action == action && c.data == 75))
+            });
+            assert!(reached, "action {action} reached the game");
+        }
+    }
+
     /// The durations of the effect packets the guest was sent.
     fn sent_durations(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<i32> {
         let mut durations = Vec::new();
@@ -4284,6 +4357,40 @@ mod tests {
             }
         }
         durations
+    }
+
+    /// The host and port of the transfer packets the guest was sent.
+    fn sent_transfers(rx: &std::sync::mpsc::Receiver<crate::lan::Out>) -> Vec<(String, i32)> {
+        let mut sent = Vec::new();
+        while let Ok(out) = rx.try_recv() {
+            let crate::lan::Out::Packet(body) = out else {
+                continue;
+            };
+            let mut r = horizon_protocol::buf::Reader::new(&body);
+            let id = r.varint().unwrap();
+            if let Ok(C::Transfer(p)) = C::decode(id, r.rest()) {
+                sent.push((p.host, p.port));
+            }
+        }
+        sent
+    }
+
+    /// `TransferCommand.transfer`: the target's client is sent the play-state
+    /// `ClientboundTransferPacket` with the hostname and the port, and nothing
+    /// else disconnects it — the client closes and logs in there itself
+    /// (`ClientPacketListener.handleTransfer`).
+    #[test]
+    fn a_transferred_player_is_sent_the_host_and_the_port() {
+        let (hub, rx) = hub_with_a_guest();
+        hub.transfer(1, "example.net", 25566);
+        assert_eq!(sent_transfers(&rx), vec![("example.net".to_owned(), 25566)]);
+        // A connection the hub does not know gets nothing.
+        hub.transfer(9, "example.net", 25566);
+        assert_eq!(
+            sent_transfers(&rx),
+            Vec::<(String, i32)>::new(),
+            "an unknown connection is not a player of this server"
+        );
     }
 
     /// `/effect give Bob minecraft:speed 30 1` from a dedicated server's
@@ -4317,6 +4424,64 @@ mod tests {
         late.guests[0].effects.tick();
         late.sync_all_effects();
         assert_eq!(sent_durations(&rx), vec![599]);
+    }
+
+    /// Minecraft.startAttack sends the attack, then the arm swing, and the next client tick
+    /// a turn. Vanilla handles both in the tick they came in; the swing starts the attack
+    /// strength again, so a swing left for the next tick took a tick off every hit's
+    /// charge: a guest's fists, 5 ticks apart, no longer broke a minecart (#7817).
+    #[test]
+    fn an_attacks_swing_goes_with_it_past_the_move_behind() {
+        let (mut hub, _rx) = hub_with_a_guest();
+        hub.guests[0].load_timeout = 0;
+        let inbox = &mut hub.guests[0].inbox;
+        inbox.push_back((S::Attack(play::Attack { id: 7 }), 0));
+        inbox.push_back((S::Punch(horizon_protocol::packets::Empty), 0));
+        inbox.push_back((
+            S::MovePlayerRot(play::MovePlayerRot {
+                yaw: 90.0,
+                pitch: 0.0,
+                flags: 1,
+            }),
+            0,
+        ));
+        let mut world = World::new(horizon_world::registry::BlockStateId(0), 0);
+        let mut next_entity = 2;
+        let border = crate::worldborder::WorldBorder::default();
+        let mut ctx = TickCtx {
+            world: &mut world,
+            entities: &[],
+            next_entity: &mut next_entity,
+            spawn: [0.5, 64.0, 0.5],
+            difficulty: 2,
+            difficulty_locked: false,
+            clock_rate: 1.0,
+            tick_rate: 20.0,
+            tick_frozen: false,
+            tick_steps: Default::default(),
+            collision: None,
+            border: &border,
+            streaming: None,
+        };
+        let events = hub.drain_packets(&mut ctx);
+        let handled: Vec<&S> = events
+            .iter()
+            .filter_map(|e| match e {
+                HostEvent::Packet(_, p) => Some(&**p),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(handled[..], [S::Attack(_), S::Punch(_)]),
+            "the game was handed {handled:?}"
+        );
+        assert!(
+            matches!(
+                hub.guests[0].inbox.iter().collect::<Vec<_>>()[..],
+                [(S::MovePlayerRot(_), _)]
+            ),
+            "the turn did not wait for the next tick"
+        );
     }
 
     /// The owner's own shoulder parrots are sent when a slot changes.

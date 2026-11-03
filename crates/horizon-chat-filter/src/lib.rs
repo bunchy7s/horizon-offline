@@ -125,7 +125,11 @@ impl Filter {
                     Some(w) => (w, true),
                     None => (word, false),
                 };
-                f.allowed.push((normalise::word(word), prefix));
+                // An allow entry with no letters would allow every word (an empty prefix).
+                let runs = normalise::word(word);
+                if !runs.is_empty() {
+                    f.allowed.push((runs, prefix));
+                }
                 continue;
             }
             let (kind, word) = match line.as_bytes()[0] {
