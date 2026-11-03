@@ -339,6 +339,44 @@ fn entity_arguments_suggest_the_selected_entity() {
     }
 }
 #[test]
+fn whitespace_is_what_java_character_is_whitespace_says() {
+    let java: Vec<u32> = [
+        0x09..=0x0D,
+        0x1C..=0x20,
+        0x1680..=0x1680,
+        0x2000..=0x2006,
+        0x2008..=0x200A,
+        0x2028..=0x2029,
+        0x205F..=0x205F,
+        0x3000..=0x3000,
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    let ours: Vec<u32> = (0..=0x10FFFF)
+        .filter_map(char::from_u32)
+        .filter(|c| Reader::is_java_whitespace(*c))
+        .map(u32::from)
+        .collect();
+    assert_eq!(ours, java);
+
+    let mut r = Reader::new("\u{1F}\u{3000} x");
+    r.skip_whitespace();
+    assert_eq!(r.peek(), 'x');
+    for nbsp in ["\u{A0}", "\u{2007}", "\u{202F}", "\u{85}"] {
+        let text = format!("{nbsp}x");
+        let mut r = Reader::new(&text);
+        r.skip_whitespace();
+        assert_eq!(r.remaining(), text, "{:?} is not whitespace", nbsp);
+    }
+
+    let reg = reg();
+    let parse = |text: &str| selector::parse(&mut Reader::new(text), &reg, true).is_ok();
+    assert!(parse("@e[ type=minecraft:pig]"));
+    assert!(parse("@e[\u{1F}type=minecraft:pig]"));
+    assert!(!parse("@e[\u{A0}type=minecraft:pig]"));
+}
+#[test]
 fn a_uuid_selects_by_entity_uuid() {
     // EntitySelectorParser.parseNameOrUUID: a UUID sets entityUUID and
     // includesEntities, never playerName (which findEntities checks first).
