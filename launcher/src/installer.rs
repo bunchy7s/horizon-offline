@@ -532,9 +532,16 @@ mod tests {
         let link = dir.join("Horizon Launcher.lnk");
         write_link(&link, &exe).unwrap();
         // The bug this guards: a link whose target the shell read as empty, so a double click did nothing.
+        // CI's temp folder can be its 8.3 short name (RUNNER~1); the shell answers with the long
+        // one, so compare against the file system's own spelling of the path.
+        let exe_path = fs::canonicalize(&exe)
+            .unwrap()
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_owned();
         assert_eq!(
             target_of(&link).to_lowercase(),
-            exe.to_string_lossy().to_lowercase()
+            exe_path.to_lowercase()
         );
         // The uninstaller finds its shortcuts by the program's path inside them.
         assert!(points_to(&link, &exe));
