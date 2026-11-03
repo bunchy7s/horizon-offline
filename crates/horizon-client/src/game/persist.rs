@@ -556,6 +556,7 @@ impl Game<'_> {
             self.remember_uuid(self.next_entity, uuid, &tag);
             let uuid = self.uuid_for(self.next_entity);
             self.falling.push(FallingBlock {
+                join: Default::default(),
                 id: self.next_entity,
                 state,
                 // DATA_START_POS is not persisted by vanilla.
@@ -626,6 +627,7 @@ impl Game<'_> {
                 _ => 80,
             };
             self.tnts.push(super::tnt::PrimedTnt {
+                join: Default::default(),
                 no_gravity: entity_nbt::flag(&tag, "NoGravity"),
                 id,
                 position,

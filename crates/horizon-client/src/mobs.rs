@@ -1175,6 +1175,8 @@ impl Extra {
 
 #[derive(Clone, Debug)]
 pub struct Mob {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub id: u32,
     pub kind: Arc<MobType>,
     pub position: Vec3,
@@ -2694,6 +2696,7 @@ impl Mob {
         );
         let _ = random.next_int();
         let mut mob = Self {
+            join: Default::default(),
             id,
             health: kind.max_health,
             position,
@@ -4835,3 +4838,4 @@ mod totem_tests {
         );
     }
 }
+crate::impl_joined!(Mob);

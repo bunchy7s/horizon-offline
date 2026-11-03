@@ -1513,6 +1513,7 @@ mod tests {
     #[test]
     fn reeling_an_item_requests_an_immediate_motion_update() {
         let mut item = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             health: 5,
             fire_ticks: 0,

@@ -649,6 +649,7 @@ mod tests {
             guest: None,
             no_gravity: false,
             power: 4.0,
+            join: Default::default(),
         };
         assert!(Entity::ticks_after_projectiles(&tnt));
         let arrow = Projectile::new(ProjectileKind::Snowball, Vec3::ZERO, None);

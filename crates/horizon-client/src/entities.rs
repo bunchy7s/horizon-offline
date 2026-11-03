@@ -93,6 +93,8 @@ pub use fluids::update_entity_fluids;
 
 #[derive(Clone, Debug)]
 pub struct ItemEntity {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub health: i32,
     pub fire_ticks: i32,
     pub id: u32,
@@ -836,6 +838,8 @@ pub fn merge_with_neighbours(
 /// ExperienceOrb: gravity 0.03, homing towards the player within 8 blocks.
 #[derive(Clone, Debug)]
 pub struct ExperienceOrb {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     /// The entity id servers track it by.
     pub id: u32,
     pub position: Vec3,
@@ -1333,6 +1337,8 @@ impl ItemFrame {
 /// An armor stand (`ArmorStand`).
 #[derive(Clone, Debug)]
 pub struct ArmorStand {
+    /// When it joined its list ([`crate::join_seq`]); set by the list, not by the spawn site.
+    pub join: crate::join_seq::JoinSeq,
     pub fire_ticks: i32,
     pub health: f32,
     pub id: u32,
@@ -1525,6 +1531,7 @@ impl ArmorStand {
     }
     pub fn new(id: u32, position: Vec3, yaw: f32) -> Self {
         Self {
+            join: Default::default(),
             fire_ticks: 0,
             health: 20.0,
             id,
@@ -1897,6 +1904,7 @@ mod fire_environment_tests {
             )
             .unwrap();
         let make = |id: &str| ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -2029,6 +2037,7 @@ mod destroyed_bundle_environment_tests {
             ItemStack::new("minecraft:diamond", 1),
         ];
         let mut bundle = ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -2125,6 +2134,7 @@ mod merge_tests {
     fn item(id: &str, count: u32, x: f64, age: i32) -> ItemEntity {
         let at = Vec3::new(x, 64.0, 0.5);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 0,
             thrower: None,
@@ -2340,6 +2350,7 @@ mod world_border_tests {
                 border,
             );
             let mut orb = ExperienceOrb {
+                join: Default::default(),
                 no_gravity: false,
                 id: 2,
                 position: Vec3::new(24.0, 4.0, 20.5),
@@ -2547,6 +2558,7 @@ mod honey_slide_tests {
     pub(super) fn falling_item(x: f64, y: f64, z: f64, vx: f64, vy: f64, vz: f64) -> ItemEntity {
         let at = Vec3::new(x, y, z);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -2695,6 +2707,7 @@ mod slime_bounce_tests {
     fn grounded_item() -> ItemEntity {
         let at = Vec3::new(0.5, 2.0, 0.5);
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -3400,6 +3413,7 @@ mod item_destroyed_tests {
             .map(|(id, count)| ItemStack::new(id, *count))
             .collect();
         ItemEntity {
+            join: Default::default(),
             no_gravity: false,
             id: 1,
             thrower: None,
@@ -3485,3 +3499,4 @@ mod item_destroyed_tests {
         );
     }
 }
+crate::impl_joined!(ItemEntity, ExperienceOrb, ArmorStand);
