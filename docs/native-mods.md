@@ -353,17 +353,16 @@ a version. Helpers (`native_text`, `native_player`…) have no hook entry; the c
 the generated `Host` offers, and they are kept stable as the hook points are. A test (`catalog_matches_hook_points`) keeps the
 catalog and the hook points' sources (`native_hooks.rs`, `gfx/native_render.rs`, `horizon-world`'s `loot.rs`) in step.
 
-### Damage with the attacker, weapon and geometry
+### Host-aware weapon damage (API next)
 
-`living_incoming_damage` (API 50) is one hook for every hit: it gets the attacker's network id,
-the weapon (a player's selected stack, a mob's main hand; `weapon.enchantments()` exposes the
-enchantment ids and levels), the hit's source position, and a mob victim's position and look
-vector, so an enchantment can tell a blow from behind and change `amount`. The weapon and the
-attacker come from the attack scope the game opens around an attack and are recorded only while
-a native mod is loaded; the positions are none for a player or the dragon as victim. It has no
-`Host`: the game is in the middle of the hit, so read the world from a tick hook. These arguments
-were added after the hook first shipped, so a mixin injection that names
-`native_living_incoming_damage` as a raw target must take them too.
+`living_incoming_damage_v2` is an additive hook, like `menu_button_v2`; v1 keeps its signature and firing point.
+It receives a mutable `Host`, attacker/victim network ids, damage type, optional source position, victim position
+and current view vector, and an optional weapon snapshot. `weapon.enchantments()` exposes enchantment ids and
+levels. Change `amount` or return `Flow::Cancel`; the host can read the world and play sounds through its helpers.
+It currently fires for player-to-mob melee, sweep and spear hits (including LAN guests), after the victim's invulnerability check (an invulnerable or dead victim fires nothing) and before
+v1. Unless canceled, v1 receives the modified amount. It is not a replacement for v1 on
+projectiles, player victims, dragons, mob attacks or environmental damage. There is no extra per-hit allocation
+without loaded mods. The fragment `living_incoming_damage_v2.json` receives its API number at merge.
 
 ### The build's warnings
 
