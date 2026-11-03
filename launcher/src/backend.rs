@@ -2449,7 +2449,9 @@ pub fn client(tag: &str) -> Result<Command, String> {
 /// [`client`], playing as `who` for this launch only (`play --account`).
 pub fn client_as(tag: &str, who: Option<&account::Player>) -> Result<Command, String> {
     let (session, offline) = match who {
-        None => account::session_for_game(&game_home(), false).map_err(|e| e.to_string()),
+        // This fork plays without a Microsoft account (tests/owner_gate.rs): with no owner the
+        // gate still lets the game start offline, so the CLI's play needs no account either.
+        None => account::session_for_game(&game_home(), true).map_err(|e| e.to_string()),
         Some(who) => account::session_for_game_as(&game_home(), who),
     }
     .map_err(|refused| format!("{refused} Sign in with `horizon-launcher account sign-in`."))?;
