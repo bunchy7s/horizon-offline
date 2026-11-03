@@ -1,8 +1,11 @@
-//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist` and
-//! `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands, PardonCommand,
-//! BanIpCommands, PardonIpCommand, BanListCommands, WhitelistCommand):
-//! commands of a dedicated server, run on its lists by an operator in game
-//! (the console has its own handlers in game/dedicated.rs).
+//! `/op`, `/deop`, `/ban`, `/pardon`, `/ban-ip`, `/pardon-ip`, `/banlist`,
+//! `/transfer` and `/whitelist` (OpCommand, DeOpCommands, BanPlayerCommands,
+//! PardonCommand, BanIpCommands, PardonIpCommand, BanListCommands,
+//! TransferCommand, WhitelistCommand): commands of a dedicated server, run on
+//! its lists by an operator in game (the console has its own handlers in
+//! game/dedicated.rs). Also `/stop`, `/save-all`, `/save-off` and `/save-on`
+//! (StopCommand, SaveAllCommand, SaveOffCommand, SaveOnCommand), on the
+//! switches the lists share.
 use super::{Arg, Context, Game, R, Target, err};
 use horizon_client::{
     server::user_lists::{BanEntry, NameAndId, OpEntry, WhiteEntry},
@@ -20,6 +23,62 @@ impl Game<'_> {
             (Some(lists), true) => Ok(lists.clone()),
             _ => Err(err("command.unknown.command", &[])),
         }
+    }
+
+    /// StopCommand: the server loop (game/dedicated.rs) ends after this tick.
+    pub(super) fn cmd_stop(&mut self) -> R<i32> {
+        let lists = self.dedicated_lists()?;
+        self.feedback(Text::translate("commands.stop.stopping", &[]));
+        lists.lock().unwrap().stop = true;
+        Ok(1)
+    }
+
+    /// SaveAllCommand. Every save waits for the chunks to be written, so
+    /// `flush` changes nothing.
+    pub(super) fn cmd_save_all(&mut self) -> R<i32> {
+        self.dedicated_lists()?;
+        self.feedback(Text::translate("commands.save.saving", &[]));
+        if self.lan_acting.is_some() {
+            // The acting guest's record holds the game's state until their
+            // turn ends: saving now would write it to their file.
+            // shortcut: the other operators aren't told of a guest's save, add it if anyone asks.
+            self.save_after_guest_turn = true;
+            return Ok(1);
+        }
+        let reply = self.save_all_reply();
+        self.feedback(reply);
+        Ok(1)
+    }
+
+    /// Save everything; `commands.save.success`, or `commands.save.failed` in red.
+    pub(in crate::game) fn save_all_reply(&mut self) -> Text {
+        match self.save_game() {
+            Ok(()) => Text::translate("commands.save.success", &[]),
+            Err(e) => {
+                log::error!("Horizon: /save-all: {e}");
+                Text::translate("commands.save.failed", &[]).with_color(horizon_client::text::RED)
+            }
+        }
+    }
+
+    /// SaveOffCommand and SaveOnCommand.
+    pub(super) fn cmd_auto_save(&mut self, enabled: bool) -> R<i32> {
+        let lists = self.dedicated_lists()?;
+        if !super::super::dedicated::set_auto_save(&lists, enabled) {
+            let already = if enabled {
+                "commands.save.alreadyOn"
+            } else {
+                "commands.save.alreadyOff"
+            };
+            return Err(err(already, &[]));
+        }
+        let done = if enabled {
+            "commands.save.enabled"
+        } else {
+            "commands.save.disabled"
+        };
+        self.feedback(Text::translate(done, &[]));
+        Ok(1)
     }
 
     /// `NameAndId` of a player target.
@@ -270,6 +329,62 @@ impl Game<'_> {
         for (uuid, _) in &players {
             self.kick_uuid(*uuid, translatable("multiplayer.disconnect.ip_banned", &[]));
         }
+        Ok(players.len() as i32)
+    }
+
+    /// `TransferCommand.register` and `TransferCommand.transfer`: each target's
+    /// client is handed to `hostname:port` (`ClientboundTransferPacket`), and
+    /// the source is told who went — the player's name for one, the count for
+    /// several. Without a players argument the source's own player is the
+    /// target, as `getPlayerOrException` asks.
+    pub(super) fn cmd_transfer(&mut self, ctx: &Context) -> R<i32> {
+        let Some(Arg::Str(hostname)) = ctx.get("hostname").cloned() else {
+            return Ok(0);
+        };
+        // `IntegerArgumentType.getInteger(c, "port")`, else 25565.
+        let port = match ctx.get("port") {
+            Some(Arg::Int(port)) => *port,
+            _ => 25565,
+        };
+        let targets = if ctx.get("players").is_some() {
+            self.entities(ctx, "players", true)?
+        } else if self.lan_acting.is_none() {
+            // CommandSourceStack.getPlayerOrException: a console or a command
+            // block has no player to send.
+            return Err(err("permissions.requires.player", &[]));
+        } else {
+            vec![Target::Player]
+        };
+        let players: Vec<(u32, String)> = targets
+            .iter()
+            .filter_map(|target| {
+                let conn = match *target {
+                    Target::Player => self.lan_acting?,
+                    Target::Guest(conn) => conn,
+                    _ => return None,
+                };
+                Some((conn, self.command_guest(conn)?.name.clone()))
+            })
+            .collect();
+        if players.is_empty() {
+            return Err(err("commands.transfer.error.no_players", &[]));
+        }
+        if let Some(host) = self.lan.as_mut() {
+            for (conn, _) in &players {
+                host.hub.transfer(*conn, &hostname, port);
+            }
+        }
+        // CommandResponseTracker.messages: one player by display name, several
+        // by count, both with the hostname and the port.
+        let lit = |s: &str| Text::literal(s.to_owned());
+        let (key, first) = match players.len() {
+            1 => ("commands.transfer.success.single", lit(&players[0].1)),
+            n => ("commands.transfer.success.multiple", lit(&n.to_string())),
+        };
+        self.feedback(Text::translate(
+            key,
+            &[first, lit(&hostname), lit(&port.to_string())],
+        ));
         Ok(players.len() as i32)
     }
 

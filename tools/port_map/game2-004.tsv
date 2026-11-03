@@ -100,7 +100,7 @@ Bogged.spawnShearedMushrooms	port	crates/horizon-client/src/game/creatures.rs::G
 WitherSkeleton.registerGoals	port	crates/horizon-client/src/mobs/undead.rs::register	piglin and piglin brute target at priority 3, then the skeleton goals
 WitherSkeleton.canHoldItem	port	crates/horizon-client/src/mobs/equip.rs::wants_to_pick_up	the wither_skeleton_disliked_weapons tag is refused
 WitherSkeleton.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::skeleton	attack damage 4 for wither skeletons
-WitherSkeleton.getArrow	missing		an arrow shot by a wither skeleton is not set on fire for 100 seconds
+WitherSkeleton.getArrow	port	crates/horizon-client/src/mobs/undead.rs::perform_ranged_attack	the arrow the bow made is `igniteForSeconds(100)` before the shot, so a wither skeleton's arrow burns for 2000 ticks
 Spider.registerGoals	port	crates/horizon-client/src/mobs/hostile.rs::register	spider goals: leap at target and the spider melee that gives up in bright light
 Spider.isClimbing	skip:other		getter; Horizon reads the mob's climbing field
 Spider.setClimbing	inline	crates/horizon-client/src/mobs/ai.rs::ai_step	climbing set from the horizontal collision each tick

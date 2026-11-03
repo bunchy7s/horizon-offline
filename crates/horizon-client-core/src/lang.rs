@@ -79,8 +79,26 @@ impl ResourceSource for Bundled {
             "assets/horizon/lang/uk_ua.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/uk_ua.json")
             }
+            "assets/horizon/lang/hi_in.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/hi_in.json")
+            }
+            "assets/horizon/lang/id_id.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/id_id.json")
+            }
             "assets/horizon/lang/tr_tr.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/tr_tr.json")
+            }
+            "assets/horizon/lang/ko_kr.json" | "assets/horizon/lang/ko.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/ko_kr.json")
+            }
+            "assets/horizon/lang/hr_hr.json" | "assets/horizon/lang/hr.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/hr_hr.json")
+            }
+            "assets/horizon/lang/pt_pt.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/pt_pt.json")
+            }
+            "assets/horizon/lang/ur_pk.json" => {
+                include_str!("../../horizon-client/assets/horizon/lang/ur_pk.json")
             }
             "assets/horizon/lang/de_de.json" | "assets/horizon/lang/de_at.json" => {
                 include_str!("../../horizon-client/assets/horizon/lang/de_de.json")

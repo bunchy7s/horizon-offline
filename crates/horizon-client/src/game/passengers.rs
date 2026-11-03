@@ -140,7 +140,8 @@ impl Game<'_> {
                         continue;
                     };
                     let m = &mut self.mobs[i];
-                    let offset = riders::vehicle_attachment(m);
+                    // EntityType.TEXT_DISPLAY's box is zero wide.
+                    let offset = riders::vehicle_attachment(m, 0.0);
                     m.position = Vec3::new(at.x, at.y - offset, at.z);
                     m.previous = Vec3::new(before.x, before.y - offset, before.z);
                     m.velocity = Vec3::ZERO;
@@ -170,8 +171,9 @@ impl Game<'_> {
                 let (pos, prev) = (vehicle.position, vehicle.previous);
                 let (yaw, prev_yaw) = (vehicle.yaw, vehicle.previous_yaw);
                 let (body, prev_body) = (vehicle.body_yaw, vehicle.previous_body_yaw);
+                let vehicle_width = vehicle.width();
                 let m = &mut self.mobs[i];
-                let offset = riders::vehicle_attachment(m);
+                let offset = riders::vehicle_attachment(m, vehicle_width);
                 m.position = riders::seat(attach, offset, pos, yaw);
                 m.previous = riders::seat(attach, offset, prev, prev_yaw);
                 m.velocity = Vec3::ZERO;
