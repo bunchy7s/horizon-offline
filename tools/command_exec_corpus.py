@@ -1670,7 +1670,11 @@ def piglin_pickups():
             {'op': 'tick', 'n': 140},
             cmd('/execute if items entity @e[tag=barter,limit=1] weapon.offhand *'),
             cmd('/execute if items entity @e[tag=barter,limit=1] weapon.mainhand minecraft:gold_ingot'),
-            cmd('/execute if entity @e[type=minecraft:item]'),
+            # A baby drops nothing. What an adult's barter throws comes from the level's random (vanilla's is
+            # unseeded), and the piglin picks some of it back up, so only the gold's fate is fixed: none of it lies
+            # on the ground.
+            cmd('/execute if entity @e[type=minecraft:item]' if baby
+                else '/execute if items entity @e[type=minecraft:item] contents minecraft:gold_ingot'),
         ]
         if baby:
             ops.append(cmd('/execute if data entity @e[tag=barter,limit=1] Inventory[{id:"minecraft:golden_sword"}]'))
