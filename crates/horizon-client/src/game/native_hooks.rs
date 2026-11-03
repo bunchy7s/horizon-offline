@@ -6300,6 +6300,10 @@ impl Game<'_> {
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     pub(super) fn native_player_save_to_file(
         &mut self,
         player: u128,
