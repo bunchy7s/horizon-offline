@@ -1445,7 +1445,31 @@ pub fn mob_from_nbt(
                     )
                 }
                 "minecraft:max_health" => m.attrs.max_health = v as f32,
+                "minecraft:movement_speed"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::MovementSpeed,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::MovementSpeed,
+                        v,
+                    )
+                }
                 "minecraft:movement_speed" => m.attrs.speed = v,
+                "minecraft:attack_damage"
+                    if crate::mobs::finalize::default_value(
+                        &m,
+                        crate::mobs::finalize::Attr::AttackDamage,
+                    ) != Some(v) =>
+                {
+                    crate::mobs::finalize::set_base(
+                        &mut m,
+                        crate::mobs::finalize::Attr::AttackDamage,
+                        v,
+                    )
+                }
                 "minecraft:attack_damage" => m.attrs.attack_damage = v as f32,
                 "minecraft:attack_knockback" => m.attrs.attack_knockback = v,
                 _ => {}
