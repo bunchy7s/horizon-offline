@@ -319,3 +319,11 @@ fn a_message_costs_little() {
     }
     assert!(start.elapsed().as_millis() < 2000, "{:?}", start.elapsed());
 }
+
+#[test]
+fn an_allow_line_without_letters_allows_nothing() {
+    for line in ["!*", "!-*", "!", "!-"] {
+        let f = Filter::new(&format!("nigger\n{line}\n"));
+        assert!(f.matches("nigger"), "{line}");
+    }
+}

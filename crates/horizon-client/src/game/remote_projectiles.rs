@@ -279,6 +279,15 @@ impl Game<'_> {
         }
     }
 
+    pub(super) fn throwable_bubbles(&mut self, at: Vec<([f64; 3], [f64; 3])>) {
+        let bubble = ParticleOptions::simple(ParticleType::Bubble);
+        for (position, speed) in at {
+            for _ in 0..4 {
+                self.particles.add(&bubble, position, speed);
+            }
+        }
+    }
+
     /// `ShulkerBullet.tick` on a client: two `END_ROD` particles in its
     /// 0.3125 box (`getRandomX(0.5)`, `getRandomY`, `getRandomZ(0.5)`).
     pub(super) fn shulker_bullet_trails(&mut self) {
@@ -647,6 +656,10 @@ impl Game<'_> {
         // updates (10 to 20 ticks apart); a block stops them there, and only
         // the server decides what they hit.
         let mut projectiles = std::mem::take(&mut self.creatures.projectiles);
+        let bubbles: Vec<_> = projectiles
+            .iter()
+            .filter_map(Projectile::water_bubbles)
+            .collect();
         let mut tridents = std::mem::take(&mut self.tridents);
         {
             let w = self.mob_world_base(&[]);
@@ -683,6 +696,7 @@ impl Game<'_> {
             .collect();
         self.smoke_trails(trails);
         self.shulker_bullet_trails();
+        self.throwable_bubbles(bubbles);
         // FireworkRocketEntity.tick: a rocket attached to another entity
         // follows it, and every rocket leaves its spark trail on a client. One
         // boosting this client's own player ticks after it (`tick_own_rockets`).

@@ -1068,6 +1068,10 @@ pub struct ParticleEngine {
     /// When set, particles ask the level for other particles here instead
     /// (type, position, velocity), as the parity probe's stand-in level does.
     pub requested: Option<Vec<(ParticleOptions, [f64; 3], [f64; 3])>>,
+    /// When set, `create` records every particle the level is asked for here and
+    /// makes none: no particle's own random is drawn and no sprite is picked, so a
+    /// parity probe compares exactly what a block, fluid or entity asked for.
+    pub created_requests: Option<Vec<(ParticleOptions, [f64; 3], [f64; 3])>>,
     names: Vec<String>,
     rects: Vec<Option<Rect>>,
     /// Each named sprite, and whether `SingleQuadParticle.Layer.bySprite` puts
@@ -1155,6 +1159,7 @@ impl ParticleEngine {
             scope_eye: None,
             seeds: LegacyRandom::new(0x7365_6564),
             requested: None,
+            created_requests: None,
             names: Vec::new(),
             rects: Vec::new(),
             atlas: HashMap::new(),
@@ -1575,6 +1580,10 @@ impl ParticleEngine {
     /// `ParticleEngine.createParticle`: always spawned, but `ParticleEngine.add`
     /// drops a spore blossom air particle once `ParticleLimit.SPORE_BLOSSOM` is full.
     pub fn create(&mut self, options: &ParticleOptions, p: [f64; 3], v: [f64; 3]) {
+        if let Some(requests) = &mut self.created_requests {
+            requests.push((options.clone(), p, v));
+            return;
+        }
         let seed = self.seeds.next_long();
         if let Some(particle) = self.make(options, p, v, seed) {
             *self.made.entry(options.ty.name()).or_default() += 1;
