@@ -8143,6 +8143,7 @@ impl Game<'_> {
                     &mut batch,
                     self.cursor,
                     self.settings.file.bool("hideSplashTexts"),
+                    self.settings.file.bool("hideServerAddress"),
                 );
             }
             // ScreenEvent.Render.Post over the title's own screens: a mod draws

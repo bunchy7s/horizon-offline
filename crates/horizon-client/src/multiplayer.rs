@@ -979,6 +979,7 @@ impl Screen {
         caret: &mut crate::ui::Caret,
         focused_at: Instant,
         cursor: (f32, f32),
+        hide_address: bool,
     ) {
         let (w, h) = (batch.width, batch.height);
         let max = self.max_length();
@@ -1236,7 +1237,11 @@ impl Screen {
                             let header = crate::lang::get_or("lanServer.title", "LAN World");
                             batch.text(atlas, &header, cx + 35.0, cy + 1.0, u32::MAX, false);
                             batch.text(atlas, &game.motd, cx + 35.0, cy + 12.0, gray, false);
-                            batch.text(atlas, &game.address, cx + 35.0, cy + 23.0, gray, false);
+                            // LanServerEntry draws the address only while
+                            // `hideServerAddress` is off.
+                            if !hide_address {
+                                batch.text(atlas, &game.address, cx + 35.0, cy + 23.0, gray, false);
+                            }
                         }
                     }
                 }
