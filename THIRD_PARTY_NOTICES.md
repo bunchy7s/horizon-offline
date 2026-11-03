@@ -14,6 +14,15 @@ Apache-2.0; both licenses are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
 fixes to its GLSL frontend that shader packs need, each applied in the commit that needed it. It is licensed under MIT or Apache-2.0; both licenses
 are in that folder (`LICENSE.MIT`, `LICENSE.APACHE`).
 
+## libmimalloc-sys and mimalloc
+
+`third_party/libmimalloc-sys` is [libmimalloc-sys](https://github.com/purpleprotocol/mimalloc_rust)
+0.1.49 by Octavian Oncescu, with the [mimalloc](https://github.com/microsoft/mimalloc) v3 sources it
+bundles (Copyright (c) 2018-2025 Microsoft Corporation, Daan Leijen), both under the MIT license
+(`LICENSE.txt` and `c_src/mimalloc/v3/LICENSE` in that folder). It holds only the v3 sources. One
+change: `mi_popcount` in `include/mimalloc/bits.h` uses mimalloc's portable bit count on MSVC
+x86/x64 instead of the POPCNT instruction, which CPUs before Nehalem lack (#7264).
+
 ## Pixelify Sans
 
 `crates/horizon-theme/fonts/PixelifySans-*.ttf` is [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans)
@@ -26,6 +35,17 @@ by The Pixelify Sans Project Authors, licensed under the SIL Open Font License 1
 [Pixelarticons](https://github.com/halfmage/pixelarticons) by Gerrit Halfmann, under the MIT
 license (`crates/horizon-theme/icons/pixel/LICENSE-pixelarticons.txt`). `star.svg` is Horizon's own, drawn on
 the same grid.
+
+## Hugeicons
+
+`crates/horizon-theme/icons/glass/*.svg` are icons from the free set of
+[Hugeicons](https://github.com/hugeicons/hugeicons) (`@hugeicons/core-free-icons` 4.4.0), under
+the MIT license (`crates/horizon-theme/icons/glass/LICENSE-hugeicons.txt`), exported with a 1.6
+stroke in `currentColor`.
+
+`crates/horizon-theme/icons/glass/discord.svg` is Discord's logo as drawn by
+[Simple Icons](https://github.com/simple-icons/simple-icons) 13.21.0 (CC0 1.0). The logo is Discord's
+trademark, used only on the button that opens Horizon's Discord server.
 
 ## AMD FidelityFX SDK (FSR 3.1 frame generation)
 
@@ -41,19 +61,17 @@ trademarks; Horizon is not affiliated with AMD.
 
 ## Mod loader logos
 
-The launcher shows the logo of the mod loader an instance plays with.
+The launcher shows the logo of the mod loader an instance plays with, and offers the logos as
+instance icons.
 
-- `launcher/assets/logos/quilt.png` is the Quilt mini icon (`brand/128png/quilt_mini_icon_transparent.png`)
-  from [QuiltMC/art](https://github.com/QuiltMC/art), by the Quilt Project, dedicated to the public
-  domain under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
-- `launcher/assets/logos/neoforge.png` is NeoForged's icon (`art/neoforged_icon_16x16.png`) from
-  [neoforged/.github](https://github.com/neoforged/.github/tree/main/art), © the NeoForged team,
-  created by Ridanisaurus, under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). It is
-  unmodified (the launcher scales it up by whole pixels).
-- Fabric's and Forge's icons are not shipped: neither publishes a license for its logo. The launcher
-  fetches them from their own sites when an instance needs them
-  ([fabric-loader's icon](https://github.com/FabricMC/fabric-loader/blob/master/src/main/resources/assets/fabricloader/icon.png),
-  [files.minecraftforge.net's](https://files.minecraftforge.net/)).
+- `launcher/assets/logos/{fabric,quilt,neoforge,forge}.png` are the loaders' logos as the launcher
+  mockup on [playhorizon.dev/launcher](https://playhorizon.dev/launcher) shows them (horizon-site
+  `public/media/launcher/*.webp`, converted to PNG), each its project's own mark:
+  [Fabric](https://fabricmc.net/), [Quilt](https://quiltmc.org/) (its art is
+  [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)),
+  [NeoForged](https://neoforged.net/) (its art, by Ridanisaurus, is
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)) and
+  [Minecraft Forge](https://minecraftforge.net/). They name the loader an instance runs.
 
 Each logo belongs to its project. Showing it says which loader an instance runs; it does not mean
 the project endorses Horizon.

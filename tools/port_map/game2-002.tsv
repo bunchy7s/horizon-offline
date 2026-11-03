@@ -4,23 +4,25 @@ ItemFrame.recalculateBoundingBox	inline	crates/horizon-client/src/entities.rs::I
 ItemFrame.shouldDamageDropItem	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	a blast breaks a frame in reach and drops its item (`explosion_breaks_frames`)
 ItemFrame.canHurtWhenFixed	port	crates/horizon-client/src/game/frames.rs::attack_frame	a fixed frame refuses a non-creative hit (attack_ticks reset, no break) and lets a creative player break it
 ItemFrame.hurtClient	inline	crates/horizon-client/src/game/frames.rs::Game::attack_frame	gap: minor: no separate client-side fixed-frame gate; the creative exception is missing
-ItemFrame.removeFramedMap	inline	crates/horizon-client/src/game/maps.rs::Game::lan_map_updates	frame map markers come from item_frames each tick, so a removed frame needs no step
+ItemFrame.removeFramedMap	port	crates/horizon-client/src/game/maps.rs::Game::remove_framed_map	the map the frame holds forgets the frame (`MapItemSavedData.removedFromFrame`: the decoration and the frames entry); drop_frame_items calls it when the frame breaks, and skips it only when the drops are off and a player caused the break, which is vanilla's null `causedBy`
 ItemFrame.getSlot	inline	crates/horizon-client/src/game/commands/items.rs::Game::slot_get	slots_named maps container.0 and contents on a frame to Slot::Frame; slot_get reads the frame's item and slot_set writes it
 ItemFrame.onSyncedDataUpdated	skip:other		network data-sync hook; the item is read from the frame field on demand
 ItemFrame.setRotation	inline	crates/horizon-client/src/game/frames.rs::Game::interact_frame	the rotate-by-one step; the neighbour update is in frame_output_changed
 ItemFrame.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::item_frame_from_nbt	gap: minor: Facing defaults to 2 where vanilla defaults to DOWN
-ItemFrame.getFrameItemStackWithData	missing		minor: a broken frame never carries its custom name; drop_frame_items builds a plain item_frame stack
+ItemFrame.getFrameItemStackWithData	missing		`game/frames.rs::drop_frame_items` builds a plain `item_frame` stack, so a broken frame never carries its custom name
 ItemFrame.getVisualRotationYInDegrees	inline	crates/horizon-client/src/game/frames.rs::Game::frame_geometry	the 45 degree step per rotation step is drawn in frame_geometry
 LeashFenceKnotEntity.recalculateBoundingBox	port	crates/horizon-client/src/mobs/leash.rs::knot_state	position and box from the block position
 LeashFenceKnotEntity.getOrCreateKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	knots are not entities in game; the knot is used when a lead is tied
 LeashFenceKnotEntity.getKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	the existing knot is the leashed-holder check at the fence position
 LeashFenceKnotEntity.createKnot	inline	crates/horizon-client/src/game/leads.rs::Game::interact_knot	no in-game knot entity is created; LAN knot ids are assigned in lan_assign_ids
+LeashFenceKnotEntity.interact	port	crates/horizon-client/src/game/leads.rs::Game::use_knot	a client sends it for the knot its crosshair meets (remote_knot_hit); Horizon attacks still go to the fence behind
 Painting.defineSynchedData	skip:other		entity data default variant; Horizon picks the variant in place_painting
 Painting.get	port	crates/horizon-client/src/game/paintings.rs::PaintingVariants::get	lookup of the variant by id; there is no component getter
 Painting.applyImplicitComponent	inline	crates/horizon-client/src/game/paintings.rs::Game::place_painting	the stack's painting/variant replaces the random pick (PaintingVariants::of_stack), and that variant has to survive where it goes
 Painting.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::painting_from_nbt	
 Painting.dropItem	port	crates/horizon-client/src/game/paintings.rs::Game::break_painting	gap: minor: the dropped painting item keeps no custom name
 PaintingVariants.register	skip:data		registry bootstrap; variants load from the data files in PaintingVariants::load
+FallingBlockEntity.tick	inline	crates/horizon-client/src/game/falling_damage.rs::Game::finish_falling_block	successful landing creates the block entity and loads carried TileEntityData over its saved defaults; movement and placement are in Game::fall_step and Behaviours::falling_block_landed
 FallingBlockEntity.callOnBrokenAfterFall	inline	crates/horizon-client/src/game/falling_damage.rs::Game::finish_falling_block	anvil 1029 and brushable 2001 events are here; gap: minor: no dripstone landing sound on a broken landing
 FallingBlockEntity.causeFallDamage	port	crates/horizon-client/src/game/falling_damage.rs::Game::falling_block_impact	impact damage and anvil wear run before block effects and portal handling
 FallingBlockEntity.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::falling_block_to_nbt	gap: minor: TileEntityData of the carried block is not written
@@ -35,15 +37,15 @@ ItemEntity.hurtClient	skip:other		client-side hurt prediction; items are not att
 ItemEntity.hurtServer	inline	crates/horizon-client/src/game/explosion.rs::Game::explosion_hurt_entities	gap: minor: explosions destroy items at damage 5 without subtracting health; fire and lava hurt are in environment_tick
 ItemEntity.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::item_entity_to_nbt	
 ItemEntity.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::item_entity_from_nbt	a missing Item returns None, which matches the discard
-ItemEntity.getName	missing		minor: a dropped item's name (custom or item name) is not used anywhere in Horizon
+ItemEntity.getName	missing		a dropped item's name (custom or the item's own) is not read anywhere
 ItemEntity.teleport	inline	crates/horizon-client/src/entities.rs::merge_with_neighbours	the arrival merge is the normal per-tick merge, not a teleport step
 ItemEntity.getVisualRotationYInDegrees	inline	crates/horizon-client/src/game/item_draw.rs::Game::dropped_item_geometry	spin is applied in radians there; no degree conversion
-ItemEntity.getSlot	missing		unsure: no slot 0 access for dropped items found in commands.rs
+ItemEntity.getSlot	missing		a dropped item is not addressable as an entity slot: `game/commands.rs` has no item entity case
 PrimedTnt.defineSynchedData	skip:other		fuse and block state are struct fields; spawn sets fuse 80; the block is always TNT
 PrimedTnt.explode	inline	crates/horizon-client/src/game/tnt.rs::Game::tick_tnt	the power is the tnt's own field (`explosion_power`, 4 by default); gap: minor: no used-portal damage calculator
 PrimedTnt.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::tnt_to_nbt	the fuse and the block state are saved
-PrimedTnt.restoreFrom	missing		minor: PrimedTnt has no owner field, so the igniter is not kept through portal moves
-PrimedTnt.teleport	missing		unsure: no used-portal flag on PrimedTnt; the portal damage calculator is not applied
+PrimedTnt.restoreFrom	missing		`PrimedTnt` has no owner field, so the igniter is not kept through a dimension change
+PrimedTnt.teleport	missing		`PrimedTnt` carries no used-portal flag and the portal damage calculator is not applied to it
 Blaze.registerGoals	port	crates/horizon-client/src/mobs/nether.rs::register_blaze	gap: minor: MoveTowardsRestriction goal (priority 5) is not registered
 Blaze.createAttributes	skip:data		attribute defaults come from data tables
 Blaze.isCharged	inline	crates/horizon-client/src/mobs/nether.rs::BlazeAttack::tick	the charged state is m.extra.flag, set in the attack goal tick
@@ -88,7 +90,7 @@ Guardian.checkGuardianSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules
 Guardian.GuardianAttackGoal.canContinueToUse	port	crates/horizon-client/src/mobs/guardian.rs::GuardianAttack::can_continue	
 Guardian.GuardianAttackSelector.test	inline	crates/horizon-client/src/mobs/guardian.rs::register	the selector is the player, squid and axolotl beyond 9 filters in register
 Monster.updateNoActionTime	port	crates/horizon-client/src/mobs/ai.rs::server_ai_step	the idle counter is counted up there and read by the despawn path in raids.rs
-Monster.getProjectile	missing		unsure: no held-ammo choice for mobs found in mobs/*.rs
+Monster.getProjectile	missing		no held-ammo choice in `mobs/*.rs`: a monster's shot takes its projectile kind from the species, not from the stack it holds
 PatrollingMonster.addAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::write_nbt	
 PatrollingMonster.readAdditionalSaveData	port	crates/horizon-client/src/mobs/raider.rs::read_nbt	
 PatrollingMonster.checkPatrollingMonsterSpawnRules	port	crates/horizon-client/src/mobs/spawn_rules.rs::check_spawn_rules	the Pillager arm: block light 8 or less, then mob rules
@@ -103,12 +105,12 @@ Phantom.PhantomBodyRotationControl.clientTick	inline	crates/horizon-client/src/m
 Phantom.PhantomMoveTargetGoal.touchingTarget	inline	crates/horizon-client/src/mobs/phantom.rs::CircleAroundAnchor::tick	the squared distance under 4 check near the move target
 Phantom.PhantomSweepAttackGoal.canContinueToUse	port	crates/horizon-client/src/mobs/phantom.rs::SweepAttack::can_continue	the cat hiss and scare check
 Ravager.registerGoals	port	crates/horizon-client/src/mobs/ravager.rs::register	
-Ravager.updateControlFlags	missing		unsure: no rider control-flag switch for ravagers in ravager.rs
+Ravager.updateControlFlags	missing		the goal set has no control flags, so a mob driving a boat does not switch off the ravager's own move, jump and look goals
 Ravager.createAttributes	skip:data		attribute defaults come from data tables
 Ravager.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	AttackTick, StunTick and RoarTick are written there
 Ravager.readAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	the same three tick values are read there
 Ravager.stunEffect	port	crates/horizon-client/src/mobs/ravager.rs::ai_step	the stun particle is emitted from ai_step
-Ravager.hasLineOfSight	missing		unsure: no stunned or roaring line-of-sight cut-off in ravager.rs
+Ravager.hasLineOfSight	missing		`ravager::immobile` knows the biting, stunned and roaring states, but no target goal is gated on it, so an immobile ravager still sees and takes targets
 Ravager.applyRoarKnockbackClient	inline	crates/horizon-client/src/mobs/ravager.rs::roar	the roar push is applied in roar
 Ravager.strongKnockback	inline	crates/horizon-client/src/mobs/ravager.rs::roar	the push of 4 along the direction is in roar
 Ravager.addRoarParticleEffects	inline	crates/horizon-client/src/mobs/ravager.rs::roar	the poof particles are emitted in roar
@@ -119,18 +121,18 @@ Shulker.addAdditionalSaveData	inline	crates/horizon-client/src/entity_nbt.rs::mo
 Shulker.findNewAttachment	inline	crates/horizon-client/src/mobs/shulker.rs::tick	keeps its face or teleports in tick, through attachable and teleport
 Shulker.makeBoundingBox	port	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	
 Shulker.getDefaultDimensions	inline	crates/horizon-client/src/mobs/shulker.rs::progress_aabb	gap: minor: the down-face height scale is not seen here
-Shulker.startRiding	missing		unsure: no attach-face reset to DOWN when a shulker mounts a vehicle in shulker.rs
-Shulker.stopRiding	missing		unsure: no body yaw reset after a shulker dismounts in shulker.rs
-Shulker.move	missing		unsure: no shulker-box move type (teleport) found in the piston code
+Shulker.startRiding	missing		no attach-face reset on boarding: `mobs/shulker.rs` sets `extra.variant3` from `Attachable` and the save only, so a shulker on a vehicle keeps the face it had
+Shulker.stopRiding	inline	crates/horizon-client/src/mobs/shulker.rs::tick	the body yaw is pinned to 0 on every tick (`shulker::tick`, and `client_tick` for a remote one), so a dismounted shulker shows no leftover body yaw without a reset of its own
+Shulker.move	missing		the `SHULKER_BOX` mover type has no counterpart: `shulker::teleport` runs from the tick and the bullet hit only, so a shulker box pushed by a piston never takes its shulker along
 Shulker.findAttachableSurface	port	crates/horizon-client/src/mobs/shulker.rs::attachable	
 Shulker.isPositionBlocked	inline	crates/horizon-client/src/mobs/shulker.rs::can_stay_at	the blocked-position check is part of can_stay_at
 Shulker.onSyncedDataUpdated	skip:other		network sync hook; the box is computed from the face on demand
-Shulker.getRenderPosition	missing		unsure: no render slide after a shulker teleport in shulker.rs
+Shulker.getRenderPosition	missing		no render slide: `client_tick` eases the lid and squares the body, and nothing interpolates the position across a teleport
 Shulker.setVariant	inline	crates/horizon-client/src/mobs/shulker.rs::register	colour comes from spawn data; NO_COLOR when unset
 Shulker.getColor	inline	crates/horizon-client/src/mobs/shulker.rs::texture	colour is read from extra.color for the texture
 Shulker.get	skip:other		component getter; Horizon reads extra.color directly
-Shulker.applyImplicitComponent	missing		minor: a shulker spawned with a SHULKER_COLOR component ignores it
-Shulker.ShulkerDefenseAttackGoal.getTargetSearchArea	missing		minor: shulkers do not defend nearby shulkers; there is no defense target goal
+Shulker.applyImplicitComponent	missing		a shulker spawned from a shulker box item ignores its colour: the implicit components are applied to a mob coming out of a bucket only (`entity_nbt::bucket_components`)
+Shulker.ShulkerDefenseAttackGoal.getTargetSearchArea	missing		no defense target goal: `mobs/shulker.rs::register` gives the shulker `HurtByTarget` with `alert` (a hurt shulker wakes the targetless ones around it) and a player search box 4 deep along the attach axis, nothing that defends another shulker
 Shulker.ShulkerNearestAttackGoal.getTargetSearchArea	inline	crates/horizon-client/src/mobs/shulker.rs::register	the 4-deep search box is the when filter in register
 Shulker.ShulkerPeekGoal.canContinueToUse	port	crates/horizon-client/src/mobs/shulker.rs::Peek::can_continue	
 Silverfish.registerGoals	port	crates/horizon-client/src/mobs/hostile.rs::register	

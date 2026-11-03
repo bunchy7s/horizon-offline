@@ -26,7 +26,7 @@ use std::{
 /// removed keeping first-seen order. The hook may be called more than
 /// once per recipe; the answer must be the same. An unclaimed kind
 /// leaves the list empty and the recipe fails, as an unknown kind does.
-/// API @API:ingredient@.
+/// API 166.
 #[inline(never)]
 pub fn native_ingredient(
     kind: &str,
@@ -34,6 +34,22 @@ pub fn native_ingredient(
     items: &mut Vec<String>,
 ) {
     crate::native_client_hooks::ingredient(kind, data, items);
+}
+
+/// A mod's own ingredient kind, matching a concrete stack at craft time:
+/// the ingredient's `test` calls here with the kind, its JSON and the
+/// stack being matched, `accept` already true (the load-time list named
+/// the item). Set `accept` to false to refuse the stack — its components
+/// are the usual reason. The hook may be called many times a craft; the
+/// answer must be the same for the same stack. API @API:ingredient_test@.
+#[inline(never)]
+pub fn native_ingredient_test(
+    kind: &str,
+    data: &serde_json::Map<String, Value>,
+    stack: &ItemStack,
+    accept: &mut bool,
+) {
+    crate::native_client_hooks::ingredient_test(kind, data, stack, accept);
 }
 
 /// Keep first-seen order, drop the rest.
@@ -45,11 +61,39 @@ fn dedup_keep_order(items: &mut Vec<String>) {
 /// A set of accepted items (expanded from an item, list or tag), and the
 /// items in its `HolderSet` order (`Ingredient.display`'s `TagSlotDisplay`).
 #[derive(Clone, Debug)]
-pub struct Ingredient(pub HashSet<String>, pub Vec<String>);
+pub struct Ingredient {
+    /// The items it accepts, however the source shape named them.
+    pub items: HashSet<String>,
+    /// The same items in `HolderSet` order (`display`).
+    pub order: Vec<String>,
+    /// A mod's own kind, for matching at craft time: the kind and its
+    /// JSON, as the load-time hook saw them (`native_ingredient_test`).
+    pub custom: Option<(String, serde_json::Map<String, Value>)>,
+    /// NeoForge's shapes, with their children parsed: matching a concrete
+    /// stack asks each child its own `test` (a mod's kind among them),
+    /// as on NeoForge — the flat list above only names items.
+    pub children: Option<(Shape, Vec<Self>)>,
+}
+
+/// How a shape's children combine at match time.
+#[derive(Clone, Debug)]
+pub enum Shape {
+    /// Any child matching the stack is enough.
+    Compound,
+    /// Every child must match it.
+    Intersection,
+    /// The first child must, and the second must not.
+    Difference,
+}
 impl Ingredient {
     /// The items of a list, in order.
     pub fn of(items: Vec<String>) -> Self {
-        Self(items.iter().cloned().collect(), items)
+        Self {
+            items: items.iter().cloned().collect(),
+            order: items,
+            custom: None,
+            children: None,
+        }
     }
     pub fn parse(v: &Value, items: &Items) -> Option<Self> {
         let mut list: Vec<String> = Vec::new();
@@ -88,6 +132,9 @@ impl Ingredient {
                 .or_else(|| o.get("ingredients"))
                 .and_then(Value::as_array)
         };
+        // The shapes' parsed children, for matching at craft time: every
+        // arm either fills it or returns.
+        let nested;
         let kept = match kind {
             // `CompoundIngredient`: any of its children matching the stack
             // is enough — the union of their items.
@@ -98,12 +145,13 @@ impl Ingredient {
                     .collect::<Option<_>>()?;
                 let mut seen = Vec::new();
                 for sub in &subs {
-                    for item in &sub.1 {
+                    for item in &sub.order {
                         if !seen.contains(item) {
                             seen.push(item.clone());
                         }
                     }
                 }
+                nested = Some((Shape::Compound, subs));
                 seen
             }
             // `IntersectionIngredient`: every child must match the same
@@ -113,10 +161,11 @@ impl Ingredient {
                     .iter()
                     .map(|s| Self::parse(s, items))
                     .collect::<Option<_>>()?;
+                nested = Some((Shape::Intersection, subs.clone()));
                 subs.first()?
-                    .1
+                    .order
                     .iter()
-                    .filter(|i| subs[1..].iter().all(|s| s.0.contains(*i)))
+                    .filter(|i| subs[1..].iter().all(|s| s.items.contains(*i)))
                     .cloned()
                     .collect()
             }
@@ -124,9 +173,10 @@ impl Ingredient {
             "neoforge:difference" => {
                 let base = Self::parse(o.get("base")?, items)?;
                 let gone = Self::parse(o.get("subtracted")?, items)?;
-                base.1
+                nested = Some((Shape::Difference, vec![base.clone(), gone.clone()]));
+                base.order
                     .iter()
-                    .filter(|i| !gone.0.contains(*i))
+                    .filter(|i| !gone.items.contains(*i))
                     .cloned()
                     .collect()
             }
@@ -136,14 +186,49 @@ impl Ingredient {
                 let mut list = Vec::new();
                 native_ingredient(k, o, &mut list);
                 dedup_keep_order(&mut list);
-                return (!list.is_empty()).then(|| Self::of(list));
+                // The kind and its JSON stay with the ingredient: the
+                // load-time list only names items, and matching a concrete
+                // stack (its components) is the match-time hook's.
+                return (!list.is_empty()).then(|| Self {
+                    order: list.clone(),
+                    items: list.iter().cloned().collect(),
+                    custom: Some((k.to_owned(), o.clone())),
+                    children: None,
+                });
             }
             _ => return None,
         };
-        (!kept.is_empty()).then(|| Self::of(kept))
+        (!kept.is_empty()).then(|| Self {
+            items: kept.iter().cloned().collect(),
+            order: kept,
+            custom: None,
+            children: nested,
+        })
     }
+    /// `Ingredient.test`: a stack the list names — and for a mod's own
+    /// kind, one the match-time hook accepts (`ICustomIngredient.test`).
     pub fn test(&self, stack: &ItemStack) -> bool {
-        self.0.contains(&*stack.item)
+        match &self.children {
+            // Each child its own `test`, as on NeoForge — a mod's kind
+            // among them answers through its hook.
+            Some((Shape::Compound, kids)) => kids.iter().any(|k| k.test(stack)),
+            Some((Shape::Intersection, kids)) => kids.iter().all(|k| k.test(stack)),
+            Some((Shape::Difference, kids)) => {
+                kids.first().is_some_and(|k| k.test(stack))
+                    && kids.get(1).is_none_or(|k| !k.test(stack))
+            }
+            None => {
+                if !self.items.contains(&*stack.item) {
+                    return false;
+                }
+                if let Some((kind, data)) = &self.custom {
+                    let mut accept = true;
+                    native_ingredient_test(kind, data, stack, &mut accept);
+                    return accept;
+                }
+                true
+            }
+        }
     }
 }
 /// `PlacementInfo`: the ingredients to find and, per recipe slot, the index
@@ -165,7 +250,7 @@ impl Placement {
         };
         for cell in cells {
             match cell {
-                Some(i) if i.0.is_empty() => return Self::default(),
+                Some(i) if i.items.is_empty() => return Self::default(),
                 Some(i) => {
                     out.slots.push(out.ingredients.len() as i32);
                     out.ingredients.push(i);
@@ -423,7 +508,7 @@ impl Special {
                     // The result keeps the input's item: any item of the ingredient.
                     let all: Vec<ItemStack> = if result.item.is_none() {
                         input
-                            .1
+                            .order
                             .iter()
                             .map(|item| {
                                 let mut stack = made.clone();
@@ -443,7 +528,7 @@ impl Special {
                 result,
             } => {
                 // DyedSlotDemo: the targets cycle fastest, 16 stacks at most.
-                let (targets, dyes) = (&target.1, &dye.1);
+                let (targets, dyes) = (&target.order, &dye.order);
                 let all: Vec<ItemStack> = (0..targets.len() * dyes.len())
                     .map(|i| {
                         let mut made = result.create();
@@ -483,7 +568,7 @@ impl Special {
                 let all = potions(result.create());
                 // The source ingredient is shown as a lingering potion of each kind.
                 let lingering = source
-                    .1
+                    .order
                     .iter()
                     .flat_map(|item| potions(ItemStack::new(item, 1)))
                     .collect();
@@ -1236,7 +1321,7 @@ pub struct Recipes {
     /// first lookup (furnaces look theirs up every tick).
     cook_index: std::sync::OnceLock<CookIndex>,
 }
-type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, usize>>;
+type CookIndex = HashMap<String, crate::fast_hash::FxHashMap<String, Vec<usize>>>;
 /// `MinMaxBounds.Ints` as (min, max) with the given defaults.
 fn bounds(v: Option<&Value>, default: (i64, i64), open: (i64, i64)) -> (i64, i64) {
     match v {
@@ -1830,18 +1915,23 @@ impl Recipes {
             .map_or(0.0, |c| c.experience)
     }
     pub fn cook(&self, kind: &str, input: &ItemStack) -> Option<&Cooking> {
+        // Every recipe an item names, not just the first: a mod's match-time
+        // hook may refuse the one the first recipe would take (`Ingredient::test`).
         let index = self.cook_index.get_or_init(|| {
             let mut index = CookIndex::new();
             for (i, c) in self.cooking.iter().enumerate() {
                 let of_kind = index.entry(c.kind.clone()).or_default();
-                for item in &c.ingredient.0 {
-                    of_kind.entry(item.clone()).or_insert(i);
+                for item in &c.ingredient.items {
+                    of_kind.entry(item.clone()).or_default().push(i);
                 }
             }
             index
         });
-        let i = *index.get(kind)?.get(&*input.item)?;
-        self.cooking.get(i)
+        index
+            .get(kind)?
+            .get(&*input.item)?
+            .iter()
+            .find_map(|i| self.cooking.get(*i).filter(|c| c.ingredient.test(input)))
     }
     /// `cook` by scanning every recipe, as it was before the index.
     #[cfg(test)]
@@ -1932,6 +2022,42 @@ mod tests {
         assert_eq!(list, vec!["b".to_string(), "a".to_string()]);
     }
 
+    /// NeoForge's shapes keep their children, and matching a concrete
+    /// stack asks each child its own way — any for compound, all for
+    /// intersection, base-but-not-subtracted for difference. A mod's own
+    /// kind among the children answers through its hook the same way
+    /// (proven on a staged build).
+    #[test]
+    fn nested_shapes_test_each_child_their_own_way() {
+        let items = Items::for_tests(HashMap::new());
+        let parse = |s: &str| {
+            Ingredient::parse(&serde_json::from_str::<Value>(s).unwrap(), &items).unwrap()
+        };
+        let stack = |n: &str| ItemStack {
+            item: n.into(),
+            count: 1,
+            damage: 0,
+            extra: None,
+        };
+        let compound = parse(
+            r#"{"type":"neoforge:compound","children":["minecraft:oak_planks","minecraft:birch_planks"]}"#,
+        );
+        assert!(compound.children.is_some(), "the children stay with it");
+        assert!(compound.test(&stack("minecraft:oak_planks")));
+        assert!(compound.test(&stack("minecraft:birch_planks")));
+        assert!(!compound.test(&stack("minecraft:stone")));
+        let inter = parse(
+            r#"{"type":"neoforge:intersection","ingredients":["minecraft:oak_planks",["minecraft:oak_planks","minecraft:birch_planks"]]}"#,
+        );
+        assert!(inter.test(&stack("minecraft:oak_planks")));
+        assert!(!inter.test(&stack("minecraft:birch_planks")));
+        let diff = parse(
+            r#"{"type":"neoforge:difference","base":["minecraft:oak_planks","minecraft:birch_planks"],"subtracted":"minecraft:birch_planks"}"#,
+        );
+        assert!(diff.test(&stack("minecraft:oak_planks")));
+        assert!(!diff.test(&stack("minecraft:birch_planks")));
+    }
+
     #[test]
     fn neoforge_ingredient_shapes_parse() {
         let mut tags = HashMap::new();
@@ -1952,7 +2078,7 @@ mod tests {
         )
         .unwrap();
         // The tag's items come from a HashSet: their order is not fixed.
-        let mut all = union.1.clone();
+        let mut all = union.order.clone();
         all.sort();
         assert_eq!(
             all,
@@ -1968,14 +2094,14 @@ mod tests {
             &items,
         )
         .unwrap();
-        assert_eq!(both.1, ["minecraft:oak_planks"]);
+        assert_eq!(both.order, ["minecraft:oak_planks"]);
         // Difference: the base without the subtracted.
         let no_oak = Ingredient::parse(
             &json(r##"{"type":"neoforge:difference","base":"#minecraft:planks","subtracted":"minecraft:oak_planks"}"##),
             &items,
         )
         .unwrap();
-        assert_eq!(no_oak.1, ["minecraft:birch_planks"]);
+        assert_eq!(no_oak.order, ["minecraft:birch_planks"]);
         // An empty intersection and an unknown kind fail the file, as today.
         let empty = Ingredient::parse(
             &json(

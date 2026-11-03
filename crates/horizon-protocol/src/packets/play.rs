@@ -461,7 +461,9 @@ impl VecDelta {
         let mut out = base;
         for i in 0..3 {
             if delta[i] != 0 {
-                out[i] = ((base[i] * 4096.0).round() as i64 + i64::from(delta[i])) as f64 / 4096.0;
+                out[i] = (horizon_core::jmath::round(base[i] * 4096.0) + i64::from(delta[i]))
+                    as f64
+                    / 4096.0;
             }
         }
         out
@@ -2589,6 +2591,7 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
     ChatSessionUpdate(ChatSessionUpdate) = CHAT_SESSION_UPDATE,
     PlaceRecipe(super::recipes::PlaceRecipe) = PLACE_RECIPE,
     RecipeBookChangeSettings(super::recipes::RecipeBookChangeSettings) = RECIPE_BOOK_CHANGE_SETTINGS,
+    RecipeBookSeenRecipe(super::recipes::RecipeBookSeenRecipe) = RECIPE_BOOK_SEEN_RECIPE,
     ChunkBatchReceived(ChunkBatchReceived) = CHUNK_BATCH_RECEIVED,
     ClientCommand(ClientCommand) = CLIENT_COMMAND,
     ClientInformation(ClientInformation) = CLIENT_INFORMATION,
@@ -2642,7 +2645,18 @@ packet_enum!(Serverbound, crate::ids::play::serverbound {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{chunk::BlockEntityInfo, packets::round_trip, text::literal};
+    use crate::{
+        chunk::BlockEntityInfo,
+        packets::{recipes::RecipeBookSeenRecipe, round_trip},
+        text::literal,
+    };
+
+    #[test]
+    fn vec_delta_quantizes_the_base_like_math_round() {
+        // Math.round(-2.5) is -2, so a delta of 1 lands on -1/4096, not -2/4096.
+        let out = VecDelta::apply([-2.5 / 4096.0, 0.0, 0.0], [1, 0, 0]);
+        assert_eq!(out[0], -1.0 / 4096.0);
+    }
 
     #[test]
     fn merchant_cost_predicate_is_a_typed_list_without_patch_counts() {
@@ -2754,6 +2768,38 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// ServerboundRecipeBookSeenRecipePacket is one `RecipeDisplayId`, a
+    /// VarInt: display 300 is the two bytes `AC 02`, and a byte list that
+    /// stops early is not a display id.
+    #[test]
+    fn a_seen_recipe_is_one_varint_display_id() {
+        let payload = [0xAC, 0x02];
+        let seen = Serverbound::RecipeBookSeenRecipe(RecipeBookSeenRecipe { recipe: 300 });
+        assert_eq!(
+            Serverbound::decode(
+                crate::ids::play::serverbound::RECIPE_BOOK_SEEN_RECIPE,
+                &payload
+            )
+            .unwrap(),
+            seen
+        );
+        assert_eq!(&seen.encode()[1..], payload);
+        assert!(
+            Serverbound::decode(
+                crate::ids::play::serverbound::RECIPE_BOOK_SEEN_RECIPE,
+                &payload[..1]
+            )
+            .is_err()
+        );
+        // Without the variant the packet was `Unknown`, which the server's
+        // dispatch has no arm for; an id still without one reads that way.
+        assert!(matches!(
+            Serverbound::decode(crate::ids::play::serverbound::SEEN_ADVANCEMENTS, &payload)
+                .unwrap(),
+            Serverbound::Unknown(crate::ids::play::serverbound::SEEN_ADVANCEMENTS, _)
+        ));
     }
 
     fn spawn() -> SpawnInfo {

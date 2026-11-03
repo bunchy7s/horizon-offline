@@ -99,6 +99,10 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// The worker has had nothing to do for [`IDLE_RELEASE`]: give back what
     /// it keeps between jobs only to go faster.
     fn idle(&self, _worker: &mut Self::Worker) {}
+    /// Every worker has had nothing to do for [`IDLE_RELEASE`]: give back the
+    /// caches the workers share, which only spare work for chunks generated
+    /// next to each other in a run. Results do not change.
+    fn all_idle(&self) {}
     fn proto(&self, worker: &mut Self::Worker, x: i32, z: i32) -> Proto;
     fn decorates(&self) -> bool {
         false
@@ -148,6 +152,16 @@ pub trait ChunkGenerator: Send + Sync + 'static {
     /// layers count once it is at INITIALIZE_LIGHT.
     fn non_air_sections(&self, _proto: &Proto) -> Option<SectionMask> {
         None
+    }
+    /// What the generator's shared caches hold: (name, entries, bytes, if
+    /// known), for `horizon-ctl memory`.
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        Vec::new()
+    }
+    /// A proto chunk's heap bytes by part, and its sections by bits per
+    /// block, for `horizon-ctl memory` (`ProtoChunk::heap_bytes`).
+    fn proto_heap_bytes(&self, _proto: &Proto) -> ([usize; 6], [usize; 16]) {
+        ([0; 6], [0; 16])
     }
     fn saved_proto(&self, _proto: &Proto) -> Option<crate::chunk::SavedProto> {
         None
@@ -399,12 +413,29 @@ impl Mailbox {
         done.pop_front()
     }
 }
+/// [`Streaming::proto_census`].
+#[derive(Debug, Default)]
+pub struct ProtoCensus {
+    pub protos: usize,
+    /// Packed blocks, section palettes and lists, heightmaps, other terrain
+    /// data, biomes, the box and its structure lists.
+    pub bytes: [usize; 6],
+    pub sections_by_bits: [usize; 16],
+    pub light_views: usize,
+    pub light_view_bytes: usize,
+    /// `ChunkGenerator::cache_census`.
+    pub caches: Vec<(&'static str, usize, Option<usize>)>,
+}
 pub struct Streaming {
     shared: Arc<Shared>,
     /// Columns generated and saved as they were left behind: new when they
     /// next arrive, though read from the save (`World::loaded_chunks`).
     dropped_new: FxHashSet<(i32, i32)>,
     non_air_sections: Arc<dyn Fn(&Proto) -> Option<SectionMask> + Send + Sync>,
+    /// `ChunkGenerator::proto_heap_bytes`, for the memory census.
+    proto_bytes: Arc<dyn Fn(&Proto) -> ([usize; 6], [usize; 16]) + Send + Sync>,
+    /// `ChunkGenerator::cache_census`.
+    caches: Arc<dyn Fn() -> Vec<(&'static str, usize, Option<usize>)> + Send + Sync>,
     /// This streamer's place in the shared pool (`horizon_threads::jobs`);
     /// dropping it waits for its running jobs.
     jobs: Registration,
@@ -774,12 +805,23 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
             };
             (kind, crate::spans::thread_cpu().unwrap_or_default())
         });
+        let _tag = horizon_threads::heap_tag(match &job.job {
+            Job::Generate(..) => "stream.generate",
+            Job::Decorate(..) => "stream.decorate",
+            Job::Finish(..) => "stream.finish",
+            Job::Light(..) => "stream.light",
+            Job::Mesh(..) => "stream.mesh",
+            _ => "stream.other",
+        });
         let done = self.locals.with(
             worker,
-            || WorkerLocal {
-                worker: self.generator.worker(),
-                faces: None,
-                mesh_scratch: MeshScratch::default(),
+            || {
+                let _tag = horizon_threads::heap_tag("stream.worker_state");
+                WorkerLocal {
+                    worker: self.generator.worker(),
+                    faces: None,
+                    mesh_scratch: MeshScratch::default(),
+                }
             },
             |local| self.run_job(job.job, local),
         );
@@ -813,6 +855,7 @@ impl<G: ChunkGenerator> Source for Jobs<G> {
         // pool lock; the pool then asks the allocator to return freed pages.
         let meshes = std::mem::take(&mut *self.shared.meshes.lock().unwrap());
         drop(meshes);
+        self.generator.all_idle();
     }
 }
 impl<G: ChunkGenerator> Jobs<G> {
@@ -950,9 +993,19 @@ impl Streaming {
             let generator = generator.clone();
             Arc::new(move |p: &Proto| generator.non_air_sections(p))
         };
+        let proto_bytes = {
+            let generator = generator.clone();
+            Arc::new(move |p: &Proto| generator.proto_heap_bytes(p))
+        };
+        let caches = {
+            let generator = generator.clone();
+            Arc::new(move || generator.cache_census())
+        };
         Self {
             shared,
             non_air_sections,
+            proto_bytes,
+            caches,
             jobs,
             workers,
             order: 0,
@@ -1125,20 +1178,39 @@ impl Streaming {
             self.submit(None, 0, Job::Free(meshes));
         }
     }
-    /// A column the server unloaded (ClientboundForgetLevelChunkPacket).
-    pub fn forget(&mut self, world: &mut World, x: i32, z: i32) -> Option<Arc<Chunk>> {
-        self.lit.remove(&(x, z));
-        self.meshed.remove(&(x, z));
-        self.lighting.remove(&(x, z));
-        // By key, not by a pass over every pending section: a moved or
-        // shrunk storage forgets thousands of columns in one frame.
-        for sy in 0..world.layout().sections() as i32 {
-            self.meshing.remove(&(x, sy, z));
-            self.compile_started.remove(&(x, sy, z));
-            self.waiting.remove(&(x, sy, z));
+    /// The columns the server unloaded (ClientboundForgetLevelChunkPacket),
+    /// often thousands at once (a teleport or a moved view): their pending
+    /// sections go through [`forget_pending_sections`]. Returns the chunks
+    /// they held.
+    pub fn forget_columns(
+        &mut self,
+        world: &mut World,
+        gone: &FxHashSet<(i32, i32)>,
+    ) -> Vec<Arc<Chunk>> {
+        // Every column held (a far teleport): no pending section is left to keep, and a
+        // pass over them all (80,000 at render distance 32) took 1.7 ms of the frame.
+        if world.chunks.keys().all(|column| gone.contains(column)) {
+            self.meshing.clear();
+            self.compile_started.clear();
+            self.waiting.clear();
+        } else {
+            forget_pending_sections(
+                &mut self.meshing,
+                &mut self.compile_started,
+                &mut self.waiting,
+                gone,
+                world.layout().sections() as i32,
+            );
         }
-        world.dirty_sections.take_column(x, z);
-        world.chunks.remove(&(x, z))
+        let mut chunks = Vec::with_capacity(gone.len());
+        for &(x, z) in gone {
+            self.lit.remove(&(x, z));
+            self.meshed.remove(&(x, z));
+            self.lighting.remove(&(x, z));
+            world.dirty_sections.take_column(x, z);
+            chunks.extend(world.chunks.remove(&(x, z)));
+        }
+        chunks
     }
     /// Queue a job for the column `at`, nearest first: its distance (`distance`)
     /// times four plus `bias`, which orders a column's jobs. A job without a
@@ -1451,6 +1523,26 @@ impl Streaming {
             && self.viewing.is_empty()
             && self.finishing.is_empty()
             && self.lighting.is_empty())
+    }
+    /// The proto chunks held (not checked out): how many, their heap bytes by
+    /// part and their sections by bits per block; and the light views of
+    /// them with their bytes. For `horizon-ctl memory`.
+    pub fn proto_census(&self) -> ProtoCensus {
+        let mut census = ProtoCensus::default();
+        for proto in self.protos.values().flatten() {
+            let (bytes, bits) = (self.proto_bytes)(proto);
+            census.protos += 1;
+            for (sum, b) in census.bytes.iter_mut().zip(bytes) {
+                *sum += b;
+            }
+            for (sum, b) in census.sections_by_bits.iter_mut().zip(bits) {
+                *sum += b;
+            }
+        }
+        census.light_views = self.light_views.len();
+        census.light_view_bytes = self.light_views.values().map(|v| v.heap_bytes()).sum();
+        census.caches = (self.caches)();
+        census
     }
     /// How much work each stage holds: queued jobs, then what is in flight or
     /// waiting at each step from generation to meshing.
@@ -2334,7 +2426,7 @@ struct Ranges<'a> {
     radius: i32,
     extra: &'a [((i32, i32), i32)],
     forced: &'a HashSet<(i32, i32)>,
-    /// `extra` as a grid, when one was made for it: `in_extra` without a
+    /// `extra` indexed by a grid or buckets: coverage queries without a
     /// scan of every area.
     cover: Option<&'a ExtraCover>,
     band: Option<&'a Band>,
@@ -2389,8 +2481,22 @@ impl Band {
 /// nearest one's square (Chebyshev distance less its radius; 0 inside). A server has an area per player, and streaming asks of every
 /// loaded and wanted column whether one reaches it, several times a tick:
 /// with fifty players, a scan of fifty squares per question.
+///
+/// Areas spread too far apart for that grid (players thousands of blocks from
+/// each other) are found by the square of [`Self::BUCKET`] columns their centre
+/// is in instead, which also answers which centre is nearest a column
+/// (`Ranges::distance`, asked of every wanted column to rank it).
 struct ExtraCover {
     extra: Vec<((i32, i32), i32)>,
+    grid: Option<CoverGrid>,
+    /// The indices in `extra` of the areas centred in each bucket.
+    buckets: FxHashMap<(i32, i32), Vec<u32>>,
+    /// The buckets' bounding box, inclusive: (x0, z0, x1, z1).
+    bucket_box: (i32, i32, i32, i32),
+    /// The largest radius in `extra`.
+    radius: i32,
+}
+struct CoverGrid {
     x0: i32,
     z0: i32,
     width: u32,
@@ -2403,14 +2509,18 @@ impl ExtraCover {
     const REACH: i32 = 4;
     /// The largest grid, in columns (a mebibyte).
     const CELLS: u64 = 1 << 20;
+    /// The side of a bucket, in columns.
+    const BUCKET: i32 = 64;
+    /// The farthest centre kept in buckets: far enough for any world border.
+    const LIMIT: i32 = 1 << 26;
     fn matching<'a>(
         cover: &'a Option<ExtraCover>,
         extra: &[((i32, i32), i32)],
     ) -> Option<&'a ExtraCover> {
         cover.as_ref().filter(|c| c.extra == extra)
     }
-    /// Make the grid again if `extra` changed; none for one area or none
-    /// (a scan is as quick), or areas too far apart.
+    /// Rebuild the coverage index if `extra` changed; none for one area or none
+    /// (a scan is as quick).
     fn refresh(cover: &mut Option<ExtraCover>, extra: &[((i32, i32), i32)]) {
         if cover.as_ref().is_some_and(|c| c.extra == extra) {
             return;
@@ -2418,27 +2528,134 @@ impl ExtraCover {
         *cover = Self::new(extra);
     }
     fn new(extra: &[((i32, i32), i32)]) -> Option<Self> {
-        if extra.len() < 2 || extra.iter().any(|&(_, r)| !(0..=64).contains(&r)) {
+        if extra.len() < 2
+            || extra.iter().any(|&((x, z), r)| {
+                !(0..=64).contains(&r) || x.abs() > Self::LIMIT || z.abs() > Self::LIMIT
+            })
+        {
             return None;
         }
-        let k = i64::from(Self::REACH);
+        let mut buckets: FxHashMap<(i32, i32), Vec<u32>> = FxHashMap::default();
+        let mut bucket_box = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+        for (i, &((x, z), _)) in extra.iter().enumerate() {
+            let key = (x.div_euclid(Self::BUCKET), z.div_euclid(Self::BUCKET));
+            buckets.entry(key).or_default().push(i as u32);
+            bucket_box = (
+                bucket_box.0.min(key.0),
+                bucket_box.1.min(key.1),
+                bucket_box.2.max(key.0),
+                bucket_box.3.max(key.1),
+            );
+        }
+        Some(Self {
+            extra: extra.to_vec(),
+            grid: CoverGrid::new(extra),
+            buckets,
+            bucket_box,
+            radius: extra.iter().map(|&(_, r)| r).max().unwrap_or(0),
+        })
+    }
+    /// Whether (x, z) is within `margin` of an area's square, for a
+    /// `margin` up to `REACH`.
+    fn within(&self, x: i32, z: i32, margin: i32) -> bool {
+        if let Some(grid) = &self.grid {
+            return grid.within(x, z, margin);
+        }
+        let reach = self.radius + margin;
+        let (kx0, kx1) = (
+            (x.saturating_sub(reach)).div_euclid(Self::BUCKET),
+            (x.saturating_add(reach)).div_euclid(Self::BUCKET),
+        );
+        let (kz0, kz1) = (
+            (z.saturating_sub(reach)).div_euclid(Self::BUCKET),
+            (z.saturating_add(reach)).div_euclid(Self::BUCKET),
+        );
+        (kz0..=kz1).any(|kz| {
+            (kx0..=kx1).any(|kx| {
+                self.buckets.get(&(kx, kz)).is_some_and(|areas| {
+                    areas.iter().any(|&i| {
+                        let ((cx, cz), r) = self.extra[i as usize];
+                        (i64::from(x) - i64::from(cx))
+                            .abs()
+                            .max((i64::from(z) - i64::from(cz)).abs())
+                            <= i64::from(r + margin)
+                    })
+                })
+            })
+        })
+    }
+    /// The squared distance from (x, z) to the nearest area's centre.
+    /// Buckets are searched ring by ring outwards: once the nearest found is
+    /// no further than the next ring can be, the search stops.
+    fn nearest_sq(&self, x: i32, z: i32) -> i64 {
+        let d = |i: u32| {
+            let (c, _) = self.extra[i as usize];
+            let (dx, dz) = (i64::from(x) - i64::from(c.0), i64::from(z) - i64::from(c.1));
+            dx * dx + dz * dz
+        };
+        let (qx, qz) = (x.div_euclid(Self::BUCKET), z.div_euclid(Self::BUCKET));
+        let (x0, z0, x1, z1) = self.bucket_box;
+        let last = (qx - x0)
+            .abs()
+            .max((qx - x1).abs())
+            .max((qz - z0).abs())
+            .max((qz - z1).abs());
+        let mut best = i64::MAX;
+        let mut looked = 0usize;
+        for ring in 0..=last {
+            let mut look = |kx: i32, kz: i32| {
+                looked += 1;
+                if let Some(areas) = self.buckets.get(&(kx, kz)) {
+                    best = areas.iter().map(|&i| d(i)).fold(best, i64::min);
+                }
+            };
+            if ring == 0 {
+                look(qx, qz);
+            } else {
+                for k in -ring..=ring {
+                    look(qx + k, qz - ring);
+                    look(qx + k, qz + ring);
+                }
+                for k in 1 - ring..ring {
+                    look(qx - ring, qz + k);
+                    look(qx + ring, qz + k);
+                }
+            }
+            // Every centre in a further ring is more than `ring` buckets away
+            // on one axis.
+            let bound = i64::from(ring) * i64::from(Self::BUCKET);
+            if best <= bound * bound {
+                break;
+            }
+            // Far from every area: a scan costs less than more empty rings.
+            if looked > self.extra.len() * 4 {
+                return (0..self.extra.len() as u32).map(d).fold(best, i64::min);
+            }
+        }
+        best
+    }
+}
+impl CoverGrid {
+    /// None for areas too far apart for [`ExtraCover::CELLS`].
+    fn new(extra: &[((i32, i32), i32)]) -> Option<Self> {
+        let k = i64::from(ExtraCover::REACH);
         let (mut x0, mut z0, mut x1, mut z1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
         for &((x, z), r) in extra {
             let (x, z, r) = (i64::from(x), i64::from(z), i64::from(r) + k);
             (x0, z0, x1, z1) = (x0.min(x - r), z0.min(z - r), x1.max(x + r), z1.max(z + r));
         }
         let (width, depth) = ((x1 - x0 + 1) as u64, (z1 - z0 + 1) as u64);
-        let fits = |lo: i64, hi: i64| lo >= i64::from(i32::MIN) && hi <= i64::from(i32::MAX);
-        if width * depth > Self::CELLS || !fits(x0, x1) || !fits(z0, z1) {
+        if width * depth > ExtraCover::CELLS {
             return None;
         }
         let (x0, z0, width, depth) = (x0 as i32, z0 as i32, width as u32, depth as u32);
-        let mut cells = vec![(Self::REACH + 1) as i8; (width * depth) as usize].into_boxed_slice();
+        let mut cells =
+            vec![(ExtraCover::REACH + 1) as i8; (width * depth) as usize].into_boxed_slice();
         // Inside a square counts as 0: no margin asked for is below it. Each
         // row of a square is a run of one value with a slope at either end.
         let lower = |run: &mut [i8], v: i8| run.iter_mut().for_each(|c| *c = (*c).min(v));
         for &((cx, cz), r) in extra {
-            let reach = r + Self::REACH;
+            let reach = r + ExtraCover::REACH;
             for dz in -reach..=reach {
                 let start = (cz + dz - z0) as usize * width as usize + (cx - x0) as usize;
                 let row = &mut cells[start - reach as usize..=start + reach as usize];
@@ -2456,7 +2673,6 @@ impl ExtraCover {
             }
         }
         Some(Self {
-            extra: extra.to_vec(),
             x0,
             z0,
             width,
@@ -2464,8 +2680,6 @@ impl ExtraCover {
             cells,
         })
     }
-    /// Whether (x, z) is within `margin` of an area's square, for a
-    /// `margin` up to `REACH`.
     fn within(&self, x: i32, z: i32, margin: i32) -> bool {
         let (dx, dz) = (
             x.wrapping_sub(self.x0) as u32,
@@ -2490,6 +2704,9 @@ impl Ranges<'_> {
             let (dx, dz) = (i64::from(x - c.0), i64::from(z - c.1));
             dx * dx + dz * dz
         };
+        if let Some(cover) = self.cover {
+            return d(self.center).min(cover.nearest_sq(x, z));
+        }
         self.extra
             .iter()
             .map(|(c, _)| d(*c))
@@ -2750,6 +2967,34 @@ fn whole_relight_columns(
     (columns, inline)
 }
 
+/// Drops the pending sections (`meshing`, `compile_started`, `waiting`) of
+/// the `gone` columns: one pass over each store when that is cheaper than a
+/// lookup per section of every column (a far teleport at render distance 32
+/// forgets ~3,700 columns, 1.7 ms of lookups), else by key.
+fn forget_pending_sections(
+    meshing: &mut FxHashMap<(i32, i32, i32), u64>,
+    compile_started: &mut FxHashMap<(i32, i32, i32), u64>,
+    waiting: &mut FxHashSet<(i32, i32, i32)>,
+    gone: &FxHashSet<(i32, i32)>,
+    sections: i32,
+) {
+    let lookups = gone.len().saturating_mul(sections.max(0) as usize);
+    if lookups > meshing.len() + compile_started.len() + waiting.len() {
+        let kept = |&(x, _, z): &(i32, i32, i32)| !gone.contains(&(x, z));
+        meshing.retain(|k, _| kept(k));
+        compile_started.retain(|k, _| kept(k));
+        waiting.retain(kept);
+    } else {
+        for &(x, z) in gone {
+            for sy in 0..sections {
+                meshing.remove(&(x, sy, z));
+                compile_started.remove(&(x, sy, z));
+                waiting.remove(&(x, sy, z));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2895,6 +3140,42 @@ mod tests {
                 .is_none()
         );
         assert!(waiting.elapsed() >= std::time::Duration::from_millis(10));
+    }
+
+    /// Whether the forgotten columns are few (looked up by key) or many
+    /// (one pass over each store), exactly their pending sections go.
+    #[test]
+    fn forgotten_columns_lose_their_pending_sections_either_way() {
+        let pending: Vec<(i32, i32, i32)> = (0..4)
+            .flat_map(|x| (0..3).map(move |sy| (x, sy, -x)))
+            .collect();
+        for gone in [
+            vec![(1, -1)],
+            (0..400)
+                .map(|x| (x, -x))
+                .filter(|&c| c != (2, -2))
+                .collect(),
+        ] {
+            let gone: FxHashSet<(i32, i32)> = gone.into_iter().collect();
+            let mut meshing: FxHashMap<_, u64> = pending.iter().map(|&k| (k, 1)).collect();
+            let mut started = meshing.clone();
+            let mut waiting: FxHashSet<_> = pending.iter().copied().collect();
+            forget_pending_sections(&mut meshing, &mut started, &mut waiting, &gone, 3);
+            let mut left: Vec<_> = waiting.into_iter().collect();
+            left.sort();
+            let expected: Vec<_> = pending
+                .iter()
+                .copied()
+                .filter(|&(x, _, z)| !gone.contains(&(x, z)))
+                .collect();
+            assert_eq!(left, expected, "{} gone", gone.len());
+            let mut left: Vec<_> = meshing.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+            let mut left: Vec<_> = started.into_keys().collect();
+            left.sort();
+            assert_eq!(left, expected);
+        }
     }
 
     /// Edits in two neighbouring columns light those and the ten around
@@ -3804,14 +4085,62 @@ mod cover_tests {
         }
     }
 
+    /// Players thousands of blocks apart: no grid fits them, and the buckets
+    /// answer what a scan of every area does, the nearest centre included.
+    #[test]
+    fn the_buckets_answer_as_the_scan() {
+        let mut seed = 0x51_7CC1_B727_220Au64;
+        let forced: HashSet<(i32, i32)> = HashSet::new();
+        for case in 0..12 {
+            // Spread over 6000 columns (96 000 blocks), some side by side.
+            let mut extra = areas(&mut seed, 2 + case * 9, 3000);
+            extra.push((extra[0].0, 10));
+            extra.push(((extra[1].0.0 + 5, extra[1].0.1 - 70), 4));
+            let cover = ExtraCover::new(&extra).expect("buckets");
+            let ranges = |cover| Ranges {
+                center: (3, -2),
+                radius: 10,
+                extra: &extra,
+                forced: &forced,
+                cover,
+                band: None,
+            };
+            let (scan, buckets) = (ranges(None), ranges(Some(&cover)));
+            // Around each area, and on a coarse lattice over the whole spread.
+            let near = extra.iter().flat_map(|&((cx, cz), _)| {
+                (-80..=80)
+                    .step_by(7)
+                    .flat_map(move |dz| (-80..=80).step_by(7).map(move |dx| (cx + dx, cz + dz)))
+            });
+            let lattice = (-3200..=3200)
+                .step_by(97)
+                .flat_map(|z| (-3200..=3200).step_by(89).map(move |x| (x, z)));
+            for (x, z) in near.chain(lattice) {
+                assert_eq!(
+                    scan.distance(x, z),
+                    buckets.distance(x, z),
+                    "case {case} ({x}, {z})"
+                );
+                for m in 0..=ExtraCover::REACH {
+                    assert_eq!(
+                        scan.in_extra(x, z, m),
+                        buckets.in_extra(x, z, m),
+                        "case {case} ({x}, {z}) {m}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_stale_or_impossible_grid_is_not_used() {
         let mut cover = None;
         ExtraCover::refresh(&mut cover, &[((0, 0), 11), ((5, 5), 11)]);
         assert!(ExtraCover::matching(&cover, &[((0, 0), 11), ((5, 5), 11)]).is_some());
         assert!(ExtraCover::matching(&cover, &[((0, 0), 11), ((5, 6), 11)]).is_none());
-        // Too far apart for a mebibyte of grid, and one area alone: scans.
-        assert!(ExtraCover::new(&[((0, 0), 11), ((100_000, 0), 11)]).is_none());
+        // Too far apart for a mebibyte of grid: buckets alone. One area alone: scans.
+        let far = ExtraCover::new(&[((0, 0), 11), ((100_000, 0), 11)]).expect("buckets");
+        assert!(far.grid.is_none());
         assert!(ExtraCover::new(&[((0, 0), 11)]).is_none());
         assert!(ExtraCover::new(&[((i32::MAX - 1, 0), 11), ((i32::MAX - 3, 0), 11)]).is_none());
         assert!(ExtraCover::new(&[((0, i32::MAX - 1), 11), ((0, i32::MAX - 3), 11)]).is_none());

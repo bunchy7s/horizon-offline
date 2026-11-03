@@ -57,6 +57,8 @@ pub(super) trait Entity: EntityRules {
     fn id(&self) -> u32;
     fn position(&self) -> Vec3;
     fn position_mut(&mut self) -> &mut Vec3;
+    /// `Entity.getDeltaMovement`.
+    fn velocity(&self) -> Vec3;
     fn velocity_mut(&mut self) -> &mut Vec3;
     fn bounds(&self) -> Aabb;
     /// What a selector finds this entity as (`@e`), or `None` for one it cannot
@@ -249,6 +251,9 @@ macro_rules! stored_motion {
         }
         fn position_mut(&mut self) -> &mut Vec3 {
             &mut self.position
+        }
+        fn velocity(&self) -> Vec3 {
+            self.velocity
         }
         fn velocity_mut(&mut self) -> &mut Vec3 {
             &mut self.velocity
@@ -996,8 +1001,7 @@ impl Entity for ThrownTrident {
         !self.in_ground || self.previous != self.position
     }
     fn selector_target(&self) -> Option<Target> {
-        // No `Target` variant for it yet: `@e` does not find tridents.
-        None
+        Some(Target::Trident(self.id))
     }
     /// Like any arrow (`AbstractArrow.push`) not pushed while in the ground.
     fn pushed_by_explosion(&self) -> bool {
@@ -1076,5 +1080,20 @@ mod no_gravity_stand_tests {
         stand.no_gravity = false;
         stand.marker = true;
         assert!(!stand.triggers_blocks());
+    }
+}
+
+#[cfg(test)]
+mod trident_selector_tests {
+    use super::Entity as _;
+    use crate::game::{commands::Target, trident::ThrownTrident};
+    use horizon_core::geometry::Vec3;
+
+    /// `@e`, `/kill` and `/data` reach a thrown trident like any other entity
+    /// (`EntityTypeTest.forClass(Entity.class)`: every entity in the level).
+    #[test]
+    fn a_thrown_trident_is_a_selector_target() {
+        let t = ThrownTrident::remote(9, Vec3::new(0.5, 100.0, 0.5), 0.0, 0.0);
+        assert_eq!(t.selector_target(), Some(Target::Trident(9)));
     }
 }

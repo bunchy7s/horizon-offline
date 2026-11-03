@@ -1540,6 +1540,28 @@ mod tests {
         assert!(p.is_ok(), "{:?}", p.err());
     }
 
+    /// `sqrt` of a negative is undefined in GLSL: in functions it reads zero, as packs written
+    /// against GL drivers expect at `sqrt(1.0 - y * y)` with y rounding just above 1. A global
+    /// constant keeps the built-in, so it stays a constant (an array's size here).
+    #[test]
+    fn sqrt_in_functions_never_takes_a_negative() {
+        let fsh = "#version 120\nconst int n = int(sqrt(16.0));\nfloat w[n];\n\
+                   vec2 f(vec2 v) { float y = v.x; return vec2(sqrt(1.0 - y * y), sqrt(v).y); }\n\
+                   void main() { w[3] = 1.0; gl_FragColor = vec4(f(vec2(1.0)), w[3], 1.0); }\n";
+        let p = program(
+            &[("composite.vsh", VSH_120), ("composite.fsh", fsh)],
+            Target::Window,
+        )
+        .unwrap();
+        let clamped = p.fragment.functions.iter().any(|(_, f)| {
+            f.expressions.iter().any(|(_, e)| {
+                matches!(e, naga::Expression::Math { fun: naga::MathFunction::Sqrt, arg, .. }
+                    if matches!(f.expressions[*arg], naga::Expression::Math { fun: naga::MathFunction::Max, .. }))
+            })
+        });
+        assert!(clamped, "sqrt's argument is clamped at zero");
+    }
+
     #[test]
     fn core_programs_translate() {
         let vsh = "#version 330 core\nin vec3 vaPosition;\nin vec2 vaUV0;\nuniform mat4 modelViewMatrix, projectionMatrix;\n\

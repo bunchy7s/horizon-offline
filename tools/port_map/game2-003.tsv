@@ -11,18 +11,18 @@ Strider.getDismountLocationForPassenger	port	crates/horizon-client/src/game/moun
 Strider.tickRidden	port	crates/horizon-client/src/mobs/equine.rs::ridden_step	strider branch: rider yaw, half pitch, boost factor, cold slowdown
 Strider.playStepSound	port	crates/horizon-client/src/mobs/ai.rs::step_sound	lava or normal step sound
 Strider.isBeingTempted	inline	crates/horizon-client/src/mobs/ai.rs::play_ambient	the Tempt goal running check is folded into the ambient sound guard
-Strider.canAddPassenger	missing		minor: a player can still board a saddled strider whose head is in lava; vanilla refuses (isEyeInFluid LAVA)
-Strider.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: the strider 0.6 x eye height override is not applied; the default eye-height offset is used
+Strider.canAddPassenger	missing		no boarding rule of its own: `mobs/riders.rs::start_riding` tests the mount and the cooldown only, so a player can still board a saddled strider whose head is in lava where vanilla refuses (`isEyeInFluid` LAVA)
+Strider.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	0.6 of the eye height, the default width/2 forwards
 Strider.StriderPathNavigation.createPathFinder	port	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	ground nav kind gets the walk evaluator, as WalkNodeEvaluator
 Strider.StriderPathNavigation.isStableDestination	port	crates/horizon-client/src/mobs/nav.rs::Mob::stable_destination	lava counts as stable for lava walkers
 Vex.registerGoals	port	crates/horizon-client/src/mobs/vex.rs::register	float, charge, random move, look goals, owner and player targets
-Vex.restoreFrom	missing		minor: a vex restored after a dimension trip keeps no owner link; Horizon has no mob restoreFrom
+Vex.restoreFrom	missing		no mob `restoreFrom`: a vex that changes dimension keeps no owner link
 Vex.getVexFlag	inline	crates/horizon-client/src/mobs/vex.rs::Charge::can_continue	the charging bit is the plain extra.flag; there is no flags byte
 Vex.setVexFlag	inline	crates/horizon-client/src/mobs/vex.rs::Charge::start	start sets extra.flag; stop and tick clear it
 Vex.finalizeSpawn	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::finalize	Vex arm: populate (sword) then enchant
 Vex.populateDefaultEquipmentSlots	port	crates/horizon-client/src/mobs/finalize.rs::Ctx::populate	iron sword in hand with drop chance 0
 Witch.registerGoals	port	crates/horizon-client/src/mobs/witch.rs::register	gap: minor: raiders that hurt a witch are still targeted back (vanilla ignores them)
-Witch.handleEntityEvent	missing		player: a witch shows purple magic puffs about once a minute while idle; not drawn here (the RNG draw is kept in ai_step)
+Witch.handleEntityEvent	port	crates/horizon-client/src/game/remote_mob_particles.rs::Game::witch_magic_particles	event 15: `nextInt(35) + 10` purple puffs half a block over the head, the count drawn again every pass as the Java loop condition does; `game/remote.rs:3949` hands it every witch entity event (the rest of the handler is LivingEntity's)
 Witch.getDamageAfterMagicAbsorb	port	crates/horizon-client/src/mobs.rs::Mob::damage_with	85% less from #witch_resistant_to, nothing from its own hit
 Zoglin.initCoreActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: look-at-target and move-to-target sinks are not separate; the goal set stands in for them
 Zoglin.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: idle is a stroll only; no look-target sometimes and no do-nothing pauses
@@ -33,7 +33,7 @@ Zoglin.createAttributes	skip:data		attribute defaults come from the data tables 
 Zoglin.doHurtTarget	port	crates/horizon-client/src/mobs/piglin.rs::hoglin_hurt_target	headbutt event, zoglin attack sound, hurt and throw
 Zoglin.hurtServer	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: HurtByTarget sets the attacker as target with no 4-block check against a much nearer current target
 Zoglin.setAttackTarget	inline	crates/horizon-client/src/mobs/piglin.rs::register_zoglin	gap: minor: target has no 200-tick expiry; Horizon sets the target directly
-Zoglin.updateActivity	missing		player: a zoglin that starts a fight does not play its angry grunt (zoglin.angry)
+Zoglin.updateActivity	port	crates/horizon-client/src/mobs/piglin.rs::zoglin_step	on entering the fight activity it plays `entity.zoglin.angry`; `mobs/ai.rs:1718` runs it for every zoglin after the brain
 Zoglin.customServerAiStep	inline	crates/horizon-client/src/mobs/piglin.rs::ai_step	gap: minor: the brain tick is not run; the zoglin goal set runs in the general AI loop
 Zoglin.setBaby	port	crates/horizon-client/src/mobs/finalize.rs::set_baby	Zoglin arm: non-ageable baby age and 0.5 attack damage
 Zoglin.handleEntityEvent	port	crates/horizon-client/src/mobs/piglin.rs::client_event	event 4 starts the headbutt; the attack sound comes from hoglin_hurt_target
@@ -42,8 +42,8 @@ Breeze.createAttributes	skip:data		attribute defaults come from the data tables 
 Breeze.makeBrain	port	crates/horizon-client/src/mobs/monster_brain.rs::init	breezes get the fight default activity
 Breeze.onSyncedDataUpdated	port	crates/horizon-client/src/mobs/breeze.rs::ai_step	client pose change restarts the matching animation
 Breeze.resetAnimations	inline	crates/horizon-client/src/mobs/breeze.rs::ai_step	the stop calls of the pose-change branch
-Breeze.emitJumpTrailParticles	missing		player: no block-dust trail behind a long jump (about 5 ticks of particles)
-Breeze.emitGroundParticles	missing		player: no block-dust puffs at its feet while it stands, shoots, inhales or lands; Horizon only draws the random number
+Breeze.emitJumpTrailParticles	missing		`mobs/breeze.rs` has no particle call (only `dangerous_block`), so no block dust follows a long jump
+Breeze.emitGroundParticles	port	crates/horizon-client/src/mobs/breeze.rs::emit_ground_particles	the block it stands in (else the one it stands on) crumbled at the centre of its box and its feet; twenty crumbs while inhaling, one while standing, shooting or sliding; none as a passenger or over a block that draws nothing
 Breeze.playWhirlSound	port	crates/horizon-client/src/mobs/breeze.rs::tick	whirl sound on a random clock, as a local sound
 Breeze.deflection	port	crates/horizon-client/src/game/creatures.rs::Game::tick_projectiles	breeze turns projectiles back, except wind charges
 Breeze.getHurtBy	port	crates/horizon-client/src/mobs/monster_brain.rs::hurt_by_entity	the living source of the last hurt
@@ -68,19 +68,19 @@ Creaking.defineSynchedData	skip:java		SynchedEntityData builder; the synced valu
 Creaking.createAttributes	skip:data		attribute defaults come from the data tables (mobs.rs attr lookup)
 Creaking.setupAnimationStates	port	crates/horizon-client/src/mobs/creaking.rs::animate	attack, invulnerability and tear-down animations
 Creaking.creakingDeathEffects	port	crates/horizon-client/src/mobs/creaking_heart.rs::remove_protector	gap: minor: no blameSourceForDamage or die(); health is set to 0 and the twitch sound plays
-Creaking.canUsePortal	missing		minor: a heart-bound creaking can still go through a portal; game/nether_portal.rs mob_can_use_portal has no heart check
+Creaking.canUsePortal	port	crates/horizon-client/src/mobs/creaking.rs::can_use_portal	`mob_can_use_portal` also asks it: isHeartBound() refuses the portal
 Creaking.readAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_from_nbt	home_pos is read back as the transient home
 Creaking.checkEyeBlink	inline	crates/horizon-client/src/mobs/creaking.rs::animate	eye flicker timing on the dying creaking
 Creaking.knockback	port	crates/horizon-client/src/mobs.rs::Mob::knockback	
-Creaking.CreakingPathNavigation.createPathFinder	missing		minor: no home-distance node evaluator; paths do not block nodes more than 32 blocks from the heart
-Creaking.HomeNodeEvaluator.getPathType	missing		minor: nodes more than 32 blocks from home are not marked blocked
+Creaking.CreakingPathNavigation.createPathFinder	missing		no home-distance node evaluator: `m.extra.home` is read for damage, tearing down and the save, never by the pathfinder
+Creaking.HomeNodeEvaluator.getPathType	missing		no node is marked blocked for being more than 32 blocks from the heart
 CreakingAi.initCoreActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	core swim, look-at-target and move sink
 CreakingAi.initIdleActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	idle: attack active creakings, look sometimes, stroll, look-walk or do nothing
 CreakingAi.initFightActivity	port	crates/horizon-client/src/mobs/monster_brain.rs::creaking_packages	fight: walk to target, melee on a 40 tick cooldown, stop when unreachable
 AbstractCubeMob.registerGoals	port	crates/horizon-client/src/mobs/cube.rs::register	float, random direction, keep jumping, attack goal and player and golem targets
 AbstractCubeMob.addAdditionalSaveData	port	crates/horizon-client/src/entity_nbt.rs::mob_to_nbt	Size stored minus one, and wasOnGround
 AbstractCubeMob.refreshDimensions	skip:other		bounds are read from the size on each use, so there is no separate refresh; the position is never reset
-AbstractCubeMob.onSyncedDataUpdated	missing		unsure: remote.rs applies no size sync to cubes; local play sets the size directly
+AbstractCubeMob.onSyncedDataUpdated	missing		no size sync from a spawn or a data update: `mobs/living.rs` takes a mob's dimensions from its own size, and `game/remote.rs` applies no cube size
 AbstractCubeMob.setUpSplitCube	port	crates/horizon-client/src/game/creatures.rs::Game::mob_died	gap: minor: children get half size and the same fixed offsets, but no random yaw
 AbstractCubeMob.push	inline	crates/horizon-client/src/mobs/cube.rs::hurt_touching_golems	an iron golem whose box overlaps a cube that can deal damage is hurt through dealDamage (MobEvent::CubeHurtMob, with the attack sound after a landed hit)
 AbstractCubeMob.dealDamage	inline	crates/horizon-client/src/mobs/cube.rs::ai_step	the player touch (CubeHurtPlayer) and a golem's overlap (CubeHurtMob, hurt_touching_golems): alive, teams allow damage, in melee range, line of sight, then mobAttack for getAttackDamage
@@ -118,7 +118,8 @@ SulfurCube.applyVerticalHitAnglePowerTransfer	port	crates/horizon-client/src/mob
 SulfurCube.applyVerticalPositionAnglePowerRotation	port	crates/horizon-client/src/mobs/sulfur_cube.rs::knockback	feet-to-feet rotation at 0.8 with the power ratio clamp
 SulfurCube.get	skip:other		data component view of the body item; Horizon reads the body item directly (sulfur_cube::body)
 SulfurCube.applyImplicitComponent	skip:other		component copy when a cube is built from an item; Horizon sets the body directly
-SulfurCube.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	gap: minor: cube rope point is half the box height; the eye-height default is used
+SulfurCube.getLeashOffset	port	crates/horizon-client/src/mobs/leash.rs::leash_offset	half the box height on the cube's centre
+SulfurCube.canBeLeashed	port	crates/horizon-client/src/mobs/leash.rs::can_be_leashed	hasBodyItem: only a cube with a block in its body takes a lead
 SulfurCube.SulfurCubeTemptGoal.stopNavigation	port	crates/horizon-client/src/mobs/sulfur_cube.rs::SulfurTempt::stop	stops the cube's wanted movement
 SulfurCube.SulfurCubeTemptGoal.navigateTowards	port	crates/horizon-client/src/mobs/sulfur_cube.rs::SulfurTempt::tick	looks at the player and sets the cube's direction
 Hoglin.createAttributes	skip:data		attribute defaults come from the data tables (mobs.rs attr lookup)
@@ -136,12 +137,12 @@ HoglinAi.initIdleActivity	inline	crates/horizon-client/src/mobs/piglin.rs::regis
 HoglinAi.initFightActivity	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	MeleeAttack.create(40) for adults and create(15) for babies (`MeleeAttack::intervals(40, 15)`); the brain's own order has no tick parity here (the probe has no hoglin brain)
 HoglinAi.initRetreatActivity	port	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	
 HoglinAi.createIdleMovementBehaviors	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: no look-target walk or do-nothing pauses; a plain stroll only
-HoglinAi.updateActivity	missing		player: no grunt when a hoglin switches activity (angry or retreat); only the ambient roll plays
+HoglinAi.updateActivity	port	crates/horizon-client/src/mobs/piglin.rs::update_activity	takes the first valid activity and voices the one it changed to (`hoglin_sound`: angry in a fight, retreat when avoiding or converting, else ambient); the same fn covers PiglinAi and PiglinBruteAi
 HoglinAi.onHitTarget	inline	crates/horizon-client/src/mobs/piglin.rs::hoglin_hurt_target	gap: player: no retreat when piglins outnumber hoglins; the hit only attacks
-HoglinAi.retreatFromNearestTarget	missing		player: no retreat from the nearest piglin or hoglin target (part of the missing retreat activity)
-HoglinAi.setAvoidTarget	missing		player: no avoid target is set, so a hoglin never backs off after a piglin hit (retreat activity missing)
+HoglinAi.retreatFromNearestTarget	port	crates/horizon-client/src/mobs/piglin.rs::retreat_from_nearest	the nearest of the new target, the avoid target and the attack target retreats `who` (`BehaviorUtils.getNearestTarget`: strictly closer wins), then a hoglin sets an avoid target and a piglin also stops hunting
+HoglinAi.setAvoidTarget	port	crates/horizon-client/src/mobs/piglin.rs::set_avoid_target	forgets the attack target and the walk and avoids `who` for a 5 to 20 second retreat, sampled from the level random
 HoglinAi.isPosNearNearestRepellent	inline	crates/horizon-client/src/mobs/piglin.rs::HoglinAvoidRepellent::can_use	the 8-block repellent distance check
-HoglinAi.piglinsOutnumberHoglins	missing		player: the count of piglins against hoglins that starts a retreat is not kept
+HoglinAi.piglinsOutnumberHoglins	port	crates/horizon-client/src/mobs/piglin.rs::piglins_outnumber_hoglins	an adult hoglin counts itself and sees more adult piglins than hoglins (`piglins > hoglins + 1`)
 HoglinAi.maybeRetaliate	port	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: no check for hoglin attackers or the 4-block nearer-target rule; HurtByTarget alerts others
 HoglinAi.setAttackTarget	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	gap: minor: target has no 200-tick expiry and the breed target is not cleared
 HoglinAi.setAttackTargetIfCloserThanCurrent	inline	crates/horizon-client/src/mobs/piglin.rs::register_hoglin	NearestTarget keeps the closest target and skips pacified hoglins

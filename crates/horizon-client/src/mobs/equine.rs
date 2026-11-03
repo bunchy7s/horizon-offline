@@ -24,6 +24,19 @@ pub const COLORS: [&str; 7] = [
     "gray",
     "darkbrown",
 ];
+/// `Horse.Variant.getSerializedName` in id order (WHITE 0 to DARK_BROWN 6):
+/// the names a `minecraft:horse/variant` component and the save's `Variant`
+/// byte carry. [`COLORS`] is the same order, but names the texture
+/// (`horse_darkbrown`), which drops the underscore.
+pub const VARIANT_NAMES: [&str; 7] = [
+    "white",
+    "creamy",
+    "chestnut",
+    "brown",
+    "black",
+    "gray",
+    "dark_brown",
+];
 pub const MARKINGS: [&str; 5] = ["", "white", "whitefield", "whitedots", "blackdots"];
 
 // AnimState slots.
@@ -111,6 +124,16 @@ pub fn on_elastic_leash_pull(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEven
     }
     if super::camel::is_camel(m.species()) {
         super::camel::on_elastic_leash_pull(m, w, events);
+    }
+}
+/// `AbstractHorse.getJumpSound` (`playJumpSound` plays it at 0.4): the donkey
+/// and the mule have their own, and a skeleton horse in water splashes.
+pub fn jump_sound(m: &Mob) -> &'static str {
+    match m.species() {
+        Species::Donkey => "entity.donkey.jump",
+        Species::Mule => "entity.mule.jump",
+        Species::SkeletonHorse if m.fluids.in_water => "entity.skeleton_horse.jump_water",
+        _ => "entity.horse.jump",
     }
 }
 /// `AbstractHorse.onPlayerJump`: a released jump bar lets the horse slide on

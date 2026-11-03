@@ -12,8 +12,8 @@ ChatComponent.scrollChat	port	crates/horizon-client-render/src/chat.rs::Chat::sc
 ChatComponent.getHeight	port	crates/horizon-client-render/src/chat.rs::ChatOptions::height_px	focused or unfocused chat height in px
 ChatComponent.defaultUnfocusedPct	inline	crates/horizon-client-render/src/chat.rs::ChatOptions::default	the default 70/160 is stored as a constant, not computed from the height formula
 ChatComponent.getLineHeight	port	crates/horizon-client-render/src/chat.rs::ChatOptions::line_height	9 * (line spacing + 1)
-ChatComponent.saveAsDraft	missing		player: Save Chat Drafts does nothing (options_ui.rs notes no drafts yet); text left in the box is not kept for the next open
-ChatComponent.createScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat	gap: player: no draft is restored; the chat opens with the initial text its caller passes
+ChatComponent.saveAsDraft	port	crates/horizon-client/src/game/chat.rs::Game::keep_chat_draft	the text left in the box becomes the draft unless the screen was closed on purpose without Save Chat Drafts or the text was sent
+ChatComponent.createScreen	port	crates/horizon-client/src/game/chat.rs::Game::open_chat_method	T or / opens the chat with the draft kept last time, a command draft only for /, else with its prefix, and records whether the box starts on a draft
 ChatComponent.preserveCurrentChatScreen	missing		minor: unsure: Horizon keeps no chat screen across a dimension change; game/nether_portal.rs:577 only leaves Chat alone during a portal effect, the change path was not checked
 ChatComponent.storeState	inline	crates/horizon-client/src/game/remote.rs::Game::poll_remote	no snapshot: the Reconfigured arm only resets boss bars and registries, so the chat survives a reconfigure without a copy
 ChatComponent.restoreState	inline	crates/horizon-client/src/game/remote.rs::Game::poll_remote	no restore: the chat is never cleared on Reconfigured, so there is nothing to put back
@@ -78,19 +78,19 @@ CycleButton.ValueListSupplier.create	skip:java		value list copy
 DebugScreenOverlay.<init>	skip:java		constructs the chart objects; Horizon's DebugCharts is plain state
 DebugScreenOverlay.formatChart	port	crates/horizon-client/src/game/debug_keys.rs::Game::debug_chart_lines	the [key] name visible or hidden line
 DebugScreenOverlay.formatKeybind	inline	crates/horizon-client/src/game/debug_keys.rs::Game::debug_chart_lines	the key closure inside debug_chart_lines
-DebugScreenOverlay.getServerLevel	missing		minor: F3 draws no chunk or level lines; draw_debug_overlay has no chunk data
-DebugScreenOverlay.getLevel	missing		minor: F3 draws no chunk or level lines; draw_debug_overlay has no chunk data
+DebugScreenOverlay.getServerLevel	inline	crates/horizon-client/src/game/debug_lines.rs::Game::debug_chunk_source_lines	the server chunk's and its ServerLevel's counts: the Chunks[S] line over the server's chunk map; the module comment names DebugScreenOverlay.getServerChunk and its ServerLevel
+DebugScreenOverlay.getLevel	inline	crates/horizon-client/src/game/debug_lines.rs::Game::debug_entry_lines	the overlay's own lines read the client level there: day count, biome, local difficulty and the chunk render stats
 DebugScreenOverlay.getServerChunk	port	crates/horizon-client/src/game/debug_lines.rs::Game::server_debug_lines	the integrated server's half of the F3 lines for the dimension at the feet: heightmaps, local difficulty, spawn counts and the chunk source's counts
-DebugScreenOverlay.getClientChunk	missing		minor: F3 draws no client chunk line
+DebugScreenOverlay.getClientChunk	inline	crates/horizon-client/src/game/debug_lines.rs::Game::debug_heightmap_lines	the client chunk's heightmaps, the CH line, then the server chunk's SH line
 DebugScreenOverlay.showDebugScreen	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	debug on and (HUD shown or a screen open)
-DebugScreenOverlay.showProfilerChart	missing		minor: no profiler chart; the profiling chart key is used up and draws nothing (debug_keys.rs:662)
+DebugScreenOverlay.showProfilerChart	inline	crates/horizon-client/src/debug_chart.rs::DebugCharts::draw	the charts the corners hold are drawn from the toggles: frame and tick times, bandwidth and ping, the lightmap; the predicate is folded into the draw
 DebugScreenOverlay.showNetworkCharts	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::draw	network chart drawn when its flag is set
 DebugScreenOverlay.showFpsCharts	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::draw	fps chart drawn when its flag is set
 DebugScreenOverlay.showLightmapTexture	port	crates/horizon-client/src/game/debug_keys.rs::Game::draw_debug_overlay	lightmap drawn when its flag is set (debug_keys.rs:473)
 DebugScreenOverlay.toggleNetworkCharts	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::toggle_network	toggles the network chart and clears the others
 DebugScreenOverlay.toggleFpsCharts	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::toggle_fps	toggles the fps chart and clears the others
 DebugScreenOverlay.toggleLightmapTexture	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::toggle_lightmap	toggles the lightmap and clears the others
-DebugScreenOverlay.toggleProfilerChart	missing		minor: no profiler chart (see showProfilerChart)
+DebugScreenOverlay.toggleProfilerChart	port	crates/horizon-client/src/debug_chart.rs::DebugCharts::toggle_fps	the chart key turns the FPS chart on (and the F3 overlay with it), turning the network and lightmap charts off
 DebugScreenOverlay.logRemoteSample	missing		minor: unsure: the debug_sample packet is only named in horizon-protocol/src/ids.rs, so a server's samples are not logged
 EditBox.createNarrationMessage	inline	crates/horizon-client/src/screen_narrator.rs::narrate	narrate's edit-box arm: gui.narrate.editBox(message, value); Narratable::edit_box is recorded by ui::EditBox::draw and screen_draw's field
 EditBox.getHighlighted	port	crates/horizon-client-render/src/ui.rs::EditBox::selected_text	the text between cursor and highlight

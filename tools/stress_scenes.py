@@ -77,6 +77,37 @@ def mobs(ox, oz):
     return out
 
 
+def markings(ox, oz):
+    """1000 horses with markings and slimes (translucent layers): the mobs scene's grid."""
+    out, i = [], 0
+    for layer in range(5):
+        for row in range(10):
+            for col in range(20):
+                x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
+                # Horse.Variant: the colour, plus 256 times the markings (1 to 4).
+                kind = (f"horse {{Variant:{i % 7 + 256 * (i // 2 % 4 + 1)}," if i % 2 == 0
+                        else "slime {Size:1,")
+                name, tags = kind.split(" ")
+                out.append(f"summon {name} {num(x)} {num(y)} {num(z)} "
+                           f"{tags}NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b}}")
+                i += 1
+    return out
+
+
+def glowing(ox, oz):
+    """1000 glowing mobs (the outline post effect): the mobs scene's kinds and grid."""
+    out, i = [], 0
+    for layer in range(5):
+        for row in range(10):
+            for col in range(20):
+                kind = MOBS[i % len(MOBS)]
+                x, y, z = ox + 0.5 - 14.25 + 1.5 * col, FLOOR_Y + 1 + 2.5 * layer, oz + 8 + 2 * row
+                out.append(f"summon {kind} {num(x)} {num(y)} {num(z)} "
+                           "{NoAI:1b,NoGravity:1b,PersistenceRequired:1b,Silent:1b,Glowing:1b}")
+                i += 1
+    return out
+
+
 def eyes(ox, oz):
     """1000 mobs with glowing eyes (spiders, cave spiders, endermen): the mobs scene's grid."""
     out, i = [], 0
@@ -148,6 +179,14 @@ def armor_stands(ox, oz):
             for row in range(20) for col in range(25)]
 
 
+def avatars(ox, oz):
+    """300 mannequins, the player model (20 x 15, 1.5 blocks apart): what cosmetics cost on many players
+    (docs/cosmetics.md: `HORIZON_COSMETICS=1 HORIZON_COSMETICS_LOCAL=<items>` dresses every mannequin)."""
+    return [f"summon mannequin {num(ox + 0.5 - 14.25 + 1.5 * col)} {FLOOR_Y + 1} {num(oz + 6 + 1.5 * row)} "
+            "{NoGravity:1b,Silent:1b,Rotation:[180f,0f]}"
+            for row in range(15) for col in range(20)]
+
+
 def chests(ox, oz):
     """800 containers with block-entity models: four walls 25 wide and 8 high, one kind each."""
     return [f"fill {ox - 12} {FLOOR_Y + 1} {oz + 10 + 4 * i} {ox + 12} {FLOOR_Y + 8} {oz + 10 + 4 * i} {kind}"
@@ -207,6 +246,9 @@ STRESS = [
     ("stress_particles", particles),
     ("stress_held", held),
     ("stress_eyes", eyes),
+    ("stress_glowing", glowing),
+    ("stress_avatars", avatars),
+    ("stress_markings", markings),
 ]
 NAMES = [name for name, _ in STRESS]
 

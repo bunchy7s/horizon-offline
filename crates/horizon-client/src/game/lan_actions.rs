@@ -1349,11 +1349,23 @@ impl Game<'_> {
         }
         // ServerPlayer.openMenu closes the menu that was open.
         self.guest_close_all(host, conn);
+        // A block's or a double chest's menu counts among the openers of its
+        // lid (a vehicle keeps its own `Container`, an ender chest has none).
+        let counts_openers = matches!(slots, Slots::Block(_) | Slots::Double(_, _));
         let hidden = self.native_hidden_slots(pos, items.len());
         host.hub
             .open_container(conn, menu, title, pos, slots, items);
         if !hidden.is_empty() {
             host.hub.hide_menu_slots(conn, hidden);
+        }
+        // `ContainerOpenersCounter.incrementOpeners` (`ChestBlockEntity.startOpen`,
+        // `ShulkerBoxBlockEntity.startOpen`): the lid opens for the guest, and
+        // when this is the first opener the open sound plays for everyone
+        // around, the opener included (`playSound(null, …)`, which the capture
+        // relay sends on to the guests). Without it the host's copy never
+        // learned of the open, so a guest's box opened silently.
+        if counts_openers && self.container_openers_changed(pos, true) {
+            self.container_edge_sound(pos, true);
         }
         true
     }
@@ -2174,6 +2186,17 @@ impl Game<'_> {
                 {
                     return;
                 }
+                // LeashFenceKnotEntity.interact: a knot has no entity here, only its fence.
+                if let Some(knot) = self.knot_at_id(p.id) {
+                    let hand = if p.hand == 1 { Hand::Off } else { Hand::Main };
+                    let swung = self.as_guest(host, conn, |g| {
+                        let swings = g.swings_started;
+                        g.with_hand(hand, |g| g.use_knot(knot, true));
+                        g.swings_started != swings
+                    });
+                    self.lan_swing_back(host, conn, swung);
+                    return;
+                }
                 let before = host.hub.guests[gi].vehicle;
                 if self
                     .look_at_entity(host, gi, p.id, Some(p.location))
@@ -2285,6 +2308,13 @@ impl Game<'_> {
                 });
             }
             S::PlayerCommand(p) if p.action == 6 => self.lan_start_gliding(host, conn),
+            // START_RIDING_JUMP: the mount's handleStartJump.
+            S::PlayerCommand(p) if p.action == 3 => {
+                self.lan_start_riding_jump(host, conn, p.data);
+            }
+            // STOP_RIDING_JUMP: AbstractHorse and Camel handleStopJump do
+            // nothing, and a nautilus' dash is not stopped this way.
+            S::PlayerCommand(p) if p.action == 4 => {}
             // ServerboundResourcePackPacket in play: the server has nothing to
             // do with it (a declined required pack is handled on the connection).
             S::ResourcePack(r) => {
@@ -2958,11 +2988,28 @@ impl Game<'_> {
         if let Some(b) = self.tracked_special_box(id) {
             return Some(b);
         }
+        if let Some(knot) = self.knot_at_id(id) {
+            let knot = horizon_client::mobs::leash::knot_state(knot);
+            let p = knot.position;
+            let half = knot.width / 2.0;
+            return Some(Aabb::new(
+                Vec3::new(p.x - half, p.y, p.z - half),
+                Vec3::new(p.x + half, p.y + knot.height, p.z + half),
+            ));
+        }
         self.creatures
             .projectiles
             .iter()
             .find(|p| p.id != 0 && p.id as i32 == id)
             .map(|p| p.bounds())
+    }
+
+    /// The fence of the knot whose entity id is `id` (`lan_assign_ids`).
+    fn knot_at_id(&self, id: i32) -> Option<[i32; 3]> {
+        self.knot_ids
+            .iter()
+            .find(|&(_, &knot)| knot as i32 == id)
+            .map(|(&fence, _)| fence)
     }
 
     fn guest_attack(&mut self, host: &mut LanHost, conn: u32, id: i32) {
@@ -3824,9 +3871,16 @@ impl Game<'_> {
             );
             // LivingEntity.die: the death animation, the dying player included.
             host.hub.entity_event(id, 3, at);
-            if let Some(eyes) = drops {
-                self.as_guest(host, conn, |game| game.drop_inventory(eyes));
-            }
+            // ServerPlayer.die: the drops, then the deathCount objectives, then
+            // the `deaths` statistic and the two timers it resets.
+            self.as_guest(host, conn, |game| {
+                if let Some(eyes) = drops {
+                    game.drop_inventory(eyes);
+                }
+                game.score_player_died();
+                game.award_custom_stat("deaths", 1);
+                game.stats.reset_death_timers();
+            });
             self.spawn_orbs(at, reward);
         }
     }
@@ -4378,6 +4432,35 @@ impl Game<'_> {
                 velocity: [v.x, v.y, v.z],
             }));
         }
+    }
+
+    /// ServerGamePacketListenerImpl.handlePlayerCommand START_RIDING_JUMP: the
+    /// vehicle the guest rides takes its own `handleStartJump` — a horse rears
+    /// and slides on the rider's keys, a camel dashes — and the sound vanilla's
+    /// server plays is broadcast to the players near the mount, the rider
+    /// included (their own client plays none).
+    fn lan_start_riding_jump(&mut self, host: &mut LanHost, conn: u32, data: i32) {
+        let Some(Some(index)) = self.as_guest(host, conn, |g| g.mount_index()) else {
+            return;
+        };
+        let m = &mut self.mobs[index];
+        let Some((sound, volume)) = crate::game::mounts::start_riding_jump(m, data) else {
+            return;
+        };
+        let at = m.center();
+        // LivingEntity.getSoundSource: a mob's sounds are in the neutral source.
+        let neutral = horizon_client::settings::SOUND_SOURCES
+            .iter()
+            .position(|s| *s == "neutral")
+            .unwrap_or(0) as i32;
+        host.hub.sound(
+            &format!("minecraft:{sound}"),
+            at,
+            volume,
+            1.0,
+            neutral,
+            None,
+        );
     }
 
     /// ServerGamePacketListenerImpl.handlePlayerCommand START_FALL_FLYING:
