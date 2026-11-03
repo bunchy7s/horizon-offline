@@ -2079,7 +2079,7 @@ mod tests {
 
     #[test]
     fn a_tall_column_sends_its_whole_height() {
-        let shape = LevelShape::new(-64, 2096, 2096, true).unwrap();
+        let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
         let mut chunk = Chunk::with_layout(0, 0, shape.column());
         chunk.set(3, 2000, 4, 1);
         let mut encoder = encoder();
