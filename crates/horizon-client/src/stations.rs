@@ -708,7 +708,7 @@ impl StationRecipes {
                 addition,
                 pattern,
                 ..
-            } if i == id => Some((&base.1, &addition.1, pattern)),
+            } if i == id => Some((&base.order, &addition.order, pattern)),
             _ => None,
         })?;
         if base.is_empty() || addition.is_empty() {
@@ -1041,13 +1041,13 @@ mod tests {
     fn smithing_ingredient_parses_holders() {
         let items = sample_items();
         let a = ingredient(&serde_json::json!("minecraft:diamond_sword"), &items);
-        assert_eq!(a.1, vec!["minecraft:diamond_sword"]);
+        assert_eq!(a.order, vec!["minecraft:diamond_sword"]);
         let b = ingredient(
             &serde_json::json!(["minecraft:diamond_sword", "minecraft:diamond_axe"]),
             &items,
         );
         assert_eq!(
-            b.1,
+            b.order,
             vec!["minecraft:diamond_sword", "minecraft:diamond_axe"]
         );
     }

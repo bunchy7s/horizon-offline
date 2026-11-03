@@ -90,7 +90,7 @@ impl Launcher {
 
     /// Changes what the new instance plays. Its name follows while it is the one the dialog gave
     /// (or none), never one the player typed.
-    fn change(&mut self, f: impl FnOnce(&mut JavaChoice)) {
+    pub(super) fn change(&mut self, f: impl FnOnce(&mut JavaChoice)) {
         let before = self.default_name();
         if let Some(j) = self.java_choice() {
             f(j);

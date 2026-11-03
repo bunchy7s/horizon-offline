@@ -90,6 +90,13 @@ fn painting_facing(face: [i32; 3]) -> Option<u8> {
         _ => 3,
     })
 }
+/// Whether the camera, at the origin of `corners`' space, is on the side of the quad
+/// that `normal` points to.
+fn faces_camera(corners: &[glam::DVec3; 4], normal: glam::DVec3) -> bool {
+    let centre = (corners[0] + corners[1] + corners[2] + corners[3]) / 4.0;
+    normal.dot(-centre) > 0.0
+}
+
 impl Game<'_> {
     /// `HangingEntity.survives`: no block collision in the box, solid blocks
     /// (or diodes) behind it and no other painting overlapping it.
@@ -378,22 +385,28 @@ impl Game<'_> {
             );
             let light = self.world.light(p.pos[0], p.pos[1], p.pos[2]);
             let packed = (u32::from(light >> 4) * 16) | ((u32::from(light & 15) * 16) << 8);
-            let mut quad = |corners: [glam::DVec3; 4], uv: [[f32; 2]; 4], shade: f32| {
-                let k = (255.0 * shade) as u32;
-                let color = 0xFF00_0000 | k << 16 | k << 8 | k;
-                for (p, uv) in corners.iter().zip(uv) {
-                    out.push(Vertex {
-                        normal: [0; 4],
-                        pos: p.as_vec3().to_array(),
-                        uv,
-                        layer: 0,
-                        color,
-                        light: packed,
+            let mut quad =
+                |corners: [glam::DVec3; 4], normal: glam::DVec3, uv: [[f32; 2]; 4], shade: f32| {
+                    // Back faces are culled, as the entity pipeline culls them: inside the
+                    // painting's box nothing of it shows. `corners` are relative to the camera.
+                    if !faces_camera(&corners, normal) {
+                        return;
+                    }
+                    let k = (255.0 * shade) as u32;
+                    let color = 0xFF00_0000 | k << 16 | k << 8 | k;
+                    for (p, uv) in corners.iter().zip(uv) {
+                        out.push(Vertex {
+                            normal: [0; 4],
+                            pos: p.as_vec3().to_array(),
+                            uv,
+                            layer: 0,
+                            color,
+                            light: packed,
 
-                        glint_uv: [0.0, 0.0],
-                    });
-                }
-            };
+                            glint_uv: [0.0, 0.0],
+                        });
+                    }
+                };
             let full = |r: horizon_client::hud::Rect| {
                 [[r.u0, r.v1], [r.u1, r.v1], [r.u1, r.v0], [r.u0, r.v0]]
             };
@@ -405,6 +418,7 @@ impl Game<'_> {
                     f + right * hw + up * hh,
                     f - right * hw + up * hh,
                 ],
+                out_dir,
                 full(front),
                 1.0,
             );
@@ -416,6 +430,7 @@ impl Game<'_> {
                     b - right * hw + up * hh,
                     b + right * hw + up * hh,
                 ],
+                -out_dir,
                 full(back),
                 0.8,
             );
@@ -434,6 +449,7 @@ impl Game<'_> {
                     f + t - right * hw,
                     f + t + right * hw,
                 ],
+                up,
                 strip,
                 1.0,
             );
@@ -444,6 +460,7 @@ impl Game<'_> {
                     b + bt - right * hw,
                     b + bt + right * hw,
                 ],
+                -up,
                 strip,
                 0.5,
             );
@@ -454,6 +471,7 @@ impl Game<'_> {
                     f - right * hw + up * hh,
                     b - right * hw + up * hh,
                 ],
+                -right,
                 strip,
                 0.6,
             );
@@ -464,6 +482,7 @@ impl Game<'_> {
                     b + right * hw + up * hh,
                     f + right * hw + up * hh,
                 ],
+                right,
                 strip,
                 0.6,
             );
@@ -492,5 +511,30 @@ mod tests {
         assert!(!painting_use_on_swings([0, 1, 0], true));
         assert!(!painting_use_on_swings([0, -1, 0], true));
         assert!(!painting_use_on_swings([0, 0, 1], false));
+    }
+}
+
+#[cfg(test)]
+mod face_tests {
+    use super::faces_camera;
+    use glam::DVec3;
+
+    /// A quad at z = 2 facing -z (towards a camera at the origin) shows; seen from behind
+    /// (the camera on the other side, the quad now at z = -2) it does not.
+    #[test]
+    fn a_quad_shows_only_to_the_side_it_faces() {
+        let at = |z: f64| {
+            [
+                DVec3::new(-1.0, -1.0, z),
+                DVec3::new(1.0, -1.0, z),
+                DVec3::new(1.0, 1.0, z),
+                DVec3::new(-1.0, 1.0, z),
+            ]
+        };
+        let normal = DVec3::new(0.0, 0.0, -1.0);
+        assert!(faces_camera(&at(2.0), normal));
+        assert!(!faces_camera(&at(-2.0), normal));
+        // Edge on: nothing to draw.
+        assert!(!faces_camera(&at(0.0), normal));
     }
 }

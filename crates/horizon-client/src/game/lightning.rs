@@ -42,6 +42,16 @@ pub(super) struct Bolt {
     /// the host, `Some(Some(conn))` for a guest.
     pub cause: Option<Option<u32>>,
 }
+/// `Pig.thunderHit`: `SpawnSetup` for mobs converted by lightning, preserving baby state.
+fn thunder_mob_spawn_setup(m: &horizon_client::mobs::Mob) -> SpawnSetup {
+    SpawnSetup {
+        baby: m.is_baby(),
+        yaw: m.yaw,
+        persistent: true,
+        ..Default::default()
+    }
+}
+
 /// The box `LightningBolt.tick` collects the `LightningStrikeTrigger` bystanders from: 15 blocks
 /// around the bolt, 15 down and `6 + 15` up.
 fn in_viewer_box(bolt: [f64; 3], p: [f64; 3]) -> bool {
@@ -55,9 +65,13 @@ impl Game<'_> {
     /// spawning chunk (within 128 blocks of a player) that is in entity
     /// ticking range.
     pub(super) fn tick_thunder(&mut self) {
-        // isRaining (rain level > 0.2) and isThundering (> 0.9, sky light, no ceiling).
+        // isRaining (rain level > 0.2) and isThundering (> 0.9) both need
+        // Level.canHaveWeather: sky light, no ceiling and not the End.
         let (rain, thunder) = self.world.weather.levels(1.0);
-        if rain <= 0.2 || thunder <= 0.9 || self.dim != super::Dim::Overworld || self.world_debug {
+        let weather = self.world.shape.sky_light
+            && !self.world.shape.has_ceiling
+            && self.dim != super::Dim::End;
+        if rain <= 0.2 || thunder <= 0.9 || !weather || self.world_debug {
             return;
         }
         let mut scratch = std::mem::take(&mut self.spawn_scratch);
@@ -404,9 +418,12 @@ impl Game<'_> {
         if let Some(mut s) = registry.state(state).cloned() {
             s.properties.insert("powered".into(), "true".into());
             if let Some(powered) = registry.id(&s) {
-                // The rod's onPlace schedules the 8-tick unpowering.
                 let _ = self.level_set(p, powered);
                 self.with_level(|b, level, ticks| {
+                    // `level.scheduleTick(pos, this, 8)`: the unpowering. A rod struck
+                    // is the same block as before, so its placement does not schedule
+                    // it, and without this it stayed powered for good.
+                    b.schedule_tick(level, ticks, BlockPos::new(p[0], p[1], p[2]), 8);
                     if level.redstone_experiments {
                         b.lightning_rod_update_neighbors(
                             level,
@@ -548,11 +565,7 @@ impl Game<'_> {
             struck.push(self.mob_entity(&self.mobs[i]));
             let m = &mut self.mobs[i];
             b.hit.push(m.id);
-            let setup = |m: &horizon_client::mobs::Mob| SpawnSetup {
-                yaw: m.yaw,
-                persistent: true,
-                ..Default::default()
-            };
+            let setup = thunder_mob_spawn_setup;
             let at = [m.position.x, m.position.y, m.position.z];
             match m.species() {
                 Species::Pig if !peaceful => {
@@ -721,8 +734,11 @@ impl Game<'_> {
 }
 
 #[cfg(test)]
-mod viewer_tests {
-    use super::in_viewer_box;
+mod tests {
+    use super::*;
+    use horizon_client::mobs::{Anim, Brain, Mob, MobType, Part, Species};
+    use horizon_core::geometry::Vec3;
+    use std::sync::Arc;
 
     #[test]
     fn viewer_box_reaches_15_around_and_down_and_21_up() {
@@ -732,5 +748,86 @@ mod viewer_tests {
         assert!(!in_viewer_box(bolt, [0.0, 85.5, 0.0]));
         assert!(!in_viewer_box(bolt, [0.0, 48.5, 0.0]));
         assert!(!in_viewer_box(bolt, [15.5, 64.0, 0.0]));
+    }
+
+    /// `Pig.thunderHit`: striking a pig with lightning converts it to a zombified
+    /// piglin while preserving age (#7510).
+    #[test]
+    fn a_baby_pig_hit_by_lightning_becomes_a_baby_zombified_piglin() {
+        let make_pig = |baby: bool| {
+            let kind = Arc::new(MobType {
+                id: "minecraft:pig".into(),
+                species: Species::Pig,
+                width: 0.9,
+                height: 0.9,
+                eye_height: 0.85,
+                category: "creature".into(),
+                max_health: 10.0,
+                speed: 0.25,
+                flying_speed: 0.02,
+                attack_damage: 0.0,
+                attack_knockback: 0.0,
+                follow_range: 16.0,
+                step_height: 0.6,
+                armor: 0.0,
+                armor_toughness: 0.0,
+                knockback_resistance: 0.0,
+                jump_strength: 0.42,
+                attributes: Default::default(),
+                gravity: 0.08,
+                safe_fall_distance: 3.0,
+                fall_damage_multiplier: 1.0,
+                water_efficiency: 0.0,
+                water_slowdown: 0.8,
+                air_speed: 0.02,
+                baby_scale: 0.5,
+                head_rot_speed: 10.0,
+                max_head_x_rot: 40.0,
+                max_head_y_rot: 75.0,
+                ambient_interval: 80,
+                flags: Default::default(),
+                model: Arc::new(Part {
+                    name: "root".into(),
+                    pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                    polygons: Vec::new(),
+                    children: Vec::new(),
+                }),
+                layers: Default::default(),
+                texture: String::new(),
+                brain: Brain::Passive,
+                anim: Anim::Quadruped,
+                sounds: ["", "", ""],
+                step_sound: None,
+                food: Default::default(),
+                tempt: Default::default(),
+            });
+            let mut pig = Mob::new(1, kind, Vec3::ZERO, 45.0);
+            if baby {
+                pig.extra.age = -24000;
+            }
+            pig
+        };
+
+        let adult_pig = make_pig(false);
+        assert!(!adult_pig.is_baby());
+        let adult_setup = thunder_mob_spawn_setup(&adult_pig);
+        assert!(!adult_setup.baby);
+        assert_eq!(adult_setup.yaw, 45.0);
+        assert!(adult_setup.persistent);
+
+        let baby_pig = make_pig(true);
+        assert!(baby_pig.is_baby());
+        let baby_setup = thunder_mob_spawn_setup(&baby_pig);
+        assert!(baby_setup.baby);
+        assert_eq!(baby_setup.yaw, 45.0);
+        assert!(baby_setup.persistent);
+
+        // When setup.baby is true, apply_setup sets m.extra.age = -24000,
+        // resulting in a baby mob (is_baby() == true).
+        let mut zombified = Mob::new(2, adult_pig.kind.clone(), Vec3::ZERO, 0.0);
+        if baby_setup.baby {
+            zombified.extra.age = -24000;
+        }
+        assert!(zombified.is_baby());
     }
 }

@@ -492,18 +492,25 @@ def passed_on(workflow, sha):
 
 def green_main_head(parity=False):
     """The newest commit on main whose checks passed: what an automatic release builds. With parity (game
-    releases), the newest commit parity-main passed on, if its checks passed too: parity-main runs on batches of
-    merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing."""
-    workflow = "parity-main" if parity else "checks"
-    # 50, not 10: every merge cancels the parity-main run before it, so a busy hour of merges pushes the last
-    # finished run out of a short window and no release goes out (2026-11-01: 14 h without a Nightly).
-    runs = gh_json("run", "list", "--repo", REPO, "--workflow", workflow, "--branch", "main", "--event", "push",
+    releases), the newest commit parity-main passed on whose checks passed too: parity-main runs on batches of
+    merges, so the commits a run skipped are covered by the next one, and a superseded run counts for nothing. A
+    later batch that failed holds only the merges after that commit, which the green one doesn't contain."""
+    if parity:
+        # Only the successful runs: while merges land, one run at a time finishes (the pending one is replaced at
+        # every push), and a later failed or timed-out batch must not starve the Nightly of the commit an earlier
+        # run passed (2026-11-02: no Nightly for 30 h while main had a green commit parity-main had passed).
+        runs = gh_json("run", "list", "--repo", REPO, "--workflow", "parity-main", "--branch", "main", "--event",
+                       "push", "--status", "success", "--limit", "20", "--json", "headSha,status,conclusion")
+        for entry in runs:
+            if entry["status"] == "completed" and entry["conclusion"] == "success" and passed_on("checks", entry["headSha"]):
+                return entry["headSha"]
+        return None
+    # 50, not 10: a busy hour of merges cancels many runs, which pushes the last finished one out of a short window.
+    runs = gh_json("run", "list", "--repo", REPO, "--workflow", "checks", "--branch", "main", "--event", "push",
                    "--limit", "50", "--json", "headSha,status,conclusion")
     for entry in runs:
         if entry["status"] == "completed" and entry["conclusion"] != "cancelled":
-            if entry["conclusion"] != "success":
-                return None
-            return entry["headSha"] if not parity or passed_on("checks", entry["headSha"]) else None
+            return entry["headSha"] if entry["conclusion"] == "success" else None
     return None
 
 

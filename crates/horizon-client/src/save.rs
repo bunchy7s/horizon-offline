@@ -4978,6 +4978,9 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
     fn prepare_loaded(&self, worker: &mut G::Worker, chunk: &Chunk) {
         self.inner.prepare_loaded(worker, chunk);
     }
+    fn all_idle(&self) {
+        self.inner.all_idle();
+    }
     fn idle(&self, worker: &mut G::Worker) {
         self.inner.idle(worker);
     }
@@ -5002,6 +5005,12 @@ impl<G: ChunkGenerator> ChunkGenerator for Persistent<G> {
         proto: &crate::streaming::Proto,
     ) -> Option<crate::section_mask::SectionMask> {
         self.inner.non_air_sections(proto)
+    }
+    fn cache_census(&self) -> Vec<(&'static str, usize, Option<usize>)> {
+        self.inner.cache_census()
+    }
+    fn proto_heap_bytes(&self, proto: &crate::streaming::Proto) -> ([usize; 6], [usize; 16]) {
+        self.inner.proto_heap_bytes(proto)
     }
     fn save_protos(&self, protos: &[&crate::streaming::Proto]) {
         self.save
@@ -5404,7 +5413,7 @@ mod tests {
         let tables = SaveTables::new(&assets);
         let stone = assets.registry.default_state("minecraft:stone").unwrap();
         // To The Max's Overworld: -64..2032, 131 sections.
-        let shape = LevelShape::new(-64, 2096, 2096, true).unwrap();
+        let shape = LevelShape::new(-64, 2096, 2096, true, false).unwrap();
         let mut chunk = Chunk::with_layout(0, 0, shape.column());
         chunk.set(0, -64, 0, stone.0);
         chunk.set(0, 2000, 0, stone.0);
