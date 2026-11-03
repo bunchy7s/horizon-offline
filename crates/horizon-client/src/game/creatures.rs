@@ -4226,6 +4226,11 @@ impl Game<'_> {
         {
             self.bell_projectile_hit(p, pos, at, face);
             self.amethyst_projectile_hit(pos);
+            if self.with_level(|b, level, ticks| {
+                b.big_dripleaf_projectile_hit(level, ticks, BlockPos::new(pos[0], pos[1], pos[2]))
+            }) {
+                self.process_level_events()?;
+            }
             self.projectile_breaks_block(p, pos);
         }
         self.combat.projectile_owner = match p.owner {
