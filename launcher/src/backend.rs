@@ -54,7 +54,7 @@ pub struct Release {
 /// The release assets of each system Horizon ships for: (`std::env::consts::OS`, `ARCH`, the game,
 /// the launcher). game-build.yml builds the game's, nightly-build.yml signs and publishes them, and
 /// launcher.yml builds the launcher's (`platform_assets_are_published`).
-pub const PLATFORMS: [(&str, &str, &str, &str); 4] = [
+pub const PLATFORMS: [(&str, &str, &str, &str); 3] = [
     (
         "linux",
         "x86_64",
@@ -66,13 +66,6 @@ pub const PLATFORMS: [(&str, &str, &str, &str); 4] = [
         "aarch64",
         "horizon-macos-arm64.zip",
         "horizon-launcher-macos-arm64.zip",
-    ),
-    // Intel Macs (#1161).
-    (
-        "macos",
-        "x86_64",
-        "horizon-macos-x64.zip",
-        "horizon-launcher-macos-x64.zip",
     ),
     (
         "windows",
@@ -3818,10 +3811,7 @@ pub fn {f}("
                 "horizon-launcher-macos-arm64.zip"
             ))
         );
-        assert_eq!(
-            platform_assets("macos", "x86_64"),
-            Some(("horizon-macos-x64.zip", "horizon-launcher-macos-x64.zip"))
-        );
+        assert_eq!(platform_assets("macos", "x86_64"), None);
         assert_eq!(
             platform_assets("windows", "x86_64").map(|(game, _)| game),
             Some("horizon-windows-x64.zip")
