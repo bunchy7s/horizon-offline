@@ -116,6 +116,8 @@ public final class VanillaProtocolClient {
     private String state;
     /** With a fifth argument {@code entities}: the entity transcript mode (EntityTranscript). */
     private EntityTranscript entities;
+    /** With {@code ride}: the entity mode, plus the order of what the player sees of a ride through a portal (RideTranscript). */
+    private RideTranscript ride;
     private GoatVoiceTranscript goatVoices;
 
     public static void main(String[] args) throws Exception {
@@ -126,6 +128,10 @@ public final class VanillaProtocolClient {
         Path output = Path.of(args[3]);
         VanillaProtocolClient client = new VanillaProtocolClient();
         if (args.length > 4 && args[4].equals("entities")) client.entities = new EntityTranscript();
+        if (args.length > 4 && args[4].equals("ride")) {
+            client.entities = new EntityTranscript();
+            client.ride = new RideTranscript();
+        }
         if (args.length > 4 && args[4].equals("goat-voices")) {
             client.entities = new EntityTranscript();
             client.goatVoices = new GoatVoiceTranscript();
@@ -289,7 +295,7 @@ public final class VanillaProtocolClient {
     }
 
     /** A record's text without object identities; other objects by their fields. */
-    private static String text(Object o) {
+    static String text(Object o) {
         String s = String.valueOf(o);
         if (o != null && s.matches("[\\w.$]+@[0-9a-f]+")) {
             StringBuilder b = new StringBuilder(o.getClass().getSimpleName()).append('{');
@@ -417,6 +423,8 @@ public final class VanillaProtocolClient {
     /** The entity mode's step, and how long it records the entities for (ms). */
     private static final int ENTITIES = 1000;
     private static final long ENTITY_WAIT = 20_000;
+    /** The ride mode records until the console says "RIDE END" in chat, at most this long (ms). */
+    private static final long RIDE_WAIT = 150_000;
     /**
      * How long a step waits at most for what it waits on (a villager to trade with, the ingot, a thrown
      * snowball, the pearl's teleport and hurt): a busy machine can hold a server's ticks back for seconds,
@@ -515,6 +523,13 @@ public final class VanillaProtocolClient {
                 Packet<?> packet = r.packet;
                 counts.merge(r.type, 1, Integer::sum);
                 if (entities != null && !entities.acceptSelf(packet) && step >= ENTITIES) entities.accept(packet);
+                if (ride != null && step >= ENTITIES) ride.accept(packet);
+                if (ride != null && ride.takeBoard() >= 0) {
+                    // The player right-clicks the vehicle (Entity.interact: it takes the player on).
+                    send(new net.minecraft.network.protocol.game.ServerboundInteractPacket(ride.boarded(),
+                        net.minecraft.world.InteractionHand.MAIN_HAND, new net.minecraft.world.phys.Vec3(0.0, 0.5, 0.0), false));
+                }
+                if (ride != null) ride.self(packet);
                 if (goatVoices != null) goatVoices.accept(packet);
                 if (r.type.equals("minecraft:chunk_batch_start")) ordered = false;
                 if (respawning && !respawned) {
@@ -681,7 +696,10 @@ public final class VanillaProtocolClient {
                     new LastSeenMessages.Update(0, new BitSet(), (byte) 0)));
                 step = ENTITIES;
                 stepAt = now;
-            } else if (step == ENTITIES && (goatVoices == null ? now - stepAt > ENTITY_WAIT : goatVoices.done())) {
+            } else if (step == ENTITIES && ride != null && (ride.done() || now - stepAt > RIDE_WAIT)) {
+                for (String line : ride.lines()) record("play-ride", line);
+                return;
+            } else if (step == ENTITIES && ride == null && (goatVoices == null ? now - stepAt > ENTITY_WAIT : goatVoices.done())) {
                 if (goatVoices == null) for (String line : entities.lines()) record("play-entities", line);
                 else for (String line : goatVoices.lines()) record("play-goat-voice", line);
                 return;
