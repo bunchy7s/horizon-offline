@@ -537,4 +537,7 @@ impl Host for super::Game<'_> {
     ) -> Option<(Option<ItemStack>, ItemStack)> {
         self.native_item_container_extract(stack, slot, max)
     }
+    fn recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        self.native_recipe_book_category(kind)
+    }
 }

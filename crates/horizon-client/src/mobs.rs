@@ -833,6 +833,11 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 pub struct Extra {
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
+    /// `Mob.lootTable`: the table its death rolls instead of its type's
+    /// (saved as `DeathLootTable`).
+    pub death_loot_table: Option<String>,
+    /// `Mob.lootTableSeed` (`DeathLootTableSeed`): 0 for none.
+    pub death_loot_seed: i64,
     /// `Rabbit.moreCarrotTicks`: how long it is full of carrots (saved as `MoreCarrotTicks`).
     pub more_carrot_ticks: i32,
     /// `Ocelot.DATA_TRUSTING`: it no longer runs from players.

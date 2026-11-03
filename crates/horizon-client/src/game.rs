@@ -95,6 +95,7 @@ mod composter;
 mod consume;
 mod control;
 mod copper_golems;
+mod cosmetics;
 mod creaking;
 mod creative_hotbar;
 mod creatures;
@@ -2081,6 +2082,21 @@ impl PackResources {
             light,
         ))
     }
+    /// The workers' context over `biomes`: this pack's own when `biomes` is
+    /// the table it was built with, else the same parts with that table.
+    fn context_with(&self, biomes: Arc<Biomes>) -> Arc<WorkerContext> {
+        let old = &self.context;
+        if Arc::ptr_eq(&old.biomes, &biomes) {
+            return old.clone();
+        }
+        Arc::new(WorkerContext {
+            assets: old.assets.clone(),
+            render: old.render.clone(),
+            tables: old.tables.clone(),
+            biomes,
+            light: old.light.clone(),
+        })
+    }
     /// The pack tables over their parts, which `load_resources` builds on
     /// separate workers.
     fn assemble(
@@ -2280,6 +2296,8 @@ struct Game<'a> {
     /// The biome table the world plays with: the game's own with the world's
     /// packs over it (`Biomes::with_packs`), `None` before a world opens.
     world_biomes: Option<Arc<Biomes>>,
+    /// `world_biomes` as the biome files made it, before `native_biome_colors`.
+    world_biomes_base: Option<Arc<Biomes>>,
     streaming: Streaming,
     lod: Option<horizon_client::lod::Lod>,
     lod_source_attempted: bool,
@@ -2761,6 +2779,8 @@ struct Game<'a> {
     /// and mannequins) resolve through the services in the background.
     skin_profiles: RefCell<horizon_client::skins::Resolver>,
     skin_slots: horizon_client::skins::SkinSlots,
+    /// Cosmetics on players (game/cosmetics.rs), off by default.
+    cosmetics: cosmetics::Cosmetics,
     /// Atlas trim slots in use: (sprite name, slot), least recently drawn first.
     trim_slots: Vec<(String, usize)>,
     cart_models: minecarts::CartModels,
@@ -11828,6 +11848,7 @@ impl Game<'_> {
         // The world's packs over the game's biomes (`Biomes::with_packs`),
         // the table its chunks were built with.
         self.world_biomes = self.packed_biomes();
+        self.world_biomes_base = self.world_biomes.clone();
         horizon_client::crash::set_detail(
             "World",
             format!("{} ({})", level.name, save_root.display()),
@@ -13336,6 +13357,7 @@ impl Game<'_> {
                 self.remote.is_none(),
                 &mut next_float,
                 Some(self.border.geometry()),
+                &self.res.motion().fluids,
             )
         });
         self.orbs = orbs;
@@ -13852,8 +13874,8 @@ impl Game<'_> {
         horizon_client::ui_theme::reset_atlas();
         self.clear_lod();
         self.pending_uploads.clear();
-        self.streaming
-            .reload_resources(&mut self.world, self.pack.context.clone());
+        let context = self.worker_context();
+        self.streaming.reload_resources(&mut self.world, context);
         self.native_shaders = native_shaders::NativeShaders::picking(&std::mem::take(
             &mut self.native_shaders.picked,
         ));
@@ -16293,10 +16315,7 @@ impl Game<'_> {
             _ => Some(self.streaming.lod_source()),
         };
         if let Some(source) = source {
-            self.lod = Some(horizon_client::lod::Lod::new(
-                source,
-                self.pack.context.clone(),
-            ));
+            self.lod = Some(horizon_client::lod::Lod::new(source, self.worker_context()));
             self.lod_observe.extend(self.world.chunks.keys().copied());
         }
     }
@@ -18288,6 +18307,7 @@ impl<'a> Game<'a> {
         );
         Ok(Game {
             world_biomes: None,
+            world_biomes_base: None,
             res: res.clone(),
             rest_loader: None,
             pending_entry: None,
@@ -18604,6 +18624,7 @@ impl<'a> Game<'a> {
             }),
             skin_profiles: RefCell::new(horizon_client::skins::Resolver::new()),
             skin_slots: horizon_client::skins::SkinSlots::new(horizon_client::hud::SKIN_SLOTS),
+            cosmetics: Default::default(),
             trim_slots: Vec::new(),
             cart_models: prepared.cart_models,
             riding: None,
@@ -19093,6 +19114,14 @@ impl Game<'_> {
         );
         (!Arc::ptr_eq(&table, self.res.biomes())).then_some(table)
     }
+    /// What the chunk and far-terrain workers mesh with: the pack's context,
+    /// over the world's biomes when it has its own.
+    fn worker_context(&self) -> Arc<WorkerContext> {
+        match &self.world_biomes {
+            Some(table) => self.pack.context_with(table.clone()),
+            None => self.pack.context.clone(),
+        }
+    }
     fn pack_files(&self) -> horizon_world::loot::PackOverlay<'_> {
         pack_files(&self.world_tables)
     }
@@ -19157,6 +19186,7 @@ impl Game<'_> {
             return;
         }
         self.world_tables = self.build_world_tables();
+        self.recipe_tables.categories = None;
         horizon_client::structure_blocks::forget_loot_data();
         // Before the players are sent the reloaded data below.
         self.sync_recipe_content();

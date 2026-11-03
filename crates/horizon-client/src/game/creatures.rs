@@ -1489,7 +1489,7 @@ impl Game<'_> {
         // LootContextParams.ORIGIN of a death: the mob's position.
         let place = self.loot_place_at([m.position.x, m.position.y, m.position.z], None);
         let (items, skulls) = horizon_world::loot::with_native_loot_place(place, || {
-            drops::die(m, &death, &mut self.rand_sequences)
+            drops::die(m, &death, &mut self.rand_sequences, &mut self.world.random)
         });
         if skulls && let Some(Who::Mob(id)) = m.last_damage.and_then(|(d, _)| d.attacker) {
             // Creeper.droppedSkulls: one head per charged explosion.
@@ -6650,6 +6650,25 @@ impl Game<'_> {
                 self.shoulder_parrots_geometry(mob, camera, alpha as f32, packed, out);
                 self.spin_attack_geometry(mob, camera, alpha as f32, packed, out);
                 self.stuck_in_body_geometry(mob, mob.id as i32, camera, alpha as f32, packed, out);
+            }
+            // Cosmetics (game/cosmetics.rs), posed on the GPU with the mob's own jobs: culled
+            // with it.
+            if !layers_only
+                && horizon_cosmetics::enabled()
+                && (is_player || &*mob.kind.id == "minecraft:mannequin")
+            {
+                let mark = self.skin_frame.borrow().mark();
+                let base = horizon_client::mobs::render::base_transform(mob, alpha as f32, camera);
+                let gpu = skinning;
+                if let Some((lo, hi)) =
+                    self.cosmetics_geometry(mob, false, base, alpha as f32, packed, gpu, out)
+                {
+                    skinned = Some(match skinned {
+                        Some((first, Some((l, h)))) => (first, Some((l.min(lo), h.max(hi)))),
+                        Some((first, None)) => (first, Some((lo, hi))),
+                        None => (mark, Some((lo, hi))),
+                    });
+                }
             }
             // CustomHeadLayer (a pumpkin, skull or head item) included.
             if layers {

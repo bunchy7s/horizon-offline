@@ -341,7 +341,6 @@ impl Game<'_> {
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
-        let context = pack.context.clone();
         self.pack = pack;
         self.gui = gui;
         // The new atlas's skin and map slots are blank: players and maps
@@ -413,6 +412,7 @@ impl Game<'_> {
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
         self.streaming.leaf_culling = self.effective_leaf_culling();
+        let context = self.worker_context();
         self.streaming.reload_resources(&mut self.world, context);
         self.pending_uploads.clear();
         // New GPU textures: a renderer built from the reloaded resources; the
