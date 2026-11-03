@@ -457,7 +457,6 @@ fn part(bone: &Bone, count: &mut usize, ids: &mut HashMap<String, String>) -> Pa
                 normal: q.normal,
                 vertices: q.vertices,
                 cull_back: false,
-                cull_backface: false,
             })
             .collect(),
         children: bone.children.iter().map(|c| part(c, count, ids)).collect(),
@@ -477,7 +476,6 @@ mod tests {
                 normal: [0.0, 0.0, -1.0],
                 cull_back: false,
                 vertices: [[0.0; 5]; 4],
-                cull_backface: false,
             }],
             children,
         }
