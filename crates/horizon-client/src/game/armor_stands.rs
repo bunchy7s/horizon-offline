@@ -2,6 +2,7 @@
 //! falling, `interactAt` equipment swaps by clicked height, the two-hit break
 //! of `hurtServer` (creative breaks at once), and `ArmorStandRenderer` with
 //! the default pose, the hit wobble and humanoid armor layers.
+use super::entity::Entity;
 use super::{Game, InteractTarget};
 use horizon_client::{
     Result,
@@ -813,7 +814,7 @@ impl Game<'_> {
             let a = &mut self.armor_stands[i];
             a.previous = a.position;
             a.previous_yaw = a.yaw;
-            let in_water = a.update_fluids(&self.world, &self.res.motion().fluids);
+            let in_water = a.push_by_fluid(&self.world, &self.res.motion().fluids).0 > 0.0;
             let (world, registry, facts, collision) = (
                 &self.world,
                 self.pack.assets.registry,
@@ -826,24 +827,18 @@ impl Game<'_> {
                 subject: None,
             };
             let mut tops: Vec<BlockPos> = Vec::new();
-            a.tick(
+            if let Some(step) = a.tick_move(
                 &mut scene,
                 facts,
                 &self.res.motion().climbing,
                 in_water,
-                &mut |bounds, velocity| {
-                    horizon_client::motion::bubble_column_push_over(
-                        world,
-                        registry,
-                        facts,
-                        collision,
-                        bounds,
-                        velocity,
-                        |pos| tops.push(pos),
-                    );
-                },
                 Some(self.border.geometry()),
-            );
+            ) {
+                a.push_by_bubble_column_over(world, registry, facts, collision, |pos| {
+                    tops.push(pos)
+                });
+                a.tick_settle(in_water, step);
+            }
             for pos in tops {
                 self.bubble_column_particles(pos);
             }

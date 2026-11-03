@@ -302,6 +302,14 @@ def entities():
         cmd('/data get entity @e[tag=h,type=minecraft:cow,limit=1] CustomName'),
         cmd('/data merge entity @e[tag=h,type=minecraft:pig,limit=1] {Tags:["a","c"]}'),
         cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base set 0.5'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect give @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed 10 1'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect clear @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base reset'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
         cmd('/effect give @e[tag=h] minecraft:glowing 10'),
         cmd('/damage @e[tag=h,type=minecraft:cow,limit=1] 1'),
         cmd('/ride @s mount @e[tag=h,type=minecraft:pig,limit=1]'),
@@ -1820,7 +1828,6 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
-
 def armor_stand_climbing():
     ops = setup('/gamerule random_tick_speed 0', '/forceload add 0 0 31 31',
                 '/fill 0 198 0 31 199 31 stone',
@@ -1853,6 +1860,48 @@ def armor_stand_climbing():
                  '/gamerule random_tick_speed 3')
     return ops
 
+
+
+def creeper_cloud_selectors():
+    """Creeper clouds are command targets for their actual lifetime (#7438)."""
+    generated = '@e[type=minecraft:area_effect_cloud,tag=!direct]'
+    direct = '@e[type=minecraft:area_effect_cloud,tag=direct]'
+    creeper = ('/summon minecraft:creeper 4.5 220 4.5 '
+               '{NoAI:1b,NoGravity:1b,ignited:1b,Tags:["source"],'
+               'active_effects:[{id:"minecraft:speed",duration:1000,amplifier:1b}]}')
+    ops = [*setup('/gamerule mob_griefing false', creeper,
+                  '/summon minecraft:area_effect_cloud 14.5 220 4.5 '
+                  '{Tags:["direct"],Duration:300,Radius:2.5f}'),
+           cmd('/execute if entity @e[type=minecraft:creeper,tag=source]')]
+    # The default fuse is intentional: custom Fuse is a separate regression.
+    for ticks in (30, 10):
+        ops += [{'op': 'tick', 'n': ticks},
+                cmd(f'/execute if entity {generated}'),
+                cmd(f'/execute if entity {direct}')]
+    cloud = '@e[type=minecraft:area_effect_cloud,tag=!direct,limit=1]'
+    ops += [
+        cmd(f'/data get entity {cloud} Pos'),
+        cmd(f'/data get entity {cloud} Duration'),
+        cmd(f'/data get entity {cloud} WaitTime'),
+        cmd(f'/tag {generated} add generated'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,tag=generated]'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,nbt={Tags:["generated"],Duration:300}]'),
+        cmd('/scoreboard objectives add cloud_seen dummy'),
+        cmd(f'/execute as {generated} run scoreboard players set @s cloud_seen 7'),
+        cmd('/execute if entity @e[type=minecraft:area_effect_cloud,scores={cloud_seen=7}]'),
+        # Past its maximum lifetime, the generated cloud must be gone.
+        {'op': 'tick', 'n': 330},
+        cmd(f'/execute if entity {generated}'),
+        # A second generated cloud exercises explicit removal independently.
+        *setup(creeper),
+        {'op': 'tick', 'n': 30},
+        cmd(f'/execute if entity {generated}'),
+        cmd(f'/kill {generated}'),
+        cmd(f'/execute if entity {generated}'),
+        *setup('/scoreboard objectives remove cloud_seen', '/kill @e[tag=direct]',
+               '/gamerule mob_griefing true'),
+    ]
+    return ops
 
 
 def mob_armor_damage():
@@ -2101,4 +2150,5 @@ def groups():
         ('piglin pickups', piglin_pickups()),
         ('experience orb stuck', experience_orb_stuck()),
         ('summoned potions', summoned_potions()),
+        ('creeper cloud selectors', creeper_cloud_selectors()),
     ]

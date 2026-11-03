@@ -1263,6 +1263,61 @@ pub trait Host {
         let _ = entity;
         unimplemented!("Host::entity_level")
     }
+    /// The entity's velocity in blocks a tick (`Entity.getDeltaMovement`). A
+    /// player's is the move its client last reported (`getKnownMovement`); an
+    /// entity Horizon doesn't simulate (a display, a painting) has none, so
+    /// zero. API @API:entity_motion@.
+    fn entity_velocity(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_velocity")
+    }
+    /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
+    /// as they see the entity move. False for a player (its client moves
+    /// it), an entity Horizon doesn't simulate, or a value that isn't finite.
+    /// API @API:entity_motion@.
+    fn entity_set_velocity(&mut self, entity: EntityRef, velocity: [f64; 3]) -> bool {
+        let _ = entity;
+        let _ = velocity;
+        unimplemented!("Host::entity_set_velocity")
+    }
+    /// Whether the entity stands on a block (`Entity.onGround`). API
+    /// @API:entity_motion@.
+    fn entity_on_ground(&self, entity: EntityRef) -> Option<bool> {
+        let _ = entity;
+        unimplemented!("Host::entity_on_ground")
+    }
+    /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
+    /// corner. None for the kinds whose box Horizon doesn't keep (displays,
+    /// markers, End crystals, the dragon). API @API:entity_motion@.
+    fn entity_bounding_box(&self, entity: EntityRef) -> Option<[[f64; 3]; 2]> {
+        let _ = entity;
+        unimplemented!("Host::entity_bounding_box")
+    }
+    /// The height of the entity's eyes above its feet (`Entity.getEyeHeight`).
+    /// API @API:entity_motion@.
+    fn entity_eye_height(&self, entity: EntityRef) -> Option<f64> {
+        let _ = entity;
+        unimplemented!("Host::entity_eye_height")
+    }
+    /// Where the entity's eyes are (`Entity.getEyePosition`). API
+    /// @API:entity_motion@.
+    fn entity_eye_position(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_eye_position")
+    }
+    /// The unit vector the entity looks along (`Entity.getViewVector`, from
+    /// its pitch and yaw). API @API:entity_motion@.
+    fn entity_view_vector(&self, entity: EntityRef) -> Option<[f64; 3]> {
+        let _ = entity;
+        unimplemented!("Host::entity_view_vector")
+    }
+    /// The square of the distance from the entity's feet to `pos`
+    /// (`Entity.distanceToSqr`). API @API:entity_motion@.
+    fn entity_distance_to_sqr(&self, entity: EntityRef, pos: [f64; 3]) -> Option<f64> {
+        let _ = entity;
+        let _ = pos;
+        unimplemented!("Host::entity_distance_to_sqr")
+    }
     /// `Capabilities.Item.ITEM`, read: the slots of one item of `stack`,
     /// empty ones included, kept in its `minecraft:container`. None for an
     /// item without slots, and for an empty stack.
@@ -1303,6 +1358,27 @@ pub trait Host {
         let _ = max;
         unimplemented!("Host::item_container_extract")
     }
+    /// For a client mod: what each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left out take the
+    /// block's default) draws on each of its six sides, as the mesher bakes its model: each face's sprite (array and
+    /// layer, as `WorldDrawn::block_sprites` cuts them), where it lies on the side, how its texture runs across it,
+    /// its tint source and whether it is cut out, translucent or animated; its particle sprite; whether it is a plain
+    /// cube. None for a block the game does not know. The model is the state's first random variant. API
+    /// @API:native_block_sprites@.
+    fn block_sprites(&self, blocks: &[&str]) -> Vec<Option<BlockSprites>> {
+        let _ = blocks;
+        unimplemented!("Host::block_sprites")
+    }
+    /// For a client mod: each texture's sprite by name (`minecraft:block/stone`, `block/stone`), none for one no
+    /// model uses. API @API:native_block_sprites@.
+    fn texture_sprites(&self, textures: &[&str]) -> Vec<Option<SpriteRef>> {
+        let _ = textures;
+        unimplemented!("Host::texture_sprites")
+    }
+    /// For a client mod: changes each time the resources load (a resource pack turned on or off can move every
+    /// sprite): ask `native_block_sprites` again then. API @API:native_block_sprites@.
+    fn block_sprites_version(&self) -> u64 {
+        unimplemented!("Host::block_sprites_version")
+    }
     /// The validated category and icon of a custom recipe type, or None for
     /// an undeclared/invalid type, before resources load, or outside a world.
     /// Rebuilt when the recipe table changes. Does not unlock any recipes.
@@ -1341,5 +1417,50 @@ impl EntityRef {
     /// The level the entity is in (`Entity.level`). API @API:entity_handles@.
     pub fn level(self, host: &dyn Host) -> Option<LevelRef> {
         host.entity_level(self)
+    }
+    /// The entity's velocity in blocks a tick (`Entity.getDeltaMovement`). A
+    /// player's is the move its client last reported (`getKnownMovement`); an
+    /// entity Horizon doesn't simulate (a display, a painting) has none, so
+    /// zero. API @API:entity_motion@.
+    pub fn velocity(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_velocity(self)
+    }
+    /// Sets the entity's velocity (`Entity.setDeltaMovement`); clients see it
+    /// as they see the entity move. False for a player (its client moves
+    /// it), an entity Horizon doesn't simulate, or a value that isn't finite.
+    /// API @API:entity_motion@.
+    pub fn set_velocity(self, host: &mut dyn Host, velocity: [f64; 3]) -> bool {
+        host.entity_set_velocity(self, velocity)
+    }
+    /// Whether the entity stands on a block (`Entity.onGround`). API
+    /// @API:entity_motion@.
+    pub fn on_ground(self, host: &dyn Host) -> Option<bool> {
+        host.entity_on_ground(self)
+    }
+    /// The entity's box (`Entity.getBoundingBox`): its lowest and highest
+    /// corner. None for the kinds whose box Horizon doesn't keep (displays,
+    /// markers, End crystals, the dragon). API @API:entity_motion@.
+    pub fn bounding_box(self, host: &dyn Host) -> Option<[[f64; 3]; 2]> {
+        host.entity_bounding_box(self)
+    }
+    /// The height of the entity's eyes above its feet (`Entity.getEyeHeight`).
+    /// API @API:entity_motion@.
+    pub fn eye_height(self, host: &dyn Host) -> Option<f64> {
+        host.entity_eye_height(self)
+    }
+    /// Where the entity's eyes are (`Entity.getEyePosition`). API
+    /// @API:entity_motion@.
+    pub fn eye_position(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_eye_position(self)
+    }
+    /// The unit vector the entity looks along (`Entity.getViewVector`, from
+    /// its pitch and yaw). API @API:entity_motion@.
+    pub fn view_vector(self, host: &dyn Host) -> Option<[f64; 3]> {
+        host.entity_view_vector(self)
+    }
+    /// The square of the distance from the entity's feet to `pos`
+    /// (`Entity.distanceToSqr`). API @API:entity_motion@.
+    pub fn distance_to_sqr(self, host: &dyn Host, pos: [f64; 3]) -> Option<f64> {
+        host.entity_distance_to_sqr(self, pos)
     }
 }

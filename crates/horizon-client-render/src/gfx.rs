@@ -930,6 +930,12 @@ pub struct Renderer {
     sprite_split: u32,
     /// A 1-layer array bound where a pack needs fewer arrays.
     sprite_unused: wgpu::TextureView,
+    /// The sprite arrays as the terrain samples them (`SPRITE_ARRAYS` views, `sprite_unused`
+    /// past the ones in use, the Mipmap Levels option's levels), for native mods
+    /// (`WorldDrawn::block_sprites`).
+    sprite_views: Vec<wgpu::TextureView>,
+    /// Nearest, repeating, nearest mip level: for drawing a sprite's texels sharp elsewhere.
+    sprite_nearest: wgpu::Sampler,
     mip_levels: u32,
     /// The mipmap levels sampled (the Mipmap Levels option), at most `mip_levels - 1`.
     mipmaps: u32,
@@ -1208,6 +1214,22 @@ fn sprite_views(
         })
         .collect()
 }
+/// The block sprites sampled sharp, for native mods (`WorldDrawn::block_sprites`): nearest,
+/// repeating, the nearest mip level.
+const SPRITE_NEAREST: wgpu::SamplerDescriptor<'static> = wgpu::SamplerDescriptor {
+    label: Some("Block sprites (nearest)"),
+    address_mode_u: wgpu::AddressMode::Repeat,
+    address_mode_v: wgpu::AddressMode::Repeat,
+    address_mode_w: wgpu::AddressMode::ClampToEdge,
+    mag_filter: wgpu::FilterMode::Nearest,
+    min_filter: wgpu::FilterMode::Nearest,
+    mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+    lod_min_clamp: 0.0,
+    lod_max_clamp: 32.0,
+    compare: None,
+    anisotropy_clamp: 1,
+    border_color: None,
+};
 /// The terrain sprites' sampler: LevelRenderer.chunkLayerSampler's linear one (clamped to the
 /// edge) in every Texture Filtering mode, with `anisotropy` samples when it is above 1 (wgpu
 /// then needs a linear mipmap filter too).
@@ -2651,6 +2673,7 @@ impl Renderer {
             });
         let sprite_views = sprite_views(&sprite_textures, &sprite_unused, None);
         let sprite_sampler = device.create_sampler(&sprite_sampler_descriptor(1));
+        let sprite_nearest = device.create_sampler(&SPRITE_NEAREST);
         let lightmap = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Lightmap"),
             size: wgpu::Extent3d {
@@ -4015,12 +4038,14 @@ impl Renderer {
             lightmap,
             sprite_textures,
             sprite_unused,
+            sprite_views,
             mip_levels,
             mipmaps: mip_levels - 1,
             terrain_layout: bindings,
             terrain_sprites: sprite_constants.map(|(_, v)| v),
             sprite_split: split,
             sprite_sampler,
+            sprite_nearest,
             texture_filtering: 0,
             max_anisotropy: 1,
             lightmap_view,
@@ -5387,9 +5412,6 @@ impl Renderer {
     }
     /// The share of real frames frame generation shows a made frame before (1 while it
     /// keeps up), `None` while it isn't running.
-    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`): not
-    /// while a shader pack or a native pack draws entities from their vertices, nor while
-    /// frame generation follows them.
     /// The posed models' store size (`SkinFrame::base`), with entity skinning.
     pub fn skinned_models(&self) -> Option<u32> {
         self.entity_skin
@@ -5397,10 +5419,16 @@ impl Renderer {
             .map(entity_skin::EntitySkin::stored)
     }
 
+    /// Whether the game may pose ordinary entity models on the GPU (`Frame::skin`).
+    /// Standard packs need every bridge stage; native packs, frame generation and
+    /// native observers of the CPU entity stream retain their existing fallback.
     pub fn skins_entities(&self) -> bool {
         self.entity_skin.is_some()
             && !self.frame_gen.on
-            && self.pack_post.is_none()
+            && self.pack_post.as_ref().is_none_or(|(_, post)| {
+                post.as_ref().is_some_and(|post| post.skins_entities())
+                    && !native_render::render_needs().entity_spans
+            })
             && self.native.is_none()
     }
 
@@ -5410,7 +5438,7 @@ impl Renderer {
     /// where they are ordinary entity quads. On, `EntityBatch` sorts them into
     /// its stages by the CPU vertices' `OIT_ENTITY` tag.
     pub fn skins_tagged(&self) -> bool {
-        self.skins_entities() && !self.improved_transparency
+        self.skins_entities() && !self.improved_transparency && self.pack_post.is_none()
     }
 
     pub fn frame_generation_share(&self) -> Option<f32> {
@@ -5703,7 +5731,7 @@ impl Renderer {
         self.rebuild_terrain_group();
     }
     fn rebuild_terrain_group(&mut self) {
-        let views = sprite_views(
+        self.sprite_views = sprite_views(
             &self.sprite_textures,
             &self.sprite_unused,
             Some(self.mipmaps + 1),
@@ -5713,12 +5741,17 @@ impl Renderer {
             "Horizon terrain resources",
             &self.terrain_layout,
             &self.globals,
-            &views,
+            &self.sprite_views,
             &self.sprite_sampler,
             &self.lightmap_view,
             &self.lightmap_sampler,
             &self.emission_stats.view,
         );
+    }
+    /// Block sprite layers per array on this device: a sprite's array is its layer over it, its
+    /// layer in that array the rest (`block_sprites::Lookup`).
+    pub fn sprite_split(&self) -> u32 {
+        self.sprite_split
     }
     /// The Mipmap Levels option: block textures sample at most `levels`
     /// reduced copies (0: none).
@@ -6978,6 +7011,17 @@ impl Renderer {
             self.uploads
                 .buffer(&mut encoder, &self.outline, 0, bytemuck::cast_slice(&lines));
         }
+        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
+            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
+            None => false,
+        });
+        let pack_skin = !frame.title
+            && skin.is_some()
+            && self
+                .pack_post
+                .as_ref()
+                .and_then(|(_, post)| post.as_ref())
+                .is_some_and(|post| post.skins_entities());
         // While a shader pack draws entities, the runs of `entity_spans` its programs draw are
         // left out of Horizon's own entity draw.
         let mut entities = frame.entities;
@@ -6992,6 +7036,7 @@ impl Renderer {
                 frame.entity_spans,
                 frame.crumbling_sprite,
                 &mut self.pack_entity_rest,
+                skin.filter(|_| pack_skin),
             );
             entities = &self.pack_entity_rest;
         }
@@ -7028,11 +7073,11 @@ impl Renderer {
         );
         self.entity_batch.append_shadow_only(frame.shadow_only);
         // The posed models' vertices come first: the ordinary entities' draw takes them in.
-        let skin = frame.skin.filter(|skin| match &mut self.entity_skin {
-            Some(skinner) => skinner.register(&self.device, &mut self.uploads, &mut encoder, skin),
-            None => false,
-        });
-        let posed = skin.map_or(0, |s| s.vertices);
+        let posed = if pack_skin {
+            0
+        } else {
+            skin.map_or(0, |s| s.vertices)
+        };
         let entity_quads = entity_quads + posed / 4;
         let weather_quads = frame.weather.len() as u32 / 4;
         let world_quads = entity_quads
@@ -7129,15 +7174,33 @@ impl Renderer {
             );
         }
         if let (Some(skinner), Some(skin)) = (&mut self.entity_skin, skin) {
-            skinner.dispatch(
-                &self.device,
-                &mut self.uploads,
-                &mut encoder,
-                skin,
-                &self.entity_buffer,
-                0,
-                outline_base,
-            );
+            if pack_skin {
+                let target = self
+                    .pack_post
+                    .as_ref()
+                    .and_then(|(_, post)| post.as_ref())
+                    .and_then(|post| post.skin_target())
+                    .expect("GPU pack entity target");
+                skinner.dispatch_pack(
+                    &self.device,
+                    &mut self.uploads,
+                    &mut encoder,
+                    skin,
+                    target,
+                    &self.entity_buffer,
+                    outline_base,
+                );
+            } else {
+                skinner.dispatch(
+                    &self.device,
+                    &mut self.uploads,
+                    &mut encoder,
+                    skin,
+                    &self.entity_buffer,
+                    0,
+                    outline_base,
+                );
+            }
         }
         let static_sections = frame.static_block_entities;
         let mut static_bytes_uploaded = 0;
@@ -8891,6 +8954,13 @@ impl Renderer {
                 motion: frame.entity_motion,
                 atlas: self.hud.atlas_texture.as_ref(),
                 quad_indices: &self.indices,
+                block_sprites: native_render::BlockSpriteArrays {
+                    views: &self.sprite_views,
+                    split: self.sprite_split,
+                    size: self.sprite_textures[0].width(),
+                    nearest: &self.sprite_nearest,
+                    filtered: &self.sprite_sampler,
+                },
             });
         }
         let overlay = Overlay {
