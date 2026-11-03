@@ -11,6 +11,7 @@
 mod fetch;
 mod item;
 mod pose;
+pub mod prefs;
 pub mod preview;
 
 pub use fetch::{BATCH, Clock, Cosmetics, Frame, Http, Local, Transport, Worn};

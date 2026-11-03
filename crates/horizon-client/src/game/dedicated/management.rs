@@ -127,7 +127,7 @@ impl Game<'_> {
                     auto_save(state),
                     enabled
                 ));
-                set_auto_save(state, enabled);
+                set_auto_save(&state.lists, enabled);
                 return json!({ "value": auto_save(state) });
             }
             "serversettings/pause_when_empty_seconds" => {
@@ -204,7 +204,7 @@ impl Game<'_> {
                 return json!({ "value": state.force_game_mode });
             }
             "serversettings/player_idle_timeout" => {
-                return json!({ "value": state.player_idle_timeout });
+                return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
             }
             "serversettings/player_idle_timeout/set" => {
                 let Some(minutes) = body["value"]
@@ -215,10 +215,11 @@ impl Game<'_> {
                 };
                 rpc(format!(
                     "Update player idle timeout from {} minutes to {} minutes",
-                    state.player_idle_timeout, minutes
+                    state.lists.lock().unwrap().player_idle_timeout,
+                    minutes
                 ));
-                self.set_player_idle_timeout(state, minutes);
-                return json!({ "value": state.player_idle_timeout });
+                self.set_player_idle_timeout(&state.lists.clone(), minutes);
+                return json!({ "value": state.lists.lock().unwrap().player_idle_timeout });
             }
             "serversettings/max_players" => {
                 return json!({ "value": state.max_players });

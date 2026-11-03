@@ -91,6 +91,7 @@ AbstractContainerMenu.synchronizeSlotToRemote	port	crates/horizon-client/src/lan
 AbstractContainerMenu.synchronizeDataSlotToRemote	port	crates/horizon-client/src/lan/containers.rs::Hub::sync_container_data	sends each changed furnace, brewing or crafter value
 AbstractContainerMenu.synchronizeCarriedToRemote	inline	crates/horizon-client/src/lan/containers.rs::Hub::answer_click	the cursor item is sent after a click when it differs; gap: minor: no sync on other carried changes
 AbstractContainerMenu.setRemoteSlotUnsafe	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's slot update is applied; gap: minor: no hashed copy of the remote slot is kept
+AbstractContainerMenu.doClick	inline	crates/horizon-client/src/menu.rs::Menu::click	the click dispatch for the player's own and a host's station menus; its QUICK_MOVE arm repeats quickMoveStack while the slot keeps the item, and the guest copy in lan/menu.rs::click does it in one pass whose move_to fills every empty slot
 AbstractContainerMenu.getClickAction	inline	crates/horizon-client/src/menu.rs::Menu::click	button 0 is the primary action, 1 the secondary
 AbstractContainerMenu.tryItemClickBehaviourOverride	port	crates/horizon-client/src/menu/bundle.rs::Menu::bundle_click	a bundle takes or puts items on a click on another stack; the NeoForge event is not modelled
 AbstractContainerMenu.initializeContents	port	crates/horizon-client/src/game/remote.rs::Game::set_menu_slot	the server's full content is applied to the open menu
@@ -140,7 +141,7 @@ HorseInventoryMenu.<init>	port	crates/horizon-client/src/game/lan_mount_menu.rs:
 InventoryMenu.isHotbarSlot	inline	crates/horizon-client/src/menu.rs::Menu::quick_move	the hotbar range check is inline in the shift-click arm
 InventoryMenu.slotsChanged	port	crates/horizon-client/src/menu.rs::Menu::inventory_slots_changed	the crafting result is recomputed when the grid changes
 InventoryMenu.removed	port	crates/horizon-client/src/game/lan_crafting.rs::Game::lan_crafting_closed	the window-0 craft grid goes back when the inventory closes; the host side of a guest's inventory
-InventoryMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the inventory, armour, grid and offhand
+InventoryMenu.quickMoveStack	port	crates/horizon-client/src/menu.rs::Menu::quick_move	shift-click for the inventory, armour, grid and offhand, in vanilla's order: the item's equipment slot first, so armour in the off hand is worn
 InventoryMenu.canTakeItemForPickAll	port	crates/horizon-client/src/menu.rs::Menu::can_take_for_pick_all	the result slot is never picked up in bulk
 ItemCombinerMenu.createInputSlots	inline	crates/horizon-client/src/menu.rs::Menu::new	the anvil's input slots are set up when the menu is made; mayPlace is Menu::may_place
 ItemCombinerMenu.createResultSlot	inline	crates/horizon-client/src/menu.rs::Menu::new	the result slot is set up when the menu is made and takes no placed items

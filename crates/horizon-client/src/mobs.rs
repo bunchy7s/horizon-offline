@@ -118,7 +118,8 @@ use std::{collections::HashMap, fs, path::Path, sync::Arc};
 pub struct Polygon {
     pub normal: [f32; 3],
     pub vertices: [[f32; 5]; 4],
-    /// The model's render type culls back faces (`entityCutoutCull`: the bat).
+    /// The model's render type culls back faces (`entityCutoutCull`: the bat,
+    /// the baby turtle).
     pub cull_back: bool,
 }
 impl Polygon {
@@ -253,7 +254,7 @@ impl Part {
         for (i, x) in pose.iter().enumerate().take(9) {
             p[i] = *x;
         }
-        let polygons = v["polygons"]
+        let polygons: Vec<Polygon> = v["polygons"]
             .as_array()
             .into_iter()
             .flatten()
@@ -430,15 +431,39 @@ pub(crate) fn exact_attributes(bytes: &[u8]) -> HashMap<String, HashMap<String, 
         })
         .collect()
 }
+
+/// The models that draw with `RenderTypes::entityCutoutCull`.
+fn culls_back_faces(key: &str) -> bool {
+    matches!(key, "minecraft:bat#main" | "minecraft:turtle_baby#main")
+}
+
 pub struct MobTypes {
     pub types: HashMap<String, MobType>,
 }
 impl MobTypes {
     pub fn load(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, true)
+    }
+
+    /// The dedicated server needs entity facts and AI, but never their render
+    /// geometry. Keep one empty part for the fields shared with the client
+    /// rather than parsing and retaining every entity-model layer.
+    pub fn load_for_server(root: &Path) -> crate::Result<Self> {
+        Self::load_with_models(root, false)
+    }
+
+    fn load_with_models(root: &Path, models_needed: bool) -> crate::Result<Self> {
         let bytes = fs::read(root.join("entity-types.json"))?;
         let types: Value = serde_json::from_slice(&bytes)?;
         let exact = exact_attributes(&bytes);
-        let models: Value = serde_json::from_slice(&fs::read(root.join("entity-models.json"))?)?;
+        let models = models_needed
+            .then(|| -> crate::Result<Value> {
+                Ok(serde_json::from_slice(&fs::read(
+                    root.join("entity-models.json"),
+                )?)?)
+            })
+            .transpose()?;
+        let empty_model = Arc::new(Part::parse("root", &Value::Null));
         let item_tags =
             crate::items::load_tags(root, "item", &horizon_world::loot::PackOverlay::NONE)
                 .unwrap_or_default();
@@ -461,19 +486,24 @@ impl MobTypes {
                 continue;
             }
             let model_key = format!("minecraft:{}", def.model);
-            let Some(model) = models.get(&model_key) else {
+            let model = models.as_ref().and_then(|models| models.get(&model_key));
+            if models_needed && model.is_none() {
                 continue;
-            };
+            }
             let defaults = exact.get(&id).cloned().unwrap_or_default();
             let attr = |k: &str| defaults.get(&format!("minecraft:{k}")).copied();
             let mut layers = crate::fast_hash::FxHashMap::default();
-            if let Some(all) = models.as_object() {
+            if let Some(all) = models.as_ref().and_then(Value::as_object) {
                 for prefix in def.layer_prefixes() {
                     let start = format!("minecraft:{prefix}#");
                     for (k, v) in all.iter().filter(|(k, _)| k.starts_with(&start)) {
+                        let mut part = Part::parse("root", v);
+                        if culls_back_faces(k) {
+                            part.set_cull_back();
+                        }
                         layers.insert(
                             k.trim_start_matches("minecraft:").to_owned(),
-                            Arc::new(Part::parse("root", v)),
+                            Arc::new(part),
                         );
                     }
                 }
@@ -512,14 +542,18 @@ impl MobTypes {
                     max_head_y_rot: def.max_head_y_rot(),
                     ambient_interval: def.ambient_interval(),
                     flags,
-                    model: Arc::new({
-                        let mut part = Part::parse("root", model);
-                        // BatModel: `RenderTypes::entityCutoutCull`.
-                        if def.name == "bat" {
-                            part.set_cull_back();
-                        }
-                        part
-                    }),
+                    model: model.map_or_else(
+                        || empty_model.clone(),
+                        |model| {
+                            Arc::new({
+                                let mut part = Part::parse("root", model);
+                                if culls_back_faces(&model_key) {
+                                    part.set_cull_back();
+                                }
+                                part
+                            })
+                        },
+                    ),
                     layers,
                     texture: def.texture.to_owned(),
                     brain: def.brain(),
@@ -831,6 +865,8 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 /// Species-specific persistent state (variants, colours, taming, ageing...).
 #[derive(Clone, Debug, Default)]
 pub struct Extra {
+    /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
+    pub from_bucket: bool,
     /// Command-created armor instances, shared by commands and runtime damage.
     pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
@@ -846,9 +882,10 @@ pub struct Extra {
     pub immovable: bool,
     /// `Mannequin.DATA_DESCRIPTION`: the text under its name.
     pub description: MannequinDescription,
-    /// A player's or mannequin's `minecraft:scale`, which scales the whole model
-    /// (`LivingEntityRenderState.scale`): the local player's own, and on a
-    /// server the others' from their attribute updates; 0 is the default, 1.
+    /// `LivingEntity`'s `minecraft:scale` (`getScale`), which scales its box
+    /// (`getDimensions`), eye height and model (`LivingEntityRenderState.scale`):
+    /// the local player's own, and on a server every living entity's from its
+    /// attribute updates; 0 is the default, 1 (`Mob::model_scale`).
     pub model_scale: f32,
     /// Players: crouching and riding (HumanoidModel's poses).
     pub crouching: bool,
@@ -1203,6 +1240,9 @@ pub struct Mob {
     /// `Entity.mainSupportingBlockPos`: the block it stood on after its last
     /// move.
     pub supporting: Option<[i32; 3]>,
+    /// The block under the mob's feet by name (`minecraft:grass_block`), kept for the
+    /// packs' random-model rules (`rule_index`); `None` without rules or off the ground.
+    pub standing_on: Option<String>,
     /// `NoAI`: no goals and no movement.
     pub no_ai: bool,
     /// `Silent`.
@@ -2117,6 +2157,24 @@ impl Seen {
     }
 }
 impl Mob {
+    /// The name used by command replies: CustomName takes precedence over the type.
+    pub fn command_name(&self) -> crate::text::Text {
+        if let Some(name) = &self.custom_name {
+            return crate::text::Text::literal(name);
+        }
+        // Villager.getTypeName returns its registered profession's name.
+        if self.species() == Species::Villager {
+            let professions = &render::PROFESSIONS;
+            let profession = professions[self.extra.variant2 as usize % professions.len()];
+            return crate::text::Text::translate(
+                &format!("entity.minecraft.villager.{profession}"),
+                &[],
+            );
+        }
+        let id = crate::command::args::normalize(&self.kind.id);
+        crate::text::Text::translate(&format!("entity.{}", id.replace(':', ".")), &[])
+    }
+
     /// What the mob holds and wears, by `EquipmentSlot` ordinal: main hand,
     /// off hand, feet, legs, chest, head, body and saddle
     /// (`ClientboundSetEquipmentPacket`'s slots).
@@ -2678,6 +2736,7 @@ impl Mob {
             first_tick: true,
             no_gravity: false,
             supporting: None,
+            standing_on: None,
             no_ai: false,
             silent: false,
             invulnerable_flag: false,

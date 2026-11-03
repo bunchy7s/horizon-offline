@@ -67,6 +67,7 @@ mod switch_page;
 mod theme;
 mod themes_page;
 mod titlebar;
+mod wardrobe_page;
 mod while_playing;
 mod worlds_page;
 
@@ -100,6 +101,8 @@ enum Page {
     /// Mods, resource packs and modpacks (imported ones and the browser's).
     Mods,
     Servers,
+    /// What the player wears (`wardrobe_page.rs`), with the cosmetics flag on.
+    Wardrobe,
     Notes,
     Settings,
 }
@@ -114,6 +117,7 @@ impl Page {
         match std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() {
             Ok("mods" | "modpacks" | "resourcepacks" | "shaders" | "datapacks") => Page::Mods,
             Ok("servers") => Page::Servers,
+            Ok("wardrobe") if horizon_cosmetics::enabled() => Page::Wardrobe,
             Ok("versions") => Page::Versions,
             Ok("notes") => Page::Notes,
             Ok("settings") => Page::Settings,
@@ -123,14 +127,24 @@ impl Page {
 
     /// Every page, with its name and icon: the top bar shows all but Settings, which has its
     /// own button.
-    const ALL: [(Page, &'static str, &'static str); 6] = [
+    const ALL: [(Page, &'static str, &'static str); 7] = [
         (Page::Play, "Home", "home"),
         (Page::Mods, "Mods", "package"),
         (Page::Servers, "Servers", "server"),
+        (Page::Wardrobe, "Wardrobe", "user"),
         (Page::Versions, "Versions", "archive"),
         (Page::Notes, "Patch notes", "notes"),
         (Page::Settings, "Settings", "sliders"),
     ];
+
+    /// The pages the top bar shows: all but Settings, and the Wardrobe only with cosmetics on.
+    fn in_top_bar() -> impl Iterator<Item = (Page, &'static str, &'static str)> {
+        Self::ALL.into_iter().filter(|(page, ..)| match page {
+            Page::Settings => false,
+            Page::Wardrobe => horizon_cosmetics::enabled(),
+            _ => true,
+        })
+    }
 }
 
 /// The launcher's own update, as the footer and Settings show it.
@@ -255,6 +269,12 @@ struct Launcher {
     menu_closed_at: Option<Point<Pixels>>,
     /// Settings > Account's skin panel for an offline name (`skin_page.rs`).
     skin: Option<skin_page::SkinPanel>,
+    /// The Wardrobe page's account and outfit (`wardrobe_page.rs`).
+    wardrobe: Option<wardrobe_page::Wardrobe>,
+    /// Ask the service again on the next draw of the Wardrobe (set by each visit).
+    wardrobe_reload: bool,
+    /// Work the look out again on the next frame (a launcher theme put on or taken off).
+    restyle: bool,
     /// Why the last picture for Home's background was refused.
     background_error: Option<String>,
     settings: Settings,
@@ -537,6 +557,9 @@ impl Launcher {
             look: horizon_theme::glass::Glass::default_look(),
             menu_closed_at: None,
             skin: None,
+            wardrobe: None,
+            wardrobe_reload: false,
+            restyle: horizon_cosmetics::enabled(),
             background_error: None,
             args_input: line_edit::LineEdit::new(settings.game_args.clone(), 1024, 38),
             args_focused: false,
@@ -683,6 +706,11 @@ impl Launcher {
         if std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("edit-instance") {
             this.open_instance_dialog(this.selected_instance().cloned());
         }
+        if cfg!(debug_assertions)
+            && std::env::var("HORIZON_LAUNCHER_PAGE").as_deref() == Ok("wardrobe")
+        {
+            this.wardrobe_preview();
+        }
         // What the game and the launcher kept, if the player allows it and there is a server.
         telemetry::send_in_background();
         telemetry::watch_playing(this.tx.clone());
@@ -752,6 +780,7 @@ impl Launcher {
             self.load_auth_statuses(false);
         }
         self.load_profile_heads();
+        self.wardrobe_reload |= page == Page::Wardrobe;
         if page != self.page {
             self.page = page;
             self.switches += 1;
@@ -915,7 +944,10 @@ impl Launcher {
         self.perf.tick();
         match self.bench.as_mut().map(|b| b.tick(&self.perf)) {
             Some(perf::Step::Go(page)) => {
-                self.go(Page::ALL[page % Page::ALL.len()].0);
+                let pages: Vec<Page> = (Page::ALL.iter().map(|p| p.0))
+                    .filter(|p| *p != Page::Wardrobe || horizon_cosmetics::enabled())
+                    .collect();
+                self.go(pages[page % pages.len()]);
                 changed = true;
             }
             Some(perf::Step::Scroll) => {
@@ -2458,10 +2490,7 @@ impl Launcher {
             .flex_wrap()
             .items_center()
             .gap(px(4.));
-        for (page, label, _) in Page::ALL {
-            if page == Page::Settings {
-                continue;
-            }
+        for (page, label, _) in Page::in_top_bar() {
             nav = nav.child(
                 shell::tab(format!("nav-{label}"), tr(label), self.page == page, &t).on_click(
                     cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -4754,6 +4783,9 @@ impl Render for Launcher {
                 .children(titlebar::render(&t, window))
                 .child(specimen::render(&t));
         }
+        if std::mem::take(&mut self.restyle) {
+            self.theme = self.settings_theme(window);
+        }
         self.scale = window.scale_factor();
         self.perf.frame();
         if self.bench.as_ref().is_some_and(perf::Bench::scrolling) {
@@ -4772,6 +4804,7 @@ impl Render for Launcher {
             Page::Versions => self.versions_page(cx),
             Page::Mods => self.mods_page(cx),
             Page::Servers => self.servers_page(cx),
+            Page::Wardrobe => self.wardrobe_page(cx),
             Page::Notes => self.notes_page(cx),
             Page::Settings => self.settings_page(cx),
         };

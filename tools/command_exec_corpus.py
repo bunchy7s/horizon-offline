@@ -797,6 +797,39 @@ def end_portal_entities():
     ]
 
 
+def loot_set_damage():
+    """SetItemDamageFunction in /loot's items engine, including its RNG tail."""
+    import json
+    sequence = 'harness:loot_damage'
+    uniform = {'type': 'minecraft:uniform', 'min': 0.2, 'max': 0.8}
+    cases = [('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': n})
+             for n in (0, 0.5, -1, 1, 2)]
+    cases += [
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': 0.5}),
+        ('minecraft:iron_sword', [
+            {'type': 'minecraft:set_damage', 'damage': 0.5},
+            {'type': 'minecraft:set_damage', 'damage': 0.25, 'add': True}]),
+        ('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': uniform}),
+        # An ineligible item must leave the provider's random draw untouched.
+        ('minecraft:stone', {'type': 'minecraft:set_damage', 'damage': uniform}),
+    ]
+    ops = setup('/setblock 2 220 2 minecraft:chest')
+    # Keep the inline fallback without a named sequence covered as well.
+    cases.append(('minecraft:iron_sword', {'type': 'minecraft:set_damage', 'damage': 0.5}))
+    for index, (item, modifier) in enumerate(cases):
+        table = {'random_sequence': sequence, 'pools': [{'rolls': 1, 'entries': [
+            {'type': 'minecraft:item', 'name': item, 'modifier': modifier}]}]}
+        if index == len(cases) - 1:
+            del table['random_sequence']
+        ops += setup(f'/random reset {sequence} 42 false true')
+        ops += [
+            cmd('/loot replace block 2 220 2 container.0 loot ' + json.dumps(table)),
+            cmd('/data get block 2 220 2 Items'),
+            cmd(f'/random value 0..1000000 {sequence}'),
+        ]
+    return ops + setup('/setblock 2 220 2 minecraft:air')
+
+
 def items_and_loot():
     return [
         *setup('/clear @s', '/gamemode survival'),
@@ -883,6 +916,119 @@ def items_and_loot():
         *setup('/kill @e[tag=c]', '/kill @e[tag=h]'),
         *setup('/setblock 3 206 3 minecraft:air', '/setblock 2 205 2 minecraft:air', '/kill @e[type=minecraft:item]', '/gamemode creative'),
     ]
+
+
+def aquatic_from_bucket():
+    """Saved bucket flags default false, except the always-true tadpole (#7763)."""
+    ops = []
+    case = 0
+    for kind in ('cod', 'salmon', 'pufferfish', 'tropical_fish', 'axolotl', 'tadpole'):
+        for value in (None, '0b', '1b'):
+            case += 1
+            tag = f'h108_{case}'
+            target = f'@e[type=minecraft:{kind},tag={tag},limit=1]'
+            bucket = '' if value is None else ',FromBucket:' + value
+            ops += setup(f'/summon minecraft:{kind} 10.5 220 10.5 '
+                         f'{{Tags:["{tag}"],NoAI:1b,NoGravity:1b,Silent:1b,'
+                         f'PersistenceRequired:1b{bucket}}}')
+            # Advance an entity tick before reading the saved field and
+            # checking that this isolated subject still exists.
+            ops += [{'op': 'tick', 'n': 1},
+                    cmd(f'/execute if entity {target}'),
+                    cmd(f'/data get entity {target} FromBucket')]
+            ops += setup(f'/kill {target}')
+    return ops
+
+
+
+
+def summoned_fangs_lifetime():
+    ops = setup('/fill 0 199 0 15 199 15 stone',
+                '/fill 0 200 0 15 206 15 air')
+    target = '@e[type=minecraft:evoker_fangs,limit=1]'
+    for i, warmup in enumerate((None, 0, 5, -2)):
+        extra = '' if warmup is None else f',Warmup:{warmup}'
+        ops += [cmd('/summon evoker_fangs 10.5 200 10.5 '
+                    f'{{UUID:[I;0,0,1,{32+i}],NoGravity:1b,Silent:1b{extra}}}'),
+                cmd(f'/data get entity {target} Pos')]
+        previous = 0
+        for tick in (0, 1, 7, 22, 23, 27, 28):
+            if tick > previous:
+                ops += [{'op': 'tick', 'n': tick - previous}]
+            # Record both: missing entity and missing Warmup are different
+            # command failures and must never be collapsed by the verifier.
+            ops += [cmd(f'/execute if entity {target}'),
+                    cmd(f'/data get entity {target} Warmup')]
+            previous = tick
+        ops += setup('/kill @e[type=minecraft:evoker_fangs]')
+        ops += [{'op': 'tick', 'n': 1}]
+    return ops
+
+
+def summoned_fangs_edits():
+    target = '@e[type=evoker_fangs,tag=fang_control,limit=1]'
+    return [
+        cmd('/summon evoker_fangs 10.5 200 10.5 '
+            '{UUID:[I;0,0,1,99],Tags:["fang_control"],NoGravity:1b,Silent:1b,Warmup:50}'),
+        cmd('/execute if entity 00000000-0000-0000-0000-000100000063'),
+        cmd(f'/data get entity {target} UUID'),
+        cmd(f'/tag {target} add fang_edited'),
+        cmd('/execute if entity @e[type=evoker_fangs,tag=fang_edited]'),
+        cmd(f'/data modify entity {target} Warmup set value 0'),
+        {'op': 'tick', 'n': 1},
+        cmd(f'/data get entity {target} Warmup'),
+        cmd(f'/data remove entity {target} Warmup'),
+        {'op': 'tick', 'n': 1},
+        cmd(f'/data get entity {target} Warmup'),
+        # Java int predecrement wraps; loading this value must not panic.
+        cmd(f'/data modify entity {target} Warmup set value -2147483648'),
+        {'op': 'tick', 'n': 1},
+        cmd(f'/data get entity {target} Warmup'),
+        cmd(f'/kill {target}'),
+        cmd('/execute if entity @e[type=evoker_fangs]'),
+    ]
+
+
+def summoned_fangs_levels():
+    # Distance limits these selectors to the source level. An already
+    # loaded fang must stay in the Overworld across a command-level swap.
+    box = 'x=10,y=200,z=10,distance=..3'
+    return [
+        cmd('/summon evoker_fangs 10.5 200 10.5 {Tags:["fang_overworld"],Warmup:1000,Silent:1b}'),
+        cmd(f'/execute in minecraft:the_nether if entity @e[tag=fang_overworld,{box}]'),
+        cmd(f'/execute in minecraft:overworld if entity @e[tag=fang_overworld,{box}]'),
+        *setup('/kill @e[type=evoker_fangs]'),
+    ]
+
+
+def bird_flap_sensors():
+    # Real mob movement -> Game event dispatch -> sculk sensor. Silent birds
+    # still emit vibrations; NoAI controls must keep the same positions too.
+    ops = setup('/gamerule random_tick_speed 0', '/tp @s 1.5 200 1.5')
+    target = '@e[tag=flap_bird,limit=1]'
+    for species in ('chicken', 'parrot'):
+        for no_ai in (0, 1):
+            ops += setup('/kill @e[tag=flap_bird]',
+                         '/fill 0 200 0 15 206 15 air',
+                         '/fill 0 199 0 15 199 15 stone')
+            ops += [{'op': 'tick', 'n': 45}]
+            ops += setup('/setblock 9 200 10 sculk_sensor strict')
+            ops += [{'op': 'tick', 'n': 2}]
+            ops += [cmd('/execute if block 9 200 10 sculk_sensor[sculk_sensor_phase=inactive,power=0]')]
+            ops += setup(f'/summon {species} 6.5 205 10.5 '
+                         f'{{Tags:["flap_bird"],NoAI:{no_ai}b,Silent:1b,NoGravity:1b,'
+                         'Motion:[0d,-1d,0d],attributes:['
+                         '{id:"minecraft:movement_speed",base:0d},'
+                         '{id:"minecraft:flying_speed",base:0d}]}')
+            ops += [cmd(f'/execute if entity {target}'),
+                    cmd(f'/data get entity {target} Pos')]
+            for _ in range(30):
+                ops += [{'op': 'tick', 'n': 1},
+                        cmd(f'/data get entity {target} Pos'),
+                        cmd('/execute if block 9 200 10 sculk_sensor[sculk_sensor_phase=active,power=8]')]
+            ops += [cmd('/data get block 9 200 10 last_vibration_frequency')]
+    return ops + setup('/kill @e[tag=flap_bird]', '/setblock 9 200 10 air strict',
+                       '/gamerule random_tick_speed 3')
 
 
 def item_nbt_count_bounds():
@@ -1670,7 +1816,11 @@ def piglin_pickups():
             {'op': 'tick', 'n': 140},
             cmd('/execute if items entity @e[tag=barter,limit=1] weapon.offhand *'),
             cmd('/execute if items entity @e[tag=barter,limit=1] weapon.mainhand minecraft:gold_ingot'),
-            cmd('/execute if entity @e[type=minecraft:item]'),
+            # A baby drops nothing. What an adult's barter throws comes from the level's random (vanilla's is
+            # unseeded), and the piglin picks some of it back up, so only the gold's fate is fixed: none of it lies
+            # on the ground.
+            cmd('/execute if entity @e[type=minecraft:item]' if baby
+                else '/execute if items entity @e[type=minecraft:item] contents minecraft:gold_ingot'),
         ]
         if baby:
             ops.append(cmd('/execute if data entity @e[tag=barter,limit=1] Inventory[{id:"minecraft:golden_sword"}]'))
@@ -1828,6 +1978,50 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def villager_command_names():
+    ops = setup('/forceload add 0 0')
+    case = 0
+    for profession in ('none', 'nitwit', 'cleric', 'farmer', 'librarian'):
+        for named in (False, True):
+            case += 1
+            target = f'00000000-0000-0000-0000-0030{case:08x}'
+            custom = ',CustomName:{text:"Ada"}' if named else ''
+            ops += setup(f'/summon villager 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                         'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                         f'VillagerData:{{profession:"minecraft:{profession}",type:"minecraft:plains",level:1}}{custom}}}')
+            for path in ('VillagerData', 'Pos', 'Rotation'):
+                ops.append(cmd(f'/data get entity {target} {path}'))
+            changed = 'cleric' if profession == 'farmer' else 'farmer'
+            ops.append(cmd(f'/data merge entity {target} '
+                           f'{{VillagerData:{{profession:"minecraft:{changed}",type:"minecraft:plains",level:1}}}}'))
+            ops.append(cmd(f'/data get entity {target} VillagerData'))
+            ops += setup(f'/kill {target}')
+    for kind in ('zombie_villager', 'wandering_trader'):
+        case += 1
+        target = f'00000000-0000-0000-0000-0030{case:08x}'
+        ops += setup(f'/summon {kind} 4.5 220 4.5 {{UUID:[I;0,0,48,{case}],'
+                     'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,'
+                     'VillagerData:{profession:"minecraft:cleric",type:"minecraft:plains",level:1}}')
+        for path in ('Pos', 'Rotation'):
+            ops.append(cmd(f'/data get entity {target} {path}'))
+        ops += setup(f'/kill {target}')
+    ops.append({'op': 'tick', 'n': 25})
+    return ops + setup('/forceload remove 0 0')
+
+
+def animal_signed_in_love():
+    ops = setup('/forceload add 0 0')
+    for case, value in enumerate(('-32769', '-32768', '-129', '-128', '-1',
+                                  '-1b', '-128b', '0', '1', '37'), 1):
+        target = f'00000000-0000-0000-0000-0038{case:08x}'
+        ops += setup(f'/summon pig 4 200 4 {{UUID:[I;0,0,56,{case}],'
+                     f'NoAI:1b,NoGravity:1b,PersistenceRequired:1b,InLove:{value}}}')
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops.append(cmd(f'/data remove entity {target} InLove'))
+        ops.append(cmd(f'/data get entity {target} InLove'))
+        ops += setup(f'/kill {target}')
+    return ops + setup('/forceload remove 0 0')
+
 
 def mob_fire_resistance_damage():
     ops = setup('/forceload add 0 0')
@@ -1853,11 +2047,6 @@ def mob_fire_resistance_damage():
         ops += setup(f'/kill {target}')
     ops.append({'op': 'tick', 'n': 25})
     return ops + setup('/forceload remove 0 0')
-
-
-
-
-
 
 
 def item_lifetime_counters():
@@ -2162,10 +2351,13 @@ def groups():
         ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('aquatic FromBucket', aquatic_from_bucket()),
+        ('villager command names', villager_command_names()),
         ('item lifetime counters', item_lifetime_counters()),
 
 
 
+        ('animal signed InLove', animal_signed_in_love()),
         ('mob fire resistance damage', mob_fire_resistance_damage()),
 
 
@@ -2189,7 +2381,17 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+        ('summoned fangs lifetime', summoned_fangs_lifetime()),
+        ('summoned fangs edits', summoned_fangs_edits()),
+        ('summoned fangs levels', summoned_fangs_levels()),
+        ('bird flap sensors', bird_flap_sensors()),
+
+        ('loot set damage', loot_set_damage()),
+
+
+
         ('item NBT count bounds', item_nbt_count_bounds()),
+
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),
