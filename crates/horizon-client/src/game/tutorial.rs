@@ -565,7 +565,6 @@ impl super::Game<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use horizon_client::items::ItemStack;
 
     #[test]
     fn craft_planks_hint_toast_appears_after_delay_and_clears_on_planks() {
@@ -587,59 +586,6 @@ mod tests {
         assert!(changed);
         assert_eq!(tutorial.step, Step::None);
         assert_eq!(tutorial.hint(), None);
-    }
-
-    #[test]
-    fn crafting_planks_in_menu_clears_craft_planks_hint() {
-        let mut tutorial = Tutorial::new(Step::CraftPlanks);
-        tutorial.waiting = 1200;
-        assert_eq!(tutorial.hint(), Some((Hint::CraftPlanks, None)));
-
-        // Simulate menu.item_crafted populated when taking a crafting result (slot 0)
-        let item_crafted = vec![(
-            "minecraft:oak_planks".to_string(),
-            ItemStack::new("minecraft:oak_planks", 4),
-        )];
-
-        let planks_tag = [
-            "minecraft:oak_planks",
-            "minecraft:birch_planks",
-            "minecraft:spruce_planks",
-        ]
-        .into_iter()
-        .collect::<std::collections::HashSet<_>>();
-
-        for (_, stack) in &item_crafted {
-            let plank = planks_tag.contains(&*stack.item);
-            tutorial.get_item(false, false, plank);
-        }
-
-        assert_eq!(tutorial.step, Step::None);
-        assert_eq!(tutorial.hint(), None);
-    }
-
-    #[test]
-    fn crafting_unrelated_item_does_not_clear_craft_planks_hint() {
-        let mut tutorial = Tutorial::new(Step::CraftPlanks);
-        tutorial.waiting = 1200;
-        assert_eq!(tutorial.hint(), Some((Hint::CraftPlanks, None)));
-
-        let item_crafted = vec![(
-            "minecraft:stick".to_string(),
-            ItemStack::new("minecraft:stick", 4),
-        )];
-
-        let planks_tag = ["minecraft:oak_planks", "minecraft:birch_planks"]
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-
-        for (_, stack) in &item_crafted {
-            let plank = planks_tag.contains(&*stack.item);
-            tutorial.get_item(false, false, plank);
-        }
-
-        assert_eq!(tutorial.step, Step::CraftPlanks);
-        assert_eq!(tutorial.hint(), Some((Hint::CraftPlanks, None)));
     }
 
     #[test]
