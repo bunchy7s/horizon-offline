@@ -270,8 +270,13 @@ impl Game<'_> {
             p.owner = shooter;
         }
         let mut targets = self.projectile_targets();
-        if p.arrow.is_some() {
-            targets.extend(self.carts.iter().map(|c| (Who::Mob(c.id), c.bounds())));
+        if p.arrow.is_some()
+            || matches!(
+                p.kind,
+                horizon_client::projectiles::ProjectileKind::Snowball
+            )
+        {
+            targets.extend(self.vehicle_targets());
         }
         if mob_shot || pvp {
             targets.extend(self.lan_projectile_targets());

@@ -59,10 +59,18 @@ FULL = [
     ('creeper_head', ''),
     ('oak_sign', f'{{front_text:{SIGN_SIDE},back_text:{{messages:["a","b","c","d"],color:"black",has_glowing_text:0b}},is_waxed:1b}}'),
     ('oak_hanging_sign', f'{{front_text:{SIGN_SIDE}}}'),
+    # RequiredPlayerRange 0: a spawner ticks its Delay down only while a player is within
+    # that range, and each game puts its player at a random spot near the world spawn,
+    # which can be 16 blocks from this one (vanilla 20 in one run, Horizon 10 in another).
+    # With range 0 nobody is ever near it, so the Delay is the same in every run.
     ('spawner', '{SpawnData:{entity:{id:"minecraft:pig"}},Delay:20s,MinSpawnDelay:200s,MaxSpawnDelay:800s,'
-                'SpawnCount:4s,MaxNearbyEntities:6s,RequiredPlayerRange:16s,SpawnRange:4s}'),
-    ('trial_spawner', '{required_player_range:10,target_cooldown_length:1200}'),
-    ('vault', '{config:{loot_table:"minecraft:chests/trial_chambers/reward",key_item:{id:"minecraft:trial_key",count:1}},'
+                'SpawnCount:4s,MaxNearbyEntities:6s,RequiredPlayerRange:0s,SpawnRange:4s}'),
+    # Also range-limited to players (10 by default): kept small for the same reason.
+    ('trial_spawner', '{required_player_range:1,target_cooldown_length:1200}'),
+    # Same reason as the spawner: a vault turns active (and shows its item) when a player is
+    # within activation_range (default 4), and a player can land that close.
+    ('vault', '{config:{loot_table:"minecraft:chests/trial_chambers/reward",key_item:{id:"minecraft:trial_key",count:1},'
+              'activation_range:1,deactivation_range:2},'
               'server_data:{rewarded_players:[[I;1,2,3,4]],total_ejections_needed:2}}'),
     ('command_block', f'{{Command:"say hi",auto:1b,TrackOutput:0b,{NAME}}}'),
     ('chain_command_block', '{Command:"say chain",conditionMet:1b}'),
@@ -137,3 +145,19 @@ ENTITIES = [
     ('minecart', 'Passengers:[{id:"minecraft:cow",UUID:[I;28673,0,0,4],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]'),
     ('horse', 'Tame:1b,Passengers:[{id:"minecraft:skeleton",UUID:[I;28673,0,0,5],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b,Passengers:[{id:"minecraft:bat",UUID:[I;28673,0,0,6],NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b}]}]'),
 ]
+
+# Leads. A leashed mob saves `leash` as [I;x,y,z] (a fence knot at that block) or
+# {UUID:[I;..]} (a holder entity); vanilla restores the holder on the first tick after
+# loading and drops the lead if the holder is not found, so the knot and the holder
+# are summoned first, with fixed UUIDs, and within a few blocks of what they hold.
+# SETBLOCKS run before the entities.
+SETBLOCKS = ['setblock 40 -60 40 minecraft:oak_fence']
+_NOAI = 'NoAI:1b,Silent:1b,NoGravity:1b,Invulnerable:1b'
+_first = len(ENTITIES)
+ENTITIES += [
+    ('leash_knot', 'block_pos:[I;40,-60,40],Pos:[40.5d,-59.5d,40.5d]'),
+    ('cow', 'Pos:[42.5d,-60.0d,40.5d],leash:[I;40,-60,40]'),
+    ('pig', 'Pos:[44.5d,-60.0d,44.5d]'),
+    ('oak_boat', f'Pos:[44.5d,-60.0d,42.5d],leash:{{UUID:[I;28672,0,0,{_first + 2}]}}'),
+]
+LEADS = 2  # the leashed mobs above that vanilla must still have leashed when it saves
