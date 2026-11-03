@@ -147,7 +147,8 @@ pub struct SoundInstance {
     pub ticking: Ticking,
     /// `AbstractTickableSoundInstance.stopped`.
     pub stopped: bool,
-    /// `sound` after `getOrResolve`.
+    /// `sound` after `getOrResolve`, or the sound a caller chose for the
+    /// instance (the Music page's off tracks: `resolve` keeps both).
     pub sound: Option<Sound>,
     /// `soundEvent != null` after `getOrResolve`, and its subtitle.
     pub event: Option<Option<String>>,
@@ -1065,6 +1066,11 @@ impl SoundEngine {
         if instance.identifier == INTENTIONALLY_EMPTY {
             instance.sound = Some(Sound::intentionally_empty());
             instance.event = Some(None);
+            return;
+        }
+        // A caller that chose the exact sound (the Music page) resolved it
+        // itself, with `sound_except`: `getOrResolve` runs once.
+        if instance.sound.is_some() && instance.event.is_some() {
             return;
         }
         match self.registry.get(&instance.identifier) {
