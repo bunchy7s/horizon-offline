@@ -341,7 +341,6 @@ impl Game<'_> {
         self.random_tick_sections.clear();
         self.portals.sections.clear();
         self.options.resources = root.clone();
-        let context = pack.context.clone();
         self.pack = pack;
         self.gui = gui;
         // The new atlas's skin and map slots are blank: players and maps
@@ -413,6 +412,7 @@ impl Game<'_> {
         // A pack that may replace leaf models falls back to `Off` before the
         // reload marks every section dirty.
         self.streaming.leaf_culling = self.effective_leaf_culling();
+        let context = self.worker_context();
         self.streaming.reload_resources(&mut self.world, context);
         self.pending_uploads.clear();
         // New GPU textures: a renderer built from the reloaded resources; the
@@ -461,7 +461,7 @@ pub(super) fn stage_pack(
     progress.set(1);
     // The world's models and sprites and the GUI atlas read the same root and nothing of
     // each other: about a second each, side by side.
-    let mod_image = !horizon_client::mod_api::mods().is_empty();
+    let mod_image = crate::game::mods::built_with_native_mods();
     // The sound events, the GUI sprites' metadata and the language are read here too, not in
     // the frame that applies the reload (about 20 ms of it).
     let (render, atlas, panorama, (sounds, ui_metadata, language)) = std::thread::scope(|s| {

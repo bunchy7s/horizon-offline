@@ -70,11 +70,14 @@ impl Game<'_> {
             .get(key)
             .cloned()
     }
-    /// Whether the chunk holding `pos` is loaded (`Level.isLoaded`): a block
+    /// Whether `pos` is inside the world's height and its chunk is loaded
+    /// (`Level.isLoaded`, which is false outside `isInValidBounds`): a block
     /// read or write there finds the world. API @API:level_reads@.
     pub(super) fn native_level_is_loaded(&self, level: LevelRef, pos: [i32; 3]) -> bool {
-        self.native_level_world(level)
-            .is_some_and(|w| w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4)))
+        self.native_level_world(level).is_some_and(|w| {
+            (w.bottom_y()..w.top_y()).contains(&pos[1])
+                && w.chunks.contains_key(&(pos[0] >> 4, pos[2] >> 4))
+        })
     }
     /// The lowest block `y` and the height of the level
     /// (`LevelHeightAccessor.getMinY`, `getHeight`). API @API:level_reads@.
