@@ -204,8 +204,15 @@ fn excluded(host: &str, no_proxy: &str) -> bool {
                 return true;
             }
             let entry = entry.trim_start_matches('*').trim_start_matches('.');
+            // A port follows the last colon of a bracketed entry, or of a host with no colon
+            // before it; an unbracketed IPv6 literal keeps its colons.
             let entry = match entry.rfind(':') {
-                Some(at) if !entry[at..].contains(']') => &entry[..at],
+                Some(at)
+                    if !entry[at..].contains(']')
+                        && (entry[..at].ends_with(']') || !entry[..at].contains(':')) =>
+                {
+                    &entry[..at]
+                }
                 _ => entry,
             };
             let entry = bare(entry);
@@ -345,6 +352,16 @@ mod tests {
         assert!(!excluded("modrinth.com", " .corp.example , mojang.com "));
         assert!(!excluded("edge.forgecdn.net", "modrinth.com"));
         assert!(!excluded("modrinth.com", ""));
+    }
+
+    /// A bare IPv6 entry keeps its colons: cut at the last one it would never match the host in
+    /// its brackets, and the download would go through the proxy after all.
+    #[test]
+    fn no_proxy_keeps_a_bare_ipv6_entry_whole() {
+        assert!(excluded("[2001:db8::1]", "2001:db8::1"));
+        assert!(excluded("[2001:db8::1]", "[2001:db8::1]"));
+        assert!(excluded("[2001:db8::1]", "[2001:db8::1]:8080"));
+        assert!(!excluded("[2001:db8::1]", "2001:db8::2"));
     }
 
     #[test]
