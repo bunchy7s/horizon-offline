@@ -1,5 +1,9 @@
 //! Cuboid geometry in block units, including blockstate rotation and UV locking.
-use crate::{json::*, model::*, resolve::ResolvedCuboidModel};
+use crate::{
+    json::*,
+    model::*,
+    resolve::{ResolvedCuboidModel, ResolvedLoader},
+};
 mod transform;
 pub use transform::BlockModelTransform;
 
@@ -13,7 +17,38 @@ pub struct ModelQuad {
     pub material: Material,
     pub tint_index: i32,
     pub shade_direction_override: Option<Direction>,
+    /// The face's or element's `light_emission`.
     pub light_emission: u8,
+    /// Least (block, sky) light the quad is drawn with: its emission, raised by `neoforge_data`.
+    pub light: [u8; 2],
+    /// `neoforge_data` colour (ARGB) multiplied into the quad's tint.
+    pub color: Option<i32>,
+    /// `neoforge_data` override of the model's ambient occlusion for this quad.
+    pub ambient_occlusion: Option<bool>,
+    pub render_type: Option<RenderType>,
+}
+
+/// NeoForge's `render_type` names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RenderType {
+    Solid,
+    Cutout,
+    CutoutMipped,
+    Translucent,
+    Tripwire,
+}
+impl RenderType {
+    /// Accepts a bare or `minecraft:` name; others (mods' own types) are `None`.
+    pub fn by_name(name: &str) -> Option<Self> {
+        match name.strip_prefix("minecraft:").unwrap_or(name) {
+            "solid" => Some(Self::Solid),
+            "cutout" => Some(Self::Cutout),
+            "cutout_mipped" => Some(Self::CutoutMipped),
+            "translucent" => Some(Self::Translucent),
+            "tripwire" => Some(Self::Tripwire),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -186,6 +221,17 @@ fn bake_elements(
     skip_flat: bool,
 ) -> Result<Vec<ModelQuad>> {
     let mut output = Vec::new();
+    bake_into(model, transform, skip_flat, &mut output)?;
+    Ok(output)
+}
+/// The elements, then what the model's loader adds.
+fn bake_into(
+    model: &ResolvedCuboidModel,
+    transform: BlockModelTransform,
+    skip_flat: bool,
+    output: &mut Vec<ModelQuad>,
+) -> Result<()> {
+    let render_type = model.render_type.as_deref().and_then(RenderType::by_name);
     for element in model.elements() {
         let element = element
             .as_ref()
@@ -207,11 +253,22 @@ fn bake_elements(
                 force_translucent: false,
             });
             output.push(bake_face(
-                element, face, *direction, matrix, material, transform,
+                element,
+                face,
+                *direction,
+                matrix,
+                material,
+                transform,
+                render_type,
             )?);
         }
     }
-    Ok(output)
+    if let Some(ResolvedLoader::Composite(children)) = model.loader() {
+        for child in children {
+            bake_into(child, transform, skip_flat, output)?;
+        }
+    }
+    Ok(())
 }
 /// `FaceBakery.bakeQuad` for a quad with explicit corners and unit-atlas UVs
 /// (`uv` in 0..16 texels), as `ItemModelGenerator` builds its layers.
@@ -230,6 +287,7 @@ pub fn bake_flat_face(
         rotation: None,
         shade_direction_override: None,
         light_emission: 0,
+        neoforge_data: None,
     };
     let face = Face {
         cull: None,
@@ -237,6 +295,8 @@ pub fn bake_flat_face(
         texture: String::new(),
         uv: Some(uv),
         rotation: 0,
+        light_emission: None,
+        neoforge_data: None,
     };
     bake_face(
         &element,
@@ -245,6 +305,7 @@ pub fn bake_flat_face(
         None,
         material,
         BlockModelTransform::new([0; 3], false),
+        None,
     )
 }
 fn bake_face(
@@ -254,6 +315,7 @@ fn bake_face(
     matrix: Option<ElementMatrix>,
     material: Material,
     transform: BlockModelTransform,
+    render_type: Option<RenderType>,
 ) -> Result<ModelQuad> {
     let mut positions = corners(element.from, element.to, direction).map(|v| v.map(|c| c / 16.0));
     if let (Some(rotation), Some(matrix)) = (&element.rotation, matrix) {
@@ -303,6 +365,11 @@ fn bake_face(
             uv.swap(index, found);
         }
     }
+    let data = face
+        .neoforge_data
+        .unwrap_or_default()
+        .over(element.neoforge_data.unwrap_or_default());
+    let light_emission = face.light_emission.unwrap_or(element.light_emission);
     Ok(ModelQuad {
         positions,
         uv,
@@ -311,6 +378,98 @@ fn bake_face(
         material,
         tint_index: face.tint_index,
         shade_direction_override: element.shade_direction_override,
-        light_emission: element.light_emission,
+        light_emission,
+        light: [data.block_light, data.sky_light].map(|l| l.unwrap_or(0).max(light_emission)),
+        color: data.color,
+        ambient_occlusion: data.ambient_occlusion,
+        render_type,
     })
+}
+
+#[cfg(test)]
+mod loader_tests {
+    use super::*;
+    use crate::resolve::ModelLibrary;
+
+    fn library(models: &[(&str, &str)]) -> ModelLibrary {
+        let models = models
+            .iter()
+            .map(|(name, json)| ((*name).to_owned(), CuboidModel::from_json(json).unwrap()))
+            .collect();
+        ModelLibrary::new(models).unwrap()
+    }
+    fn bake(library: &ModelLibrary, name: &str) -> Vec<ModelQuad> {
+        bake_block_model(
+            &library.resolve(name).unwrap(),
+            BlockModelTransform::new([0; 3], false),
+        )
+        .unwrap()
+    }
+    fn sprites(quads: &[ModelQuad]) -> Vec<&str> {
+        quads.iter().map(|q| q.material.sprite.as_str()).collect()
+    }
+    const CUBE: &str =
+        r##"{"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"up":{"texture":"#all"}}}]}"##;
+    const COMPOSITE: &str = r#"{"loader":"neoforge:composite","textures":{"all":"block/shared"},
+        "children":{"zeta":{"parent":"t:cube","textures":{"all":"block/own"}},"alpha":{"parent":"t:cube"}}}"#;
+
+    #[test]
+    fn composite_bakes_children_in_document_order_with_slot_fallback() {
+        let library = library(&[("t:cube", CUBE), ("t:comp", COMPOSITE)]);
+        let quads = bake(&library, "t:comp");
+        assert_eq!(
+            sprites(&quads),
+            ["minecraft:block/own", "minecraft:block/shared"]
+        );
+    }
+    #[test]
+    fn composite_visibility_hides_a_child() {
+        let hidden =
+            COMPOSITE.replace(r#""children""#, r#""visibility":{"zeta":false},"children""#);
+        let library = library(&[("t:cube", CUBE), ("t:comp", &hidden)]);
+        assert_eq!(
+            sprites(&bake(&library, "t:comp")),
+            ["minecraft:block/shared"]
+        );
+    }
+    #[test]
+    fn an_inheriting_model_overrides_which_children_are_visible() {
+        let hidden =
+            COMPOSITE.replace(r#""children""#, r#""visibility":{"zeta":false},"children""#);
+        let shown = r#"{"parent":"t:hidden","visibility":{"zeta":true,"alpha":false}}"#;
+        let library = library(&[("t:cube", CUBE), ("t:hidden", &hidden), ("t:shown", shown)]);
+        assert_eq!(sprites(&bake(&library, "t:shown")), ["minecraft:block/own"]);
+    }
+    #[test]
+    fn loader_is_inherited_by_parent_after_own_elements() {
+        let derived = r##"{"parent":"t:comp","textures":{"all":"block/derived"},
+            "elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"down":{"texture":"#all"}}}]}"##;
+        let library = library(&[
+            ("t:cube", CUBE),
+            ("t:comp", COMPOSITE),
+            ("t:derived", derived),
+        ]);
+        let quads = bake(&library, "t:derived");
+        assert_eq!(quads[0].facing, Direction::Down);
+        assert_eq!(
+            sprites(&quads),
+            [
+                "minecraft:block/derived",
+                "minecraft:block/own",
+                "minecraft:block/derived"
+            ]
+        );
+    }
+    #[test]
+    fn own_loader_wins_and_unknown_loader_adds_nothing() {
+        let other = r#"{"parent":"t:comp","loader":"somemod:thing"}"#;
+        let library = library(&[("t:cube", CUBE), ("t:comp", COMPOSITE), ("t:other", other)]);
+        assert!(bake(&library, "t:other").is_empty());
+    }
+    #[test]
+    fn composites_that_nest_through_themselves_are_an_error() {
+        let looping = r#"{"loader":"neoforge:composite","children":{"a":{"parent":"t:loop"}}}"#;
+        let library = library(&[("t:loop", looping)]);
+        assert!(library.resolve("t:loop").is_err());
+    }
 }

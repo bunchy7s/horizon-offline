@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 /// Textures offered as icons, when the player's prepared files hold them: block faces and items
 /// that read well at sidebar size.
-const TEXTURES: [&str; 24] = [
+pub(super) const TEXTURES: [&str; 24] = [
     "grass_block_side",
     "oak_planks",
     "oak_log",
@@ -45,16 +45,20 @@ const COLOURS: [&str; 8] = [
 /// The dialog: a new instance (`editing` None) or one being changed. Its name and group are the
 /// text fields `Field::InstanceName` and `Field::InstanceGroup`.
 pub(super) struct InstanceDialog {
-    editing: Option<String>,
+    pub(super) editing: Option<String>,
     /// A new instance copies the selected one's worlds, options and packs.
-    copy: bool,
-    icon: Option<Icon>,
+    pub(super) copy: bool,
+    pub(super) icon: Option<Icon>,
     /// A picture chosen since it opened (None in it: the instance's is removed on Save).
     pub(super) picture: Option<Option<instance_icons::Chosen>>,
     pub(super) error: Option<String>,
-    busy: bool,
+    pub(super) busy: bool,
     /// Horizon, or the Java game it plays.
     pub(super) java: new_instance::JavaChoice,
+    /// The Horizon version it keeps (`Instance::version`); None follows the launcher's.
+    pub(super) pin: Option<String>,
+    /// The loader logo `picture` was made from, when it was one.
+    pub(super) logo: Option<&'static str>,
 }
 
 /// The instances and their icons as images, kept between frames.
@@ -270,6 +274,8 @@ impl Launcher {
         self.servers.focus_soon = Some(Field::InstanceName);
         self.instances.dialog = Some(InstanceDialog {
             icon: editing.as_ref().and_then(|i| i.icon.clone()),
+            pin: editing.as_ref().and_then(|i| i.version.clone()),
+            logo: None,
             picture: None,
             editing: editing.map(|i| i.id),
             copy: false,
@@ -313,12 +319,22 @@ impl Launcher {
             return;
         };
         let icon = d.icon.clone();
+        let pin = d.pin.clone();
         let picture = d
             .picture
             .as_ref()
             .map(|p| p.as_ref().map(|c| c.png.clone()));
         let editing = d.editing.clone();
         let copy = selected.filter(|_| d.copy);
+        // The Horizon version is Horizon's instances' alone: a Java one plays its own game.
+        let plays_horizon = match &editing {
+            Some(id) => self
+                .instances
+                .list
+                .iter()
+                .any(|i| &i.id == id && i.java.is_none()),
+            None => d.java.kind == new_instance::NewKind::Horizon,
+        };
         // A new Java instance: what it plays, and its name when none is typed.
         let java = (editing.is_none() && d.java.kind != new_instance::NewKind::Horizon)
             .then(|| d.java.clone());
@@ -358,6 +374,9 @@ impl Launcher {
                 m.name = Some(name);
                 m.group = group;
                 m.icon = icon;
+                if plays_horizon {
+                    m.version = pin;
+                }
             })?;
             if let Some(png) = picture {
                 instances::set_picture(
@@ -395,6 +414,9 @@ impl Launcher {
 
     pub(super) fn instance_dialog(&mut self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let t = self.theme;
+        if t.dark {
+            return self.glass_instance_dialog(cx);
+        }
         let d = self.instances.dialog.as_ref()?;
         let editing_id = d.editing.clone();
         let chosen = d

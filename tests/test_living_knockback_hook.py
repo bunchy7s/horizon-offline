@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class LivingKnockbackHookTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("rustc"), "requires Rust")
-    def test_one_hook_attacker_held_items_cancellation_and_validation(self):
+    def test_attacker_versions_cancellation_and_validation(self):
         hooks = (ROOT / "crates/horizon-client/src/game/native_hooks.rs").read_text(encoding="utf-8")
         health = (ROOT / "crates/horizon-client/src/health.rs").read_text(encoding="utf-8")
         context_start = health.index("thread_local! {")
@@ -60,14 +60,20 @@ mod mod_api {
 }
 struct Game;
 impl Game {
-    fn native_living_knockback(_: i32, _: &str, _: &str, causing: i32, _: i32, attacker: i32,
-                              main: Option<&ItemStack>, off: Option<&ItemStack>,
-                              strength: &mut f64, x: &mut f64, _: &mut f64, canceled: &mut bool) {
-        CALLS.with_borrow_mut(|calls| calls.push((1, causing.max(attacker), *strength)));
+    fn native_living_knockback(_: i32, _: &str, _: &str, causing: i32, _: i32,
+                              strength: &mut f64, _: &mut f64, _: &mut f64, canceled: &mut bool) {
+        CALLS.with_borrow_mut(|calls| calls.push((1, causing, *strength)));
+        *strength *= 2.0;
+        *canceled = CANCEL_V1.get();
+    }
+    fn native_living_knockback_v2(_: i32, _: &str, attacker: i32, main: Option<&ItemStack>,
+                                 off: Option<&ItemStack>, strength: &mut f64,
+                                 x: &mut f64, _: &mut f64, canceled: &mut bool) {
+        CALLS.with_borrow_mut(|calls| calls.push((2, attacker, *strength)));
         HELD.with_borrow_mut(|held| held.push((main.cloned(), off.cloned())));
         *x = -*x;
         if NONFINITE.get() { *strength = f64::NAN; }
-        *canceled = CANCEL_V1.get() || CANCEL_V2.get();
+        *canceled = CANCEL_V2.get();
     }
 }
 fn mob_source(damage: &Damage) -> HurtSource<'static> {
@@ -77,7 +83,7 @@ fn mob_source(damage: &Damage) -> HurtSource<'static> {
 ARGUMENTS
 BRIDGE
 #[test]
-fn the_one_hook_names_player_mob_and_stand_attackers_and_what_they_hold() {
+fn bridge_preserves_v1_and_names_player_mob_and_stand_attackers() {
     use horizon_client::health::{knockback_from, knockback_from_holding, knockback_canceled, install};
     install();
     let mob = Mob { id: 12, kind: Kind { id: "minecraft:zombie".into() },
@@ -89,8 +95,8 @@ fn the_one_hook_names_player_mob_and_stand_attackers_and_what_they_hold() {
     for pushed in [Hurting::Mob(&mob, &player_hit), Hurting::Player(12, source)] {
         let mut knock = original;
         assert!(!knockback_canceled(pushed, &mut knock));
-        assert_eq!(knock, Knock { strength: 0.4, x: -1.0, z: 0.0 });
-        assert_eq!(CALLS.take(), [(1, 7, 0.4)]);
+        assert_eq!(knock, Knock { strength: 0.8, x: -1.0, z: 0.0 });
+        assert_eq!(CALLS.take(), [(1, 0, 0.4), (2, 7, 0.8)]);
     }
     HELD.take();
     {
@@ -108,21 +114,24 @@ fn the_one_hook_names_player_mob_and_stand_attackers_and_what_they_hold() {
         let damage = Damage { attacker };
         let mut knock = original;
         knockback_canceled(Hurting::Mob(&mob, &damage), &mut knock);
-        assert_eq!(CALLS.take()[0].1, if attacker.is_some() { 3 } else { 99 });
+        assert_eq!(CALLS.take()[1].1, if attacker.is_some() { 3 } else { 99 });
     }
     let explicit = HurtSource { causing: 5, ..source };
     let mut knock = original;
     knockback_canceled(Hurting::Dragon(12, explicit), &mut knock);
-    assert_eq!(CALLS.take()[0].1, 5);
-    // An armor stand's sweep fires the same hook.
+    assert_eq!(CALLS.take()[1].1, 5);
     let mut knock = original;
     knockback_canceled(Hurting::ArmorStand(12, source), &mut knock);
-    assert_eq!(CALLS.take(), [(1, 7, 0.4)]);
-    CANCEL_V1.set(true);
-    let mut knock = original;
-    assert!(knockback_canceled(Hurting::Player(12, source), &mut knock));
-    assert_eq!(CALLS.take().len(), 1);
+    assert_eq!(CALLS.take(), [(2, 7, 0.4)]);
+    for (v1, v2) in [(true, false), (false, true)] {
+        CANCEL_V1.set(v1);
+        CANCEL_V2.set(v2);
+        let mut knock = original;
+        assert!(knockback_canceled(Hurting::Player(12, source), &mut knock));
+        assert_eq!(CALLS.take().len(), 2);
+    }
     CANCEL_V1.set(false);
+    CANCEL_V2.set(false);
     NONFINITE.set(true);
     let mut knock = original;
     knockback_canceled(Hurting::ArmorStand(12, source), &mut knock);

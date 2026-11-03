@@ -1,0 +1,14 @@
+{
+  "hooks": [],
+  "helpers": [
+    {"name": "block_sprites", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_block_sprites"},
+    {"name": "texture_sprites", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_texture_sprites"},
+    {"name": "block_sprites_version", "target": "horizon_client::game::native_block_sprites::Game<'_>::native_block_sprites_version"}
+  ],
+  "comments": [
+    "crates/horizon-client/src/game/native_block_sprites.rs",
+    "crates/horizon-client-render/src/gfx/native_render.rs"
+  ],
+  "rust_summary": "block textures for client mods: `native_block_sprites` and `native_texture_sprites` say where blocks' and textures' sprites are in the block sprite arrays, and `WorldDrawn::block_sprites` hands a mod the arrays.",
+  "doc_summary": "[block textures](#block-textures) for client mods: `native_block_sprites(blocks)` says what each block draws on each side (each face's sprite, place, UV map and tint source), `native_texture_sprites(textures)` a texture's sprite, `native_block_sprites_version()` changes when the resources load anew, and `WorldDrawn::block_sprites` holds the arrays with a nearest and the terrain's sampler. Bundles need \"hooks\": @API:native_block_sprites@."
+}

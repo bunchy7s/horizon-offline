@@ -1172,6 +1172,7 @@ mod tests {
         pub(super) struct LootStack;
         pub(super) struct NativeLootContext<'a>(pub &'a ());
         pub(super) struct NativeDataMapType;
+        pub(super) struct RecipeBookCategory;
         pub(super) struct NativeMapDecoration;
         pub(super) struct NativeMapInfo<'a>(pub &'a ());
         pub(super) struct NativePlayerRender<'a>(pub &'a ());
@@ -1924,7 +1925,7 @@ mod tests {
     fn dispatch_contracts() {
         struct Weapon;
         impl Hooks for Weapon {
-            fn living_knockback(&self, event: &mut LivingKnockbackEvent<'_>) -> Flow {
+            fn living_knockback_v2(&self, event: &mut LivingKnockbackV2Event<'_>) -> Flow {
                 assert_eq!(
                     (event.entity, event.kind, event.attacker),
                     (12, "minecraft:armor_stand", 7)
@@ -1938,13 +1939,10 @@ mod tests {
         }
         let weapon_mods: Vec<Box<dyn Hooks>> = vec![Box::new(Weapon)];
         let (mut strength, mut x, mut z, mut canceled) = (0.4, 1.0, 0.0, false);
-        dispatch_living_knockback(
+        dispatch_living_knockback_v2(
             &weapon_mods,
             12,
             "minecraft:armor_stand",
-            "minecraft:player_attack",
-            0,
-            0,
             7,
             None,
             None,

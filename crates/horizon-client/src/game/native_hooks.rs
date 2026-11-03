@@ -882,7 +882,7 @@ use super::{
 };
 use horizon_client::mod_api::{
     self, NativeCamera, NativeCommand, NativeDispensed, NativeLifecycleContext, NativeServerPlayer,
-    ServerTickPhase, WorldPhase,
+    RecipeBookCategory, ServerTickPhase, WorldPhase,
 };
 use horizon_client::mod_api::{AttachmentResult, Attachments, Holder, Suggestion};
 pub(crate) use horizon_client::mod_api::{
@@ -2024,6 +2024,13 @@ fn chars_to_type(text: &str, canceled: impl FnMut(char) -> bool) -> Option<Strin
 
 /// The hook points. Each does nothing in Horizon.
 impl Game<'_> {
+    /// Declare categories for custom recipe types, with registered item icons.
+    /// Asked lazily once per recipe table by `native_recipe_book_category`.
+    /// Invalid declarations are logged and skipped; the first valid category
+    /// owns its id and type. This does not yet add tabs or book displays.
+    pub(super) fn native_recipe_book_categories(&self, categories: &mut Vec<RecipeBookCategory>) {
+        mod_api::dispatch_recipe_book_categories(self, mod_api::mods(), categories);
+    }
     /// Once a frame, in a world or not, after Horizon's extras.
     pub(super) fn native_frame(&mut self, elapsed: Duration) {
         mod_api::dispatch_frame(self, mod_api::mods(), elapsed);
@@ -5108,6 +5115,58 @@ impl Game<'_> {
         mod_api::dispatch_entity_shoot_bow(self, mod_api::mods(), player, name, projectile, force);
     }
 
+    /// A player is about to nock `bow` with `hand` (`BowItem.use`, NeoForge's
+    /// `ArrowNockEvent`): `has_ammo` is whether `getProjectile` found ammunition
+    /// or the player is in creative. Set `cancel` to fail the use.
+    /// @API:arrow_nock@.
+    pub(super) fn native_arrow_nock(
+        &mut self,
+        player: u128,
+        name: &str,
+        bow: &ItemStack,
+        hand: Hand,
+        has_ammo: bool,
+        cancel: &mut bool,
+    ) {
+        mod_api::dispatch_arrow_nock(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            bow,
+            hand,
+            has_ammo,
+            cancel,
+        );
+    }
+
+    /// `LivingEntity.getProjectile(weapon)` (NeoForge's
+    /// `LivingGetProjectileEvent`) for a player (`player` and `name`) or a
+    /// mob (`entity`, `kind`): a skeleton or illusioner's shot, or the crossbow
+    /// load of a pillager or piglin. `projectile` is the vanilla
+    /// ammunition; replace it to choose another. A replaced stack is not taken
+    /// from the inventory. @API:living_get_projectile@.
+    pub(super) fn native_living_get_projectile(
+        &mut self,
+        player: Option<u128>,
+        name: &str,
+        entity: Option<u32>,
+        kind: &str,
+        weapon: &ItemStack,
+        projectile: &mut Option<ItemStack>,
+    ) {
+        mod_api::dispatch_living_get_projectile(
+            self,
+            mod_api::mods(),
+            player,
+            name,
+            entity,
+            kind,
+            weapon,
+            projectile,
+        );
+    }
+
     /// A guest's fall flying state changed on the server. The change has
     /// already been applied. 222.
     pub(super) fn native_entity_toggle_glide(&mut self, player: u128, name: &str, gliding: bool) {
@@ -6085,7 +6144,7 @@ impl Game<'_> {
     /// release; `native_entity_shoot_bow` reports a spawned arrow afterward
     /// with read-only force. Fires on the Game running the bow release, including
     /// LAN guests; a remote client's own release path is not covered. Crossbows
-    /// and `ArrowNockEvent` are not covered. 318.
+    /// are not covered; `native_arrow_nock` is the bow's start. 318.
     pub(super) fn native_arrow_loose(
         &mut self,
         stack: &ItemStack,
@@ -6191,6 +6250,31 @@ impl Game<'_> {
         blocks: &mut Vec<[i32; 3]>,
     ) {
         mod_api::dispatch_explosion_detonate(self, mod_api::mods(), dimension, center, blocks);
+    }
+    /// An explosion at `center` in `dimension`, about to break `blocks`, pushes
+    /// `entity` (None for a player, whom `native_acting_player` names):
+    /// `ServerExplosion.hurtEntities`, after the knockback is calculated. Change `knockback_velocity` to change
+    /// what is added to the entity's velocity; a player's client is sent the
+    /// same. Wind bursts too, except dragons and end crystals. End crystals
+    /// are also omitted from ordinary blasts: Horizon removes them without a
+    /// velocity to change. Server-side. @API:explosion_knockback@.
+    pub(super) fn native_explosion_knockback(
+        &mut self,
+        dimension: &str,
+        center: [f64; 3],
+        blocks: &[[i32; 3]],
+        entity: Option<u32>,
+        knockback_velocity: &mut [f64; 3],
+    ) {
+        mod_api::dispatch_explosion_knockback(
+            self,
+            mod_api::mods(),
+            dimension,
+            center,
+            blocks,
+            entity,
+            knockback_velocity,
+        );
     }
     /// A player fills (`stack` an empty bucket) or empties a bucket at `pos`:
     /// `BucketItem.use`, where it asks `Level.mayInteract`. Set `canceled`
@@ -6313,12 +6397,16 @@ impl Game<'_> {
     }
     /// A player was saved to the world's store (NeoForge's
     /// `PlayerEvent.SaveToFile`, `PlayerList.save`): when they leave or the
-    /// world closes, when the dedicated server saves everyone, and for an
-    /// integrated server's owner when the world saves them. LAN guests are
-    /// not heard on integrated autosaves. Once for each save. `directory`
+    /// world closes, when a dedicated or integrated server saves its guests,
+    /// and for an integrated server's owner when the world saves them.
+    /// Once for each save. `directory`
     /// is the world's player directory (`players/data`): write your own file
     /// there, named `<uuid>.<suffix>`, never the player's `.dat`. The player
     /// may be leaving, so no player's state is swapped in. Not cancellable.
+    /// Autosave snapshots are written asynchronously: this notification runs
+    /// on a later server tick after a successful write, possibly after WorldSaved.
+    /// Live state may have advanced beyond the saved snapshot; a process exit
+    /// before completions are drained can prevent notification delivery.
     pub(super) fn native_player_save_to_file(
         &mut self,
         player: u128,
@@ -7121,11 +7209,7 @@ impl Game<'_> {
     /// `super` there), for the pushes vanilla doesn't make with `LivingEntity.knockback` (the
     /// ender dragon's wings, Punch arrows, explosions, wind charges, a mace smash's area, a
     /// hoglin's throw), nor yet for the ones Horizon makes another way: a mob's melee push from
-    /// its attack knockback or a Knockback weapon, the ender dragon's. An armor stand's sweep fires it.
-    /// `attacker` is the attacking entity's network id (falling back to the victim's last hurt-by
-    /// mob, or 0 when unknown); `attacker_main` and `attacker_off` are what it holds (a player's
-    /// selected and off-hand stacks, a mob's main hand), none when unknown, recorded only while a
-    /// native mod is loaded. It runs
+    /// its attack knockback or a Knockback weapon, an armor stand's, the ender dragon's. It runs
     /// on the thread that ticks the world (the server thread): state
     /// shared with render thread hooks needs synchronising. No `self`: the game is in the middle
     /// of the hit. API 125.
@@ -7135,9 +7219,6 @@ impl Game<'_> {
         damage_type: &str,
         causing: i32,
         direct: i32,
-        attacker: i32,
-        attacker_main: Option<&ItemStack>,
-        attacker_off: Option<&ItemStack>,
         strength: &mut f64,
         x: &mut f64,
         z: &mut f64,
@@ -7150,6 +7231,35 @@ impl Game<'_> {
             damage_type,
             causing,
             direct,
+            strength,
+            x,
+            z,
+            canceled,
+        );
+    }
+    /// LivingEntity.knockback before resistance and motion, after the unchanged v1 hook.
+    /// Cancellation from either hook wins. Attacker is the attacking entity's network id,
+    /// falling back to the victim's last hurt-by mob, or 0 when unknown; `attacker_main` and
+    /// `attacker_off` are what it holds (a player's selected and off-hand stacks, a mob's main hand), none when unknown. Player attackers
+    /// include the guest whose action runs. Includes mob melee and armor-stand sweeps, not
+    /// direct velocity pushes (explosions, Punch arrows, hoglin throws). Non-finite changes
+    /// are restored before resistance. Server-side, without self: damage borrows the victim.
+    /// API @API:living_knockback_v2@.
+    pub(super) fn native_living_knockback_v2(
+        entity: i32,
+        kind: &str,
+        attacker: i32,
+        attacker_main: Option<&ItemStack>,
+        attacker_off: Option<&ItemStack>,
+        strength: &mut f64,
+        x: &mut f64,
+        z: &mut f64,
+        canceled: &mut bool,
+    ) {
+        mod_api::dispatch_living_knockback_v2(
+            mod_api::mods(),
+            entity,
+            kind,
             attacker,
             attacker_main,
             attacker_off,
@@ -7273,7 +7383,7 @@ impl Game<'_> {
 impl Game<'_> {
     /// `health::knockback_from` that, while a native mod listens, also records what the attacker
     /// holds (the player's selected and off-hand stacks, a mob's main hand) for
-    /// `living_knockback`. A nested scope for the same attacker keeps what the outer recorded.
+    /// `living_knockback_v2`. A nested scope for the same attacker keeps what the outer recorded.
     pub(super) fn knockback_scope(&self, attacker: i32) -> impl Drop + use<> {
         use horizon_client::health::{knockback_attacker, knockback_from_holding, knockback_held};
         if mod_api::mods().is_empty() {
@@ -7327,6 +7437,13 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
             }
         }
     };
+    // No `matches!`: horizon-mixins refuses macros in a hook point's body.
+    #[allow(clippy::match_like_matches_macro)]
+    let stand = if let Hurting::ArmorStand(..) = &pushed {
+        true
+    } else {
+        false
+    };
     let (entity, kind, source) = hurt_server_args(pushed);
     let HurtSource {
         damage_type,
@@ -7334,22 +7451,33 @@ pub(super) fn knockback(pushed: Hurting<'_>, knock: &mut Knock) -> bool {
         direct,
     } = source;
     let mut canceled = false;
+    if !stand {
+        Game::native_living_knockback(
+            entity,
+            kind,
+            damage_type,
+            causing,
+            direct,
+            &mut knock.strength,
+            &mut knock.x,
+            &mut knock.z,
+            &mut canceled,
+        );
+    }
+    let mut canceled_v2 = false;
     let held = horizon_client::health::knockback_held();
-    Game::native_living_knockback(
+    Game::native_living_knockback_v2(
         entity,
         kind,
-        damage_type,
-        causing,
-        direct,
         attacker,
         held[0].as_ref(),
         held[1].as_ref(),
         &mut knock.strength,
         &mut knock.x,
         &mut knock.z,
-        &mut canceled,
+        &mut canceled_v2,
     );
-    canceled
+    canceled || canceled_v2
 }
 
 pub(super) fn block_contact(
@@ -8549,6 +8677,15 @@ impl Game<'_> {
         }
         self.recipes().custom.get(kind).map_or(&[], Vec::as_slice)
     }
+    /// The validated category and icon of a custom recipe type, or None for
+    /// an undeclared/invalid type, before resources load, or outside a world.
+    /// Rebuilt when the recipe table changes. Does not unlock any recipes.
+    pub(super) fn native_recipe_book_category(&mut self, kind: &str) -> Option<RecipeBookCategory> {
+        if self.outside_world() || self.res.rest.get().is_none() {
+            return None;
+        }
+        self.registered_recipe_book_category(kind)
+    }
     /// An ingredient as a recipe's JSON names it: an item, a `#tag`, or a list
     /// of them, a bare id as `minecraft:` (as vanilla reads it); `test` says
     /// whether a stack fits. Items the game doesn't know are left out; None
@@ -8574,7 +8711,7 @@ impl Game<'_> {
         };
         let items = self.items();
         let known: Vec<String> = Ingredient::parse(&json, items)?
-            .1
+            .order
             .into_iter()
             .filter(|item| items.get(item).is_some())
             .collect();

@@ -194,20 +194,176 @@ pub fn apply(guest: &mut Guest, level: &Level) {
     }
 }
 
-/// Save a guest (PlayerDataStorage.save) who has left: the vehicle it took
-/// along is in its `saved` compound already (`take_parent_vehicle`).
-pub fn save(guest: &Guest, world: &Path) {
+/// The shared player compound for logout and autosave snapshots.
+fn player_tag(guest: &Guest) -> Tag {
     let mut level = Level {
         player_uuid: Some(uuid_ints(guest.uuid)),
         ..Level::default()
     };
     store(guest, &mut level, None);
-    let file = path(world, guest.uuid);
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    level.player_tag()
+}
+
+/// Save a leaving guest, including its saved vehicle tree.
+pub fn save(guest: &Guest, world: &Path) {
+    if let Err(e) = write_dat(&path(world, guest.uuid), player_tag(guest)) {
+        log::warn!(
+            "Horizon: {} is not saved: {e}",
+            path(world, guest.uuid).display()
+        );
     }
-    if let Err(e) = write_dat(&file, level.player_tag()) {
-        log::warn!("Horizon: {} is not saved: {e}", file.display());
+}
+
+/// An immutable player snapshot. Compression and all filesystem work belong to
+/// the writer; native callbacks are delivered by the server after completion.
+struct Snapshot {
+    uuid: u128,
+    name: String,
+    file: PathBuf,
+    tag: Tag,
+}
+
+pub struct SavedPlayer {
+    pub uuid: u128,
+    pub name: String,
+}
+
+fn write_snapshot(snapshot: Snapshot) -> Result<SavedPlayer, String> {
+    write_dat(&snapshot.file, snapshot.tag)
+        .map(|()| SavedPlayer {
+            uuid: snapshot.uuid,
+            name: snapshot.name,
+        })
+        .map_err(|e| format!("{} is not saved: {e}", snapshot.file.display()))
+}
+
+struct PlayerWriter {
+    send: std::sync::mpsc::Sender<Snapshot>,
+    done: std::sync::mpsc::Receiver<Result<SavedPlayer, String>>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+/// One FIFO writer for a server's player autosaves. Synchronous logout writes
+/// must follow a barrier, so an older autosave can never replace them later.
+#[derive(Default)]
+pub struct Autosaves {
+    writer: Option<PlayerWriter>,
+    pending: usize,
+    error: Option<String>,
+    ready: Vec<SavedPlayer>,
+}
+
+impl Autosaves {
+    pub fn enqueue(&mut self, guest: &Guest, world: &Path) {
+        let snapshot = Snapshot {
+            uuid: guest.uuid,
+            name: guest.name.clone(),
+            file: path(world, guest.uuid),
+            tag: player_tag(guest),
+        };
+        if self.writer.is_none() {
+            let (send, receive) = std::sync::mpsc::channel::<Snapshot>();
+            let (complete, done) = std::sync::mpsc::channel();
+            match std::thread::Builder::new()
+                .name("horizon-player-writer".into())
+                .spawn(move || {
+                    for snapshot in receive {
+                        let _ = complete.send(write_snapshot(snapshot));
+                    }
+                }) {
+                Ok(thread) => self.writer = Some(PlayerWriter { send, done, thread }),
+                Err(error) => {
+                    log::warn!("Horizon: cannot start player writer, saving inline: {error}")
+                }
+            }
+        }
+        let snapshot = if let Some(writer) = &self.writer {
+            match writer.send.send(snapshot) {
+                Ok(()) => {
+                    self.pending += 1;
+                    return;
+                }
+                Err(error) => {
+                    let completed = self.completed(true);
+                    self.ready.extend(completed);
+                    if let Some(writer) = self.writer.take() {
+                        drop(writer.send);
+                        let _ = writer.thread.join();
+                    }
+                    error.0
+                }
+            }
+        } else {
+            snapshot
+        };
+        match write_snapshot(snapshot) {
+            Ok(player) => self.ready.push(player),
+            Err(error) => {
+                log::warn!("Horizon: {error}");
+                self.error = Some(error);
+            }
+        }
+    }
+
+    /// Serialize a newer logout snapshot after every queued autosave.
+    pub fn save_after(&mut self, guest: &Guest, world: &Path) -> Vec<SavedPlayer> {
+        let saved = self.completed(true);
+        save(guest, world);
+        saved
+    }
+
+    /// Drain completions on the tick thread; `wait` is the durability barrier
+    /// for explicit saves, logout, and shutdown. Failures remain visible.
+    pub fn completed(&mut self, wait: bool) -> Vec<SavedPlayer> {
+        let mut saved = std::mem::take(&mut self.ready);
+        while self.pending > 0 {
+            let done = &self.writer.as_ref().unwrap().done;
+            let result = if wait {
+                done.recv()
+                    .map_err(|_| std::sync::mpsc::TryRecvError::Disconnected)
+            } else {
+                done.try_recv()
+            };
+            match result {
+                Ok(result) => {
+                    self.pending -= 1;
+                    match result {
+                        Ok(player) => saved.push(player),
+                        Err(error) => {
+                            log::warn!("Horizon: {error}");
+                            self.error = Some(error);
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.error = Some("the player writer stopped".into());
+                    log::warn!("Horizon: the player writer stopped");
+                    self.pending = 0;
+                    if let Some(writer) = self.writer.take() {
+                        drop(writer.send);
+                        let _ = writer.thread.join();
+                    }
+                }
+            }
+        }
+        saved
+    }
+
+    pub fn writes_finished(&mut self) -> crate::Result<bool> {
+        match self.error.take() {
+            Some(error) => Err(error.into()),
+            None => Ok(self.pending == 0),
+        }
+    }
+}
+
+impl Drop for Autosaves {
+    fn drop(&mut self) {
+        if let Some(writer) = self.writer.take() {
+            drop(writer.send);
+            let _ = writer.thread.join();
+        }
     }
 }
 
@@ -369,6 +525,130 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("horizon-owner-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn autosaves_keep_snapshots_and_order_before_logout() {
+        let dir = world("async-batch");
+        let mut saves = Autosaves::default();
+        for uuid in 1..=150 {
+            let mut g = holding(uuid, "minecraft:diamond", 5);
+            saves.enqueue(&g, &dir);
+            // Subsequent live changes cannot alter the queued snapshot.
+            g.inventory[0] = None;
+        }
+        let completed = saves.completed(true);
+        assert!(saves.writes_finished().unwrap());
+        assert!(completed.iter().map(|p| p.uuid).eq(1..=150));
+        for uuid in 1..=150 {
+            let mut loaded = guest();
+            loaded.uuid = uuid;
+            assert!(load(&mut loaded, &dir));
+            assert_eq!(first_item(&loaded), Some(("minecraft:diamond", 5)));
+        }
+        saves.enqueue(&holding(1, "minecraft:gold_ingot", 7), &dir);
+        saves.enqueue(&holding(1, "minecraft:emerald", 9), &dir);
+        assert_eq!(saves.completed(true).len(), 2);
+        assert!(saves.writes_finished().unwrap());
+        let mut loaded = guest();
+        loaded.uuid = 1;
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:emerald", 9)));
+        // The barrier protects the synchronous, newer logout snapshot.
+        for uuid in 1..=150 {
+            saves.enqueue(&holding(uuid, "minecraft:diamond", 5), &dir);
+        }
+        saves.save_after(&holding(1, "minecraft:iron_ingot", 11), &dir);
+        drop(saves);
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:iron_ingot", 11)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn autosave_failures_recover_and_drop_drains_writes() {
+        let dir = world("async-error");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("players"), b"not a directory").unwrap();
+        let mut saves = Autosaves::default();
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        assert!(saves.completed(true).is_empty());
+        assert!(saves.writes_finished().is_err());
+        assert!(saves.completed(false).is_empty());
+        assert!(saves.writes_finished().unwrap());
+        drop(saves);
+        std::fs::remove_file(dir.join("players")).unwrap();
+        let mut saves = Autosaves::default();
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        for uuid in 2..=150 {
+            saves.enqueue(&holding(uuid, "minecraft:diamond", 5), &dir);
+        }
+        drop(saves);
+        for uuid in 1..=150 {
+            let mut g = guest();
+            g.uuid = uuid;
+            assert!(load(&mut g, &dir));
+            assert_eq!(first_item(&g), Some(("minecraft:diamond", 5)));
+        }
+        let mut loaded = guest();
+        loaded.uuid = 1;
+        assert!(load(&mut loaded, &dir));
+        assert_eq!(first_item(&loaded), Some(("minecraft:diamond", 5)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mixed_autosaves_keep_successes_and_match_logout_files() {
+        let bad = world("mixed-bad");
+        let good = world("mixed-good");
+        let reference = world("mixed-reference");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("players"), b"not a directory").unwrap();
+        let mut saves = Autosaves::default();
+        let g = holding(2, "minecraft:emerald", 9);
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &bad);
+        saves.enqueue(&g, &good);
+        saves.enqueue(&holding(3, "minecraft:diamond", 5), &bad);
+        let saved = saves.completed(true);
+        assert_eq!(saved.iter().map(|p| p.uuid).collect::<Vec<_>>(), vec![2]);
+        assert!(saves.writes_finished().is_err());
+        assert!(saves.writes_finished().unwrap());
+        save(&g, &reference);
+        assert_eq!(
+            read_dat(&path(&good, 2)).unwrap(),
+            read_dat(&path(&reference, 2)).unwrap()
+        );
+        std::fs::remove_file(bad.join("players")).unwrap();
+        saves.enqueue(&g, &bad);
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().unwrap());
+        for dir in [bad, good, reference] {
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_disconnected_writer_is_restarted() {
+        let dir = world("restart");
+        let (send, receive) = std::sync::mpsc::channel();
+        drop(receive);
+        let (complete, done) = std::sync::mpsc::channel();
+        drop(complete);
+        let mut saves = Autosaves::default();
+        saves.writer = Some(PlayerWriter {
+            send,
+            done,
+            thread: std::thread::spawn(|| {}),
+        });
+        saves.pending = 1;
+        saves.enqueue(&holding(1, "minecraft:diamond", 5), &dir);
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().is_err());
+        saves.enqueue(&holding(2, "minecraft:emerald", 9), &dir);
+        assert!(saves.writer.is_some());
+        assert_eq!(saves.completed(true).len(), 1);
+        assert!(saves.writes_finished().unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn first_item(g: &Guest) -> Option<(&str, u32)> {
