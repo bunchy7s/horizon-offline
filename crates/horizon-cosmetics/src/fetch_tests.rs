@@ -231,7 +231,12 @@ fn an_item_not_sent_is_asked_for_again_soon() {
         }
     }
     let shared = c.shared.clone();
-    work(&shared, &ItemsDown(fake.clone()), &None);
+    work(
+        &shared,
+        &ItemsDown(fake.clone()),
+        &None,
+        &mut Saved::default(),
+    );
     assert!(c.frame().worn(3).is_none());
     time.store(BACKOFF.0.as_secs(), Ordering::SeqCst);
     let _ = c.frame().worn(3);
@@ -251,4 +256,41 @@ fn the_thread_answers_a_frame() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(ids(c.frame().worn(9)), ["hat"]);
+}
+
+#[test]
+fn a_new_game_shows_the_last_outfits_while_the_service_is_down() {
+    let dir = std::env::temp_dir().join(format!("horizon-cosmetics-worn-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (fake, mut c, _) = setup(Some(dir.clone()));
+    let _ = c.frame().worn(5);
+    let _ = c.frame().worn(42);
+    run(&mut c);
+    drop(c);
+    // The next game starts with the service down: what 5 last wore, from disk only.
+    let (fake2, mut c, time) = setup(Some(dir.clone()));
+    fake2.offline.store(true, Ordering::SeqCst);
+    let _ = c.frame().worn(5);
+    let _ = c.frame().worn(3);
+    let _ = c.frame().worn(42);
+    run(&mut c);
+    assert_eq!(fake2.log(), ["POST /v1/worn 3"]);
+    assert_eq!(ids(c.frame().worn(5)), ["hat", "pet"]);
+    // Never seen before, or wore nothing: plain.
+    assert!(c.frame().worn(3).is_none());
+    assert!(c.frame().worn(42).is_none());
+    // Back online, 5 took everything off: the fresh answer wins, and is kept.
+    fake2.offline.store(false, Ordering::SeqCst);
+    fake2.wearing.lock().unwrap().remove(&5);
+    time.store(15, Ordering::SeqCst);
+    run(&mut c);
+    assert!(c.frame().worn(5).is_none());
+    drop(c);
+    let (fake3, mut c, _) = setup(Some(dir.clone()));
+    fake3.offline.store(true, Ordering::SeqCst);
+    let _ = c.frame().worn(5);
+    run(&mut c);
+    assert!(c.frame().worn(5).is_none());
+    drop(fake);
+    let _ = std::fs::remove_dir_all(&dir);
 }

@@ -1427,10 +1427,11 @@ impl Game<'_> {
     ) {
         self.guest_attachments_into(guest);
         if guest.placed {
+            let _ = self.finish_player_autosaves(true);
             if host.owner.as_ref().is_some_and(|o| o.uuid == guest.uuid) {
                 playerdata::save_owner(guest, &mut self.level, &self.world_root);
             } else {
-                playerdata::save(guest, &self.world_root);
+                self.player_autosaves.save_after(guest, &self.world_root);
             }
             let directory = playerdata::directory(&self.world_root);
             self.native_player_save_to_file(guest.uuid, &guest.name, &directory);
@@ -2231,6 +2232,9 @@ impl Game<'_> {
         // drops remain absent from the snapshot until the following tick.
         if !paused {
             self.tick_guests(&mut host);
+            // The vehicles the guests just moved enter their portals now.
+            let ridden: Vec<u32> = host.hub.guests.iter().filter_map(|g| g.vehicle).collect();
+            self.find_ridden_vehicle_portals(&ridden);
         }
         {
             let has_guests = !host.hub.guests.is_empty();
@@ -2457,6 +2461,9 @@ impl Game<'_> {
         // PlayerEvent.LoadFromFile: the player's data is read and applied,
         // the player not yet placed.
         self.native_player_load_from_file(g.uuid, &g.name, &playerdata::directory(&root));
+        // PrepareSpawnTask: with no saved rotation the player faces the world
+        // spawn's angle (`/setworldspawn ... <angle>`).
+        playerdata::face_world_spawn(g, known, self.level.world_spawn_angle);
         if !known || force {
             g.game_mode = default_mode;
         }
@@ -2472,6 +2479,14 @@ impl Game<'_> {
             };
             g.position = feet;
             g.previous_position = feet;
+            // Ready.spawn snaps the newcomer to the respawn data's yaw and
+            // pitch, which for a player without a bed or anchor is the world
+            // spawn's angle (`setworldspawn <pos> <rotation>`).
+            (g.yaw, g.pitch) = (
+                self.level.world_spawn_angle[0],
+                self.level.world_spawn_angle[1],
+            );
+            g.head_yaw = g.yaw;
             g.health = 20.0;
             g.food = 20;
             g.dimension = super::Dim::Overworld.id().to_owned();
@@ -2546,7 +2561,17 @@ impl Game<'_> {
                     // sound (2019, 2020).
                     let except = if matches!(
                         *id,
-                        2015 | 1503 | 1505 | 1029 | 1030 | 1045 | 1052 | 2019 | 2020 | 3000 | 3008
+                        2015 | 1501
+                            | 1503
+                            | 1505
+                            | 1029
+                            | 1030
+                            | 1045
+                            | 1052
+                            | 2019
+                            | 2020
+                            | 3000
+                            | 3008
                     ) || (*id == 2001 && self.lan_break_pos.is_some() && !own)
                     {
                         None
