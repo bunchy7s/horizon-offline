@@ -9,7 +9,6 @@ use horizon_client::{
     spans::thread_cpu,
     world::World,
 };
-use horizon_protocol::registry::Builtin;
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
     hint::black_box,
@@ -64,6 +63,18 @@ fn main() -> horizon_client::Result<()> {
     let stone = assets.registry.default_state("minecraft:stone").unwrap().0;
     let water = assets.registry.default_state("minecraft:water").unwrap().0;
     let tables = Arc::new(SaveTables::new(&assets));
+    let biomes = horizon_client::biome::Biomes::load(root)?;
+    let biome_names: Vec<String> = biomes.list.iter().map(|b| b.name.clone()).collect();
+    let sync =
+        horizon_client::lan::data::SyncData::load(root, &horizon_world::loot::PackOverlay::NONE)?;
+    let biome_registry: Vec<String> = sync
+        .dynamic
+        .registries
+        .get("minecraft:worldgen/biome")
+        .ok_or("missing biome registry")?
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect();
     let make = || {
         let states = (0..assets.registry.len()).map(|i| {
             let s = assets
@@ -77,7 +88,7 @@ fn main() -> horizon_client::Result<()> {
                     || s.properties.get("waterlogged").is_some_and(|v| v == "true"),
             )
         });
-        let mut e = ChunkEncoder::new(states, &Builtin::default(), &[], &[]);
+        let mut e = ChunkEncoder::new(states, &sync.builtin, &biome_names, &biome_registry);
         e.tables = Some(tables.clone());
         e
     };
@@ -99,7 +110,6 @@ fn main() -> horizon_client::Result<()> {
         expected.hash(&mut hasher);
         let hash = hasher.finish();
         let bytes: usize = expected.iter().map(Vec::len).sum();
-        drop(expected);
         if players == 100 && side == 1 {
             for sample in 0..8 {
                 let encoder = make();
@@ -132,10 +142,7 @@ fn main() -> horizon_client::Result<()> {
         for cold in [true, false] {
             let e = make();
             e.warm(&columns);
-            assert_eq!(
-                bodies(&e, &columns, &world),
-                bodies(&reference, &columns, &world)
-            );
+            assert_eq!(bodies(&e, &columns, &world), expected);
             for sample in 0..8 {
                 let encoder = if cold { make() } else { e.detached() };
                 if !cold {

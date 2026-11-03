@@ -299,28 +299,20 @@ impl SectionCoder {
     /// The section's biome container (`PalettedContainerRO.write`'s), in
     /// network biome ids.
     fn biomes(&self, section: &Section) -> Paletted {
-        if section.biomes.bits() == 0 {
-            let internal = section.biomes.get(0) as u16;
+        let net = |v: u32| {
+            self.biome_ids
+                .get(usize::from(v as u16))
+                .copied()
+                .unwrap_or(0)
+        };
+        if let Some(v) = section.biomes.uniform() {
             return Paletted {
                 bits: 0,
-                palette: vec![
-                    self.biome_ids
-                        .get(usize::from(internal))
-                        .copied()
-                        .unwrap_or(0),
-                ],
+                palette: vec![net(v)],
                 data: Vec::new(),
             };
         }
-        let values: Vec<i32> = (0..BIOMES)
-            .map(|j| {
-                let internal = section.biomes.get(j) as u16;
-                self.biome_ids
-                    .get(usize::from(internal))
-                    .copied()
-                    .unwrap_or(0)
-            })
-            .collect();
+        let values: Vec<i32> = (0..BIOMES).map(|j| net(section.biomes.get(j))).collect();
         Paletted::from_values(&values, Strategy::Biomes, self.biome_bits)
     }
 }
@@ -328,7 +320,7 @@ impl SectionCoder {
 /// Sections kept before the ones no longer resident are dropped.
 const CACHE_SWEEP: usize = 1 << 15;
 
-/// Uncached sections below which a batch is encoded on the tick's thread
+/// Listed uncached section occurrences below which a batch is encoded on the tick's thread
 /// alone: waking the warm-up threads costs more than a few sections.
 const WARM_MIN: usize = 16;
 
@@ -648,13 +640,7 @@ impl ChunkEncoder {
         let mut cache = self.cache.lock().unwrap();
         for (i, s) in chunk.sections[self.sections.clone()].iter().enumerate() {
             let non_air = if s.blocks.bits() == 0 {
-                self.coder
-                    .flags
-                    .get(s.blocks.get(0) as usize)
-                    .copied()
-                    .unwrap_or(0)
-                    & NON_AIR
-                    != 0
+                !self.is_air(s.blocks.get(0))
             } else {
                 self.entry(&mut cache, s).non_air
             };
@@ -782,7 +768,7 @@ impl ChunkEncoder {
     }
 
     /// The work `warm` shares out: the heightmaps of the columns and the
-    /// sections not cached yet; none when there is too little to wake the
+    /// distinct sections not cached yet; none when there is too little to wake the
     /// warm-up threads for.
     fn job(&self, columns: &[&Chunk]) -> Option<Warm> {
         let stale: Vec<((i32, i32), Vec<Arc<Section>>)> = match &self.tables {
@@ -797,10 +783,8 @@ impl ChunkEncoder {
             }
             None => Vec::new(),
         };
-        let mut uncached = 0;
-        let sections: Vec<Arc<Section>> = {
+        let mut sections: Vec<Arc<Section>> = {
             let cache = self.cache.lock().unwrap();
-            let mut seen = crate::fast_hash::FxHashSet::default();
             columns
                 .iter()
                 .flat_map(|c| &c.sections[self.sections.clone()])
@@ -809,17 +793,14 @@ impl ChunkEncoder {
                         .get(&(Arc::as_ptr(s) as usize))
                         .is_none_or(|e| e.wire.is_none())
                 })
-                .filter(|s| {
-                    uncached += 1;
-                    seen.insert(Arc::as_ptr(s) as usize)
-                })
                 .cloned()
                 .collect()
         };
-        // Preserve the dispatch cutoff while encoding shared sections only once.
-        if uncached + stale.len() < WARM_MIN {
+        if sections.len() + stale.len() < WARM_MIN {
             return None;
         }
+        let mut seen = crate::fast_hash::FxHashSet::default();
+        sections.retain(|s| seen.insert(Arc::as_ptr(s)));
         let (min_y, height) = self.level();
         Some(Warm {
             coder: self.coder.clone(),
@@ -1647,6 +1628,15 @@ mod tests {
             encoder.coder.biomes(&section),
             Paletted::from_values(&expected, Strategy::Biomes, 1)
         );
+        section.biomes.set(13, 0);
+        assert_eq!(
+            encoder.coder.biomes(&section),
+            Paletted {
+                bits: 0,
+                palette: vec![1],
+                data: Vec::new()
+            }
+        );
         section.biomes =
             horizon_core::paletted::PalettedContainer::new(section.biomes.strategy(), 99);
         assert_eq!(
@@ -1657,6 +1647,49 @@ mod tests {
                 data: Vec::new()
             }
         );
+    }
+
+    #[test]
+    fn a_batch_encodes_each_shared_section_once() {
+        let encoder = encoder();
+        let air = Arc::new(Section::default());
+        let mut stone = Section::default();
+        stone.blocks = horizon_core::paletted::PalettedContainer::new(stone.blocks.strategy(), 1);
+        let stone = Arc::new(stone);
+        let mut edited = Chunk::empty(9, 9);
+        edited.set(3, MIN_Y + 40, 5, 2);
+        let mixed = edited.sections[2].clone();
+        let (mut a, mut b) = (Chunk::empty(0, 0), Chunk::empty(1, 0));
+        for (i, s) in a.sections.iter_mut().enumerate() {
+            *s = if i % 2 == 0 {
+                air.clone()
+            } else {
+                stone.clone()
+            };
+        }
+        for (i, s) in b.sections.iter_mut().enumerate() {
+            *s = if i % 3 == 0 {
+                stone.clone()
+            } else {
+                air.clone()
+            };
+        }
+        a.sections[7] = mixed.clone();
+        b.sections[5] = mixed.clone();
+        let job = encoder.job(&[&a, &b]).unwrap();
+        assert_eq!(job.sections.len(), 3);
+        job.run();
+        encoder.keep(&job);
+        for s in [&air, &stone, &mixed] {
+            let kept = encoder
+                .cached(s, |e| e.wire.clone())
+                .expect("kept by the job");
+            assert_eq!(&*kept.0, fresh(&encoder, s));
+        }
+        for c in [&a, &b] {
+            let expected: Vec<u8> = c.sections.iter().flat_map(|s| fresh(&encoder, s)).collect();
+            assert_eq!(encoder.encode(c, &HashMap::new()).chunk.buffer, expected);
+        }
     }
 
     #[test]
@@ -1993,7 +2026,7 @@ mod tests {
         let mut cold = ChunkEncoder::new(states, &builtin, &[], &[]);
         cold.tables = alone.tables.clone();
         let job = cold.job(&chunks).unwrap();
-        assert_eq!(job.columns.len(), 16);
+        assert_eq!((job.columns.len(), job.sections.len()), (16, 16 * SECTIONS));
         job.run();
         cold.keep(&job);
         assert_eq!(cold.heights.lock().unwrap().len(), 16);
