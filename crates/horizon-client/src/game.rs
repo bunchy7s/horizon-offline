@@ -201,6 +201,7 @@ mod names;
 mod narrator;
 mod native_biome_colors;
 pub mod native_block_entity_draw;
+mod native_block_sprites;
 mod native_claimed_items;
 mod native_components;
 mod native_criteria;

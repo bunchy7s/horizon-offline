@@ -2662,9 +2662,10 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   the first-person hand, the HUD and screens not yet. `WorldDrawn` holds the device, queue and encoder, the frame's
   colour target (copy it out before sampling it), the world's reversed depth and its size, the camera's position and
   its matrices with and without TAA's jitter, the frame's camera-relative entity quads with their runs by entity, the
-  entity atlas and the shared quad index buffer. Not called on the title screen's panorama. `motion` says which mob,
-  player or dropped item each run of the entity quads is, by its entity id, so a mod can match an entity's vertices
-  with last frame's (a motion blur's own motion vectors); `spans` only name the type.
+  entity atlas, the shared quad index buffer and the block sprite arrays ([block textures](#block-textures)). Not
+  called on the title screen's panorama. `motion` says which mob, player or dropped item each run of the entity quads
+  is, by its entity id, so a mod can match an entity's vertices with last frame's (a motion blur's own motion
+  vectors); `spans` only name the type.
 - `native_hand_drawn(hand)`: the first-person hand and held item are drawn, after `native_world_drawn` and before
   entity outlines, post effects, screen effects and the HUD, on every frame `native_world_drawn` runs. `HandDrawn`
   holds the device, queue and encoder, the frame's colour target with the hand in it, the hand's camera-relative
@@ -2676,6 +2677,37 @@ render thread with the frame's wgpu objects; what a mod draws there shows in tha
   shader pack (each run's id is stable from frame to frame: a hash of the entity type's name, a block entity's state),
   and `world_depth` to keep the world pass's depth when nothing else needs it. Set what you need and leave the rest:
   several mods can ask. It's asked as each frame is built, so keep it cheap.
+
+### Block textures
+
+`crates/horizon-client/src/game/native_block_sprites.rs` and `WorldDrawn::block_sprites`: for a client mod drawing
+blocks in its own pass (flying debris as voxels, say) with the player's own block textures, resource packs included,
+as the terrain samples them. API @API:native_block_sprites@.
+
+- `WorldDrawn::block_sprites` (`BlockSpriteArrays`) holds the block sprite arrays as `D2Array` views: the terrain's
+  eight, a 1-layer stand-in past the ones in use, each with the mip levels the Mipmap Levels option leaves, animated
+  layers at the frame shown. Each texture is a whole square layer of `size` texels, its UVs 0 to 1 across it,
+  gamma-encoded as the world uses it. `split` layers go to an array (2048 on most GPUs, fewer where the GPU holds
+  fewer): every vanilla texture is usually in array 0. `nearest` samples texels sharp (nearest, repeating, the
+  nearest mip level), `filtered` is the terrain's own sampler.
+- `native_block_sprites(blocks)` says, for each block (`minecraft:grass_block`, `oak_log[axis=x]`; properties left
+  out take the default), what its model draws on each side, in `Direction` order (down, up, north, south, west,
+  east): its faces in the order drawn, each with its `sprite` (`array`, `layer`, `animated`, `cutout`), its `rect`
+  on the side and `inset` from the side's plane (a whole face is 0, 0, 1, 1 and 0), its `uv` map, its `tint` source
+  and whether it is `translucent`; the model's `particle` sprite; whether it is a plain `cube`. None for a block the
+  game doesn't know. A side's axes run along x then z for down and up, x then y for north and south, z then y for
+  west and east, from the block's corner nearest 0, 0, 0 (`block_sprites::side_axes`); the point (a, b) of a side
+  shows the sprite at `(uv[0], uv[1]) + a * (uv[2], uv[3]) + b * (uv[4], uv[5])`, rotations and mirrors included
+  (for a plain block's north side, `u = 1 - x, v = 1 - y`). A tinted face is multiplied by its source's colour:
+  `Grass`, `Foliage`, `DryFoliage` and `Water` are the biome's where the block is, `Fixed` a constant (spruce
+  leaves, redstone at its power). A grass block's side is two faces, the side and then its grey overlay tinted with
+  grass. The model is the state's first random variant; faces that don't lie flat on a side (a flower's crossed
+  planes) are left out, and the `particle` sprite stands for them. Fluids give their still texture on every side.
+- `native_texture_sprites(textures)`: a texture's sprite by name (`block/stone`), none for one no model uses.
+- `native_block_sprites_version()` changes each time the resources load (a resource pack turned on or off moves the
+  layers, and the arrays are new): ask again then.
+
+Look blocks up once and keep what you need (a few words a block for your own shader), not every frame.
 
 ### Menu slot rules
 

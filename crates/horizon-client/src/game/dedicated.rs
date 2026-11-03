@@ -658,6 +658,8 @@ struct ServerState {
     stop: bool,
     autosave: bool,
     empty_ticks: i32,
+    /// The mutable `DedicatedServer.pauseWhenEmptySeconds` setting.
+    pause_when_empty_seconds: i32,
     /// The mutable `DedicatedServer.playerIdleTimeout` setting, in minutes.
     player_idle_timeout: i32,
     /// When the last passes of the loop ended, for the tick rate horizon-server shows.
@@ -1068,6 +1070,7 @@ impl Game<'_> {
             stop: false,
             autosave: true,
             empty_ticks: 0,
+            pause_when_empty_seconds: props.pause_when_empty_seconds,
             player_idle_timeout: props.player_idle_timeout,
             ticks: Default::default(),
             paused: false,
@@ -1083,7 +1086,6 @@ impl Game<'_> {
             ),
             max_players: props.max_players.max(0) as usize,
         };
-        let pause_after = props.pause_when_empty_seconds * 20;
         let mut next = Instant::now();
         // The panic that ended the tick loop, when one did.
         let mut crashed: Option<String> = None;
@@ -1109,6 +1111,9 @@ impl Game<'_> {
                 break;
             }
             let players = self.lan.as_ref().map_or(0, |h| h.hub.guests.len());
+            // Vanilla reads pauseWhenEmptySeconds on every tick, so management changes take effect
+            // without restarting the server.
+            let pause_after = state.pause_when_empty_seconds.wrapping_mul(20);
             if pause_after > 0 {
                 // A `/pregen` task keeps the server busy as a player would:
                 // paused, nothing would post-process its chunks.
@@ -1125,7 +1130,7 @@ impl Game<'_> {
                     "INFO",
                     &format!(
                         "Server empty for {} seconds, pausing",
-                        props.pause_when_empty_seconds
+                        state.pause_when_empty_seconds
                     ),
                 );
                 self.save_game()?;
@@ -1883,6 +1888,13 @@ impl Game<'_> {
     pub(super) fn set_enforce_whitelist(&mut self, lists: &Arc<Mutex<Lists>>, on: bool) {
         lists.lock().unwrap().enforce_whitelist = on;
         self.store_property("enforce-whitelist", on.to_string());
+    }
+
+    /// `DedicatedServer.setPauseWhenEmptySeconds`: the live pause timer, and
+    /// `pause-when-empty-seconds` in server.properties.
+    fn set_pause_when_empty_seconds(&mut self, state: &mut ServerState, seconds: i32) {
+        state.pause_when_empty_seconds = seconds;
+        self.store_property("pause-when-empty-seconds", seconds.to_string());
     }
 
     /// DedicatedServerSettings.update: change one key and store the file.
