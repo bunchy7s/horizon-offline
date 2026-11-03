@@ -2732,6 +2732,7 @@ dependencies = [
 name = "horizon-mod-api-gen"
 version = "0.1.0"
 dependencies = [
+ "heck 0.5.0",
  "quote",
  "serde",
  "serde_json",

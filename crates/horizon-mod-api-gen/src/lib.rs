@@ -1,6 +1,12 @@
 //! Generate the typed mod interface from native hook signatures and catalog contracts.
+use heck::ToSnakeCase;
 use quote::ToTokens;
-use std::{collections::HashSet, fs, path::Path, process::Command};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fs,
+    path::Path,
+    process::Command,
+};
 use syn::{FnArg, ImplItem, Item, Pat, Type, visit::Visit, visit_mut::VisitMut};
 
 fn impl_functions(item: syn::ItemImpl) -> impl Iterator<Item = syn::ItemFn> {
@@ -76,7 +82,12 @@ fn doc_comments(
     Ok(docs)
 }
 
-fn exported_types(source: &str, generated: &str) -> Result<HashSet<String>, String> {
+struct ApiTypes {
+    exports: HashSet<String>,
+    handles: BTreeMap<String, String>,
+}
+
+fn api_types(source: &str, generated: &str) -> Result<ApiTypes, String> {
     fn use_names(tree: &syn::UseTree, names: &mut HashSet<String>) {
         match tree {
             syn::UseTree::Path(path) => use_names(&path.tree, names),
@@ -95,7 +106,8 @@ fn exported_types(source: &str, generated: &str) -> Result<HashSet<String>, Stri
         }
     }
     let mut names = HashSet::new();
-    for source in [source, generated] {
+    let mut handles = BTreeMap::new();
+    for (source, collect_handles) in [(source, true), (generated, false)] {
         let file = syn::parse_file(source).map_err(|e| e.to_string())?;
         for item in file.items {
             let ident = match item {
@@ -104,6 +116,18 @@ fn exported_types(source: &str, generated: &str) -> Result<HashSet<String>, Stri
                     None
                 }
                 Item::Struct(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
+                    if collect_handles
+                        && let Some(base) = item.ident.to_string().strip_suffix("Ref")
+                        && !base.is_empty()
+                    {
+                        let receiver = base.to_snake_case();
+                        if handles
+                            .insert(receiver.clone(), item.ident.to_string())
+                            .is_some()
+                        {
+                            return Err(format!("duplicate handle receiver {receiver}"));
+                        }
+                    }
                     Some(item.ident)
                 }
                 Item::Enum(item) if matches!(item.vis, syn::Visibility::Public(_)) => {
@@ -128,7 +152,10 @@ fn exported_types(source: &str, generated: &str) -> Result<HashSet<String>, Stri
             }
         }
     }
-    Ok(names)
+    Ok(ApiTypes {
+        exports: names,
+        handles,
+    })
 }
 
 fn host_method(
@@ -297,22 +324,20 @@ fn host_method(
     ))
 }
 
-/// The handle types a helper's `receiver` names (#7387), keyed as in the catalog.
-const HANDLES: [(&str, &str); 2] = [("entity", "EntityRef"), ("level", "LevelRef")];
-
 /// A helper's method on its handle (`receiver`): `entity_position(entity)` on
 /// `Host` is also `EntityRef::position(self, host)`, which calls it. The
 /// helper's first argument is the handle; the host is borrowed as the helper
 /// borrows `Game`.
-fn handle_method(
+fn handle_method<'a>(
     method: &syn::ItemFn,
     name: &str,
     receiver: &str,
-) -> Result<(&'static str, String), String> {
-    let (_, handle) = HANDLES
-        .iter()
-        .find(|(key, _)| *key == receiver)
-        .ok_or_else(|| format!("{name}: unknown receiver {receiver}"))?;
+    handles: &'a BTreeMap<String, String>,
+) -> Result<(&'a str, String), String> {
+    let handle = handles
+        .get(receiver)
+        .ok_or_else(|| format!("{name}: unknown receiver {receiver}"))?
+        .as_str();
     let short = name
         .strip_prefix(receiver)
         .and_then(|rest| rest.strip_prefix('_'))
@@ -971,7 +996,7 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
     );
     let api_source = fs::read_to_string(root.join("crates/horizon-client/src/mod_api.rs"))
         .map_err(|e| e.to_string())?;
-    let exports = exported_types(&api_source, &code)?;
+    let types = api_types(&api_source, &code)?;
     let mut game = Vec::new();
     game_methods(
         &root.join("crates/horizon-client/src/game"),
@@ -1026,14 +1051,14 @@ fn sources(root: &Path, fill: FillMode) -> Result<Sources, String> {
                 "wrong target for helper {name}: {target}, it is {expected}"
             ));
         }
-        let (declaration, implementation) = host_method(method, name, &exports)?;
+        let (declaration, implementation) = host_method(method, name, &types.exports)?;
         host_traits.push_str(&declaration);
         host_impl.push_str(&implementation);
         if let Some(receiver) = helper.get("receiver") {
             let receiver = receiver
                 .as_str()
                 .ok_or("helper receiver must be a string")?;
-            let (handle, code) = handle_method(method, name, receiver)?;
+            let (handle, code) = handle_method(method, name, receiver, &types.handles)?;
             handles.entry(handle).or_default().push_str(&code);
         }
     }
@@ -1175,12 +1200,59 @@ mod tests {
     }
 
     #[test]
+    fn public_ref_structs_define_receivers_without_registration() {
+        let types = super::api_types(
+            "pub struct BlockEntityRef; pub struct HTTPRequestRef;
+             struct HiddenRef; pub(crate) struct InternalRef;
+             pub enum EnumRef {} pub type AliasRef = BlockEntityRef; pub struct Plain;",
+            "pub struct GeneratedRef;",
+        )
+        .unwrap();
+        for (receiver, ty) in [
+            ("block_entity", "BlockEntityRef"),
+            ("http_request", "HTTPRequestRef"),
+        ] {
+            let name = format!("{receiver}_kind");
+            let method =
+                syn::parse_str(&format!("fn native_{name}(&self, value: {ty}) {{}}")).unwrap();
+            let (handle, code) =
+                super::handle_method(&method, &name, receiver, &types.handles).unwrap();
+            assert_eq!(handle, ty);
+            assert!(code.contains(&format!("host.{name}(self)")));
+        }
+        let method = syn::parse_quote! { fn native_hidden_kind(&self, value: HiddenRef) {} };
+        for receiver in [
+            "hidden",
+            "internal",
+            "enum",
+            "alias",
+            "plain",
+            "generated",
+            "missing",
+        ] {
+            assert!(
+                super::handle_method(&method, "hidden_kind", receiver, &types.handles)
+                    .unwrap_err()
+                    .contains("unknown receiver")
+            );
+        }
+        assert_eq!(
+            super::api_types("pub struct URLRef; pub struct UrlRef;", "")
+                .err()
+                .unwrap(),
+            "duplicate handle receiver url",
+        );
+    }
+
+    #[test]
     fn handle_methods_call_the_host_and_borrow_it_as_the_helper_borrows_game() {
+        let types = super::api_types("pub struct EntityRef; pub struct LevelRef;", "").unwrap();
         let read: syn::ItemFn = syn::parse_quote! {
             /// Where it is.
             fn native_entity_position(&self, entity: EntityRef, mut scale: f64) -> Option<[f64; 3]> { todo!() }
         };
-        let (handle, code) = super::handle_method(&read, "entity_position", "entity").unwrap();
+        let (handle, code) =
+            super::handle_method(&read, "entity_position", "entity", &types.handles).unwrap();
         assert_eq!(handle, "EntityRef");
         assert!(code.starts_with("/// Where it is.\n"));
         assert!(code.contains("pub fn position (self , host : & dyn Host , scale : f64)"));
@@ -1188,7 +1260,8 @@ mod tests {
         let write: syn::ItemFn = syn::parse_quote! {
             fn native_level_set(&mut self, level: LevelRef) {}
         };
-        let (handle, code) = super::handle_method(&write, "level_set", "level").unwrap();
+        let (handle, code) =
+            super::handle_method(&write, "level_set", "level", &types.handles).unwrap();
         assert_eq!(handle, "LevelRef");
         assert!(code.contains("host : & mut dyn Host"));
         for (method, name, receiver, error) in [
@@ -1225,7 +1298,7 @@ mod tests {
         ] {
             let method: syn::ItemFn = method;
             assert!(
-                super::handle_method(&method, name, receiver)
+                super::handle_method(&method, name, receiver, &types.handles)
                     .unwrap_err()
                     .contains(error),
                 "{name}"
@@ -1235,11 +1308,12 @@ mod tests {
 
     #[test]
     fn host_mapping_preserves_access_and_docs_and_rejects_unavailable_types() {
-        let exports = super::exported_types(
+        let exports = super::api_types(
             "pub use external::{Visible, Original as Renamed}; pub struct Defined; struct Hidden;",
             "pub struct Generated;",
         )
-        .unwrap();
+        .unwrap()
+        .exports;
         for ty in ["Visible", "Renamed", "Defined", "Generated"] {
             let method: syn::ItemFn =
                 syn::parse_str(&format!("fn native_test(&self, value: {ty}) {{ }}")).unwrap();

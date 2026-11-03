@@ -3077,6 +3077,9 @@ custom copy handler, conditional serialization, the `sendToPlayer` predicate,
 `native-hooks.json`, without their `native_` prefix. Each keeps the helper's
 receiver and documentation; a helper without `self` (`config_dir`) takes
 `&self` in `Host`. Level services stay on the level hosts above.
+A helper's `receiver` also exposes it on that handle. Receivers come from public
+`*Ref` structs in `mod_api.rs`: for example, a public `BlockEntityRef` struct registers
+`block_entity`. Adding a handle requires no separate generator registration.
 The following documented `Game` helpers are not in the trait yet:
 
 - `spawn_mob`, `mob`, `mobs`, `block_in_tag`, `item_in_tag`,
