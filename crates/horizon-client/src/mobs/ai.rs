@@ -1477,10 +1477,11 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     let self_pushable = m.alive()
         && m.species() != Species::Shulker
         && !on_climbable(m, w)
-        && (m.species() != Species::Creaking || super::creaking::can_move(m));
+        && (m.species() != Species::Creaking || super::creaking::can_move(m))
+        && !super::equine::is_vehicle(m);
     // Each with whether it rides a vehicle (`Entity.isPassenger`) and
     // whether it shares this one's root vehicle (`isPassengerOfSameVehicle`).
-    let mut targets: Vec<(Who, Vec3, bool, bool)> = Vec::new();
+    let mut targets: Vec<(Who, Vec3, bool, bool, bool)> = Vec::new();
     if let Some(p) = &w.player
         // Entity.push: passengers of the same vehicle never push each other.
         && m.rider.is_none()
@@ -1488,13 +1489,13 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         && !p.spectator
         && p.bounds.intersects(bounds)
     {
-        targets.push((Who::Player, p.position, p.passenger, false));
+        targets.push((Who::Player, p.position, p.passenger, false, false));
     }
     let root = root_vehicle(w, m.id, m.extra.mount);
     for o in w.others_near(bounds) {
         if o.id != m.id && o.alive && o.pushable && o.bounds.intersects(bounds) {
             let same = root_vehicle(w, o.id, o.vehicle) == root;
-            targets.push((Who::Mob(o.id), o.position, o.passenger, same));
+            targets.push((Who::Mob(o.id), o.position, o.passenger, same, o.is_vehicle));
         }
     }
     // EntitySelector.pushableBy(this): the teams' collision rules.
@@ -1510,7 +1511,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
     {
         m.damage(6.0, Damage::of(DamageKind::Cramming));
     }
-    for (who, at, _, same) in targets {
+    for (who, at, _, same, vehicle) in targets {
         // Warden.doPush: touching it angers it, then the push itself.
         if m.species() == Species::Warden {
             super::warden::do_push(m, w, who, events);
@@ -1545,7 +1546,7 @@ fn push_entities(m: &mut Mob, w: &MobWorld, events: &mut Vec<MobEvent>) {
         za *= f64::from(0.05_f32);
         // A guest's server-side push never reaches its client (ServerPlayer
         // motion is synced only when hurt): its client pushes it itself.
-        if who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote) {
+        if !vehicle && (who != Who::Player || w.player.as_ref().is_none_or(|p| !p.remote)) {
             events.push(MobEvent::Push {
                 target: who,
                 velocity: [-xa, 0.0, -za],
@@ -3208,6 +3209,73 @@ mod same_vehicle_push_tests {
         assert_eq!(velocity, Vec3::ZERO, "its rider pushes the camel");
         let (pushed, _) = push(true).unwrap();
         assert_eq!(pushed, vec![3], "the camel pushes the zombie");
+    }
+
+    #[test]
+    fn a_ridden_horse_is_not_pushed_but_still_pushes() {
+        let pair = |ridden: bool| {
+            let mut out = None;
+            with_test_world(&[], |_, types| {
+                let mob = |id: u32, name: &str, at: Vec3| {
+                    Mob::new(id, std::sync::Arc::new(types.types[name].clone()), at, 0.0)
+                };
+                let mut horse = mob(1, "minecraft:horse", Vec3::new(0.5, 64.0, 0.5));
+                if ridden {
+                    horse.extra.rider = Some(3);
+                }
+                let cow = mob(2, "minecraft:cow", Vec3::new(1.4, 64.0, 0.5));
+                out = Some((horse, cow));
+            });
+            out
+        };
+        let pushed = |events: &[MobEvent]| -> Vec<u32> {
+            events
+                .iter()
+                .filter_map(|e| match e {
+                    MobEvent::Push {
+                        target: Who::Mob(id),
+                        ..
+                    } => Some(*id),
+                    _ => None,
+                })
+                .collect()
+        };
+        let Some((mut horse, cow)) = pair(true) else {
+            return;
+        };
+        let mut events = Vec::new();
+        with_test_world(&[cow.seen(None)], |w, _| {
+            push_entities(&mut horse, w, &mut events)
+        });
+        assert_eq!(pushed(&events), vec![2], "the ridden horse pushes the cow");
+        assert_eq!(
+            horse.velocity,
+            Vec3::ZERO,
+            "the cow pushes the ridden horse"
+        );
+
+        let (horse, mut cow) = pair(true).unwrap();
+        let mut events = Vec::new();
+        with_test_world(&[horse.seen(None)], |w, _| {
+            push_entities(&mut cow, w, &mut events)
+        });
+        assert_eq!(
+            pushed(&events),
+            Vec::<u32>::new(),
+            "the cow pushes the ridden horse"
+        );
+        assert!(cow.velocity.x > 0.0, "the ridden horse pushes the cow away");
+
+        let (horse, mut cow) = pair(false).unwrap();
+        let mut events = Vec::new();
+        with_test_world(&[horse.seen(None)], |w, _| {
+            push_entities(&mut cow, w, &mut events)
+        });
+        assert_eq!(
+            pushed(&events),
+            vec![1],
+            "the cow pushes a horse nobody rides"
+        );
     }
 }
 
