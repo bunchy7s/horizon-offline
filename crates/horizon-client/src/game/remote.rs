@@ -2091,6 +2091,7 @@ impl Game<'_> {
             dimension.height,
             dimension.logical_height,
             dimension.has_skylight,
+            dimension.has_ceiling,
         )
         .unwrap_or_else(|_| super::Dim::from_id(&dimension.name).shape());
         // handleRespawn keeps the ClientLevel only for the same level key:
@@ -3606,6 +3607,17 @@ impl Game<'_> {
                             (0, Value::Byte(flags)) => {
                                 if let Some(pl) = self.player.as_mut() {
                                     pl.sprinting = flags & 0x08 != 0;
+                                    // Entity.DATA_SHARED_FLAGS_ID's fall-flying
+                                    // bit (0x80, `Entity.setSharedFlag(7, ...)`):
+                                    // `LivingEntity.updateFallFlying` clears the
+                                    // glide on the server only and `LocalPlayer`
+                                    // never ends one itself, so this packet is
+                                    // the glide's own end. Applied when it is
+                                    // handled — the frame's poll, before its
+                                    // ticks — as ClientPacketListener does, so a
+                                    // clear that arrives mid-tick lets that tick
+                                    // keep its glide travel (#7616).
+                                    pl.fall_flying = flags & -128 != 0;
                                 }
                                 if let Some(r) = self.remote.as_mut() {
                                     r.own_invisible = flags & 0x20 != 0;
@@ -6590,6 +6602,7 @@ impl Game<'_> {
                     false,
                     &mut next_float,
                     border,
+                    &self.res.motion().fluids,
                 );
                 // `tick` set `previous` to the stepped position: keep the
                 // pre-step one, as `xo` is in vanilla.
@@ -6616,13 +6629,14 @@ impl Game<'_> {
             Some(self.border.geometry()),
         );
         for d in self.dropped.iter_mut().filter(|_| running) {
-            d.tick(
+            super::entity::tick_item(
+                d,
                 world,
                 registry,
                 facts,
                 collision,
-                false,
                 &self.res.motion().fluids,
+                false,
                 // The server decides what an item rests on; this copy only moves between updates.
                 &[],
                 border,
@@ -9590,6 +9604,12 @@ impl Game<'_> {
         Some(r.glowing.contains(&(id as i32)))
     }
     /// The profile name of another player the server sent, by entity id.
+    /// The UUID of another player's entity in the level.
+    pub(super) fn remote_player_uuid(&self, id: u32) -> Option<u128> {
+        let r = self.remote.as_ref()?;
+        let uuid = *r.level_players.get(&(id as i32))?;
+        (uuid != r.profile).then_some(uuid)
+    }
     pub(super) fn remote_player_name(&self, id: u32) -> Option<&str> {
         let r = self.remote.as_ref()?;
         let uuid = r.level_players.get(&(id as i32))?;

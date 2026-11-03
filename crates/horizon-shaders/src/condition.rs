@@ -18,6 +18,7 @@ pub fn eval_condition(expr: &str, macros: &Macros) -> Result<i64, String> {
         tokens: &tokens,
         at: 0,
         real,
+        quiet: false,
     };
     let value = parser.binary(0)?;
     match parser.tokens.get(parser.at) {
@@ -257,6 +258,8 @@ struct Parser<'a> {
     at: usize,
     /// A float literal appears: `/` and `%` divide as floats.
     real: bool,
+    /// Inside a side that `&&` / `||` skips: a division by zero is not an error.
+    quiet: bool,
 }
 
 /// Binary operators from the loosest to the tightest (GLSL §5.1 / §3.3).
@@ -290,8 +293,14 @@ impl Parser<'_> {
                 break;
             }
             self.at += 1;
-            let right = self.binary(level + 1)?;
-            left = apply(op, left, right, self.real)?;
+            // C does not evaluate the side `&&` / `||` skips, so a guarded division by zero
+            // there is no error.
+            let skipped = (op == "||" && left != 0.0) || (op == "&&" && left == 0.0);
+            let outer = self.quiet;
+            self.quiet |= skipped;
+            let right = self.binary(level + 1);
+            self.quiet = outer;
+            left = apply(op, left, right?, self.real, skipped || outer)?;
         }
         Ok(left)
     }
@@ -316,7 +325,7 @@ impl Parser<'_> {
     }
 }
 
-fn apply(op: &str, a: f64, b: f64, real: bool) -> Result<f64, String> {
+fn apply(op: &str, a: f64, b: f64, real: bool, quiet: bool) -> Result<f64, String> {
     let truth = |v: bool| f64::from(u8::from(v));
     let (i, j) = (a as i64, b as i64);
     Ok(match op {
@@ -336,6 +345,7 @@ fn apply(op: &str, a: f64, b: f64, real: bool) -> Result<f64, String> {
         "+" => a + b,
         "-" => a - b,
         "*" => a * b,
+        "/" | "%" if b == 0.0 && quiet => 0.0,
         "/" | "%" if b == 0.0 => return Err("division by zero".into()),
         "/" if real => a / b,
         "%" if real => a % b,
@@ -391,6 +401,18 @@ mod tests {
         assert_eq!(eval("1.5f"), Ok(1));
         assert_eq!(eval("7 / 2"), Ok(3));
         assert_eq!(eval("SHADOW_RES == 2048.0"), Ok(1));
+    }
+
+    #[test]
+    fn short_circuit_skips_guarded_division() {
+        let mut m = Macros::standard();
+        m.define("AMOUNT", "0");
+        assert_eq!(eval_condition("AMOUNT != 0 && 100 / AMOUNT > 5", &m), Ok(0));
+        assert_eq!(eval_condition("AMOUNT == 0 || 100 / AMOUNT > 5", &m), Ok(1));
+        assert_eq!(eval_condition("AMOUNT && (1 % AMOUNT)", &m), Ok(0));
+        // The unskipped side still errors.
+        assert!(eval_condition("AMOUNT == 0 && 100 / AMOUNT > 5", &m).is_err());
+        assert!(eval_condition("AMOUNT != 0 || 100 / AMOUNT > 5", &m).is_err());
     }
 
     #[test]
