@@ -23,6 +23,16 @@ fn slot_in_group(group: &str, slot: &str) -> bool {
         || (group == "armor" && matches!(slot, "feet" | "legs" | "chest" | "head" | "body"))
 }
 
+fn generic_attributes_into(
+    map: &horizon_world::attributes::entity::EntityAttributes,
+    out: &mut Vec<AttributeSnapshot>,
+) {
+    for s in generic_syncable(map) {
+        let (attribute, base) = (s.attribute, s.base);
+        *instance(out, attribute, base) = s;
+    }
+}
+
 impl Game<'_> {
     /// `getAttributeValue(KNOCKBACK_RESISTANCE)` of a mob: its own value plus
     /// the modifiers of the items it wears or holds in matching slots.
@@ -238,6 +248,9 @@ impl Game<'_> {
             out,
         );
         self.generic_attributes_of(Target::Mob(m.id), out);
+        if let Some(map) = m.extra.armor_attributes.as_deref() {
+            generic_attributes_into(map, out);
+        }
     }
 
     /// An armor stand's synced instances: movement speed (its first
@@ -310,12 +323,8 @@ impl Game<'_> {
     /// The instances `/attribute` created in an entity's generic map
     /// replace the ones derived from its state.
     fn generic_attributes_of(&self, t: Target, out: &mut Vec<AttributeSnapshot>) {
-        let Some(map) = self.cmds.attributes.get(&t) else {
-            return;
-        };
-        for s in generic_syncable(map) {
-            let (attribute, base) = (s.attribute, s.base);
-            *instance(out, attribute, base) = s;
+        if let Some(map) = self.cmds.attributes.get(&t) {
+            generic_attributes_into(map, out);
         }
     }
 }

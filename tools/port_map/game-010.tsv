@@ -13,7 +13,7 @@ AmphibiousPathNavigation.isStableDestination	inline	crates/horizon-client/src/mo
 FlyingPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Flying picks Evaluator::Fly
 FlyingPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: always true, vanilla is false for a flier that rides something
 GroundPathNavigation.createPathFinder	inline	crates/horizon-client/src/mobs/nav.rs::Navigation::evaluator	NavKind::Ground picks Evaluator::Walk
-GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	gap: minor: on ground or in liquid, the isPassenger case is missing
+GroundPathNavigation.canUpdatePath	port	crates/horizon-client/src/mobs/nav.rs::Mob::can_update_path	onGround || isInLiquid || isPassenger: a mob riding a vehicle keeps making and following paths
 GroundPathNavigation.getTempMobPos	port	crates/horizon-client/src/mobs/nav.rs::Mob::temp_mob_pos	x, surface_y, z
 GroundPathNavigation.createPath	port	crates/horizon-client/src/mobs/nav.rs::Mob::create_path_to	unloaded chunk gives no path, then the surface search (surface_position) unless below_surface
 GroundPathNavigation.getSurfaceY	port	crates/horizon-client/src/mobs/nav.rs::Mob::surface_y	floats up through water up to 16 blocks when the mob can float, else floor(y + 0.5)

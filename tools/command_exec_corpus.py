@@ -859,6 +859,37 @@ def aquatic_from_bucket():
     return ops
 
 
+def item_nbt_count_bounds():
+    """ItemStack's NBT count codec defaults invalid counts to one (#7724)."""
+    stand = '@e[type=minecraft:armor_stand,tag=h085,limit=1]'
+    chest = '12 220 4'
+    ops = setup('/tick freeze', '/kill @e[tag=h085]',
+                f'/setblock {chest} minecraft:air strict',
+                f'/setblock {chest} minecraft:chest strict',
+                '/summon minecraft:armor_stand 8 220 4 {Tags:["h085"],NoGravity:1b}')
+    ops += [cmd(f'/execute if entity {stand}'),
+            cmd(f'/execute if block {chest} minecraft:chest')]
+    for item in ('minecraft:stone', 'minecraft:diamond_sword'):
+        for count in (None, '-1', '0', '1', '2', '64', '99', '100', '255', '256',
+                      '2147483647', '1b', '1.5f', '"1"'):
+            nbt = '{id:"' + item + '"' + ('' if count is None else ',count:' + count) + '}'
+            ops += setup(f'/item replace entity {stand} weapon.mainhand with minecraft:air')
+            ops += [
+                cmd(f'/data modify entity {stand} equipment.mainhand set value {nbt}'),
+                cmd(f'/data get entity {stand} equipment.mainhand.id'),
+                cmd(f'/data get entity {stand} equipment.mainhand.count'),
+            ]
+            entry = '{Slot:0b,' + nbt[1:]
+            ops += setup(f'/data modify block {chest} Items set value []')
+            ops += [
+                cmd(f'/data modify block {chest} Items set value [{entry}]'),
+                cmd(f'/data get block {chest} Items[0].id'),
+                cmd(f'/data get block {chest} Items[0].count'),
+            ]
+    return ops + setup('/kill @e[tag=h085]', f'/setblock {chest} minecraft:air strict',
+                       '/tick unfreeze')
+
+
 def world_misc():
     return [
         # BlockInput.place calculates neighbour shapes before setting the block,
@@ -1771,6 +1802,30 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def mob_armor_damage():
+    """Attribute commands must change runtime mob damage, not only getters (#7494)."""
+    cases = [(armor, toughness, amount, 'cactus')
+             for armor in (0, 0.5, 1, 20) for toughness in (0, 8) for amount in (0.25, 4, 100)]
+    cases += [(20, 8, 4, kind) for kind in ('arrow', 'generic', 'falling_anvil', 'sonic_boom')]
+    ops = []
+    for index, (armor, toughness, amount, kind) in enumerate(cases):
+        tag = f'audit_armor_{index}'
+        target = f'@e[tag={tag},limit=1]'
+        ops += setup('/summon minecraft:pig 4.5 220 4.5 '
+                     f'{{NoAI:1b,NoGravity:1b,Tags:["{tag}"]}}',
+                     f'/attribute {target} minecraft:max_health base set 1000',
+                     f'/data merge entity {target} {{Health:1000f}}',
+                     f'/attribute {target} minecraft:armor base set {armor}',
+                     f'/attribute {target} minecraft:armor_toughness base set {toughness}')
+        ops += [cmd(f'/attribute {target} minecraft:armor get 1000'),
+                cmd(f'/attribute {target} minecraft:armor_toughness get 1000'),
+                cmd(f'/data get entity {target} Health 1000'),
+                cmd(f'/damage {target} {amount} minecraft:{kind}'),
+                cmd(f'/data get entity {target} Health 1000'),
+                *setup(f'/kill {target}')]
+    return ops + [{'op': 'tick', 'n': 25}]
+
+
 def bossbar_list_order():
     """CustomBossEvents lists Java HashMap values, with no sorting (#7469)."""
     ops = [
@@ -1894,6 +1949,7 @@ def groups():
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
         ('aquatic FromBucket', aquatic_from_bucket()),
+        ('mob armor damage', mob_armor_damage()),
         ('mob max health bounds', mob_max_health_bounds()),
         ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
@@ -1907,6 +1963,7 @@ def groups():
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+        ('item NBT count bounds', item_nbt_count_bounds()),
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),

@@ -2020,14 +2020,16 @@ impl MotionWorld<'_, '_, '_> {
             m.z * f64::from(0.99_f32),
         );
         let movement = self.player.velocity;
+        let before = self.player.position;
         self.move_self(movement)?;
-        // LivingEntity.handleFallFlyingCollisions: only the server hurts.
+        // LivingEntity.handleFallFlyingCollisions: only the server hurts, and
+        // it compares the delta before the move with the one after it, which
+        // `Entity.move` leaves as the movement it resolved. `move_entity` does
+        // not write that back, so the distance actually travelled stands in.
         if !self.player.client_side && self.player.collision.horizontal {
-            let new_h = {
-                let v = self.player.velocity;
-                (v.x * v.x + v.z * v.z).sqrt()
-            };
-            let dmg = ((move_h - new_h) * 10.0 - 3.0) as f32;
+            let travelled = self.player.position.subtract(before);
+            let new_h = (travelled.x * travelled.x + travelled.z * travelled.z).sqrt();
+            let dmg = fly_into_wall_damage(move_h, new_h);
             if dmg > 0.0 {
                 let first = self.player.events.len();
                 // getFallDamageSound((int) dmg)
@@ -2888,8 +2890,25 @@ fn horizontal_collision_minor(yaw: f32, input: [f32; 2], movement: Vec3) -> bool
     horizon_core::jmath::acos(dot / (a_len * m_len).sqrt()) < f64::from(0.13962634_f32)
 }
 
+/// `LivingEntity.handleFallFlyingCollisions`: a glide a block stopped takes
+/// `(before - after) * 10 - 3`, and nothing when that is not positive.
+fn fly_into_wall_damage(before: f64, after: f64) -> f32 {
+    ((before - after) * 10.0 - 3.0) as f32
+}
+
 #[cfg(test)]
 mod tests {
+    /// The glide's collision damage: a third of a block a tick lost is 0.0 and
+    /// does nothing, more than that hurts, and a move a block stopped loses
+    /// everything it had.
+    #[test]
+    fn a_glide_hurts_by_what_a_collision_took_off_its_speed() {
+        assert_eq!(fly_into_wall_damage(0.5, 0.5), -3.0);
+        assert_eq!(fly_into_wall_damage(0.3, 0.0), 0.0);
+        assert!((fly_into_wall_damage(0.5, 0.1) - 1.0).abs() < 1e-5);
+        assert!((fly_into_wall_damage(1.2, 0.0) - 9.0).abs() < 1e-5);
+    }
+
     use super::*;
 
     /// `LocalPlayer.isHorizontalCollisionMinor`: sliding along a wall at a

@@ -2015,7 +2015,7 @@ impl UiResources {
                     horizon_client::gfx::panorama::Faces::load(root, defaults)
                 })
             });
-            let mod_image = !horizon_client::mod_api::mods().is_empty();
+            let mod_image = crate::game::mods::built_with_native_mods();
             let atlas = startup::time("ui.atlas", || {
                 HudAtlas::build_over_with_image(root, defaults, mod_image)
             });
@@ -5142,7 +5142,7 @@ impl Game<'_> {
                         };
                         if matches!(
                             id,
-                            1019 | 1021 | 1029 | 1030 | 1045 | 1052 | 1053 | 1054 | 1503
+                            1019 | 1021 | 1029 | 1030 | 1045 | 1052 | 1053 | 1054 | 1501 | 1503
                         ) {
                             // Clients play these sounds from their level events;
                             // capturing it also sends a duplicate sound packet.
@@ -5588,11 +5588,14 @@ impl Game<'_> {
                 ..Default::default()
             }),
         };
+        // Entity.isDescending: only sneaking entities descend through
+        // scaffolding. Falling blocks do not sneak, so descending is always
+        // false (Entity.isDescending returns isShiftKeyDown, fixes #7553).
         let context = CollisionContext::for_entity(
             CollisionEntity {
                 identity: EntityIdentity(0),
                 y: f.position.y,
-                descending: wanted.y < 0.0,
+                descending: false,
                 main_hand: None,
             },
             false,
@@ -6931,7 +6934,8 @@ impl Game<'_> {
     /// `LivingEntity.releaseUsingItem` (`Item.releaseUsing`) for `stack`,
     /// used for `ticks`, its hand acting: a bow or a trident lets go (not
     /// when its hand changed), a spyglass stops scoping, and a mod's own
-    /// release follows. A mod's `Stop` may skip the release.
+    /// release follows. A mod's `Stop` may skip the release. `stopUsingItem`
+    /// ends the use after it.
     pub(super) fn release_used_item(&mut self, stack: &ItemStack, ticks: u32, hand_changed: bool) {
         let canceled = !hand_changed && !self.use_item_stopped(stack, ticks);
         let (release, spyglass) = item_use::release_parts(canceled, hand_changed);
@@ -6944,6 +6948,32 @@ impl Game<'_> {
         if release {
             self.mod_release_using(stack, ticks);
         }
+        self.stop_using_item(stack);
+    }
+    /// `LivingEntity.stopUsingItem`: the use of `stack` is over (`useItem` and
+    /// its remaining ticks are cleared), and when the use effects of the stack
+    /// ask for it, `ItemStack.causeUseVibration` sends an `ITEM_INTERACT_FINISH`
+    /// game event from the player, at its feet.
+    pub(super) fn stop_using_item(&mut self, stack: &ItemStack) {
+        self.using = None;
+        self.use_vibration(stack);
+    }
+    /// `ItemStack.causeUseVibration` for `stack` used by the player: an
+    /// `ITEM_INTERACT_FINISH` game event from the player, at its feet, when the
+    /// stack's use effects ask for interaction vibrations (the default).
+    pub(super) fn use_vibration(&mut self, stack: &ItemStack) {
+        if !self
+            .items()
+            .get(&stack.item)
+            .is_some_and(|i| i.interact_vibrations)
+        {
+            return;
+        }
+        let Some(p) = self.player.as_ref().map(|p| p.position) else {
+            return;
+        };
+        let ctx = self.player_context(None);
+        self.post_game_event("minecraft:item_interact_finish", [p.x, p.y, p.z], ctx);
     }
     /// `ServerPlayerGameMode.tick` while a player digs: level event 2020 every
     /// fourth tick since the START (the hit sound), else 2019 (the crack only),
@@ -18228,18 +18258,13 @@ impl Game<'_> {
             );
             return;
         }
-        // A window the compositor hides gets no `RedrawRequested` at all, so
-        // polling would spin the loop with nothing to draw and pin a core.
-        // Once a requested frame fails to reach the swap chain, wait for the
-        // next event instead; a resize or occlusion change wakes the loop and
-        // the frame that follows sets the pace back to polling.
-        if self.frame_drawn {
-            event_loop.set_control_flow(ControlFlow::Poll);
-        } else {
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(16),
-            ));
-        }
+        // Consume the last frame's result: a hidden compositor may stop sending
+        // redraws altogether, leaving a successful result stale indefinitely.
+        event_loop.set_control_flow(event_loop::redraw_flow(
+            &mut self.frame_drawn,
+            self.options.offscreen,
+            Instant::now(),
+        ));
     }
 }
 /// clouds.png as filled cells (`CloudRenderer.prepare`: alpha 10 or more).
@@ -21572,6 +21597,66 @@ mod tests {
         let state = BlockStateId(7);
         assert!(!falling_block_visible(state, state));
         assert!(falling_block_visible(state, BlockStateId(0)));
+    }
+
+    /// A falling block does not sneak, so `Entity.isDescending()` is false.
+    /// Scaffolding top surface collides solidly with non-descending entities
+    /// so falling scaffolding lands on top of existing scaffolding instead
+    /// of falling through and breaking (#7553).
+    #[test]
+    fn falling_block_does_not_descend_through_scaffolding() {
+        let pos = BlockPos::new(0, 10, 0);
+        let scaffold = horizon_world::block_collision::ScaffoldingCollision::from_state(
+            &horizon_world::chunk::BlockState {
+                name: "minecraft:scaffolding".to_string(),
+                properties: [
+                    ("bottom".to_string(), "false".to_string()),
+                    ("distance".to_string(), "0".to_string()),
+                    ("waterlogged".to_string(), "false".to_string()),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        )
+        .unwrap()
+        .expect("scaffolding collision rule");
+
+        // When a falling block is falling downward (wanted.y < 0) above the scaffolding top (y = 11.0):
+        let falling_y = 11.0;
+        let buggy_descending_context = CollisionContext::for_entity(
+            CollisionEntity {
+                identity: EntityIdentity(0),
+                y: falling_y,
+                descending: true, // the old buggy behavior: wanted.y < 0.0
+                main_hand: None,
+            },
+            false,
+        );
+        let fixed_context = CollisionContext::for_entity(
+            CollisionEntity {
+                identity: EntityIdentity(0),
+                y: falling_y,
+                descending: false, // fixed: FallingBlockEntity does not sneak
+                main_hand: None,
+            },
+            false,
+        );
+
+        // Before the fix, descending=true caused scaffolding collision to be empty:
+        assert!(buggy_descending_context.is_descending());
+        let buggy_shape = scaffold.shape(&buggy_descending_context, pos);
+        assert!(
+            buggy_shape.is_empty(),
+            "descending entities fall through scaffolding"
+        );
+
+        // With descending=false, scaffolding provides stable top collision:
+        assert!(!fixed_context.is_descending());
+        let solid_shape = scaffold.shape(&fixed_context, pos);
+        assert!(
+            !solid_shape.is_empty(),
+            "falling block must collide with scaffolding top"
+        );
     }
 
     /// A key bound to key.attack keeps attacking while it is held: each

@@ -12,6 +12,7 @@ pub mod anim;
 pub mod animal_brain;
 pub mod aquatic;
 pub mod armadillo;
+pub mod armor;
 pub mod axolotl;
 pub mod bat;
 pub mod bee;
@@ -832,6 +833,8 @@ pub fn anger_left(anger_end: i64, game_time: i64) -> i32 {
 pub struct Extra {
     /// Saved fish/axolotl bucket flag; tadpoles save a constant true value.
     pub from_bucket: bool,
+    /// Command-created armor instances, shared by commands and runtime damage.
+    pub armor_attributes: Option<Box<horizon_world::attributes::entity::EntityAttributes>>,
     /// `Mob.lootTable`: the table its death rolls instead of its type's
     /// (saved as `DeathLootTable`).
     pub death_loot_table: Option<String>,
@@ -2092,6 +2095,7 @@ pub struct Seen {
     pub lying: bool,
     /// `Entity.isVehicle` or `isPassenger`.
     pub ridden: bool,
+    pub is_vehicle: bool,
     /// `Attributes.KNOCKBACK_RESISTANCE`.
     pub knockback_resistance: f64,
     /// The active effects, without namespace (`slowness`, `poison`...).
@@ -2272,6 +2276,7 @@ impl Mob {
             silent: m.silent,
             lying: m.species() == Species::Cat && (m.extra.flag || m.extra.relax_one),
             ridden: m.rider.is_some() || m.extra.rider.is_some() || m.extra.mount.is_some(),
+            is_vehicle: equine::is_vehicle(m),
             knockback_resistance: m.attrs.knockback_resistance,
             effects: m
                 .extra
@@ -2302,6 +2307,13 @@ impl Mob {
 /// `events[from..]` into `pending`, which the caller adds to each mob's
 /// velocity before its tick (and to every mob once all have ticked). The
 /// other events keep their order.
+/// The part of `Entity.canUsePortal` a mob's own state decides: it is alive,
+/// it is not a boss that never travels, and — over `Monster.canUsePortal` —
+/// it is not a creaking bound to a heart (`Creaking.canUsePortal`). The
+/// rides and the players a side carries are the caller's half.
+pub fn mob_can_use_portal(m: &Mob) -> bool {
+    m.alive() && m.species() != Species::Wither && creaking::can_use_portal(m)
+}
 pub fn take_mob_pushes(events: &mut Vec<MobEvent>, from: usize, pending: &mut PendingPushes) {
     // One pass: a crowd's tick holds a push per neighbour, and removing each
     // in place would shift the rest every time.
@@ -2907,28 +2919,23 @@ impl Mob {
         if !amount.is_finite() {
             amount = f32::MAX;
         }
-        let (worn, worn_toughness) = self.worn_armor();
-        // Shulker.setRawPeekAmount: a closed shell adds the covered armor modifier.
-        let covered = if self.species() == Species::Shulker && self.extra.counter == 0 {
-            20.0
-        } else {
-            0.0
-        };
         // LivingEntity.getDamageAfterArmorAbsorb asks `hurtArmor` *before*
         // `CombatRules.getDamageAfterAbsorb`, so a worn piece wears by the
         // damage the armour, toughness and enchantment reductions have not
         // touched yet, and only a hit outside `#bypasses_armor` asks at all.
         let armor_hit = (!source.bypasses_armor() && amount > 0.0).then_some(amount);
-        if !source.bypasses_armor() && self.kind.armor + worn + covered > 0.0 {
-            // CombatRules.getDamageAfterAbsorb
-            let armor = self.kind.armor + worn + covered;
-            let toughness = 2.0 + (self.kind.armor_toughness + worn_toughness) / 4.0;
-            let effective = (armor - amount / toughness).clamp(armor * 0.2, 20.0);
-            let mut fraction = effective / 25.0;
-            if let Some(modify) = armor_effectiveness {
-                fraction = modify(fraction).clamp(0.0, 1.0);
+        if !source.bypasses_armor() {
+            let (armor, armor_toughness) = armor::values(self);
+            if armor > 0.0 {
+                // CombatRules.getDamageAfterAbsorb
+                let toughness = 2.0 + armor_toughness / 4.0;
+                let effective = (armor - amount / toughness).clamp(armor * 0.2, 20.0);
+                let mut fraction = effective / 25.0;
+                if let Some(modify) = armor_effectiveness {
+                    fraction = modify(fraction).clamp(0.0, 1.0);
+                }
+                amount *= 1.0 - fraction;
             }
-            amount *= 1.0 - fraction;
         }
         // CombatRules.getDamageAfterMagicAbsorb: enchantment protection.
         let epf = gear::protection(self, source.kind);

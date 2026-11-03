@@ -502,7 +502,7 @@ pub struct PackPost {
     clouds: Option<Pass>,
     cloud_draw: Option<Clouds>,
     /// The pack has `gbuffers_clouds`, even one that writes nothing (a pack drawing its own
-    /// clouds discards vanilla's): the game's clouds are not drawn.
+    /// clouds discards vanilla's), or `clouds=off`: the game's clouds are not drawn.
     hides_clouds: bool,
     /// The pack has a sky (`gbuffers_skybasic`) or sun and moon (`gbuffers_skytextured`)
     /// program: vanilla's stays hidden even when the program writes nothing.
@@ -2033,7 +2033,7 @@ impl PackPost {
             ids: None,
             cull: false,
         });
-        let hides_clouds = post.clouds.is_some() && cloud_geometry.is_some();
+        let hides_clouds = post.clouds_off || post.clouds.is_some() && cloud_geometry.is_some();
         let weather_geometry = world.weather.then(|| Geometry {
             buffers: &entity_buffers,
             table: None,
@@ -3158,7 +3158,11 @@ impl PackPost {
         encoder: &mut wgpu::CommandEncoder,
         size: [u32; 2],
     ) {
-        let (Some(mut pass), Some(clouds)) = (self.clouds.take(), self.cloud_draw.take()) else {
+        // The pass stays for later frames when this one has no clouds.
+        let Some(clouds) = self.cloud_draw.take() else {
+            return;
+        };
+        let Some(mut pass) = self.clouds.take() else {
             return;
         };
         let group = self.bind(device, queue, encoder, &mut pass, size);
@@ -3222,8 +3226,11 @@ impl PackPost {
         encoder: &mut wgpu::CommandEncoder,
         size: [u32; 2],
     ) {
-        let (Some(mut passes), Some(weather)) = (self.weather.take(), self.weather_draw.take())
-        else {
+        // The passes stay for later frames when this one has no rain or snow.
+        let Some(weather) = self.weather_draw.take() else {
+            return;
+        };
+        let Some(mut passes) = self.weather.take() else {
             return;
         };
         if weather.generation != self.weather_generation {

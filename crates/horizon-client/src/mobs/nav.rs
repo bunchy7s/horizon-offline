@@ -180,7 +180,13 @@ impl Mob {
     }
     fn can_update_path(&self) -> bool {
         match self.ai.nav.kind {
-            NavKind::Ground | NavKind::WallClimber => self.on_ground || self.is_in_liquid(),
+            // GroundPathNavigation.canUpdatePath: onGround() || isInLiquid() ||
+            // isPassenger(). A mob riding a vehicle keeps making and following
+            // paths where it sits (`create_path_raw` and `recompute_path` refuse
+            // without this).
+            NavKind::Ground | NavKind::WallClimber => {
+                self.on_ground || self.is_in_liquid() || self.extra.mount.is_some()
+            }
             NavKind::Water { breach } => breach || self.is_in_liquid(),
             NavKind::Flying | NavKind::Amphibious { .. } => true,
         }
@@ -772,5 +778,27 @@ mod tests {
             m.health = 4.0;
             assert_eq!(m.max_fall_distance(), 6, "hurt, has a target");
         });
+    }
+
+    /// `GroundPathNavigation.canUpdatePath`: `onGround() || isInLiquid() ||
+    /// isPassenger()`. A pig riding a vehicle - a chicken jockey, a husk on a
+    /// camel, a piglin on a hoglin - can still ask for a path and follow it.
+    #[test]
+    fn a_mob_riding_a_vehicle_keeps_its_ground_navigation() {
+        let mut kind = crate::mobs::sensor_scan_tests::kind();
+        std::sync::Arc::make_mut(&mut kind).species = crate::mobs::Species::Pig;
+        let mut m = Mob::new(1, kind, Vec3::ZERO, 0.0);
+        m.on_ground = true;
+        assert!(m.can_update_path(), "standing on the ground");
+        m.on_ground = false;
+        assert!(
+            !m.can_update_path(),
+            "in the air with no vehicle: no path is made or followed"
+        );
+        m.extra.mount = Some(7);
+        assert!(m.can_update_path(), "riding a vehicle: isPassenger()");
+        m.extra.mount = None;
+        m.fluids.in_water = true;
+        assert!(m.can_update_path(), "in a liquid");
     }
 }
