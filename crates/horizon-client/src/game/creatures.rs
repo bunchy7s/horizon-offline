@@ -145,6 +145,15 @@ impl ProjectileWorld for ProjWorld<'_, '_> {
     fn targets(&self) -> &[(Who, Aabb)] {
         &self.targets
     }
+    /// `BaseFireBlock.entityInside` for a thrown projectile: fire and soul
+    /// fire set it alight for 160 ticks.
+    fn ignites(&self, p: [i32; 3]) -> bool {
+        let state = self.w.world.block(p[0], p[1], p[2]);
+        matches!(
+            &*self.w.facts.get(state).name,
+            "minecraft:fire" | "minecraft:soul_fire"
+        )
+    }
     fn empty(&self, p: [i32; 3]) -> bool {
         self.w.facts.is_air(self.w.world.block(p[0], p[1], p[2]))
     }
@@ -7062,6 +7071,14 @@ impl Game<'_> {
                     * glam::Mat4::from_quat(self.camera_orientation());
                 self.submit_item_world(&state, pose, packed, out);
                 continue;
+            }
+            // `Entity.displayFireAnimation`: a thrown item that flew through a
+            // fire block burns (`ThrowableProjectile.tick`'s
+            // `applyEffectsFromBlocks`), and ThrownItemRenderer draws the flame
+            // over its box as any other entity renderer does.
+            if a.on_fire() {
+                let size = a.kind.size() as f32;
+                flame_geometry(atlas, c, size, size, self.yaw, light, out);
             }
             let Some(name) = a.item_sprite() else {
                 continue;

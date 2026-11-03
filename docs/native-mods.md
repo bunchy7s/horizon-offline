@@ -2487,6 +2487,9 @@ a dimension.
   slot as `/item replace entity` does (None empties it; false where the entity has no such slot: a horse has no head
   slot, a zombie no body slot; an air stack empties the slot). A mob's saddle can't be set yet, and a mob's off hand and
   body slot keep only the item, not the stack's count and components.
+- `entity.nbt(host)` and `merge_nbt(host, compound)` read and change its data as `/data get` and `/data merge entity`
+  do (merging works on mobs, dropped items, armor stands and item frames; never on players, as in vanilla);
+  `tags`, `add_tag`, `remove_tag` work as `/tag` does, and `name` is its name as plain text.
 - An `EntityRef` holds the world's open (`NativeWorldEpoch`) and the entity's id, which no other entity of that open
   gets. A handle of an earlier open, of an entity that is gone or moved to another level (it gets a new id there, as in
   vanilla), or used on a client reads as `None`.
