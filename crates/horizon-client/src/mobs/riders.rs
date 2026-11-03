@@ -66,14 +66,27 @@ fn base_attachment(v: &Mob) -> [f64; 3] {
 }
 /// The rider's own `VEHICLE` attachment height (`ridingOffset`): how far
 /// below the vehicle's attachment point its feet hang, in its scale.
-pub fn vehicle_attachment(r: &Mob) -> f64 {
-    unscaled_vehicle_attachment(r) * scale(r)
+/// `vehicle_width` is the vehicle's `getBbWidth`, which a spider's own rule
+/// reads.
+pub fn vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
+    unscaled_vehicle_attachment(r, vehicle_width) * scale(r)
 }
-fn unscaled_vehicle_attachment(r: &Mob) -> f64 {
+fn unscaled_vehicle_attachment(r: &Mob, vehicle_width: f32) -> f64 {
     use Species as S;
     // Avatar.DEFAULT_VEHICLE_ATTACHMENT.
     if avatar(r) {
         return 0.6;
+    }
+    // `Spider.getVehicleAttachmentPoint` and `CaveSpider.getVehicleAttachmentPoint`:
+    // a vehicle no wider than the rider takes the spider's fixed seat, and a
+    // wider one the type's default. A cave spider's super call reaches the
+    // spider's rule, which then sees the same width and takes the default too.
+    if vehicle_width <= r.width() {
+        match r.species() {
+            S::CaveSpider => return 0.21875,
+            S::Spider => return 0.3125,
+            _ => {}
+        }
     }
     match r.species() {
         S::Zombie | S::Husk | S::Drowned if r.is_baby() => 0.1875,
@@ -368,13 +381,13 @@ mod tests {
         let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
         assert!(close(passenger_attachment(&npc(0.0))[1], 1.8));
         assert!(close(passenger_attachment(&npc(1.5))[1], 2.7));
-        assert!(close(vehicle_attachment(&npc(0.0)), 0.6));
-        assert!(close(vehicle_attachment(&npc(1.5)), 0.9));
+        assert!(close(vehicle_attachment(&npc(0.0), 1.375), 0.6));
+        assert!(close(vehicle_attachment(&npc(1.5), 1.375), 0.9));
         // On a seat at y 55 (a text display, whose attachment is its feet):
         // a 1.5 NPC's feet at 54.1, where the server puts it.
         let seat = seat(
             [0.0; 3],
-            vehicle_attachment(&npc(1.5)),
+            vehicle_attachment(&npc(1.5), 1.375),
             Vec3::new(0.0, 55.0, 0.0),
             0.0,
         );
@@ -395,5 +408,38 @@ mod tests {
     fn archers_keep_their_distance_and_brawlers_close_in() {
         assert!(ranged(Species::Skeleton) && ranged(Species::Pillager));
         assert!(!ranged(Species::Zombie) && !ranged(Species::Vindicator));
+    }
+    /// `Spider.getVehicleAttachmentPoint` and
+    /// `CaveSpider.getVehicleAttachmentPoint`: a vehicle no wider than the
+    /// spider takes the spider's fixed seat — 0.3125 of its scale, and a cave
+    /// spider's 0.21875 — and a wider one the type's default.
+    #[test]
+    fn a_spider_sits_by_its_own_rule_on_a_narrow_vehicle() {
+        // World-gated: without the extracted data the body never runs.
+        let _ = crate::mobs::world::with_test_world(&[], |_, types| {
+            let new = |kind: &str| {
+                Mob::new(
+                    1,
+                    std::sync::Arc::new(types.types[kind].clone()),
+                    Vec3::ZERO,
+                    0.0,
+                )
+            };
+            let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+            let chicken = 0.4_f32;
+            // Wider than either spider (the boat's 1.375 is not).
+            let wide = 2.0_f32;
+            let spider = new("minecraft:spider");
+            let cave = new("minecraft:cave_spider");
+            assert!(spider.width() > chicken && cave.width() > chicken);
+            assert!(spider.width() < wide && cave.width() < wide);
+            assert!(close(vehicle_attachment(&spider, chicken), 0.3125));
+            assert!(close(vehicle_attachment(&cave, chicken), 0.21875));
+            assert!(close(vehicle_attachment(&spider, wide), 0.0));
+            assert!(close(vehicle_attachment(&cave, wide), 0.0));
+            let mut big = new("minecraft:cave_spider");
+            big.extra.model_scale = 2.0;
+            assert!(close(vehicle_attachment(&big, chicken), 0.4375));
+        });
     }
 }

@@ -1,0 +1,41 @@
+{
+  "attributes": {
+    "minecraft:gameplay/natural_mob_spawns": {
+      "argument": {
+        "spawn_costs": {},
+        "spawns_by_category": {
+          "creature": [{ "type": "minecraft:rabbit", "count": 3, "weight": 4 }],
+          "monster": [{ "type": "minecraft:husk", "count": 4, "weight": 80 }]
+        }
+      },
+      "modifier": "overlay"
+    },
+    "minecraft:visual/ambient_particles": [
+      { "particle": { "type": "minecraft:ash" }, "probability": 0.1 }
+    ],
+    "minecraft:visual/fog_color": "#aa3311",
+    "minecraft:visual/sky_color": "#ff6633"
+  },
+  "carvers": ["minecraft:cave"],
+  "downfall": 0.0,
+  "effects": {
+    "foliage_color": "#ff7700",
+    "grass_color": "#d04010",
+    "water_color": "#ff5522"
+  },
+  "features": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
+    ["minecraft:ore_dirt"],
+    [],
+    [],
+    ["minecraft:patch_grass_plain"],
+    []
+  ],
+  "has_precipitation": false,
+  "temperature": 2.0
+}

@@ -193,7 +193,10 @@ impl Game<'_> {
                     }
                     Ok(false)
                 }
-                Stage::Writes => self.save.writes_finished(),
+                Stage::Writes => {
+                    let players = self.finish_player_autosaves(false)?;
+                    Ok(self.save.writes_finished()? && players)
+                }
             }
         })();
         match result {

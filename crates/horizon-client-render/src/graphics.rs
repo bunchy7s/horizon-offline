@@ -245,7 +245,8 @@ impl GraphicsApi {
 /// What the frame limiter does in the last half millisecond before a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Pacing {
-    /// Sleep the whole wait: no CPU spent spinning, a little less precise.
+    /// Sleep the whole wait: no CPU spent spinning, a little less precise; frames
+    /// keep to a fixed grid of slots, so late wake-ups don't lower the frame rate.
     #[default]
     Efficient,
     /// Vanilla's `FramerateLimiter`: sleep, then spin until the deadline.

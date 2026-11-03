@@ -26,15 +26,15 @@ const OFF: &str = ".disabled";
 #[derive(Clone)]
 pub(super) struct ModRow {
     /// Its file in the instance, as it is when on (`mods/lumen-0.6.2.jar`).
-    file: String,
-    name: String,
-    version: String,
-    on: bool,
+    pub(super) file: String,
+    pub(super) name: String,
+    pub(super) version: String,
+    pub(super) on: bool,
     /// What the browser knows of it; None: a file put in by hand.
-    entry: Option<installed::Entry>,
+    pub(super) entry: Option<installed::Entry>,
     /// The icon its jar names, scaled to the row (`images::ROW`) and decoded once by the UI.
-    icon: Option<Arc<gpui::Image>>,
-    native: Option<native_status::Installed>,
+    pub(super) icon: Option<Arc<gpui::Image>>,
+    pub(super) native: Option<native_status::Installed>,
 }
 
 /// Modrinth projects' icon URLs by project id, kept on disk beside the image cache so the icons
@@ -53,15 +53,15 @@ fn project_icons_file() -> PathBuf {
 #[derive(Default)]
 pub(super) struct InstanceMods {
     home: Option<PathBuf>,
-    fresh: bool,
+    pub(super) fresh: bool,
     reading: bool,
-    list: Vec<ModRow>,
+    pub(super) list: Vec<ModRow>,
     /// The browser was installing at the last draw: its end changes the list.
     was_busy: bool,
     /// Only the rows near the view are built (a modpack has hundreds), measured again when the
     /// shown list changes (its length and the filter).
-    cull: cull::Cull,
-    shown: (usize, String),
+    pub(super) cull: cull::Cull,
+    pub(super) shown: (usize, String),
     fingerprint: String,
 }
 
@@ -319,7 +319,7 @@ impl Launcher {
         m.fresh.then_some(m.list.len())
     }
 
-    fn switch_mod(&mut self, row: &ModRow) {
+    pub(super) fn switch_mod(&mut self, row: &ModRow) {
         let home = self.instance_mods.home.clone().unwrap_or_default();
         let java_instance = self.selected_instance().is_some_and(|i| i.java.is_some());
         match &row.entry {

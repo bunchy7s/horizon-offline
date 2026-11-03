@@ -7,7 +7,7 @@ use horizon_client::{
     text::Text,
     worldborder::MAX_SIZE,
 };
-use horizon_core::random::RandomSource;
+use horizon_core::{position::ChunkPos, random::RandomSource};
 
 fn num(n: impl std::fmt::Display) -> Text {
     Text::literal(n.to_string())
@@ -25,6 +25,12 @@ fn holder(text: Text) -> Holder {
 fn ticks_to_seconds(ticks: i64) -> String {
     super::percent_f(ticks as f64 / 20.0, 2)
 }
+/// `WorldBorderCommand.ERROR_TOO_BIG`'s argument: vanilla hands the message the
+/// double `5.9999968E7` (the value `setSize` compares against too), and a `%s`
+/// substitution prints a double with `Double.toString`.
+fn size_limit_text() -> String {
+    horizon_client::java_text::double_to_string(MAX_SIZE)
+}
 
 impl Game<'_> {
     // ---- /forceload ----------------------------------------------------------
@@ -41,7 +47,8 @@ impl Game<'_> {
         match id {
             "forceload.query" if ctx.get("pos").is_none() => {
                 let mut forced: Vec<(i32, i32)> = self.streaming.forced.iter().copied().collect();
-                forced.sort_unstable();
+                // ForceLoadCommand sorts its LongStream before formatting chunks.
+                forced.sort_unstable_by_key(|&(x, z)| ChunkPos::new(x, z).pack());
                 if forced.is_empty() {
                     self.command_failure(Text::translate("commands.forceload.added.none", &[dim]));
                     return Ok(0);
@@ -351,7 +358,10 @@ impl Game<'_> {
                     return Err(err("commands.worldborder.set.failed.small", &[]));
                 }
                 if distance > MAX_SIZE {
-                    return Err(err("commands.worldborder.set.failed.big", &[&"5.999997E7"]));
+                    return Err(err(
+                        "commands.worldborder.set.failed.big",
+                        &[&size_limit_text()],
+                    ));
                 }
                 let shown = Text::literal(super::percent_f(distance, 1));
                 if time > 0 {
@@ -503,15 +513,18 @@ impl Game<'_> {
                 let Some(Arg::Resource(table)) = ctx.get("loot_table").cloned() else {
                     return Ok(0);
                 };
-                // An inline table (ResourceOrIdArgument): no random sequence.
+                // An inline table (ResourceOrIdArgument) keeps its random sequence.
                 if table.starts_with('{') {
                     let (tag, _) = horizon_world::nbt::parse_snbt(&table)
                         .map_err(|e| err("argument.nbt.invalid", &[&e]))?;
                     let json = horizon_client::scoreboard::tag_to_json(&tag);
-                    let drops = self
-                        .res
-                        .items()
-                        .inline_loot_table(&json, &mut self.world.random);
+                    let drops = match json["random_sequence"].as_str() {
+                        Some(sequence) => {
+                            let random = self.rand_sequences.get(sequence, self.level.seed);
+                            world_items!(self).inline_loot_table(&json, random)
+                        }
+                        None => world_items!(self).inline_loot_table(&json, &mut self.world.random),
+                    };
                     (drops, None)
                 } else {
                     if !self.items().has_loot_table(&table) {
@@ -574,10 +587,11 @@ impl Game<'_> {
                 let p = self.block_pos_arg(ctx, "pos")?;
                 let state = self.world.block(p[0], p[1], p[2]);
                 let name = self.data_block_name(p);
-                let table = format!("minecraft:blocks/{}", name.trim_start_matches("minecraft:"));
-                if !world_items!(self).has_loot_table(&table) {
+                let Some(table) =
+                    world_items!(self).block_loot_table(self.pack.assets.registry, state)
+                else {
                     return Err(err("commands.drop.no_loot_table.block", &[&name]));
-                }
+                };
                 let tool = self.tool_stack(ctx)?;
                 let drops = match world_items!(self).loot_sequence(&table) {
                     Some(seq) => {
@@ -735,8 +749,9 @@ impl Game<'_> {
         let mut tracker = Tracker::default();
         for u in &used {
             let name = self.item_display_name(&u.item);
-            tracker.track(&holder(name), u.count as i32);
-            let _ = u;
+            // CommandResponseTracker.track(drop): one per stack, so the
+            // command returns how many stacks it used, not how many items.
+            tracker.track(&holder(name), 1);
         }
         let counts: Vec<u32> = used.iter().map(|u| u.count).collect();
         let (message, total) = tracker.message(
@@ -764,5 +779,19 @@ impl Game<'_> {
         )?;
         self.feedback(message);
         Ok(total)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// `WorldBorderCommand.ERROR_TOO_BIG` is built with the double
+    /// `5.9999968E7`, the same value `setSize` compares `distance` against, and
+    /// the `%s` substitution of a translatable renders a double with
+    /// `Double.toString`: the message names `5.9999968E7`, not a rounded
+    /// `5.999997E7`.
+    #[test]
+    fn the_too_big_message_names_the_limit_as_vanilla_prints_it() {
+        assert_eq!(super::MAX_SIZE, 5.9999968E7);
+        assert_eq!(super::size_limit_text(), "5.9999968E7");
     }
 }
