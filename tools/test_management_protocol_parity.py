@@ -19,7 +19,8 @@ sent the same things over TLS, and every answer is compared exactly:
   message, difficulty, default and forced game mode read and changed (including saved properties), autosave
   read and changed (including its reset after restart), allowlist use and enforcement read and changed
   (including saved properties and restart), max players read and changed (including saved
-  properties and restart), and
+  properties and restart), player idle timeout read and changed (including disabling it, invalid input,
+  saved properties and restart), and
   `server/stop`;
 - the TLS version each server agrees on.
 
@@ -199,6 +200,25 @@ MESSAGES = [
     '{"jsonrpc":"2.0","id":206,"method":"minecraft:gamerules/update","params":[{"key":"minecraft:nope","value":true}]}',
     '{"jsonrpc":"2.0","id":207,"method":"minecraft:gamerules/update","params":[{"value":true}]}',
     '{"jsonrpc":"2.0","id":208,"method":"minecraft:gamerules"}',
+    '{"jsonrpc":"2.0","id":120,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":121,"method":"minecraft:serversettings/player_idle_timeout/set","params":[10]}',
+    '{"jsonrpc":"2.0","id":122,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":123,"method":"minecraft:serversettings/player_idle_timeout/set","params":[0]}',
+    '{"jsonrpc":"2.0","id":124,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":125,"method":"minecraft:serversettings/player_idle_timeout/set","params":[-1]}',
+    '{"jsonrpc":"2.0","id":126,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":127,"method":"minecraft:serversettings/player_idle_timeout/set","params":["yes"]}',
+    '{"jsonrpc":"2.0","id":128,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":134,"method":"minecraft:serversettings/player_idle_timeout/set","params":[1.9]}',
+    '{"jsonrpc":"2.0","id":135,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":136,"method":"minecraft:serversettings/player_idle_timeout/set","params":[4294967297]}',
+    '{"jsonrpc":"2.0","id":137,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":138,"method":"minecraft:serversettings/player_idle_timeout/set","params":[-4294967297]}',
+    '{"jsonrpc":"2.0","id":139,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":129,"method":"minecraft:serversettings/player_idle_timeout/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":130,"method":"minecraft:serversettings/player_idle_timeout"}',
+    '{"jsonrpc":"2.0","id":131,"method":"minecraft:serversettings/player_idle_timeout/set","params":[30]}',
+    '{"jsonrpc":"2.0","id":132,"method":"minecraft:serversettings/player_idle_timeout"}',
 ]
 # The notifications Horizon sends so far, which both servers must send for the same messages the same number of
 # times (the others, `server/saving`... depend on timing, or aren't sent yet).
@@ -443,6 +463,9 @@ def main():
                 sides[side]['saved_max_players'] = next(
                     (line.partition('=')[2] for line in properties.splitlines()
                      if line.startswith('max-players=')), None)
+                sides[side]['saved_player_idle_timeout'] = next(
+                    (line.partition('=')[2] for line in properties.splitlines()
+                     if line.startswith('player-idle-timeout=')), None)
                 if side == 'horizon':
                     world = (folder / 'server.toml').read_text().partition('[world]')[2].split('\n[', 1)[0]
                     sides[side]['saved_config_difficulty'] = 'difficulty = "peaceful"' in world
@@ -454,6 +477,8 @@ def main():
                     sides[side]['saved_config_enforce_allowlist'] = 'enforce_whitelist = true' in (
                         folder / 'server.toml').read_text()
                     sides[side]['saved_config_max_players'] = 'max_players = 30' in (
+                        folder / 'server.toml').read_text()
+                    sides[side]['saved_config_player_idle_timeout'] = 'player-idle-timeout = 30' in (
                         folder / 'server.toml').read_text()
             finally:
                 server.stop()
@@ -492,6 +517,12 @@ def main():
                         if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
                             break
                     sides[side]['restarted_max_players'] = reply
+                    ws.send('{"jsonrpc":"2.0","id":133,"method":"minecraft:serversettings/player_idle_timeout"}')
+                    while True:
+                        reply = normal(ws.receive(timeout=60))
+                        if not isinstance(reply, dict) or 'method' not in reply or 'id' in reply:
+                            break
+                    sides[side]['restarted_player_idle_timeout'] = reply
                 finally:
                     ws.sock.close()
             finally:
@@ -547,6 +578,14 @@ def main():
         if vanilla['restarted_max_players'] != horizon['restarted_max_players'] or \
                 vanilla['restarted_max_players'] != {'jsonrpc': '2.0', 'id': 109, 'result': 30}:
             failures.append(f"restarted max players: vanilla {vanilla['restarted_max_players']!r}, Horizon {horizon['restarted_max_players']!r}")
+        if vanilla['saved_player_idle_timeout'] != horizon['saved_player_idle_timeout'] or \
+                vanilla['saved_player_idle_timeout'] != '30':
+            failures.append(f"saved player idle timeout: vanilla {vanilla['saved_player_idle_timeout']!r}, Horizon {horizon['saved_player_idle_timeout']!r}")
+        if not horizon['saved_config_player_idle_timeout']:
+            failures.append('Horizon did not save player idle timeout in server.toml')
+        if vanilla['restarted_player_idle_timeout'] != horizon['restarted_player_idle_timeout'] or \
+                vanilla['restarted_player_idle_timeout'] != {'jsonrpc': '2.0', 'id': 133, 'result': 30}:
+            failures.append(f"restarted player idle timeout: vanilla {vanilla['restarted_player_idle_timeout']!r}, Horizon {horizon['restarted_player_idle_timeout']!r}")
         (build / 'report.json').write_text(json.dumps(sides, indent=1))
         if failures:
             sys.exit(f'{NAME}: {len(failures)} differences (logs in {build}):\n' + '\n'.join(failures))

@@ -28,6 +28,7 @@ const MAX_SYNCED_RECIPES: usize = 1_000_000;
 #[derive(Default)]
 pub(super) struct RecipeTables {
     tables: Option<Arc<Recipes>>,
+    pub(super) categories: Option<HashMap<String, horizon_client::recipe_book::RecipeBookCategory>>,
     known: (Option<u64>, Arc<[i32]>),
     /// The server's recipes of the types its native mods sent (`horizon:
     /// recipe_content`) over the window's own: what `Game::recipes` reads on
@@ -54,7 +55,8 @@ impl Index {
         self.stack(&s.item, s.count, components(s))
     }
     fn any(&self, i: &Ingredient) -> Vec<RecipeStack> {
-        i.1.iter()
+        i.order
+            .iter()
             .filter_map(|id| self.stack(id, 1, String::new()))
             .collect()
     }
@@ -97,6 +99,21 @@ fn recipe(id: String, kind: RecipeKind) -> Recipe {
 }
 
 impl Game<'_> {
+    pub(super) fn registered_recipe_book_category(
+        &mut self,
+        kind: &str,
+    ) -> Option<horizon_client::recipe_book::RecipeBookCategory> {
+        if self.recipe_tables.categories.is_none() {
+            let mut declarations = Vec::new();
+            self.native_recipe_book_categories(&mut declarations);
+            self.recipe_tables.categories = Some(horizon_client::recipe_book::mod_categories(
+                declarations,
+                self.recipes(),
+                self.items(),
+            ));
+        }
+        self.recipe_tables.categories.as_ref()?.get(kind).cloned()
+    }
     /// `native_give`: `count` of `item`, refused outside a world, unless
     /// creative and for an item the game doesn't have.
     pub(super) fn recipe_give(&mut self, item: &str, count: u32) -> Result<(), String> {

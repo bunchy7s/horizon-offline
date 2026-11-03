@@ -11,15 +11,25 @@ depend on world generation.
 """
 
 
-def cmd(command, record=True):
+def cmd(command, record=True, expect_result=None):
     op = {'op': 'cmd', 'cmd': command}
     if not record:
         op['record'] = False
+    if expect_result is not None:
+        op['expect_result'] = expect_result
     return op
 
 
 def setup(*commands):
     return [cmd(c, False) for c in commands]
+
+
+def predicate_selector_fixtures(group_names):
+    if 'selector missing predicates' not in group_names:
+        return {}
+    sheep = {'type': 'minecraft:entity_properties', 'entity': 'this',
+             'predicate': {'minecraft:entity_type': 'minecraft:sheep'}}
+    return {'h124_selector:sheep': sheep, 'minecraft:h124_selector_sheep': sheep}
 
 
 BASE = (0, 200, 0)
@@ -292,6 +302,14 @@ def entities():
         cmd('/data get entity @e[tag=h,type=minecraft:cow,limit=1] CustomName'),
         cmd('/data merge entity @e[tag=h,type=minecraft:pig,limit=1] {Tags:["a","c"]}'),
         cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base set 0.5'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect give @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed 10 1'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed get'),
+        cmd('/effect clear @e[tag=h,type=minecraft:pig,limit=1] minecraft:speed'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base reset'),
+        cmd('/attribute @e[tag=h,type=minecraft:pig,limit=1] minecraft:movement_speed base get'),
         cmd('/effect give @e[tag=h] minecraft:glowing 10'),
         cmd('/damage @e[tag=h,type=minecraft:cow,limit=1] 1'),
         cmd('/ride @s mount @e[tag=h,type=minecraft:pig,limit=1]'),
@@ -554,6 +572,36 @@ def scores():
     ]
 
 
+def selector_missing_predicates():
+    """Missing named predicates reject both signs before negation (#7794)."""
+    missing = 'h124_missing_873b04b1:absent'
+    missing_default = 'h124_missing_default_873b04b1'
+    defined = ('h124_selector:sheep', 'minecraft:h124_selector_sheep', 'h124_selector_sheep')
+    ops = setup('/tick freeze')
+    for i, kind in enumerate(('sheep', 'cow', 'pig', 'chicken')):
+        custom = ',CustomName:{text:"Named pig"}' if kind == 'pig' else ''
+        ops += setup(f'/summon minecraft:{kind} {6 + i * 2}.5 220 4.5 '
+                     f'{{Tags:["h124","h124_{kind}"],NoAI:1b,NoGravity:1b,'
+                     f'PersistenceRequired:1b{custom}}}')
+    for kind in ('sheep', 'cow', 'pig', 'chicken'):
+        base = f'@e[tag=h124_{kind}'
+        ops.append(cmd(f'/execute if entity {base}]', expect_result=1))
+        for predicate in (missing, missing_default):
+            for sign in ('', '!'):
+                ops.append(cmd(f'/execute if entity {base},predicate={sign}{predicate}]'))
+        for predicate in defined:
+            ops += [cmd(f'/execute if entity {base},predicate={predicate}]',
+                        expect_result=1 if kind == 'sheep' else None),
+                    cmd(f'/execute if entity {base},predicate=!{predicate}]',
+                        expect_result=1 if kind != 'sheep' else None)]
+        ops += [cmd(f'/execute if entity {base},predicate={defined[0]},predicate=!{missing}]'),
+                cmd(f'/execute if entity {base},predicate=!{missing},predicate={defined[0]}]')]
+    ops += [cmd(f'/execute if entity @e[tag=h124,predicate={defined[0]}]', expect_result=1),
+            cmd(f'/execute if entity @e[tag=h124,predicate=!{defined[0]}]', expect_result=3),
+            cmd(f'/execute if entity @e[tag=h124_unrelated,predicate=!{missing}]')]
+    return ops + setup('/kill @e[tag=h124]', '/tick unfreeze')
+
+
 def execute():
     return [
         *setup('/scoreboard objectives add exec dummy', '/scoreboard players set @s exec 4', '/scoreboard players set fake exec 9'),
@@ -801,6 +849,9 @@ def items_and_loot():
         cmd('/loot replace block 3 206 3 container.8 loot minecraft:blocks/cobblestone'),
         cmd('/loot replace entity @s hotbar.5 loot minecraft:blocks/glass'),
         cmd('/loot spawn 3 210 3 loot minecraft:blocks/stone'),
+        # NestedLootTable: the reward tables pick another table and roll it.
+        cmd('/loot spawn 3 210 3 loot minecraft:chests/trial_chambers/reward'),
+        cmd('/loot give @s loot minecraft:chests/trial_chambers/reward_ominous'),
         cmd('/loot give @s loot {pools:[{rolls:1,entries:[{type:"minecraft:item",name:"minecraft:apple",functions:[{type:"minecraft:set_count",count:4}]}]}]}'),
         cmd('/setblock 2 205 2 minecraft:stone'),
         cmd('/loot give @s mine 2 205 2'),
@@ -832,6 +883,37 @@ def items_and_loot():
         *setup('/kill @e[tag=c]', '/kill @e[tag=h]'),
         *setup('/setblock 3 206 3 minecraft:air', '/setblock 2 205 2 minecraft:air', '/kill @e[type=minecraft:item]', '/gamemode creative'),
     ]
+
+
+def item_nbt_count_bounds():
+    """ItemStack's NBT count codec defaults invalid counts to one (#7724)."""
+    stand = '@e[type=minecraft:armor_stand,tag=h085,limit=1]'
+    chest = '12 220 4'
+    ops = setup('/tick freeze', '/kill @e[tag=h085]',
+                f'/setblock {chest} minecraft:air strict',
+                f'/setblock {chest} minecraft:chest strict',
+                '/summon minecraft:armor_stand 8 220 4 {Tags:["h085"],NoGravity:1b}')
+    ops += [cmd(f'/execute if entity {stand}'),
+            cmd(f'/execute if block {chest} minecraft:chest')]
+    for item in ('minecraft:stone', 'minecraft:diamond_sword'):
+        for count in (None, '-1', '0', '1', '2', '64', '99', '100', '255', '256',
+                      '2147483647', '1b', '1.5f', '"1"'):
+            nbt = '{id:"' + item + '"' + ('' if count is None else ',count:' + count) + '}'
+            ops += setup(f'/item replace entity {stand} weapon.mainhand with minecraft:air')
+            ops += [
+                cmd(f'/data modify entity {stand} equipment.mainhand set value {nbt}'),
+                cmd(f'/data get entity {stand} equipment.mainhand.id'),
+                cmd(f'/data get entity {stand} equipment.mainhand.count'),
+            ]
+            entry = '{Slot:0b,' + nbt[1:]
+            ops += setup(f'/data modify block {chest} Items set value []')
+            ops += [
+                cmd(f'/data modify block {chest} Items set value [{entry}]'),
+                cmd(f'/data get block {chest} Items[0].id'),
+                cmd(f'/data get block {chest} Items[0].count'),
+            ]
+    return ops + setup('/kill @e[tag=h085]', f'/setblock {chest} minecraft:air strict',
+                       '/tick unfreeze')
 
 
 def world_misc():
@@ -1746,6 +1828,76 @@ def trial_spawner_passengers():
     return ops + setup('/fill 1 219 1 13 224 8 air', '/gamerule spawn_mobs false')
 
 
+def mob_armor_damage():
+    """Attribute commands must change runtime mob damage, not only getters (#7494)."""
+    cases = [(armor, toughness, amount, 'cactus')
+             for armor in (0, 0.5, 1, 20) for toughness in (0, 8) for amount in (0.25, 4, 100)]
+    cases += [(20, 8, 4, kind) for kind in ('arrow', 'generic', 'falling_anvil', 'sonic_boom')]
+    ops = []
+    for index, (armor, toughness, amount, kind) in enumerate(cases):
+        tag = f'audit_armor_{index}'
+        target = f'@e[tag={tag},limit=1]'
+        ops += setup('/summon minecraft:pig 4.5 220 4.5 '
+                     f'{{NoAI:1b,NoGravity:1b,Tags:["{tag}"]}}',
+                     f'/attribute {target} minecraft:max_health base set 1000',
+                     f'/data merge entity {target} {{Health:1000f}}',
+                     f'/attribute {target} minecraft:armor base set {armor}',
+                     f'/attribute {target} minecraft:armor_toughness base set {toughness}')
+        ops += [cmd(f'/attribute {target} minecraft:armor get 1000'),
+                cmd(f'/attribute {target} minecraft:armor_toughness get 1000'),
+                cmd(f'/data get entity {target} Health 1000'),
+                cmd(f'/damage {target} {amount} minecraft:{kind}'),
+                cmd(f'/data get entity {target} Health 1000'),
+                *setup(f'/kill {target}')]
+    return ops + [{'op': 'tick', 'n': 25}]
+
+
+def bossbar_list_order():
+    """CustomBossEvents lists Java HashMap values, with no sorting (#7469)."""
+    ops = [
+        cmd('/bossbar add audit:test "Title"'),
+        cmd('/bossbar set audit:test name "Other"'),
+        cmd('/bossbar add audit:second "Second"'),
+        cmd('/bossbar list'),
+    ]
+    for i in range(11):
+        ops.append(cmd(f'/bossbar add audit:grow{i} "Extra {i}"'))
+    for i in range(11):
+        ops.append(cmd(f'/bossbar remove audit:grow{i}'))
+    ops += [
+        cmd('/bossbar list'),
+        cmd('/bossbar remove audit:test'),
+        cmd('/bossbar list'),
+        cmd('/bossbar add audit:test "Again"'),
+        cmd('/bossbar list'),
+        cmd('/bossbar remove audit:test'),
+        cmd('/bossbar remove audit:second'),
+        cmd('/bossbar list'),
+    ]
+    return ops
+
+
+def experience_level_boundaries():
+    """Exact zero retains progress/total; a negative result resets all three (#7515)."""
+    def observe():
+        return [cmd('/experience query @s levels'),
+                cmd('/experience query @s points'),
+                cmd('/data get entity @s XpLevel'),
+                cmd('/data get entity @s XpP 1000000'),
+                cmd('/data get entity @s XpTotal')]
+    ops = []
+    for start, delta in [(1, -1), (1, -2), (2, -1), (0, -1)]:
+        ops += setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                     '/experience add @s -2147483647 points', '/experience add @s 10 points',
+                     '/experience set @s 1 levels', '/experience set @s 3 points',
+                     f'/experience set @s {start} levels')
+        ops += observe()
+        ops.append(cmd(f'/experience add @s {delta} levels'))
+        ops += observe()
+    return ops + setup('/experience set @s 0 levels', '/experience set @s 0 points',
+                       '/experience add @s -2147483647 points')
+
+
 def mob_max_health_bounds():
     """Raw bases survive effective clamping without changing Health (#7413)."""
     pig = '00000000-0000-0000-0000-000000000001'
@@ -1772,6 +1924,64 @@ def mob_max_health_bounds():
         *setup(f'/kill {pig}'),
     ]
     return ops
+
+def setblock_destroy_air():
+    """Destroy-to-air skips placement, including already-air targets (#7691)."""
+    pos = '24 220 10'
+    # Keep this section nonempty so strict placement can retain air variants.
+    out = setup('/tick freeze', '/gamerule block_drops true',
+                '/scoreboard objectives add destroy_air dummy',
+                '/setblock 24 219 11 minecraft:stone strict')
+    for before, after, mode in [
+        ('stone', 'air', 'destroy'),
+        ('air', 'air', 'destroy'),
+        ('stone', 'cave_air', 'destroy'),
+        ('cave_air', 'air', 'destroy'),
+        ('cave_air', 'cave_air', 'destroy'),
+        ('stone', 'void_air', 'destroy'),
+        ('void_air', 'air', 'destroy'),
+        ('water', 'air', 'destroy'),
+        ('stone', 'dirt', 'destroy'),
+        ('stone', 'stone', 'destroy'),
+        ('air', 'dirt', 'destroy'),
+        ('air', 'air', 'replace'),
+        ('stone', 'air', 'replace'),
+    ]:
+        out += setup('/kill @e[type=minecraft:item]',
+                     f'/setblock {pos} minecraft:{before} strict',
+                     '/scoreboard players set result destroy_air -99',
+                     '/scoreboard players set success destroy_air -99')
+        out += [
+            cmd(f'/execute if block {pos} minecraft:{before}'),
+            cmd('/execute store success score success destroy_air '
+                'store result score result destroy_air run '
+                f'setblock {pos} minecraft:{after} {mode}'),
+            cmd('/scoreboard players get success destroy_air'),
+            cmd('/scoreboard players get result destroy_air'),
+            *[cmd(f'/execute if block {pos} minecraft:{air}')
+              for air in ('air', 'cave_air', 'void_air')],
+            cmd('/execute if entity @e[type=minecraft:item]'),
+            cmd('/execute as @e[type=minecraft:item] run data get entity @s Item'),
+        ]
+    # Skipping BlockInput.place must still notify neighbours. A strict write
+    # leaves this unsupported power value intact until a neighbour updates it.
+    out += setup(f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:stone strict',
+                 '/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]'),
+            cmd(f'/setblock {pos} minecraft:air destroy'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=0]'),
+            cmd(f'/execute if block {pos} minecraft:air')]
+    out += setup('/setblock 23 220 10 minecraft:redstone_wire[power=15] strict')
+    out += [cmd(f'/setblock {pos} minecraft:air replace'),
+            cmd('/execute if block 23 220 10 minecraft:redstone_wire[power=15]')]
+    out += setup('/kill @e[type=minecraft:item]', f'/setblock {pos} minecraft:air strict',
+                 '/setblock 23 220 10 minecraft:air strict',
+                 '/setblock 23 219 10 minecraft:air strict',
+                 '/setblock 24 219 11 minecraft:air strict',
+                 '/scoreboard objectives remove destroy_air', '/tick unfreeze')
+    return out
+
 
 def forceload_query_order():
     """ForceLoadCommand sorts signed packed chunk IDs, not coordinate tuples (#7451)."""
@@ -1818,9 +2028,12 @@ def groups():
         ('client commands', client_commands()),
         ('game state', game_state()),
         ('player state', player_state()),
+        ('experience level boundaries', experience_level_boundaries()),
         ('blocks and border', world_blocks()),
+        ('setblock destroy air', setblock_destroy_air()),
         ('forceload query order', forceload_query_order()),
         ('entities', entities()),
+        ('mob armor damage', mob_armor_damage()),
         ('mob max health bounds', mob_max_health_bounds()),
         ('creeper custom fuse', creeper_custom_fuse()),
         ('wither spawn', wither_spawn()),
@@ -1829,10 +2042,13 @@ def groups():
         ('trial spawner passengers', trial_spawner_passengers()),
         ('camel riders', camel_riders()),
         ('scores, teams and bossbars', scores()),
+        ('bossbar list order', bossbar_list_order()),
         ('execute', execute()),
+        ('selector missing predicates', selector_missing_predicates()),
         ('levels', levels()),
         ('end portal entities', end_portal_entities()),
         ('items and loot', items_and_loot()),
+        ('item NBT count bounds', item_nbt_count_bounds()),
         ('world', world_misc()),
         ('progression', progression()),
         ('functions and packs', functions_and_packs()),

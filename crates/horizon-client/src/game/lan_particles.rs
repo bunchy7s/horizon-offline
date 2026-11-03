@@ -465,13 +465,8 @@ impl Game<'_> {
         }
         // A wind charge's burst throws none.
         if !p.block_particles.is_empty() {
-            let (world, facts) = (&self.world, self.res.facts());
-            self.particles.explosion_blocks(
-                p.center,
-                p.radius,
-                p.block_count.max(0) as usize,
-                &|b| facts.is_air(world.block(b[0], b[1], b[2])),
-            );
+            self.particles
+                .track_explosion(p.center, p.radius, p.block_count.max(0) as usize);
         }
         // Entity.pushFromExplosion.
         if let (Some(push), Some(player)) = (p.knockback, self.player.as_mut()) {

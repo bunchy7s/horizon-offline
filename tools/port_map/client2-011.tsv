@@ -53,8 +53,8 @@ ScrollableLayout.setMaxHeight	skip:ui		sizing only; same screens
 ScrollableLayout.arrangeElements	skip:ui		scrollbar reserve and layout live in each screen's own code (10 px each side in dialog and LAN screens)
 ScrollableLayout.Container.refreshChildren	skip:ui		children are laid out each frame
 ScrollableLayout.Container.extractWidgetRenderState	skip:ui		each screen draws its own clipped list (server links, dialog, LAN)
-ScrollableLayout.Container.getBorderForArrowNavigation	missing		minor: arrow-key focus moves across the list are not ported; Horizon lists have no keyboard focus
-ScrollableLayout.Container.setFocused	missing		minor: focusing a row does not scroll it into view; Horizon lists have no keyboard focus
+ScrollableLayout.Container.getBorderForArrowNavigation	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::key	the arrow keys step the focus to the neighbour in that direction, across the list's edge too (gamepad::focus_step_rect, or focus_step_strict/vague for up and down), which is the child the border lookup would return
+ScrollableLayout.Container.setFocused	inline	crates/horizon-client-render/src/options_ui.rs::OptionsUi::key	Tab and the arrows scroll a list row that took the focus into the visible area, 4 pixels past the edge it crossed, then clamp the list
 ScrollableLayout.Container.setX	skip:ui		positions set by each screen's layout
 ScrollableLayout.Container.setY	skip:ui		positions set by each screen's layout
 ScrollableLayout.Container.setScrollAmount	inline	crates/horizon-client/src/game/server_links.rs::Game::server_links_scroll	gap: minor: clamps the server links list only; other scroll areas clamp in their own code
