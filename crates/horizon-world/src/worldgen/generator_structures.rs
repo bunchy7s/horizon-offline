@@ -206,8 +206,13 @@ impl StartCache {
         let mut census = (0, 0);
         for shard in &self.shards {
             let shard = shard.read().unwrap();
-            census.0 += shard.len();
-            census.1 += shard.values().filter(|s| !s.is_empty()).count();
+            census.0 += shard.new.len() + shard.old.len();
+            census.1 += shard
+                .new
+                .values()
+                .chain(shard.old.values())
+                .filter(|s| !s.is_empty())
+                .count();
         }
         census
     }
@@ -836,6 +841,33 @@ mod tests {
         }
         assert!(Arc::ptr_eq(&cache.get((0, 0)).unwrap(), &hot));
         assert!(cache.get(cold_key).is_none());
+    }
+
+    #[test]
+    fn start_cache_counts_both_generations_and_replaces_old_starts() {
+        let cache = StartCache::new();
+        let key = (3, -4);
+        let first: Starts = Arc::new(Vec::new());
+        cache.insert_first(key, first.clone());
+        {
+            let mut shard = cache.shard(key).write().unwrap();
+            shard.old = std::mem::take(&mut shard.new);
+        }
+        cache.insert_first((99, 100), Arc::new(Vec::new()));
+        assert_eq!(cache.census(), (2, 0));
+        assert!(Arc::ptr_eq(
+            &cache.insert_first(key, Arc::new(Vec::new())),
+            &first
+        ));
+        {
+            let mut shard = cache.shard(key).write().unwrap();
+            let value = shard.new.remove(&key).unwrap();
+            shard.old.insert(key, value);
+        }
+        let replacement: Starts = Arc::new(Vec::new());
+        cache.replace(key, replacement.clone());
+        assert!(Arc::ptr_eq(&cache.get(key).unwrap(), &replacement));
+        assert_eq!(cache.census(), (2, 0));
     }
 
     /// A ring search ends where `may_land_near` allows: on its ring chunk

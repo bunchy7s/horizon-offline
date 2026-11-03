@@ -2426,7 +2426,7 @@ struct Ranges<'a> {
     radius: i32,
     extra: &'a [((i32, i32), i32)],
     forced: &'a HashSet<(i32, i32)>,
-    /// `extra` as a grid, when one was made for it: `in_extra` without a
+    /// `extra` indexed by a grid or buckets: coverage queries without a
     /// scan of every area.
     cover: Option<&'a ExtraCover>,
     band: Option<&'a Band>,
@@ -2519,7 +2519,7 @@ impl ExtraCover {
     ) -> Option<&'a ExtraCover> {
         cover.as_ref().filter(|c| c.extra == extra)
     }
-    /// Make the grid again if `extra` changed; none for one area or none
+    /// Rebuild the coverage index if `extra` changed; none for one area or none
     /// (a scan is as quick).
     fn refresh(cover: &mut Option<ExtraCover>, extra: &[((i32, i32), i32)]) {
         if cover.as_ref().is_some_and(|c| c.extra == extra) {
@@ -2645,8 +2645,7 @@ impl CoverGrid {
             (x0, z0, x1, z1) = (x0.min(x - r), z0.min(z - r), x1.max(x + r), z1.max(z + r));
         }
         let (width, depth) = ((x1 - x0 + 1) as u64, (z1 - z0 + 1) as u64);
-        let fits = |lo: i64, hi: i64| lo >= i64::from(i32::MIN) && hi <= i64::from(i32::MAX);
-        if width * depth > ExtraCover::CELLS || !fits(x0, x1) || !fits(z0, z1) {
+        if width * depth > ExtraCover::CELLS {
             return None;
         }
         let (x0, z0, width, depth) = (x0 as i32, z0 as i32, width as u32, depth as u32);

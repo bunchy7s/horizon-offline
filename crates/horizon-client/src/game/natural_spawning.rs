@@ -34,8 +34,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub(super) struct SpawnScratch {
     pub(super) candidates: Vec<(i32, i32)>,
-    pub(super) seen: horizon_client::fast_hash::FxHashSet<(i32, i32)>,
-    pub(super) near: Vec<usize>,
+    pub(super) seen: horizon_client::fast_hash::FxHashMap<(i32, i32), usize>,
+    pub(super) close: Vec<bool>,
 }
 
 /// A player in the level in place, as spawning and despawning see it.
@@ -595,6 +595,8 @@ impl<'a> Game<'a> {
         let seen = &mut scratch.seen;
         seen.clear();
         seen.reserve(289 * players.len());
+        let close = &mut scratch.close;
+        close.clear();
         for p in players {
             let (pcx, pcz) = (
                 p.position.x.floor() as i32 >> 4,
@@ -603,26 +605,25 @@ impl<'a> Game<'a> {
             for dx in -8..=8 {
                 for dz in -8..=8 {
                     let key = (pcx + dx, pcz + dz);
-                    if seen.insert(key) {
+                    let i = *seen.entry(key).or_insert_with(|| {
+                        let i = candidates.len();
                         candidates.push(key);
-                    }
+                        close.push(false);
+                        i
+                    });
+                    close[i] |= close_enough_for_spawning(p, key);
                 }
             }
         }
         let count = candidates.len() as i32;
         let levels = self.tickets.levels();
-        // A player within 128 blocks of a chunk's centre stands within 8
-        // chunks of it.
-        let cells = horizon_client::mobs::spawn_selection::PlayerCells::new(
-            players.iter().map(|p| (p.position.x, p.position.z)),
-        );
-        let near = &mut scratch.near;
+        let mut i = 0;
         candidates.retain(|&(cx, cz)| {
-            levels.loaded_ticking(cx, cz) && super::ticking_chunk(&self.world, cx, cz) && {
-                cells.within_8(cx, cz, near);
-                near.iter()
-                    .any(|&i| close_enough_for_spawning(&players[i], (cx, cz)))
-            }
+            let keep = close[i]
+                && levels.loaded_ticking(cx, cz)
+                && super::ticking_chunk(&self.world, cx, cz);
+            i += 1;
+            keep
         });
         count
     }
@@ -813,14 +814,7 @@ mod tests {
             (seed % 1_000_000) as f64 / 1_000_000.0 * 2.0 * m - m
         };
         let mut players: Vec<LevelPlayer> = (0..150)
-            .map(|i| {
-                player(
-                    next(20_000.0),
-                    64.0 + next(60.0),
-                    next(20_000.0),
-                    i % 11 == 0,
-                )
-            })
+            .map(|i| player(next(3_000.0), 64.0 + next(60.0), next(3_000.0), i % 11 == 0))
             .collect();
         // Two at the same distance from the origin, the second one first in no cell order.
         players.push(player(300.0, 64.0, 0.0, false));
@@ -829,7 +823,7 @@ mod tests {
         let grid = NearestPlayers::new(&players);
         let index = |p: Option<&LevelPlayer>| p.map(|p| std::ptr::from_ref(p) as usize);
         let mut probes: Vec<(f64, f64, f64)> = (0..400)
-            .map(|_| (next(25_000.0), next(100.0), next(25_000.0)))
+            .map(|_| (next(3_000.0), next(100.0), next(3_000.0)))
             .collect();
         probes.extend([(0.0, 64.0, 0.0), (1.0e12, 0.0, 0.0), (f64::NAN, 0.0, 0.0)]);
         for (x, y, z) in probes {
@@ -837,6 +831,15 @@ mod tests {
                 index(grid.nearest(x, y, z)),
                 index(nearest_player(&players, x, y, z)),
                 "({x}, {y}, {z})"
+            );
+        }
+        players.push(player(NearestPlayers::FAR * 2.0, 64.0, 0.0, false));
+        let grid = NearestPlayers::new(&players);
+        assert!(grid.scan);
+        for x in [0.0, NearestPlayers::FAR * 2.0] {
+            assert_eq!(
+                index(grid.nearest(x, 64.0, 0.0)),
+                index(nearest_player(&players, x, 64.0, 0.0))
             );
         }
         let spectators: Vec<LevelPlayer> = (0..20)

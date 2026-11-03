@@ -174,11 +174,6 @@ pub(super) const HEIGHT: f64 = 0.7_f32 as f64;
 fn display_offset(kind: CartKind) -> f64 {
     if kind == CartKind::Hopper { 1.0 } else { 6.0 }
 }
-/// `MinecartFurnace.calculateNewPushAlong`: the push turned onto the
-/// movement's direction, at the push's own length (3D, so it holds from tick
-/// to tick while the movement has a vertical part).
-/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`: the
-/// push the cart at `cart` loses (the entity gets a quarter of it back).
 /// Where the cart `id` is in `carts`: at `hint` (where it was a moment ago,
 /// the usual case while carts tick in order) or found by a scan. A world
 /// with hundreds of mineshaft chest carts asked this of every cart several
@@ -189,46 +184,8 @@ fn cart_at(carts: &[Minecart], id: u32, hint: usize) -> Option<usize> {
     }
     carts.iter().position(|c| c.id == id)
 }
-/// The carts by chunk column of their position, so that a box finds the
-/// carts it can touch without testing every cart in the level.
-struct CartCells(horizon_client::fast_hash::FxHashMap<(i32, i32), Vec<usize>>);
-impl CartCells {
-    fn new(carts: &[Minecart]) -> Self {
-        let mut cells = horizon_client::fast_hash::FxHashMap::<(i32, i32), Vec<usize>>::default();
-        for (i, c) in carts.iter().enumerate() {
-            let key = (
-                (c.position.x.floor() as i32) >> 4,
-                (c.position.z.floor() as i32) >> 4,
-            );
-            cells.entry(key).or_default().push(i);
-        }
-        Self(cells)
-    }
-    /// The carts whose box `bb` can meet, in their order in the list.
-    fn near(&self, bb: Aabb, carts: usize, out: &mut Vec<usize>) {
-        out.clear();
-        let w = WIDTH / 2.0 + 1.0;
-        let (lo, hi) = (bb.min_position(), bb.max_position());
-        let (x0, x1) = (
-            (lo.x - w).floor() as i32 >> 4,
-            (hi.x + w).floor() as i32 >> 4,
-        );
-        let (z0, z1) = (
-            (lo.z - w).floor() as i32 >> 4,
-            (hi.z + w).floor() as i32 >> 4,
-        );
-        if i64::from(x1) - i64::from(x0) > 4 || i64::from(z1) - i64::from(z0) > 4 {
-            out.extend(0..carts);
-            return;
-        }
-        for x in x0..=x1 {
-            for z in z0..=z1 {
-                out.extend(self.0.get(&(x, z)).into_iter().flatten());
-            }
-        }
-        out.sort_unstable();
-    }
-}
+/// `AbstractMinecart.push(entity)` for a non-cart `entity` at `feet`:
+/// the push the cart loses (the entity gets a quarter of it back).
 fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
     let (xa, za) = (feet.x - cart.x, feet.z - cart.z);
     let dd = xa * xa + za * za;
@@ -240,6 +197,7 @@ fn cart_push_from(feet: Vec3, cart: Vec3) -> Option<(f64, f64)> {
     let k = f64::from(0.1f32) * 0.5;
     Some((xa / d * pow * k, za / d * pow * k))
 }
+/// `MinecartFurnace.calculateNewPushAlong`: project the push onto movement.
 fn push_along(push: Vec3, movement: Vec3) -> Vec3 {
     if push.horizontal_distance_squared() > 1.0e-4 && movement.horizontal_distance_squared() > 0.001
     {
@@ -545,26 +503,17 @@ impl Game<'_> {
     /// collision, which sets a TNT minecart off.
     fn cart_entity_collisions(&self, c: &Minecart) -> Vec<Aabb> {
         let near = c.bounds().inflate(Vec3::new(2.0, 2.0, 2.0));
-        // No entity is wider or taller than 16 blocks (the ender dragon): one
-        // standing further than that from the cart is passed over before its
-        // box is made. A level with hundreds of mineshaft carts made every
-        // mob's box for every cart each tick.
-        let at = c.position;
-        let close = |p: Vec3| {
-            !((p.x - at.x).abs() > 20.0 || (p.z - at.z).abs() > 20.0 || (p.y - at.y).abs() > 20.0)
-        };
         let mut boxes: Vec<Aabb> = self
             .carts
             .iter()
-            .filter(|o| o.id != c.id && close(o.position))
+            .filter(|o| o.id != c.id)
             .map(Minecart::bounds)
             .chain(self.boats.iter().map(super::boats::Boat::bounds))
             .chain(
                 self.mobs
                     .iter()
                     .filter(|m| {
-                        close(m.position)
-                            && !m.removed
+                        !m.removed
                             && m.extra.mount != Some(c.id)
                             && (m.pushable()
                                 || m.species() == horizon_client::mobs::Species::Shulker
@@ -572,7 +521,6 @@ impl Game<'_> {
                     })
                     .map(|m| m.bounds()),
             )
-            .filter(|b| b.intersects(near))
             .collect();
         if self.riding != Some(c.id)
             && let Some(p) = self.player.as_ref()
@@ -1454,11 +1402,15 @@ impl Game<'_> {
                 pushers.push((Vec3::new(x, y, z), g.bounds()));
             }
         }
-        let cells = CartCells::new(&self.carts);
+        let cells =
+            horizon_client::mobs::seen_grid::SeenGrid::new(self.carts.iter().map(Minecart::bounds));
         let mut near = Vec::new();
         for (feet, bb) in pushers {
-            cells.near(bb, self.carts.len(), &mut near);
+            if !cells.candidates(bb, &mut near) {
+                near.extend(0..self.carts.len() as u32);
+            }
             for &k in &near {
+                let k = k as usize;
                 let c = &mut self.carts[k];
                 if !bb.intersects(c.bounds()) {
                     continue;
@@ -1476,13 +1428,13 @@ impl Game<'_> {
                 c.velocity.z -= za;
             }
         }
-        self.push_carts_from_mobs();
+        self.push_carts_from_mobs(&cells);
     }
     /// `AbstractMinecart.push(mob)` from each mob walking into a cart
     /// (`LivingEntity.pushEntities` -> `doPush`): the cart gets the push and
     /// the mob a quarter of it back (`Entity.push`, which needs the mob to be
     /// pushable and to carry no one). Bats push nothing (`Bat.pushEntities`).
-    fn push_carts_from_mobs(&mut self) {
+    fn push_carts_from_mobs(&mut self, cells: &horizon_client::mobs::seen_grid::SeenGrid) {
         let teams = self.mob_teams();
         // (mob index, feet, box)
         let pushers: Vec<(usize, Vec3, Aabb)> = self
@@ -1498,11 +1450,13 @@ impl Game<'_> {
             .map(|(j, m)| (j, m.position, m.bounds()))
             .collect();
         drop(teams);
-        let cells = CartCells::new(&self.carts);
         let mut near = Vec::new();
         for (j, feet, bb) in pushers {
-            cells.near(bb, self.carts.len(), &mut near);
+            if !cells.candidates(bb, &mut near) {
+                near.extend(0..self.carts.len() as u32);
+            }
             for &k in &near {
+                let k = k as usize;
                 let c = &mut self.carts[k];
                 // hasPassenger(mob): a mob in this cart never pushes it.
                 if self.mobs[j].extra.mount == Some(c.id) || !bb.intersects(c.bounds()) {
@@ -1529,14 +1483,7 @@ impl Game<'_> {
     fn push_from_cart(&mut self, i: usize) {
         let reach = f64::from(0.2f32);
         let hitbox = self.carts[i].bounds().inflate(Vec3::new(reach, 0.0, reach));
-        let at = self.carts[i].position;
         for j in 0..self.carts.len() {
-            // Carts touch within a block and a fifth of each other: the far
-            // ones are passed over before their boxes are made.
-            let p = self.carts[j].position;
-            if (p.x - at.x).abs() > 2.0 || (p.z - at.z).abs() > 2.0 || (p.y - at.y).abs() > 2.0 {
-                continue;
-            }
             if j == i || !hitbox.intersects(self.carts[j].bounds()) {
                 continue;
             }
