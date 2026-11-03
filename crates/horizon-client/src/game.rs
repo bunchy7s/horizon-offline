@@ -3908,7 +3908,7 @@ impl Game<'_> {
             vertical_collision: false,
             horizontal_collision: false,
             age: 0,
-            pickup_delay,
+            pickup_delay: i64::from(pickup_delay),
             bob_offset: bob,
             ticks: 0,
             needs_sync: false,

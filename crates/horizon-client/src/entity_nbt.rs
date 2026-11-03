@@ -2112,7 +2112,10 @@ pub fn item_entity_to_nbt(e: &ItemEntity, uuid: [i32; 4], raw: Option<&Tag>) -> 
         ),
         (
             "PickupDelay",
-            Tag::Short(e.pickup_delay.min(i16::MAX as u32) as i16),
+            Tag::Short(
+                e.pickup_delay
+                    .clamp(i64::from(i16::MIN), i64::from(i16::MAX)) as i16,
+            ),
         ),
     ] {
         put(&mut tag, key, value);
@@ -2187,7 +2190,7 @@ pub fn item_entity_from_nbt(tag: &Tag, id: u32, bob_offset: f32) -> Option<ItemE
         vertical_collision: false,
         horizontal_collision: false,
         age: number(tag.get("Age")).unwrap_or(0) as i32,
-        pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0).clamp(0, 32767) as u32,
+        pickup_delay: number(tag.get("PickupDelay")).unwrap_or(0),
         bob_offset,
         ticks: 0,
         needs_sync: false,
@@ -3717,6 +3720,103 @@ mod tests {
         assert_eq!(falling_block_flags(&tag), (false, false));
         assert_eq!(crate::falling_block::Damage::from_nbt(&tag, true), damage);
         assert_eq!(uuid(&tag), Some([1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn loaded_item_lifetime_counters_tick_with_signed_sentinels() {
+        let root = std::env::var_os("HORIZON_TEST_RESOURCES")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../.local/horizon-client")
+                    .join(horizon_core::VANILLA_VERSION)
+            });
+        if !root.join("movement-properties.nbt").exists() {
+            return;
+        }
+        let assets = crate::assets::Assets::load(&root).unwrap();
+        let registry = assets.registry;
+        let facts = crate::blocks::BlockFacts::load(&root, registry).unwrap();
+        let collision = crate::collisions::load(&root, registry).unwrap();
+        let fluids = crate::motion::FluidResources::new(&assets, &facts).unwrap();
+        let mut world =
+            crate::world::World::new(registry.default_state("minecraft:air").unwrap(), 0);
+        world
+            .chunks
+            .insert((0, 0), Arc::new(crate::chunk::Chunk::empty(0, 0)));
+        let tick = |item: &mut ItemEntity| {
+            item.tick(
+                &world,
+                registry,
+                &facts,
+                &collision,
+                false,
+                &fluids,
+                &[],
+                None,
+            )
+        };
+        let fresh = Tag::compound([
+            ("id", string("minecraft:item")),
+            ("Pos", doubles(&[4.5, 210.0, 4.5])),
+            ("NoGravity", Tag::Byte(1)),
+            (
+                "Item",
+                Tag::compound([("id", string("minecraft:stone")), ("count", Tag::Int(1))]),
+            ),
+        ]);
+        for delay in [32767_i16, -1, 0, 1, 2] {
+            for age in [-32768_i16, -1, 0, 5998, 5999, 6000, 32767] {
+                let mut item = item_entity_from_nbt(&fresh, 1, 0.0).unwrap();
+                for _ in 0..3 {
+                    assert!(tick(&mut item));
+                }
+                assert_eq!(item.age, 3);
+                let mut data = item_entity_to_nbt(&item, [0, 0, 0, 1], None);
+                put(&mut data, "Age", Tag::Short(age));
+                put(&mut data, "PickupDelay", Tag::Short(delay));
+                let mut item = item_entity_from_nbt(&data, 1, 0.0).unwrap();
+                let mut alive = true;
+                for step in 0..=3 {
+                    if step > 0 && alive {
+                        alive = tick(&mut item);
+                    }
+                    let expected_age = if age == i16::MIN {
+                        i32::from(age)
+                    } else {
+                        i32::from(age) + step
+                    };
+                    let expected_alive = step == 0 || expected_age < 6000;
+                    assert_eq!(
+                        alive, expected_alive,
+                        "age={age}, delay={delay}, tick={step}"
+                    );
+                    if !alive {
+                        continue;
+                    }
+                    let data = item_entity_to_nbt(&item, [0, 0, 0, 1], None);
+                    let expected_delay = if delay > 0 && delay != i16::MAX {
+                        (i32::from(delay) - step).max(0)
+                    } else {
+                        i32::from(delay)
+                    };
+                    assert_eq!(
+                        number(data.get("Age")),
+                        Some(i64::from(expected_age)),
+                        "age={age}, tick={step}"
+                    );
+                    assert_eq!(
+                        number(data.get("PickupDelay")),
+                        Some(i64::from(expected_delay)),
+                        "age={age}, delay={delay}, tick={step}"
+                    );
+                }
+            }
+        }
+        let mut legacy = item_entity_from_nbt(&fresh, 1, 0.0).unwrap();
+        legacy.pickup_delay = i64::from(u32::MAX);
+        assert!(tick(&mut legacy));
+        assert_eq!(legacy.pickup_delay, i64::from(u32::MAX));
     }
 
     #[test]
