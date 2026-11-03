@@ -1006,7 +1006,18 @@ impl Game<'_> {
     pub(in crate::game) fn generic_attributes(
         &mut self,
         t: Target,
+        attribute: &str,
     ) -> Option<&mut horizon_world::attributes::entity::EntityAttributes> {
+        if let Target::Mob(id) = t
+            && matches!(attribute, "minecraft:armor" | "minecraft:armor_toughness")
+        {
+            let mob = self.mobs.iter_mut().find(|m| m.id == id)?;
+            if mob.extra.armor_attributes.is_none() {
+                mob.extra.armor_attributes =
+                    self.motion.attributes.create(&mob.kind.id).map(Box::new);
+            }
+            return mob.extra.armor_attributes.as_deref_mut();
+        }
         if !self.cmds.attributes.contains_key(&t) {
             let ty = self.target_type(t);
             let map = self.motion.attributes.create(&ty)?;
@@ -1042,7 +1053,9 @@ impl Game<'_> {
         };
         let catalog = self.motion.attributes.clone();
         let key = catalog.id(attribute).ok_or_else(no_attribute)?;
-        let map = self.generic_attributes(target).ok_or_else(no_attribute)?;
+        let map = self
+            .generic_attributes(target, attribute)
+            .ok_or_else(no_attribute)?;
         if !map.has(key) {
             return Err(no_attribute());
         }
